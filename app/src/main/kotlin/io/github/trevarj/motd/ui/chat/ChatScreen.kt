@@ -71,6 +71,8 @@ import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -150,6 +152,17 @@ internal class ChatForegroundLifecycleGate(
     fun dispose() = sync(false)
 }
 
+/** Ensures the outgoing chat surface releases the IME before navigation reveals the list. */
+internal fun dismissKeyboardBeforeNavigating(
+    clearFocus: () -> Unit,
+    hideKeyboard: () -> Unit,
+    onBack: () -> Unit,
+) {
+    clearFocus()
+    hideKeyboard()
+    onBack()
+}
+
 /** Stateful entry: wires the ViewModel, lifecycle mark-read, and navigation. */
 @Composable
 fun ChatScreen(
@@ -164,6 +177,17 @@ fun ChatScreen(
     onOpenChannelList: (Long) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val onHeaderBack = remember(focusManager, keyboardController, onBack) {
+        {
+            dismissKeyboardBeforeNavigating(
+                clearFocus = focusManager::clearFocus,
+                hideKeyboard = { keyboardController?.hide() },
+                onBack = onBack,
+            )
+        }
+    }
     var mentionRequest by remember { mutableStateOf<Pair<Long, String>?>(null) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val items = viewModel.messages.collectAsLazyPagingItems()
@@ -250,7 +274,7 @@ fun ChatScreen(
         rawNewestAnchor = rawNewestAnchor,
         onMarkRead = viewModel::markRead,
         countUnreadBelowViewport = viewModel::countUnreadBelowViewport,
-        onBack = onBack,
+        onBack = onHeaderBack,
         // Channel titles open Channel Info; query titles describe the other user. SERVER buffers
         // have neither channel nor peer details, so their title remains inert.
         onOpenChannelInfo = { id ->
