@@ -122,7 +122,7 @@ private fun LinkPreviewContent(preview: LinkPreview, onClick: () -> Unit) {
             .clickable { onClick() }
             .padding(8.dp),
     ) {
-        if (preview.kind == LinkPreviewKind.WEB && preview.imageUrl != null) {
+        if (preview.kind != LinkPreviewKind.TEXT && preview.imageUrl != null) {
             AsyncImage(
                 model = preview.imageUrl,
                 contentDescription = null,
@@ -155,9 +155,17 @@ private fun LinkPreviewContent(preview: LinkPreview, onClick: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = if (preview.kind == LinkPreviewKind.TEXT) FontFamily.Monospace else FontFamily.Default,
-                    maxLines = if (preview.kind == LinkPreviewKind.TEXT) 4 else 2,
+                    maxLines = when (preview.kind) {
+                        LinkPreviewKind.TEXT -> 4
+                        LinkPreviewKind.WIKIPEDIA -> 3
+                        LinkPreviewKind.WEB -> 2
+                    },
                     overflow = TextOverflow.Ellipsis,
-                    modifier = if (preview.kind == LinkPreviewKind.TEXT) Modifier.testTag("link_preview_text_body") else Modifier,
+                    modifier = when (preview.kind) {
+                        LinkPreviewKind.TEXT -> Modifier.testTag("link_preview_text_body")
+                        LinkPreviewKind.WIKIPEDIA -> Modifier.testTag("link_preview_wikipedia_body")
+                        LinkPreviewKind.WEB -> Modifier
+                    },
                 )
             }
         }

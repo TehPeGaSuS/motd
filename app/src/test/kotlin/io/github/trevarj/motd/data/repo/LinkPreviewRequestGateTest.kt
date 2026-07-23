@@ -58,6 +58,10 @@ class LinkPreviewRequestGateTest {
         assertNotNull(repository.preview(url))
         assertNotNull(repository.cachedPreview(url)?.preview)
         assertEquals(1, server.requestCount)
+        assertEquals(
+            "MOTD-Android (https://github.com/trevarj/motd)",
+            server.takeRequest().getHeader("User-Agent"),
+        )
 
         prefs.setShowLinkPreviews(false)
         assertNull(repository.preview(url))

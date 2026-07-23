@@ -56,4 +56,97 @@ class OgParserTest {
         val html = "<html><body>no metadata at all</body></html>"
         assertNull(LinkPreviewRepositoryImpl.parseOgTags(url, html))
     }
+
+    @Test
+    fun wikipediaArticleUrls_useLanguageEditionSummaryEndpoint() {
+        assertEquals(
+            "https://en.wikipedia.org/api/rest_v1/page/summary/Alan_Turing",
+            LinkPreviewRepositoryImpl.wikipediaSummaryUrl(
+                "https://en.wikipedia.org/wiki/Alan_Turing#Early_life",
+            ),
+        )
+        assertEquals(
+            "https://en.wikipedia.org/api/rest_v1/page/summary/Alan%20Turing",
+            LinkPreviewRepositoryImpl.wikipediaSummaryUrl(
+                "https://en.wikipedia.org/wiki/Alan%20Turing",
+            ),
+        )
+        assertEquals(
+            "https://fr.wikipedia.org/api/rest_v1/page/summary/Alan_Turing",
+            LinkPreviewRepositoryImpl.wikipediaSummaryUrl(
+                "https://fr.m.wikipedia.org/wiki/Alan_Turing",
+            ),
+        )
+        assertEquals(
+            "https://de.wikipedia.org/api/rest_v1/page/summary/Alan_Turing",
+            LinkPreviewRepositoryImpl.wikipediaSummaryUrl(
+                "https://de.wikipedia.org/w/index.php?title=Alan_Turing&oldid=1",
+            ),
+        )
+        assertEquals(
+            "https://de.wikipedia.org/api/rest_v1/page/summary/Alan%20Turing",
+            LinkPreviewRepositoryImpl.wikipediaSummaryUrl(
+                "https://de.wikipedia.org/w/index.php?title=Alan+Turing",
+            ),
+        )
+    }
+
+    @Test
+    fun wikipediaSummaryRouting_rejectsNonArticlesAndLookalikeHosts() {
+        assertNull(LinkPreviewRepositoryImpl.wikipediaSummaryUrl("https://en.wikipedia.org/"))
+        assertNull(LinkPreviewRepositoryImpl.wikipediaSummaryUrl("https://wikipedia.org.example.test/wiki/Test"))
+        assertNull(LinkPreviewRepositoryImpl.wikipediaSummaryUrl("https://example.test/wiki/Test"))
+    }
+
+    @Test
+    fun parsesWikipediaSummaryIntoRicherArticlePreview() {
+        val summary = """
+            {
+              "title": "Alan Turing",
+              "description": "English computer scientist",
+              "extract": "Alan Turing was an English mathematician,\ncomputer scientist.",
+              "thumbnail": {
+                "source": "https://upload.wikimedia.org/turing.jpg",
+                "width": 320,
+                "height": 427
+              },
+              "ignored": true
+            }
+        """.trimIndent()
+
+        val preview = LinkPreviewRepositoryImpl.parseWikipediaSummary(
+            "https://en.wikipedia.org/wiki/Alan_Turing",
+            summary,
+        )!!
+
+        assertEquals("Alan Turing", preview.title)
+        assertEquals(
+            "Alan Turing was an English mathematician, computer scientist.",
+            preview.description,
+        )
+        assertEquals("https://upload.wikimedia.org/turing.jpg", preview.imageUrl)
+        assertEquals("Wikipedia", preview.siteName)
+        assertEquals(LinkPreviewKind.WIKIPEDIA, preview.kind)
+    }
+
+    @Test
+    fun wikipediaSummary_ignoresUnsafeThumbnailAndMalformedJson() {
+        val preview = LinkPreviewRepositoryImpl.parseWikipediaSummary(
+            url,
+            """{"title":"Safe","thumbnail":{"source":"file:///tmp/private"}}""",
+        )!!
+        assertEquals("Safe", preview.title)
+        assertNull(preview.imageUrl)
+        assertNull(LinkPreviewRepositoryImpl.parseWikipediaSummary(url, "not json"))
+        assertNull(LinkPreviewRepositoryImpl.parseWikipediaSummary(url, "{}"))
+    }
+
+    @Test
+    fun wikipediaSummary_fallsBackToShortDescriptionWhenExtractIsMissing() {
+        val preview = LinkPreviewRepositoryImpl.parseWikipediaSummary(
+            url,
+            """{"title":"Alan Turing","description":"English computer scientist"}""",
+        )!!
+        assertEquals("English computer scientist", preview.description)
+    }
 }

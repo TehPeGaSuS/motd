@@ -25,4 +25,24 @@ class LinkPreviewCardUiTest {
         }
         compose.onNodeWithTag("link_preview_text_body").assertIsDisplayed()
     }
+
+    @Test fun wikipedia_preview_exposes_its_article_extract() {
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                LinkPreviewCard(
+                    preview = LinkPreview(
+                        "https://en.wikipedia.org/wiki/Alan_Turing",
+                        "Alan Turing",
+                        "Alan Turing was an English mathematician and computer scientist.",
+                        "https://upload.wikimedia.org/turing.jpg",
+                        "Wikipedia",
+                        LinkPreviewKind.WIKIPEDIA,
+                    ),
+                    loading = false,
+                    onClick = {},
+                )
+            }
+        }
+        compose.onNodeWithTag("link_preview_wikipedia_body").assertIsDisplayed()
+    }
 }

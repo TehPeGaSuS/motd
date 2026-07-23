@@ -99,7 +99,7 @@ interface LinkPreviewRepository {
     suspend fun preview(url: String): LinkPreview?
 }
 
-enum class LinkPreviewKind { WEB, TEXT }
+enum class LinkPreviewKind { WEB, TEXT, WIKIPEDIA }
 
 data class LinkPreview(
     val url: String,

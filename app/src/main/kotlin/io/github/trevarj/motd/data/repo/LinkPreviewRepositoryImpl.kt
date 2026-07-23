@@ -21,16 +21,21 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 // Declared web/text link preview. HttpURLConnection GET, 5s connect/read timeouts, HTML body
-// capped at 512 KB and text body capped at 16 KB. Completed negative results live in a
-// bounded process cache, while concurrent callers for the same URL await one shared request. The OG
-// parser is a small regex-based extractor (no HTML-parser dependency) and is unit-tested against
-// fixtures.
+// capped at 512 KB, text body capped at 16 KB, and Wikipedia summaries capped at 128 KB.
+// Completed negative results live in a bounded process cache, while concurrent callers for the
+// same URL await one shared request. The OG parser remains dependency-free; Wikipedia summaries
+// use the already-pinned kotlinx.serialization JSON parser.
 @Singleton
 class LinkPreviewRepositoryImpl @Inject constructor(
     private val contentPreviewPrefs: ContentPreviewPrefs,
@@ -93,36 +98,93 @@ class LinkPreviewRepositoryImpl @Inject constructor(
             connection.get()?.let { conn -> applicationScope.launch(ioDispatcher) { conn.disconnect() } }
         }
         val job = applicationScope.launch(ioDispatcher) {
-            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = TIMEOUT_MS
-                readTimeout = TIMEOUT_MS
-                instanceFollowRedirects = true
-                setRequestProperty("Accept", "text/html, text/*, application/json, application/xml")
-            }
-            connection.set(conn)
             try {
-                conn.connect()
-                val result = if (conn.responseCode !in 200..299) {
+                // Wikimedia's summary response is purpose-built for link previews. Fall back to
+                // the ordinary HTML parser when a page or language edition does not expose it.
+                val summaryUrl = wikipediaSummaryUrl(url)
+                val summary = if (summaryUrl == null) {
                     null
                 } else {
-                    when (responseKind(conn.getHeaderField("Content-Type"))) {
-                        LinkPreviewKind.WEB -> parseOgTags(conn.url.toString(), conn.inputStream.readCapped(HTML_MAX_BYTES, Charsets.UTF_8))
-                        LinkPreviewKind.TEXT -> parseTextPreview(conn.url.toString(), conn.inputStream.readCapped(TEXT_MAX_BYTES, charsetFromContentType(conn.getHeaderField("Content-Type"))))
-                        null -> null
+                    try {
+                        fetchWikipediaSummary(url, summaryUrl, connection)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // A summary outage must not suppress metadata available from the page.
+                        if (!isActive) return@launch
+                        null
                     }
                 }
+                if (!isActive) return@launch
+                val result = summary ?: fetchGenericPreview(url, connection)
                 if (continuation.isActive) continuation.resume(result)
             } catch (error: Exception) {
                 if (continuation.isActive) continuation.resumeWithException(error)
-            } finally {
-                conn.disconnect()
             }
         }
         worker.set(job)
         if (!continuation.isActive) {
             job.cancel()
             connection.get()?.let { conn -> applicationScope.launch(ioDispatcher) { conn.disconnect() } }
+        }
+    }
+
+    private fun fetchWikipediaSummary(
+        articleUrl: String,
+        summaryUrl: String,
+        connection: AtomicReference<HttpURLConnection?>,
+    ): LinkPreview? = request(summaryUrl, WIKIPEDIA_ACCEPT, connection) { conn ->
+        val contentType = conn.getHeaderField("Content-Type")
+        if (contentType?.substringBefore(';')?.trim()?.equals("application/json", ignoreCase = true) != true) {
+            return@request null
+        }
+        parseWikipediaSummary(
+            articleUrl,
+            conn.inputStream.readCapped(WIKIPEDIA_MAX_BYTES, charsetFromContentType(contentType)),
+        )
+    }
+
+    private fun fetchGenericPreview(
+        url: String,
+        connection: AtomicReference<HttpURLConnection?>,
+    ): LinkPreview? = request(url, GENERIC_ACCEPT, connection) { conn ->
+        when (responseKind(conn.getHeaderField("Content-Type"))) {
+            LinkPreviewKind.WEB -> parseOgTags(
+                conn.url.toString(),
+                conn.inputStream.readCapped(HTML_MAX_BYTES, Charsets.UTF_8),
+            )
+            LinkPreviewKind.TEXT -> parseTextPreview(
+                conn.url.toString(),
+                conn.inputStream.readCapped(
+                    TEXT_MAX_BYTES,
+                    charsetFromContentType(conn.getHeaderField("Content-Type")),
+                ),
+            )
+            LinkPreviewKind.WIKIPEDIA, null -> null
+        }
+    }
+
+    private fun <T> request(
+        url: String,
+        accept: String,
+        connection: AtomicReference<HttpURLConnection?>,
+        read: (HttpURLConnection) -> T?,
+    ): T? {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = TIMEOUT_MS
+            readTimeout = TIMEOUT_MS
+            instanceFollowRedirects = true
+            setRequestProperty("Accept", accept)
+            setRequestProperty("User-Agent", USER_AGENT)
+        }
+        connection.set(conn)
+        return try {
+            conn.connect()
+            if (conn.responseCode in 200..299) read(conn) else null
+        } finally {
+            connection.compareAndSet(conn, null)
+            conn.disconnect()
         }
     }
 
@@ -144,7 +206,15 @@ class LinkPreviewRepositoryImpl @Inject constructor(
         private const val TIMEOUT_MS = 5_000
         private const val HTML_MAX_BYTES = 512 * 1024
         private const val TEXT_MAX_BYTES = 16 * 1024
+        private const val WIKIPEDIA_MAX_BYTES = 128 * 1024
         private const val TEXT_MAX_CODE_POINTS = 2_048
+        private const val GENERIC_ACCEPT = "text/html, text/*, application/json, application/xml"
+        private const val WIKIPEDIA_ACCEPT = "application/json"
+        private const val USER_AGENT = "MOTD-Android (https://github.com/trevarj/motd)"
+        private const val WIKIPEDIA_SITE_NAME = "Wikipedia"
+        private val JSON = Json { ignoreUnknownKeys = true }
+        private val WIKIPEDIA_HOST = Regex("""(?:^|[.])wikipedia[.]org$""", RegexOption.IGNORE_CASE)
+        private val WIKIPEDIA_WHITESPACE = Regex("""\s+""")
 
         internal fun responseKind(contentType: String?): LinkPreviewKind? {
             val mediaType = contentType?.substringBefore(';')?.trim()?.lowercase().orEmpty()
@@ -196,6 +266,57 @@ class LinkPreviewRepositoryImpl @Inject constructor(
             val host = URL(url).host
             return LinkPreview(url, textTitle(url), body, null, host, LinkPreviewKind.TEXT)
         }
+
+        internal fun wikipediaSummaryUrl(url: String): String? {
+            val parsed = runCatching { URL(url) }.getOrNull() ?: return null
+            if (parsed.protocol != "http" && parsed.protocol != "https") return null
+            if (!WIKIPEDIA_HOST.containsMatchIn(parsed.host)) return null
+            val title = when {
+                parsed.path.startsWith("/wiki/") -> parsed.path.removePrefix("/wiki/")
+                parsed.path == "/w/index.php" -> parsed.query
+                    ?.split('&')
+                    ?.firstOrNull { it.startsWith("title=") }
+                    ?.substringAfter('=')
+                    ?.replace("+", "%20")
+                else -> null
+            }?.takeIf(String::isNotBlank) ?: return null
+            val canonicalHost = parsed.host.replace(".m.wikipedia.org", ".wikipedia.org")
+            return "https://$canonicalHost/api/rest_v1/page/summary/$title"
+        }
+
+        internal fun parseWikipediaSummary(url: String, rawJson: String): LinkPreview? =
+            runCatching {
+                val root = JSON.parseToJsonElement(rawJson) as? JsonObject
+                    ?: return@runCatching null
+                val title = root.string("title")?.cleanWikipediaText()
+                val extract = (root.string("extract") ?: root.string("description"))
+                    ?.cleanWikipediaText()
+                val image = (root["thumbnail"] as? JsonObject)?.string("source")
+                    ?.takeIf(::isHttpUrl)
+                if (title == null && extract == null && image == null) {
+                    null
+                } else {
+                    LinkPreview(
+                        url = url,
+                        title = title,
+                        description = extract,
+                        imageUrl = image,
+                        siteName = WIKIPEDIA_SITE_NAME,
+                        kind = LinkPreviewKind.WIKIPEDIA,
+                    )
+                }
+            }.getOrNull()
+
+        private fun JsonObject.string(name: String): String? =
+            get(name)?.jsonPrimitive?.contentOrNull
+
+        private fun String.cleanWikipediaText(): String? =
+            sanitizeText(this)?.replace(WIKIPEDIA_WHITESPACE, " ")?.trim()?.takeIf(String::isNotEmpty)
+
+        private fun isHttpUrl(value: String): Boolean = runCatching {
+            val protocol = URL(value).protocol
+            protocol == "http" || protocol == "https"
+        }.getOrDefault(false)
 
         // <meta property="og:*" content="..."> in either attribute order, single or double quotes.
         private val OG_TITLE = ogRegex("og:title")
