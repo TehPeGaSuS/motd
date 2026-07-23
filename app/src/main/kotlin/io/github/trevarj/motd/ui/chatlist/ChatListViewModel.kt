@@ -119,16 +119,28 @@ class ChatListViewModel @Inject constructor(
             initialValue = ChatListState(),
         )
 
-    fun setPinned(bufferId: Long, pinned: Boolean) = viewModelScope.launch {
-        bufferRepository.setPinned(bufferId, pinned)
+    fun setPinned(bufferId: Long, pinned: Boolean) = setPinned(listOf(bufferId), pinned)
+
+    fun setPinned(bufferIds: Collection<Long>, pinned: Boolean) {
+        val ids = bufferIds.toList().distinct()
+        if (ids.isEmpty()) return
+        viewModelScope.launch { ids.forEach { bufferRepository.setPinned(it, pinned) } }
     }
 
-    fun setMuted(bufferId: Long, muted: Boolean) = viewModelScope.launch {
-        bufferRepository.setMuted(bufferId, muted)
+    fun setMuted(bufferId: Long, muted: Boolean) = setMuted(listOf(bufferId), muted)
+
+    fun setMuted(bufferIds: Collection<Long>, muted: Boolean) {
+        val ids = bufferIds.toList().distinct()
+        if (ids.isEmpty()) return
+        viewModelScope.launch { ids.forEach { bufferRepository.setMuted(it, muted) } }
     }
 
-    fun setArchived(bufferId: Long, archived: Boolean) = viewModelScope.launch {
-        bufferRepository.setArchived(bufferId, archived)
+    fun setArchived(bufferId: Long, archived: Boolean) = setArchived(listOf(bufferId), archived)
+
+    fun setArchived(bufferIds: Collection<Long>, archived: Boolean) {
+        val ids = bufferIds.toList().distinct()
+        if (ids.isEmpty()) return
+        viewModelScope.launch { ids.forEach { bufferRepository.setArchived(it, archived) } }
     }
 
     fun joinChannel(networkId: Long, channel: String) = viewModelScope.launch {
@@ -141,11 +153,19 @@ class ChatListViewModel @Inject constructor(
      * the process-scoped coordinator performs the server close and removes history only after it
      * succeeds. Scope selection keys off networkId, never a bufferId, so no scope reset is needed.
      */
-    fun deleteBuffer(row: ChatListRow) = viewModelScope.launch {
-        if (row.type == BufferType.CHANNEL) {
-            channelCloseCoordinator.requestClose(row.bufferId)
-        } else {
-            bufferRepository.deleteBuffer(row.bufferId)
+    fun deleteBuffer(row: ChatListRow) = deleteBuffers(listOf(row))
+
+    fun deleteBuffers(rows: Collection<ChatListRow>) {
+        val targets = rows.toList().distinctBy(ChatListRow::bufferId)
+        if (targets.isEmpty()) return
+        viewModelScope.launch {
+            targets.forEach { row ->
+                if (row.type == BufferType.CHANNEL) {
+                    channelCloseCoordinator.requestClose(row.bufferId)
+                } else {
+                    bufferRepository.deleteBuffer(row.bufferId)
+                }
+            }
         }
     }
 

@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
@@ -86,6 +87,7 @@ fun ChatListRowItem(
     modifier: Modifier = Modifier,
     isFriend: Boolean = false,
     presence: PresenceState? = null,
+    selected: Boolean = false,
 ) {
     // Resolved per-nick color (also used to tint the friend star), matching sender coloring.
     val nickColor = LocalNickColors.current.nick(row.displayName, MaterialTheme.colorScheme.onSurfaceVariant)
@@ -105,8 +107,12 @@ fun ChatListRowItem(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .then(
+                if (selected) Modifier.background(MaterialTheme.colorScheme.primaryContainer) else Modifier,
+            )
             // Per-buffer handle so the harness selects a specific row (display names collide).
             .testTag("chatlist_row_${row.bufferId}")
+            .semantics { this.selected = selected }
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .defaultMinSize(minHeight = 48.dp)
             .then(

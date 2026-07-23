@@ -190,4 +190,18 @@ class ChatListDeleteTest {
 
         assertEquals(listOf("delete:3"), ops)
     }
+
+    @Test
+    fun batchDeletion_deduplicates_and_keeps_channel_coordinator_order() = runTest {
+        val ops = mutableListOf<String>()
+        val buffers = object : FakeBufferRepository() {
+            override suspend fun deleteBuffer(id: Long) { super.deleteBuffer(id); ops += "delete:$id" }
+        }
+        val vm = vm(buffers, FakeConnectionManager(ops), FakeChannelCloseCoordinator(ops))
+
+        vm.deleteBuffers(listOf(row(7, BufferType.CHANNEL, "#kotlin"), row(9, BufferType.QUERY, "carol"), row(7, BufferType.CHANNEL, "#kotlin")))
+        runCurrent()
+
+        assertEquals(listOf("pending:7", "delete:9"), ops)
+    }
 }

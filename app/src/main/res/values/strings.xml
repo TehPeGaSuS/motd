@@ -757,6 +757,28 @@
     <string name="chatlist_unmute">Unmute</string>
     <string name="chatlist_archive">Archive</string>
     <string name="chatlist_unarchive">Unarchive</string>
+    <plurals name="chatlist_selected_count">
+        <item quantity="one">%d selected</item>
+        <item quantity="other">%d selected</item>
+    </plurals>
+    <string name="chatlist_selection_close">Close selection</string>
+    <string name="chatlist_remove">Remove</string>
+    <plurals name="chatlist_remove_confirm_title">
+        <item quantity="one">Remove %d chat?</item>
+        <item quantity="other">Remove %d chats?</item>
+    </plurals>
+    <plurals name="chatlist_remove_channels">
+        <item quantity="one">%d channel hides immediately. If you are offline, leaving completes after reconnect. History is removed after each accepted leave.</item>
+        <item quantity="other">%d channels hide immediately. If you are offline, leaving completes after reconnect. History is removed after each accepted leave.</item>
+    </plurals>
+    <plurals name="chatlist_remove_queries">
+        <item quantity="one">%d direct chat and its downloaded messages are removed from this device. Your bouncer may keep its own history.</item>
+        <item quantity="other">%d direct chats and their downloaded messages are removed from this device. Your bouncer may keep its own history.</item>
+    </plurals>
+    <plurals name="chatlist_remove_servers">
+        <item quantity="one">%d server chat and its local history are removed from this device.</item>
+        <item quantity="other">%d server chats and their local history are removed from this device.</item>
+    </plurals>
     <string name="chatlist_archived_chats">Archived Chats</string>
     <string name="chatlist_archived_chats_count">Archived Chats (%1$d)</string>
     <string name="chatlist_archived_pull_hint">Keep pulling to reveal archived chats</string>

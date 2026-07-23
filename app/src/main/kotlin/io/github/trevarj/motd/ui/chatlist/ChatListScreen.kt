@@ -50,8 +50,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
@@ -160,7 +158,7 @@ fun ChatListScreen(
         onSetPinned = viewModel::setPinned,
         onSetMuted = viewModel::setMuted,
         onSetArchived = viewModel::setArchived,
-        onDeleteBuffer = viewModel::deleteBuffer,
+        onDeleteBuffers = viewModel::deleteBuffers,
         onJoinChannel = viewModel::joinChannel,
         onMessageUser = { networkId, nick -> viewModel.messageUser(networkId, nick, onOpenBuffer) },
         // Round 5: drawer selection + connectivity + nav.
@@ -184,12 +182,12 @@ fun ChatListContent(
     onOpenBuffer: (Long) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSearch: () -> Unit,
-    onSetPinned: (Long, Boolean) -> Unit,
-    onSetMuted: (Long, Boolean) -> Unit,
-    onSetArchived: (Long, Boolean) -> Unit = { _, _ -> },
+    onSetPinned: (Collection<Long>, Boolean) -> Unit,
+    onSetMuted: (Collection<Long>, Boolean) -> Unit,
+    onSetArchived: (Collection<Long>, Boolean) -> Unit = { _, _ -> },
     onJoinChannel: (Long, String) -> Unit,
     onMessageUser: (Long, String) -> Unit,
-    onDeleteBuffer: (ChatListRow) -> Unit = {},
+    onDeleteBuffers: (Collection<ChatListRow>) -> Unit = {},
     // Round 5 (plans/16 §3): drawer + scoping. Defaulted so previews stay terse.
     onSelectNetwork: (Long?) -> Unit = {},
     onConnect: (Long) -> Unit = {},
@@ -210,10 +208,25 @@ fun ChatListContent(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     // The per-row network tag is redundant once the list is scoped to one network.
     val showNetworkChip = state.networks.size > 1 && state.selectedNetworkId == null
+    val visibleRows = if (archiveMode) state.archivedRows else state.rows
+    var selectedIds by rememberSaveable(archiveMode, state.selectedNetworkId) { mutableStateOf(emptyList<Long>()) }
+    val selectedRows = orderedSelectedRows(visibleRows, selectedIds)
+    val selectionActive = selectedRows.isNotEmpty()
+    var confirmRemoval by remember { mutableStateOf(false) }
 
-    // Close the drawer with Back when it's open (before popping the back stack).
-    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
-    BackHandler(enabled = archiveMode) { archiveMode = false }
+    LaunchedEffect(visibleRows) {
+        selectedIds = pruneSelectedIds(selectedIds, visibleRows)
+        if (confirmRemoval && orderedSelectedRows(visibleRows, selectedIds).isEmpty()) confirmRemoval = false
+    }
+
+    // One ordered Back policy keeps drawer, transient selection, and archive mode independent.
+    BackHandler(enabled = drawerState.isOpen || selectionActive || archiveMode) {
+        when {
+            drawerState.isOpen -> scope.launch { drawerState.close() }
+            selectionActive -> selectedIds = emptyList()
+            else -> archiveMode = false
+        }
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -259,9 +272,12 @@ fun ChatListContent(
             modifier = Modifier.testTag("screen_chat_list"),
             topBar = {
                 TopAppBar(
+                    modifier = Modifier.testTag(if (selectionActive) "chatlist_selection_top_app_bar" else "chatlist_top_app_bar"),
                     title = {
                         val scopedName = state.selectedNetworkName
-                        if (archiveMode) {
+                        if (selectionActive) {
+                            Text(pluralStringResource(R.plurals.chatlist_selected_count, selectedRows.size, selectedRows.size))
+                        } else if (archiveMode) {
                             Text(text = stringResource(R.string.chatlist_archived_chats), fontWeight = FontWeight.Bold)
                         } else if (scopedName != null) {
                             // Scoped: show the network name so the active filter is legible.
@@ -280,16 +296,38 @@ fun ChatListContent(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = { if (archiveMode) archiveMode = false else scope.launch { drawerState.open() } }) {
+                        IconButton(
+                            onClick = { if (selectionActive) selectedIds = emptyList() else if (archiveMode) archiveMode = false else scope.launch { drawerState.open() } },
+                            modifier = Modifier.testTag("chatlist_selection_close"),
+                        ) {
                             Icon(
-                                if (archiveMode) Icons.AutoMirrored.Filled.ArrowBack else Icons.Filled.Menu,
+                                if (selectionActive || archiveMode) Icons.AutoMirrored.Filled.ArrowBack else Icons.Filled.Menu,
                                 contentDescription = stringResource(
-                                    if (archiveMode) R.string.action_back else R.string.drawer_open,
+                                    if (selectionActive) R.string.chatlist_selection_close else if (archiveMode) R.string.action_back else R.string.drawer_open,
                                 ),
                             )
                         }
                     },
                     actions = {
+                        if (selectionActive) {
+                            val pinTarget = aggregateToggleTarget(selectedRows) { it.pinned }
+                            val muteTarget = aggregateToggleTarget(selectedRows) { it.muted }
+                            IconButton(
+                                onClick = { onSetPinned(selectedRows.map(ChatListRow::bufferId), pinTarget); selectedIds = emptyList() },
+                                modifier = Modifier.testTag("chatlist_selection_pin"),
+                            ) { Icon(Icons.Filled.PushPin, stringResource(if (pinTarget) R.string.chatlist_pin else R.string.chatlist_unpin)) }
+                            IconButton(
+                                onClick = { onSetMuted(selectedRows.map(ChatListRow::bufferId), muteTarget); selectedIds = emptyList() },
+                                modifier = Modifier.testTag("chatlist_selection_mute"),
+                            ) { Icon(if (muteTarget) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications, stringResource(if (muteTarget) R.string.chatlist_mute else R.string.chatlist_unmute)) }
+                            IconButton(
+                                onClick = { onSetArchived(selectedRows.map(ChatListRow::bufferId), !archiveMode); selectedIds = emptyList() },
+                                modifier = Modifier.testTag("chatlist_selection_archive"),
+                            ) { Icon(Icons.Outlined.Archive, stringResource(if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive)) }
+                            IconButton(onClick = { confirmRemoval = true }, modifier = Modifier.testTag("chatlist_selection_remove")) {
+                                Icon(Icons.Outlined.Delete, stringResource(R.string.chatlist_remove))
+                            }
+                        } else {
                         IconButton(onClick = onOpenSearch) {
                             Icon(
                                 Icons.Outlined.Search,
@@ -302,11 +340,12 @@ fun ChatListContent(
                                 contentDescription = stringResource(R.string.chatlist_settings),
                             )
                         }
+                        }
                     },
                 )
             },
             floatingActionButton = {
-                FloatingActionButton(onClick = { showSheet = true }, modifier = Modifier.testTag("chatlist_new_conversation")) {
+                if (!selectionActive) FloatingActionButton(onClick = { showSheet = true }, modifier = Modifier.testTag("chatlist_new_conversation")) {
                     Icon(
                         Icons.Filled.Add,
                         contentDescription = stringResource(R.string.chatlist_new_conversation),
@@ -328,7 +367,6 @@ fun ChatListContent(
                     )
                 }
 
-                val visibleRows = if (archiveMode) state.archivedRows else state.rows
                 if (!shouldRenderChatList(archiveMode, state.rows, state.archivedRows) &&
                     !state.loading && state.networks.isNotEmpty()
                 ) {
@@ -363,7 +401,12 @@ fun ChatListContent(
                         onSetPinned = onSetPinned,
                         onSetMuted = onSetMuted,
                         onSetArchived = onSetArchived,
-                        onDeleteBuffer = onDeleteBuffer,
+                        onDeleteBuffers = onDeleteBuffers,
+                        selectedIds = selectedIds.toSet(),
+                        selectionActive = selectionActive,
+                        onToggleSelection = { id -> selectedIds = toggleSelectedId(selectedIds, id) },
+                        onStartSelection = { id -> selectedIds = addSelectedId(selectedIds, id) },
+                        onRemoveSelection = { ids -> selectedIds = selectedIds.filterNot(ids::contains) },
                     )
                 }
             }
@@ -431,6 +474,19 @@ fun ChatListContent(
             },
         )
     }
+
+    if (confirmRemoval && selectedRows.isNotEmpty()) {
+        val onConfirmRemoval = {
+            onDeleteBuffers(selectedRows)
+            confirmRemoval = false
+            selectedIds = emptyList()
+        }
+        if (selectedRows.size == 1) {
+            DeleteConfirmDialog(selectedRows.single(), onConfirmRemoval) { confirmRemoval = false }
+        } else {
+            MultiDeleteConfirmDialog(selectedRows, onConfirmRemoval) { confirmRemoval = false }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -469,10 +525,15 @@ private fun ChatList(
     fools: Set<String>,
     multiNetwork: Boolean,
     onOpenBuffer: (Long) -> Unit,
-    onSetPinned: (Long, Boolean) -> Unit,
-    onSetMuted: (Long, Boolean) -> Unit,
-    onSetArchived: (Long, Boolean) -> Unit,
-    onDeleteBuffer: (ChatListRow) -> Unit,
+    onSetPinned: (Collection<Long>, Boolean) -> Unit,
+    onSetMuted: (Collection<Long>, Boolean) -> Unit,
+    onSetArchived: (Collection<Long>, Boolean) -> Unit,
+    onDeleteBuffers: (Collection<ChatListRow>) -> Unit,
+    selectedIds: Set<Long>,
+    selectionActive: Boolean,
+    onToggleSelection: (Long) -> Unit,
+    onStartSelection: (Long) -> Unit,
+    onRemoveSelection: (Collection<Long>) -> Unit,
 ) {
     // Pinning has global priority, then unpinned friends, recent chats, and collapsed fools.
     // Pin state remains an inline row marker; it does not add a visible section header.
@@ -675,17 +736,18 @@ private fun ChatList(
             contentPadding = PaddingValues(bottom = 88.dp),
         ) {
             items(sections.pinned, key = { it.bufferId }) { row ->
-                RowWithMenu(
+                SelectableChatListRow(
                     row,
                     presence[row.bufferId],
                     isFriend = isFriendQuery(row, friends),
                     multiNetwork,
                     onOpenBuffer,
-                    onSetPinned,
-                    onSetMuted,
-                    onSetArchived,
                     archiveMode,
-                    onDeleteBuffer,
+                    selected = row.bufferId in selectedIds,
+                    selectionActive = selectionActive,
+                    onToggleSelection = onToggleSelection,
+                    onStartSelection = onStartSelection,
+                    onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
                     modifier = Modifier.animateItem(
                         fadeInSpec = ChatListItemMotion.fadeInSpec,
                         fadeOutSpec = ChatListItemMotion.fadeOutSpec,
@@ -698,17 +760,18 @@ private fun ChatList(
                     SectionHeader(stringResource(R.string.chatlist_friends))
                 }
                 items(sections.friends, key = { it.bufferId }) { row ->
-                    RowWithMenu(
+                    SelectableChatListRow(
                         row,
                         presence[row.bufferId],
                         isFriend = true,
                         multiNetwork,
                         onOpenBuffer,
-                        onSetPinned,
-                        onSetMuted,
-                        onSetArchived,
                         archiveMode,
-                        onDeleteBuffer,
+                        selected = row.bufferId in selectedIds,
+                        selectionActive = selectionActive,
+                        onToggleSelection = onToggleSelection,
+                        onStartSelection = onStartSelection,
+                        onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
                         modifier = Modifier.animateItem(
                             fadeInSpec = ChatListItemMotion.fadeInSpec,
                             fadeOutSpec = ChatListItemMotion.fadeOutSpec,
@@ -723,17 +786,18 @@ private fun ChatList(
                 }
             }
             items(sections.regular, key = { it.bufferId }) { row ->
-                RowWithMenu(
+                SelectableChatListRow(
                     row,
                     presence[row.bufferId],
                     isFriend = false,
                     multiNetwork,
                     onOpenBuffer,
-                    onSetPinned,
-                    onSetMuted,
-                    onSetArchived,
                     archiveMode,
-                    onDeleteBuffer,
+                    selected = row.bufferId in selectedIds,
+                    selectionActive = selectionActive,
+                    onToggleSelection = onToggleSelection,
+                    onStartSelection = onStartSelection,
+                    onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
                     modifier = Modifier.animateItem(
                         fadeInSpec = ChatListItemMotion.fadeInSpec,
                         fadeOutSpec = ChatListItemMotion.fadeOutSpec,
@@ -746,7 +810,10 @@ private fun ChatList(
                     FoolsSectionHeader(
                         count = sections.fools.size,
                         expanded = foolsExpanded,
-                        onToggle = { foolsExpanded = !foolsExpanded },
+                        onToggle = {
+                            if (foolsExpanded) onRemoveSelection(sections.fools.map(ChatListRow::bufferId))
+                            foolsExpanded = !foolsExpanded
+                        },
                     )
                 }
                 if (foolsExpanded) {
@@ -760,7 +827,19 @@ private fun ChatList(
                                     placementSpec = ChatListItemMotion.placementSpec,
                                 ),
                         ) {
-                            RowWithMenu(row, presence[row.bufferId], isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onSetArchived, archiveMode, onDeleteBuffer)
+                            SelectableChatListRow(
+                                row = row,
+                                presence = presence[row.bufferId],
+                                isFriend = false,
+                                multiNetwork = multiNetwork,
+                                onOpenBuffer = onOpenBuffer,
+                                archiveMode = archiveMode,
+                                selected = row.bufferId in selectedIds,
+                                selectionActive = selectionActive,
+                                onToggleSelection = onToggleSelection,
+                                onStartSelection = onStartSelection,
+                                onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
+                            )
                         }
                     }
                 }
@@ -782,7 +861,7 @@ private fun ChatList(
             )
         }
 
-        ViewportScrollToTopFab(
+        if (!selectionActive) ViewportScrollToTopFab(
             listState = listState,
             sections = sections,
             foolsExpanded = foolsExpanded,
@@ -1003,148 +1082,70 @@ private fun FoolsSectionHeader(count: Int, expanded: Boolean, onToggle: () -> Un
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RowWithMenu(
+private fun SelectableChatListRow(
     row: ChatListRow,
     presence: io.github.trevarj.motd.service.PresenceState?,
     isFriend: Boolean,
     multiNetwork: Boolean,
     onOpenBuffer: (Long) -> Unit,
-    onSetPinned: (Long, Boolean) -> Unit,
-    onSetMuted: (Long, Boolean) -> Unit,
-    onSetArchived: (Long, Boolean) -> Unit,
     archiveMode: Boolean,
-    onDeleteBuffer: (ChatListRow) -> Unit,
+    selected: Boolean,
+    selectionActive: Boolean,
+    onToggleSelection: (Long) -> Unit,
+    onStartSelection: (Long) -> Unit,
+    onArchive: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
-    val removalCopy = chatRemovalCopy(row.type)
-
-    // Swipe end-to-start reveals a destructive red background; releasing arms the confirm dialog
-    // (deleting drops history + parts a joined channel, so we never delete silently). We do NOT
-    // let the box settle into the dismissed state — confirmValueChange returns false so the row
-    // snaps back and the dialog drives the actual delete.
+    val currentArchive by rememberUpdatedState(onArchive)
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
             if (value == SwipeToDismissBoxValue.EndToStart) {
-                confirmDelete = true
+                currentArchive()
             }
             false
         },
     )
-
-    Box(modifier = modifier) {
-        SwipeToDismissBox(
-            state = dismissState,
+    SwipeToDismissBox(
+        state = dismissState,
         enableDismissFromStartToEnd = false,
-        backgroundContent = { DeleteSwipeBackground(removalCopy.actionLabel) },
+        enableDismissFromEndToStart = !selectionActive,
+        backgroundContent = { ArchiveSwipeBackground(archiveMode) },
+        modifier = modifier,
+    ) {
+        // Keep the normal foreground opaque so the archive affordance appears only during drag.
+        Box(
+            modifier = Modifier
+                .background(MaterialTheme.colorScheme.surface)
+                .testTag("chatlist_row_surface_${row.bufferId}"),
         ) {
-        // Row background must be opaque so the swipe background stays hidden until swiped.
-        Box(modifier = Modifier.background(MaterialTheme.colorScheme.background)) {
             ChatListRowItem(
                 row = row,
                 showNetworkChip = multiNetwork,
-                onClick = { onOpenBuffer(row.bufferId) },
-                onLongClick = { menuOpen = true },
+                onClick = { if (selectionActive) onToggleSelection(row.bufferId) else onOpenBuffer(row.bufferId) },
+                onLongClick = { onStartSelection(row.bufferId) },
                 isFriend = isFriend,
                 presence = presence,
+                selected = selected,
             )
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            stringResource(
-                                if (row.pinned) R.string.chatlist_unpin else R.string.chatlist_pin,
-                            ),
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            if (row.pinned) Icons.Outlined.PushPin else Icons.Filled.PushPin,
-                            contentDescription = null,
-                        )
-                    },
-                    onClick = {
-                        onSetPinned(row.bufferId, !row.pinned)
-                        menuOpen = false
-                    },
-                )
-                DropdownMenuItem(
-                    text = {
-                        Text(stringResource(if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive))
-                    },
-                    leadingIcon = { Icon(Icons.Outlined.Archive, contentDescription = null) },
-                    onClick = {
-                        onSetArchived(row.bufferId, !archiveMode)
-                        menuOpen = false
-                    },
-                )
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            stringResource(
-                                if (row.muted) R.string.chatlist_unmute else R.string.chatlist_mute,
-                            ),
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            if (row.muted) Icons.Outlined.Notifications else Icons.Outlined.NotificationsOff,
-                            contentDescription = null,
-                        )
-                    },
-                    onClick = {
-                        onSetMuted(row.bufferId, !row.muted)
-                        menuOpen = false
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(removalCopy.actionLabel)) },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Outlined.Delete,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                        )
-                    },
-                    onClick = {
-                        menuOpen = false
-                        confirmDelete = true
-                    },
-                )
-            }
-        }
-    }
-
-    if (confirmDelete) {
-        DeleteConfirmDialog(
-            row = row,
-            onConfirm = {
-                confirmDelete = false
-                onDeleteBuffer(row)
-            },
-            onDismiss = { confirmDelete = false },
-        )
         }
     }
 }
 
-
-/** Red end-aligned trash background revealed while swiping a chat-list row toward delete. */
+/** End-to-start archive action uses a neutral archive container, never destructive styling. */
 @Composable
-private fun DeleteSwipeBackground(@StringRes actionLabel: Int) {
+private fun ArchiveSwipeBackground(archiveMode: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.errorContainer)
+            .background(MaterialTheme.colorScheme.secondaryContainer)
             .padding(horizontal = 24.dp),
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = Icons.Outlined.Delete,
-            contentDescription = stringResource(actionLabel),
-            tint = MaterialTheme.colorScheme.onErrorContainer,
+            imageVector = Icons.Outlined.Archive,
+            contentDescription = stringResource(if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive),
+            tint = MaterialTheme.colorScheme.onSecondaryContainer,
         )
     }
 }
@@ -1181,6 +1182,53 @@ private fun DeleteConfirmDialog(
         },
     )
 }
+
+/** Type totals retain the compatibility SERVER branch even though ordinary list queries hide it. */
+internal data class ChatRemovalCounts(val channels: Int, val queries: Int, val servers: Int)
+
+internal fun removalCounts(rows: Collection<ChatListRow>): ChatRemovalCounts = ChatRemovalCounts(
+    channels = rows.count { it.type == BufferType.CHANNEL },
+    queries = rows.count { it.type == BufferType.QUERY },
+    servers = rows.count { it.type == BufferType.SERVER },
+)
+
+@Composable
+private fun MultiDeleteConfirmDialog(rows: List<ChatListRow>, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val counts = removalCounts(rows)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(pluralStringResource(R.plurals.chatlist_remove_confirm_title, rows.size, rows.size)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (counts.channels > 0) Text(pluralStringResource(R.plurals.chatlist_remove_channels, counts.channels, counts.channels))
+                if (counts.queries > 0) Text(pluralStringResource(R.plurals.chatlist_remove_queries, counts.queries, counts.queries))
+                if (counts.servers > 0) Text(pluralStringResource(R.plurals.chatlist_remove_servers, counts.servers, counts.servers))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text(stringResource(R.string.chatlist_remove), color = MaterialTheme.colorScheme.error) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+    )
+}
+
+internal fun pruneSelectedIds(selectedIds: Collection<Long>, visibleRows: Collection<ChatListRow>): List<Long> {
+    val visible = visibleRows.map(ChatListRow::bufferId).toSet()
+    return selectedIds.distinct().filter(visible::contains)
+}
+
+internal fun orderedSelectedRows(rows: List<ChatListRow>, selectedIds: Collection<Long>): List<ChatListRow> {
+    val selected = selectedIds.toSet()
+    return rows.filter { it.bufferId in selected }
+}
+
+internal fun toggleSelectedId(selectedIds: Collection<Long>, id: Long): List<Long> =
+    if (id in selectedIds) selectedIds.filterNot { it == id } else addSelectedId(selectedIds, id)
+
+internal fun addSelectedId(selectedIds: Collection<Long>, id: Long): List<Long> = (selectedIds + id).distinct()
+
+internal fun aggregateToggleTarget(rows: Collection<ChatListRow>, value: (ChatListRow) -> Boolean): Boolean =
+    rows.isNotEmpty() && !rows.all(value)
 
 internal data class ChatRemovalCopy(
     @get:StringRes val actionLabel: Int,
