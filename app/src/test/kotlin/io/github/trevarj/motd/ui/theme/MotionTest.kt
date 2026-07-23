@@ -74,4 +74,20 @@ class MotionTest {
         assertTrue(samples.all { it.height in start.height..target.height })
         assertEquals(target, animation.getValueFromNanos(animation.durationNanos))
     }
+
+    @Test
+    fun `archive settle duration is monotonic and bounded`() {
+        assertEquals(200, MotdMotion.archiveSettleDurationMillis(-1f))
+        assertEquals(200, MotdMotion.archiveSettleDurationMillis(0f))
+        assertEquals(250, MotdMotion.archiveSettleDurationMillis(.5f))
+        assertEquals(300, MotdMotion.archiveSettleDurationMillis(1f))
+        assertEquals(300, MotdMotion.archiveSettleDurationMillis(2f))
+    }
+
+    @Test
+    fun `archive settle uses quintic ease out`() {
+        assertEquals(0f, MotdMotion.archiveSettleEasing.transform(0f), 0f)
+        assertEquals(.96875f, MotdMotion.archiveSettleEasing.transform(.5f), 0f)
+        assertEquals(1f, MotdMotion.archiveSettleEasing.transform(1f), 0f)
+    }
 }

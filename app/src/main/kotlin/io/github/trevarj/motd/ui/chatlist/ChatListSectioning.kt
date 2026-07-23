@@ -50,15 +50,268 @@ internal fun shouldShowArchiveFolder(
     pullRevealed: Boolean,
 ): Boolean = !archiveMode && hasArchivedRows && (!hasActiveRows || pullRevealed)
 
-/** Pulling down at the active-list origin reveals the archive independently of list height. */
-internal fun archiveFolderRevealAfterPull(
-    archiveMode: Boolean,
-    hasActiveRows: Boolean,
-    hasArchivedRows: Boolean,
-): Boolean = !archiveMode && hasActiveRows && hasArchivedRows
+/** Fixed Telegram-style archive pull measurements expressed as row-relative geometry. */
+internal object ArchiveFolderPull {
+    const val RowDp = 56f
+    const val DwellStartDp = 4f
+    const val HintStartDp = 16f
+    const val ArmRatio = .85f
+    const val DisarmRatio = .70f
+    const val BeyondRowResistance = .2f
+    const val ExtraDp = 16f
+    const val DwellMillis = 200L
+}
 
-/** Any upward drag into active content returns the folder to its hidden-above-list position. */
-internal fun archiveFolderRevealAfterActiveScroll(): Boolean = false
+/** Pixel geometry supplied by Compose; invalid geometry makes the reducer safely inert. */
+internal data class ArchiveFolderPullGeometry(
+    val rowPx: Float,
+) {
+    val isValid: Boolean get() = rowPx.isFinite() && rowPx > 0f
+    val dwellStartPx: Float get() = rowPx * (ArchiveFolderPull.DwellStartDp / ArchiveFolderPull.RowDp)
+    val hintStartPx: Float get() = rowPx * (ArchiveFolderPull.HintStartDp / ArchiveFolderPull.RowDp)
+    val armPx: Float get() = rowPx * ArchiveFolderPull.ArmRatio
+    val disarmPx: Float get() = rowPx * ArchiveFolderPull.DisarmRatio
+    val maxExposurePx: Float get() = rowPx * ((ArchiveFolderPull.RowDp + ArchiveFolderPull.ExtraDp) / ArchiveFolderPull.RowDp)
+}
+
+internal enum class ArchiveFolderPullPhase { HIDDEN, PULLING, ARMED, REVEALED }
+internal enum class ArchiveFolderPullSource { USER_INPUT, NON_USER_INPUT }
+
+/** Transient gesture truth. Revealed is intentionally local UI state, not persisted state. */
+internal data class ArchiveFolderPullState(
+    val exposurePx: Float = 0f,
+    val phase: ArchiveFolderPullPhase = ArchiveFolderPullPhase.HIDDEN,
+    val gestureActive: Boolean = false,
+    val gestureId: Long = 0L,
+    val dwellStartedAtMs: Long? = null,
+    val hapticEmitted: Boolean = false,
+    val gestureStartedRevealed: Boolean = false,
+)
+
+internal sealed interface ArchiveFolderPullEvent {
+    data class StartGesture(val timestampMs: Long) : ArchiveFolderPullEvent
+    data class DragDelta(
+        val deltaY: Float,
+        val timestampMs: Long,
+        val source: ArchiveFolderPullSource,
+        val listAtTop: Boolean,
+    ) : ArchiveFolderPullEvent
+
+    data class Tick(val timestampMs: Long) : ArchiveFolderPullEvent
+    data class Release(val timestampMs: Long) : ArchiveFolderPullEvent
+    data object Cancel : ArchiveFolderPullEvent
+    data object RevealedRowHidden : ArchiveFolderPullEvent
+    data object RevealAccessibilityAction : ArchiveFolderPullEvent
+    data object Reset : ArchiveFolderPullEvent
+}
+
+internal sealed interface ArchiveFolderPullEffect {
+    data object HapticThresholdActivated : ArchiveFolderPullEffect
+    data object AnnounceShown : ArchiveFolderPullEffect
+    data object AnnounceHidden : ArchiveFolderPullEffect
+}
+
+/** The raw nested-scroll portion consumed by the archive visual, plus one-shot effects. */
+internal data class ArchiveFolderPullResult(
+    val state: ArchiveFolderPullState,
+    val consumedY: Float = 0f,
+    val effects: List<ArchiveFolderPullEffect> = emptyList(),
+)
+
+/**
+ * Timestamped pure state machine. Only an active direct user gesture can change exposure. The
+ * visual uses a 1:1 row range and a 0.2x, 16dp-capped continuation after that row.
+ */
+internal fun reduceArchiveFolderPull(
+    state: ArchiveFolderPullState,
+    event: ArchiveFolderPullEvent,
+    geometry: ArchiveFolderPullGeometry,
+): ArchiveFolderPullResult {
+    if (!geometry.isValid) return ArchiveFolderPullResult(ArchiveFolderPullState())
+
+    fun hidden(): ArchiveFolderPullState = ArchiveFolderPullState(gestureId = state.gestureId)
+    fun normalized(input: ArchiveFolderPullState): ArchiveFolderPullState {
+        if (!input.exposurePx.isFinite()) return hidden()
+        val exposure = input.exposurePx.coerceIn(0f, geometry.maxExposurePx)
+        val phase = when {
+            input.phase == ArchiveFolderPullPhase.REVEALED -> ArchiveFolderPullPhase.REVEALED
+            exposure <= 0f -> ArchiveFolderPullPhase.HIDDEN
+            input.phase == ArchiveFolderPullPhase.ARMED && exposure >= geometry.disarmPx -> ArchiveFolderPullPhase.ARMED
+            else -> ArchiveFolderPullPhase.PULLING
+        }
+        return input.copy(
+            exposurePx = if (phase == ArchiveFolderPullPhase.REVEALED) geometry.rowPx else exposure,
+            phase = phase,
+            dwellStartedAtMs = if (exposure >= geometry.dwellStartPx) input.dwellStartedAtMs else null,
+        )
+    }
+
+    val current = normalized(state)
+    when (event) {
+        is ArchiveFolderPullEvent.StartGesture -> {
+            if (event.timestampMs < 0L) return ArchiveFolderPullResult(current)
+            return ArchiveFolderPullResult(
+                current.copy(
+                    gestureActive = current.phase != ArchiveFolderPullPhase.REVEALED,
+                    gestureId = current.gestureId + 1,
+                    dwellStartedAtMs = null,
+                    hapticEmitted = false,
+                    gestureStartedRevealed = current.phase == ArchiveFolderPullPhase.REVEALED,
+                ),
+            )
+        }
+
+        is ArchiveFolderPullEvent.DragDelta -> {
+            if (event.source != ArchiveFolderPullSource.USER_INPUT || !event.listAtTop ||
+                !current.gestureActive || event.timestampMs < 0L || !event.deltaY.isFinite()
+            ) return ArchiveFolderPullResult(current)
+
+            val rawBefore = exposureToRaw(current.exposurePx, geometry)
+            val rawAfter = (rawBefore + event.deltaY).coerceIn(0f, exposureToRaw(geometry.maxExposurePx, geometry))
+            val exposure = rawToExposure(rawAfter, geometry)
+            val dwellStart = when {
+                exposure < geometry.dwellStartPx -> null
+                current.dwellStartedAtMs == null -> event.timestampMs
+                else -> current.dwellStartedAtMs
+            }
+            return evaluateArming(
+                current.copy(exposurePx = exposure, dwellStartedAtMs = dwellStart),
+                event.timestampMs,
+                geometry,
+                rawAfter - rawBefore,
+            )
+        }
+
+        is ArchiveFolderPullEvent.Tick -> {
+            if (!current.gestureActive || event.timestampMs < 0L) return ArchiveFolderPullResult(current)
+            return evaluateArming(current, event.timestampMs, geometry)
+        }
+
+        is ArchiveFolderPullEvent.Release -> {
+            if (!current.gestureActive || event.timestampMs < 0L) return ArchiveFolderPullResult(current)
+            return if (current.phase == ArchiveFolderPullPhase.ARMED) {
+                ArchiveFolderPullResult(
+                    current.copy(
+                        exposurePx = geometry.rowPx,
+                        phase = ArchiveFolderPullPhase.REVEALED,
+                        gestureActive = false,
+                        dwellStartedAtMs = null,
+                    ),
+                    effects = listOf(ArchiveFolderPullEffect.AnnounceShown),
+                )
+            } else {
+                ArchiveFolderPullResult(hidden())
+            }
+        }
+
+        ArchiveFolderPullEvent.Cancel -> {
+            val keepRevealed = current.phase == ArchiveFolderPullPhase.REVEALED && current.gestureStartedRevealed
+            return ArchiveFolderPullResult(if (keepRevealed) current.copy(gestureActive = false) else hidden())
+        }
+
+        ArchiveFolderPullEvent.RevealedRowHidden -> {
+            return if (current.phase == ArchiveFolderPullPhase.REVEALED) {
+                ArchiveFolderPullResult(hidden(), effects = listOf(ArchiveFolderPullEffect.AnnounceHidden))
+            } else {
+                ArchiveFolderPullResult(current)
+            }
+        }
+
+        ArchiveFolderPullEvent.RevealAccessibilityAction -> {
+            return if (current.phase != ArchiveFolderPullPhase.REVEALED) {
+                ArchiveFolderPullResult(
+                    current.copy(
+                        exposurePx = geometry.rowPx,
+                        phase = ArchiveFolderPullPhase.REVEALED,
+                        gestureActive = false,
+                        dwellStartedAtMs = null,
+                    ),
+                    effects = listOf(ArchiveFolderPullEffect.AnnounceShown),
+                )
+            } else {
+                ArchiveFolderPullResult(current)
+            }
+        }
+
+        ArchiveFolderPullEvent.Reset -> return ArchiveFolderPullResult(hidden())
+    }
+}
+
+/** Visible hint alpha, kept pure so frame rendering never creates a layout dependency. */
+internal fun archiveFolderPullHintAlpha(exposurePx: Float, geometry: ArchiveFolderPullGeometry): Float {
+    if (!geometry.isValid || !exposurePx.isFinite()) return 0f
+    val denominator = (geometry.armPx - geometry.hintStartPx).coerceAtLeast(.0001f)
+    return ((exposurePx - geometry.hintStartPx) / denominator).coerceIn(0f, 1f)
+}
+
+internal fun archiveFolderPullSettleTarget(state: ArchiveFolderPullState, geometry: ArchiveFolderPullGeometry): Float =
+    if (geometry.isValid && state.phase == ArchiveFolderPullPhase.REVEALED) geometry.rowPx else 0f
+
+/** Keep the overlay through the committed-row anchor handoff so no blank frame can appear. */
+internal data class RevealedArchiveFolderScrollResult(
+    val exposurePx: Float,
+    val consumedY: Float,
+    val hidden: Boolean,
+)
+
+/**
+ * Moves the revealed pull surface and chat list together without changing LazyColumn content.
+ * Negative deltas hide the folder; positive deltas can restore a partially hidden folder.
+ */
+internal fun scrollRevealedArchiveFolder(
+    exposurePx: Float,
+    deltaY: Float,
+    geometry: ArchiveFolderPullGeometry,
+): RevealedArchiveFolderScrollResult {
+    if (!geometry.isValid || !exposurePx.isFinite() || !deltaY.isFinite()) {
+        return RevealedArchiveFolderScrollResult(0f, 0f, hidden = false)
+    }
+    val current = exposurePx.coerceIn(0f, geometry.rowPx)
+    val next = (current + deltaY).coerceIn(0f, geometry.rowPx)
+    return RevealedArchiveFolderScrollResult(
+        exposurePx = next,
+        consumedY = next - current,
+        hidden = deltaY < 0f && next <= 0f,
+    )
+}
+
+private fun evaluateArming(
+    input: ArchiveFolderPullState,
+    timestampMs: Long,
+    geometry: ArchiveFolderPullGeometry,
+    consumedY: Float = 0f,
+): ArchiveFolderPullResult {
+    val state = if (input.phase == ArchiveFolderPullPhase.ARMED && input.exposurePx < geometry.disarmPx) {
+        input.copy(phase = if (input.exposurePx <= 0f) ArchiveFolderPullPhase.HIDDEN else ArchiveFolderPullPhase.PULLING)
+    } else if (input.exposurePx <= 0f) {
+        input.copy(phase = ArchiveFolderPullPhase.HIDDEN)
+    } else if (input.phase != ArchiveFolderPullPhase.ARMED) {
+        input.copy(phase = ArchiveFolderPullPhase.PULLING)
+    } else {
+        input
+    }
+    val eligible = state.phase != ArchiveFolderPullPhase.ARMED &&
+        state.exposurePx >= geometry.armPx &&
+        state.dwellStartedAtMs != null && timestampMs - state.dwellStartedAtMs >= ArchiveFolderPull.DwellMillis
+    return if (eligible) {
+        val armed = state.copy(phase = ArchiveFolderPullPhase.ARMED)
+        ArchiveFolderPullResult(
+            armed.copy(hapticEmitted = true),
+            consumedY,
+            effects = if (state.hapticEmitted) emptyList() else listOf(ArchiveFolderPullEffect.HapticThresholdActivated),
+        )
+    } else {
+        ArchiveFolderPullResult(state, consumedY)
+    }
+}
+
+private fun exposureToRaw(exposurePx: Float, geometry: ArchiveFolderPullGeometry): Float =
+    if (exposurePx <= geometry.rowPx) exposurePx else geometry.rowPx +
+        (exposurePx - geometry.rowPx) / ArchiveFolderPull.BeyondRowResistance
+
+private fun rawToExposure(rawPx: Float, geometry: ArchiveFolderPullGeometry): Float =
+    if (rawPx <= geometry.rowPx) rawPx else geometry.rowPx +
+        (rawPx - geometry.rowPx) * ArchiveFolderPull.BeyondRowResistance
 
 /** Whether [row] keeps the friend presentation, including when it is globally pinned. */
 internal fun isFriendQuery(row: ChatListRow, friends: Set<String>): Boolean =

@@ -49,7 +49,7 @@ class ChatListSectioningTest {
     }
 
     @Test
-    fun `one active and one archived chat use pull reveal independently of list height`() {
+    fun `archive folder visibility preserves active archived-only and archive-mode routes`() {
         val active = row(id = 1, name = "#active", type = BufferType.CHANNEL)
         val archived = row(id = 2, name = "alice").copy(archived = true)
 
@@ -58,7 +58,7 @@ class ChatListSectioningTest {
                 archiveMode = false,
                 hasActiveRows = true,
                 hasArchivedRows = true,
-                pullRevealed = archiveFolderRevealAfterActiveScroll(),
+                pullRevealed = false,
             ),
         )
         assertTrue(
@@ -66,15 +66,7 @@ class ChatListSectioningTest {
                 archiveMode = false,
                 hasActiveRows = listOf(active).isNotEmpty(),
                 hasArchivedRows = listOf(archived).isNotEmpty(),
-                pullRevealed = archiveFolderRevealAfterPull(false, true, true),
-            ),
-        )
-        assertFalse(
-            shouldShowArchiveFolder(
-                archiveMode = false,
-                hasActiveRows = true,
-                hasArchivedRows = true,
-                pullRevealed = false,
+                pullRevealed = true,
             ),
         )
         assertTrue(
@@ -85,6 +77,143 @@ class ChatListSectioningTest {
                 pullRevealed = false,
             ),
         )
+        assertFalse(
+            shouldShowArchiveFolder(
+                archiveMode = true,
+                hasActiveRows = true,
+                hasArchivedRows = true,
+                pullRevealed = true,
+            ),
+        )
+    }
+
+    private val pullGeometry = ArchiveFolderPullGeometry(rowPx = 56f)
+
+    private fun reduce(
+        state: ArchiveFolderPullState,
+        event: ArchiveFolderPullEvent,
+    ): ArchiveFolderPullResult = reduceArchiveFolderPull(state, event, pullGeometry)
+
+    @Test
+    fun `archive pull is one to one through row then damped and capped`() {
+        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
+        val row = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 0, ArchiveFolderPullSource.USER_INPUT, true))
+        assertEquals(56f, row.state.exposurePx, 0f)
+        assertEquals(56f, row.consumedY, 0f)
+
+        val capped = reduce(row.state, ArchiveFolderPullEvent.DragDelta(200f, 0, ArchiveFolderPullSource.USER_INPUT, true))
+        assertEquals(72f, capped.state.exposurePx, 0f)
+        assertEquals(80f, capped.consumedY, 0f)
+    }
+
+    @Test
+    fun `dwell is continuous and stationary tick arms only after time and distance`() {
+        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
+        val near = reduce(started, ArchiveFolderPullEvent.DragDelta(4f, 10, ArchiveFolderPullSource.USER_INPUT, true)).state
+        assertEquals(10L, near.dwellStartedAtMs)
+        val reset = reduce(near, ArchiveFolderPullEvent.DragDelta(-1f, 20, ArchiveFolderPullSource.USER_INPUT, true)).state
+        assertEquals(null, reset.dwellStartedAtMs)
+        val ready = reduce(reset, ArchiveFolderPullEvent.DragDelta(50f, 30, ArchiveFolderPullSource.USER_INPUT, true)).state
+        assertEquals(30L, ready.dwellStartedAtMs)
+        assertEquals(ArchiveFolderPullPhase.PULLING, reduce(ready, ArchiveFolderPullEvent.Tick(229)).state.phase)
+        val armed = reduce(ready, ArchiveFolderPullEvent.Tick(230))
+        assertEquals(ArchiveFolderPullPhase.ARMED, armed.state.phase)
+        assertEquals(listOf(ArchiveFolderPullEffect.HapticThresholdActivated), armed.effects)
+    }
+
+    @Test
+    fun `distance before time and time before distance both require both thresholds`() {
+        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
+        val far = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
+        assertEquals(ArchiveFolderPullPhase.PULLING, reduce(far, ArchiveFolderPullEvent.Tick(199)).state.phase)
+        assertEquals(ArchiveFolderPullPhase.ARMED, reduce(far, ArchiveFolderPullEvent.Tick(200)).state.phase)
+
+        val slow = reduce(started, ArchiveFolderPullEvent.DragDelta(4f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
+        val waited = reduce(slow, ArchiveFolderPullEvent.Tick(300)).state
+        assertEquals(ArchiveFolderPullPhase.PULLING, waited.phase)
+        assertEquals(ArchiveFolderPullPhase.ARMED, reduce(waited, ArchiveFolderPullEvent.DragDelta(44f, 300, ArchiveFolderPullSource.USER_INPUT, true)).state.phase)
+    }
+
+    @Test
+    fun `armed hysteresis and haptic latch survive a disarm rearm`() {
+        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
+        val pulled = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
+        val armed = reduce(pulled, ArchiveFolderPullEvent.Tick(200)).state
+        assertEquals(ArchiveFolderPullPhase.ARMED, armed.phase)
+        val disarmed = reduce(armed, ArchiveFolderPullEvent.DragDelta(-17f, 201, ArchiveFolderPullSource.USER_INPUT, true)).state
+        assertEquals(ArchiveFolderPullPhase.PULLING, disarmed.phase)
+        val rearmed = reduce(disarmed, ArchiveFolderPullEvent.DragDelta(17f, 202, ArchiveFolderPullSource.USER_INPUT, true))
+        assertEquals(ArchiveFolderPullPhase.ARMED, rearmed.state.phase)
+        assertTrue(rearmed.effects.isEmpty())
+    }
+
+    @Test
+    fun `release commits only armed and cancel never commits`() {
+        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
+        val pulling = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
+        assertEquals(ArchiveFolderPullPhase.HIDDEN, reduce(pulling, ArchiveFolderPullEvent.Release(100)).state.phase)
+
+        val far = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
+        val armed = reduce(far, ArchiveFolderPullEvent.Tick(200)).state
+        val revealed = reduce(armed, ArchiveFolderPullEvent.Release(201))
+        assertEquals(ArchiveFolderPullPhase.REVEALED, revealed.state.phase)
+        assertEquals(listOf(ArchiveFolderPullEffect.AnnounceShown), revealed.effects)
+        assertEquals(ArchiveFolderPullPhase.HIDDEN, reduce(armed, ArchiveFolderPullEvent.Cancel).state.phase)
+    }
+
+    @Test
+    fun `non user input and invalid geometry are inert`() {
+        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
+        assertEquals(
+            started,
+            reduce(started, ArchiveFolderPullEvent.DragDelta(100f, 0, ArchiveFolderPullSource.NON_USER_INPUT, true)).state,
+        )
+        assertEquals(
+            started,
+            reduce(started, ArchiveFolderPullEvent.DragDelta(100f, 0, ArchiveFolderPullSource.USER_INPUT, false)).state,
+        )
+        val invalid = reduceArchiveFolderPull(
+            ArchiveFolderPullState(exposurePx = Float.NaN),
+            ArchiveFolderPullEvent.DragDelta(10f, 0, ArchiveFolderPullSource.USER_INPUT, true),
+            ArchiveFolderPullGeometry(Float.NaN),
+        )
+        assertEquals(ArchiveFolderPullState(), invalid.state)
+        assertEquals(0f, invalid.consumedY, 0f)
+    }
+
+    @Test
+    fun `revealed row collapse resets and announces hidden`() {
+        val revealed = ArchiveFolderPullState(exposurePx = 56f, phase = ArchiveFolderPullPhase.REVEALED)
+        val hidden = reduce(revealed, ArchiveFolderPullEvent.RevealedRowHidden)
+        assertEquals(ArchiveFolderPullPhase.HIDDEN, hidden.state.phase)
+        assertEquals(listOf(ArchiveFolderPullEffect.AnnounceHidden), hidden.effects)
+    }
+
+    @Test
+    fun `revealed archive folder scrolls with chats without changing list content`() {
+        val partiallyHidden = scrollRevealedArchiveFolder(56f, -20f, pullGeometry)
+        assertEquals(36f, partiallyHidden.exposurePx, 0f)
+        assertEquals(-20f, partiallyHidden.consumedY, 0f)
+        assertFalse(partiallyHidden.hidden)
+
+        val restored = scrollRevealedArchiveFolder(36f, 30f, pullGeometry)
+        assertEquals(56f, restored.exposurePx, 0f)
+        assertEquals(20f, restored.consumedY, 0f)
+        assertFalse(restored.hidden)
+
+        val hidden = scrollRevealedArchiveFolder(10f, -30f, pullGeometry)
+        assertEquals(0f, hidden.exposurePx, 0f)
+        assertEquals(-10f, hidden.consumedY, 0f)
+        assertTrue(hidden.hidden)
+    }
+
+    @Test
+    fun `hint alpha and settle target are bounded`() {
+        assertEquals(0f, archiveFolderPullHintAlpha(16f, pullGeometry), 0f)
+        assertEquals(1f, archiveFolderPullHintAlpha(56f, pullGeometry), 0f)
+        assertEquals(0f, archiveFolderPullSettleTarget(ArchiveFolderPullState(), pullGeometry), 0f)
+        assertEquals(56f, archiveFolderPullSettleTarget(
+            ArchiveFolderPullState(56f, ArchiveFolderPullPhase.REVEALED), pullGeometry), 0f)
     }
 
     @Test

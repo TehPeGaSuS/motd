@@ -3,11 +3,17 @@ package io.github.trevarj.motd.ui.chatlist
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,10 +23,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -61,22 +69,34 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -84,7 +104,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferType
@@ -96,6 +122,12 @@ import io.github.trevarj.motd.ui.components.ConnectionBanner
 import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import android.os.SystemClock
+import android.view.HapticFeedbackConstants
+import android.view.View
+import kotlin.math.abs
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Stateful entry: wires the ViewModel and drives navigation/empty-state. */
@@ -449,57 +481,199 @@ private fun ChatList(
     var foolsExpanded by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    var archiveFolderPullRevealed by rememberSaveable { mutableStateOf(false) }
     val hasActiveRows = rows.isNotEmpty()
     val hasArchivedRows = archivedRows.isNotEmpty()
-    val archiveFolderVisible = shouldShowArchiveFolder(
-        archiveMode,
-        hasActiveRows,
-        hasArchivedRows,
-        archiveFolderPullRevealed,
-    )
+    val archiveFolderHeight = 56.dp
+    val archiveFolderGeometry = ArchiveFolderPullGeometry(with(LocalDensity.current) { archiveFolderHeight.toPx() })
+    val archiveFolderPullEligible = !archiveMode && hasActiveRows && hasArchivedRows
+    val archivedOnly = !archiveMode && !hasActiveRows && hasArchivedRows
+    var archivePullState by remember { mutableStateOf(ArchiveFolderPullState()) }
+    var archiveDisplayExposurePx by remember { mutableFloatStateOf(0f) }
+    var archiveSettling by remember { mutableStateOf(false) }
+    var archiveSettleJob by remember { mutableStateOf<Job?>(null) }
+    val view = LocalView.current
 
-    LaunchedEffect(archiveMode, hasActiveRows, hasArchivedRows) {
-        if (archiveMode || !hasActiveRows || !hasArchivedRows) archiveFolderPullRevealed = false
+    fun dispatchArchiveEvent(event: ArchiveFolderPullEvent): ArchiveFolderPullResult {
+        val result = reduceArchiveFolderPull(archivePullState, event, archiveFolderGeometry)
+        archivePullState = result.state
+        result.effects.forEach { effect ->
+            when (effect) {
+                ArchiveFolderPullEffect.HapticThresholdActivated -> view.performArchiveThresholdHaptic()
+                ArchiveFolderPullEffect.AnnounceShown -> view.announceForAccessibility(view.context.getString(R.string.chatlist_archived_revealed_announcement))
+                ArchiveFolderPullEffect.AnnounceHidden -> view.announceForAccessibility(view.context.getString(R.string.chatlist_archived_hidden_announcement))
+            }
+        }
+        return result
     }
-    val archiveFolderPullConnection = remember(listState, archiveMode, hasActiveRows, hasArchivedRows) {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (available.y < 0f) archiveFolderPullRevealed = archiveFolderRevealAfterActiveScroll()
-                return Offset.Zero
-            }
 
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource,
-            ): Offset {
-                if (available.y > 0f && !listState.canScrollBackward) {
-                    archiveFolderPullRevealed = archiveFolderRevealAfterPull(
-                        archiveMode,
-                        hasActiveRows,
-                        hasArchivedRows,
-                    )
-                }
-                return Offset.Zero
+    fun settleArchivePull(targetPx: Float) {
+        archiveSettleJob?.cancel()
+        if (!archiveFolderGeometry.isValid || targetPx == archiveDisplayExposurePx) {
+            archiveDisplayExposurePx = targetPx
+            archiveSettling = false
+            return
+        }
+        archiveSettling = true
+        val remaining = abs(targetPx - archiveDisplayExposurePx) / archiveFolderGeometry.rowPx
+        archiveSettleJob = scope.launch {
+            animate(
+                initialValue = archiveDisplayExposurePx,
+                targetValue = targetPx,
+                animationSpec = MotdMotion.archiveSettleSpec(remaining),
+            ) { value, _ ->
+                archiveDisplayExposurePx = value
             }
+            archiveDisplayExposurePx = targetPx
+            archiveSettling = false
+            archiveSettleJob = null
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .nestedScroll(archiveFolderPullConnection),
-        ) {
-            AnimatedVisibility(visible = archiveFolderVisible) {
+    fun applyArchiveFolderPull(deltaY: Float, atTop: Boolean): Float {
+        archiveSettleJob?.cancel()
+        archiveSettleJob = null
+        archiveSettling = false
+        val result = dispatchArchiveEvent(
+            ArchiveFolderPullEvent.DragDelta(deltaY, SystemClock.uptimeMillis(), ArchiveFolderPullSource.USER_INPUT, atTop),
+        )
+        archiveDisplayExposurePx = result.state.exposurePx
+        return result.consumedY
+    }
+
+    LaunchedEffect(archiveFolderPullEligible) {
+        if (!archiveFolderPullEligible) {
+            archiveSettleJob?.cancel()
+            archiveSettleJob = null
+            archiveSettling = false
+            archiveDisplayExposurePx = 0f
+            dispatchArchiveEvent(ArchiveFolderPullEvent.Reset)
+        }
+    }
+
+    LaunchedEffect(archivePullState.gestureActive, archivePullState.phase, archivePullState.dwellStartedAtMs, archivePullState.exposurePx) {
+        val dwellStart = archivePullState.dwellStartedAtMs
+        if (archivePullState.gestureActive && archivePullState.phase != ArchiveFolderPullPhase.ARMED && dwellStart != null) {
+            delay((ArchiveFolderPull.DwellMillis - (SystemClock.uptimeMillis() - dwellStart)).coerceAtLeast(0L))
+            val result = dispatchArchiveEvent(ArchiveFolderPullEvent.Tick(SystemClock.uptimeMillis()))
+            archiveDisplayExposurePx = result.state.exposurePx
+        }
+    }
+
+    DisposableEffect(Unit) { onDispose { archiveSettleJob?.cancel() } }
+
+    val archiveFolderPullConnection = remember(archiveFolderPullEligible, archiveSettling) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput || !archiveFolderPullEligible || archiveSettling) return Offset.Zero
+                if (available.y < 0f && archivePullState.phase == ArchiveFolderPullPhase.REVEALED) {
+                    val result = scrollRevealedArchiveFolder(
+                        archiveDisplayExposurePx,
+                        available.y,
+                        archiveFolderGeometry,
+                    )
+                    archiveDisplayExposurePx = result.exposurePx
+                    if (result.hidden) dispatchArchiveEvent(ArchiveFolderPullEvent.RevealedRowHidden)
+                    return Offset(0f, result.consumedY)
+                }
+                return if (available.y < 0f && archivePullState.gestureActive && archiveDisplayExposurePx > 0f) {
+                    Offset(0f, applyArchiveFolderPull(available.y, atTop = true))
+                } else Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput || !archiveFolderPullEligible || archiveSettling) return Offset.Zero
+                if (available.y > 0f && !listState.canScrollBackward &&
+                    archivePullState.phase == ArchiveFolderPullPhase.REVEALED
+                ) {
+                    val result = scrollRevealedArchiveFolder(
+                        archiveDisplayExposurePx,
+                        available.y,
+                        archiveFolderGeometry,
+                    )
+                    archiveDisplayExposurePx = result.exposurePx
+                    return Offset(0f, result.consumedY)
+                }
+                return if (available.y > 0f && !listState.canScrollBackward && archivePullState.gestureActive) {
+                    Offset(0f, applyArchiveFolderPull(available.y, atTop = true))
+                } else Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity = Velocity.Zero
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = Velocity.Zero
+        }
+    }
+    val currentDispatchArchiveEvent by rememberUpdatedState(::dispatchArchiveEvent)
+    val revealArchiveActionLabel = stringResource(R.string.chatlist_archived_reveal_action)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clipToBounds()
+            .nestedScroll(archiveFolderPullConnection)
+            .pointerInput(archiveFolderPullEligible) {
+                if (!archiveFolderPullEligible) return@pointerInput
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    val gestureStartedRevealed = archivePullState.phase == ArchiveFolderPullPhase.REVEALED
+                    archiveSettleJob?.cancel()
+                    archiveSettleJob = null
+                    archiveSettling = false
+                    currentDispatchArchiveEvent(ArchiveFolderPullEvent.StartGesture(SystemClock.uptimeMillis()))
+                    // Observe release after children without treating LazyColumn drag consumption as
+                    // cancellation. The observer never consumes input from scrolling or row taps.
+                    var pointerEvent = awaitPointerEvent(PointerEventPass.Final)
+                    while (pointerEvent.changes.any { it.pressed }) {
+                        pointerEvent = awaitPointerEvent(PointerEventPass.Final)
+                    }
+                    if (gestureStartedRevealed) {
+                        currentDispatchArchiveEvent(ArchiveFolderPullEvent.Cancel)
+                    } else {
+                        val event = if (pointerEvent.type == PointerEventType.Release) {
+                            ArchiveFolderPullEvent.Release(SystemClock.uptimeMillis())
+                        } else {
+                            ArchiveFolderPullEvent.Cancel
+                        }
+                        val result = currentDispatchArchiveEvent(event)
+                        settleArchivePull(archiveFolderPullSettleTarget(result.state, archiveFolderGeometry))
+                    }
+                }
+            }
+            .semantics {
+                if (archiveFolderPullEligible && archivePullState.phase != ArchiveFolderPullPhase.REVEALED) {
+                    customActions = listOf(
+                        CustomAccessibilityAction(revealArchiveActionLabel) {
+                            val result = dispatchArchiveEvent(ArchiveFolderPullEvent.RevealAccessibilityAction)
+                            archiveDisplayExposurePx = result.state.exposurePx
+                            true
+                        },
+                    )
+                }
+            }
+            .testTag("chatlist_archive_pull_target"),
+    ) {
+        if (archivedOnly) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(archiveFolderHeight)
+            ) {
                 ArchivedChatsFolder(archivedRows.size, onOpenArchive)
             }
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(bottom = 88.dp),
-            ) {
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationY = when {
+                        archivedOnly -> archiveFolderGeometry.rowPx
+                        archiveFolderPullEligible -> archiveDisplayExposurePx
+                        else -> 0f
+                    }
+                },
+            contentPadding = PaddingValues(bottom = 88.dp),
+        ) {
             items(sections.pinned, key = { it.bufferId }) { row ->
                 RowWithMenu(
                     row,
@@ -592,6 +766,20 @@ private fun ChatList(
                 }
             }
             }
+
+        if (archiveFolderPullEligible && archiveDisplayExposurePx > 0f) {
+            val overlayModifier = Modifier
+                .fillMaxWidth()
+                .height(archiveFolderHeight)
+                .graphicsLayer { translationY = archiveDisplayExposurePx - archiveFolderGeometry.rowPx }
+            ArchiveFolderPullOverlay(
+                phase = archivePullState.phase,
+                exposurePx = archiveDisplayExposurePx,
+                geometry = archiveFolderGeometry,
+                archivedCount = archivedRows.size,
+                onOpenArchive = onOpenArchive,
+                modifier = overlayModifier,
+            )
         }
 
         ViewportScrollToTopFab(
@@ -607,7 +795,11 @@ private fun ChatList(
 }
 
 @Composable
-private fun ArchivedChatsFolder(count: Int, onOpenArchive: () -> Unit) {
+private fun ArchivedChatsFolder(
+    count: Int,
+    onOpenArchive: () -> Unit,
+    contentColor: Color = MaterialTheme.colorScheme.onSurface,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -616,13 +808,120 @@ private fun ArchivedChatsFolder(count: Int, onOpenArchive: () -> Unit) {
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Outlined.Archive, contentDescription = null)
+        Icon(Icons.Outlined.Archive, contentDescription = null, tint = contentColor)
         Text(
             text = stringResource(R.string.chatlist_archived_chats_count, count),
             modifier = Modifier.padding(start = 16.dp),
             fontWeight = FontWeight.Medium,
+            color = contentColor,
         )
     }
+}
+
+@Composable
+private fun ArchiveFolderPullOverlay(
+    phase: ArchiveFolderPullPhase,
+    exposurePx: Float,
+    geometry: ArchiveFolderPullGeometry,
+    archivedCount: Int,
+    onOpenArchive: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val armed = phase == ArchiveFolderPullPhase.ARMED
+    val committed = phase == ArchiveFolderPullPhase.REVEALED
+    val activeProgress by animateFloatAsState(
+        targetValue = if (armed) 1f else 0f,
+        animationSpec = tween(durationMillis = 230, easing = FastOutLinearInEasing),
+        label = "archive pull color",
+    )
+    val activeBackground = MaterialTheme.colorScheme.primaryContainer
+    val pullBackground = MaterialTheme.colorScheme.background
+    val inactiveContent = MaterialTheme.colorScheme.onSurface
+    val activeContent = MaterialTheme.colorScheme.onPrimaryContainer
+    val backgroundColor = lerp(pullBackground, activeBackground, activeProgress)
+    val contentColor = lerp(inactiveContent, activeContent, activeProgress)
+    val prompt = stringResource(
+        if (armed) R.string.chatlist_archived_pull_armed else R.string.chatlist_archived_pull_hint,
+    )
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                alpha = if (armed || committed) 1f else archiveFolderPullHintAlpha(exposurePx, geometry)
+            }
+            .background(backgroundColor),
+    ) {
+        if (committed) {
+            // Keep rendering the same pull surface after release so the list never changes shape.
+            ArchivedChatsFolder(
+                count = archivedCount,
+                onOpenArchive = onOpenArchive,
+                contentColor = contentColor,
+            )
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clearAndSetSemantics { stateDescription = prompt }
+                    .testTag("chatlist_archived_pull_${phase.name.lowercase()}")
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .background(contentColor.copy(alpha = .14f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.ExpandMore,
+                        contentDescription = null,
+                        tint = contentColor,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .graphicsLayer { rotationZ = 180f * activeProgress },
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 16.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.chatlist_archived_pull_hint),
+                        color = contentColor,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.graphicsLayer {
+                            alpha = 1f - activeProgress
+                            translationY = -8.dp.toPx() * activeProgress
+                            scaleX = 1f - .1f * activeProgress
+                            scaleY = scaleX
+                        },
+                    )
+                    Text(
+                        text = stringResource(R.string.chatlist_archived_pull_armed),
+                        color = contentColor,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.graphicsLayer {
+                            alpha = activeProgress
+                            translationY = 8.dp.toPx() * (1f - activeProgress)
+                            scaleX = .9f + .1f * activeProgress
+                            scaleY = scaleX
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Telegram deliberately bypasses disabled touch feedback for this explicit threshold latch. */
+@Suppress("DEPRECATION")
+private fun View.performArchiveThresholdHaptic() {
+    performHapticFeedback(
+        HapticFeedbackConstants.KEYBOARD_TAP,
+        HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING,
+    )
 }
 
 @Composable

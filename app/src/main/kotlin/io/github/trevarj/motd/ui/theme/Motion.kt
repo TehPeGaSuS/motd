@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.theme
 
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -19,8 +20,15 @@ object MotdMotion {
     const val MicroDurationMs = 140
     const val StandardDurationMs = 210
     const val NavigationDurationMs = 340
+    const val ArchiveSettleMinimumDurationMs = 200
+    const val ArchiveSettleMaximumDurationMs = 300
 
     private val StandardEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+    /** Quintic ease-out keeps the archive settle decisive without spring overshoot. */
+    val archiveSettleEasing = Easing { fraction ->
+        val inverse = 1f - fraction
+        1f - inverse * inverse * inverse * inverse * inverse
+    }
     private const val SoftSpringStiffness = 340f
     private const val MaterialDefaultSpatialDampingRatio = 0.9f
     private const val MaterialDefaultSpatialStiffness = 700f
@@ -76,5 +84,16 @@ object MotdMotion {
     val contentSize: FiniteAnimationSpec<IntSize> = spring(
         dampingRatio = Spring.DampingRatioNoBouncy,
         stiffness = SoftSpringStiffness,
+    )
+
+    /** Duration grows monotonically with the remaining fraction and remains within 200–300ms. */
+    fun archiveSettleDurationMillis(remainingFraction: Float): Int =
+        (ArchiveSettleMinimumDurationMs +
+            (ArchiveSettleMaximumDurationMs - ArchiveSettleMinimumDurationMs) *
+                remainingFraction.coerceIn(0f, 1f)).toInt()
+
+    fun archiveSettleSpec(remainingFraction: Float): FiniteAnimationSpec<Float> = tween(
+        durationMillis = archiveSettleDurationMillis(remainingFraction),
+        easing = archiveSettleEasing,
     )
 }
