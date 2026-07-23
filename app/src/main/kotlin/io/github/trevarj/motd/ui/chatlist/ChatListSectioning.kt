@@ -27,6 +27,21 @@ data class ChatListSections(
         get() = regular.isNotEmpty() && (pinned.isNotEmpty() || friends.isNotEmpty())
 }
 
+/** Splits the already-scoped projection before badges, drawer rollups, or sectioning run. */
+internal fun partitionArchivedRows(rows: List<ChatListRow>): Pair<List<ChatListRow>, List<ChatListRow>> =
+    rows.filterNot(ChatListRow::archived) to rows.filter(ChatListRow::archived)
+
+/** Active empty state must not hide the only route to an existing archived folder. */
+internal fun shouldRenderChatList(
+    archiveMode: Boolean,
+    activeRows: List<ChatListRow>,
+    archivedRows: List<ChatListRow>,
+): Boolean = if (archiveMode) {
+    archivedRows.isNotEmpty()
+} else {
+    activeRows.isNotEmpty() || archivedRows.isNotEmpty()
+}
+
 /** Whether [row] keeps the friend presentation, including when it is globally pinned. */
 internal fun isFriendQuery(row: ChatListRow, friends: Set<String>): Boolean =
     row.type == BufferType.QUERY && row.identityRules.matchesConfiguredNick(row.displayName, friends)

@@ -27,6 +27,8 @@ import javax.inject.Inject
 /** Single UI state for the chat list screen. See plans/07 + plans/16 §3.4. */
 data class ChatListState(
     val rows: List<ChatListRow> = emptyList(),
+    /** Scoped archived rows; all global badges and drawer rollups deliberately exclude these. */
+    val archivedRows: List<ChatListRow> = emptyList(),
     val connection: Map<Long, IrcClientState> = emptyMap(),
     val queryPresence: Map<Long, PresenceState> = emptyMap(),
     val networks: List<NetworkEntity> = emptyList(),
@@ -88,10 +90,13 @@ class ChatListViewModel @Inject constructor(
             val validSelection = selected?.takeIf { id -> networks.any { it.id == id } }
             if (validSelection != selected) setSelection(validSelection)
 
+            val scopedRows = scopeRows(rows, validSelection, networks)
+            val (activeRows, archivedRows) = partitionArchivedRows(scopedRows)
             ChatListState(
-                rows = scopeRows(rows, validSelection, networks),
+                rows = activeRows,
+                archivedRows = archivedRows,
                 connection = connection,
-                queryPresence = rows.asSequence()
+                queryPresence = scopedRows.asSequence()
                     .filter { it.type == BufferType.QUERY }
                     .mapNotNull { row ->
                         val normalize = connectionManager.clientFor(row.networkId)?.isupport?.let { it::normalize }
@@ -104,9 +109,9 @@ class ChatListViewModel @Inject constructor(
                 friends = settings.friends,
                 fools = settings.fools,
                 selectedNetworkId = validSelection,
-                drawerRows = buildDrawerRows(networks, rows, connection),
-                allUnread = rows.filterNot { it.muted }.sumOf { it.unreadCount },
-                allMentions = rows.filterNot { it.muted }.sumOf { it.mentionCount },
+                drawerRows = buildDrawerRows(networks, rows.filterNot(ChatListRow::archived), connection),
+                allUnread = rows.filterNot { it.muted || it.archived }.sumOf { it.unreadCount },
+                allMentions = rows.filterNot { it.muted || it.archived }.sumOf { it.mentionCount },
             )
         }.stateIn(
             scope = viewModelScope,
@@ -120,6 +125,10 @@ class ChatListViewModel @Inject constructor(
 
     fun setMuted(bufferId: Long, muted: Boolean) = viewModelScope.launch {
         bufferRepository.setMuted(bufferId, muted)
+    }
+
+    fun setArchived(bufferId: Long, archived: Boolean) = viewModelScope.launch {
+        bufferRepository.setArchived(bufferId, archived)
     }
 
     fun joinChannel(networkId: Long, channel: String) = viewModelScope.launch {

@@ -115,6 +115,49 @@ class EventProcessorTest {
     }
 
     @Test
+    fun `only live peer chat revives an unmuted archive`() = runTest {
+        val room = db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "#archive", displayName = "#archive", type = BufferType.CHANNEL, archived = true),
+        )
+
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "live-peer"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#archive", text = "live", isSelf = false, replyToMsgid = null,
+        ))
+
+        assertFalse(db.bufferDao().observeById(room)!!.archived)
+    }
+
+    @Test
+    fun `history self and muted live chat retain archive`() = runTest {
+        val room = db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "#archive", displayName = "#archive", type = BufferType.CHANNEL, archived = true),
+        )
+        suspend fun archived() = db.bufferDao().observeById(room)!!.archived
+
+        processor.process(networkId, IrcEvent.HistoryBatch("#archive", listOf(
+            IrcEvent.ChatMessage(
+                ctx = ctx(msgid = "history").copy(batchId = "history"), kind = IrcEvent.ChatKind.PRIVMSG,
+                source = Prefix("alice"), target = "#archive", text = "old", isSelf = false, replyToMsgid = null,
+            ),
+        )))
+        assertTrue(archived())
+
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "self"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "#archive", text = "mine", isSelf = true, replyToMsgid = null,
+        ))
+        assertTrue(archived())
+
+        db.bufferDao().setMuted(room, true)
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "muted-live"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#archive", text = "still hidden", isSelf = false, replyToMsgid = null,
+        ))
+        assertTrue(archived())
+    }
+
+    @Test
     fun advertisedCustomChantypesAreAuthoritativeForRoomRouting() = runTest {
         processor.onRegistered(
             networkId,

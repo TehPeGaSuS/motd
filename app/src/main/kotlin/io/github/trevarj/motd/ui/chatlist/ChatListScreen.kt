@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsOff
@@ -65,6 +67,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -120,6 +123,7 @@ fun ChatListScreen(
         onOpenSearch = onOpenSearch,
         onSetPinned = viewModel::setPinned,
         onSetMuted = viewModel::setMuted,
+        onSetArchived = viewModel::setArchived,
         onDeleteBuffer = viewModel::deleteBuffer,
         onJoinChannel = viewModel::joinChannel,
         onMessageUser = { networkId, nick -> viewModel.messageUser(networkId, nick, onOpenBuffer) },
@@ -146,6 +150,7 @@ fun ChatListContent(
     onOpenSearch: () -> Unit,
     onSetPinned: (Long, Boolean) -> Unit,
     onSetMuted: (Long, Boolean) -> Unit,
+    onSetArchived: (Long, Boolean) -> Unit = { _, _ -> },
     onJoinChannel: (Long, String) -> Unit,
     onMessageUser: (Long, String) -> Unit,
     onDeleteBuffer: (ChatListRow) -> Unit = {},
@@ -161,6 +166,7 @@ fun ChatListContent(
     onOpenChannelList: (Long) -> Unit = {},
     onMarkAllRead: () -> Unit = {},
 ) {
+    var archiveMode by rememberSaveable { mutableStateOf(false) }
     var showSheet by remember { mutableStateOf(false) }
     var showMarkAllReadDialog by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
@@ -171,6 +177,7 @@ fun ChatListContent(
 
     // Close the drawer with Back when it's open (before popping the back stack).
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+    BackHandler(enabled = archiveMode) { archiveMode = false }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -218,7 +225,9 @@ fun ChatListContent(
                 TopAppBar(
                     title = {
                         val scopedName = state.selectedNetworkName
-                        if (scopedName != null) {
+                        if (archiveMode) {
+                            Text(text = stringResource(R.string.chatlist_archived_chats), fontWeight = FontWeight.Bold)
+                        } else if (scopedName != null) {
                             // Scoped: show the network name so the active filter is legible.
                             Text(text = scopedName, fontWeight = FontWeight.Bold)
                         } else {
@@ -235,10 +244,12 @@ fun ChatListContent(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                        IconButton(onClick = { if (archiveMode) archiveMode = false else scope.launch { drawerState.open() } }) {
                             Icon(
-                                Icons.Filled.Menu,
-                                contentDescription = stringResource(R.string.drawer_open),
+                                if (archiveMode) Icons.AutoMirrored.Filled.ArrowBack else Icons.Filled.Menu,
+                                contentDescription = stringResource(
+                                    if (archiveMode) R.string.action_back else R.string.drawer_open,
+                                ),
                             )
                         }
                     },
@@ -281,7 +292,10 @@ fun ChatListContent(
                     )
                 }
 
-                if (state.rows.isEmpty() && !state.loading && state.networks.isNotEmpty()) {
+                val visibleRows = if (archiveMode) state.archivedRows else state.rows
+                if (!shouldRenderChatList(archiveMode, state.rows, state.archivedRows) &&
+                    !state.loading && state.networks.isNotEmpty()
+                ) {
                     EmptyState(
                         icon = Icons.Outlined.Forum,
                         title = stringResource(
@@ -301,7 +315,10 @@ fun ChatListContent(
                     )
                 } else {
                     ChatList(
-                        rows = state.rows,
+                        rows = visibleRows,
+                        archivedRows = state.archivedRows,
+                        archiveMode = archiveMode,
+                        onOpenArchive = { archiveMode = true },
                         presence = state.queryPresence,
                         friends = state.friends,
                         fools = state.fools,
@@ -309,6 +326,7 @@ fun ChatListContent(
                         onOpenBuffer = onOpenBuffer,
                         onSetPinned = onSetPinned,
                         onSetMuted = onSetMuted,
+                        onSetArchived = onSetArchived,
                         onDeleteBuffer = onDeleteBuffer,
                     )
                 }
@@ -407,6 +425,9 @@ internal object ChatListItemMotion {
 @Composable
 private fun ChatList(
     rows: List<ChatListRow>,
+    archivedRows: List<ChatListRow>,
+    archiveMode: Boolean,
+    onOpenArchive: () -> Unit,
     presence: Map<Long, io.github.trevarj.motd.service.PresenceState>,
     friends: Set<String>,
     fools: Set<String>,
@@ -414,6 +435,7 @@ private fun ChatList(
     onOpenBuffer: (Long) -> Unit,
     onSetPinned: (Long, Boolean) -> Unit,
     onSetMuted: (Long, Boolean) -> Unit,
+    onSetArchived: (Long, Boolean) -> Unit,
     onDeleteBuffer: (ChatListRow) -> Unit,
 ) {
     // Pinning has global priority, then unpinned friends, recent chats, and collapsed fools.
@@ -424,12 +446,39 @@ private fun ChatList(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
+    // The folder is a real preceding item, not synthetic overscroll. On first active rendering,
+    // anchor the first chat below it so pulling down reveals the folder naturally.
+    LaunchedEffect(archiveMode, archivedRows.isNotEmpty(), rows.isNotEmpty()) {
+        if (!archiveMode && archivedRows.isNotEmpty() && rows.isNotEmpty()) {
+            listState.scrollToItem(1)
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 88.dp),
         ) {
+            if (!archiveMode && archivedRows.isNotEmpty()) {
+                item(key = "archived-chats-folder") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onOpenArchive)
+                            .testTag("chatlist_archived_folder")
+                            .padding(horizontal = 20.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.Archive, contentDescription = null)
+                        Text(
+                            text = stringResource(R.string.chatlist_archived_chats_count, archivedRows.size),
+                            modifier = Modifier.padding(start = 16.dp),
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            }
             items(sections.pinned, key = { it.bufferId }) { row ->
                 RowWithMenu(
                     row,
@@ -439,6 +488,8 @@ private fun ChatList(
                     onOpenBuffer,
                     onSetPinned,
                     onSetMuted,
+                    onSetArchived,
+                    archiveMode,
                     onDeleteBuffer,
                     modifier = Modifier.animateItem(
                         fadeInSpec = ChatListItemMotion.fadeInSpec,
@@ -460,6 +511,8 @@ private fun ChatList(
                         onOpenBuffer,
                         onSetPinned,
                         onSetMuted,
+                        onSetArchived,
+                        archiveMode,
                         onDeleteBuffer,
                         modifier = Modifier.animateItem(
                             fadeInSpec = ChatListItemMotion.fadeInSpec,
@@ -483,6 +536,8 @@ private fun ChatList(
                     onOpenBuffer,
                     onSetPinned,
                     onSetMuted,
+                    onSetArchived,
+                    archiveMode,
                     onDeleteBuffer,
                     modifier = Modifier.animateItem(
                         fadeInSpec = ChatListItemMotion.fadeInSpec,
@@ -510,7 +565,7 @@ private fun ChatList(
                                     placementSpec = ChatListItemMotion.placementSpec,
                                 ),
                         ) {
-                            RowWithMenu(row, presence[row.bufferId], isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
+                            RowWithMenu(row, presence[row.bufferId], isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onSetArchived, archiveMode, onDeleteBuffer)
                         }
                     }
                 }
@@ -616,6 +671,8 @@ private fun RowWithMenu(
     onOpenBuffer: (Long) -> Unit,
     onSetPinned: (Long, Boolean) -> Unit,
     onSetMuted: (Long, Boolean) -> Unit,
+    onSetArchived: (Long, Boolean) -> Unit,
+    archiveMode: Boolean,
     onDeleteBuffer: (ChatListRow) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -669,6 +726,16 @@ private fun RowWithMenu(
                     },
                     onClick = {
                         onSetPinned(row.bufferId, !row.pinned)
+                        menuOpen = false
+                    },
+                )
+                DropdownMenuItem(
+                    text = {
+                        Text(stringResource(if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive))
+                    },
+                    leadingIcon = { Icon(Icons.Outlined.Archive, contentDescription = null) },
+                    onClick = {
+                        onSetArchived(row.bufferId, !archiveMode)
                         menuOpen = false
                     },
                 )

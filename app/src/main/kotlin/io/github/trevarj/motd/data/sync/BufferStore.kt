@@ -259,6 +259,9 @@ class BufferStore @Inject constructor(
                 membershipCycle = maxOf(winner.membershipCycle, loser.membershipCycle),
                 pinned = winner.pinned || loser.pinned,
                 muted = winner.muted || loser.muted,
+                // The canonical winner owns the current archive decision; an older redirect must
+                // never unexpectedly hide a conversation the user has already revived.
+                archived = winner.archived,
                 readMarkerTime = readStateRooms.mapNotNull { it.readMarkerTime }.maxOrNull(),
                 localReadAnchorTime = localReadAnchor?.serverTime,
                 localReadAnchorEventId = localReadAnchor?.eventId,

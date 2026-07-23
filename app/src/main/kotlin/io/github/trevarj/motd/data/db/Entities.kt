@@ -123,6 +123,8 @@ data class RoomEntity(
     /** Incremented only by explicit self PART/KICK, so reconnect JOIN replay stays in one cycle. */
     val membershipCycle: Long = 0,
     val pinned: Boolean = false, val muted: Boolean = false,
+    /** Hidden from the active chat list without altering membership, history, or read state. */
+    val archived: Boolean = false,
     val ordering: Int = 0,
     val readMarkerTime: Long? = null,    // last known remote draft/read-marker timestamp
     val localReadAnchorTime: Long? = null,

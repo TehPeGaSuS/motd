@@ -123,6 +123,7 @@ interface BufferDao {
             b.type AS type,
             b.pinned AS pinned,
             b.muted AS muted,
+            b.archived AS archived,
             lm.text AS lastMessageText,
             lm.sender AS lastMessageSender,
             lm.serverTime AS lastMessageTime,
@@ -265,6 +266,18 @@ interface BufferDao {
 
     @Query("UPDATE buffers SET muted = :muted WHERE id = :id")
     suspend fun writeMuted(id: Long, muted: Boolean)
+
+    /** Archive through a stale redirect shell to the current canonical conversation. */
+    @Query(
+        """UPDATE buffers SET archived = :archived
+           WHERE id = (SELECT COALESCE(redirectToRoomId, id) FROM buffers WHERE id = :requestedId)
+             AND type IN ('CHANNEL', 'QUERY')""",
+    )
+    suspend fun setArchived(requestedId: RoomId, archived: Boolean): Int
+
+    /** A peer's live chat revives an unmuted conversation only. */
+    @Query("UPDATE buffers SET archived = 0 WHERE id = :id AND muted = 0")
+    suspend fun unarchiveIfUnmuted(id: RoomId): Int
 
     /** Write via a stale redirect shell to its current canonical conversation. */
     @Query(
@@ -482,6 +495,7 @@ data class ChatListRow(
     val unreadCount: Int, val mentionCount: Int,
     val caseMapping: String? = null,
     val chanTypes: String? = null,
+    val archived: Boolean = false,
 )
 
 data class BufferTargetRow(val id: Long, val name: String)

@@ -4,7 +4,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -24,6 +26,24 @@ class BufferDaoTest {
     @After
     fun tearDown() {
         db.close()
+    }
+
+    @Test
+    fun `chat list projects archive state and canonical archive writes follow redirects`() = runTest {
+        val winner = db.bufferDao().insert(buffer(networkId, "alice", type = BufferType.QUERY))
+        val loser = db.bufferDao().insert(buffer(networkId, "alice-old", type = BufferType.QUERY))
+        db.bufferDao().update(db.bufferDao().rawById(loser)!!.copy(redirectToRoomId = winner))
+
+        assertEquals(1, db.bufferDao().setArchived(loser, true))
+        val row = db.bufferDao().observeChatList().first().single { it.bufferId == winner }
+        assertTrue(row.archived)
+
+        db.bufferDao().setMuted(winner, true)
+        assertEquals(0, db.bufferDao().unarchiveIfUnmuted(winner))
+        assertTrue(db.bufferDao().observeById(winner)!!.archived)
+        db.bufferDao().setMuted(winner, false)
+        assertEquals(1, db.bufferDao().unarchiveIfUnmuted(winner))
+        assertFalse(db.bufferDao().observeById(winner)!!.archived)
     }
 
     @Test

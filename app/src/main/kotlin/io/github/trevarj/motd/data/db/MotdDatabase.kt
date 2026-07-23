@@ -30,7 +30,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -534,6 +534,13 @@ val MIGRATION_13_14 = object : Migration(13, 14) {
 val MIGRATION_14_15 = object : Migration(14, 15) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE buffers ADD COLUMN layoutDensityOverride TEXT")
+    }
+}
+
+/** v15 -> v16: archive is a non-destructive local chat-list visibility flag. */
+val MIGRATION_15_16 = object : Migration(15, 16) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE buffers ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
     }
 }
 

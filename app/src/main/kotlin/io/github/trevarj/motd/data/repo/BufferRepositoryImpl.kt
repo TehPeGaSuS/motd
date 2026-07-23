@@ -45,6 +45,10 @@ class BufferRepositoryImpl @Inject constructor(
         bufferDao.setMuted(bufferDao.canonicalId(id) ?: id, muted)
     }
 
+    override suspend fun setArchived(id: Long, archived: Boolean) {
+        bufferDao.setArchived(id, archived)
+    }
+
     override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean =
         bufferDao.setLayoutDensityOverride(id, layout) == 1
 

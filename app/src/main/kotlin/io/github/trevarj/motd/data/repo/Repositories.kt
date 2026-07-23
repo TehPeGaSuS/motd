@@ -33,6 +33,8 @@ interface BufferRepository {
     fun observeMembers(bufferId: Long): Flow<List<MemberEntity>>
     suspend fun setPinned(id: Long, pinned: Boolean)
     suspend fun setMuted(id: Long, muted: Boolean)
+    /** Hide or restore a durable CHANNEL/QUERY without altering its IRC membership or history. */
+    suspend fun setArchived(id: Long, archived: Boolean) = Unit
     /** Persists a nullable per-conversation override; false means the requested room disappeared. */
     suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean
     /** Remove local content. QUERY identity/cursor state remains as a hidden reconnect tombstone;

@@ -755,6 +755,10 @@
     <string name="chatlist_unpin">Unpin</string>
     <string name="chatlist_mute">Mute</string>
     <string name="chatlist_unmute">Unmute</string>
+    <string name="chatlist_archive">Archive</string>
+    <string name="chatlist_unarchive">Unarchive</string>
+    <string name="chatlist_archived_chats">Archived Chats</string>
+    <string name="chatlist_archived_chats_count">Archived Chats (%1$d)</string>
 
     <!-- Terminal color schemes (theme picker) -->
     <string name="settings_theme_gruvbox_dark">Gruvbox Dark</string>

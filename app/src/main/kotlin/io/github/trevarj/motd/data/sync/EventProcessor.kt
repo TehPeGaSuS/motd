@@ -400,7 +400,7 @@ class EventProcessor @Inject constructor(
             val multiplicity = activeHistoryMultiplicities[networkId]?.get(batchKey)
             val result = db.withTransaction {
                 if (isDm) bufferDao.reviveQuery(bufferId)
-                canonicalTimeline.ingest(
+                val ingested = canonicalTimeline.ingest(
                     TimelineObservation(
                         networkId = networkId,
                         event = row,
@@ -416,6 +416,12 @@ class EventProcessor @Inject constructor(
                         selfAttributionAuthoritative = route.selfAttributionAuthoritative,
                     ),
                 )
+                // Only a new peer chat received live from the server revives an archive. History,
+                // push, self echoes, and system activity deliberately retain the user's choice.
+                if (origin == EventOrigin.LIVE && !sourceIsSelf && type != BufferType.SERVER) {
+                    bufferDao.unarchiveIfUnmuted(ingested.event.bufferId)
+                }
+                ingested
             }
             val canonical = result.event
             traceMessageWrite(

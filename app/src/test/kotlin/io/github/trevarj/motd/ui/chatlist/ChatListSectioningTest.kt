@@ -27,6 +27,28 @@ class ChatListSectioningTest {
     )
 
     @Test
+    fun `archived rows are excluded before active sectioning`() {
+        val active = row(id = 1, name = "#active", type = BufferType.CHANNEL)
+        val archived = row(id = 2, name = "alice", type = BufferType.QUERY).copy(archived = true)
+
+        val (activeRows, archivedRows) = partitionArchivedRows(listOf(active, archived))
+
+        assertEquals(listOf(active), activeRows)
+        assertEquals(listOf(archived), archivedRows)
+        assertEquals(listOf(active), sectionChatList(activeRows, emptySet(), emptySet()).regular)
+    }
+
+    @Test
+    fun `archive folder remains reachable when active scope is empty`() {
+        val archived = row(id = 2, name = "alice").copy(archived = true)
+
+        assertTrue(shouldRenderChatList(archiveMode = false, activeRows = emptyList(), archivedRows = listOf(archived)))
+        assertFalse(shouldRenderChatList(archiveMode = false, activeRows = emptyList(), archivedRows = emptyList()))
+        assertTrue(shouldRenderChatList(archiveMode = true, activeRows = emptyList(), archivedRows = listOf(archived)))
+        assertFalse(shouldRenderChatList(archiveMode = true, activeRows = emptyList(), archivedRows = emptyList()))
+    }
+
+    @Test
     fun `classifies queries into friends and fools, regular otherwise`() {
         val rows = listOf(
             row(1, "alice"),

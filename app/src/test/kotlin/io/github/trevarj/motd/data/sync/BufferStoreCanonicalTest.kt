@@ -58,6 +58,19 @@ class BufferStoreCanonicalTest {
     fun tearDown() = db.close()
 
     @Test
+    fun `room merge retains the canonical winners archive choice`() = runTest {
+        val winner = store.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
+        val loser = store.getOrCreate(networkId, "bob", "Bob", BufferType.QUERY)
+        db.bufferDao().setArchived(winner.id, false)
+        db.bufferDao().setArchived(loser.id, true)
+
+        val merged = store.mergeRooms(winner.id, loser.id)
+
+        assertFalse(merged.archived)
+        assertFalse(db.bufferDao().observeById(winner.id)!!.archived)
+    }
+
+    @Test
     fun differentAccountsReusingNickRemainSeparate() = runTest {
         val provisional = store.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
         val first = store.bindQueryIdentity(provisional.id, networkId, "alice", "Alice", "acct-a")
