@@ -1,10 +1,13 @@
 package io.github.trevarj.motd
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -12,6 +15,8 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
 import io.github.trevarj.motd.ui.chatlist.ChatListState
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
@@ -56,9 +61,50 @@ class ChatListSelectionUiTest {
         assertEquals(0, compose.onAllNodesWithTag("chatlist_selection_top_app_bar").fetchSemanticsNodes().size)
     }
 
+    @Test fun empty_archive_uses_archive_specific_copy_without_connection_prompt() {
+        val state = mutableStateOf(
+            ChatListState(
+                archivedRows = listOf(row().copy(archived = true)),
+                networks = listOf(network()),
+                loading = false,
+            ),
+        )
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatListContent(
+                    state = state.value,
+                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
+                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
+                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                )
+            }
+        }
+
+        compose.onNodeWithText("Archived Chats (1)").performClick()
+        compose.runOnIdle { state.value = state.value.copy(archivedRows = emptyList()) }
+
+        compose.onNodeWithText("No archived chats yet").assertIsDisplayed()
+        assertEquals(
+            0,
+            compose.onAllNodesWithText("Connect to a network to start chatting.")
+                .fetchSemanticsNodes().size,
+        )
+    }
+
     private fun row() = ChatListRow(
         bufferId = 1, networkId = 1, networkName = "network", displayName = "alice",
         type = BufferType.QUERY, pinned = false, muted = false, lastMessageText = "hello",
         lastMessageSender = "alice", lastMessageTime = 1, unreadCount = 0, mentionCount = 0,
+    )
+
+    private fun network() = NetworkEntity(
+        id = 1,
+        name = "network",
+        role = NetworkRole.DIRECT,
+        host = "irc.example.test",
+        port = 6697,
+        nick = "me",
+        username = "me",
+        realname = "Me",
     )
 }

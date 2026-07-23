@@ -14,6 +14,7 @@
     <string name="chatlist_pinned">Pinned</string>
     <string name="chatlist_empty_title">No conversations yet</string>
     <string name="chatlist_empty_message">Connect to a network to start chatting.</string>
+    <string name="chatlist_archived_empty_title">No archived chats yet</string>
     <string name="chat_refresh_history">Refresh history</string>
     <plurals name="chat_history_updated">
         <item quantity="one">History updated · %1$d new message</item>

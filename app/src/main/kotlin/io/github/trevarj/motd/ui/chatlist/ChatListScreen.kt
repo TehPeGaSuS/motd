@@ -370,24 +370,30 @@ fun ChatListContent(
                 }
 
                 if (!shouldRenderChatList(archiveMode, state.rows, state.archivedRows) &&
-                    !state.loading && state.networks.isNotEmpty()
+                    !state.loading && (archiveMode || state.networks.isNotEmpty())
                 ) {
                     EmptyState(
-                        icon = Icons.Outlined.Forum,
+                        icon = if (archiveMode) Icons.Outlined.Archive else Icons.Outlined.Forum,
                         title = stringResource(
-                            if (state.selectedNetworkId != null) {
+                            if (archiveMode) {
+                                R.string.chatlist_archived_empty_title
+                            } else if (state.selectedNetworkId != null) {
                                 R.string.chatlist_scoped_empty_title
                             } else {
                                 R.string.chatlist_empty_title
                             },
                         ),
-                        message = stringResource(
-                            if (state.selectedNetworkId != null) {
-                                R.string.chatlist_scoped_empty_message
-                            } else {
-                                R.string.chatlist_empty_message
-                            },
-                        ),
+                        message = if (archiveMode) {
+                            null
+                        } else {
+                            stringResource(
+                                if (state.selectedNetworkId != null) {
+                                    R.string.chatlist_scoped_empty_message
+                                } else {
+                                    R.string.chatlist_empty_message
+                                },
+                            )
+                        },
                     )
                 } else {
                     ChatList(

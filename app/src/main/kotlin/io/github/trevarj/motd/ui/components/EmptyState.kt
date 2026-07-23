@@ -25,7 +25,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 fun EmptyState(
     icon: ImageVector,
     title: String,
-    message: String,
+    message: String?,
     modifier: Modifier = Modifier,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
@@ -50,13 +50,15 @@ fun EmptyState(
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 16.dp),
         )
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 8.dp),
-        )
+        message?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
         if (actionLabel != null && onAction != null) {
             Button(
                 onClick = onAction,
