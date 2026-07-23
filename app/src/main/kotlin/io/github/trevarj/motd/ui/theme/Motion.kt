@@ -25,6 +25,7 @@ object MotdMotion {
     private const val MaterialDefaultSpatialDampingRatio = 0.9f
     private const val MaterialDefaultSpatialStiffness = 700f
     private const val ChatBackSpatialDampingRatio = 0.8f
+    private const val ChatBackSpatialStiffness = 112.5f
 
     val fadeIn: FiniteAnimationSpec<Float> = tween(
         durationMillis = StandardDurationMs,
@@ -54,12 +55,13 @@ object MotdMotion {
     )
 
     /**
-     * A lightly underdamped spatial spring for returning from chat to the chat list. The very-low
-     * stiffness token gives approximately twice the characteristic time of [Spring.StiffnessLow].
+     * A lightly underdamped spatial spring for returning from chat to the chat list. At this
+     * damping ratio, its stiffness gives a 1.5x characteristic-speed increase over the prior
+     * very-low token, with roughly 4/3 the characteristic time of [Spring.StiffnessLow].
      */
     val chatBackSpatial: FiniteAnimationSpec<IntOffset> = spring(
         dampingRatio = ChatBackSpatialDampingRatio,
-        stiffness = Spring.StiffnessVeryLow,
+        stiffness = ChatBackSpatialStiffness,
     )
 
     /** A calm spring: responsive and soft, without a playful bounce. */

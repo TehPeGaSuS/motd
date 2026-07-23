@@ -15,20 +15,19 @@ import kotlin.math.sqrt
 
 class MotionTest {
     @Test
-    fun `chat back spring is very low stiffness and springier than drawer entry`() {
+    fun `chat back spring is one and a half times faster and springier than drawer entry`() {
         val chatBack = MotdMotion.chatBackSpatial as SpringSpec<*>
         val drawerEntry = MotdMotion.navigationDrawerSpatial as SpringSpec<*>
 
         assertEquals(0.8f, chatBack.dampingRatio, 0f)
-        assertEquals(Spring.StiffnessVeryLow, chatBack.stiffness, 0f)
-        assertEquals(50f, chatBack.stiffness, 0f)
-        assertEquals(2f, sqrt(Spring.StiffnessLow / chatBack.stiffness), 0f)
+        assertEquals(112.5f, chatBack.stiffness, 0f)
+        assertEquals(4f / 3f, sqrt(Spring.StiffnessLow / chatBack.stiffness), 0f)
         assertTrue(chatBack.dampingRatio < drawerEntry.dampingRatio)
         assertTrue(chatBack.stiffness < drawerEntry.stiffness)
     }
 
     @Test
-    fun `chat back spring takes approximately twice as long as low stiffness`() {
+    fun `chat back spring takes approximately four thirds as long as low stiffness`() {
         val start = IntOffset(1080, 0)
         val target = IntOffset.Zero
         val zeroVelocity = AnimationVector2D(0f, 0f)
@@ -52,7 +51,7 @@ class MotionTest {
         )
 
         val durationRatio = chatBack.durationNanos.toDouble() / baseline.durationNanos
-        assertTrue(durationRatio in 1.95..2.05)
+        assertTrue(durationRatio in 1.28..1.38)
     }
 
     @Test
