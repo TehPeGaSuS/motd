@@ -38,3 +38,27 @@ fun networkPreset(id: NetworkPresetId): NetworkPreset? = COMMON_NETWORK_PRESETS.
 /** Apply only endpoint defaults, preserve IRC identity, and drop credentials from the old server. */
 fun applyNetworkPreset(preset: NetworkPreset, server: ServerForm): Pair<ServerForm, AuthForm> =
     server.copy(host = preset.host, port = preset.port.toString(), tls = preset.tls) to AuthForm()
+
+/** Create-only Soju BouncerServ choices: Custom followed by the shared catalog order. */
+data class SojuNetworkPresetChoice(
+    val preset: NetworkPreset?,
+) {
+    val displayName: String get() = preset?.displayName ?: "Custom"
+    val address: String? get() = preset?.let(::sojuPresetAddress)
+}
+
+val SOJU_NETWORK_PRESET_CHOICES: List<SojuNetworkPresetChoice> =
+    listOf(SojuNetworkPresetChoice(null)) + COMMON_NETWORK_PRESETS.map(::SojuNetworkPresetChoice)
+
+/** Soju accepts explicit URI schemes; plaintext presets must never silently become TLS. */
+fun sojuPresetAddress(preset: NetworkPreset): String =
+    "${if (preset.tls) "ircs" else "irc+insecure"}://${preset.host}:${preset.port}"
+
+/** Apply only a selected preset endpoint and a blank name default; every other form field survives. */
+fun applySojuNetworkPreset(
+    choice: SojuNetworkPresetChoice,
+    address: String,
+    name: String,
+): Pair<String, String> = choice.preset?.let { preset ->
+    sojuPresetAddress(preset) to name.ifBlank { preset.displayName }
+} ?: (address to name)

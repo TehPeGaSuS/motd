@@ -5,12 +5,43 @@ import io.github.trevarj.motd.ui.onboarding.AuthMode
 import io.github.trevarj.motd.ui.onboarding.ServerForm
 import io.github.trevarj.motd.ui.settings.addnetwork.COMMON_NETWORK_PRESETS
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
+import io.github.trevarj.motd.ui.settings.addnetwork.SOJU_NETWORK_PRESET_CHOICES
 import io.github.trevarj.motd.ui.settings.addnetwork.applyNetworkPreset
+import io.github.trevarj.motd.ui.settings.addnetwork.applySojuNetworkPreset
+import io.github.trevarj.motd.ui.settings.addnetwork.sojuPresetAddress
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class NetworkPresetsTest {
+    @Test
+    fun soju_choices_are_custom_then_the_shared_catalog_with_explicit_schemes() {
+        assertEquals("Custom", SOJU_NETWORK_PRESET_CHOICES.first().displayName)
+        assertEquals(COMMON_NETWORK_PRESETS.map { it.id }, SOJU_NETWORK_PRESET_CHOICES.drop(1).map { it.preset?.id })
+        assertEquals("ircs://irc.libera.chat:6697", sojuPresetAddress(COMMON_NETWORK_PRESETS.first()))
+        assertEquals(
+            "irc+insecure://irc.quakenet.org:6667",
+            sojuPresetAddress(COMMON_NETWORK_PRESETS.first { it.id == NetworkPresetId.QUAKENET }),
+        )
+    }
+
+    @Test
+    fun soju_preset_populates_endpoint_and_only_blank_name() {
+        val libera = SOJU_NETWORK_PRESET_CHOICES.first { it.preset?.id == NetworkPresetId.LIBERA }
+        assertEquals(
+            "ircs://irc.libera.chat:6697" to "Libera.Chat",
+            applySojuNetworkPreset(libera, "old", ""),
+        )
+        assertEquals(
+            "ircs://irc.libera.chat:6697" to "My Libera",
+            applySojuNetworkPreset(libera, "old", "My Libera"),
+        )
+        assertEquals(
+            "irc+insecure://custom:6667" to "Custom name",
+            applySojuNetworkPreset(SOJU_NETWORK_PRESET_CHOICES.first(), "irc+insecure://custom:6667", "Custom name"),
+        )
+    }
+
     @Test
     fun catalog_values_and_order_are_exact() {
         assertEquals(

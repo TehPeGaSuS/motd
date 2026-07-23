@@ -11,7 +11,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -25,19 +25,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.bouncer.NetworkCommandFields
 import io.github.trevarj.motd.bouncer.UserCommandFields
+import io.github.trevarj.motd.ui.settings.addnetwork.SOJU_NETWORK_PRESET_CHOICES
+import io.github.trevarj.motd.ui.settings.addnetwork.applySojuNetworkPreset
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun NetworkEditorDialog(
     existingName: String?,
     onDismiss: () -> Unit,
     onSubmit: (NetworkCommandFields) -> Unit,
 ) {
+    var preset by remember { mutableStateOf(SOJU_NETWORK_PRESET_CHOICES.first()) }
+    var presetsExpanded by remember { mutableStateOf(false) }
     var address by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var nick by remember { mutableStateOf("") }
@@ -67,6 +73,42 @@ fun NetworkEditorDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (creating) {
+                    ExposedDropdownMenuBox(
+                        expanded = presetsExpanded,
+                        onExpandedChange = { presetsExpanded = it },
+                        modifier = Modifier.testTag("bouncer_network_preset"),
+                    ) {
+                        OutlinedTextField(
+                            value = preset.displayName,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text(stringResource(R.string.bouncer_network_preset)) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = presetsExpanded) },
+                            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                        )
+                        ExposedDropdownMenu(
+                            expanded = presetsExpanded,
+                            onDismissRequest = { presetsExpanded = false },
+                        ) {
+                            SOJU_NETWORK_PRESET_CHOICES.forEach { choice ->
+                                DropdownMenuItem(
+                                    text = { Text(choice.displayName) },
+                                    onClick = {
+                                        preset = choice
+                                        val populated = applySojuNetworkPreset(choice, address, name)
+                                        address = populated.first
+                                        name = populated.second
+                                        presetsExpanded = false
+                                    },
+                                    modifier = Modifier.testTag(
+                                        "bouncer_network_preset_${choice.preset?.id?.name?.lowercase() ?: "custom"}",
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
                 FormField(address, { address = it }, R.string.bouncer_field_address)
                 FormField(name, { name = it }, R.string.bouncer_field_name)
                 FormField(nick, { nick = it }, R.string.bouncer_field_nick)
@@ -394,7 +436,7 @@ fun TriStateField(label: String, value: Boolean?, onValueChange: (Boolean?) -> U
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             modifier = Modifier
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                 .fillMaxWidth(),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
