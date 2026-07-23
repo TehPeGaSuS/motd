@@ -75,6 +75,41 @@ enum class ChannelJoinStatus { JOIN, JOINING, JOINED }
 fun normalizeChannelNames(channels: Collection<String>, identityRules: IrcIdentityRules): Set<String> =
     channels.map(identityRules::normalize).toSet()
 
+/** Drops pending spellings confirmed joined by Room, or all pending names after Ready is lost. */
+fun reconcilePendingChannelNames(
+    pendingChannelNames: Set<String>,
+    joinedChannels: Set<String>,
+    identityRules: IrcIdentityRules,
+    isReady: Boolean,
+): Set<String> = if (isReady) {
+    pendingChannelNames.filterTo(linkedSetOf()) { identityRules.normalize(it) !in joinedChannels }
+} else {
+    emptySet()
+}
+
+/** Removes every raw spelling equivalent to the target under the current server CASEMAPPING. */
+fun removePendingChannelName(
+    pendingChannelNames: Set<String>,
+    channel: String,
+    identityRules: IrcIdentityRules,
+): Set<String> {
+    val normalized = identityRules.normalize(channel)
+    return pendingChannelNames.filterTo(linkedSetOf()) { identityRules.normalize(it) != normalized }
+}
+
+/** A rejection matters only for an outstanding join on the currently Ready connection. */
+fun pendingChannelNamesAfterJoinRejection(
+    pendingChannelNames: Set<String>,
+    channel: String,
+    identityRules: IrcIdentityRules,
+    isReady: Boolean,
+): Set<String>? {
+    if (!isReady || pendingChannelNames.none { identityRules.normalize(it) == identityRules.normalize(channel) }) {
+        return null
+    }
+    return removePendingChannelName(pendingChannelNames, channel, identityRules)
+}
+
 /** Pending JOIN is optimistic only; Room self-JOIN remains the sole joined confirmation. */
 fun channelJoinStatus(
     channel: String,
@@ -89,7 +124,11 @@ fun channelJoinStatus(
 
 /** Confirmation and connection loss are the only paths that clear optimistic pending names. */
 fun reconcilePendingChannels(
-    pendingChannels: Set<String>,
+    pendingChannelNames: Set<String>,
     joinedChannels: Set<String>,
+    identityRules: IrcIdentityRules,
     isReady: Boolean,
-): Set<String> = if (isReady) pendingChannels - joinedChannels else emptySet()
+): Set<String> = normalizeChannelNames(
+    reconcilePendingChannelNames(pendingChannelNames, joinedChannels, identityRules, isReady),
+    identityRules,
+)

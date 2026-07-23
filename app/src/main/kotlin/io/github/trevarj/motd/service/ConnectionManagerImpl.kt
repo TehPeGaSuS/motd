@@ -71,8 +71,11 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -396,6 +399,9 @@ class ConnectionManagerImpl @Inject constructor(
     private val userIntents = java.util.concurrent.ConcurrentHashMap<Long, Boolean>()
 
     override val connectionStates: StateFlow<Map<Long, IrcClientState>> = registry.connectionStates
+
+    private val _channelJoinOutcomes = MutableSharedFlow<ChannelJoinOutcome>(extraBufferCapacity = 16)
+    override val channelJoinOutcomes: SharedFlow<ChannelJoinOutcome> = _channelJoinOutcomes.asSharedFlow()
 
     private val _rosterStates = MutableStateFlow<Map<Long, RosterLoadState>>(emptyMap())
     override val rosterStates: StateFlow<Map<Long, RosterLoadState>> = _rosterStates.asStateFlow()
@@ -773,6 +779,8 @@ class ConnectionManagerImpl @Inject constructor(
     private suspend fun handleConnectionEvent(networkId: Long, event: IrcEvent) {
         avatarCoordinator.onEvent(networkId, event)
         eventProcessor.process(networkId, event)
+        channelJoinOutcome(networkId, event, clientFor(networkId)?.isupport?.identityRules ?: IrcIdentityRules())
+            ?.let { _channelJoinOutcomes.emit(it) }
         when (event) {
             is IrcEvent.Joined -> if (event.isSelf) {
                 bufferForChannel(networkId, event.channel)?.let { buffer ->

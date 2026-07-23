@@ -40,7 +40,9 @@ data class ChannelListUiState(
     val isRoot: Boolean = false,
     val error: String? = null,
     val identityRules: IrcIdentityRules = IrcIdentityRules(),
-    /** Normalized names sent in this Ready session, awaiting authoritative Room self-JOIN. */
+    /** Raw names sent in this Ready session, awaiting authoritative Room self-JOIN. */
+    val pendingChannelNames: Set<String> = emptySet(),
+    /** [pendingChannelNames] normalized with [identityRules] for duplicate and UI matching. */
     val pendingChannels: Set<String> = emptySet(),
     /** Durable joined CHANNEL names before applying the active server CASEMAPPING. */
     val persistedJoinedChannels: Set<String> = emptySet(),
@@ -85,15 +87,21 @@ class ChannelListViewModel @Inject constructor(
                 val conn = channelBrowserConnectionState(states[networkId], clientState)
                 val current = _state.value
                 val normalizedJoined = normalizeChannelNames(current.persistedJoinedChannels, rules)
+                val pendingChannelNames = reconcilePendingChannelNames(
+                    current.pendingChannelNames,
+                    normalizedJoined,
+                    rules,
+                    conn is IrcClientState.Ready,
+                )
                 _state.value = current.copy(
                     connState = conn,
                     initialized = true,
                     identityRules = rules,
                     joinedChannels = normalizedJoined,
-                    pendingChannels = reconcilePendingChannels(
-                        current.pendingChannels,
-                        normalizedJoined,
-                        conn is IrcClientState.Ready,
+                    pendingChannelNames = pendingChannelNames,
+                    pendingChannels = normalizeChannelNames(
+                        pendingChannelNames,
+                        rules,
                     ),
                 )
                 // Auto-fetch a bounded set of the busiest channels. ELIST 'U' applies the
@@ -107,14 +115,39 @@ class ChannelListViewModel @Inject constructor(
             bufferRepository.observeJoinedChannelNames(networkId).collect { joined ->
                 val current = _state.value
                 val normalizedJoined = normalizeChannelNames(joined, current.identityRules)
+                val pendingChannelNames = reconcilePendingChannelNames(
+                    current.pendingChannelNames,
+                    normalizedJoined,
+                    current.identityRules,
+                    current.connState is IrcClientState.Ready,
+                )
                 _state.value = current.copy(
                     persistedJoinedChannels = joined,
                     joinedChannels = normalizedJoined,
-                    pendingChannels = reconcilePendingChannels(
-                        current.pendingChannels,
-                        normalizedJoined,
-                        current.connState is IrcClientState.Ready,
+                    pendingChannelNames = pendingChannelNames,
+                    pendingChannels = normalizeChannelNames(
+                        pendingChannelNames,
+                        current.identityRules,
                     ),
+                )
+            }
+        }
+        viewModelScope.launch {
+            connectionManager.channelJoinOutcomes.collect { outcome ->
+                val rejection = outcome as? io.github.trevarj.motd.service.ChannelJoinOutcome.Rejected
+                    ?: return@collect
+                if (rejection.networkId != networkId) return@collect
+                val current = _state.value
+                val pendingChannelNames = pendingChannelNamesAfterJoinRejection(
+                    current.pendingChannelNames,
+                    rejection.channel,
+                    current.identityRules,
+                    current.connState is IrcClientState.Ready,
+                ) ?: return@collect
+                _state.value = current.copy(
+                    pendingChannelNames = pendingChannelNames,
+                    pendingChannels = normalizeChannelNames(pendingChannelNames, current.identityRules),
+                    joinError = rejection.reason,
                 )
             }
         }
@@ -163,16 +196,36 @@ class ChannelListViewModel @Inject constructor(
         if (!current.isReady) return
         val normalized = current.identityRules.normalize(channel)
         if (normalized in current.pendingChannels || normalized in current.joinedChannels) return
-        _state.value = current.copy(pendingChannels = current.pendingChannels + normalized, joinError = null)
+        _state.value = current.copy(
+            pendingChannelNames = current.pendingChannelNames + channel,
+            pendingChannels = current.pendingChannels + normalized,
+            joinError = null,
+        )
         viewModelScope.launch {
             try {
                 connectionManager.joinChannel(networkId, channel)
             } catch (cancelled: CancellationException) {
-                _state.value = _state.value.copy(pendingChannels = _state.value.pendingChannels - normalized)
+                val latest = _state.value
+                val pendingChannelNames = removePendingChannelName(
+                    latest.pendingChannelNames,
+                    channel,
+                    latest.identityRules,
+                )
+                _state.value = latest.copy(
+                    pendingChannelNames = pendingChannelNames,
+                    pendingChannels = normalizeChannelNames(pendingChannelNames, latest.identityRules),
+                )
                 throw cancelled
             } catch (error: Exception) {
-                _state.value = _state.value.copy(
-                    pendingChannels = _state.value.pendingChannels - normalized,
+                val latest = _state.value
+                val pendingChannelNames = removePendingChannelName(
+                    latest.pendingChannelNames,
+                    channel,
+                    latest.identityRules,
+                )
+                _state.value = latest.copy(
+                    pendingChannelNames = pendingChannelNames,
+                    pendingChannels = normalizeChannelNames(pendingChannelNames, latest.identityRules),
                     joinError = error.message,
                 )
             }

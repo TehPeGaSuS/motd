@@ -21,8 +21,9 @@ class ChannelListModelsTest {
     }
 
     @Test
-    fun `persisted joined names can be renormalized for updated identity rules`() {
+    fun `persisted joined and pending names can be renormalized for updated identity rules`() {
         val persisted = setOf("#[CHANNEL]")
+        val pending = setOf("#[PENDING]")
 
         assertEquals(
             setOf("#{channel}"),
@@ -32,18 +33,49 @@ class ChannelListModelsTest {
             setOf("#[channel]"),
             normalizeChannelNames(persisted, IrcIdentityRules.from("ascii", null)),
         )
+        assertEquals(
+            setOf("#{pending}"),
+            reconcilePendingChannels(pending, emptySet(), IrcIdentityRules(), isReady = true),
+        )
+        assertEquals(
+            setOf("#[pending]"),
+            reconcilePendingChannels(pending, emptySet(), IrcIdentityRules.from("ascii", null), isReady = true),
+        )
     }
 
     @Test
     fun `pending joins clear only after confirmation or loss of ready state`() {
         assertEquals(
             setOf("#two"),
-            reconcilePendingChannels(setOf("#one", "#two"), setOf("#one"), isReady = true),
+            reconcilePendingChannels(
+                setOf("#one", "#two"),
+                setOf("#one"),
+                IrcIdentityRules(),
+                isReady = true,
+            ),
         )
         assertEquals(
             emptySet<String>(),
-            reconcilePendingChannels(setOf("#one", "#two"), emptySet(), isReady = false),
+            reconcilePendingChannels(
+                setOf("#one", "#two"),
+                emptySet(),
+                IrcIdentityRules(),
+                isReady = false,
+            ),
         )
+    }
+
+    @Test
+    fun `ready join rejection clears only its matching pending channel`() {
+        val rules = IrcIdentityRules()
+        val remaining = pendingChannelNamesAfterJoinRejection(
+            pendingChannelNames = setOf("#one", "#two"),
+            channel = "#ONE",
+            identityRules = rules,
+            isReady = true,
+        )
+
+        assertEquals(setOf("#two"), remaining)
     }
 
     @Test

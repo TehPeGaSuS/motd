@@ -29,14 +29,16 @@ class BufferDaoTest {
     }
 
     @Test
-    fun `joined channel observer emits only visible canonical normalized names`() = runTest {
-        val joined = db.bufferDao().insert(buffer(networkId, "#joined").copy(joined = true))
+    fun `joined channel observer emits only visible raw display names`() = runTest {
+        val joined = db.bufferDao().insert(
+            buffer(networkId, "#{joined}").copy(displayName = "#[JOINED]", joined = true),
+        )
         db.bufferDao().insert(buffer(networkId, "#leaving").copy(joined = true, pendingCloseAt = 1L))
         val redirect = db.bufferDao().insert(buffer(networkId, "#redirect").copy(joined = true))
         db.bufferDao().update(db.bufferDao().rawById(redirect)!!.copy(redirectToRoomId = joined))
         db.bufferDao().insert(buffer(networkId, "#not-joined"))
 
-        assertEquals(setOf("#joined"), db.bufferDao().observeJoinedChannelNames(networkId).first().toSet())
+        assertEquals(setOf("#[JOINED]"), db.bufferDao().observeJoinedChannelNames(networkId).first().toSet())
     }
 
     @Test

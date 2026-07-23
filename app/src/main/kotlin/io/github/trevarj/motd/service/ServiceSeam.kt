@@ -2,11 +2,15 @@ package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.TimelineEventId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 
 enum class DeliveryMode { PERSISTENT_SOCKET, UNIFIED_PUSH }
 enum class SendRejectionReason {
@@ -33,6 +37,42 @@ sealed interface SendAcceptance {
 enum class RosterLoadState { NOT_LOADED, LOADING, LOADED, FAILED }
 enum class PresenceState { UNKNOWN, ONLINE, OFFLINE }
 data class PresenceKey(val networkId: Long, val normalizedNick: String)
+
+/** Ephemeral, target-keyed server rejection for a browser-initiated JOIN. */
+sealed interface ChannelJoinOutcome {
+    data class Rejected(
+        val networkId: Long,
+        val channel: String,
+        val reason: String,
+    ) : ChannelJoinOutcome
+}
+
+private val JOIN_FAILURE_NUMERICS = setOf("403", "405", "471", "473", "474", "475", "476")
+
+/** Extracts only JOIN-specific numeric and IRCv3 FAIL replies; unrelated server errors stay inert. */
+internal fun channelJoinOutcome(
+    networkId: Long,
+    event: IrcEvent,
+    identityRules: IrcIdentityRules,
+): ChannelJoinOutcome.Rejected? {
+    val (params, reason) = when (event) {
+        is IrcEvent.ServerError -> if (event.code in JOIN_FAILURE_NUMERICS) {
+            event.params to event.text.ifBlank { event.code }
+        } else {
+            return null
+        }
+        is IrcEvent.Raw -> {
+            val message = event.message
+            if (!message.command.equals("FAIL", ignoreCase = true) ||
+                message.params.firstOrNull()?.equals("JOIN", ignoreCase = true) != true
+            ) return null
+            message.params.drop(1) to message.params.lastOrNull().orEmpty().ifBlank { "JOIN failed" }
+        }
+        else -> return null
+    }
+    val channel = params.firstOrNull(identityRules::isChannel) ?: return null
+    return ChannelJoinOutcome.Rejected(networkId, channel, reason)
+}
 
 internal fun rosterStateAfterNames(explicitRefreshInFlight: Boolean): RosterLoadState =
     if (explicitRefreshInFlight) RosterLoadState.LOADING else RosterLoadState.LOADED
@@ -65,6 +105,7 @@ interface ConnectionManager {
     val connectionStates: StateFlow<Map<Long, IrcClientState>>
     val rosterStates: StateFlow<Map<Long, RosterLoadState>> get() = EMPTY_ROSTER_STATES
     val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> get() = EMPTY_PRESENCE_STATES
+    val channelJoinOutcomes: Flow<ChannelJoinOutcome> get() = emptyFlow()
 
     /** Live client for a connected network, null otherwise. */
     fun clientFor(networkId: Long): IrcClient?
