@@ -46,6 +46,7 @@ import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Unarchive
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -85,6 +86,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -323,7 +325,7 @@ fun ChatListContent(
                             IconButton(
                                 onClick = { onSetArchived(selectedRows.map(ChatListRow::bufferId), !archiveMode); selectedIds = emptyList() },
                                 modifier = Modifier.testTag("chatlist_selection_archive"),
-                            ) { Icon(Icons.Outlined.Archive, stringResource(if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive)) }
+                            ) { Icon(archiveActionIcon(archiveMode), stringResource(if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive)) }
                             IconButton(onClick = { confirmRemoval = true }, modifier = Modifier.testTag("chatlist_selection_remove")) {
                                 Icon(Icons.Outlined.Delete, stringResource(R.string.chatlist_remove))
                             }
@@ -1143,12 +1145,16 @@ private fun ArchiveSwipeBackground(archiveMode: Boolean) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = Icons.Outlined.Archive,
+            imageVector = archiveActionIcon(archiveMode),
             contentDescription = stringResource(if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive),
             tint = MaterialTheme.colorScheme.onSecondaryContainer,
         )
     }
 }
+
+/** Keep every archive affordance's glyph aligned with the action it will perform. */
+internal fun archiveActionIcon(archiveMode: Boolean): ImageVector =
+    if (archiveMode) Icons.Outlined.Unarchive else Icons.Outlined.Archive
 
 /** Destructive-delete confirmation; channel copy mentions the implicit part/leave. */
 @Composable

@@ -1,5 +1,8 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Unarchive
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import org.junit.Assert.assertEquals
@@ -8,6 +11,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatListSectioningTest {
+
+    @Test
+    fun `archive action icon matches the action direction`() {
+        assertEquals(Icons.Outlined.Archive, archiveActionIcon(archiveMode = false))
+        assertEquals(Icons.Outlined.Unarchive, archiveActionIcon(archiveMode = true))
+    }
 
     private fun row(
         id: Long,
