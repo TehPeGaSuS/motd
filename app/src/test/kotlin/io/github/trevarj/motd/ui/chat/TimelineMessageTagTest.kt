@@ -5,6 +5,12 @@ import org.junit.Test
 
 class TimelineMessageTagTest {
     @Test
+    fun `fool collapse tag prefers server msgid and falls back to event id`() {
+        assertEquals("chat_fool_collapse_msgid-123", foolCollapseTag("msgid-123", 42L))
+        assertEquals("chat_fool_collapse_42", foolCollapseTag(null, 42L))
+    }
+
+    @Test
     fun `server msgid is the timeline selector once present`() {
         assertEquals("chat_message_msgid-123", timelineMessageTag("msgid-123", 42L))
     }

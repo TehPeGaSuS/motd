@@ -141,6 +141,9 @@ internal fun timelineMessageTag(msgid: String?, eventId: Long): String =
 
 private fun messageTag(msg: MessageEntity): String = timelineMessageTag(msg.msgid, msg.id)
 
+internal fun foolCollapseTag(msgid: String?, eventId: Long): String =
+    "chat_fool_collapse_${msgid ?: eventId}"
+
 private fun MessageEntity.timelineAnchor(): TimelineAnchor = TimelineAnchor(serverTime, id)
 
 /**
@@ -744,7 +747,7 @@ private fun MessageRow(
         null
     }
 
-    onCollapseFool?.let { FoolCollapseChip(sender = msg.sender, onCollapse = it) }
+    onCollapseFool?.let { FoolCollapseChip(sender = msg.sender, tag = foolCollapseTag(msg.msgid, msg.id), onCollapse = it) }
 
     SwipeToReplyContainer(
         // Keep the stable automation id and mention state on one semantics node. SwipeToReply adds
@@ -874,9 +877,11 @@ private fun FoolPlaceholderRow(
  * bubble's own long-press/link taps intact by owning a separate tap target.
  */
 @Composable
-private fun FoolCollapseChip(sender: String, onCollapse: () -> Unit) {
+internal fun FoolCollapseChip(sender: String, tag: String, onCollapse: () -> Unit) {
     Row(
         modifier = Modifier
+            .fillMaxWidth()
+            .testTag(tag)
             .clickable { onCollapse() }
             .alpha(0.7f)
             .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
