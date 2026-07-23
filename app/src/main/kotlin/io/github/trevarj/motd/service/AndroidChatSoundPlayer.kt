@@ -23,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.first
+import kotlin.math.pow
 
 internal enum class ChatSoundCue {
     SEND,
@@ -92,6 +93,43 @@ internal fun outgoingChatSoundCue(
 }
 
 /**
+ * Process-lifetime receive melody. Only eligible RECEIVE cues advance it; SEND is deliberately
+ * inert so outgoing activity cannot alter an incoming conversation's cadence.
+ */
+internal class ChatReceiveMelody {
+    private var lastEligibleBufferId: Long? = null
+    private var lastEligibleAtNanos: Long = Long.MIN_VALUE
+    private var nextIndex: Int = 0
+
+    fun playbackRate(cue: ChatSoundCue, bufferId: Long, nowNanos: Long): Float = synchronized(this) {
+        if (cue == ChatSoundCue.SEND) return@synchronized NORMAL_RATE
+
+        if (
+            lastEligibleBufferId != bufferId ||
+            nowNanos - lastEligibleAtNanos >= RESET_AFTER_SILENCE_NANOS
+        ) {
+            nextIndex = 0
+        }
+        val rate = RECEIVE_RATES[nextIndex]
+        nextIndex = (nextIndex + 1) % RECEIVE_RATES.size
+        lastEligibleBufferId = bufferId
+        lastEligibleAtNanos = nowNanos
+        rate
+    }
+
+    private companion object {
+        const val NORMAL_RATE = 1f
+        const val RESET_AFTER_SILENCE_NANOS = 2_000_000_000L
+        val RECEIVE_RATES = floatArrayOf(
+            NORMAL_RATE,
+            2.0.pow(2.0 / 12.0).toFloat(),
+            2.0.pow(4.0 / 12.0).toFloat(),
+            2.0.pow(7.0 / 12.0).toFloat(),
+        )
+    }
+}
+
+/**
  * Process-lifetime sonification using two small, original PCM samples. Sonification attributes
  * keep the cues subordinate to Android's ringer/silent policy without requesting audio focus.
  */
@@ -148,7 +186,7 @@ internal class SoundPoolChatSoundBackend @Inject constructor(
         cuesBySampleId[sampleId] = cue
     }
 
-    fun play(cue: ChatSoundCue) {
+    fun play(cue: ChatSoundCue, playbackRate: Float = NORMAL_RATE) {
         val pool = soundPool ?: return
         val sampleId = sampleIds[cue]
         if (sampleId == null || sampleId !in readySampleIds) {
@@ -162,7 +200,7 @@ internal class SoundPoolChatSoundBackend @Inject constructor(
                 PLAYBACK_VOLUME,
                 PLAYBACK_PRIORITY,
                 NO_LOOP,
-                NORMAL_RATE,
+                playbackRate,
             )
         } catch (error: Exception) {
             trace("play_failed", cue, "error" to error::class.simpleName)
@@ -215,6 +253,8 @@ class AndroidChatSoundPlayer @Inject internal constructor(
     private val settingsRepository: SettingsRepository,
     private val backend: SoundPoolChatSoundBackend,
 ) : ChatSoundPlayer {
+    private val receiveMelody = ChatReceiveMelody()
+
     override suspend fun onIncoming(
         bufferId: Long,
         type: BufferType,
@@ -264,7 +304,10 @@ class AndroidChatSoundPlayer @Inject internal constructor(
                 normalizedActor ?: identityRules.normalize(senderNick.orEmpty()),
             ),
         ) ?: return
-        backend.play(cue)
+        backend.play(
+            cue,
+            receiveMelody.playbackRate(cue, bufferId, android.os.SystemClock.elapsedRealtimeNanos()),
+        )
     }
 
     override suspend fun onOutgoingAccepted(bufferId: Long) {
@@ -276,6 +319,9 @@ class AndroidChatSoundPlayer @Inject internal constructor(
             bufferId = bufferId,
             muted = buffer.muted,
         ) ?: return
-        backend.play(cue)
+        backend.play(
+            cue,
+            receiveMelody.playbackRate(cue, bufferId, android.os.SystemClock.elapsedRealtimeNanos()),
+        )
     }
 }

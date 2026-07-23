@@ -9,8 +9,54 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.pow
 
 class ChatSoundDecisionTest {
+    @Test
+    fun `receive melody follows the configured interval sequence and wraps`() {
+        val melody = ChatReceiveMelody()
+        val rates = listOf(
+            1f,
+            2.0.pow(2.0 / 12.0).toFloat(),
+            2.0.pow(4.0 / 12.0).toFloat(),
+            2.0.pow(7.0 / 12.0).toFloat(),
+            1f,
+        )
+
+        rates.forEachIndexed { index, expected ->
+            assertEquals(
+                expected,
+                melody.playbackRate(ChatSoundCue.RECEIVE, bufferId = 7, nowNanos = index.toLong()),
+                0f,
+            )
+        }
+    }
+
+    @Test
+    fun `receive melody resets after silence or an eligible buffer change`() {
+        val melody = ChatReceiveMelody()
+        assertEquals(1f, melody.playbackRate(ChatSoundCue.RECEIVE, 7, nowNanos = 0), 0f)
+        assertEquals(
+            2.0.pow(2.0 / 12.0).toFloat(),
+            melody.playbackRate(ChatSoundCue.RECEIVE, 7, nowNanos = 1),
+            0f,
+        )
+        assertEquals(1f, melody.playbackRate(ChatSoundCue.RECEIVE, 7, nowNanos = 2_000_000_001L), 0f)
+        assertEquals(1f, melody.playbackRate(ChatSoundCue.RECEIVE, 8, nowNanos = 2_000_000_002L), 0f)
+    }
+
+    @Test
+    fun `send cue neither advances nor resets the receive melody`() {
+        val melody = ChatReceiveMelody()
+        assertEquals(1f, melody.playbackRate(ChatSoundCue.RECEIVE, 7, nowNanos = 0), 0f)
+        assertEquals(1f, melody.playbackRate(ChatSoundCue.SEND, 8, nowNanos = 1_000_000_000L), 0f)
+        assertEquals(
+            2.0.pow(2.0 / 12.0).toFloat(),
+            melody.playbackRate(ChatSoundCue.RECEIVE, 7, nowNanos = 1_500_000_000L),
+            0f,
+        )
+    }
+
     @Test
     fun `send and receive select distinct cues`() {
         assertEquals(
