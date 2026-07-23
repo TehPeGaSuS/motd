@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.channellist
 
 import io.github.trevarj.motd.irc.client.ChannelListing
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 
 /** Server-side user-count floor when the network advertises ELIST 'U'. */
 const val DEFAULT_MIN_USERS = 50
@@ -67,3 +68,28 @@ fun listArgsFor(query: String): ListArgs =
 /** Popular browsing is deliberately compact; explicit searches may return a larger result set. */
 fun channelListLimit(query: String): Int =
     if (query.isBlank()) POPULAR_CHANNEL_LIMIT else CHANNEL_SEARCH_LIMIT
+
+enum class ChannelJoinStatus { JOIN, JOINING, JOINED }
+
+/** Applies the current server CASEMAPPING to persisted or optimistic channel names. */
+fun normalizeChannelNames(channels: Collection<String>, identityRules: IrcIdentityRules): Set<String> =
+    channels.map(identityRules::normalize).toSet()
+
+/** Pending JOIN is optimistic only; Room self-JOIN remains the sole joined confirmation. */
+fun channelJoinStatus(
+    channel: String,
+    pendingChannels: Set<String>,
+    joinedChannels: Set<String>,
+    identityRules: IrcIdentityRules,
+): ChannelJoinStatus = when (identityRules.normalize(channel)) {
+    in joinedChannels -> ChannelJoinStatus.JOINED
+    in pendingChannels -> ChannelJoinStatus.JOINING
+    else -> ChannelJoinStatus.JOIN
+}
+
+/** Confirmation and connection loss are the only paths that clear optimistic pending names. */
+fun reconcilePendingChannels(
+    pendingChannels: Set<String>,
+    joinedChannels: Set<String>,
+    isReady: Boolean,
+): Set<String> = if (isReady) pendingChannels - joinedChannels else emptySet()

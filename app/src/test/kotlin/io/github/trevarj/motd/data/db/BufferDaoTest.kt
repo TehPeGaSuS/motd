@@ -29,6 +29,17 @@ class BufferDaoTest {
     }
 
     @Test
+    fun `joined channel observer emits only visible canonical normalized names`() = runTest {
+        val joined = db.bufferDao().insert(buffer(networkId, "#joined").copy(joined = true))
+        db.bufferDao().insert(buffer(networkId, "#leaving").copy(joined = true, pendingCloseAt = 1L))
+        val redirect = db.bufferDao().insert(buffer(networkId, "#redirect").copy(joined = true))
+        db.bufferDao().update(db.bufferDao().rawById(redirect)!!.copy(redirectToRoomId = joined))
+        db.bufferDao().insert(buffer(networkId, "#not-joined"))
+
+        assertEquals(setOf("#joined"), db.bufferDao().observeJoinedChannelNames(networkId).first().toSet())
+    }
+
+    @Test
     fun `chat list projects archive state and canonical archive writes follow redirects`() = runTest {
         val winner = db.bufferDao().insert(buffer(networkId, "alice", type = BufferType.QUERY))
         val loser = db.bufferDao().insert(buffer(networkId, "alice-old", type = BufferType.QUERY))

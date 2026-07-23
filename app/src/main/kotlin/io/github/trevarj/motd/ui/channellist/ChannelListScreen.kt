@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
@@ -35,6 +34,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -56,11 +56,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
  * The busiest channels are auto-fetched on entry. ELIST 'U' is used when available; otherwise
  * the client retains a bounded top set from the LIST stream. Browsing is disabled for an unbound
  * soju BOUNCER_ROOT (its connection can't LIST). Join delegates to
- * ConnectionManager.joinChannel and pops back; the buffer appears on the JOIN echo.
- *
- * NOTE: the join flow uses [onBack] (per plan §5.7) — no separate nav-to-channel callback is
- * needed, so ChannelListScreen keeps the WP-V0 (networkId, onBack) signature and NavGraph is
- * untouched.
+ * ConnectionManager.joinChannel and remains open; Room self-JOIN persistence is authoritative.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,7 +72,7 @@ fun ChannelListScreen(
         onBack = onBack,
         onQueryChange = viewModel::onQueryChange,
         onSearch = viewModel::fetch,
-        onJoin = { name -> viewModel.join(name, onDone = onBack) },
+        onJoin = viewModel::join,
     )
 }
 
@@ -231,7 +227,9 @@ private fun ResultsBody(
             }
             ChannelList(
                 listings = state.listings,
-                joiningChannel = state.joiningChannel,
+                pendingChannels = state.pendingChannels,
+                joinedChannels = state.joinedChannels,
+                identityRules = state.identityRules,
                 onJoin = onJoin,
             )
         }
@@ -257,12 +255,20 @@ private fun ChannelListLoading() {
 @Composable
 private fun ChannelList(
     listings: List<ChannelListing>,
-    joiningChannel: String?,
+    pendingChannels: Set<String>,
+    joinedChannels: Set<String>,
+    identityRules: io.github.trevarj.motd.irc.proto.IrcIdentityRules,
     onJoin: (String) -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize()) {
         // Keyed by channel name for stable recomposition over large lists (cap 2000).
         items(listings, key = { it.name }) { listing ->
+            val joinStatus = channelJoinStatus(
+                listing.name,
+                pendingChannels,
+                joinedChannels,
+                identityRules,
+            )
             ListItem(
                 headlineContent = { Text(listing.name) },
                 supportingContent = {
@@ -288,16 +294,20 @@ private fun ChannelList(
                         )
                         TextButton(
                             onClick = { onJoin(listing.name) },
-                            enabled = joiningChannel == null,
+                            enabled = joinStatus == ChannelJoinStatus.JOIN,
+                            modifier = Modifier.testTag(
+                                "channel_list_join_${listing.name.removePrefix("#").lowercase()}",
+                            ),
                         ) {
-                            if (joiningChannel == listing.name) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                )
-                            } else {
-                                Text(stringResource(R.string.channel_list_join))
-                            }
+                            Text(
+                                stringResource(
+                                    when (joinStatus) {
+                                        ChannelJoinStatus.JOIN -> R.string.channel_list_join
+                                        ChannelJoinStatus.JOINING -> R.string.channel_list_joining
+                                        ChannelJoinStatus.JOINED -> R.string.channel_list_joined
+                                    },
+                                ),
+                            )
                         }
                     }
                 },

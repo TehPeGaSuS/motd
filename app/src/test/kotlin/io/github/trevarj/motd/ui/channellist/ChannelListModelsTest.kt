@@ -2,11 +2,49 @@ package io.github.trevarj.motd.ui.channellist
 
 import io.github.trevarj.motd.irc.client.ChannelListing
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ChannelListModelsTest {
+
+    @Test
+    fun `join state uses normalized authoritative joined names and independent pending names`() {
+        val rules = IrcIdentityRules()
+        val pending = setOf("#one", "#two")
+        val joined = setOf("#joined")
+
+        assertEquals(ChannelJoinStatus.JOINING, channelJoinStatus("#ONE", pending, joined, rules))
+        assertEquals(ChannelJoinStatus.JOINED, channelJoinStatus("#JOINED", pending, joined, rules))
+        assertEquals(ChannelJoinStatus.JOIN, channelJoinStatus("#other", pending, joined, rules))
+    }
+
+    @Test
+    fun `persisted joined names can be renormalized for updated identity rules`() {
+        val persisted = setOf("#[CHANNEL]")
+
+        assertEquals(
+            setOf("#{channel}"),
+            normalizeChannelNames(persisted, IrcIdentityRules()),
+        )
+        assertEquals(
+            setOf("#[channel]"),
+            normalizeChannelNames(persisted, IrcIdentityRules.from("ascii", null)),
+        )
+    }
+
+    @Test
+    fun `pending joins clear only after confirmation or loss of ready state`() {
+        assertEquals(
+            setOf("#two"),
+            reconcilePendingChannels(setOf("#one", "#two"), setOf("#one"), isReady = true),
+        )
+        assertEquals(
+            emptySet<String>(),
+            reconcilePendingChannels(setOf("#one", "#two"), emptySet(), isReady = false),
+        )
+    }
 
     @Test
     fun `live ready client wins while manager snapshot is absent or stale`() {

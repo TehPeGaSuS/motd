@@ -6,9 +6,11 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.client.ChannelListing
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.nav.ChannelListRoute
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 
 /**
@@ -36,7 +39,13 @@ data class ChannelListUiState(
     val loaded: Boolean = false,
     val isRoot: Boolean = false,
     val error: String? = null,
-    val joiningChannel: String? = null,
+    val identityRules: IrcIdentityRules = IrcIdentityRules(),
+    /** Normalized names sent in this Ready session, awaiting authoritative Room self-JOIN. */
+    val pendingChannels: Set<String> = emptySet(),
+    /** Durable joined CHANNEL names before applying the active server CASEMAPPING. */
+    val persistedJoinedChannels: Set<String> = emptySet(),
+    /** Persisted joined names normalized with [identityRules] for channel-browser matching. */
+    val joinedChannels: Set<String> = emptySet(),
     val joinError: String? = null,
 ) {
     val isReady: Boolean get() = connState is IrcClientState.Ready
@@ -48,6 +57,7 @@ data class ChannelListUiState(
 class ChannelListViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val networkRepository: NetworkRepository,
+    private val bufferRepository: BufferRepository,
     private val connectionManager: ConnectionManager,
 ) : ViewModel() {
 
@@ -70,16 +80,42 @@ class ChannelListViewModel @Inject constructor(
             )
             connectionManager.connectionStates.collect { states ->
                 val clientState = connectionManager.clientFor(networkId)?.state?.value
+                val rules = connectionManager.clientFor(networkId)?.isupport?.identityRules
+                    ?: _state.value.identityRules
                 val conn = channelBrowserConnectionState(states[networkId], clientState)
-                _state.value = _state.value.copy(
+                val current = _state.value
+                val normalizedJoined = normalizeChannelNames(current.persistedJoinedChannels, rules)
+                _state.value = current.copy(
                     connState = conn,
                     initialized = true,
+                    identityRules = rules,
+                    joinedChannels = normalizedJoined,
+                    pendingChannels = reconcilePendingChannels(
+                        current.pendingChannels,
+                        normalizedJoined,
+                        conn is IrcClientState.Ready,
+                    ),
                 )
                 // Auto-fetch a bounded set of the busiest channels. ELIST 'U' applies the
                 // population floor server-side; other servers stream into the bounded collector.
                 if (conn is IrcClientState.Ready && !_state.value.loaded && !_state.value.isRoot) {
                     fetch()
                 }
+            }
+        }
+        viewModelScope.launch {
+            bufferRepository.observeJoinedChannelNames(networkId).collect { joined ->
+                val current = _state.value
+                val normalizedJoined = normalizeChannelNames(joined, current.identityRules)
+                _state.value = current.copy(
+                    persistedJoinedChannels = joined,
+                    joinedChannels = normalizedJoined,
+                    pendingChannels = reconcilePendingChannels(
+                        current.pendingChannels,
+                        normalizedJoined,
+                        current.connState is IrcClientState.Ready,
+                    ),
+                )
             }
         }
     }
@@ -121,17 +157,25 @@ class ChannelListViewModel @Inject constructor(
         }
     }
 
-    /** Join [channel], then pop; the buffer appears in the chat list on the JOIN echo. */
-    fun join(channel: String, onDone: () -> Unit) {
-        if (_state.value.joiningChannel != null) return
-        _state.value = _state.value.copy(joiningChannel = channel, joinError = null)
+    /** Send a JOIN and retain its pending state until EventProcessor persists our self-JOIN. */
+    fun join(channel: String) {
+        val current = _state.value
+        if (!current.isReady) return
+        val normalized = current.identityRules.normalize(channel)
+        if (normalized in current.pendingChannels || normalized in current.joinedChannels) return
+        _state.value = current.copy(pendingChannels = current.pendingChannels + normalized, joinError = null)
         viewModelScope.launch {
-            val result = runCatching { connectionManager.joinChannel(networkId, channel) }
-            _state.value = _state.value.copy(
-                joiningChannel = null,
-                joinError = result.exceptionOrNull()?.message,
-            )
-            if (result.isSuccess) onDone()
+            try {
+                connectionManager.joinChannel(networkId, channel)
+            } catch (cancelled: CancellationException) {
+                _state.value = _state.value.copy(pendingChannels = _state.value.pendingChannels - normalized)
+                throw cancelled
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    pendingChannels = _state.value.pendingChannels - normalized,
+                    joinError = error.message,
+                )
+            }
         }
     }
 

@@ -30,6 +30,9 @@ class BufferRepositoryImpl @Inject constructor(
         settings.settings.map(MessageVisibilitySpec::from).distinctUntilChanged(),
     ) { rows, spec -> visibilityReader.resolveChatList(rows, spec) }
 
+    override fun observeJoinedChannelNames(networkId: Long): Flow<Set<String>> =
+        bufferDao.observeJoinedChannelNames(networkId).map { it.toSet() }.distinctUntilChanged()
+
     override fun observeBuffer(id: Long): Flow<BufferEntity?> = bufferDao.observe(id)
 
     override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> =

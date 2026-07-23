@@ -203,6 +203,13 @@ interface BufferDao {
     @Query("SELECT displayName FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL' AND joined = 1 AND pendingCloseAt IS NULL ORDER BY id")
     suspend fun joinedChannelNames(networkId: Long): List<String>
 
+    /** Authoritative self-JOIN persistence for channel-browser buttons; names are stored normalized. */
+    @Query(
+        """SELECT name FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL' AND joined = 1
+           AND pendingCloseAt IS NULL AND redirectToRoomId IS NULL ORDER BY id""",
+    )
+    fun observeJoinedChannelNames(networkId: Long): Flow<List<String>>
+
     @Query(
         """SELECT id, CASE WHEN type = 'SERVER' THEN name ELSE displayName END AS name
            FROM buffers WHERE networkId = :networkId AND type != 'SERVER'

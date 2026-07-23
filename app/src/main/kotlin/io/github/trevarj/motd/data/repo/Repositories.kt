@@ -12,6 +12,7 @@ import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 interface NetworkRepository {
     fun observeNetworks(): Flow<List<NetworkEntity>>
@@ -29,6 +30,8 @@ interface NetworkRepository {
 
 interface BufferRepository {
     fun observeChatList(): Flow<List<ChatListRow>>
+    /** Normalized CHANNEL names confirmed by EventProcessor self-JOIN persistence. */
+    fun observeJoinedChannelNames(networkId: Long): Flow<Set<String>> = flowOf(emptySet())
     fun observeBuffer(id: Long): Flow<BufferEntity?>
     fun observeMembers(bufferId: Long): Flow<List<MemberEntity>>
     suspend fun setPinned(id: Long, pinned: Boolean)

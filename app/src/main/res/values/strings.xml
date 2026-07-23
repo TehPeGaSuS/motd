@@ -760,6 +760,8 @@
     <string name="chatlist_archived_chats">Archived Chats</string>
     <string name="chatlist_archived_chats_count">Archived Chats (%1$d)</string>
     <string name="bouncer_network_preset">Network preset</string>
+    <string name="channel_list_joining">Joining</string>
+    <string name="channel_list_joined">Joined</string>
 
     <!-- Terminal color schemes (theme picker) -->
     <string name="settings_theme_gruvbox_dark">Gruvbox Dark</string>
