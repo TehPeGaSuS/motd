@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
 import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -36,6 +37,7 @@ class ContentPreviewPolicyTest {
             description = "Description",
             imageUrl = urls.imageUrl,
             siteName = "Example",
+            kind = LinkPreviewKind.TEXT,
         )
 
         val gated = preview.withImageGate(showImages = false)
@@ -43,6 +45,7 @@ class ContentPreviewPolicyTest {
         assertNull(gated.imageUrl)
         assertEquals(preview.title, gated.title)
         assertEquals(preview.description, gated.description)
+        assertEquals(LinkPreviewKind.TEXT, gated.kind)
         assertEquals(preview, preview.withImageGate(showImages = true))
     }
 }

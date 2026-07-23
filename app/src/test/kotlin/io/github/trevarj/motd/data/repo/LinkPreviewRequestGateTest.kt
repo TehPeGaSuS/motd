@@ -13,6 +13,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -99,6 +100,30 @@ class LinkPreviewRequestGateTest {
             request.cancel()
             request.join()
         }
+    }
+
+    @Test
+    fun text_preview_honors_declared_charset_and_16kib_cap() = runTest {
+        val repository = LinkPreviewRepositoryImpl(prefs, this, StandardTestDispatcher(testScheduler))
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "text/plain; charset=ISO-8859-1")
+                .setBody(Buffer().write("caf\u00e9".toByteArray(Charsets.ISO_8859_1))),
+        )
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "text/plain")
+                .setBody("a".repeat(16 * 1024) + "ignored"),
+        )
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "text/plain")
+                .setBody("\u0000".repeat(16 * 1024) + "must-not-be-read"),
+        )
+
+        assertEquals("caf\u00e9", repository.preview(server.url("/latin1").toString())?.description)
+        assertEquals(2_048, repository.preview(server.url("/large").toString())?.description?.length)
+        assertNull(repository.preview(server.url("/beyond-cap").toString()))
     }
 
     private class FakeContentPreviewPrefs : ContentPreviewPrefs {

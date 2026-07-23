@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.components
 
 import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -69,6 +70,14 @@ class LinkPreviewVisibilityTest {
         assertEquals(
             LinkPreviewTransitionKey.UNAVAILABLE,
             LinkPreviewRenderState.Unavailable.transitionKey,
+        )
+    }
+
+    @Test
+    fun text_preview_still_uses_the_available_render_state() {
+        assertEquals(
+            LinkPreviewRenderState.Available(preview(null).copy(kind = LinkPreviewKind.TEXT)),
+            resolveLinkPreviewRenderState(preview(null).copy(kind = LinkPreviewKind.TEXT), loading = false),
         )
     }
 

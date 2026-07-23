@@ -91,7 +91,7 @@ interface SearchRepository {
  */
 data class CachedLinkPreview(val preview: LinkPreview?)
 
-/** OG-tag link preview; in-memory LRU + shared fetch on miss. Null if unfetchable/not HTML. */
+/** Declared web or text link preview; in-memory LRU + shared fetch on miss. */
 interface LinkPreviewRepository {
     /** Returns a completed positive or negative result without starting work. */
     fun cachedPreview(url: String): CachedLinkPreview? = null
@@ -99,4 +99,13 @@ interface LinkPreviewRepository {
     suspend fun preview(url: String): LinkPreview?
 }
 
-data class LinkPreview(val url: String, val title: String?, val description: String?, val imageUrl: String?, val siteName: String?)
+enum class LinkPreviewKind { WEB, TEXT }
+
+data class LinkPreview(
+    val url: String,
+    val title: String?,
+    val description: String?,
+    val imageUrl: String?,
+    val siteName: String?,
+    val kind: LinkPreviewKind = LinkPreviewKind.WEB,
+)

@@ -27,12 +27,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -119,7 +122,7 @@ private fun LinkPreviewContent(preview: LinkPreview, onClick: () -> Unit) {
             .clickable { onClick() }
             .padding(8.dp),
     ) {
-        if (preview.imageUrl != null) {
+        if (preview.kind == LinkPreviewKind.WEB && preview.imageUrl != null) {
             AsyncImage(
                 model = preview.imageUrl,
                 contentDescription = null,
@@ -151,8 +154,10 @@ private fun LinkPreviewContent(preview: LinkPreview, onClick: () -> Unit) {
                     text = it,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    fontFamily = if (preview.kind == LinkPreviewKind.TEXT) FontFamily.Monospace else FontFamily.Default,
+                    maxLines = if (preview.kind == LinkPreviewKind.TEXT) 4 else 2,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = if (preview.kind == LinkPreviewKind.TEXT) Modifier.testTag("link_preview_text_body") else Modifier,
                 )
             }
         }

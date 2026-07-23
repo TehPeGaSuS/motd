@@ -7,6 +7,8 @@ import io.github.trevarj.motd.di.IoDispatcher
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLDecoder
+import java.nio.charset.Charset
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
@@ -24,8 +26,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-// OG-tag link preview. HttpURLConnection GET, 5s connect/read timeouts, only text/html, body
-// capped at 512 KB. Completed results (including nulls for unfetchable / non-HTML pages) live in a
+// Declared web/text link preview. HttpURLConnection GET, 5s connect/read timeouts, HTML body
+// capped at 512 KB and text body capped at 16 KB. Completed negative results live in a
 // bounded process cache, while concurrent callers for the same URL await one shared request. The OG
 // parser is a small regex-based extractor (no HTML-parser dependency) and is unit-tested against
 // fixtures.
@@ -96,7 +98,7 @@ class LinkPreviewRepositoryImpl @Inject constructor(
                 connectTimeout = TIMEOUT_MS
                 readTimeout = TIMEOUT_MS
                 instanceFollowRedirects = true
-                setRequestProperty("Accept", "text/html")
+                setRequestProperty("Accept", "text/html, text/*, application/json, application/xml")
             }
             connection.set(conn)
             try {
@@ -104,9 +106,11 @@ class LinkPreviewRepositoryImpl @Inject constructor(
                 val result = if (conn.responseCode !in 200..299) {
                     null
                 } else {
-                    val contentType = conn.contentType?.substringBefore(';')?.trim()?.lowercase()
-                    if (contentType != "text/html") null
-                    else parseOgTags(url, conn.inputStream.readCapped(MAX_BYTES))
+                    when (responseKind(conn.getHeaderField("Content-Type"))) {
+                        LinkPreviewKind.WEB -> parseOgTags(conn.url.toString(), conn.inputStream.readCapped(HTML_MAX_BYTES, Charsets.UTF_8))
+                        LinkPreviewKind.TEXT -> parseTextPreview(conn.url.toString(), conn.inputStream.readCapped(TEXT_MAX_BYTES, charsetFromContentType(conn.getHeaderField("Content-Type"))))
+                        null -> null
+                    }
                 }
                 if (continuation.isActive) continuation.resume(result)
             } catch (error: Exception) {
@@ -122,7 +126,7 @@ class LinkPreviewRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun InputStream.readCapped(max: Int): String {
+    private fun InputStream.readCapped(max: Int, charset: Charset): String {
         val buf = ByteArray(8 * 1024)
         val out = ByteArray(max)
         var total = 0
@@ -132,13 +136,66 @@ class LinkPreviewRepositoryImpl @Inject constructor(
             System.arraycopy(buf, 0, out, total, read)
             total += read
         }
-        return String(out, 0, total, Charsets.UTF_8)
+        return String(out, 0, total, charset)
     }
 
     companion object {
         private const val CACHE_SIZE = 256
         private const val TIMEOUT_MS = 5_000
-        private const val MAX_BYTES = 512 * 1024
+        private const val HTML_MAX_BYTES = 512 * 1024
+        private const val TEXT_MAX_BYTES = 16 * 1024
+        private const val TEXT_MAX_CODE_POINTS = 2_048
+
+        internal fun responseKind(contentType: String?): LinkPreviewKind? {
+            val mediaType = contentType?.substringBefore(';')?.trim()?.lowercase().orEmpty()
+            return when {
+                mediaType == "text/html" -> LinkPreviewKind.WEB
+                mediaType.startsWith("text/") -> LinkPreviewKind.TEXT
+                mediaType == "application/json" || mediaType == "application/xml" ||
+                    (mediaType.startsWith("application/") && (mediaType.endsWith("+json") || mediaType.endsWith("+xml"))) -> LinkPreviewKind.TEXT
+                else -> null
+            }
+        }
+
+        internal fun charsetFromContentType(contentType: String?): Charset {
+            val value = Regex("(?:^|;)\\s*charset\\s*=\\s*(?:\\\"([^\\\"]*)\\\"|([^;\\s]*))", RegexOption.IGNORE_CASE)
+                .find(contentType.orEmpty())
+                ?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } }
+            return runCatching { value?.takeIf(String::isNotBlank)?.let(Charset::forName) ?: Charsets.UTF_8 }
+                .getOrDefault(Charsets.UTF_8)
+        }
+
+        internal fun sanitizeText(text: String): String? {
+            val normalized = text.replace("\r\n", "\n").replace('\r', '\n')
+            val out = StringBuilder()
+            var kept = 0
+            var index = 0
+            while (index < normalized.length && kept < TEXT_MAX_CODE_POINTS) {
+                val codePoint = normalized.codePointAt(index)
+                index += Character.charCount(codePoint)
+                val type = Character.getType(codePoint)
+                if (codePoint == '\n'.code || codePoint == '\t'.code ||
+                    (type != Character.CONTROL.toInt() && type != Character.FORMAT.toInt())
+                ) {
+                    out.appendCodePoint(codePoint)
+                    kept++
+                }
+            }
+            return out.toString().takeIf { it.isNotBlank() }
+        }
+
+        internal fun textTitle(url: String): String {
+            val parsed = URL(url)
+            val segment = parsed.path.split('/').lastOrNull { it.isNotBlank() }
+                ?.let { runCatching { URLDecoder.decode(it.replace("+", "%2B"), "UTF-8") }.getOrDefault(it) }
+            return segment?.takeIf(String::isNotBlank) ?: parsed.host
+        }
+
+        internal fun parseTextPreview(url: String, text: String): LinkPreview? {
+            val body = sanitizeText(text) ?: return null
+            val host = URL(url).host
+            return LinkPreview(url, textTitle(url), body, null, host, LinkPreviewKind.TEXT)
+        }
 
         // <meta property="og:*" content="..."> in either attribute order, single or double quotes.
         private val OG_TITLE = ogRegex("og:title")

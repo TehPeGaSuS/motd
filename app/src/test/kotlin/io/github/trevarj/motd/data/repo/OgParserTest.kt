@@ -25,6 +25,7 @@ class OgParserTest {
         assertEquals("https://example.com/img.png", p.imageUrl)
         assertEquals("Example Site", p.siteName)
         assertEquals(url, p.url)
+        assertEquals(LinkPreviewKind.WEB, p.kind)
     }
 
     @Test
