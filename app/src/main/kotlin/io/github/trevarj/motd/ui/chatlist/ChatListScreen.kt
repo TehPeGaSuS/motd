@@ -73,6 +73,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -445,40 +449,57 @@ private fun ChatList(
     var foolsExpanded by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    var archiveFolderPullRevealed by rememberSaveable { mutableStateOf(false) }
+    val hasActiveRows = rows.isNotEmpty()
+    val hasArchivedRows = archivedRows.isNotEmpty()
+    val archiveFolderVisible = shouldShowArchiveFolder(
+        archiveMode,
+        hasActiveRows,
+        hasArchivedRows,
+        archiveFolderPullRevealed,
+    )
 
-    // The folder is a real preceding item, not synthetic overscroll. On first active rendering,
-    // anchor the first chat below it so pulling down reveals the folder naturally.
-    LaunchedEffect(archiveMode, archivedRows.isNotEmpty(), rows.isNotEmpty()) {
-        if (!archiveMode && archivedRows.isNotEmpty() && rows.isNotEmpty()) {
-            listState.scrollToItem(1)
+    LaunchedEffect(archiveMode, hasActiveRows, hasArchivedRows) {
+        if (archiveMode || !hasActiveRows || !hasArchivedRows) archiveFolderPullRevealed = false
+    }
+    val archiveFolderPullConnection = remember(listState, archiveMode, hasActiveRows, hasArchivedRows) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < 0f) archiveFolderPullRevealed = archiveFolderRevealAfterActiveScroll()
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                if (available.y > 0f && !listState.canScrollBackward) {
+                    archiveFolderPullRevealed = archiveFolderRevealAfterPull(
+                        archiveMode,
+                        hasActiveRows,
+                        hasArchivedRows,
+                    )
+                }
+                return Offset.Zero
+            }
         }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 88.dp),
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(archiveFolderPullConnection),
         ) {
-            if (!archiveMode && archivedRows.isNotEmpty()) {
-                item(key = "archived-chats-folder") {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(onClick = onOpenArchive)
-                            .testTag("chatlist_archived_folder")
-                            .padding(horizontal = 20.dp, vertical = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Outlined.Archive, contentDescription = null)
-                        Text(
-                            text = stringResource(R.string.chatlist_archived_chats_count, archivedRows.size),
-                            modifier = Modifier.padding(start = 16.dp),
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                }
+            AnimatedVisibility(visible = archiveFolderVisible) {
+                ArchivedChatsFolder(archivedRows.size, onOpenArchive)
             }
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = 88.dp),
+            ) {
             items(sections.pinned, key = { it.bufferId }) { row ->
                 RowWithMenu(
                     row,
@@ -570,6 +591,7 @@ private fun ChatList(
                     }
                 }
             }
+            }
         }
 
         ViewportScrollToTopFab(
@@ -580,6 +602,25 @@ private fun ChatList(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 16.dp, bottom = 88.dp),
+        )
+    }
+}
+
+@Composable
+private fun ArchivedChatsFolder(count: Int, onOpenArchive: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenArchive)
+            .testTag("chatlist_archived_folder")
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Archive, contentDescription = null)
+        Text(
+            text = stringResource(R.string.chatlist_archived_chats_count, count),
+            modifier = Modifier.padding(start = 16.dp),
+            fontWeight = FontWeight.Medium,
         )
     }
 }

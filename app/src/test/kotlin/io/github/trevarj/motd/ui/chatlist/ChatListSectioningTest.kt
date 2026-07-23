@@ -49,6 +49,45 @@ class ChatListSectioningTest {
     }
 
     @Test
+    fun `one active and one archived chat use pull reveal independently of list height`() {
+        val active = row(id = 1, name = "#active", type = BufferType.CHANNEL)
+        val archived = row(id = 2, name = "alice").copy(archived = true)
+
+        assertFalse(
+            shouldShowArchiveFolder(
+                archiveMode = false,
+                hasActiveRows = true,
+                hasArchivedRows = true,
+                pullRevealed = archiveFolderRevealAfterActiveScroll(),
+            ),
+        )
+        assertTrue(
+            shouldShowArchiveFolder(
+                archiveMode = false,
+                hasActiveRows = listOf(active).isNotEmpty(),
+                hasArchivedRows = listOf(archived).isNotEmpty(),
+                pullRevealed = archiveFolderRevealAfterPull(false, true, true),
+            ),
+        )
+        assertFalse(
+            shouldShowArchiveFolder(
+                archiveMode = false,
+                hasActiveRows = true,
+                hasArchivedRows = true,
+                pullRevealed = false,
+            ),
+        )
+        assertTrue(
+            shouldShowArchiveFolder(
+                archiveMode = false,
+                hasActiveRows = false,
+                hasArchivedRows = true,
+                pullRevealed = false,
+            ),
+        )
+    }
+
+    @Test
     fun `classifies queries into friends and fools, regular otherwise`() {
         val rows = listOf(
             row(1, "alice"),

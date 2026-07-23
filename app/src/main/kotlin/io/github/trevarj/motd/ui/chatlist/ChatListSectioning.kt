@@ -42,6 +42,24 @@ internal fun shouldRenderChatList(
     activeRows.isNotEmpty() || archivedRows.isNotEmpty()
 }
 
+/** The folder is hidden above active chats until pull-revealed, but remains the only-row route. */
+internal fun shouldShowArchiveFolder(
+    archiveMode: Boolean,
+    hasActiveRows: Boolean,
+    hasArchivedRows: Boolean,
+    pullRevealed: Boolean,
+): Boolean = !archiveMode && hasArchivedRows && (!hasActiveRows || pullRevealed)
+
+/** Pulling down at the active-list origin reveals the archive independently of list height. */
+internal fun archiveFolderRevealAfterPull(
+    archiveMode: Boolean,
+    hasActiveRows: Boolean,
+    hasArchivedRows: Boolean,
+): Boolean = !archiveMode && hasActiveRows && hasArchivedRows
+
+/** Any upward drag into active content returns the folder to its hidden-above-list position. */
+internal fun archiveFolderRevealAfterActiveScroll(): Boolean = false
+
 /** Whether [row] keeps the friend presentation, including when it is globally pinned. */
 internal fun isFriendQuery(row: ChatListRow, friends: Set<String>): Boolean =
     row.type == BufferType.QUERY && row.identityRules.matchesConfiguredNick(row.displayName, friends)
