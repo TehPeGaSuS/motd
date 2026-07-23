@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -98,7 +97,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -285,15 +283,10 @@ fun ChatListContent(
                             // Scoped: show the network name so the active filter is legible.
                             Text(text = scopedName, fontWeight = FontWeight.Bold)
                         } else {
-                            // Unscoped: brand the bar with the /motd wordmark. Tinted onSurface so
-                            // it reads on every theme (including terminal); never hardcode periwinkle.
-                            Icon(
-                                painter = painterResource(R.drawable.motd_wordmark),
-                                contentDescription = stringResource(R.string.app_name),
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                // Keep the thin stroked lettering crisp without crowding the app bar.
-                                // 330:100 source ratio, rendered at an exact 3.25:1 ratio.
-                                modifier = Modifier.height(24.dp).width(78.dp),
+                            // Use the platform typography instead of the stylized brand asset here.
+                            Text(
+                                text = stringResource(R.string.app_name),
+                                fontWeight = FontWeight.Bold,
                             )
                         }
                     },

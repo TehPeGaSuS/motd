@@ -61,6 +61,22 @@ class ChatListSelectionUiTest {
         assertEquals(0, compose.onAllNodesWithTag("chatlist_selection_top_app_bar").fetchSemanticsNodes().size)
     }
 
+    @Test fun unscoped_title_uses_lowercase_text() {
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatListContent(
+                    state = ChatListState(loading = false),
+                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
+                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
+                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                )
+            }
+        }
+
+        compose.onNodeWithText("motd").assertIsDisplayed()
+        assertEquals(0, compose.onAllNodesWithText("/motd").fetchSemanticsNodes().size)
+    }
+
     @Test fun empty_archive_uses_archive_specific_copy_without_connection_prompt() {
         val state = mutableStateOf(
             ChatListState(
