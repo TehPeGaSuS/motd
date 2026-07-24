@@ -499,9 +499,9 @@ private fun PaletteGroup(
     onSelect: (NickColorPalette) -> Unit,
 ) {
     val options = listOf(
-        NickColorPalette.DEFAULT to R.string.settings_palette_default,
+        NickColorPalette.THEME to R.string.settings_palette_theme,
+        NickColorPalette.CLASSIC to R.string.settings_palette_classic,
         NickColorPalette.VIVID to R.string.settings_palette_vivid,
-        NickColorPalette.PASTEL to R.string.settings_palette_pastel,
     )
     Column(Modifier.selectableGroup()) {
         options.forEach { (palette, labelRes) ->

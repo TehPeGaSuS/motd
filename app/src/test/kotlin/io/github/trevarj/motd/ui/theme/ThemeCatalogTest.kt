@@ -92,6 +92,7 @@ class ThemeCatalogTest {
                             overrides = mapOf("nick" to hue),
                             isDark = preset.isDark,
                             textBackgrounds = backgrounds,
+                            themeColors = listOf(variant.primary, variant.tertiary, variant.secondary),
                         )
                         val color = colors.nick("nick", variant.onSurface)
                         backgrounds.forEachIndexed { index, background ->

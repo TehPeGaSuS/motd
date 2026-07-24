@@ -47,7 +47,6 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import io.github.trevarj.motd.ui.theme.hueColor
 
 /**
  * Sanitize raw add-nick input. Returns the trimmed nick, or null when unusable: blank, contains
@@ -203,13 +202,7 @@ fun ManageNicksContent(
                                         modifier = Modifier
                                             .size(20.dp)
                                             .clip(CircleShape)
-                                            .background(
-                                                hueColor(
-                                                    state.overrides[nick] ?: 0,
-                                                    scheme.isDark,
-                                                    scheme.palette,
-                                                ),
-                                            ),
+                                            .background(scheme.hue(state.overrides[nick] ?: 0)),
                                     )
                                 } else {
                                     Avatar(name = nick, size = 36.dp)

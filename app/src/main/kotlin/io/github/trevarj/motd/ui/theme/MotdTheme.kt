@@ -95,7 +95,7 @@ fun MotdTheme(
     // Round 4 (plans/13); all defaulted so existing call sites (incl. previews) stay unchanged.
     layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
     nickColorsEnabled: Boolean = true,
-    nickColorPalette: NickColorPalette = NickColorPalette.DEFAULT,
+    nickColorPalette: NickColorPalette = NickColorPalette.THEME,
     nickColorOverrides: Map<String, Int> = emptyMap(),
     avatarStyle: AvatarStyle = AvatarStyle.IRC_SPRITE,
     uiFontScalePercent: Int = DEFAULT_FONT_SCALE_PERCENT,
@@ -132,6 +132,9 @@ fun MotdTheme(
             colorScheme.tertiaryContainer,
         ).distinct()
     }
+    val nickThemeColors = remember(colorScheme) {
+        listOf(colorScheme.primary, colorScheme.tertiary, colorScheme.secondary).distinct()
+    }
     // Style-only concerns (spacing, nick colors, avatar style) flow through CompositionLocals so
     // components never receive them as parameters (plans/13 plumbing split).
     val typography = remember(uiFontScalePercent) { scaledTypography(uiFontScalePercent) }
@@ -144,6 +147,7 @@ fun MotdTheme(
                 nickColorOverrides,
                 dark,
                 nickTextBackgrounds,
+                nickThemeColors,
             ),
             LocalAvatarStyle provides avatarStyle,
             LocalMotdSemanticColors provides semanticColors(colorScheme, dark),

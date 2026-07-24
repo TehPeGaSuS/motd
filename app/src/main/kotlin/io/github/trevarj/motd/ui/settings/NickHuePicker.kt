@@ -27,7 +27,6 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import io.github.trevarj.motd.ui.theme.hueColor
 
 /** The 12 fixed hues shown in the swatch grid (30° apart around the wheel). */
 private val PICKER_HUES = listOf(0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330)
@@ -62,7 +61,7 @@ fun NickHuePickerDialog(
                             modifier = Modifier
                                 .size(40.dp)
                                 .clip(CircleShape)
-                                .background(hueColor(hue, scheme.isDark, scheme.palette))
+                                .background(scheme.hue(hue))
                                 .then(
                                     if (selected) {
                                         Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)

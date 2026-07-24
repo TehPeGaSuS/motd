@@ -17,8 +17,16 @@ enum class ThemeMode {
 
 // Round 4 (plans/13): user-customizable UI settings.
 enum class LayoutDensity { COMPACT, COMFORTABLE, TWO_LINE }
-enum class NickColorPalette { DEFAULT, VIVID, PASTEL }
+enum class NickColorPalette { THEME, CLASSIC, VIVID }
 enum class FoolsMode { COLLAPSE, HIDE }
+
+/** Decode saved palettes, migrating both former defaults to the theme-derived default. */
+internal fun nickColorPaletteFromPreference(saved: String?): NickColorPalette = when (saved) {
+    "CLASSIC" -> NickColorPalette.CLASSIC
+    "VIVID" -> NickColorPalette.VIVID
+    "THEME", "DEFAULT", "PASTEL", null -> NickColorPalette.THEME
+    else -> NickColorPalette.THEME
+}
 
 /** Which visual style to use for nick avatars. IRC sprites are the default for new users. */
 enum class AvatarStyle { MONOGRAM, INITIALS, IRC_SPRITE }
@@ -45,8 +53,8 @@ data class Settings(
     // Round 4 (plans/13)
     val layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
     val nickColorsEnabled: Boolean = true,
-    val nickColorPalette: NickColorPalette = NickColorPalette.DEFAULT,
-    /** Normalized nick -> hue 0..359. Rendered with the active palette's S/L. */
+    val nickColorPalette: NickColorPalette = NickColorPalette.THEME,
+    /** Normalized nick -> hue/position 0..359, rendered through the active palette. */
     val nickColorOverrides: Map<String, Int> = emptyMap(),
     /** Normalized nicks. friends and fools are kept disjoint by the repository. */
     val friends: Set<String> = emptySet(),

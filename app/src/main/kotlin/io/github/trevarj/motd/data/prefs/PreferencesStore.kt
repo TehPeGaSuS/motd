@@ -106,8 +106,7 @@ class DataStoreSettingsRepository @Inject constructor(
             layoutDensity = prefs[PrefKeys.LAYOUT_DENSITY]?.let { runCatching { LayoutDensity.valueOf(it) }.getOrNull() }
                 ?: LayoutDensity.COMFORTABLE,
             nickColorsEnabled = prefs[PrefKeys.NICK_COLORS_ENABLED]?.toBooleanStrictOrNull() ?: true,
-            nickColorPalette = prefs[PrefKeys.NICK_COLOR_PALETTE]?.let { runCatching { NickColorPalette.valueOf(it) }.getOrNull() }
-                ?: NickColorPalette.DEFAULT,
+            nickColorPalette = nickColorPaletteFromPreference(prefs[PrefKeys.NICK_COLOR_PALETTE]),
             nickColorOverrides = decodeHueOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]),
             friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]),
             fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]),
