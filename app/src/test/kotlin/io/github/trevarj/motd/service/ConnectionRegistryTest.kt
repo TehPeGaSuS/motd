@@ -116,6 +116,35 @@ class ConnectionRegistryTest {
     }
 
     @Test
+    fun explicitConnect_retriesTerminalConfigurationFailureWithSameFingerprint() = runTest {
+        val created = mutableListOf<FakeActor>()
+        val registry = ConnectionRegistry(
+            backgroundScope,
+            actorFactory = { _, _ -> FakeActor().also(created::add) },
+            isConfigurationFailure = { it.startsWith("config:") },
+        )
+        val row = network()
+        registry.beginStart()
+        registry.reconcile(listOf(row to "fp"), setOf(row.id), emptySet())
+        val firstGeneration = registry.snapshot.value.actors.getValue(row.id).generation
+        registry.actorState(
+            row.id,
+            firstGeneration,
+            "fp",
+            IrcClientState.Failed("config: provider unavailable", fatal = true),
+        )
+        runCurrent()
+        assertEquals(1, registry.snapshot.value.terminalFingerprintCount)
+
+        registry.connect(row, "fp")
+
+        assertEquals(2, created.size)
+        assertEquals(1, created.first().stops)
+        assertEquals(0, registry.snapshot.value.terminalFingerprintCount)
+        assertTrue(registry.snapshot.value.actors.getValue(row.id).generation > firstGeneration)
+    }
+
+    @Test
     fun stopAwaitsActorAndJobCleanup_andTimeoutJobsCannotSurvive() = runTest {
         val created = mutableListOf<FakeActor>()
         val registry = ConnectionRegistry(

@@ -234,11 +234,13 @@ internal class ConnectionRegistry(
                     command.result.complete(Unit)
                     return
                 }
-                if (terminalFingerprints[command.row.id] != command.fingerprint) {
-                    removeActor(command.row.id, clearTerminal = false)
-                    ensureActor(command.row, command.fingerprint, emptySet())
-                    publish()
-                }
+                // Automatic reconciliation honors terminal configuration failures to avoid a
+                // retry storm, but an explicit user action must be able to retry unchanged
+                // settings after a transient provider failure.
+                terminalFingerprints.remove(command.row.id)
+                removeActor(command.row.id, clearTerminal = false)
+                ensureActor(command.row, command.fingerprint, emptySet())
+                publish()
                 command.result.complete(Unit)
             }
             is Command.Disconnect -> {
