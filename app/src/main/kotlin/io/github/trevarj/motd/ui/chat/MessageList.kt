@@ -160,6 +160,10 @@ fun showsSender(current: MessageEntity, olderNeighbor: MessageEntity?): Boolean 
         current.normalizedActor == olderNeighbor.normalizedActor
     }
     if (!sameActor || olderNeighbor.isSelf != current.isSelf) return true
+    // An ACTION (/me) is its own utterance: it always opens a new group on either side of the
+    // boundary, so a regular message following an ACTION shows its nick again instead of reading
+    // as a continuation of the emote.
+    if (current.kind == MessageKind.ACTION || olderNeighbor.kind == MessageKind.ACTION) return true
     if (isSystemKind(olderNeighbor.kind) != isSystemKind(current.kind)) return true
     return current.serverTime - olderNeighbor.serverTime > GROUP_WINDOW_MS
 }
@@ -167,8 +171,8 @@ fun showsSender(current: MessageEntity, olderNeighbor: MessageEntity?): Boolean 
 /**
  * Vertical gap to render before a bubble row. Reuses [showsSender] so the gap tracks the same-sender
  * grouping window: a burst gap while a group continues, a break gap when a new group opens (sender,
- * direction, or system-kind change, or >[GROUP_WINDOW_MS]). Zero when there is no older neighbor.
- * Non-COMFORTABLE densities get 0 for both tokens, so this is a no-op there.
+ * direction, or system-kind change, an ACTION boundary, or >[GROUP_WINDOW_MS]). Zero when there is
+ * no older neighbor. Non-COMFORTABLE densities get 0 for both tokens, so this is a no-op there.
  */
 fun bubbleGap(showSender: Boolean, hasOlder: Boolean, spacing: MotdSpacing): Dp {
     if (!hasOlder) return 0.dp

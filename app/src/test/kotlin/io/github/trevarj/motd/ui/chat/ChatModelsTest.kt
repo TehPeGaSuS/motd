@@ -454,6 +454,33 @@ class ChatModelsTest {
         assertFalse(showsSender(partiallyEnriched, mappedOlder))
     }
 
+    @Test fun `action breaks the consecutive-sender group on either side`() {
+        // Same actor, within the 3-min window: a plain continuation hides its nick.
+        val older = message(id = 1, sender = "nick", serverTime = 100)
+        val current = message(id = 2, sender = "nick", serverTime = 200)
+        assertFalse(showsSender(current, older))
+
+        // Regular message after an ACTION shows its nick again (the reported bug).
+        val actionOlder = message(id = 3, sender = "nick", kind = MessageKind.ACTION, serverTime = 300)
+        val afterAction = message(id = 4, sender = "nick", serverTime = 400)
+        assertTrue(showsSender(afterAction, actionOlder))
+
+        // An ACTION after a regular message also opens a new group.
+        val beforeAction = message(id = 5, sender = "nick", serverTime = 500)
+        val actionCurrent = message(id = 6, sender = "nick", kind = MessageKind.ACTION, serverTime = 600)
+        assertTrue(showsSender(actionCurrent, beforeAction))
+
+        // Two consecutive ACTIONs each open their own group.
+        val actionA = message(id = 7, sender = "nick", kind = MessageKind.ACTION, serverTime = 700)
+        val actionB = message(id = 8, sender = "nick", kind = MessageKind.ACTION, serverTime = 800)
+        assertTrue(showsSender(actionB, actionA))
+
+        // Regression: the plain grouping window still collapses same-sender PRIVMSGs.
+        val spaced = message(id = 9, sender = "nick", serverTime = 100)
+        val spacedLater = message(id = 10, sender = "nick", serverTime = 100 + GROUP_WINDOW_MS + 1)
+        assertTrue(showsSender(spacedLater, spaced))
+    }
+
     @Test fun `bubble gap tracks grouping and density`() {
         val comfortable = spacingFor(LayoutDensity.COMFORTABLE)
         val compact = spacingFor(LayoutDensity.COMPACT)
