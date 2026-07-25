@@ -1,12 +1,12 @@
 # Color theme sources
 
-MOTD adapts these editor and terminal palettes into Material 3 semantic roles. Theme names belong
+motd adapts these editor and terminal palettes into Material 3 semantic roles. Theme names belong
 to their respective projects; palette values are reproduced with attribution and adjusted only
 where Android UI contrast requires it.
 
 ## Accessibility adaptation
 
-Palette identity is carried by the primary, secondary, and tertiary hues. MOTD adjusts their tone
+Palette identity is carried by the primary, secondary, and tertiary hues. motd adjusts their tone
 when necessary so readable text and meaningful icons meet a 4.5:1 contrast ratio across the
 surfaces where they appear. Component boundaries, outlines, and other non-text indicators target
 3:1. Success, warning, and error use stable semantic color families instead of borrowing an accent

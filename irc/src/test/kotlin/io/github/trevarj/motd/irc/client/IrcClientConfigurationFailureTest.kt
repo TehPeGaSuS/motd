@@ -38,7 +38,7 @@ class IrcClientConfigurationFailureTest {
         val client = IrcClient(
             IrcClientConfig(
                 host = "irc.example.org", port = 6697, tls = true,
-                nick = "motd", username = "motd", realname = "MOTD User",
+                nick = "motd", username = "motd", realname = "motd User",
             ),
             factory,
             clientScope(),

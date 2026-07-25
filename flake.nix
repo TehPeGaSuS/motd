@@ -1,5 +1,5 @@
 {
-  description = "MOTD dev shell: JDK 21 + Android SDK (CI remains the canonical build env)";
+  description = "motd dev shell: JDK 21 + Android SDK (CI remains the canonical build env)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/767b0d3ec98a143ad9ed7dfc0d5553510ac27133";

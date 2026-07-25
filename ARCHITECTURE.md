@@ -1,6 +1,6 @@
 # Architecture
 
-MOTD has two Gradle modules: `:app` is the Android application and `:irc` is a
+motd has two Gradle modules: `:app` is the Android application and `:irc` is a
 pure-JVM IRC engine with no Android dependencies.
 
 ```mermaid

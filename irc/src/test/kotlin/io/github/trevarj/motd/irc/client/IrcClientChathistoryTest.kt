@@ -338,7 +338,7 @@ class IrcClientChathistoryTest {
     @Test
     fun `request without transport throws disconnected instead of returning empty history`() = runTest {
         val client = IrcClient(
-            IrcClientConfig("irc.example", 6697, true, "motd", "motd", "MOTD"),
+            IrcClientConfig("irc.example", 6697, true, "motd", "motd", "motd"),
             FakeTransport().factory(),
             clientScope(),
         )
@@ -358,7 +358,7 @@ class IrcClientChathistoryTest {
 
     private suspend fun TestScope.registeredWithoutLabeledResponse(transport: FakeTransport): IrcClient {
         val client = IrcClient(
-            IrcClientConfig("irc.example", 6697, true, "motd", "motd", "MOTD"),
+            IrcClientConfig("irc.example", 6697, true, "motd", "motd", "motd"),
             transport.factory(),
             clientScope(),
         )

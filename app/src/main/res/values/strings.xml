@@ -204,7 +204,7 @@
     <string name="network_settings_obfs_proxy_host">Proxy host</string>
     <string name="network_settings_obfs_proxy_port">Proxy port</string>
     <string name="network_settings_obfs_tor_desc">Sets a SOCKS5 proxy at 127.0.0.1:9050. Requires Orbot running on this device.</string>
-    <string name="network_settings_obfs_reality_desc">Paste the VLESS + REALITY share link for this network. MOTD starts its embedded tunnel and keeps the loopback proxy private.</string>
+    <string name="network_settings_obfs_reality_desc">Paste the VLESS + REALITY share link for this network. motd starts its embedded tunnel and keeps the loopback proxy private.</string>
     <string name="network_settings_obfs_reality_link">VLESS + REALITY link</string>
     <string name="network_settings_obfs_dns_note">DNS is resolved remotely through the proxy (no leak; .onion works).</string>
     <string name="network_settings_delete">Delete network</string>
@@ -447,7 +447,7 @@
     <string name="settings_show_shared_avatars">Show shared user avatars</string>
     <string name="settings_show_shared_avatars_desc">Experimental · Receive HTTPS avatar URLs shared through IRCv3 metadata</string>
     <string name="network_settings_avatar_section">Shared avatar</string>
-    <string name="network_settings_avatar_experimental">Experimental IRCv3 metadata feature. MOTD stores only the HTTPS URL; it never uploads an image.</string>
+    <string name="network_settings_avatar_experimental">Experimental IRCv3 metadata feature. motd stores only the HTTPS URL; it never uploads an image.</string>
     <string name="network_settings_avatar_url">Avatar HTTPS URL</string>
     <string name="network_settings_avatar_url_desc">You may use {size} as a pixel-size placeholder.</string>
     <string name="network_settings_avatar_unavailable">This connection does not currently allow publishing avatar metadata. Your existing choice is retained for later.</string>
@@ -577,7 +577,7 @@
     <!-- soju bound-network manager (WP-V2, §5.5) -->
     <string name="bouncer_control_title">Soju control center</string>
     <string name="bouncer_connect">Connect</string>
-    <string name="bouncer_show_in_motd">Shown in MOTD</string>
+    <string name="bouncer_show_in_motd">Shown in motd</string>
     <string name="bouncer_delete_from_bouncer">Delete from bouncer</string>
     <string name="bouncer_delete_confirm_title">Delete network?</string>
     <string name="bouncer_delete_confirm_message">This removes %1$s from the bouncer permanently.</string>
@@ -594,7 +594,7 @@
     <string name="bouncer_commands_verified">BouncerServ commands verified for this connection.</string>
     <string name="bouncer_commands_unverified">BouncerServ capabilities could not be verified. Guided actions are paused; the console remains available.</string>
     <string name="bouncer_probe_again">Check commands again</string>
-    <string name="bouncer_networks_help">Networks come from soju’s machine-readable listing. “Shown in MOTD” controls the local chat mirror; editing changes the bouncer itself.</string>
+    <string name="bouncer_networks_help">Networks come from soju’s machine-readable listing. “Shown in motd” controls the local chat mirror; editing changes the bouncer itself.</string>
     <string name="bouncer_network_create_title">Add network</string>
     <string name="bouncer_network_update_title">Edit %1$s</string>
     <string name="bouncer_network_create_help">Use a complete IRC URL, such as ircs://irc.libera.chat:6697. Passwords and connect commands are never saved in app history.</string>

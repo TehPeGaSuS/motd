@@ -106,6 +106,6 @@ sealed interface IrcEvent {
     data class ReadMarker(val target: String, val timestamp: Long?) : IrcEvent  // MARKREAD; null = "*" (unset)
     data class BouncerNetworkState(val netId: String, val attrs: Map<String, String>) : IrcEvent // BOUNCER NETWORK notify
     data class ServerError(val code: String, val params: List<String>, val text: String) : IrcEvent
-    /** Escape hatch: anything not mapped above (raw numerics for MOTD text, WHOIS, etc.). */
+    /** Escape hatch: anything not mapped above (raw numerics for motd text, WHOIS, etc.). */
     data class Raw(val message: IrcMessage) : IrcEvent
 }

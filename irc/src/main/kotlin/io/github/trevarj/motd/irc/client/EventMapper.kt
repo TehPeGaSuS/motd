@@ -175,7 +175,7 @@ class EventMapper(
                     ctcpReply(
                         IrcMessage(
                             command = "NOTICE",
-                            params = listOf(source.nick, "VERSION MOTD"),
+                            params = listOf(source.nick, "VERSION motd"),
                         ),
                     )
                     return null

@@ -56,8 +56,8 @@ The model includes:
 - accidental logs, crash material, or backup/device-transfer behavior.
 
 The model does not claim confidentiality from an attacker who can execute code
-inside the live MOTD process or fully control the running OS. Such an attacker
-can ask the application to decrypt a secret or observe it when MOTD connects.
+inside the live motd process or fully control the running OS. Such an attacker
+can ask the application to decrypt a secret or observe it when motd connects.
 Android Keystore still improves resistance to offline extraction because the
 wrapping key is non-exportable, but it is not a process-compromise boundary.
 

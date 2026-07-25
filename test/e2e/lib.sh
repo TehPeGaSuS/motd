@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# test/e2e/lib.sh — sourced helper library for the MOTD device-driven E2E harness.
+# test/e2e/lib.sh — sourced helper library for the motd device-driven E2E harness.
 #
 # Source this from runbook.sh; it provides adb wrappers, uiautomator dump parsing,
 # tap/input primitives, assertions, crash detection, and step/pass/fail logging.
@@ -608,7 +608,7 @@ scroll_to_text() {
   dump || true
   [ -n "$(bounds_of_text "$t")" ] && return 0
 
-  # MOTD deliberately restores each chat's saved viewport. The runbook's search below is
+  # motd deliberately restores each chat's saved viewport. The runbook's search below is
   # one-directional, so an older restored anchor must first be reset to the newest viewport or the
   # swipes can only walk farther toward "Beginning of history" and never reach a newer target.
   bottom_bounds="$(bounds_of_desc "Scroll to bottom")"

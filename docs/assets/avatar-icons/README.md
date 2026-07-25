@@ -5,7 +5,7 @@ requests. People and private messages use compact robot variations; network
 rows use a robot plus a thicker outer status ring. Project-named channels use
 a matched, background-free Devicons mark, while ordinary channels use a quiet
 `#` fallback. All badges are tinted with the deterministic channel/nick color,
-so the marks feel native to MOTD rather than like imported app icons.
+so the marks feel native to motd rather than like imported app icons.
 
 ## Font Awesome Free source
 

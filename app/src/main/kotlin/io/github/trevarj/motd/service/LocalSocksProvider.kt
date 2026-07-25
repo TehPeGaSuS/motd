@@ -262,7 +262,7 @@ private class AndroidPlatform(context: Context) : PlatformInterface {
     override fun includeAllNetworks() = false
     override fun localDNSTransport(): io.nekohasekai.libbox.LocalDNSTransport? = null
     override fun openTun(options: io.nekohasekai.libbox.TunOptions?): Int =
-        throw UnsupportedOperationException("libbox TUN is not enabled by MOTD")
+        throw UnsupportedOperationException("libbox TUN is not enabled by motd")
     // sing-box's Android platform implementation returns an object even when Wi-Fi is absent.
     override fun readWIFIState(): io.nekohasekai.libbox.WIFIState =
         io.nekohasekai.libbox.WIFIState("", "")

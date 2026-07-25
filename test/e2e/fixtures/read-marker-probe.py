@@ -65,7 +65,7 @@ def connect(host: str, port: int, username: str, password: str, nick: str) -> Cl
     client = Client(sock)
     client.send("CAP LS 302")
     client.send(f"NICK {nick}")
-    client.send(f"USER {nick} 0 * :MOTD read-marker probe")
+    client.send(f"USER {nick} 0 * :motd read-marker probe")
     client.wait_for(lambda line: " CAP " in line and " LS " in line, "CAP LS")
     client.pump(0.5)
     offered = " ".join(line for line in client.lines if " CAP " in line and " LS " in line)

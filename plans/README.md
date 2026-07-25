@@ -1,6 +1,6 @@
 # Historical design plans
 
-The files in this directory record MOTD’s original architecture and staged
+The files in this directory record motd’s original architecture and staged
 implementation. They are useful for design rationale and feature archaeology,
 but they are not current implementation contracts.
 

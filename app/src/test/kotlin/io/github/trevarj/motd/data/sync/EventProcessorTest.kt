@@ -2056,7 +2056,7 @@ class EventProcessorTest {
 
     @Test
     fun serverBufferMention_doesNotNotify() = runTest {
-        // A recording notifier; a MOTD line containing our nick must not fire.
+        // A recording notifier; a motd line containing our nick must not fire.
         var fired = false
         val recProcessor = EventProcessor(db, TypingTrackerImpl(), object : MessageNotifier {
             override suspend fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage) {

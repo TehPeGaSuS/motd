@@ -1,5 +1,5 @@
 # test/e2e/hermetic/docker-compose.yml — self-contained bouncer stack for the
-# MOTD end-to-end run. No external network, no secrets.
+# motd end-to-end run. No external network, no secrets.
 #
 # Topology:
 #   ergo            upstream IRCd (plaintext :6667, internal only)

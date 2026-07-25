@@ -24,7 +24,7 @@ Waves: WP1 alone → wave A: WP2 ∥ WP4 ∥ WP6 ∥ WP9 → wave B: WP3 ∥ WP7
 **Owns:** repo root (`settings.gradle.kts`, root `build.gradle.kts`, `gradle.properties`,
 wrapper files incl. jar), `gradle/libs.versions.toml`, `.github/workflows/*`, `irc/build.gradle.kts`,
 `app/build.gradle.kts`, `app/src/main/AndroidManifest.xml`, app resources
-(`strings.xml`, launcher icon: adaptive icon, indigo background + white "MOTD" monogram
+(`strings.xml`, launcher icon: adaptive icon, indigo background + white "motd" monogram
 vector), `MotdApplication.kt` (@HiltAndroidApp), `MainActivity.kt` (theme + NavHost with
 placeholder composables), `di/*` (AppModule/DbModule/IrcModule binding interfaces to
 `internal` stub impls annotated `@Deprecated("WP10 removes")`), and ALL contract files from

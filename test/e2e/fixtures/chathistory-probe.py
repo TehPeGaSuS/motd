@@ -128,7 +128,7 @@ def connect(
     client = Client(context.wrap_socket(raw, server_hostname=host))
     client.send("CAP LS 302")
     client.send("NICK motdhistoryprobe")
-    client.send("USER motdhistoryprobe 0 * :MOTD CHATHISTORY probe")
+    client.send("USER motdhistoryprobe 0 * :motd CHATHISTORY probe")
     client.wait_for(lambda line: " CAP " in line and " LS " in line, "CAP LS")
     client.pump(0.25)
     offered = " ".join(line for line in client.lines if " CAP " in line and " LS " in line)

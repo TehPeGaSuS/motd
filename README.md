@@ -151,7 +151,7 @@ reproducible by F-Droid without changing its update-compatible signing key.
 
 The managed-device smoke and exhaustive emulator journey remain available as
 separate workflows, but currently do not gate releases because hosted emulator
-System UI failures can occur before MOTD starts.
+System UI failures can occur before motd starts.
 
 ```sh
 git tag -s v0.1.0 -m "v0.1.0"

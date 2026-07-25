@@ -45,7 +45,7 @@ class IrcClientTest {
         tls = true,
         nick = "motd",
         username = "motd",
-        realname = "MOTD User",
+        realname = "motd User",
         sasl = sasl,
         saslUser = saslUser,
         saslPassword = saslPassword,
@@ -82,7 +82,7 @@ class IrcClientTest {
         // Opening lines.
         assertEquals("CAP LS 302", ft.sent[0])
         assertEquals("NICK motd", ft.sent[1])
-        assertEquals("USER motd 0 * :MOTD User", ft.sent[2])
+        assertEquals("USER motd 0 * :motd User", ft.sent[2])
 
         ft.feed(":srv CAP * LS :$fullLs")
         runCurrent()
@@ -307,7 +307,7 @@ class IrcClientTest {
         val defaults = registered(defaultTransport)
         assertFalse(defaults.targetClassificationReady.value)
 
-        defaultTransport.feed(":srv 376 motd :End of MOTD")
+        defaultTransport.feed(":srv 376 motd :End of motd")
         runCurrent()
         assertTrue(defaults.targetClassificationReady.value)
     }

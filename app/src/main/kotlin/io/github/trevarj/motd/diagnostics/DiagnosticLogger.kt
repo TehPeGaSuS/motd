@@ -140,7 +140,7 @@ class FileDiagnosticLogger @Inject constructor(
 
     private fun exportFiles(output: OutputStream) {
         val writer = output.bufferedWriter(Charsets.UTF_8)
-        writer.appendLine("# MOTD diagnostic log")
+        writer.appendLine("# motd diagnostic log")
         writer.appendLine("# app=${BuildConfig.VERSION_NAME} build=${BuildConfig.BUILD_TYPE} sdk=${Build.VERSION.SDK_INT}")
         writer.appendLine("# Generated ${Instant.now()}; message bodies and user identifiers are not recorded.")
         if (!previousFile.exists() && !currentFile.exists()) writer.appendLine("# No diagnostic events captured.")

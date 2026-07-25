@@ -52,7 +52,7 @@ class AllMigrationsTest {
                 """INSERT INTO buffers
                     (id, networkId, name, displayName, type, joined, pinned, muted, ordering,
                      historyComplete)
-                    VALUES (1, 1, '#motd', '#MOTD', 'CHANNEL', 1, 1, 0, 0, 0)""",
+                    VALUES (1, 1, '#motd', '#motd', 'CHANNEL', 1, 1, 0, 0, 0)""",
             )
             execSQL(
                 """INSERT INTO messages

@@ -1,4 +1,4 @@
-# test/e2e/hermetic/ergo/ircd.yaml — hermetic upstream IRCd for the MOTD e2e stack.
+# test/e2e/hermetic/ergo/ircd.yaml — hermetic upstream IRCd for the motd e2e stack.
 #
 # ergo (formerly oragono) is the UPSTREAM network that soju proxies. It runs on
 # the internal docker network only; the app never talks to it directly (it talks

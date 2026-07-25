@@ -80,7 +80,7 @@ class ReadyHandler(socketserver.StreamRequestHandler):
             f":{SERVER} 005 {self.nick} CASEMAPPING=rfc1459 CHANTYPES=# "
             "CHANMODES=b,k,l,imnpst MONITOR=10 PREFIX=(ov)@+ WHOX :are supported"
         )
-        self.send(f":{SERVER} 376 {self.nick} :End of MOTD")
+        self.send(f":{SERVER} 376 {self.nick} :End of motd")
 
     def names(self, channel: str) -> None:
         nick = self.nick or "motd"
@@ -181,7 +181,7 @@ class ReadyHandler(socketserver.StreamRequestHandler):
                     self.send(f"PONG :{rest.lstrip(':')}")
                 elif upper == "JOIN" and params:
                     channel = params[0].lstrip(":")
-                    self.send(f":{self.nick}!device@localhost JOIN {channel} * :MOTD device")
+                    self.send(f":{self.nick}!device@localhost JOIN {channel} * :motd device")
                     self.send(
                         f":{REMOTE}!fixture@ready.example JOIN {channel} "
                         ":Ready Fixture User"

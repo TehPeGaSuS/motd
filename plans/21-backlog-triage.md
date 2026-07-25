@@ -87,9 +87,9 @@ files.
   optimistic state.
 - **Focused tests:** serializer and mapper tests for ratified and legacy reply
   tags; `CLIENTTAGDENY` wildcard/exemption matrix; optimistic add/remove and
-  rollback; duplicate replay; push mapping. Exercise two MOTD clients on the
+  rollback; duplicate replay; push mapping. Exercise two motd clients on the
   Ergo/soju stack and, when available, one compatible independent client.
-- **2026-07-13 evidence:** MOTD now sends the ratified `+reply` reference,
+- **2026-07-13 evidence:** motd now sends the ratified `+reply` reference,
   accepts ratified and legacy references in live, push, and history paths, and
   models `CLIENTTAGDENY` without changing frozen contracts. Reaction add/remove
   is optimistic, idempotent on replay, and rolls back only its own failed
@@ -967,7 +967,7 @@ user explicitly requests it.
 
 | # | Original report | Implementation entry |
 |---:|---|---|
-| 1 | Add a MOTD channel on Libera connection for first timers | D3 |
+| 1 | Add a motd channel on Libera connection for first timers | D3 |
 | 2 | Crash after adding a fool from the nick menu | D4 |
 | 3 | Minimized fool rows are not considered seen and break saved place | B1 |
 | 4 | Reactions do not sync to other users | A1 |

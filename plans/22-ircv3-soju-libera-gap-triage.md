@@ -2,7 +2,7 @@
 
 Date: 2026-07-14
 Baseline: `main` at `8e68f8b`
-Sources reviewed: current MOTD source, the IRCv3 client support table, IRCv3
+Sources reviewed: current motd source, the IRCv3 client support table, IRCv3
 specifications, and Libera.Chat's 2026 feature announcement
 
 This document turns the IRCv3 support audit into implementation-sized backlog
@@ -206,7 +206,7 @@ sending wire commands directly.
 - **Priority / size / status:** P1, L, Ready / included.
 - **Applies to:** soju and Solanum/Libera.Chat; degrade on servers without the
   `MONITOR` ISUPPORT token.
-- **Evidence:** MOTD has friends, query buffers, and `UserEntity.away`, account,
+- **Evidence:** motd has friends, query buffers, and `UserEntity.away`, account,
   hostmask, and realname fields, but no `MONITOR` commands or 730-734 numeric
   handling. Existing AWAY/ACCOUNT/CHGHOST/SETNAME state only stays current for
   users who share a channel.
@@ -271,7 +271,7 @@ sending wire commands directly.
 
 - **Priority / size / status:** P1, L, Ready / included.
 - **Applies to:** soju and Solanum/Libera.Chat through the `WHOX` ISUPPORT token.
-- **Evidence:** MOTD preserves the generic ISUPPORT map internally but neither
+- **Evidence:** motd preserves the generic ISUPPORT map internally but neither
   issues extended `WHO` nor parses 354. Member identity is therefore assembled
   opportunistically from JOIN notifications and one-off WHOIS requests.
 
@@ -345,7 +345,7 @@ sending wire commands directly.
   capability.
 - **Motivation:** the extension avoids the automatic NAMES burst after every
   JOIN and is explicitly intended to improve connection time on mobile clients
-  with many channels. MOTD currently needs complete lists for channel info and
+  with many channels. motd currently needs complete lists for channel info and
   completion, so requesting it without lazy fetches would be a regression.
 
 #### Capability and loading state
@@ -499,7 +499,7 @@ sending wire commands directly.
 - **Priority / size / status:** P2, M, Product decision required.
 - **Applies to:** soju; the reviewed spec lists soju server support and describes
   the extension as work-in-progress.
-- **Question to settle before implementation:** which MOTD connections represent
+- **Question to settle before implementation:** which motd connections represent
   active user presence? A safe starting policy is foreground/user-opened
   connections = present, background history/push maintenance connections =
   `AWAY *`, but Android lifecycle transitions and persistent-socket mode need a
@@ -511,8 +511,8 @@ sending wire commands directly.
 - **Failure behavior:** without the capability, do not send pre-registration
   AWAY; retain manual `/away`. A transient lifecycle event must not overwrite a
   user-supplied human-readable away message without an explicit policy.
-- **Acceptance:** a history-only/background MOTD connection does not make the
-  soju user appear present; returning to the active UI clears only MOTD's
+- **Acceptance:** a history-only/background motd connection does not make the
+  soju user appear present; returning to the active UI clears only motd's
   automatic away state; manual away remains distinguishable and respected.
 - **Focused verification:** registration ordering, foreground/background
   debounce, process recreation, multiple downstream clients, manual away,
@@ -554,7 +554,7 @@ sending wire commands directly.
 ### M4. `draft/multiline`
 
 - **Priority / size / status:** P3, L, watch Libera deployment and draft status.
-- **Evidence:** MOTD currently splits pasted physical lines into separate
+- **Evidence:** motd currently splits pasted physical lines into separate
   PRIVMSGs, which is safe but loses logical-message grouping. Libera.Chat listed
   multiline as a possible near-term feature, not a deployed one; the reviewed
   soju support table did not list downstream multiline support.
@@ -562,7 +562,7 @@ sending wire commands directly.
   batch, enforce server limits, fall back to today's safe split, and make Room,
   replies, reactions, notifications, search, history, and redaction agree on
   logical versus physical identity.
-- **Trigger:** move to Ready only after the actual soju/Libera path used by MOTD
+- **Trigger:** move to Ready only after the actual soju/Libera path used by motd
   advertises a compatible capability and the draft revision is pinned in tests.
 
 ## Verified existing coverage
@@ -570,7 +570,7 @@ sending wire commands directly.
 These are not implementation backlog items. They are recorded to prevent
 duplicate work and should be regression-tested when adjacent code changes.
 
-| Feature | Current MOTD behavior |
+| Feature | Current motd behavior |
 |---|---|
 | CAP 302 / `cap-notify` | Multiline LS, runtime NEW/DEL/ACK, Ready cap updates |
 | SASL | PLAIN and EXTERNAL; required auth never falls back to NickServ password messages |
@@ -588,9 +588,9 @@ duplicate work and should be regression-tested when adjacent code changes.
 | `soju.im/webpush` | Registration, unregistration, encrypted push handling |
 | STS | Capability value surfaced and persisted at the Android transport boundary |
 
-Libera.Chat currently permits the `+typing` client tag, which MOTD already
+Libera.Chat currently permits the `+typing` client tag, which motd already
 supports. Its reviewed announcement says `+draft/channel-context`, reactions,
-replies, and unreact remain under consideration. MOTD's reply/reaction support
+replies, and unreact remain under consideration. motd's reply/reaction support
 should therefore continue to obey `CLIENTTAGDENY` and visibly degrade rather
 than assuming direct Libera acceptance.
 

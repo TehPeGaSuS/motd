@@ -86,7 +86,7 @@ def connect_znc(host: str, port: int, sasl: bool) -> Client:
     # Attached ZNC clients share the upstream identity; distinct probe nicks would issue upstream
     # NICK changes rather than identify downstream sessions.
     client.send("NICK motdadb")
-    client.send("USER motd 0 * :MOTD ZNC probe")
+    client.send("USER motd 0 * :motd ZNC probe")
     client.wait_for(" CAP ")
     caps = cap_tokens(client.lines)
     requested = [cap for cap in ("server-time", "batch", "echo-message") if cap in caps]
@@ -113,7 +113,7 @@ def connect_ergo(port: int) -> Client:
     client = Client(socket.create_connection(("127.0.0.1", port), timeout=5))
     client.send("CAP LS 302")
     client.send("NICK motdadb2")
-    client.send("USER motdadb2 0 * :MOTD direct probe")
+    client.send("USER motdadb2 0 * :motd direct probe")
     client.wait_for(" CAP ")
     client.send("CAP REQ :sasl echo-message server-time")
     client.wait_for(" CAP ")

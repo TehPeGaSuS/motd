@@ -210,7 +210,7 @@ class LinkPreviewRepositoryImpl @Inject constructor(
         private const val TEXT_MAX_CODE_POINTS = 2_048
         private const val GENERIC_ACCEPT = "text/html, text/*, application/json, application/xml"
         private const val WIKIPEDIA_ACCEPT = "application/json"
-        private const val USER_AGENT = "MOTD-Android (https://github.com/trevarj/motd)"
+        private const val USER_AGENT = "motd-Android (https://github.com/trevarj/motd)"
         private const val WIKIPEDIA_SITE_NAME = "Wikipedia"
         private val JSON = Json { ignoreUnknownKeys = true }
         private val WIKIPEDIA_HOST = Regex("""(?:^|[.])wikipedia[.]org$""", RegexOption.IGNORE_CASE)

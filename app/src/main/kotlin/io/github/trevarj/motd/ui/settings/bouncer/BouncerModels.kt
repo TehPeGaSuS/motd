@@ -15,7 +15,7 @@ data class BouncerNetRow(
 /**
  * Pure merge of the live bouncer listing with local child rows (plans/16 §5.5). A local child is
  * matched to a listing entry by [NetworkEntity.bouncerNetId]; the match sets [childNetworkId] so
- * the UI can show the "shown in MOTD" import toggle.
+ * the UI can show the "shown in motd" import toggle.
  */
 fun mergeBouncerRows(
     listing: List<BouncerNetwork>,

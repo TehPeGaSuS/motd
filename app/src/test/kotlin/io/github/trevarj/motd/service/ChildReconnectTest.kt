@@ -29,7 +29,7 @@ class ChildReconnectTest {
         port = 6697,
         nick = "motd",
         username = "motd",
-        realname = "MOTD",
+        realname = "motd",
         autoConnect = autoConnect,
     )
 

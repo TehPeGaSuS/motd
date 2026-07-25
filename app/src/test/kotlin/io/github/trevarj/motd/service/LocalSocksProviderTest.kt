@@ -94,7 +94,7 @@ class LocalSocksProviderTest {
             tls = true,
             nick = "motd",
             username = "motd",
-            realname = "MOTD",
+            realname = "motd",
             obfsMode = ObfsMode.EMBEDDED_REALITY,
             // Embedded REALITY intentionally clears legacy SOCKS settings when persisting a VLESS link.
             proxyHost = null,
@@ -120,7 +120,7 @@ class LocalSocksProviderTest {
             tls = true,
             nick = "motd",
             username = "motd",
-            realname = "MOTD",
+            realname = "motd",
             obfsMode = ObfsMode.EMBEDDED_REALITY,
             obfsLink = "not-a-vless-link",
         )

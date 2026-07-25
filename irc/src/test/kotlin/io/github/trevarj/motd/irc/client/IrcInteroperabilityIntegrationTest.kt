@@ -24,7 +24,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
-/** Opt-in two-MOTD-client proof against `test/e2e/local-stack.sh up`. */
+/** Opt-in two-motd-client proof against `test/e2e/local-stack.sh up`. */
 class IrcInteroperabilityIntegrationTest {
     @Test
     fun `reply react unreact and history interoperate over Ergo`() = runBlocking {
@@ -150,7 +150,7 @@ class IrcInteroperabilityIntegrationTest {
                 tls = false,
                 nick = nick,
                 username = nick,
-                realname = "MOTD interoperability test",
+                realname = "motd interoperability test",
             ),
             factory,
             scope,

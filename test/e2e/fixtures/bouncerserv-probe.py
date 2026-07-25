@@ -99,7 +99,7 @@ def connect(host: str, port: int, username: str, password: str, nick: str) -> Cl
     client = Client(sock, nick)
     client.send("CAP LS 302")
     client.send(f"NICK {nick}")
-    client.send(f"USER {username} 0 * :MOTD BouncerServ probe")
+    client.send(f"USER {username} 0 * :motd BouncerServ probe")
     client.wait_for(lambda line: " CAP " in line and " LS " in line, "CAP LS")
     client.send("CAP REQ :sasl")
     client.wait_for(lambda line: " CAP " in line and " ACK " in line, "CAP ACK")

@@ -516,7 +516,7 @@ fun ChatContent(
             AutoFollowTrace.record("first_frame", traceBufferId, traceSessionId) {
                 "item_count=${items.itemCount}"
             }
-            Trace.beginSection("MOTD chat first frame")
+            Trace.beginSection("motd chat first frame")
             try {
                 // Instant-like marker for Perfetto/gfx correlation without spanning suspension.
             } finally {

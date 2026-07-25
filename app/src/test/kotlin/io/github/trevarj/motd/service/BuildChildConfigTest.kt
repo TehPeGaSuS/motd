@@ -26,7 +26,7 @@ class BuildChildConfigTest {
         tls = true,
         nick = "motd",
         username = "motd",
-        realname = "MOTD",
+        realname = "motd",
         saslMechanism = SaslMechanism.PLAIN.name,
         saslUser = "motd",
         saslPassword = "s3cret",
@@ -45,7 +45,7 @@ class BuildChildConfigTest {
         tls = true,
         nick = "motd",
         username = "motd",
-        realname = "MOTD",
+        realname = "motd",
         // A wrongly-mirrored child could even carry NO SASL; the fix pulls creds from the root.
         saslMechanism = SaslMechanism.NONE.name,
         saslUser = null,

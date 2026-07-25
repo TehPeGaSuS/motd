@@ -308,7 +308,7 @@ private fun channelTokens(channelName: String): List<String> {
 /**
  * Contextual channel badge: named technical channels get a Devicons mark; ordinary channels keep
  * a quiet IRC sigil. Both retain the deterministic channel color and circular shape of the avatar
- * system, so this reads as part of MOTD rather than an imported app icon.
+ * system, so this reads as part of motd rather than an imported app icon.
  */
 @Composable
 internal fun IrcChannelBadge(

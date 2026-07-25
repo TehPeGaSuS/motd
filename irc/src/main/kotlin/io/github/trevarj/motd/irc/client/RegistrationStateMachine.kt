@@ -74,7 +74,7 @@ internal class RegistrationStateMachine(
             "001" -> onWelcome(msg)
             "005" -> { onIsupport(msg); emptyList() }
             "FAIL" -> fail(msg.params.drop(1).joinToString(" ").ifBlank { "registration failed" }, fatal = true)
-            "376", "422" -> emptyList() // end of MOTD; 001 already completed us
+            "376", "422" -> emptyList() // end of motd; 001 already completed us
             "PING" -> listOf(Action.Send("PONG ${msg.params.firstOrNull().orEmpty()}"))
             "ERROR" -> fail("server ERROR: ${msg.params.lastOrNull().orEmpty()}", fatal = false)
             else -> emptyList()

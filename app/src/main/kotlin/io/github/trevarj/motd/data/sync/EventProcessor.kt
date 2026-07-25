@@ -2251,7 +2251,7 @@ class EventProcessor @Inject constructor(
         e: IrcEvent.ChatMessage,
     ) {
         if (e.isSelf) return
-        // Never raise a notification for a SERVER buffer: a MOTD line containing the user's nick
+        // Never raise a notification for a SERVER buffer: a motd line containing the user's nick
         // must not fire a mention (plans/16 §5.6.5).
         if (type == BufferType.SERVER) return
         if (type != BufferType.QUERY && !hasMention) return
@@ -2299,7 +2299,7 @@ class EventProcessor @Inject constructor(
     private companion object {
         /**
          * Informational numerics persisted to the SERVER buffer as SERVER_INFO (plans/16 §5.6.3):
-         * welcome (001..004), lusers (251..255, 265, 266), MOTD (375, 372, 376), away toggled
+         * welcome (001..004), lusers (251..255, 265, 266), motd (375, 372, 376), away toggled
          * (305, 306), RPL_AWAY (301), and the WHOIS set (311, 312, 317, 318, 319, 330, 338) as a
          * fallback surface when labeled-response is missing. LIST numerics (321/322/323) are
          * deliberately excluded so a browse never floods the buffer.

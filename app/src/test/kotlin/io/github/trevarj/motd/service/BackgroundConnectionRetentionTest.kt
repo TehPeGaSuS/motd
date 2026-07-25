@@ -144,7 +144,7 @@ class BackgroundConnectionRetentionTest {
         port = 6697,
         nick = "motd",
         username = "motd",
-        realname = "MOTD",
+        realname = "motd",
         obfsMode = obfsMode,
     )
 }

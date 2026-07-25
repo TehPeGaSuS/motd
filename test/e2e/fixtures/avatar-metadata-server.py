@@ -51,7 +51,7 @@ class AvatarIrcHandler(socketserver.StreamRequestHandler):
         self.registered = True
         self.send(f":{SERVER} 001 {self.nick} :Welcome to the avatar metadata fixture")
         self.send(f":{SERVER} 005 {self.nick} CASEMAPPING=rfc1459 CHANTYPES=# :are supported")
-        self.send(f":{SERVER} 376 {self.nick} :End of MOTD")
+        self.send(f":{SERVER} 376 {self.nick} :End of motd")
         self.send(f":{self.nick}!fixture@localhost JOIN {CHANNEL}")
         self.send(f":{REMOTE_NICK}!fixture@localhost JOIN {CHANNEL}")
         self.send(f":{SERVER} 353 {self.nick} = {CHANNEL} :{self.nick} {REMOTE_NICK}")

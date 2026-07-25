@@ -72,7 +72,7 @@ class Migration6To7Test {
                 id, name, role, host, port, tls, nick, username, realname, saslMechanism,
                 saslPassword, autoConnect, ordering
             ) VALUES (
-                1, 'example', 'DIRECT', 'irc.example.org', 6697, 1, 'motd', 'motd', 'MOTD',
+                1, 'example', 'DIRECT', 'irc.example.org', 6697, 1, 'motd', 'motd', 'motd',
                 'PLAIN', 'sasl-secret', 1, 0
             )
         """

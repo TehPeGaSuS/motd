@@ -1,7 +1,7 @@
 # Push notifications with ntfy
 
-MOTD can use [ntfy](https://ntfy.sh/) as its UnifiedPush distributor. This keeps Firebase out of
-MOTD and works with the Google-free `foss` APK. Your soju bouncer must support
+motd can use [ntfy](https://ntfy.sh/) as its UnifiedPush distributor. This keeps Firebase out of
+motd and works with the Google-free `foss` APK. Your soju bouncer must support
 `soju.im/webpush`.
 
 ## Install ntfy
@@ -11,29 +11,29 @@ F-Droid build contains no Firebase and maintains its own instant-delivery connec
 notification permission and allow it to run in the background.
 
 You do not need to create an ntfy topic or account for UnifiedPush when using the public
-`https://ntfy.sh` server. MOTD creates and manages its private push endpoints automatically.
+`https://ntfy.sh` server. motd creates and manages its private push endpoints automatically.
 
-## Enable UnifiedPush in MOTD
+## Enable UnifiedPush in motd
 
 1. Open ntfy once after installing it.
-2. Connect MOTD to your soju bouncer. MOTD must connect at least once to detect Web Push support.
+2. Connect motd to your soju bouncer. motd must connect at least once to detect Web Push support.
 3. Open **Settings → Message delivery**.
 4. Select **UnifiedPush**.
 5. If Android asks which distributor to use, select **ntfy**. When ntfy is the only installed
-   distributor, MOTD selects it automatically.
-6. Leave MOTD open until the status card says **UnifiedPush active**. MOTD first obtains an
+   distributor, motd selects it automatically.
+6. Leave motd open until the status card says **UnifiedPush active**. motd first obtains an
    endpoint, then waits for soju to confirm that its encrypted test delivery succeeded.
-7. Background MOTD and send a message from another IRC client to verify that a notification
+7. Background motd and send a message from another IRC client to verify that a notification
    arrives.
 
-MOTD closes an IRC socket only after soju acknowledges the current endpoint for that network.
-Networks without Web Push support, or whose registration fails, remain connected through MOTD's
+motd closes an IRC socket only after soju acknowledges the current endpoint for that network.
+Networks without Web Push support, or whose registration fails, remain connected through motd's
 foreground service. The setting remains UnifiedPush and the status card reports this as socket
 fallback rather than silently changing modes. Push payloads are encrypted by soju and decrypted on
 your device; ntfy cannot read the IRC message.
 
 Soju uses Web Push for direct messages and channel highlights. Ordinary channel traffic is fetched
-through CHATHISTORY when MOTD returns to the foreground. Foregrounding always reconnects first, runs
+through CHATHISTORY when motd returns to the foreground. Foregrounding always reconnects first, runs
 catch-up, and keeps the socket available while you are using the app.
 
 The status card distinguishes endpoint setup, server verification, active delivery, partial socket
@@ -45,7 +45,7 @@ distributor** safely cleans up the previous instances before requesting replacem
 
 Self-hosting is optional. In the ntfy app, open **Settings**, change the default server to your
 HTTPS ntfy URL, and add credentials under **Manage users** if the server requires authentication.
-Then return to MOTD and select **UnifiedPush** again so it obtains endpoints from that server.
+Then return to motd and select **UnifiedPush** again so it obtains endpoints from that server.
 
 The phone must be able to maintain a connection to the self-hosted server. Use a valid HTTPS
 certificate where possible; current ntfy Android releases also support self-signed and client
@@ -59,28 +59,28 @@ configuration.
 
 For reliable background delivery:
 
-- Allow notification permission for both ntfy and MOTD.
+- Allow notification permission for both ntfy and motd.
 - Exempt ntfy from battery optimization on devices that aggressively stop background apps.
 - Allow ntfy background data and automatic startup when those controls exist.
 - Do not force-stop ntfy; Android prevents a force-stopped app from receiving messages.
 
-The battery exemption shown in MOTD primarily protects persistent IRC connections. In
+The battery exemption shown in motd primarily protects persistent IRC connections. In
 UnifiedPush mode, ntfy is the application that must remain reachable in the background.
 
 ## Troubleshooting
 
-- **UnifiedPush is disabled in MOTD:** connect to soju first. The bouncer must advertise
+- **UnifiedPush is disabled in motd:** connect to soju first. The bouncer must advertise
   `soju.im/webpush`; plain IRC servers cannot provide push delivery.
-- **MOTD says no distributor is installed:** open ntfy, confirm UnifiedPush is enabled in its
-  settings, then restart MOTD or select UnifiedPush again.
+- **motd says no distributor is installed:** open ntfy, confirm UnifiedPush is enabled in its
+  settings, then restart motd or select UnifiedPush again.
 - **No notification arrives:** confirm ntfy reports an active connection and review Android's
   battery, background-data, and notification permissions.
 - **It worked until ntfy was force-stopped:** reopen ntfy. Android intentionally blocks delivery
   to force-stopped applications.
-- **Messages appear only after opening MOTD:** inspect the status card. Use **Retry** if it reports
+- **Messages appear only after opening motd:** inspect the status card. Use **Retry** if it reports
   endpoint or verification failure; affected networks remain socket-backed until verification.
 - **Multiple distributors are installed:** use **Choose distributor** or **Change distributor** in
-  the status card. MOTD never silently picks one when the choice is ambiguous.
+  the status card. motd never silently picks one when the choice is ambiguous.
 - **Self-hosted delivery fails:** verify the ntfy URL, TLS certificate, login, reverse proxy
   WebSocket/streaming support, and that the phone can reach the server outside Wi-Fi.
 

@@ -1,6 +1,6 @@
-# MOTD device and end-to-end testing
+# motd device and end-to-end testing
 
-This is the canonical operator guide for MOTD’s Android device harness. The
+This is the canonical operator guide for motd’s Android device harness. The
 scripts in this directory are the behavioral authority; historical design notes
 under `plans/` are not required to run it.
 
@@ -181,8 +181,8 @@ enable/disable cleanup without adding Python dependencies beyond the Nix shell.
 `read-marker-check` connects two downstream clients to the same Soju network,
 sends a timestamped message, and verifies that `draft/read-marker` broadcasts
 between clients, never regresses after an older SET, and remains available after
-a downstream reconnect. The live response is required inside MOTD’s bounded
-five-second reconnect barrier: MOTD converges its durable local marker with the
+a downstream reconnect. The live response is required inside motd’s bounded
+five-second reconnect barrier: motd converges its durable local marker with the
 server maximum before CHATHISTORY replay can populate unread-count queries.
 
 `history-check [EXACT_TEXT]` authenticates as the fixture bouncer user, requires

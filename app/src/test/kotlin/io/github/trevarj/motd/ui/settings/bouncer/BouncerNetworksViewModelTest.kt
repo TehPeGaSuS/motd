@@ -134,6 +134,6 @@ class BouncerNetworksViewModelTest {
         tls = true,
         nick = "motd",
         username = "motd",
-        realname = "MOTD",
+        realname = "motd",
     )
 }

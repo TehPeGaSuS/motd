@@ -462,7 +462,7 @@ class ConnectionManagerImpl @Inject constructor(
                 }
             }
             // Delivery-mode reaction: UNIFIED_PUSH tears verified sockets down only after Android
-            // enters Doze. Merely switching away from MOTD keeps active conversations connected.
+            // enters Doze. Merely switching away from motd keeps active conversations connected.
             val deliveryModeJob = scope.launch {
                 settings.settings.map { it.deliveryMode }.distinctUntilChanged().collect { mode ->
                     if (mode == DeliveryMode.UNIFIED_PUSH) {
@@ -578,7 +578,7 @@ class ConnectionManagerImpl @Inject constructor(
 
     /**
      * Doze entry is the UnifiedPush hand-off boundary. Doze exit intentionally leaves a completed
-     * hand-off suspended until MOTD foregrounds; reconnecting sockets behind another foreground
+     * hand-off suspended until motd foregrounds; reconnecting sockets behind another foreground
      * app would defeat the battery-saving mode without improving delivery.
      */
     internal fun onDeviceIdleModeChanged(idle: Boolean) {

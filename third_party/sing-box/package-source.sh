@@ -105,10 +105,10 @@ install -m 0644 "$root_dir/app/libs/libbox-v${SING_BOX_VERSION#v}.manifest" \
   "$motd_dir/app/libs/libbox-v${SING_BOX_VERSION#v}.manifest"
 
 cat > "$package_dir/README.md" <<EOF
-# MOTD libbox corresponding source — ${release_tag}
+# motd libbox corresponding source — ${release_tag}
 
-This archive is the complete libbox source snapshot distributed beside MOTD ${release_tag}.
-It contains the exact git archives for Go, sing-box, its Android submodule, and gomobile, plus MOTD's
+This archive is the complete libbox source snapshot distributed beside motd ${release_tag}.
+It contains the exact git archives for Go, sing-box, its Android submodule, and gomobile, plus motd's
 pinned build inputs and rebuild procedure. The inner archive hashes are fixed in source.lock.
 
 To rebuild, provide the verified Android NDK r28 archive described in

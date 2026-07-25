@@ -112,7 +112,7 @@ Map inbound `IrcMessage` → `IrcEvent` per `10-contracts.md`. Notables:
   `java.time.Instant`; fall back to `System.currentTimeMillis()` when absent.
 - `isSelf`: source nick == current nick (track own nick through NICK changes).
 - CTCP ACTION: PRIVMSG text `\x01ACTION <t>\x01` → `ChatKind.ACTION` with text `<t>`.
-  Other CTCP: respond to `\x01VERSION\x01` with NOTICE `\x01VERSION MOTD\x01` (hardcoded
+  Other CTCP: respond to `\x01VERSION\x01` with NOTICE `\x01VERSION motd\x01` (hardcoded
   reply string); ignore the rest.
 - NAMES: accumulate 353 params (with `multi-prefix` + `userhost-in-names` parsing) until 366,
   then emit `Names`.

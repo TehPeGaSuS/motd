@@ -145,7 +145,7 @@ class WhoxTest {
         advertiseWhox: Boolean = true,
     ): IrcClient {
         val client = IrcClient(
-            IrcClientConfig("irc.example", 6697, true, "motd", "motd", "MOTD"),
+            IrcClientConfig("irc.example", 6697, true, "motd", "motd", "motd"),
             transport.factory(),
             clientScope(),
         )

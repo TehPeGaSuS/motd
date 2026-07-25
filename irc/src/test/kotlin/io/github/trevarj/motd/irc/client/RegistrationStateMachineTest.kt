@@ -15,7 +15,7 @@ class RegistrationStateMachineTest {
                 tls = true,
                 nick = "motd",
                 username = "motd-android",
-                realname = "MOTD",
+                realname = "motd",
                 serverPassword = "trev/libera:secret",
             ),
         )
@@ -25,7 +25,7 @@ class RegistrationStateMachineTest {
                 "PASS trev/libera:secret",
                 "CAP LS 302",
                 "NICK motd",
-                "USER motd-android 0 * :MOTD",
+                "USER motd-android 0 * :motd",
             ),
             machine.start().sentLines(),
         )
@@ -40,7 +40,7 @@ class RegistrationStateMachineTest {
                 tls = true,
                 nick = "motd",
                 username = "motd",
-                realname = "MOTD",
+                realname = "motd",
                 serverPassword = "secret with spaces",
             ),
         )
@@ -57,7 +57,7 @@ class RegistrationStateMachineTest {
                 tls = true,
                 nick = "motd",
                 username = "motd",
-                realname = "MOTD",
+                realname = "motd",
                 serverPassword = "secret\r\nQUIT",
             ),
         )
@@ -71,7 +71,7 @@ class RegistrationStateMachineTest {
     @Test
     fun `password mismatch is a fatal registration failure`() {
         val machine = RegistrationStateMachine(
-            IrcClientConfig("cloak", 6697, true, "motd", "motd", "MOTD", serverPassword = "bad"),
+            IrcClientConfig("cloak", 6697, true, "motd", "motd", "motd", serverPassword = "bad"),
         )
 
         val fail = machine.onMessage(
@@ -91,7 +91,7 @@ class RegistrationStateMachineTest {
                 tls = true,
                 nick = "motd",
                 username = "motd",
-                realname = "MOTD",
+                realname = "motd",
                 bouncerNetId = "2",
             ),
         )
@@ -119,7 +119,7 @@ class RegistrationStateMachineTest {
                 tls = true,
                 nick = "motd",
                 username = "motd",
-                realname = "MOTD",
+                realname = "motd",
                 bouncerNetId = "404",
             ),
         )
@@ -142,7 +142,7 @@ class RegistrationStateMachineTest {
                 tls = true,
                 nick = "motd",
                 username = "motd",
-                realname = "MOTD",
+                realname = "motd",
                 saslUser = "motd/libera",
             ),
         )

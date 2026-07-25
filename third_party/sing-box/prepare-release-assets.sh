@@ -41,7 +41,7 @@ cat >> "$output_dir/$notice_name" <<EOF
 - Source archive SHA-256: \`${source_sha256}\`
 
 The source archive contains the exact pinned sing-box, Android-submodule, and gomobile source archives,
-MOTD's build script and lock file, the Nix build definition, artifact manifest, licenses, and
+motd's build script and lock file, the Nix build definition, artifact manifest, licenses, and
 rebuild instructions. It is provided alongside the APK at no additional charge.
 EOF
 
@@ -53,7 +53,7 @@ EOF
 cat > "$output_dir/release-compliance.md" <<EOF
 ## Source and license
 
-MOTD is GPL-3.0-or-later, includes libbox from sing-box, and uses outlined lettering derived
+motd is GPL-3.0-or-later, includes libbox from sing-box, and uses outlined lettering derived
 from IBM Plex Mono under the SIL Open Font License 1.1. The complete corresponding source for
 the bundled libbox is available as [${source_name}](${source_url})
 (SHA-256: \`${source_sha256}\`). See the attached [release-specific third-party notice](https://github.com/${repository}/releases/download/${release_tag}/${notice_name})

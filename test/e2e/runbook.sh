@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test/e2e/runbook.sh — device-driven E2E acceptance run for MOTD.
+# test/e2e/runbook.sh — device-driven E2E acceptance run for motd.
 #
 # Implements the A–I traversal documented in test/e2e/README.md against a
 # physical device or emulator and a real soju test bouncer. Drives the app via
@@ -1371,7 +1371,7 @@ phase_r() {
   wait_for_desc "New conversation" 8 || return 1
   assert_no_crash
 
-  step "Seed forty older retained rows while MOTD is absent"
+  step "Seed forty older retained rows while motd is absent"
   adb_shell am force-stop "$MOTD_PKG"
   reconnect_stack reconnect-gap "$MOTD_RECONNECT_TOKEN"
   reconnect_stack history-check "$gap_first"
@@ -1514,7 +1514,7 @@ phase_s() {
 # ==========================================================================
 main() {
   ensure_device
-  echo "${_C_CYA}MOTD E2E run — pkg=${MOTD_PKG} device=${SERIAL}${_C_RST}"
+  echo "${_C_CYA}motd E2E run — pkg=${MOTD_PKG} device=${SERIAL}${_C_RST}"
   echo "${_C_CYA}bouncer=${MOTD_SOJU_HOST}:${MOTD_SOJU_PORT} nick=${MOTD_NICK} channel=${MOTD_TEST_CHANNEL}${_C_RST}"
 
   # Freeze animations so uiautomator can reach an idle state. Compose's blinking text cursor and

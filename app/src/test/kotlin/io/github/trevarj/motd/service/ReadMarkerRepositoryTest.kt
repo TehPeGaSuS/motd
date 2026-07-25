@@ -148,7 +148,7 @@ class ReadMarkerRepositoryTest {
 
         val response = awaitReadMarkerResponse(
             events = events,
-            target = "#MOTD",
+            target = "#motd",
             normalize = String::lowercase,
             timeoutMs = 1_000,
         ) {

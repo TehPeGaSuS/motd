@@ -6,14 +6,14 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 lock_file="$root_dir/third_party/sing-box/source.lock"
 output_dir="${LIBBOX_OUTPUT_DIR:-$root_dir/app/libs}"
-# libbox's upstream builder supports a platform selector.  MOTD currently
+# libbox's upstream builder supports a platform selector.  motd currently
 # ships to the connected arm64-v8a device only, so keep the generated AAR
 # deliberately single-ABI rather than paying for three unused native slices.
 # This is an ABI contract, not a best-effort optimization: changing it requires
 # an explicit build invocation and updates the provenance manifest.
 android_platform="${LIBBOX_ANDROID_PLATFORM:-android/arm64}"
 [[ "$android_platform" == "android/arm64" ]] || {
-  echo "only the supported MOTD arm64 build is allowed (LIBBOX_ANDROID_PLATFORM=android/arm64)" >&2
+  echo "only the supported motd arm64 build is allowed (LIBBOX_ANDROID_PLATFORM=android/arm64)" >&2
   exit 1
 }
 
@@ -298,7 +298,7 @@ if [[ -n "$gomobile_source_archive" ]]; then
   mkdir -p "$gomobile_source_dir"
   tar -xf "$gomobile_source_archive" -C "$gomobile_source_dir"
   git -C "$gomobile_source_dir" init --quiet
-  git -C "$gomobile_source_dir" config user.name "MOTD source rebuild"
+  git -C "$gomobile_source_dir" config user.name "motd source rebuild"
   git -C "$gomobile_source_dir" config user.email "source-rebuild@invalid"
   git -C "$gomobile_source_dir" add --all
   GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
@@ -336,7 +336,7 @@ if [[ -n "$source_archive" || -n "$android_source_archive" ]]; then
   # and tag the verified tree. The commit identity is not provenance (the archive hashes above
   # are); it only restores the v1.13.12 version string used by the original pinned build.
   git -C "$source_dir" init --quiet
-  git -C "$source_dir" config user.name "MOTD source rebuild"
+  git -C "$source_dir" config user.name "motd source rebuild"
   git -C "$source_dir" config user.email "source-rebuild@invalid"
   git -C "$source_dir" add --all
   GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
@@ -416,7 +416,7 @@ else
   }
 fi
 
-# sing-box v1.13.12 unnecessarily rejects newer JDKs before invoking gomobile. MOTD validates
+# sing-box v1.13.12 unnecessarily rejects newer JDKs before invoking gomobile. motd validates
 # the exact JDK above, then temporarily updates that guard without changing the pinned source
 # checkout or archive provenance. The original file is restored when the build exits.
 java_check_file="$source_dir/cmd/internal/build_libbox/main.go"

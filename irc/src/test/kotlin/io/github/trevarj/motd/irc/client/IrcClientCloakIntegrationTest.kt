@@ -141,7 +141,7 @@ class IrcClientCloakIntegrationTest {
                 tls = false,
                 nick = nick,
                 username = username,
-                realname = "MOTD CLoak interoperability test",
+                realname = "motd CLoak interoperability test",
                 serverPassword = serverPassword,
             ),
             factory,

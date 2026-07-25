@@ -1,4 +1,4 @@
-# AGENTS.md — MOTD ground rules
+# AGENTS.md — motd ground rules
 
 This file is the mandatory policy layer for work in this repository. Detailed
 workflows live in [`.agents/`](.agents/README.md); operational E2E instructions

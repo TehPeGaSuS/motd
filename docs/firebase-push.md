@@ -1,6 +1,6 @@
 # Firebase Cloud Messaging push
 
-MOTD currently publishes only the `foss` APK, with persistent sockets and
+motd currently publishes only the `foss` APK, with persistent sockets and
 UnifiedPush. The Google/FCM flavor below is unfinished and paused: it is not a
 CI APK build or release artifact, and agents should not build or publish it
 unless the maintainer explicitly reactivates the integration.
@@ -55,7 +55,7 @@ deployment, and release support as one explicit work package.
 ## Use it
 
 Connect to soju once, then select **Settings → Message delivery → Firebase Cloud Messaging
-(Google)**. MOTD creates one relay subscription per auto-connect network and closes sockets only
+(Google)**. motd creates one relay subscription per auto-connect network and closes sockets only
 after every eligible network has a registered endpoint.
 
 References: [Firebase Android setup](https://firebase.google.com/docs/android/setup),

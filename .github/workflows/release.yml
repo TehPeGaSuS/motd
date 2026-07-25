@@ -9,7 +9,7 @@ permissions:
 jobs:
   release:
     # The managed-device smoke remains available via smoke.yml, but is temporarily not a
-    # release gate: hosted AOSP emulators intermittently surface a System UI ANR before MOTD's
+    # release gate: hosted AOSP emulators intermittently surface a System UI ANR before motd's
     # onboarding can run. The release build below still runs all unit tests and lint checks.
     runs-on: ubuntu-latest
     timeout-minutes: 45

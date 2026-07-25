@@ -42,7 +42,7 @@ class TypedDaoProjectionTest {
         assertEquals(2, db.messageDao().countForBuffer(channel))
         assertTrue(db.messageDao().hasStoredChat(channel))
         assertFalse(db.messageDao().hasStoredChat(server))
-        assertEquals(channel, db.bufferDao().idForTarget(networkId, "#MOTD"))
+        assertEquals(channel, db.bufferDao().idForTarget(networkId, "#motd"))
         assertEquals(listOf(BufferTargetRow(channel, "#motd")), db.bufferDao().openTargets(networkId))
     }
 

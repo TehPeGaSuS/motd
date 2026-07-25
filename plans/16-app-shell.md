@@ -26,7 +26,7 @@ correct field set per variant.
 | Add server from Settings (reuses NetworkForm + connect test) | yes | §5.4 |
 | Edit/delete server (extend NetworkSettingsScreen: status header, autoConnect) | yes | §5.3 |
 | soju bound-network management post-onboarding (LIST/ADD/DEL NETWORK) | yes | §5.5 |
-| Server buffer (MOTD, server notices, numerics, errors) | yes | §5.6 |
+| Server buffer (motd, server notices, numerics, errors) | yes | §5.6 |
 | Channel list / browse + join (LIST + ELIST) | yes | §5.7 |
 | Nick context actions: message, mention, whois, friend/fool | yes | §5.8 |
 | Channel moderation (op/deop, voice, kick, ban) for ops | yes | §5.8 |
@@ -99,7 +99,7 @@ Rationale:
   folder drawer are the modern reference).
 - The drawer also gives the shell its missing "app-level" surface: Add network, Go offline,
   Settings shortcut — none of which belong in a per-buffer list.
-- `ModalNavigationDrawer` (not `PermanentNavigationDrawer`): MOTD is phone-first; the modal
+- `ModalNavigationDrawer` (not `PermanentNavigationDrawer`): motd is phone-first; the modal
   drawer costs no horizontal space and is the M3-canonical pattern with the top-bar Menu icon.
   A future tablet round can swap in `PermanentNavigationDrawer` behind the same
   `ServerDrawerContent` composable without redesign.
@@ -119,7 +119,7 @@ ModalNavigationDrawer(drawerState, gesturesEnabled = true) {
   drawerContent = ModalDrawerSheet {
     Column(verticalScroll) {
       // Header: app name, small — matches SectionHeader style
-      Text("MOTD", titleLarge, padding 16dp)
+      Text("motd", titleLarge, padding 16dp)
       // 1. All chats
       NavigationDrawerItem(
         icon = Icon(Icons.Outlined.Forum),
@@ -143,7 +143,7 @@ ModalNavigationDrawer(drawerState, gesturesEnabled = true) {
 ```
 
 - Top bar gains `navigationIcon = IconButton(Icons.Filled.Menu)` opening the drawer.
-  Title stays "MOTD" when unscoped; shows the selected network's name when scoped.
+  Title stays "motd" when unscoped; shows the selected network's name when scoped.
 - `BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }`.
 - "Go offline" label flips to "Go online" when every network's state is absent/Disconnected.
 
@@ -498,7 +498,7 @@ ViewModel (injects `NetworkRepository`, `ConnectionManager`):
 
 Screen: `TopAppBar("Bouncer networks")`; not-Ready card (per above) or:
 `LazyColumn` of rows — status mini-dot from `bouncerState` string, name + host subtitle,
-trailing: `Switch` bound to `childNetworkId != null` ("shown in MOTD" import toggle) +
+trailing: `Switch` bound to `childNetworkId != null` ("shown in motd" import toggle) +
 overflow `DropdownMenu` with "Delete from bouncer" (error-colored, confirm dialog).
 Footer `OutlinedButton("Add network to bouncer")` opens an `AlertDialog` with
 name/host (+ optional port, nickname) `OutlinedTextField`s.
@@ -524,14 +524,14 @@ EventProcessor routing changes (all inserts via the existing `insertSystem`):
    text = `"${code} ${text}"` (use `System.currentTimeMillis()`; the event has no ctx).
 3. **`IrcEvent.Raw`** → persist a whitelist of informational numerics as
    `MessageKind.SERVER_INFO`, text = `params.drop(1).joinToString(" ")` (drop our nick):
-   `001..004` (welcome), `251..255, 265, 266` (lusers), `375, 372, 376` (MOTD), `305, 306`
+   `001..004` (welcome), `251..255, 265, 266` (lusers), `375, 372, 376` (motd), `305, 306`
    (away toggled), `301` (RPL_AWAY, "<nick> is away: msg"), and the WHOIS set
    `311, 312, 317, 318, 319, 330, 338` (fallback surface when labeled-response is missing,
    §5.8). Everything else stays dropped. Keep the whitelist as a private `Set<String>`.
 4. **`IrcEvent.Disconnected`** → server buffer, `SERVER_INFO`,
    `"disconnected" + (reason?.let { ": $it" } ?: "")`. (Cheap reconnect visibility in-history.)
 5. **Notification guard**: `maybeNotify` returns early when `type == BufferType.SERVER`
-   (a MOTD line containing the user's nick must not raise a mention notification).
+   (a motd line containing the user's nick must not raise a mention notification).
 
 Chat screen behavior for SERVER buffers (`ChatViewModel` + `ChatScreen`):
 
@@ -943,7 +943,7 @@ back into this document ("Amendments" section at the end, per house style).
 | LIST fallback floods `IrcClient.events` (4096 DROP_OLDEST) on huge networks without labeled-response | The fallback collects concurrently (subscribe before send), caps rows, and stops at 323/15s; chat events dropped during a monster burst are recovered by CHATHISTORY catch-up. Also mitigated by the ≥50-users default filter (decision 6). |
 | soju root vs child confusion for LIST/whois (root connection is unbound) | Browse entry is disabled for BOUNCER_ROOT (§3.5); drawer scoping naturally hands child networkIds to the sheet. |
 | `bouncerAddNetwork` notify-mirror race duplicating child rows | Import path re-reads `childrenOf` inside the action and no-ops on an existing `bouncerNetId`; delete path removes both sides explicitly. |
-| Server buffer accumulates unbounded MOTD/notice rows | Bounded numeric whitelist; no images/previews render for SERVER_INFO/ERROR kinds; acceptable for v1 (retention/pruning is a data-layer round). |
+| Server buffer accumulates unbounded motd/notice rows | Bounded numeric whitelist; no images/previews render for SERVER_INFO/ERROR kinds; acceptable for v1 (retention/pruning is a data-layer round). |
 | WHOIS label timeout (30s) blocks the sheet | `runCatching` + sheet renders actions immediately with whois=null; details fill in when the response lands. |
 | `Failed.reason` strings leak into UI unlocalized | They already do (ConnectionBanner); accepted — server-provided text is shown verbatim in drawer subtitles and status headers. |
 | Drawer badge counts diverge from list badges | Same source (`ChatListRow` sums) via pure `buildDrawerRows`, unit-tested against the sectioning fixtures. |

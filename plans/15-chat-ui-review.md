@@ -195,7 +195,7 @@ the client layer, so per-keystroke `sendTyping` is wire-safe. Reaction add-only 
     (`TypingIndicatorRow.kt:48-53`), "Today"/"Yesterday" (`DaySeparator.kt:66-67`),
     Reply/Copy/Quote + "＋" (`MessageActionSheet.kt:86,117-119`), "notice"
     (`MessageBubble.kt:138`), "Failed" (179), "Scroll to bottom" (`ChatScreen.kt:412`),
-    "Share image"/"Saved to Pictures/MOTD"/"Couldn't save image"
+    "Share image"/"Saved to Pictures/motd"/"Couldn't save image"
     (`ImageViewerScreen.kt:145,169`). Fix: move to resources (use plurals for members).
 
 26. **Image viewer**: pan is unclamped so the image can be flung fully off-screen
