@@ -62,6 +62,10 @@ fun SystemEventPill(
     val expansionState = stringResource(
         if (expanded) R.string.system_event_expanded else R.string.system_event_collapsed,
     )
+    // Capsule for the short collapsed pill; once expanded the percent radius would be 50% of the
+    // smaller dimension and overrun the 14 dp text padding, pushing top/bottom lines outside the
+    // background. Cap it to a Dp radius that stays within the padding when expanded.
+    val pillShape = if (expanded && collapsible) RoundedCornerShape(14.dp) else RoundedCornerShape(50)
     Row(
         modifier = modifier.fillMaxWidth().padding(
             vertical = LocalSpacing.current.systemPillVPad,
@@ -73,7 +77,7 @@ fun SystemEventPill(
             modifier = Modifier
                 .background(
                     MaterialTheme.colorScheme.surfaceContainerHigh,
-                    RoundedCornerShape(50),
+                    pillShape,
                 )
                 .then(
                     if (collapsible) Modifier.semantics {
