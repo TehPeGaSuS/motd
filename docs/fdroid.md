@@ -1,5 +1,10 @@
 # F-Droid packaging
 
+For the per-release update runbook — bump the version, clone the fdroiddata
+fork, add the build entry, run local `fdroid` checks, and update the merge
+request — see [`human-fdroid-update.md`](human-fdroid-update.md). This file is
+the recipe and signing reference.
+
 The official F-Droid package is the `foss` Gradle flavor. It is built from the
 full source checkout and verified against the upstream-signed GitHub release
 APK. F-Droid publishes that upstream signature only after the unsigned rebuild

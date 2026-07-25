@@ -1,0 +1,39 @@
+# motd docs
+
+Human-oriented runbooks for working in this repository. Each one lists the
+exact `nix develop` commands for one activity.
+
+## Human runbooks
+
+- [`human-developing.md`](human-developing.md) — building, linting, and testing
+  motd locally.
+- [`human-releasing.md`](human-releasing.md) — cutting a signed release tag and
+  the workflow that publishes it.
+- [`human-fdroid-update.md`](human-fdroid-update.md) — bumping the F-Droid
+  metadata and updating the fdroiddata merge request after a release.
+
+## Packaging reference
+
+- [`fdroid.md`](fdroid.md) — the F-Droid build recipe, native libbox source
+  build, reproducible signing, and the FOSS boundary. The per-release update
+  steps live in `human-fdroid-update.md`.
+
+## Feature and setup docs
+
+- [`cloak.md`](cloak.md) — CLoak bouncer connection guide.
+- [`obfuscation.md`](obfuscation.md) — SOCKS5, Tor, and VLESS + REALITY
+  transport behavior and validation.
+- [`firebase-push.md`](firebase-push.md) — Firebase Cloud Messaging relay
+  (paused Google/FCM flavor).
+- [`ntfy-push.md`](ntfy-push.md) — ntfy and UnifiedPush setup for Google-free
+  push.
+- [`theme-sources.md`](theme-sources.md) — editor, terminal, and wallpaper
+  palette sources.
+- [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) — third-party
+  licensing and libbox source provenance.
+
+## Note on agent docs
+
+[`../AGENTS.md`](../AGENTS.md) and [`../.agents/`](../.agents) are mandatory
+policy and task guides for AI agents working in this repository. They are not
+human runbooks; the files above are.

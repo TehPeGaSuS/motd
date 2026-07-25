@@ -58,21 +58,19 @@ nix develop -c ./test/e2e/headless.sh showcase
 
 Requires Android 8.0 (API 26) or newer.
 
-## Building
+## Building and testing
 
 GitHub Actions defines the canonical CI jobs (see
 [`.github/workflows/`](.github/workflows/)). For local work, the Nix flake
-provides JDK 21 and the Android SDK; direnv loads it via `.envrc`, or run the
+provides JDK 21 and the Android SDK; direnv loads it via `.envrc`, or run
 commands under `nix develop`.
 
-Initialize submodules recursively before rebuilding the bundled libbox AAR:
-`git submodule update --init --recursive`.
+The full build, lint, and test command reference lives in
+[docs/human-developing.md](docs/human-developing.md). Quick start:
 
 ```sh
-nix develop -c ./gradlew :irc:test               # protocol tests (pure JVM)
-nix develop -c ./gradlew :app:testFossDebugUnitTest  # app unit tests (Robolectric)
+git submodule update --init --recursive
 nix develop -c ./gradlew :app:assembleFossDebug      # Google-free arm64 debug APK
-nix develop -c ./gradlew :app:lintFossDebug :app:assembleFossDebug  # FOSS checks + APK
 ```
 
 The unfinished Google/FCM flavor is currently excluded from CI APK builds and
@@ -80,9 +78,9 @@ releases. Its paused implementation notes remain in
 [Firebase push setup](docs/firebase-push.md).
 For Google-free push, see [ntfy and UnifiedPush setup](docs/ntfy-push.md).
 
-The debug APK lands under `app/build/outputs/apk/foss/debug/`. Install it with `adb
-install`. The debug build carries the `.debug` application-id suffix, so it can
-coexist with a release install.
+The debug APK lands under `app/build/outputs/apk/foss/debug/`. Install it with
+`adb install`. The debug build carries the `.debug` application-id suffix, so
+it can coexist with a release install.
 
 The embedded VLESS + REALITY transport uses bundled libbox, which is currently
 arm64-v8a-only. APKs built from this source tree must not be installed on 32-bit
@@ -91,14 +89,13 @@ libbox artifact.
 
 ## F-Droid packaging
 
-The official F-Droid build uses the `foss` flavor only. Its metadata supplies a
-full source commit, semantic version, and deterministic version code; the
-checked-in defaults in `gradle.properties` keep ordinary source builds
-versioned as well. F-Droid removes the checked-in libbox AAR and dormant
-Google/Firebase sources before scanning, then rebuilds libbox from the pinned
-sing-box, Android-submodule, and gomobile sources into
-`app/build/generated/libbox`. The source-build procedure and metadata guidance
-are in [docs/fdroid.md](docs/fdroid.md).
+The official F-Droid build uses the `foss` flavor only. F-Droid removes the
+checked-in libbox AAR and dormant Google/Firebase sources before scanning, then
+rebuilds libbox from the pinned sing-box, Android-submodule, and gomobile
+sources. The build recipe and signing model are in
+[docs/fdroid.md](docs/fdroid.md); the per-release update runbook (bump the
+version, update the fdroiddata merge request) is in
+[docs/human-fdroid-update.md](docs/human-fdroid-update.md).
 
 F-Droid builds retain the arm64-v8a-only embedded transport. The F-Droid
 signature is independent from the GitHub release key, so switching channels
@@ -125,9 +122,10 @@ For a CLoak bouncer, follow the dedicated [CLoak connection guide](docs/cloak.md
 For SOCKS5, Tor, or VLESS + REALITY configuration, see the
 [obfuscation guide](docs/obfuscation.md).
 
-## Architecture
+## Architecture and docs
 
-See [ARCHITECTURE.md](ARCHITECTURE.md).
+See [ARCHITECTURE.md](ARCHITECTURE.md). Human runbooks for building, testing,
+releasing, and F-Droid updates are indexed in [docs/README.md](docs/README.md).
 
 ## License
 
@@ -149,27 +147,13 @@ and `versionCode` come from `gradle.properties`; the workflow requires the
 signed tag to match `v<versionName>`. This keeps the upstream-signed APK
 reproducible by F-Droid without changing its update-compatible signing key.
 
+The full preflight, version-bump, tagging, dry-run, and failure-recovery steps
+are in [docs/human-releasing.md](docs/human-releasing.md). Agent-facing release
+policy lives in [`.agents/releases.md`](.agents/releases.md).
+
 The managed-device smoke and exhaustive emulator journey remain available as
 separate workflows, but currently do not gate releases because hosted emulator
 System UI failures can occur before motd starts.
-
-```sh
-git tag -s v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
-```
-
-CI decodes the keystore from `KEYSTORE_BASE64`, runs the full build with the
-signing env (`MOTD_KEYSTORE_PATH`, `MOTD_KEYSTORE_PASSWORD`, `MOTD_KEY_ALIAS`,
-`MOTD_KEY_PASSWORD`, `MOTD_SOURCE_COMMIT`), and attaches the APK, GPL and IBM Plex licenses,
-deterministic complete libbox source, `SHA256SUMS`, and release-specific
-third-party notice. Required
-repository secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`,
-`KEY_PASSWORD`. The Google/FCM APK is not built or published. Maintainer and
-agent details are in the
-[release runbook](.agents/releases.md).
-
-To dry-run locally, run `nix develop -c ./gradlew :app:assembleFossRelease` with the
-signing env set (or the debug signing config).
 
 ## LLM disclaimer
 
