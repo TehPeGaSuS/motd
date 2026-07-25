@@ -1,10 +1,12 @@
 package io.github.trevarj.motd
 
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -13,6 +15,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.NetworkEntity
@@ -20,6 +24,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
 import io.github.trevarj.motd.ui.chatlist.ChatListState
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
+import io.github.trevarj.motd.ui.chatlist.ArchiveAccessibilityAnnouncement
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Rule
 import org.junit.Assert.assertEquals
@@ -105,6 +110,66 @@ class ChatListSelectionUiTest {
             compose.onAllNodesWithText("Connect to a network to start chatting.")
                 .fetchSemanticsNodes().size,
         )
+    }
+
+    @Test fun end_to_start_swipe_archives_once() {
+        val archiveCalls = mutableListOf<Pair<List<Long>, Boolean>>()
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatListContent(
+                    state = ChatListState(rows = listOf(row()), loading = false),
+                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
+                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
+                    onSetArchived = { ids, archived -> archiveCalls += ids.toList() to archived },
+                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeLeft() }
+
+        compose.runOnIdle {
+            assertEquals(listOf(listOf(1L) to true), archiveCalls)
+        }
+    }
+
+    @Test fun disabled_swipe_directions_do_not_archive() {
+        val archiveCalls = mutableListOf<Pair<List<Long>, Boolean>>()
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatListContent(
+                    state = ChatListState(rows = listOf(row()), loading = false),
+                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
+                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
+                    onSetArchived = { ids, archived -> archiveCalls += ids.toList() to archived },
+                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeRight() }
+        compose.onNodeWithTag("chatlist_row_1").performTouchInput { longClick() }
+        compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeLeft() }
+
+        compose.runOnIdle { assertEquals(emptyList<Pair<List<Long>, Boolean>>(), archiveCalls) }
+    }
+
+    @Test fun archive_announcement_uses_a_polite_live_region() {
+        val announcement = mutableStateOf<String?>(null)
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ArchiveAccessibilityAnnouncement(announcement.value)
+            }
+        }
+
+        compose.runOnIdle { announcement.value = "Archived chats revealed" }
+        compose.onNodeWithTag("chatlist_archive_announcement")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+            .assertTextEquals("Archived chats revealed")
+
+        compose.runOnIdle { announcement.value = "Archived chats hidden" }
+        compose.onNodeWithTag("chatlist_archive_announcement")
+            .assertTextEquals("Archived chats hidden")
     }
 
     private fun row() = ChatListRow(

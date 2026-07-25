@@ -105,11 +105,15 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.core.view.HapticFeedbackConstantsCompat
+import androidx.core.view.ViewCompat
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
@@ -121,7 +125,6 @@ import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import android.os.SystemClock
-import android.view.HapticFeedbackConstants
 import android.view.View
 import kotlin.math.abs
 import kotlinx.coroutines.Job
@@ -553,7 +556,10 @@ private fun ChatList(
     var archiveDisplayExposurePx by remember { mutableFloatStateOf(0f) }
     var archiveSettling by remember { mutableStateOf(false) }
     var archiveSettleJob by remember { mutableStateOf<Job?>(null) }
+    var archiveAnnouncement by remember { mutableStateOf<String?>(null) }
     val view = LocalView.current
+    val archivedRevealedAnnouncement = stringResource(R.string.chatlist_archived_revealed_announcement)
+    val archivedHiddenAnnouncement = stringResource(R.string.chatlist_archived_hidden_announcement)
 
     fun dispatchArchiveEvent(event: ArchiveFolderPullEvent): ArchiveFolderPullResult {
         val result = reduceArchiveFolderPull(archivePullState, event, archiveFolderGeometry)
@@ -561,8 +567,8 @@ private fun ChatList(
         result.effects.forEach { effect ->
             when (effect) {
                 ArchiveFolderPullEffect.HapticThresholdActivated -> view.performArchiveThresholdHaptic()
-                ArchiveFolderPullEffect.AnnounceShown -> view.announceForAccessibility(view.context.getString(R.string.chatlist_archived_revealed_announcement))
-                ArchiveFolderPullEffect.AnnounceHidden -> view.announceForAccessibility(view.context.getString(R.string.chatlist_archived_hidden_announcement))
+                ArchiveFolderPullEffect.AnnounceShown -> archiveAnnouncement = archivedRevealedAnnouncement
+                ArchiveFolderPullEffect.AnnounceHidden -> archiveAnnouncement = archivedHiddenAnnouncement
             }
         }
         return result
@@ -713,6 +719,8 @@ private fun ChatList(
             }
             .testTag("chatlist_archive_pull_target"),
     ) {
+        ArchiveAccessibilityAnnouncement(archiveAnnouncement)
+
         if (archivedOnly) {
             Box(
                 modifier = Modifier
@@ -995,12 +1003,25 @@ private fun ArchiveFolderPullOverlay(
     }
 }
 
-/** Telegram deliberately bypasses disabled touch feedback for this explicit threshold latch. */
-@Suppress("DEPRECATION")
+/** Use the action-specific compat effect while honoring the user's touch-feedback preference. */
 private fun View.performArchiveThresholdHaptic() {
-    performHapticFeedback(
-        HapticFeedbackConstants.KEYBOARD_TAP,
-        HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING,
+    ViewCompat.performHapticFeedback(
+        this,
+        HapticFeedbackConstantsCompat.GESTURE_THRESHOLD_ACTIVATE,
+    )
+}
+
+/** A stable semantic host lets accessibility services announce reducer-driven state changes. */
+@Composable
+internal fun ArchiveAccessibilityAnnouncement(message: String?) {
+    if (message == null) return
+    Text(
+        text = message,
+        color = Color.Transparent,
+        modifier = Modifier
+            .size(1.dp)
+            .semantics { liveRegion = LiveRegionMode.Polite }
+            .testTag("chatlist_archive_announcement"),
     )
 }
 
@@ -1098,18 +1119,14 @@ private fun SelectableChatListRow(
     modifier: Modifier = Modifier,
 ) {
     val currentArchive by rememberUpdatedState(onArchive)
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.EndToStart) {
-                currentArchive()
-            }
-            false
-        },
-    )
+    val dismissState = rememberSwipeToDismissBoxState()
     SwipeToDismissBox(
         state = dismissState,
         enableDismissFromStartToEnd = false,
         enableDismissFromEndToStart = !selectionActive,
+        onDismiss = { direction ->
+            if (direction == SwipeToDismissBoxValue.EndToStart) currentArchive()
+        },
         backgroundContent = { ArchiveSwipeBackground(archiveMode) },
         modifier = modifier,
     ) {

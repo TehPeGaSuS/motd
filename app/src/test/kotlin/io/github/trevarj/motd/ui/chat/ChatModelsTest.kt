@@ -184,6 +184,17 @@ class ChatModelsTest {
         assertEquals(ScrollToBottomFabJump.Newest, scrollToBottomFabJump(longPress = true, mentionTarget = null))
     }
 
+    @Test fun `FAB hold animation compresses the icon continuously`() {
+        assertEquals(1f, scrollToBottomFabIconScale(0f), 0.0001f)
+        assertEquals(0.96f, scrollToBottomFabIconScale(0.5f), 0.0001f)
+        assertEquals(0.92f, scrollToBottomFabIconScale(1f), 0.0001f)
+    }
+
+    @Test fun `FAB hold animation clamps transient progress`() {
+        assertEquals(1f, scrollToBottomFabIconScale(-0.5f), 0.0001f)
+        assertEquals(0.92f, scrollToBottomFabIconScale(1.5f), 0.0001f)
+    }
+
     @Test fun `burst arrivals keep following across programmatic scroll motion`() {
         val tracker = AutoFollowTracker(initialItemCount = 10)
 

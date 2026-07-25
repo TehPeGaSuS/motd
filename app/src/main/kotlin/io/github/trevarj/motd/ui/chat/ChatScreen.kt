@@ -13,6 +13,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
@@ -66,9 +67,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -91,7 +91,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -103,7 +102,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -148,7 +147,13 @@ private const val MAX_VISIBLE_REACTION_MSGIDS = 80
 private const val MAX_UNREAD_BADGE_COUNT = 100
 
 /** How long (ms) the scroll-to-bottom FAB must be held to skip the mention walk and jump to newest. */
-private const val HOLD_MS = 450
+internal const val SCROLL_TO_BOTTOM_FAB_HOLD_MS = 450
+private const val SCROLL_TO_BOTTOM_FAB_SETTLE_MS = 160
+private const val SCROLL_TO_BOTTOM_FAB_HELD_SCALE = 0.92f
+
+/** Continuous icon compression used while the FAB's hold ring fills. */
+internal fun scrollToBottomFabIconScale(progress: Float): Float =
+    1f - (1f - SCROLL_TO_BOTTOM_FAB_HELD_SCALE) * progress.coerceIn(0f, 1f)
 
 internal class ChatForegroundLifecycleGate(
     private val onResume: () -> Unit,
@@ -1817,24 +1822,27 @@ private fun ScrollToBottomFab(
     // current mention/bottom resolution, even as mentionTarget updates between recompositions.
     val latestOnClick by rememberUpdatedState(onClick)
     val latestOnLongClick by rememberUpdatedState(onLongClick)
-    // One-shot bounce played when the hold completes, to confirm the "skip to newest" jump.
-    val iconScale = remember { Animatable(1f) }
     // Hold progress 0..1: fills a ring around the FAB while pressed, so the user can see how long
-    // to hold before the long-press fires. Reaches 1 at the hold threshold.
+    // to hold before the long-press fires. The same value gently compresses the arrow so progress
+    // and completion read as one continuous motion rather than two competing animations.
     val holdProgress = remember { Animatable(0f) }
     val ringColor = MaterialTheme.colorScheme.onPrimaryContainer
 
+    fun settle() {
+        scope.launch {
+            holdProgress.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(
+                    durationMillis = SCROLL_TO_BOTTOM_FAB_SETTLE_MS,
+                    easing = FastOutSlowInEasing,
+                ),
+            )
+        }
+    }
+
     fun fire() {
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-        scope.launch {
-            iconScale.snapTo(1f)
-            iconScale.animateTo(1.28f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium))
-            iconScale.animateTo(1f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium))
-        }
-        scope.launch {
-            holdProgress.snapTo(1f)
-            holdProgress.animateTo(0f, tween(durationMillis = 180, easing = LinearEasing))
-        }
+        settle()
         latestOnLongClick()
     }
 
@@ -1863,35 +1871,39 @@ private fun ScrollToBottomFab(
                             down.consume()
                             val holdJob = scope.launch {
                                 holdProgress.snapTo(0f)
-                                holdProgress.animateTo(1f, tween(durationMillis = HOLD_MS, easing = LinearEasing))
+                                holdProgress.animateTo(
+                                    1f,
+                                    tween(
+                                        durationMillis = SCROLL_TO_BOTTOM_FAB_HOLD_MS,
+                                        easing = LinearEasing,
+                                    ),
+                                )
                             }
-                            val completed = withTimeoutOrNull(HOLD_MS.toLong()) {
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    val release = event.changes.firstOrNull { it.id == down.id && it.changedToUp() }
-                                    if (release != null) {
-                                        release.consume()
-                                        return@withTimeoutOrNull false
-                                    }
-                                }
+                            // Wrapping the nullable pointer result distinguishes gesture
+                            // cancellation from the timeout that completes a hold.
+                            val releaseResult = withTimeoutOrNull(SCROLL_TO_BOTTOM_FAB_HOLD_MS.toLong()) {
+                                Result.success(waitForUpOrCancellation())
                             }
                             holdJob.cancel()
-                            if (completed == null) {
-                                // Held past the threshold: skip mentions, jump to newest.
-                                fire()
-                                // Swallow the trailing release so it doesn't leak to other handlers.
-                                while (true) {
-                                    val trailing = awaitPointerEvent()
-                                    val up = trailing.changes.firstOrNull { it.id == down.id && it.changedToUp() }
-                                    if (up != null) {
-                                        up.consume()
-                                        break
-                                    }
+                            when {
+                                releaseResult == null -> {
+                                    // Held past the threshold: skip mentions, jump to newest.
+                                    fire()
+                                    // Swallow the trailing release so it doesn't leak to handlers
+                                    // behind the FAB.
+                                    waitForUpOrCancellation()?.consume()
                                 }
-                            } else {
-                                // Released early: treat as a normal tap.
-                                scope.launch { holdProgress.snapTo(0f) }
-                                latestOnClick()
+                                releaseResult.getOrNull() != null -> {
+                                    // Released early: settle the partial ring and perform a tap.
+                                    releaseResult.getOrNull()?.consume()
+                                    settle()
+                                    latestOnClick()
+                                }
+                                else -> {
+                                    // Leaving the gesture bounds or another recognizer taking over
+                                    // cancels cleanly instead of being mistaken for a completed hold.
+                                    settle()
+                                }
                             }
                         }
                     }
@@ -1906,7 +1918,7 @@ private fun ScrollToBottomFab(
                                 val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
                                 val arcSize = Size(diameter, diameter)
                                 drawArc(
-                                    color = ringColor.copy(alpha = 0.22f),
+                                    color = ringColor.copy(alpha = 0.22f * (progress * 4f).coerceAtMost(1f)),
                                     startAngle = -90f,
                                     sweepAngle = 360f,
                                     useCenter = false,
@@ -1930,7 +1942,7 @@ private fun ScrollToBottomFab(
                 Icon(
                     Icons.Filled.KeyboardArrowDown,
                     contentDescription = stringResource(R.string.chat_scroll_to_bottom),
-                    modifier = Modifier.scale(iconScale.value),
+                    modifier = Modifier.scale(scrollToBottomFabIconScale(holdProgress.value)),
                 )
             }
         }

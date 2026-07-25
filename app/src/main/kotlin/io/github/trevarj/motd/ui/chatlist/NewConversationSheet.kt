@@ -19,7 +19,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SheetState
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -103,7 +103,7 @@ internal fun NewConversationSheetContent(
             .testTag("new_conversation_content"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        TabRow(selectedTabIndex = tab) {
+        PrimaryTabRow(selectedTabIndex = tab) {
             Tab(
                 selected = tab == 0,
                 onClick = { tab = 0; input = "" },
