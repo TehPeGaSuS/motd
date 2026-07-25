@@ -33,12 +33,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -205,13 +201,23 @@ fun ChatListRowItem(
                     NetworkChip(name = row.networkName)
                     Spacer(Modifier.width(6.dp))
                 }
+                // Channel previews lead with a sender label chip (no colon, which collided
+                // with nick mentions in the message text); queries read cleaner without it.
+                val lastMessage = row.lastMessageText
+                val sender = row.lastMessageSender
+                    ?.takeIf { row.type == BufferType.CHANNEL && lastMessage != null }
+                if (sender != null) {
+                    SenderLabel(
+                        sender = sender,
+                        color = LocalNickColors.current.nick(
+                            sender,
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
                 Text(
-                    text = lastMessageLine(
-                        row = row,
-                        senderColor = row.lastMessageSender?.let {
-                            LocalNickColors.current.nick(it, MaterialTheme.colorScheme.onSurfaceVariant)
-                        } ?: nickColor,
-                    ),
+                    text = lastMessage.orEmpty(),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = if (isUnread) FontWeight.Medium else FontWeight.Normal,
                     color = if (isUnread) {
@@ -339,20 +345,26 @@ private fun PresenceBadge(
     }
 }
 
-/** "sender: text" one-liner; falls back to plain text (queries) or empty. */
-private fun lastMessageLine(row: ChatListRow, senderColor: Color): AnnotatedString {
-    val text = row.lastMessageText ?: return AnnotatedString("")
-    // In channels, prefix with the sender; keep queries read cleaner without it.
-    return if (row.type == BufferType.CHANNEL && row.lastMessageSender != null) {
-        buildAnnotatedString {
-            withStyle(SpanStyle(color = senderColor, fontWeight = FontWeight.Bold)) {
-                append(row.lastMessageSender)
-            }
-            append(": ")
-            append(text)
-        }
-    } else {
-        AnnotatedString(text)
+/**
+ * Sender label chip for channel previews: nick-colored bold nick on a low-alpha
+ * nick-tinted rounded background (mirrors [NetworkChip] metrics). No colon, so a
+ * nick mention inside the message no longer reads as a double `nick: nick:`.
+ */
+@Composable
+private fun SenderLabel(sender: String, color: Color, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .background(color.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    ) {
+        Text(
+            text = sender,
+            color = color,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -400,6 +412,18 @@ private fun ChatListPresencePreview() {
                 showNetworkChip = true,
                 onClick = {}, onLongClick = {},
                 presence = PresenceState.UNKNOWN,
+            )
+            ChatListRowItem(
+                row = ChatListRow(
+                    bufferId = 4, networkId = 1, networkName = "Libera",
+                    displayName = "#motd", type = BufferType.CHANNEL,
+                    pinned = false, muted = false,
+                    lastMessageText = "alice: welcome @bob", lastMessageSender = "alice",
+                    lastMessageTime = System.currentTimeMillis() - 30_000,
+                    unreadCount = 3, mentionCount = 1,
+                ),
+                showNetworkChip = true,
+                onClick = {}, onLongClick = {},
             )
         }
     }
