@@ -575,7 +575,7 @@
     <string name="add_network_failed">Couldn\'t connect — %1$s</string>
 
     <!-- soju bound-network manager (WP-V2, §5.5) -->
-    <string name="bouncer_control_title">Soju control center</string>
+    <string name="bouncer_control_title">Soju Control Center</string>
     <string name="bouncer_connect">Connect</string>
     <string name="bouncer_show_in_motd">Shown in motd</string>
     <string name="bouncer_delete_from_bouncer">Delete from bouncer</string>

@@ -29,7 +29,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
@@ -273,7 +273,9 @@ private fun BouncerTabs(
         add(BouncerControlTab.CONSOLE to R.string.bouncer_tab_console)
     }
     val visibleSelected = tabs.indexOfFirst { it.first == selected }.coerceAtLeast(0)
-    PrimaryTabRow(selectedTabIndex = visibleSelected) {
+    // Scrollable so each tab sizes to its label instead of being equally
+    // divided across the width (which truncates labels once Console is added).
+    PrimaryScrollableTabRow(selectedTabIndex = visibleSelected, edgePadding = 0.dp) {
         tabs.forEach { (tab, label) ->
             Tab(
                 selected = tab == selected,
