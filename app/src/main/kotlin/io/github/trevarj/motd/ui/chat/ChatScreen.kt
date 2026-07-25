@@ -725,6 +725,26 @@ fun ChatContent(
             initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty
         val targetRow = if (terminalEmpty) {
             null
+        } else if (target.placeAtTop) {
+            // Open-at-first-unread: load the first-unread row OFF-SCREEN (the viewport stays at
+            // newest, so no read history flashes), then snap the viewport so the first unread tops
+            // the window with the remaining unread continuing below it. The snap runs before
+            // initialPositionSettled is set, so the scroll-state collector (gated on settlement)
+            // cannot misclassify it as a user drag.
+            val row = try {
+                materializeTarget(target, scroll = false)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: RuntimeException) {
+                null
+            }
+            if (row != null) {
+                val rowsFit = listState.layoutInfo.visibleItemsInfo.size
+                if (rowsFit >= 1) {
+                    listState.scrollToItem(firstUnreadTopAnchorIndex(target.index, rowsFit))
+                }
+            }
+            row
         } else {
             try {
                 materializeTarget(
@@ -744,7 +764,8 @@ fun ChatContent(
         } else if (targetRow != null && positionTargetMatches(target, targetRow)) {
             AutoFollowTrace.record("initial_position_settled", traceBufferId, traceSessionId) {
                 "target_index=${target.index} index=${listState.firstVisibleItemIndex} " +
-                    "offset=${listState.firstVisibleItemScrollOffset} at_bottom=$currentlyAtBottom"
+                    "offset=${listState.firstVisibleItemScrollOffset} at_bottom=$currentlyAtBottom " +
+                    "place_at_top=${target.placeAtTop}"
             }
             initialPositionSettled = true
             suppressNextAutoFollow = true

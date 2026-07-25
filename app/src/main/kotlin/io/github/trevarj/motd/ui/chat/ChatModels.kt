@@ -237,6 +237,13 @@ data class ChatPositionTarget(
      * must displace the viewport even when the retained list state already sits at the bottom.
      */
     val forceScrollOnEntry: Boolean = false,
+    /**
+     * On entry, place the first-unread row at the TOP of the viewport (mature-chat open-at-unread),
+     * with the remaining unread continuing below it. The placement is realized in [ChatScreen]:
+     * load the target off-screen (no scroll), measure how many rows fit, then snap the viewport so
+     * the first unread tops the window. Only the read-marker entry target sets this.
+     */
+    val placeAtTop: Boolean = false,
     /** Opaque ViewModel request identity; stale UI completions must not consume a newer jump. */
     val requestToken: Long = 0,
 )
@@ -256,6 +263,16 @@ data class ChatScrollPosition(
  */
 fun shouldScrollToInitialTarget(target: ChatPositionTarget, atBottom: Boolean): Boolean =
     target.fromSavedPosition || target.forceScrollOnEntry || !atBottom
+
+/**
+ * Index to bring to the bottom (start) of a reversed viewport so that [firstUnreadIndex] lands
+ * `rowsFit - 1` rows above it, i.e. at the top of the viewport. Clamps to 0 when fewer than `rowsFit`
+ * unread rows exist below the target (the list cannot scroll past index 0, so the first unread
+ * then stays in view within the lower viewport with read history above it). Caller must guard
+ * `rowsFit >= 1`; an empty measurement would otherwise scroll past the first unread.
+ */
+internal fun firstUnreadTopAnchorIndex(firstUnreadIndex: Int, rowsFit: Int): Int =
+    (firstUnreadIndex - (rowsFit - 1)).coerceAtLeast(0)
 
 /** Canonical local identity is checked before the case-sensitive opaque wire msgid. */
 fun positionTargetMatches(target: ChatPositionTarget, actual: MessageEntity?): Boolean {

@@ -1229,20 +1229,22 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val entrySpec = MessageVisibilitySpec.from(settingsRepository.settings.first())
             val realMarker = bufferRepository.observeBuffer(bufferId).firstOrNull()?.effectiveLocalReadAnchor
-            _readMarkerSnapshot.value = if (realMarker == null) {
-                null
-            } else {
-                visibilityReader.firstVisibleUnreadAnchor(bufferId, realMarker, entrySpec)
-                    ?.let { TimelineAnchor(it.serverTime, it.eventId - 1L) }
+            // Oldest unread row past the marker (first message from someone else you have not seen),
+            // computed once and shared by the frozen divider and the entry target.
+            val firstUnread = realMarker?.let {
+                visibilityReader.firstVisibleUnreadAnchor(bufferId, it, entrySpec)
             }
-            // A deep-link owns positioning. A normal open lands at the last-read message when there
-            // is unread from others, so the scroll-to-bottom FAB (with its @-mention badge) is the
-            // natural next step. When the buffer is fully caught up (no unread marker), restore the
-            // last in-memory viewport when available, otherwise stay at the newest row. The frozen
-            // unread marker above still drives the divider and badge, but never repositions the window.
+            _readMarkerSnapshot.value = firstUnread
+                ?.let { TimelineAnchor(it.serverTime, it.eventId - 1L) }
+            // A deep-link owns positioning. A normal open lands on the oldest unread message so the
+            // first unseen row tops the viewport and the rest of the unread continues below it; the
+            // scroll-to-bottom FAB (with its @-mention badge) is the natural next step. When the
+            // buffer is fully caught up (no unread marker), restore the last in-memory viewport when
+            // available, otherwise stay at the newest row. The frozen unread marker above still
+            // drives the divider and badge, but never repositions the window.
             if (!hasDeepJump && !_entryPositionSettled.value) {
                 _initialTarget.value = when {
-                    realMarker != null -> readMarkerEntryTarget(realMarker, entrySpec)
+                    realMarker != null -> readMarkerEntryTarget(firstUnread ?: realMarker, entrySpec)
                     else -> restoredScrollPosition(entrySpec) ?: ChatPositionTarget(index = 0)
                 }
             }
@@ -1254,15 +1256,21 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** Position the viewport so the last-read message tops the window and unread continues below. */
+    /**
+     * Position the viewport on the oldest unread message (the first unseen row) so it tops the
+     * window and the remaining unread continues below it. Falls back to the read marker itself when
+     * every unread row is filtered out (fools/self), so entry still sits at last-read.
+     */
     private suspend fun readMarkerEntryTarget(
-        marker: TimelineAnchor,
+        anchor: TimelineAnchor,
         spec: MessageVisibilitySpec,
     ): ChatPositionTarget {
-        val index = visibilityReader.countTimelineNewer(bufferId, marker.serverTime, marker.eventId, spec)
+        val index = visibilityReader.countTimelineNewer(bufferId, anchor.serverTime, anchor.eventId, spec)
         // forceScrollOnEntry: retained list state sits at the newest row on entry, so the gate must
-        // still scroll to the (typically non-zero) marker index instead of treating it as a no-op.
-        return ChatPositionTarget(index = index, forceScrollOnEntry = true)
+        // still scroll to the (typically non-zero) anchor index instead of treating it as a no-op.
+        // placeAtTop: ChatScreen realizes the top placement (off-screen load + measured snap) so the
+        // first unread tops the viewport rather than sitting at the bottom edge under read history.
+        return ChatPositionTarget(index = index, forceScrollOnEntry = true, placeAtTop = true)
     }
 
     private suspend fun restoredScrollPosition(spec: MessageVisibilitySpec): ChatPositionTarget? {

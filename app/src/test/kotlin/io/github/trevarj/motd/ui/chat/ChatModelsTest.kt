@@ -376,6 +376,13 @@ class ChatModelsTest {
         assertTrue(
             shouldScrollToInitialTarget(ChatPositionTarget(index = 0, forceScrollOnEntry = true), atBottom = true),
         )
+        // placeAtTop is realized in ChatScreen, not the gate; forceScrollOnEntry still fires it.
+        assertTrue(
+            shouldScrollToInitialTarget(
+                ChatPositionTarget(index = 515, forceScrollOnEntry = true, placeAtTop = true),
+                atBottom = true,
+            ),
+        )
     }
 
     @Test fun `saved scroll position always restores`() {
@@ -385,6 +392,20 @@ class ChatModelsTest {
                 atBottom = true,
             ),
         )
+    }
+
+    @Test fun `first unread top anchor lands the target at the top of a reversed viewport`() {
+        // Only one row fits: the first unread is both top and bottom.
+        assertEquals(515, firstUnreadTopAnchorIndex(firstUnreadIndex = 515, rowsFit = 1))
+        // Ten rows fit: first unread 9 rows above the bottom = at the top.
+        assertEquals(506, firstUnreadTopAnchorIndex(firstUnreadIndex = 515, rowsFit = 10))
+        // Fewer unread than rows fit: clamp to 0 (cannot scroll past newest to top a low index).
+        assertEquals(0, firstUnreadTopAnchorIndex(firstUnreadIndex = 3, rowsFit = 10))
+        // Single unread at newest: no movement.
+        assertEquals(0, firstUnreadTopAnchorIndex(firstUnreadIndex = 0, rowsFit = 10))
+        assertEquals(0, firstUnreadTopAnchorIndex(firstUnreadIndex = 0, rowsFit = 1))
+        // Two rows fit, one unread below newest: clamp to 0.
+        assertEquals(0, firstUnreadTopAnchorIndex(firstUnreadIndex = 1, rowsFit = 2))
     }
 
     @Test fun `composer does not need member nicks for blank text or command hints`() {
