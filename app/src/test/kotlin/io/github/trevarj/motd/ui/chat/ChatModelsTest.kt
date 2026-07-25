@@ -369,6 +369,15 @@ class ChatModelsTest {
         assertTrue(shouldScrollToInitialTarget(ChatPositionTarget(index = 513), atBottom = false))
     }
 
+    @Test fun `last read marker entry target displaces even a bottom aligned conversation`() {
+        assertTrue(
+            shouldScrollToInitialTarget(ChatPositionTarget(index = 513, forceScrollOnEntry = true), atBottom = true),
+        )
+        assertTrue(
+            shouldScrollToInitialTarget(ChatPositionTarget(index = 0, forceScrollOnEntry = true), atBottom = true),
+        )
+    }
+
     @Test fun `saved scroll position always restores`() {
         assertTrue(
             shouldScrollToInitialTarget(

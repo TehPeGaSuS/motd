@@ -203,6 +203,33 @@ internal fun firstVisibleUnreadQuery(
     arrayOf(bufferId, after.serverTime, after.serverTime, after.eventId),
 )
 
+/**
+ * Oldest unread nick mention among the newest [beforeIndex] visible-timeline rows: the nearest
+ * such mention sitting strictly below the viewport (reversed list, index < firstVisibleItemIndex).
+ * `visibleUnread` already excludes self/fools/non-chat kinds, so `hasMention = 1` narrows it to
+ * mentions of our nick. Ordered ascending so the oldest (closest to the viewport edge) wins.
+ */
+internal fun nearestUnreadMentionInPrefixQuery(
+    bufferId: Long,
+    beforeIndex: Int,
+    after: TimelineAnchor,
+    spec: MessageVisibilitySpec,
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
+): SimpleSQLiteQuery {
+    val visibility = MessageVisibilitySql(spec, identityRules)
+    return SimpleSQLiteQuery(
+        "SELECT viewport.* FROM (" +
+            "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
+            "AND ${visibility.timeline()} ORDER BY m.serverTime DESC, m.id DESC LIMIT ?" +
+            ") AS viewport WHERE (viewport.serverTime > ? OR " +
+            "(viewport.serverTime = ? AND viewport.id > ?)) " +
+            "AND ${visibility.visibleUnread("viewport")} " +
+            "AND viewport.hasMention = 1 " +
+            "ORDER BY viewport.serverTime ASC, viewport.id ASC LIMIT 1",
+        arrayOf<Any?>(bufferId, beforeIndex.coerceAtLeast(0), after.serverTime, after.serverTime, after.eventId),
+    )
+}
+
 private fun allOf(vararg clauses: String): String = clauses
     .filterNot { it == TRUE }
     .distinct()

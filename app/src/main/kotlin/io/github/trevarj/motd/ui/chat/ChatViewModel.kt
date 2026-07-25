@@ -565,6 +565,15 @@ class ChatViewModel @Inject constructor(
             spec = filterSpec.value,
         )
 
+    /** Lazy-list index of the nearest unread nick mention below the viewport, for the FAB jump. */
+    suspend fun nearestUnreadMentionBelow(firstVisibleIndex: Int, marker: TimelineAnchor): Int? =
+        visibilityReader.nearestUnreadMentionBelowIndex(
+            bufferId = bufferId,
+            beforeIndex = firstVisibleIndex,
+            after = marker,
+            spec = filterSpec.value,
+        )
+
     // --- lifecycle: foreground tracker + mark-read (plans/07) ---
 
     fun onResume() {
@@ -1226,12 +1235,16 @@ class ChatViewModel @Inject constructor(
                 visibilityReader.firstVisibleUnreadAnchor(bufferId, realMarker, entrySpec)
                     ?.let { TimelineAnchor(it.serverTime, it.eventId - 1L) }
             }
-            // A deep-link owns positioning. A normal open restores this buffer's last in-memory
-            // viewport when available; otherwise it remains at the newest row. The frozen unread
-            // marker above still drives the divider and badge, but never repositions the window.
+            // A deep-link owns positioning. A normal open lands at the last-read message when there
+            // is unread from others, so the scroll-to-bottom FAB (with its @-mention badge) is the
+            // natural next step. When the buffer is fully caught up (no unread marker), restore the
+            // last in-memory viewport when available, otherwise stay at the newest row. The frozen
+            // unread marker above still drives the divider and badge, but never repositions the window.
             if (!hasDeepJump && !_entryPositionSettled.value) {
-                _initialTarget.value = restoredScrollPosition(entrySpec)
-                    ?: ChatPositionTarget(index = 0)
+                _initialTarget.value = when {
+                    realMarker != null -> readMarkerEntryTarget(realMarker, entrySpec)
+                    else -> restoredScrollPosition(entrySpec) ?: ChatPositionTarget(index = 0)
+                }
             }
         }
         viewModelScope.launch {
@@ -1239,6 +1252,17 @@ class ChatViewModel @Inject constructor(
                 restoreRedirectedViewport(filterSpec.value)
             }
         }
+    }
+
+    /** Position the viewport so the last-read message tops the window and unread continues below. */
+    private suspend fun readMarkerEntryTarget(
+        marker: TimelineAnchor,
+        spec: MessageVisibilitySpec,
+    ): ChatPositionTarget {
+        val index = visibilityReader.countTimelineNewer(bufferId, marker.serverTime, marker.eventId, spec)
+        // forceScrollOnEntry: retained list state sits at the newest row on entry, so the gate must
+        // still scroll to the (typically non-zero) marker index instead of treating it as a no-op.
+        return ChatPositionTarget(index = index, forceScrollOnEntry = true)
     }
 
     private suspend fun restoredScrollPosition(spec: MessageVisibilitySpec): ChatPositionTarget? {

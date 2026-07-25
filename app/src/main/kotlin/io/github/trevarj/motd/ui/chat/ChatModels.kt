@@ -232,6 +232,11 @@ data class ChatPositionTarget(
     val serverTime: Long = 0,
     val highlightMsgid: String? = null,
     val fromSavedPosition: Boolean = false,
+    /**
+     * This entry target is an intentional destination (e.g. the buffer's last-read marker), so it
+     * must displace the viewport even when the retained list state already sits at the bottom.
+     */
+    val forceScrollOnEntry: Boolean = false,
     /** Opaque ViewModel request identity; stale UI completions must not consume a newer jump. */
     val requestToken: Long = 0,
 )
@@ -245,11 +250,12 @@ data class ChatScrollPosition(
 )
 
 /**
- * Normal entry scroll: an explicit saved viewport always restores. An unsaved target only repairs
- * list state retained physically off-bottom; it must not displace an already-bottom conversation.
+ * Normal entry scroll: an explicit saved viewport or last-read marker always restores. A plain
+ * unsaved target only repairs list state retained physically off-bottom; it must not displace an
+ * already-bottom conversation.
  */
 fun shouldScrollToInitialTarget(target: ChatPositionTarget, atBottom: Boolean): Boolean =
-    target.fromSavedPosition || !atBottom
+    target.fromSavedPosition || target.forceScrollOnEntry || !atBottom
 
 /** Canonical local identity is checked before the case-sensitive opaque wire msgid. */
 fun positionTargetMatches(target: ChatPositionTarget, actual: MessageEntity?): Boolean {

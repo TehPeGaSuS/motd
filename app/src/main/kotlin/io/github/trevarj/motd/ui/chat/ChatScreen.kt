@@ -274,6 +274,7 @@ fun ChatScreen(
         rawNewestAnchor = rawNewestAnchor,
         onMarkRead = viewModel::markRead,
         countUnreadBelowViewport = viewModel::countUnreadBelowViewport,
+        nearestUnreadMentionBelow = viewModel::nearestUnreadMentionBelow,
         onBack = onHeaderBack,
         // Channel titles open Channel Info; query titles describe the other user. SERVER buffers
         // have neither channel nor peer details, so their title remains inert.
@@ -443,6 +444,7 @@ fun ChatContent(
     onCancelHistoryRefresh: () -> Unit = {},
     onHistoryResyncShown: () -> Unit = {},
     countUnreadBelowViewport: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int = { _, _ -> 0 },
+    nearestUnreadMentionBelow: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int? = { _, _ -> null },
     conversationLayout: ConversationLayoutState = ConversationLayoutState(),
     onConversationLayoutSelected: (io.github.trevarj.motd.data.prefs.LayoutDensity?) -> Unit = {},
 ) {
@@ -881,6 +883,25 @@ fun ChatContent(
         }
     }
 
+    // Jump to a mid-list row (e.g. the nearest unread @mention) without arming auto-follow: a live
+    // arrival must not yank the viewport away from the mention the user just navigated to.
+    suspend fun scrollToIndex(index: Int, animate: Boolean, reason: String) {
+        AutoFollowTrace.record("scroll_start", traceBufferId, traceSessionId) {
+            "reason=$reason animate=$animate target=$index index=${listState.firstVisibleItemIndex} " +
+                "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
+        }
+        programmaticScrolls++
+        try {
+            if (animate) listState.animateScrollToItem(index) else listState.scrollToItem(index)
+        } finally {
+            programmaticScrolls--
+            AutoFollowTrace.record("scroll_end", traceBufferId, traceSessionId) {
+                "reason=$reason index=${listState.firstVisibleItemIndex} " +
+                    "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
+            }
+        }
+    }
+
     // Record only actual scroll-state/programmatic edges. An index/offset change caused by a Paging
     // prepend does not emit here, so it cannot be mistaken for the user leaving the bottom.
     LaunchedEffect(listState, initialPositionSettled) {
@@ -1265,8 +1286,12 @@ fun ChatContent(
                         readMarker = readMarkerLive,
                         visibilityPolicy = visibilityPolicy,
                         countUnreadBelowViewport = countUnreadBelowViewport,
+                        nearestUnreadMentionBelow = nearestUnreadMentionBelow,
                         visible = initialPositionSettled && !atBottom && !autoScrolling,
-                        onClick = { scope.launch { scrollToNewest(animate = true, reason = "jump_fab") } },
+                        onJumpMention = { index ->
+                            scope.launch { scrollToIndex(index, animate = true, reason = "jump_mention_fab") }
+                        },
+                        onJumpNewest = { scope.launch { scrollToNewest(animate = true, reason = "jump_fab") } },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                     )
                 }
@@ -1726,14 +1751,18 @@ internal fun chatSubtitle(state: ChatState, context: android.content.Context): S
 private fun ScrollToBottomFab(
     visible: Boolean,
     unread: Int,
+    mentionPending: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(visible = visible, enter = scaleIn(), exit = scaleOut(), modifier = modifier) {
         BadgedBox(
             badge = {
-                if (unread > 0) {
-                    Badge { Text(if (unread >= MAX_UNREAD_BADGE_COUNT) "99+" else "$unread") }
+                // An unread @mention of our nick takes priority over the plain unread count: the
+                // "@" badge signals the next tap stops at that mention before continuing to bottom.
+                when {
+                    mentionPending -> Badge { Text("@") }
+                    unread > 0 -> Badge { Text(if (unread >= MAX_UNREAD_BADGE_COUNT) "99+" else "$unread") }
                 }
             },
         ) {
@@ -1751,6 +1780,11 @@ private fun ScrollToBottomFab(
  * Viewport-aware FAB wrapper. This is intentionally its own restart scope: the first visible index
  * changes repeatedly during a fling, while the expensive chat scaffold and lazy-list declaration do
  * not. Only this small badge subtree recomposes at message boundaries.
+ *
+ * When an unread @mention of our nick sits below the viewport, the badge shows "@" and a tap jumps
+ * to the nearest such mention (recomputed each tap, so repeated taps walk through mentions newest-
+ * to-oldest before falling through to the bottom). Otherwise the badge shows the unread count and a
+ * tap scrolls to the newest row.
  */
 @Composable
 private fun ViewportScrollToBottomFab(
@@ -1758,26 +1792,34 @@ private fun ViewportScrollToBottomFab(
     readMarker: io.github.trevarj.motd.data.db.TimelineAnchor?,
     visibilityPolicy: MessageVisibilityPolicy,
     countUnreadBelowViewport: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int,
+    nearestUnreadMentionBelow: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int?,
     visible: Boolean,
-    onClick: () -> Unit,
+    onJumpMention: (Int) -> Unit,
+    onJumpNewest: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val firstVisible by remember(listState) {
         derivedStateOf { listState.firstVisibleItemIndex }
     }
     val latestCounter by rememberUpdatedState(countUnreadBelowViewport)
+    val latestMentionJump by rememberUpdatedState(nearestUnreadMentionBelow)
     var unread by remember(readMarker, visibilityPolicy) { mutableIntStateOf(0) }
+    var mentionTarget by remember(readMarker, visibilityPolicy) { mutableStateOf<Int?>(null) }
     LaunchedEffect(firstVisible, readMarker, visibilityPolicy) {
-        unread = if (readMarker == null || firstVisible <= 0) {
-            0
+        if (readMarker == null || firstVisible <= 0) {
+            unread = 0
+            mentionTarget = null
         } else {
-            latestCounter(firstVisible, readMarker).coerceIn(0, MAX_UNREAD_BADGE_COUNT)
+            unread = latestCounter(firstVisible, readMarker).coerceIn(0, MAX_UNREAD_BADGE_COUNT)
+            mentionTarget = latestMentionJump(firstVisible, readMarker)
         }
     }
+    val pending = mentionTarget
     ScrollToBottomFab(
         visible = visible,
         unread = unread,
-        onClick = onClick,
+        mentionPending = pending != null,
+        onClick = { if (pending != null) onJumpMention(pending) else onJumpNewest() },
         modifier = modifier,
     )
 }

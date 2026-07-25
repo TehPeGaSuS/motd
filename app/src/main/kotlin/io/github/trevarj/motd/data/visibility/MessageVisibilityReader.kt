@@ -88,6 +88,26 @@ class MessageVisibilityReader @Inject constructor(
             ?.let { TimelineAnchor(it.serverTime, it.id) }
     }
 
+    /**
+     * Lazy-list index of the nearest unread nick mention strictly below the viewport (the oldest
+     * unread mention within the newest [beforeIndex] visible-timeline rows), or null if none.
+     * Mirrors [countVisibleUnreadInTimelinePrefix] so the FAB can resolve a jump target with one
+     * cheap DB read instead of scanning paged items during a fling.
+     */
+    suspend fun nearestUnreadMentionBelowIndex(
+        bufferId: Long,
+        beforeIndex: Int,
+        after: TimelineAnchor,
+        spec: MessageVisibilitySpec,
+    ): Int? {
+        if (beforeIndex <= 0) return null
+        val context = visibilityContext(bufferId)
+        val target = db.messageDao().rawMessage(
+            nearestUnreadMentionInPrefixQuery(context.roomId, beforeIndex, after, spec, context.identityRules),
+        ) ?: return null
+        return countTimelineNewer(bufferId, target.serverTime, target.id, spec)
+    }
+
     suspend fun resolveSavedAnchor(
         bufferId: Long,
         msgid: String?,

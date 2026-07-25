@@ -392,6 +392,48 @@ class MessageVisibilityReaderTest {
         assertFalse(observedQueries.any { it.contains(" OFFSET ", ignoreCase = true) })
     }
 
+    @Test
+    fun nearestUnreadMentionBelowViewportWalksNewestToOldestAndExcludesFoolsAndRead() = runTest {
+        val ids = db.messageDao().insertAll(
+            listOf(
+                message(bufferId, "old", sender = "bob", serverTime = 100, dedupKey = "old"),
+                message(bufferId, "fool", sender = "alice", serverTime = 200, dedupKey = "fool", hasMention = true),
+                message(bufferId, "mention-a", sender = "bob", serverTime = 300, dedupKey = "m-a", hasMention = true),
+                message(bufferId, "mention-b", sender = "bob", serverTime = 400, dedupKey = "m-b", hasMention = true),
+                message(bufferId, "plain", sender = "bob", serverTime = 500, dedupKey = "plain"),
+            ),
+        )
+        val marker = io.github.trevarj.motd.data.db.TimelineAnchor(50, 0)
+        val spec = spec(FoolsMode.COLLAPSE)
+        // Reversed indices: 0=plain(500), 1=mention-b(400), 2=mention-a(300), 3=fool(200), 4=old(100).
+
+        // firstVisible=3 => below viewport = {0,1,2}; nearest unread mention = mention-a (index 2).
+        assertEquals(
+            2,
+            reader.nearestUnreadMentionBelowIndex(bufferId, beforeIndex = 3, after = marker, spec = spec),
+        )
+        // firstVisible=2 => below = {0,1}; nearest = mention-b (index 1). Repeated taps walk downward.
+        assertEquals(
+            1,
+            reader.nearestUnreadMentionBelowIndex(bufferId, beforeIndex = 2, after = marker, spec = spec),
+        )
+        // firstVisible=1 => below = {0}; plain(500) has no mention => null (fall through to bottom).
+        assertNull(reader.nearestUnreadMentionBelowIndex(bufferId, beforeIndex = 1, after = marker, spec = spec))
+        // firstVisible=4 => below = {0,1,2,3}; fool(200) is timeline-visible but visibleUnread excludes
+        // it, so the nearest mention is still mention-a (index 2), never the fool.
+        assertEquals(
+            2,
+            reader.nearestUnreadMentionBelowIndex(bufferId, beforeIndex = 4, after = marker, spec = spec),
+        )
+        // Read marker advanced past mention-b(400): neither mention is unread-after-marker, so null.
+        val pastMarker = io.github.trevarj.motd.data.db.TimelineAnchor(450, ids[3])
+        assertNull(
+            reader.nearestUnreadMentionBelowIndex(bufferId, beforeIndex = 3, after = pastMarker, spec = spec),
+        )
+        // No viewport prefix to search => null without querying.
+        assertNull(reader.nearestUnreadMentionBelowIndex(bufferId, beforeIndex = 0, after = marker, spec = spec))
+    }
+
     private fun spec(mode: FoolsMode, showJoinPartQuit: Boolean = true) = MessageVisibilitySpec(
         showJoinPartQuit = showJoinPartQuit,
         fools = setOf("alice"),

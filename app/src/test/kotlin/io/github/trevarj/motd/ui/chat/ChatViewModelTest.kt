@@ -799,7 +799,7 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `recovered unread gap keeps normal entry at newest while preserving divider boundary`() = runTest {
+    fun `recovered unread gap positions entry at last read marker while preserving divider boundary`() = runTest {
         val markerId = db.messageDao().insertAll(
             listOf(message(channel.id, "marker", null, "alice").copy(
                 serverTime = 100,
@@ -836,10 +836,14 @@ class ChatViewModelTest {
 
         assertEquals(101L, divider?.serverTime)
         assertEquals(historyIds.first() - 1L, divider?.eventId)
-        assertEquals(0, target?.index)
+        // Entry lands on the last-read marker row (516 unread rows newer than it): the marker tops
+        // the viewport and the unread history continues below, so the scroll-to-bottom FAB shows.
+        assertEquals(516, target?.index)
         assertNull(target?.expectedEventId)
         assertNull(target?.expectedMsgid)
         assertFalse(target?.fromSavedPosition == true)
+        // The marker target must displace an already-bottom conversation so entry actually scrolls.
+        assertTrue(target?.forceScrollOnEntry == true)
     }
 
     @Test
