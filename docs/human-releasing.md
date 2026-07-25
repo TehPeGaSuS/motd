@@ -65,15 +65,46 @@ version.
 
 ## Local dry-run
 
-Run inside the `nix develop` shell (see [`human-developing.md`](human-developing.md)):
+The tracked `.envrc` points `MOTD_KEYSTORE_PATH` at
+`~/secrets/motd-release.jks`. Keep the three remaining values in
+`~/secrets/motd-release.env`, outside the repository:
 
 ```sh
-./gradlew :app:assembleFossRelease
+install -d -m 700 "$HOME/secrets"
+(umask 077; touch "$HOME/secrets/motd-release.env")
+chmod 600 "$HOME/secrets/motd-release.env"
+${EDITOR:?Set EDITOR first} "$HOME/secrets/motd-release.env"
 ```
 
-Set the signing env (`MOTD_KEYSTORE_PATH`, `MOTD_KEYSTORE_PASSWORD`,
-`MOTD_KEY_ALIAS`, `MOTD_KEY_PASSWORD`, `MOTD_SOURCE_COMMIT`) to exercise the
-release signing config, or omit them to fall back to the debug signing config.
+The private file is shell syntax and must define the signing credentials:
+
+```sh
+export MOTD_KEYSTORE_PASSWORD='replace with the keystore password'
+export MOTD_KEY_ALIAS='replace with the signing key alias'
+export MOTD_KEY_PASSWORD='replace with the signing key password'
+```
+
+Do not commit that file or put the secret values directly in `.envrc`. After
+creating or changing it, reload direnv and build the supported FOSS release:
+
+```sh
+direnv allow
+MOTD_SOURCE_COMMIT="$(git rev-parse HEAD)" \
+  ./gradlew :app:assembleFossRelease --no-daemon --max-workers=1
+```
+
+The signed APK is
+`app/build/outputs/apk/foss/release/app-foss-release.apk`. Verify its signature
+before installing or distributing it:
+
+```sh
+apksigner verify --verbose --print-certs \
+  app/build/outputs/apk/foss/release/app-foss-release.apk
+```
+
+The command must report verification success and the expected signer
+certificate. If `MOTD_KEYSTORE_PATH` is unset, Gradle can assemble an unsigned
+release APK; that is not a valid release artifact.
 
 ## Failure recovery
 
