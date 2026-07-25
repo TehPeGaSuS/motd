@@ -191,16 +191,19 @@ fun ChatListRowItem(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // Network belongs to buffer identity, so it rides the title line (trailing the
+                // status icons); keeping it off the preview line avoids a two-chip collision
+                // with the sender label.
+                if (showNetworkChip) {
+                    Spacer(Modifier.width(6.dp))
+                    NetworkChip(name = row.networkName)
+                }
             }
             Spacer(Modifier.size(2.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (showNetworkChip) {
-                    NetworkChip(name = row.networkName)
-                    Spacer(Modifier.width(6.dp))
-                }
                 // Channel previews lead with a sender label chip (no colon, which collided
                 // with nick mentions in the message text); queries read cleaner without it.
                 val lastMessage = row.lastMessageText
