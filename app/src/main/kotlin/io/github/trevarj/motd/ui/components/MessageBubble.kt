@@ -54,8 +54,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
@@ -166,32 +167,68 @@ fun MessageBubble(
     }
 
     if (kind == MessageKind.ACTION) {
-        ActionMessageRow(
-            sender = sender,
-            text = text,
-            formattedTime = displayedTime,
-            isSelf = isSelf,
-            nickColors = nickColors,
-            modifier = renderedModifier,
-            hasMention = mentionHighlighted,
-            senderIsFriend = senderIsFriend,
-            failed = failed,
-            pending = pending,
-            reply = reply,
-            onReplyClick = onReplyClick,
-            imageUrl = imageUrl,
-            linkPreview = linkPreview,
-            linkPreviewLoading = linkPreviewLoading,
-            linkPreviewResolved = linkPreviewResolved,
-            reactions = reactions,
-            knownNicks = knownNicks,
-            identityRules = identityRules,
-            onLongPress = onLongPress,
-            onReact = onReact,
-            onImageClick = onImageClick,
-            onLinkPreviewClick = onLinkPreviewClick,
-            onSenderClick = onSenderClick,
-        )
+        // COMFORTABLE renders emotes as a thin content-sized bubble with a small inline avatar
+        // replacing the `* nick` prefix; COMPACT and TWO_LINE keep the classic full-width
+        // `* nick action` banner row.
+        if (spacing.compact || spacing.twoLine) {
+            ActionMessageRow(
+                sender = sender,
+                text = text,
+                formattedTime = displayedTime,
+                isSelf = isSelf,
+                nickColors = nickColors,
+                modifier = renderedModifier,
+                hasMention = mentionHighlighted,
+                senderIsFriend = senderIsFriend,
+                failed = failed,
+                pending = pending,
+                reply = reply,
+                onReplyClick = onReplyClick,
+                imageUrl = imageUrl,
+                linkPreview = linkPreview,
+                linkPreviewLoading = linkPreviewLoading,
+                linkPreviewResolved = linkPreviewResolved,
+                reactions = reactions,
+                knownNicks = knownNicks,
+                identityRules = identityRules,
+                onLongPress = onLongPress,
+                onReact = onReact,
+                onImageClick = onImageClick,
+                onLinkPreviewClick = onLinkPreviewClick,
+                onSenderClick = onSenderClick,
+            )
+        } else {
+            ComfortableActionBubble(
+                sender = sender,
+                text = text,
+                formattedTime = displayedTime,
+                isSelf = isSelf,
+                nickColors = nickColors,
+                spacing = spacing,
+                networkId = networkId,
+                senderAccount = senderAccount,
+                modifier = renderedModifier,
+                showSender = showSender,
+                hasMention = mentionHighlighted,
+                senderIsFriend = senderIsFriend,
+                failed = failed,
+                pending = pending,
+                reply = reply,
+                onReplyClick = onReplyClick,
+                imageUrl = imageUrl,
+                linkPreview = linkPreview,
+                linkPreviewLoading = linkPreviewLoading,
+                linkPreviewResolved = linkPreviewResolved,
+                reactions = reactions,
+                knownNicks = knownNicks,
+                identityRules = identityRules,
+                onLongPress = onLongPress,
+                onReact = onReact,
+                onImageClick = onImageClick,
+                onLinkPreviewClick = onLinkPreviewClick,
+                onSenderClick = onSenderClick,
+            )
+        }
         return
     }
 
@@ -442,9 +479,197 @@ fun MessageBubble(
 }
 
 /**
- * Shared ACTION renderer for every conversation density. The accent band distinguishes emotes from
- * ordinary chat without turning them into another bubble type; the traditional `* nick action`
- * shape remains intact and the body keeps the same rich-text behavior as a normal message.
+ * COMFORTABLE ACTION renderer: a thin content-sized tinted bubble. The `* nick` prefix is replaced
+ * by a small inline avatar (the sender indicator), and the body is italic. Keeps the accent rail
+ * and tertiary tint so emotes stay visually distinct from ordinary bubbles; the body reuses the
+ * same rich-text behavior (links/mentions/code) as a normal message via [buildActionBody].
+ */
+@Composable
+private fun ComfortableActionBubble(
+    sender: String,
+    text: String,
+    formattedTime: String,
+    isSelf: Boolean,
+    nickColors: NickColorScheme,
+    spacing: io.github.trevarj.motd.ui.theme.MotdSpacing,
+    networkId: Long?,
+    senderAccount: String?,
+    modifier: Modifier = Modifier,
+    showSender: Boolean = true,
+    hasMention: Boolean = false,
+    senderIsFriend: Boolean = false,
+    failed: Boolean = false,
+    pending: Boolean = false,
+    reply: ReplyPreviewData? = null,
+    onReplyClick: (() -> Unit)? = null,
+    imageUrl: String? = null,
+    linkPreview: LinkPreview? = null,
+    linkPreviewLoading: Boolean = false,
+    linkPreviewResolved: Boolean = false,
+    reactions: List<ReactionChip> = emptyList(),
+    knownNicks: Set<String> = emptySet(),
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
+    onLongPress: () -> Unit = {},
+    onReact: (String) -> Unit = {},
+    onImageClick: (String) -> Unit = {},
+    onLinkPreviewClick: () -> Unit = {},
+    onSenderClick: (() -> Unit)? = null,
+) {
+    val actionsLabel = stringResource(R.string.chat_bubble_actions)
+    val actionDescription = stringResource(R.string.chat_action_message)
+    val rowColor = if (hasMention) {
+        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
+    } else {
+        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = ACTION_ROW_TINT_ALPHA)
+    }
+    val bodyColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
+    val linkColor = MaterialTheme.colorScheme.primary
+    val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
+    val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
+    val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
+
+    // Window width in dp = container px / density; keeps the 0.78 bubble max-width behavior.
+    val containerWidthPx = LocalWindowInfo.current.containerSize.width
+    val density = LocalDensity.current
+    val maxWidth = with(density) { (containerWidthPx * 0.78f).toDp() }
+
+    // Tighten the inner (grouped) top corner like an ordinary bubble. ACTION always opens a new
+    // group (showsSender), so this is the full corner in practice, but mirror the bubble logic.
+    val topCorner = if (showSender) spacing.bubbleCorner else 4.dp
+    val shape = if (isSelf) {
+        RoundedCornerShape(topStart = spacing.bubbleCorner, topEnd = topCorner, bottomEnd = 4.dp, bottomStart = spacing.bubbleCorner)
+    } else {
+        RoundedCornerShape(topStart = topCorner, topEnd = spacing.bubbleCorner, bottomEnd = spacing.bubbleCorner, bottomStart = 4.dp)
+    }
+
+    // Italic emote body (links/mentions/code preserved). Rendered in its own Text so the slant is
+    // unconditional; the nick is a separate non-italic Text to the right of the avatar.
+    val body = remember(
+        text, bodyColor, linkColor, mentionsActive, mentionColor, codeBackground, codeColor,
+    ) {
+        buildActionBody(
+            text = text,
+            bodyColor = bodyColor,
+            linkColor = linkColor,
+            mentionsActive = mentionsActive,
+            mentionColor = mentionColor,
+            codeBackground = codeBackground,
+            codeColor = codeColor,
+        )
+    }
+
+    Row(
+        modifier = modifier.fillMaxWidth().padding(
+            horizontal = spacing.messageOuterHPad,
+            vertical = spacing.bubbleRowVPad,
+        ),
+        horizontalArrangement = if (isSelf) Arrangement.End else Arrangement.Start,
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = maxWidth)
+                .clip(shape)
+                .background(rowColor)
+                .testTag("chat_action_row")
+                .semantics { stateDescription = actionDescription }
+                .combinedClickable(
+                    interactionSource = null,
+                    indication = null,
+                    onClick = {},
+                    onLongClick = onLongPress,
+                    onLongClickLabel = actionsLabel,
+                )
+                .padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
+        ) {
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
+
+            Row(verticalAlignment = Alignment.Bottom) {
+                val avatarMod = Modifier
+                    .padding(end = 6.dp, bottom = 1.dp)
+                    .size(20.dp)
+                    .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
+                Avatar(
+                    name = sender,
+                    size = 20.dp,
+                    modifier = avatarMod,
+                    networkId = networkId,
+                    account = senderAccount,
+                )
+                // Sender nick: bold, nick-colored, friend-tinted, tappable — same shape as the
+                // ordinary bubble header, kept non-italic so it reads as an attribution.
+                Text(
+                    text = sender,
+                    color = nameColor,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .padding(end = 6.dp, bottom = 1.dp)
+                        .let { if (senderIsFriend) it.friendNickTint() else it }
+                        .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it },
+                )
+                Text(
+                    text = body,
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontStyle = FontStyle.Italic,
+                        fontSynthesis = FontSynthesis.Style,
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("chat_action_text"),
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
+                ) {
+                    MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
+                    Text(
+                        text = formattedTime,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (failed) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
+
+            imageUrl?.let { url ->
+                AsyncImage(
+                    model = url,
+                    contentDescription = null,
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .widthIn(max = 280.dp)
+                        .heightIn(max = 240.dp)
+                        .aspectRatio(4f / 3f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .combinedClickable(onClick = { onImageClick(url) }, onLongClick = onLongPress),
+                )
+            }
+
+            if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
+                Box(Modifier.padding(top = 4.dp)) {
+                    LinkPreviewCard(
+                        preview = linkPreview,
+                        loading = linkPreviewLoading,
+                        onClick = onLinkPreviewClick,
+                    )
+                }
+            }
+
+            ReactionRow(reactions = reactions, onReact = onReact)
+        }
+    }
+}
+
+/**
+ * COMPACT/TWO_LINE ACTION renderer. The accent band distinguishes emotes from ordinary chat without
+ * turning them into another bubble type; the traditional `* nick action` shape remains intact and
+ * the body keeps the same rich-text behavior as a normal message.
  */
 @Composable
 private fun ActionMessageRow(
@@ -553,7 +778,10 @@ private fun ActionMessageRow(
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     text = actionLine,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontStyle = FontStyle.Italic,
+                        fontSynthesis = FontSynthesis.Style,
+                    ),
                     modifier = Modifier
                         .weight(1f)
                         .testTag("chat_action_text"),
@@ -605,7 +833,44 @@ private fun ActionMessageRow(
     }
 }
 
-/** Build the styled `* nick action` paragraph shared by all ACTION rows. */
+/** Italic rich-text body shared by every ACTION renderer; links/mentions/code keep working. */
+internal fun buildActionBody(
+    text: String,
+    bodyColor: Color,
+    linkColor: Color,
+    mentionsActive: Boolean = true,
+    mentionColor: (String) -> Color? = { null },
+    codeBackground: Color = Color.Unspecified,
+    codeColor: Color = Color.Unspecified,
+): AnnotatedString = buildAnnotatedString {
+    // fontSynthesis is explicit because some OEM system fonts (e.g. Nothing OS) ship no italic
+    // face; with the default null synthesis, FontStyle.Italic is honored by layout but the glyphs
+    // render upright. FontSynthesis.Style forces an oblique slant on the plain and link runs so the
+    // emote reads as italic regardless of the resolved typeface. Code stays upright by design.
+    appendRichText(
+        text = text,
+        plainStyle = SpanStyle(
+            color = bodyColor,
+            fontStyle = FontStyle.Italic,
+            fontSynthesis = FontSynthesis.Style,
+        ),
+        linkStyle = SpanStyle(
+            color = linkColor,
+            fontStyle = FontStyle.Italic,
+            fontSynthesis = FontSynthesis.Style,
+            textDecoration = TextDecoration.Underline,
+        ),
+        codeStyle = SpanStyle(
+            color = codeColor,
+            background = codeBackground,
+            fontFamily = FontFamily.Monospace,
+            fontStyle = FontStyle.Normal,
+        ),
+        mentionColor = if (mentionsActive) mentionColor else ({ null }),
+    )
+}
+
+/** Build the styled `* nick action` paragraph shared by the COMPACT/TWO_LINE ACTION rows. */
 internal fun buildActionLine(
     sender: String,
     text: String,
@@ -633,22 +898,15 @@ internal fun buildActionLine(
         withStyle(senderStyle) { append(sender) }
     }
     append(" ")
-    appendRichText(
+    append(buildActionBody(
         text = text,
-        plainStyle = SpanStyle(color = bodyColor, fontStyle = FontStyle.Italic),
-        linkStyle = SpanStyle(
-            color = linkColor,
-            fontStyle = FontStyle.Italic,
-            textDecoration = TextDecoration.Underline,
-        ),
-        codeStyle = SpanStyle(
-            color = codeColor,
-            background = codeBackground,
-            fontFamily = FontFamily.Monospace,
-            fontStyle = FontStyle.Normal,
-        ),
-        mentionColor = if (mentionsActive) mentionColor else ({ null }),
-    )
+        bodyColor = bodyColor,
+        linkColor = linkColor,
+        mentionsActive = mentionsActive,
+        mentionColor = mentionColor,
+        codeBackground = codeBackground,
+        codeColor = codeColor,
+    ))
 }
 
 /** Theme-aware leading rail shared by ordinary and mention-highlighted ACTION rows. */

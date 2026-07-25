@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontWeight
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -153,6 +154,56 @@ class MessageBubbleTextTest {
                 it.item.fontFamily == FontFamily.Monospace &&
                     it.item.fontStyle == FontStyle.Normal &&
                     line.text.substring(it.start, it.end) == "hello"
+            },
+        )
+    }
+
+    @Test
+    fun action_body_emits_italic_text_without_star_or_sender() {
+        val body = buildActionBody(
+            text = "waves hello",
+            bodyColor = Color.Gray,
+            linkColor = Color.Blue,
+            mentionsActive = false,
+        )
+
+        // The comfortable emote bubble replaces `* nick` with an avatar, so the body string is the
+        // raw text only.
+        assertEquals("waves hello", body.text)
+        assertTrue(body.spanStyles.isNotEmpty())
+        // The whole run is italic; no bold sender span and no asterisk.
+        val plain = body.spanStyles.first { it.start == 0 && it.end == body.length }.item
+        assertEquals(Color.Gray, plain.color)
+        assertEquals(FontStyle.Italic, plain.fontStyle)
+        // Italic must be synthesized so emotes slant on fonts with no italic face (Nothing OS, etc.).
+        assertEquals(FontSynthesis.Style, plain.fontSynthesis)
+        assertTrue(body.spanStyles.none { it.item.fontWeight == FontWeight.Bold })
+        assertTrue(!body.hasLinkAnnotations(0, body.length))
+    }
+
+    @Test
+    fun action_body_preserves_links_mentions_and_code() {
+        val body = buildActionBody(
+            text = "greets @bob at https://example.com with `hello`",
+            bodyColor = Color.Gray,
+            linkColor = Color.Blue,
+            mentionColor = { nick -> if (nick == "bob") Color.Red else null },
+            codeBackground = Color.DarkGray,
+            codeColor = Color.White,
+        )
+
+        assertEquals("greets @bob at https://example.com with hello", body.text)
+        assertTrue(body.hasLinkAnnotations(0, body.length))
+        assertTrue(
+            body.spanStyles.any {
+                it.item.color == Color.Red && body.text.substring(it.start, it.end) == "@bob"
+            },
+        )
+        assertTrue(
+            body.spanStyles.any {
+                it.item.fontFamily == FontFamily.Monospace &&
+                    it.item.fontStyle == FontStyle.Normal &&
+                    body.text.substring(it.start, it.end) == "hello"
             },
         )
     }
