@@ -216,6 +216,7 @@ fun ChatListRowItem(
                             sender,
                             MaterialTheme.colorScheme.onSurfaceVariant,
                         ),
+                        unread = isUnread,
                     )
                     Spacer(Modifier.width(6.dp))
                 }
@@ -349,21 +350,30 @@ private fun PresenceBadge(
 }
 
 /**
- * Sender label chip for channel previews: nick-colored bold nick on a low-alpha
- * nick-tinted rounded background (mirrors [NetworkChip] metrics). No colon, so a
- * nick mention inside the message no longer reads as a double `nick: nick:`.
+ * Sender label chip for channel previews: nick-tinted rounded chip (mirrors
+ * [NetworkChip] metrics), no colon so a nick mention in the text no longer reads
+ * as a double `nick: nick:`. Dimmed to match the message-preview prominence:
+ * the nick hue stays but text alpha and weight track the row's unread state, so
+ * the label reads as part of the preview line rather than a louder element.
  */
 @Composable
-private fun SenderLabel(sender: String, color: Color, modifier: Modifier = Modifier) {
+private fun SenderLabel(
+    sender: String,
+    color: Color,
+    unread: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val textAlpha = if (unread) 0.90f else 0.60f
+    val bgAlpha = if (unread) 0.14f else 0.08f
     Box(
         modifier = modifier
-            .background(color.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
+            .background(color.copy(alpha = bgAlpha), RoundedCornerShape(6.dp))
             .padding(horizontal = 6.dp, vertical = 1.dp),
     ) {
         Text(
             text = sender,
-            color = color,
-            fontWeight = FontWeight.Bold,
+            color = color.copy(alpha = textAlpha),
+            fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
