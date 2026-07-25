@@ -11,6 +11,8 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
@@ -63,6 +65,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -78,6 +85,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
@@ -129,6 +146,9 @@ private const val AUTOCOMPLETE_SHOW_DEBOUNCE_MS = 250L
 private const val REACTION_PREFETCH_ROWS = 12
 private const val MAX_VISIBLE_REACTION_MSGIDS = 80
 private const val MAX_UNREAD_BADGE_COUNT = 100
+
+/** How long (ms) the scroll-to-bottom FAB must be held to skip the mention walk and jump to newest. */
+private const val HOLD_MS = 450
 
 internal class ChatForegroundLifecycleGate(
     private val onResume: () -> Unit,
@@ -1788,8 +1808,36 @@ private fun ScrollToBottomFab(
     unread: Int,
     mentionPending: Boolean,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    // Keep the latest callbacks so the long-lived pointerInput gesture always dispatches to the
+    // current mention/bottom resolution, even as mentionTarget updates between recompositions.
+    val latestOnClick by rememberUpdatedState(onClick)
+    val latestOnLongClick by rememberUpdatedState(onLongClick)
+    // One-shot bounce played when the hold completes, to confirm the "skip to newest" jump.
+    val iconScale = remember { Animatable(1f) }
+    // Hold progress 0..1: fills a ring around the FAB while pressed, so the user can see how long
+    // to hold before the long-press fires. Reaches 1 at the hold threshold.
+    val holdProgress = remember { Animatable(0f) }
+    val ringColor = MaterialTheme.colorScheme.onPrimaryContainer
+
+    fun fire() {
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        scope.launch {
+            iconScale.snapTo(1f)
+            iconScale.animateTo(1.28f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium))
+            iconScale.animateTo(1f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium))
+        }
+        scope.launch {
+            holdProgress.snapTo(1f)
+            holdProgress.animateTo(0f, tween(durationMillis = 180, easing = LinearEasing))
+        }
+        latestOnLongClick()
+    }
+
     AnimatedVisibility(visible = visible, enter = scaleIn(), exit = scaleOut(), modifier = modifier) {
         BadgedBox(
             badge = {
@@ -1801,10 +1849,88 @@ private fun ScrollToBottomFab(
                 }
             },
         ) {
-            FloatingActionButton(onClick = onClick) {
+            // A custom hold-to-fire gesture owns both tap and long-press: a quick tap performs the
+            // mention-walk/bottom jump via onClick, while holding past HOLD_MS draws a filling
+            // progress ring and then fires onLongClick (skip straight to newest). The FAB's own
+            // onClick is inert — consuming the down here neutralizes its internal Surface click.
+            FloatingActionButton(
+                onClick = {},
+                modifier = Modifier
+                    .testTag("chat_scroll_to_bottom_fab")
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            down.consume()
+                            val holdJob = scope.launch {
+                                holdProgress.snapTo(0f)
+                                holdProgress.animateTo(1f, tween(durationMillis = HOLD_MS, easing = LinearEasing))
+                            }
+                            val completed = withTimeoutOrNull(HOLD_MS.toLong()) {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val release = event.changes.firstOrNull { it.id == down.id && it.changedToUp() }
+                                    if (release != null) {
+                                        release.consume()
+                                        return@withTimeoutOrNull false
+                                    }
+                                }
+                            }
+                            holdJob.cancel()
+                            if (completed == null) {
+                                // Held past the threshold: skip mentions, jump to newest.
+                                fire()
+                                // Swallow the trailing release so it doesn't leak to other handlers.
+                                while (true) {
+                                    val trailing = awaitPointerEvent()
+                                    val up = trailing.changes.firstOrNull { it.id == down.id && it.changedToUp() }
+                                    if (up != null) {
+                                        up.consume()
+                                        break
+                                    }
+                                }
+                            } else {
+                                // Released early: treat as a normal tap.
+                                scope.launch { holdProgress.snapTo(0f) }
+                                latestOnClick()
+                            }
+                        }
+                    }
+                    .drawWithContent {
+                        drawContent()
+                        val progress = holdProgress.value
+                        if (progress > 0f) {
+                            val stroke = 3.dp.toPx()
+                            val inset = stroke / 2 + 2.dp.toPx()
+                            val diameter = minOf(size.width, size.height) - inset * 2
+                            if (diameter > 0f) {
+                                val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
+                                val arcSize = Size(diameter, diameter)
+                                drawArc(
+                                    color = ringColor.copy(alpha = 0.22f),
+                                    startAngle = -90f,
+                                    sweepAngle = 360f,
+                                    useCenter = false,
+                                    topLeft = topLeft,
+                                    size = arcSize,
+                                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                                )
+                                drawArc(
+                                    color = ringColor,
+                                    startAngle = -90f,
+                                    sweepAngle = 360f * progress,
+                                    useCenter = false,
+                                    topLeft = topLeft,
+                                    size = arcSize,
+                                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                                )
+                            }
+                        }
+                    },
+            ) {
                 Icon(
                     Icons.Filled.KeyboardArrowDown,
                     contentDescription = stringResource(R.string.chat_scroll_to_bottom),
+                    modifier = Modifier.scale(iconScale.value),
                 )
             }
         }
@@ -1850,11 +1976,21 @@ private fun ViewportScrollToBottomFab(
         }
     }
     val pending = mentionTarget
+    // A tap follows the nearest pending @mention (the walk) before falling through to newest; a
+    // long-press skips the walk and always goes to newest. Routing lives in a pure helper so it is
+    // unit-testable without composition.
+    val dispatch: (Boolean) -> Unit = { longPress ->
+        when (val jump = scrollToBottomFabJump(longPress, pending)) {
+            is ScrollToBottomFabJump.Mention -> onJumpMention(jump.index)
+            ScrollToBottomFabJump.Newest -> onJumpNewest()
+        }
+    }
     ScrollToBottomFab(
         visible = visible,
         unread = unread,
         mentionPending = pending != null,
-        onClick = { if (pending != null) onJumpMention(pending) else onJumpNewest() },
+        onClick = { dispatch(false) },
+        onLongClick = { dispatch(true) },
         modifier = modifier,
     )
 }

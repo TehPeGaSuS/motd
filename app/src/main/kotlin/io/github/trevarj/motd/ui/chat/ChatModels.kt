@@ -87,6 +87,23 @@ internal const val TARGET_MATERIALIZATION_TIMEOUT_MS = 30_000L
 fun shouldAutoscrollToNewest(atBottom: Boolean, oldCount: Int, newCount: Int): Boolean =
     atBottom && oldCount > 0 && newCount > oldCount
 
+/** Which jump the scroll-to-bottom FAB performs. */
+sealed interface ScrollToBottomFabJump {
+    /** Jump to the nearest unread @mention below the viewport (the FAB's mention walk). */
+    data class Mention(val index: Int) : ScrollToBottomFabJump
+    /** Jump straight to the newest row. */
+    object Newest : ScrollToBottomFabJump
+}
+
+/**
+ * Resolves the scroll-to-bottom FAB action. A long-press always skips the mention walk and goes to
+ * newest; a tap follows the nearest unread [mentionTarget] when one is pending below the viewport,
+ * otherwise it also goes to newest. Pure so the routing is unit-testable without composition.
+ */
+fun scrollToBottomFabJump(longPress: Boolean, mentionTarget: Int?): ScrollToBottomFabJump =
+    if (longPress || mentionTarget == null) ScrollToBottomFabJump.Newest
+    else ScrollToBottomFabJump.Mention(mentionTarget)
+
 /**
  * Tracks the user's decision to follow live arrivals independently from the reverse list's
  * transient physical position. Paging inserts and programmatic scrolls can both move index zero

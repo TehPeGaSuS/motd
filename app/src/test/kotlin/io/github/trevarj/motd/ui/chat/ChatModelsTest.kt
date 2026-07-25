@@ -168,6 +168,22 @@ class ChatModelsTest {
         assertFalse(shouldAutoscrollToNewest(atBottom = true, oldCount = 10, newCount = 9))
     }
 
+    @Test fun `FAB tap with a pending mention follows the mention walk`() {
+        assertEquals(ScrollToBottomFabJump.Mention(7), scrollToBottomFabJump(longPress = false, mentionTarget = 7))
+    }
+
+    @Test fun `FAB tap with no pending mention falls through to newest`() {
+        assertEquals(ScrollToBottomFabJump.Newest, scrollToBottomFabJump(longPress = false, mentionTarget = null))
+    }
+
+    @Test fun `FAB long-press skips the mention walk and goes to newest`() {
+        assertEquals(ScrollToBottomFabJump.Newest, scrollToBottomFabJump(longPress = true, mentionTarget = 7))
+    }
+
+    @Test fun `FAB long-press with no pending mention also goes to newest`() {
+        assertEquals(ScrollToBottomFabJump.Newest, scrollToBottomFabJump(longPress = true, mentionTarget = null))
+    }
+
     @Test fun `burst arrivals keep following across programmatic scroll motion`() {
         val tracker = AutoFollowTracker(initialItemCount = 10)
 
