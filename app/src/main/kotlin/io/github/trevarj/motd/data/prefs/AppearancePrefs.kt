@@ -45,6 +45,48 @@ val ColorThemePreset.isDark: Boolean
         else -> true
     }
 
+/**
+ * Opposite-mode sibling for follow-system auto-switching: each light palette maps to its family's
+ * canonical dark counterpart and vice versa. Returns null for the meta mode presets
+ * (SYSTEM/LIGHT/DARK/AMOLED), dark-only palettes (Dracula, Monokai, Nord, OneDark, Tokyo Night,
+ * Zenburn), and alternate dark variants (Ayu Mirage, Kanagawa Dragon, Rose Pine Moon) — those keep
+ * their fixed mode when follow-system is on.
+ */
+val ColorThemePreset.systemPartner: ColorThemePreset?
+    get() = when (this) {
+        ColorThemePreset.AYU_LIGHT -> ColorThemePreset.AYU_DARK
+        ColorThemePreset.AYU_DARK -> ColorThemePreset.AYU_LIGHT
+        ColorThemePreset.CATPPUCCIN_LATTE -> ColorThemePreset.CATPPUCCIN_MOCHA
+        ColorThemePreset.CATPPUCCIN_MOCHA -> ColorThemePreset.CATPPUCCIN_LATTE
+        ColorThemePreset.EVERFOREST_LIGHT -> ColorThemePreset.EVERFOREST_DARK
+        ColorThemePreset.EVERFOREST_DARK -> ColorThemePreset.EVERFOREST_LIGHT
+        ColorThemePreset.GRUVBOX_LIGHT -> ColorThemePreset.GRUVBOX_DARK
+        ColorThemePreset.GRUVBOX_DARK -> ColorThemePreset.GRUVBOX_LIGHT
+        ColorThemePreset.KANAGAWA_LOTUS -> ColorThemePreset.KANAGAWA_WAVE
+        ColorThemePreset.KANAGAWA_WAVE -> ColorThemePreset.KANAGAWA_LOTUS
+        ColorThemePreset.MODUS_OPERANDI -> ColorThemePreset.MODUS_VIVENDI
+        ColorThemePreset.MODUS_VIVENDI -> ColorThemePreset.MODUS_OPERANDI
+        ColorThemePreset.ROSE_PINE_DAWN -> ColorThemePreset.ROSE_PINE
+        ColorThemePreset.ROSE_PINE -> ColorThemePreset.ROSE_PINE_DAWN
+        ColorThemePreset.SOLARIZED_LIGHT -> ColorThemePreset.SOLARIZED_DARK
+        ColorThemePreset.SOLARIZED_DARK -> ColorThemePreset.SOLARIZED_LIGHT
+        else -> null
+    }
+
+/**
+ * Resolves the palette to render when follow-system is on. A fixed palette whose OS mode disagrees
+ * swaps to its [systemPartner]; everything else (meta presets, dark-only palettes, palettes without
+ * a partner) keeps its own mode. Pure so the resolution can be unit-tested without composition.
+ */
+fun resolveAutoPalette(
+    themePreset: ColorThemePreset,
+    followSystem: Boolean,
+    systemDark: Boolean,
+): ColorThemePreset {
+    if (!followSystem || !themePreset.isFixedPalette) return themePreset
+    return if (systemDark != themePreset.isDark) themePreset.systemPartner ?: themePreset else themePreset
+}
+
 enum class ChatWallpaperPreset { NONE, CHATTER, CHANNELS, TERMINAL, RELAY, SIGNALS, PIXELS }
 
 data class WallpaperSelection(
@@ -60,12 +102,14 @@ data class AppearanceConfig(
     val uiFontScalePercent: Int = DEFAULT_FONT_SCALE_PERCENT,
     val conversationFontScalePercent: Int = DEFAULT_FONT_SCALE_PERCENT,
     val trueBlack: Boolean = false,
+    val followSystem: Boolean = false,
 )
 
 interface AppearancePrefs {
     val config: Flow<AppearanceConfig>
     suspend fun setTheme(theme: ColorThemePreset)
     suspend fun setTrueBlack(enabled: Boolean)
+    suspend fun setFollowSystem(enabled: Boolean)
     suspend fun setWallpaper(selection: WallpaperSelection)
     suspend fun setUiFontScale(percent: Int)
     suspend fun setConversationFontScale(percent: Int)

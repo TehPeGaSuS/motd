@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.map
 private val Context.appearanceDataStore by preferencesDataStore("appearance")
 private val THEME = stringPreferencesKey("theme_preset_v1")
 private val TRUE_BLACK = booleanPreferencesKey("true_black_v1")
+private val FOLLOW_SYSTEM = booleanPreferencesKey("follow_system_v1")
 private val WALLPAPER = stringPreferencesKey("wallpaper_preset_v1")
 private val WALLPAPER_INTENSITY = intPreferencesKey("wallpaper_intensity_v1")
 private val UI_FONT_SCALE = intPreferencesKey("ui_font_scale_percent_v1")
@@ -57,6 +58,7 @@ class AppearancePrefsImpl @Inject constructor(
                 prefs[CONVERSATION_FONT_SCALE] ?: DEFAULT_FONT_SCALE_PERCENT,
             ),
             trueBlack = storedTheme.trueBlack,
+            followSystem = prefs[FOLLOW_SYSTEM] ?: false,
         )
     }
 
@@ -73,6 +75,10 @@ class AppearancePrefsImpl @Inject constructor(
 
     override suspend fun setTrueBlack(enabled: Boolean) {
         store.edit { it[TRUE_BLACK] = enabled }
+    }
+
+    override suspend fun setFollowSystem(enabled: Boolean) {
+        store.edit { it[FOLLOW_SYSTEM] = enabled }
     }
 
     override suspend fun setWallpaper(selection: WallpaperSelection) {

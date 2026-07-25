@@ -83,6 +83,7 @@ fun AppearanceSettingsScreen(
         onOpenNickColors = onOpenNickColors,
         onThemePreset = viewModel::setThemePreset,
         onTrueBlack = viewModel::setTrueBlack,
+        onFollowSystem = viewModel::setFollowSystem,
         onDynamicColor = viewModel::setDynamicColor,
         onLayoutDensity = viewModel::setLayoutDensity,
         onAvatarStyle = viewModel::setAvatarStyle,
@@ -102,6 +103,7 @@ fun AppearanceSettingsContent(
     onOpenNickColors: () -> Unit,
     onThemePreset: (ColorThemePreset) -> Unit,
     onTrueBlack: (Boolean) -> Unit,
+    onFollowSystem: (Boolean) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
     onLayoutDensity: (LayoutDensity) -> Unit,
     onAvatarStyle: (AvatarStyle) -> Unit,
@@ -137,6 +139,18 @@ fun AppearanceSettingsContent(
                 onCheckedChange = onTrueBlack,
                 switchTag = "settings_switch_true_black",
                 enabled = trueBlackAvailable,
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_follow_system),
+                subtitle = stringResource(
+                    if (appearance.theme.isFixedPalette) R.string.settings_follow_system_desc
+                    else R.string.settings_follow_system_unavailable_desc,
+                ),
+                checked = appearance.followSystem,
+                onCheckedChange = onFollowSystem,
+                switchTag = "settings_switch_follow_system",
+                enabled = appearance.theme.isFixedPalette,
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
@@ -523,7 +537,7 @@ private fun AppearanceSettingsPreview() {
         AppearanceSettingsContent(
             settings = Settings(dynamicColor = true),
             appearance = io.github.trevarj.motd.data.prefs.AppearanceConfig(theme = ColorThemePreset.DARK),
-            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onDynamicColor = {},
+            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onFollowSystem = {}, onDynamicColor = {},
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
             onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
             onConversationFontScale = {},
@@ -538,7 +552,7 @@ private fun AppearanceSettingsMinTextPreview() {
         AppearanceSettingsContent(
             settings = Settings(dynamicColor = true),
             appearance = io.github.trevarj.motd.data.prefs.AppearanceConfig(uiFontScalePercent = 80),
-            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onDynamicColor = {},
+            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onFollowSystem = {}, onDynamicColor = {},
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
             onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
             onConversationFontScale = {},
@@ -553,7 +567,7 @@ private fun AppearanceSettingsMaxTextPreview() {
         AppearanceSettingsContent(
             settings = Settings(dynamicColor = true),
             appearance = io.github.trevarj.motd.data.prefs.AppearanceConfig(uiFontScalePercent = 140),
-            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onDynamicColor = {},
+            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onFollowSystem = {}, onDynamicColor = {},
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
             onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
             onConversationFontScale = {},

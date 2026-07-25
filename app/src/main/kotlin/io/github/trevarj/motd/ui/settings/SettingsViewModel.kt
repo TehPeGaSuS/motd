@@ -124,6 +124,10 @@ class SettingsViewModel @Inject constructor(
         appearancePrefs.setTrueBlack(enabled)
     }
 
+    fun setFollowSystem(enabled: Boolean) = viewModelScope.launch {
+        appearancePrefs.setFollowSystem(enabled)
+    }
+
     fun setDynamicColor(enabled: Boolean) = viewModelScope.launch {
         settingsRepository.setDynamicColor(enabled)
     }

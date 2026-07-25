@@ -28,10 +28,20 @@ class AppearancePrefsTest {
     @Test fun themeAndWallpaper_roundTrip() = runTest {
         prefs.setTheme(ColorThemePreset.KANAGAWA_WAVE)
         prefs.setTrueBlack(true)
+        prefs.setFollowSystem(true)
         prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RELAY, 73))
         assertEquals(ColorThemePreset.KANAGAWA_WAVE, prefs.config.first().theme)
         assertEquals(true, prefs.config.first().trueBlack)
+        assertEquals(true, prefs.config.first().followSystem)
         assertEquals(WallpaperSelection(ChatWallpaperPreset.RELAY, 73), prefs.config.first().wallpaper)
+    }
+
+    @Test fun followSystem_defaultsFalseAndRoundTrips() = runTest {
+        assertEquals(false, prefs.config.first().followSystem)
+        prefs.setFollowSystem(true)
+        assertEquals(true, prefs.config.first().followSystem)
+        prefs.setFollowSystem(false)
+        assertEquals(false, prefs.config.first().followSystem)
     }
 
     @Test fun legacyAmoledTheme_migratesToDarkWithTrueBlack() {

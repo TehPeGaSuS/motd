@@ -115,6 +115,9 @@
     <string name="settings_true_black_system_desc">Applied whenever your device uses dark theme.</string>
     <string name="settings_true_black_saved_desc">Saved; applies when you return to a dark theme.</string>
     <string name="settings_true_black_unavailable_desc">Available with dark themes.</string>
+    <string name="settings_follow_system">Follow system theme</string>
+    <string name="settings_follow_system_desc">Swap to this theme\'s light or dark variant when your device switches between modes. Themes without a light variant stay dark.</string>
+    <string name="settings_follow_system_unavailable_desc">Available for named themes; System already follows your device.</string>
     <string name="settings_dynamic_color">Dynamic color</string>
     <string name="settings_dynamic_color_desc">Use colors from your wallpaper (Android 12+).</string>
     <string name="settings_dynamic_color_unavailable">Dynamic color is unavailable for named themes.</string>
