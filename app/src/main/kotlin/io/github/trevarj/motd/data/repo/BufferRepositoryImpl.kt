@@ -5,6 +5,7 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MemberDao
 import io.github.trevarj.motd.data.db.MemberEntity
+import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.map
 class BufferRepositoryImpl @Inject constructor(
     private val bufferDao: BufferDao,
     private val memberDao: MemberDao,
+    private val messageDao: MessageDao,
     private val settings: SettingsRepository,
     private val visibilityReader: MessageVisibilityReader,
 ) : BufferRepository {
@@ -38,6 +40,12 @@ class BufferRepositoryImpl @Inject constructor(
     override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> =
         bufferDao.observe(bufferId).flatMapLatest { room ->
             memberDao.observe(room?.id ?: bufferId)
+        }
+
+    override fun observeLastSpokeByNick(bufferId: Long): Flow<Map<String, Long>> =
+        bufferDao.observe(bufferId).flatMapLatest { room ->
+            messageDao.observeLastSpoke(room?.id ?: bufferId)
+                .map { rows -> rows.associate { it.nick to it.lastSpokeAt } }
         }
 
     override suspend fun setPinned(id: Long, pinned: Boolean) {

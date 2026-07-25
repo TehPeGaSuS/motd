@@ -48,6 +48,10 @@ data class ChannelInfoUiState(
     val identityRules: IrcIdentityRules = IrcIdentityRules(),
     // Round 5 (plans/16 §5.8): true when the viewer holds op in this channel (moderation gate).
     val canModerate: Boolean = false,
+    // Fuzzy member search. When [searchResults] is non-null the list renders a flat ranked set
+    // instead of the prefix sections; null (query blank) means sectioned mode.
+    val query: String = "",
+    val searchResults: List<MemberEntity>? = null,
 )
 
 internal data class RosterPresentation(val memberCount: Int?, val hasStaleMembers: Boolean)
@@ -84,6 +88,17 @@ class ChannelInfoViewModel @Inject constructor(
         if (id == null) flowOf(emptyList<MemberEntity>()) else bufferRepository.observeMembers(id)
     }
 
+    // Fuzzy member search input. The visible query lives in the screen's local IME state; this
+    // flow mirrors it so the sections/search-results re-derive without a network fetch.
+    private val queryFlow = MutableStateFlow("")
+    fun setQuery(query: String) { queryFlow.value = query }
+
+    // Per-nick last-spoke time in this channel (PRIVMSG/NOTICE/ACTION, isSelf=0). Keyed by the
+    // normalized actor stored on messages; looked up via identityRules.normalize(member.nick).
+    private val lastSpokeFlow = bufferIdFlow.flatMapLatest { id ->
+        if (id == null) flowOf(emptyMap<String, Long>()) else bufferRepository.observeLastSpokeByNick(id)
+    }
+
     private val identityRulesFlow = bufferFlow.flatMapLatest { buffer ->
         if (buffer == null) {
             flowOf(IrcIdentityRules())
@@ -92,29 +107,67 @@ class ChannelInfoViewModel @Inject constructor(
         }
     }
 
+    // Gather the per-roster inputs that don't depend on [bufferFlow]'s prefix order: lastSpoke,
+    // the search query, friend/fool sets, and the identity rules. Sectioning/ranking happen in the
+    // outer combine where [order] (derived from buffer) is available.
+    private data class DerivedRoster(
+        val lastSpoke: Map<String, Long>,
+        val query: String,
+        val friends: Set<String>,
+        val fools: Set<String>,
+        val identityRules: IrcIdentityRules,
+    )
+
+    private val derivedRosterFlow = combine(
+        lastSpokeFlow,
+        queryFlow,
+        settingsRepository.settings,
+        identityRulesFlow,
+    ) { lastSpoke, query, settings, identityRules ->
+        DerivedRoster(lastSpoke, query, settings.friends, settings.fools, identityRules)
+    }
+
     val state: StateFlow<ChannelInfoUiState> =
         combine(
             bufferFlow,
             membersFlow,
-            settingsRepository.settings,
+            derivedRosterFlow,
             connectionManager.rosterStates,
-            identityRulesFlow,
-        ) { buffer, members, settings, rosterStates, identityRules ->
+        ) { buffer, members, derived, rosterStates ->
             val order = prefixOrderForBuffer(buffer)
-            val social = sectionMembersSocial(members, order, settings.fools, identityRules)
+            val identityRules = derived.identityRules
+            val lookup: (MemberEntity) -> Long? = { derived.lastSpoke[identityRules.normalize(it.nick)] }
+            val sections: List<MemberSection>
+            val foolMembers: List<MemberEntity>
+            val searchResults: List<MemberEntity>?
+            if (derived.query.isBlank()) {
+                val social = sectionMembersSocial(
+                    members, order, derived.fools, identityRules,
+                    comparator = activityMemberComparator(identityRules, lookup),
+                )
+                sections = social.sections
+                foolMembers = social.fools
+                searchResults = null
+            } else {
+                sections = emptyList()
+                foolMembers = emptyList()
+                searchResults = rankMembersFuzzy(derived.query, members, identityRules::normalize, lookup)
+            }
             val rosterState = buffer?.let { rosterStates[it.id] } ?: RosterLoadState.NOT_LOADED
             val presentation = rosterPresentation(members.size, rosterState)
             ChannelInfoUiState(
                 buffer = buffer,
-                sections = social.sections,
+                sections = sections,
                 memberCount = presentation.memberCount,
                 rosterState = rosterState,
                 hasStaleMembers = presentation.hasStaleMembers,
-                foolMembers = social.fools,
-                friends = settings.friends,
-                fools = settings.fools,
+                foolMembers = foolMembers,
+                friends = derived.friends,
+                fools = derived.fools,
                 identityRules = identityRules,
                 canModerate = viewerCanModerate(buffer, members, order),
+                query = derived.query,
+                searchResults = searchResults,
             )
         }.stateIn(
             scope = viewModelScope,

@@ -155,4 +155,48 @@ class MemberSectioningTest {
 
         assertEquals(listOf("[Nick]", "{Nick}"), sorted.map { it.nick })
     }
+
+    // -- activity comparator (last-spoke within sections) --
+
+    @Test
+    fun `activityMemberComparator orders by lastSpokeAt descending nulls last`() {
+        val members = listOf(member("recent"), member("silent"), member("older"))
+        val lastSpoke = mapOf("recent" to 2000L, "older" to 1000L)
+        val lookup: (MemberEntity) -> Long? = { lastSpoke[it.nick] }
+        val rules = IrcIdentityRules(caseMapping = IrcCaseMapping.Ascii)
+        val sorted = members.sortedWith(activityMemberComparator(rules, lookup))
+        assertEquals(listOf("recent", "older", "silent"), sorted.map { it.nick })
+    }
+
+    @Test
+    fun `activityMemberComparator falls back to alphabetical for ties`() {
+        val members = listOf(member("Bob"), member("alice"))
+        val rules = IrcIdentityRules(caseMapping = IrcCaseMapping.Ascii)
+        val sorted = members.sortedWith(activityMemberComparator(rules) { null })
+        assertEquals(listOf("alice", "Bob"), sorted.map { it.nick })
+    }
+
+    @Test
+    fun `sectionMembersSocial applies comparator to sections but fools stay alphabetical`() {
+        val members = listOf(
+            member("op", "@"),
+            member("carol"),
+            member("bob"),
+            member("Zed"),
+            member("alice"),
+        )
+        // Reverse-alpha for sections; fools {alice, zed} must stay alphabetical regardless.
+        val rules = IrcIdentityRules(caseMapping = IrcCaseMapping.Ascii)
+        val reverseAlpha: Comparator<MemberEntity> =
+            compareByDescending<MemberEntity> { rules.normalize(it.nick) }.thenByDescending { it.nick }
+        val social = sectionMembersSocial(
+            members,
+            fools = setOf("alice", "zed"),
+            identityRules = rules,
+            comparator = reverseAlpha,
+        )
+        // Prefix section (@) and regular section use reverse-alpha; fools bucket stays alpha.
+        assertEquals(listOf("op", "carol", "bob"), social.sections.flatMap { it.members }.map { it.nick })
+        assertEquals(listOf("alice", "Zed"), social.fools.map { it.nick })
+    }
 }

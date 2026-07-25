@@ -11,22 +11,27 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +51,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -79,6 +87,7 @@ fun ChannelInfoScreen(
         onMemberClick = viewModel::openNickSheet,
         onSetTopic = viewModel::setTopic,
         onRetryMembers = viewModel::retryMembers,
+        onQueryChange = viewModel::setQuery,
     )
 
     // Nick sheet (plans/16 §5.8): shared with the chat timeline. Moderation shown only when op.
@@ -115,12 +124,18 @@ fun ChannelInfoContent(
     onMemberClick: (String) -> Unit = {},
     onSetTopic: (String) -> Unit = {},
     onRetryMembers: () -> Unit = {},
+    onQueryChange: (String) -> Unit = {},
 ) {
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var showTopicEdit by remember { mutableStateOf(false) }
     // Fools section is collapsed by default; state is local to the screen (plans/13 §3.6).
     var foolsExpanded by remember { mutableStateOf(false) }
     val buffer = state.buffer
+    // Visible query lives in local IME state so keystrokes aren't dropped and the cursor is
+    // preserved; the ViewModel query drives the filter only. Seeded once from incoming state.
+    var queryText by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(state.query))
+    }
 
     Scaffold(
         topBar = {
@@ -153,26 +168,84 @@ fun ChannelInfoContent(
                     onLeave = { showLeaveConfirm = true },
                 )
             }
-            state.sections.forEach { section ->
-                item(key = "sec-${section.prefix ?: "regular"}") {
-                    Text(
-                        text = section.prefix?.let { "$it" } ?: stringResource(R.string.channelinfo_section_regular),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
-                    )
+            item(key = "search-field") {
+                OutlinedTextField(
+                    value = queryText,
+                    onValueChange = { queryText = it; onQueryChange(it.text) },
+                    singleLine = true,
+                    placeholder = { Text(stringResource(R.string.channelinfo_member_search_hint)) },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Outlined.Search,
+                            contentDescription = null,
+                        )
+                    },
+                    trailingIcon = {
+                        if (queryText.text.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    queryText = TextFieldValue("")
+                                    onQueryChange("")
+                                },
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Close,
+                                    contentDescription = stringResource(R.string.channelinfo_member_search_clear),
+                                )
+                            }
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { /* in-memory filter; nothing to fetch */ }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .testTag("channelinfo_member_search_field"),
+                )
+            }
+            val searchResults = state.searchResults
+            if (searchResults != null) {
+                if (searchResults.isEmpty()) {
+                    item(key = "search-empty") {
+                        Text(
+                            text = stringResource(R.string.channelinfo_member_search_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(24.dp),
+                        )
+                    }
+                } else {
+                    items(searchResults, key = { "search-${it.nick}" }) { member ->
+                        MemberRow(
+                            member = member,
+                            networkId = buffer?.networkId,
+                            isFriend = state.identityRules.matchesConfiguredNick(member.nick, state.friends),
+                            onClick = { onMemberClick(member.nick) },
+                        )
+                    }
                 }
-                items(section.members, key = { "${section.prefix}-${it.nick}" }) { member ->
-                    MemberRow(
-                        member = member,
-                        networkId = buffer?.networkId,
-                        isFriend = state.identityRules.matchesConfiguredNick(member.nick, state.friends),
-                        onClick = { onMemberClick(member.nick) },
-                    )
+            } else {
+                state.sections.forEach { section ->
+                    item(key = "sec-${section.prefix ?: "regular"}") {
+                        Text(
+                            text = section.prefix?.let { "$it" } ?: stringResource(R.string.channelinfo_section_regular),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+                        )
+                    }
+                    items(section.members, key = { "${section.prefix}-${it.nick}" }) { member ->
+                        MemberRow(
+                            member = member,
+                            networkId = buffer?.networkId,
+                            isFriend = state.identityRules.matchesConfiguredNick(member.nick, state.friends),
+                            onClick = { onMemberClick(member.nick) },
+                        )
+                    }
                 }
             }
-            if (state.foolMembers.isNotEmpty()) {
+            if (state.searchResults == null && state.foolMembers.isNotEmpty()) {
                 item(key = "fools-header") {
                     FoolsSectionHeader(
                         count = state.foolMembers.size,
@@ -444,6 +517,7 @@ private fun ChannelInfoContentPreview() {
                 rosterState = RosterLoadState.LOADED,
             ),
             onBack = {}, onSetPinned = {}, onSetMuted = {}, onLeave = {},
+            onQueryChange = {},
         )
     }
 }

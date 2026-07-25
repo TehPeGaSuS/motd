@@ -278,6 +278,9 @@
     <string name="channelinfo_leave_confirm_title">Leave channel?</string>
     <string name="channelinfo_leave_confirm_message">You will stop receiving messages from this channel.</string>
     <string name="channelinfo_section_regular">Members</string>
+    <string name="channelinfo_member_search_hint">Search members</string>
+    <string name="channelinfo_member_search_empty">No members match your search</string>
+    <string name="channelinfo_member_search_clear">Clear search</string>
     <string name="chat_jump_not_loaded">Message not loaded</string>
 
     <!-- TLS cert trust (TOFU, WP-S1) -->

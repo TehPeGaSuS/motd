@@ -514,6 +514,9 @@ data class BufferReadMarkerRow(
     val eventId: TimelineEventId? = null,
 )
 
+/** Per-nick last-spoke time in a channel (PRIVMSG/NOTICE/ACTION, isSelf=0). Projection, not an entity. */
+data class LastSpokeRow(val nick: String, val lastSpokeAt: Long)
+
 @Dao
 interface MessageDao {
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId ORDER BY serverTime DESC, id DESC")
@@ -683,6 +686,15 @@ interface MessageDao {
 
     @Query("SELECT MAX(serverTime) FROM messages WHERE bufferId = :bufferId")
     suspend fun newestTime(bufferId: Long): Long?
+
+    @Query(
+        """SELECT normalizedActor AS nick, MAX(serverTime) AS lastSpokeAt
+           FROM messages
+           WHERE bufferId = :bufferId AND isSelf = 0
+             AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+           GROUP BY normalizedActor""",
+    )
+    fun observeLastSpoke(bufferId: Long): Flow<List<LastSpokeRow>>
 
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId ORDER BY serverTime DESC, id DESC LIMIT 1")
     suspend fun newestMessage(bufferId: RoomId): MessageEntity?

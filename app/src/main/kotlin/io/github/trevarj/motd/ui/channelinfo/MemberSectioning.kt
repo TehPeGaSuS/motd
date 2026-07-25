@@ -24,12 +24,14 @@ data class MemberSection(
 /**
  * Build sections. [prefixOrder] is the ordered prefix glyphs, most privileged first (from
  * `client.isupport.prefixModes` prefixes, mapped to glyph order). Falls back to
- * [DEFAULT_PREFIX_ORDER] when empty.
+ * [DEFAULT_PREFIX_ORDER] when empty. [comparator] orders members within a section (defaults to
+ * alphabetical by normalized nick).
  */
 fun sectionMembers(
     members: List<MemberEntity>,
     prefixOrder: String = DEFAULT_PREFIX_ORDER,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
+    comparator: Comparator<MemberEntity> = identityRules.memberComparator(),
 ): List<MemberSection> {
     val order = prefixOrder.ifEmpty { DEFAULT_PREFIX_ORDER }
     val rank: (Char) -> Int = { c -> order.indexOf(c).let { if (it < 0) Int.MAX_VALUE else it } }
@@ -44,11 +46,11 @@ fun sectionMembers(
     val prefixSections = order
         .mapNotNull { glyph ->
             grouped[glyph]?.let { list ->
-                MemberSection(glyph, list.sortedWith(identityRules.memberComparator()))
+                MemberSection(glyph, list.sortedWith(comparator))
             }
         }
     val regular = grouped[null]?.let { list ->
-        MemberSection(null, list.sortedWith(identityRules.memberComparator()))
+        MemberSection(null, list.sortedWith(comparator))
     }
 
     return prefixSections + listOfNotNull(regular)
@@ -67,6 +69,9 @@ fun prefixOrderFrom(prefixModes: List<Pair<Char, Char>>): String =
  * using the network's IRC casemapping are removed from every prefix section and returned separately,
  * sorted case-insensitively. Friends are NOT moved — they stay in their prefix section (they
  * only gain a star on the row). Empty [fools] reproduces the plain [sectionMembers] result.
+ *
+ * [comparator] orders members within each prefix section; the fools bucket stays alphabetical
+ * (fools are a separate trailing bucket, not a prefix section), so it ignores [comparator].
  */
 data class SocialSections(
     val sections: List<MemberSection>,
@@ -78,15 +83,31 @@ fun sectionMembersSocial(
     prefixOrder: String = DEFAULT_PREFIX_ORDER,
     fools: Set<String> = emptySet(),
     identityRules: IrcIdentityRules = IrcIdentityRules(),
+    comparator: Comparator<MemberEntity> = identityRules.memberComparator(),
 ): SocialSections {
     val (foolMembers, rest) = members.partition {
         identityRules.matchesConfiguredNick(it.nick, fools)
     }
     return SocialSections(
-        sections = sectionMembers(rest, prefixOrder, identityRules),
+        sections = sectionMembers(rest, prefixOrder, identityRules, comparator),
         fools = foolMembers.sortedWith(identityRules.memberComparator()),
     )
 }
 
 private fun IrcIdentityRules.memberComparator(): Comparator<MemberEntity> =
     compareBy<MemberEntity> { normalize(it.nick) }.thenBy { it.nick }
+
+/**
+ * Orders members by last-spoke time descending, with never-spoke members (null) sorting last
+ * (mapped to [Long.MIN_VALUE] so they fall below any real timestamp), then falls back to the
+ * alphabetical [IrcIdentityRules.memberComparator] for ties. Used to rank a prefix section by
+ * recent channel activity.
+ */
+fun activityMemberComparator(
+    identityRules: IrcIdentityRules,
+    lastSpokeAt: (MemberEntity) -> Long?,
+): Comparator<MemberEntity> {
+    val alpha = identityRules.memberComparator()
+    return compareByDescending<MemberEntity> { lastSpokeAt(it) ?: Long.MIN_VALUE }
+        .thenComparator { a, b -> alpha.compare(a, b) }
+}

@@ -34,6 +34,8 @@ interface BufferRepository {
     fun observeJoinedChannelNames(networkId: Long): Flow<Set<String>> = flowOf(emptySet())
     fun observeBuffer(id: Long): Flow<BufferEntity?>
     fun observeMembers(bufferId: Long): Flow<List<MemberEntity>>
+    /** Per-nick last-spoke time in a channel (PRIVMSG/NOTICE/ACTION, isSelf=0). Empty when unavailable. */
+    fun observeLastSpokeByNick(bufferId: Long): Flow<Map<String, Long>> = flowOf(emptyMap())
     suspend fun setPinned(id: Long, pinned: Boolean)
     suspend fun setMuted(id: Long, muted: Boolean)
     /** Hide or restore a durable CHANNEL/QUERY without altering its IRC membership or history. */
