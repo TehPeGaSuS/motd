@@ -411,6 +411,18 @@ read_marker_check() {
     --channel "$TEST_CHANNEL"
 }
 
+soju_read_marker_check() {
+  [ -f "$RUN/soju.pid" ] && kill -0 "$(cat "$RUN/soju.pid")" 2>/dev/null \
+    || die "soju is not running — run '$0 up' first"
+  python3 "$REPO/test/e2e/fixtures/read-marker-soju-probe.py" \
+    --host 127.0.0.1 \
+    --port "$SOJU_PORT" \
+    --username "$SOJU_USER" \
+    --password "$SOJU_PASS" \
+    --network "$NETWORK_NAME" \
+    --channel "$TEST_CHANNEL"
+}
+
 invite_check() {
   [ -S "$ADMIN_SOCK" ] || die "soju admin socket not found; run '$0 up' first"
   log "running direct Ergo sender -> soju downstream invitation proof"
@@ -896,6 +908,7 @@ case "$CMD" in
   control-check) control_check ;;
   history-check) history_check "${2:-}" ;;
   read-marker-check) read_marker_check ;;
+  soju-read-marker-check) soju_read_marker_check ;;
   invite-check) invite_check ;;
   ready-up) ready_up ;;
   ready-check) ready_check ;;

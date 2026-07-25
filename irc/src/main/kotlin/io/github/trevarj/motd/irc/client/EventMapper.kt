@@ -24,6 +24,12 @@ class EventMapper(
     private val selfNick: () -> String,
     private val isupport: () -> Isupport,
     private val now: () -> Long = { System.currentTimeMillis() },
+    /**
+     * Whether `soju.im/read` is negotiated on this connection. Guards inbound `READ` lines so a
+     * connection that never negotiated soju's extension cannot emit spurious [IrcEvent.ReadMarker]
+     * events from stray `READ` traffic. `MARKREAD` (IRCv3) is mapped unconditionally, as before.
+     */
+    private val sojuReadCap: () -> Boolean = { true },
 ) {
     // channel(normalized) -> accumulating members for a pending NAMES (353..366) run.
     private val namesBuffers = HashMap<String, MutableList<IrcEvent.Names.Member>>()
@@ -127,6 +133,10 @@ class EventMapper(
                 IrcEvent.RealnameChanged(nick, msg.params.getOrNull(0).orEmpty())
             }
             "MARKREAD" -> mapMarkRead(msg)
+            // soju.im/read uses the READ command with the same timestamp= shape as MARKREAD. Only
+            // map it on connections that negotiated soju's extension; otherwise stray READ traffic
+            // (e.g. a non-soju server) must not synthesize ReadMarker events.
+            "READ" -> if (sojuReadCap()) mapMarkRead(msg) else null
             "BOUNCER" -> mapBouncer(msg)
             "ERROR" -> IrcEvent.ServerError("ERROR", msg.params, msg.params.lastOrNull().orEmpty())
             // NAMES accumulation.

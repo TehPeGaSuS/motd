@@ -1112,7 +1112,7 @@ class ConnectionManagerImpl @Inject constructor(
         // final. ConnectionActor cancels this scope as soon as Ready ends.
         coroutineScope {
             val readMarkers = async {
-                awaitCapabilityAvailable(client, READ_MARKER_CAP)
+                awaitReadMarkerCapability(client)
                 if (isCurrent()) reconcileReadMarkersForConnection(row, client, isCurrent)
             }
             launch {
@@ -1120,7 +1120,7 @@ class ConnectionManagerImpl @Inject constructor(
                 if (!isCurrent()) return@launch
                 // If read-marker was already negotiated, establish the durable max before
                 // history rows arrive. If it appears later, its own watcher will still converge.
-                if (client.hasCap(READ_MARKER_CAP)) readMarkers.join()
+                if (client.hasReadMarkerCap()) readMarkers.join()
                 if (isCurrent()) catchUpForConnection(row.id, client)
             }
             launch {
@@ -1235,7 +1235,7 @@ class ConnectionManagerImpl @Inject constructor(
         client: IrcClient,
         isCurrent: () -> Boolean,
     ) {
-        if (row.role == NetworkRole.BOUNCER_ROOT || !client.hasCap(READ_MARKER_CAP)) return
+        if (row.role == NetworkRole.BOUNCER_ROOT || !client.hasReadMarkerCap()) return
         val requests = readMarkerSyncRequests(readMarkerRepository.storedForNetwork(row.id))
         coroutineScope {
             requests.map { request ->
@@ -1276,6 +1276,25 @@ class ConnectionManagerImpl @Inject constructor(
             ready.caps.any { it == capability || it.startsWith("$capability=") }
         }
     }
+
+    /**
+     * Wait until either read-marker extension is negotiated. Soju offers `draft/read-marker`
+     * (MARKREAD) and/or `soju.im/read` (READ); a server exposing only the soju fallback would leave
+     * a `draft/read-marker`-only waiter blocked forever, so accept either. Bouncer children publish
+     * their post-bind CAP ACK via successive Ready snapshots, so the filter matches whenever either
+     * cap lands.
+     */
+    private suspend fun awaitReadMarkerCapability(client: IrcClient) {
+        if (client.hasReadMarkerCap()) return
+        client.state.filterIsInstance<IrcClientState.Ready>().first { ready ->
+            ready.caps.any { isReadMarkerCap(it) }
+        }
+    }
+
+    /** True for either `draft/read-marker` or `soju.im/read`, with or without a `=value` suffix. */
+    private fun isReadMarkerCap(cap: String): Boolean =
+        cap == READ_MARKER_CAP || cap.startsWith("$READ_MARKER_CAP=") ||
+            cap == SOJU_READ_CAP || cap.startsWith("$SOJU_READ_CAP=")
 
     private suspend fun awaitHistoryReady(client: IrcClient): Boolean {
         when (client.historyAvailability) {
@@ -1733,7 +1752,7 @@ class ConnectionManagerImpl @Inject constructor(
         val client = clientFor(buffer.networkId)
         AutoFollowTrace.record("wire_markread_out", canonicalBufferId) {
             "marker=${authoritative.timestamp} connected=${client != null} " +
-                "supported=${client?.hasCap("draft/read-marker") == true}"
+                "supported=${client?.hasReadMarkerCap() == true}"
         }
         client?.markRead(buffer.ircTarget, authoritative.timestamp)
     }
@@ -1810,6 +1829,7 @@ class ConnectionManagerImpl @Inject constructor(
         // Stable logcat tag for reconnect catch-up failures.
         private const val TAG = "MotdCatchUp"
         const val READ_MARKER_CAP = "draft/read-marker"
+        const val SOJU_READ_CAP = "soju.im/read"
         const val WEBPUSH_CAP = "soju.im/webpush"
         const val READ_MARKER_RESPONSE_TIMEOUT_MS = 5_000L
         const val READ_MARKER_PERSIST_TIMEOUT_MS = 2_000L

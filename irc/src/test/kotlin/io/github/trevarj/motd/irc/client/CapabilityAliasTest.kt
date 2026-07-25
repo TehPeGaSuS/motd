@@ -54,4 +54,44 @@ class CapabilityAliasTest {
             ),
         )
     }
+
+    @Test fun `read marker requests draft standard when both offered, soju fallback when only it is offered`() {
+        // Both advertised: IRCv3 draft wins; no redundant soju.im/read request.
+        assertEquals(
+            setOf("draft/read-marker"),
+            CapNegotiator.requestSet(READ_MARKER_ALIASES.toSet(), emptySet()),
+        )
+        // Only the soju fallback is offered: request it.
+        assertEquals(
+            setOf("soju.im/read"),
+            CapNegotiator.requestSet(setOf("soju.im/read"), emptySet()),
+        )
+        // Neither offered: request nothing.
+        assertEquals(
+            emptySet<String>(),
+            CapNegotiator.requestSet(emptySet(), emptySet()),
+        )
+        assertEquals(null, preferredReadMarker(emptySet()))
+    }
+
+    @Test fun `runtime capability discovery holds the already-acked read marker alias`() {
+        // Already on soju.im/read; a later CAP NEW advertising the draft must not switch aliases.
+        assertEquals(
+            emptySet<String>(),
+            CapNegotiator.runtimeRequestSet(
+                newCaps = setOf("draft/read-marker"),
+                ackedCaps = setOf("soju.im/read"),
+                extraCaps = emptySet(),
+            ),
+        )
+        // Fresh connection with both advertised still prefers the draft.
+        assertEquals(
+            setOf("draft/read-marker"),
+            CapNegotiator.runtimeRequestSet(
+                newCaps = READ_MARKER_ALIASES.toSet(),
+                ackedCaps = emptySet(),
+                extraCaps = emptySet(),
+            ),
+        )
+    }
 }

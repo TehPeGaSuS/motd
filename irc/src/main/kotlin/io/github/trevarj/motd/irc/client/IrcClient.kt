@@ -162,7 +162,11 @@ class IrcClient(
     private val unlabeledChatHistoryLock = Mutex()
     private val batches = BatchAssembler()
     private val typingOutbox = TypingOutbox()
-    private val eventMapper = EventMapper(selfNick = { selfNick.get() }, isupport = { _isupport.get() })
+    private val eventMapper = EventMapper(
+        selfNick = { selfNick.get() },
+        isupport = { _isupport.get() },
+        sojuReadCap = { hasCap("soju.im/read") },
+    )
     private val whoxRequests = ConcurrentHashMap<String, Deferred<WhoxResult>>()
     private val whoxTokens = WhoxTokenPool()
 
@@ -729,14 +733,32 @@ class IrcClient(
 
     suspend fun markRead(target: String, timestampMs: Long) {
         val t = transport ?: return
-        if (!hasCap("draft/read-marker")) return
-        t.send(ReadMarkerCommands.set(target, timestampMs).serialize())
+        val command = readMarkerCommand() ?: return
+        t.send(ReadMarkerCommands.set(command, target, timestampMs).serialize())
     }
 
     suspend fun fetchReadMarker(target: String) {
         val t = transport ?: return
-        if (!hasCap("draft/read-marker")) return
-        t.send(ReadMarkerCommands.get(target).serialize())
+        val command = readMarkerCommand() ?: return
+        t.send(ReadMarkerCommands.get(command, target).serialize())
+    }
+
+    /**
+     * True when either read-marker extension is negotiated: the IRCv3 `draft/read-marker`
+     * (MARKREAD) or soju's older `soju.im/read` (READ) fallback. The app gates marker sync on this
+     * so a soju-connected chat without the IRCv3 draft still syncs.
+     */
+    fun hasReadMarkerCap(): Boolean = hasCap("draft/read-marker") || hasCap("soju.im/read")
+
+    /**
+     * The read-marker command to send on this connection: MARKREAD when the IRCv3 draft is acked,
+     * else READ when only soju's extension is acked, else null (no-op). The IRCv3 standard wins so
+     * soju broadcasts MARKREAD to this client when both are advertised.
+     */
+    private fun readMarkerCommand(): String? = when {
+        hasCap("draft/read-marker") -> "MARKREAD"
+        hasCap("soju.im/read") -> "READ"
+        else -> null
     }
 
     /**

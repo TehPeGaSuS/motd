@@ -38,6 +38,7 @@ internal object CapTiers {
         "draft/chathistory",
         "draft/event-playback",
         "draft/read-marker",
+        "soju.im/read",
         "draft/metadata-2",
         "soju.im/bouncer-networks",
         "soju.im/bouncer-networks-notify",
@@ -71,6 +72,12 @@ internal object CapNegotiator {
         val selectedMonitor = preferredExtendedMonitor(advertised)
         req.removeAll(EXTENDED_MONITOR_ALIASES)
         if (selectedMonitor != null) req.add(selectedMonitor)
+        // draft/read-marker is the IRCv3 standard; soju.im/read is the pre-standard fallback with
+        // an identical on-wire shape. Request only the standard when both are advertised so soju
+        // broadcasts MARKREAD (not READ) to this client.
+        val selectedReadMarker = preferredReadMarker(advertised)
+        req.removeAll(READ_MARKER_ALIASES)
+        if (selectedReadMarker != null) req.add(selectedReadMarker)
         return req
     }
 
@@ -80,6 +87,7 @@ internal object CapNegotiator {
         val heldAliases = buildSet {
             if (preferredNoImplicitNames(ackedNames) != null) addAll(NO_IMPLICIT_NAMES_ALIASES)
             if (preferredExtendedMonitor(ackedNames) != null) addAll(EXTENDED_MONITOR_ALIASES)
+            if (preferredReadMarker(ackedNames) != null) addAll(READ_MARKER_ALIASES)
         }
         val advertised = (newCaps - heldAliases) + ackedNames
         return requestSet(advertised, extraCaps) - ackedNames
@@ -119,4 +127,12 @@ val EXTENDED_MONITOR_ALIASES: List<String> = listOf("extended-monitor", "draft/e
 fun preferredExtendedMonitor(caps: Set<String>): String? {
     val names = caps.mapTo(HashSet()) { it.substringBefore('=') }
     return EXTENDED_MONITOR_ALIASES.firstOrNull { it in names }
+}
+
+// draft/read-marker (IRCv3) supersedes soju's older soju.im/read; both share the timestamp= param.
+val READ_MARKER_ALIASES: List<String> = listOf("draft/read-marker", "soju.im/read")
+
+fun preferredReadMarker(caps: Set<String>): String? {
+    val names = caps.mapTo(HashSet()) { it.substringBefore('=') }
+    return READ_MARKER_ALIASES.firstOrNull { it in names }
 }

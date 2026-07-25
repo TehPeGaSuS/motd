@@ -1056,4 +1056,84 @@ class IrcClientTest {
         runCurrent()
         return client
     }
+
+    /** Registers a client whose server advertises exactly [caps] (ACK mirrors the same set). */
+    private suspend fun kotlinx.coroutines.test.TestScope.registeredWithCaps(
+        ft: FakeTransport,
+        caps: String,
+    ): IrcClient {
+        val client = IrcClient(config(), ft.factory(), clientScope())
+        client.start()
+        runCurrent()
+        ft.feed(":srv CAP * LS :$caps")
+        runCurrent()
+        ft.feed(":srv CAP motd ACK :$caps")
+        runCurrent()
+        ft.feed(":srv 001 motd :Welcome")
+        ft.feed(":srv 005 motd CHATHISTORY=100 :are supported")
+        runCurrent()
+        return client
+    }
+
+    @Test
+    fun `markRead sends MARKREAD when draft read marker is negotiated`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+        assertTrue(client.hasReadMarkerCap())
+
+        client.markRead("#motd", 1_000)
+        runCurrent()
+        assertEquals("MARKREAD #motd timestamp=1970-01-01T00:00:01.000Z", ft.sent.last())
+
+        client.fetchReadMarker("#motd")
+        runCurrent()
+        assertEquals("MARKREAD #motd", ft.sent.last())
+    }
+
+    @Test
+    fun `markRead sends READ when only soju im read is negotiated`() = runTest {
+        val ft = FakeTransport()
+        val caps = "message-tags server-time batch soju.im/read"
+        val client = registeredWithCaps(ft, caps)
+        assertTrue(client.hasReadMarkerCap())
+        assertFalse(client.hasCap("draft/read-marker"))
+
+        client.markRead("#motd", 1_000)
+        runCurrent()
+        assertEquals("READ #motd timestamp=1970-01-01T00:00:01.000Z", ft.sent.last())
+
+        client.fetchReadMarker("#motd")
+        runCurrent()
+        assertEquals("READ #motd", ft.sent.last())
+    }
+
+    @Test
+    fun `markRead is a no-op when neither read marker cap is negotiated`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredNoCaps(ft)
+        assertFalse(client.hasReadMarkerCap())
+
+        val before = ft.sent.size
+        client.markRead("#motd", 1_000)
+        client.fetchReadMarker("#motd")
+        runCurrent()
+        assertEquals(before, ft.sent.size)
+    }
+
+    @Test
+    fun `inbound READ maps to ReadMarker only when soju im read is negotiated`() = runTest {
+        val ft = FakeTransport()
+        val caps = "message-tags server-time batch soju.im/read"
+        val client = registeredWithCaps(ft, caps)
+
+        val collected = mutableListOf<IrcEvent>()
+        val job = launch { client.broadcastEvents.toList(collected) }
+        runCurrent()
+        ft.feed(":srv READ #motd timestamp=2026-07-25T12:00:00.000Z")
+        runCurrent()
+        job.cancel()
+
+        val marker = collected.filterIsInstance<IrcEvent.ReadMarker>().first()
+        assertEquals("#motd", marker.target)
+    }
 }

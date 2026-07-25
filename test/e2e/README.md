@@ -185,6 +185,13 @@ a downstream reconnect. The live response is required inside motd’s bounded
 five-second reconnect barrier: motd converges its durable local marker with the
 server maximum before CHATHISTORY replay can populate unread-count queries.
 
+`soju-read-marker-check` is the soju.im/read (`READ` command) fallback sibling:
+both downstream clients request `soju.im/read` and decline `draft/read-marker`,
+so Soju broadcasts `READ` instead of `MARKREAD`. It asserts the same
+set/get/broadcast/persist parity as `read-marker-check` against the older
+pre-standard extension. Soju picks the broadcast command per downstream client,
+so a client that ACKs only `soju.im/read` sees `READ` traffic only.
+
 `history-check [EXACT_TEXT]` authenticates as the fixture bouncer user, requires
 `##motdtest` in a `CHATHISTORY TARGETS` response bounded from
 `1970-01-01T00:00:00.000Z`, then requires its seeded message from
