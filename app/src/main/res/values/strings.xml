@@ -25,6 +25,9 @@
     <string name="chat_history_failed">History refresh failed</string>
     <string name="chat_history_offline">Reconnect before refreshing history</string>
     <string name="chat_send_rejected">Couldn\'t save this message</string>
+    <string name="chat_not_in_channel">You\'re not in this channel</string>
+    <string name="chat_parted_banner_rejoin">Rejoin</string>
+    <string name="chat_parted_banner_text">You\'re not in %1$s</string>
     <string name="chat_history_refresh_title">Refresh history</string>
     <string name="chat_history_refresh_description">Choose how much history to load for this chat.</string>
     <string name="chat_history_range_missing">Missing messages</string>

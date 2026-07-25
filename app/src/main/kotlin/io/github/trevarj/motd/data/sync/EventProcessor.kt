@@ -1621,6 +1621,29 @@ class EventProcessor @Inject constructor(
                 messageDao.failJoiningInvites(inviteBufferId, e.text.ifBlank { e.code })
             }
         }
+        // "Not in channel" / "cannot send" numerics are only useful if surfaced where the user is
+        // looking — the channel they tried to talk to. Route these inline into that channel buffer
+        // (instead of the SERVER buffer) so a bouncer that never echoed the self-PART still makes
+        // the parted state obvious. 403/442 also flip joined=false so the UI banner engages; 404
+        // (ERR_CANNOTSENDTOCHAN) may be a mute/ban while still joined, so it only surfaces inline.
+        if (e.code in NOT_IN_CHANNEL_NUMERICS || e.code == "404") {
+            val channel = e.params.firstOrNull { isChannel(networkId, it, st) }
+            val channelBuffer = channel?.let { existingChannelBuffer(networkId, it, st) }
+            if (channelBuffer != null) {
+                val bufferId = channelBuffer.id
+                val text = "${e.code} ${e.text}".trim()
+                insertSystem(bufferId, serverCtx(), MessageKind.ERROR, "", text)
+                // Mark the just-sent message as failed; the server never accepted it. Retry is still
+                // available, and after rejoining it will succeed. Capture the row first — failLatestPending
+                // flips it to failed=0-excluded.
+                val failedRow = messageDao.latestPendingRow(bufferId)
+                if (messageDao.failLatestPending(bufferId) > 0 && failedRow != null) {
+                    traceMessageWrite("room_pending_failed", failedRow, fromHistory = false)
+                }
+                if (e.code in NOT_IN_CHANNEL_NUMERICS) markJoined(bufferId, false)
+                return
+            }
+        }
         val bufferId = ensureServerBuffer(networkId, st)
         val text = "${e.code} ${e.text}".trim()
         insertSystem(bufferId, serverCtx(), MessageKind.ERROR, "", text)
@@ -2316,6 +2339,9 @@ class EventProcessor @Inject constructor(
             "403", "405", "471", "473", "474", "475", "476",
         )
         val PART_ALREADY_CLOSED_NUMERICS: Set<String> = setOf("403", "442")
+        // The server confirms you are no longer on this channel. Flip joined=false so the channel
+        // UI shows its parted banner instead of an enabled composer.
+        val NOT_IN_CHANNEL_NUMERICS: Set<String> = setOf("403", "442")
     }
 }
 

@@ -48,6 +48,7 @@ import io.github.trevarj.motd.service.HistoryRefreshRange
 import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.SendAcceptance
+import io.github.trevarj.motd.service.SendRejectionReason
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import androidx.navigation.toRoute
@@ -97,6 +98,9 @@ data class ChatState(
     val connState: IrcClientState? = null,
     val presence: Map<PresenceKey, PresenceState> = emptyMap(),
     val conversationLayout: ConversationLayoutState = ConversationLayoutState(),
+    // True for a CHANNEL buffer we are no longer a member of (server-confirmed or reflected self-PART).
+    // Drives the "You're not in #channel — Rejoin" banner and disables the composer.
+    val parted: Boolean = false,
 )
 
 data class ComposerDraftState(
@@ -441,6 +445,7 @@ class ChatViewModel @Inject constructor(
             replyTo = reply,
             connState = conn,
             presence = presence,
+            parted = buffer?.type == BufferType.CHANNEL && !buffer.joined && buffer.pendingCloseAt == null,
         )
     }.combine(conversationLayout) { current, layout ->
         current.copy(conversationLayout = layout)
@@ -699,14 +704,27 @@ class ChatViewModel @Inject constructor(
 
     /** Retry mutates the same durable row; no replacement deletion is involved. */
     fun retry(message: MessageEntity) = viewModelScope.launch {
-        if (connectionManager.retryMessage(message.id) is SendAcceptance.Rejected) {
-            uiEventQueue.enqueue(ChatUiEvent.SendRejected)
+        val rejection = connectionManager.retryMessage(message.id) as? SendAcceptance.Rejected
+        if (rejection != null) {
+            val event = if (rejection.reason == SendRejectionReason.NOT_IN_CHANNEL) {
+                ChatUiEvent.NotInChannel
+            } else {
+                ChatUiEvent.SendRejected
+            }
+            uiEventQueue.enqueue(event)
         }
     }
 
     /** Delete a failed local row without resending (action-sheet delete affordance, plans/15 #10). */
     fun deleteFailed(message: MessageEntity) = viewModelScope.launch {
         messageRepository.deleteMessage(message.id)
+    }
+
+    /** Re-join the current channel after a self-PART (local or reflected from a bouncer). */
+    fun rejoinChannel() = viewModelScope.launch {
+        val currentBuffer = buffer.value ?: return@launch
+        if (currentBuffer.type != BufferType.CHANNEL) return@launch
+        connectionManager.joinChannel(currentBuffer.networkId, currentBuffer.ircTarget)
     }
 
     suspend fun linkPreview(url: String): LinkPreview? =
@@ -765,7 +783,12 @@ class ChatViewModel @Inject constructor(
                         clearDraftSubmission(submission)
                         connectionManager.sendTyping(roomId, "done")
                     } else if (result is SendAcceptance.Rejected) {
-                        uiEventQueue.enqueue(ChatUiEvent.SendRejected)
+                        val event = if (result.reason == SendRejectionReason.NOT_IN_CHANNEL) {
+                            ChatUiEvent.NotInChannel
+                        } else {
+                            ChatUiEvent.SendRejected
+                        }
+                        uiEventQueue.enqueue(event)
                     }
                 } finally {
                     releaseDraftSubmission(submission.snapshot)

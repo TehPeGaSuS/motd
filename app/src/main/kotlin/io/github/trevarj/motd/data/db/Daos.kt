@@ -616,6 +616,13 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND pendingLabel = :label")
     suspend fun byPendingLabel(bufferId: Long, label: String): MessageEntity?
 
+    @Query(
+        """SELECT * FROM messages
+           WHERE bufferId = :bufferId AND pendingLabel IS NOT NULL AND msgid IS NULL AND failed = 0
+           ORDER BY id DESC LIMIT 1""",
+    )
+    suspend fun latestPendingRow(bufferId: Long): MessageEntity?
+
     @Query("SELECT * FROM messages WHERE id IN (:eventIds) ORDER BY id")
     suspend fun byIds(eventIds: List<TimelineEventId>): List<MessageEntity>
 
@@ -624,6 +631,19 @@ interface MessageDao {
            WHERE bufferId = :bufferId AND pendingLabel = :label AND msgid IS NULL""",
     )
     suspend fun failIfStillPending(bufferId: Long, label: String): Int
+
+    // Mark the most recent un-echoed self-send in this buffer failed. Used when the server
+    // rejects a send with a "not in channel" / "cannot send" numeric (403/404/442) that
+    // carries no label to correlate with a specific pending row.
+    @Query(
+        """UPDATE messages SET failed = 1
+           WHERE id = (
+             SELECT id FROM messages
+             WHERE bufferId = :bufferId AND pendingLabel IS NOT NULL AND msgid IS NULL AND failed = 0
+             ORDER BY id DESC LIMIT 1
+           )""",
+    )
+    suspend fun failLatestPending(bufferId: Long): Int
 
     @Query(
         """UPDATE messages SET failed = 1

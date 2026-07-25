@@ -320,6 +320,7 @@ sealed interface ChatUiEvent {
     data object ReactionTargetUnavailable : ChatUiEvent
     data object ReactionSendFailed : ChatUiEvent
     data object SendRejected : ChatUiEvent
+    data object NotInChannel : ChatUiEvent
     data object HistoryOffline : ChatUiEvent
     data class HistoryUpdated(val inserted: Int) : ChatUiEvent
     data object HistoryUpToDate : ChatUiEvent

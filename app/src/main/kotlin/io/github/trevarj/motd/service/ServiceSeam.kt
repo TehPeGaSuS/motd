@@ -19,6 +19,7 @@ enum class SendRejectionReason {
     UNSUPPORTED_BUFFER,
     EVENT_NOT_RETRYABLE,
     PERSISTENCE_FAILED,
+    NOT_IN_CHANNEL,
 }
 
 enum class ImmediateWireAcceptance {

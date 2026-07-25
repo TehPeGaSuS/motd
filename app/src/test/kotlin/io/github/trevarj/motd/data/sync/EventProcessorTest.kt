@@ -9,6 +9,7 @@ import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.HistoryCursorEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.TimelineEventEntity
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ReactionEntity
@@ -1350,6 +1351,108 @@ class EventProcessorTest {
         )
 
         assertNull(db.bufferDao().observeById(bufferId))
+    }
+
+    @Test
+    fun notOnChannelError_routesInlineAndFlipsJoined() = runTest {
+        val bufferId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "#gone",
+                displayName = "#gone",
+                type = BufferType.CHANNEL,
+                joined = true,
+            ),
+        )
+        // A self-send is sitting un-echoed in the buffer; the server never accepted it.
+        val pendingId = db.canonicalTimelineDao().insertEvent(
+            TimelineEventEntity(
+                bufferId = bufferId,
+                serverTime = 1000,
+                sender = "me",
+                kind = MessageKind.PRIVMSG,
+                text = "hello?",
+                isSelf = true,
+                pendingLabel = "L1",
+                dedupKey = "dk-pending",
+            ),
+        )
+
+        processor.process(
+            networkId,
+            IrcEvent.ServerError(
+                code = "442",
+                params = listOf("me", "#gone", "You're not on that channel"),
+                text = "You're not on that channel",
+            ),
+        )
+
+        val buffer = db.bufferDao().observeById(bufferId)!!
+        assertFalse(buffer.joined)
+        // The error surfaced inline in the channel buffer, not the SERVER buffer.
+        val channelRows = pagingList(bufferId)
+        assertTrue(channelRows.any { it.kind == MessageKind.ERROR && it.text.contains("442") })
+        val server = db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "*", displayName = "*", type = BufferType.SERVER),
+        )
+        assertFalse(pagingList(server).any { it.kind == MessageKind.ERROR })
+        // The orphaned send is marked failed so the user sees it never delivered.
+        assertTrue(db.canonicalTimelineDao().eventById(pendingId)!!.failed)
+    }
+
+    @Test
+    fun cannotSendError_routesInlineWithoutFlippingJoined() = runTest {
+        val bufferId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "#muted",
+                displayName = "#muted",
+                type = BufferType.CHANNEL,
+                joined = true,
+            ),
+        )
+        val pendingId = db.canonicalTimelineDao().insertEvent(
+            TimelineEventEntity(
+                bufferId = bufferId,
+                serverTime = 1000,
+                sender = "me",
+                kind = MessageKind.PRIVMSG,
+                text = "hello?",
+                isSelf = true,
+                pendingLabel = "L1",
+                dedupKey = "dk-pending",
+            ),
+        )
+
+        processor.process(
+            networkId,
+            IrcEvent.ServerError(
+                code = "404",
+                params = listOf("me", "#muted", "Cannot send to channel"),
+                text = "Cannot send to channel",
+            ),
+        )
+
+        // 404 may mean muted/banned while still joined; don't flip joined.
+        assertTrue(db.bufferDao().observeById(bufferId)!!.joined)
+        assertTrue(pagingList(bufferId).any { it.kind == MessageKind.ERROR && it.text.contains("404") })
+        assertTrue(db.canonicalTimelineDao().eventById(pendingId)!!.failed)
+    }
+
+    @Test
+    fun notOnChannelError_withoutChannelBuffer_fallsBackToServerBuffer() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.ServerError(
+                code = "442",
+                params = listOf("me", "#never-joined", "You're not on that channel"),
+                text = "You're not on that channel",
+            ),
+        )
+
+        val server = db.bufferDao().byName(networkId, "*")!!
+        assertTrue(pagingList(server.id).any { it.kind == MessageKind.ERROR && it.text.contains("442") })
+        assertNull(db.bufferDao().byName(networkId, "#never-joined"))
     }
 
     @Test

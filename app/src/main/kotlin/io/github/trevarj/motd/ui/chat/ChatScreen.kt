@@ -13,6 +13,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -24,6 +25,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
@@ -47,7 +49,9 @@ import androidx.compose.material3.SheetState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -250,7 +254,7 @@ fun ChatScreen(
     ChatContent(
         state = state,
         items = items,
-        composerEnabled = !isServerBuffer || state.connState is IrcClientState.Ready,
+        composerEnabled = (!isServerBuffer || state.connState is IrcClientState.Ready) && !state.parted,
         friends = settings.friends,
         fools = settings.fools,
         foolsMode = settings.foolsMode,
@@ -296,6 +300,7 @@ fun ChatScreen(
         onDelete = viewModel::deleteFailed,
         onAcceptInvite = viewModel::acceptInvite,
         onDismissInvite = viewModel::dismissInvite,
+        onRejoin = viewModel::rejoinChannel,
         loadPreview = viewModel::linkPreview,
         cachedPreview = viewModel::cachedLinkPreview,
         consumePrefill = viewModel::consumePrefill,
@@ -413,6 +418,8 @@ fun ChatContent(
     onDelete: (MessageEntity) -> Unit = {},
     onAcceptInvite: (Long) -> Unit = {},
     onDismissInvite: (Long) -> Unit = {},
+    // Re-join the current channel from the parted banner.
+    onRejoin: () -> Unit = {},
     consumePrefill: () -> String? = { null },
     composerDraft: ComposerDraftState = ComposerDraftState(),
     onDraftChanged: (String) -> Unit = {},
@@ -592,6 +599,7 @@ fun ChatContent(
             ChatUiEvent.ReactionTargetUnavailable -> stringResource(R.string.chat_react_failed)
             ChatUiEvent.ReactionSendFailed -> stringResource(R.string.chat_reaction_send_failed)
             ChatUiEvent.SendRejected -> stringResource(R.string.chat_send_rejected)
+            ChatUiEvent.NotInChannel -> stringResource(R.string.chat_not_in_channel)
             ChatUiEvent.ConversationLayoutWriteFailed -> stringResource(R.string.chat_layout_write_failed)
             ChatUiEvent.HistoryOffline -> stringResource(R.string.chat_history_offline)
             is ChatUiEvent.HistoryUpdated -> pluralStringResource(
@@ -1338,6 +1346,12 @@ fun ChatContent(
                         showAutocomplete = true
                     }
                 }
+                if (state.parted) {
+                    PartedChannelBanner(
+                        channel = state.buffer?.displayName.orEmpty(),
+                        onRejoin = onRejoin,
+                    )
+                }
                 Composer(
                     value = composerText,
                     onValueChange = {
@@ -1858,5 +1872,43 @@ private fun ChatContentPreview() {
 private fun ChatContentLargeTextPreview() {
     MotdTheme {
         ChatContentPreviewBody(conversationFontScalePercent = 140)
+    }
+}
+
+/**
+ * Persistent banner shown when the user has parted the current channel (locally or via a
+ * bouncer-reflected self-PART). Disables the composer and offers a one-tap rejoin so a message
+ * never silently disappears into a channel the user is no longer a member of.
+ */
+@Composable
+private fun PartedChannelBanner(
+    channel: String,
+    onRejoin: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth().testTag("chat_parted_banner"),
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = stringResource(R.string.chat_parted_banner_text, channel),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f).padding(end = 12.dp),
+            )
+            TextButton(onClick = onRejoin, modifier = Modifier.testTag("chat_parted_rejoin")) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Login,
+                    contentDescription = null,
+                    modifier = Modifier.padding(end = 6.dp),
+                )
+                Text(stringResource(R.string.chat_parted_banner_rejoin))
+            }
+        }
     }
 }

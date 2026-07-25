@@ -1318,6 +1318,12 @@ class ConnectionManagerImpl @Inject constructor(
         if (buffer.type == BufferType.SERVER) {
             return@sending SendAcceptance.Rejected(SendRejectionReason.UNSUPPORTED_BUFFER)
         }
+        // The composer is disabled when a channel is parted, but joined can flip during a submit
+        // (race) or be stale on a bouncer that never echoes the self-PART. Refuse to persist a
+        // doomed outgoing row when local state already says we are not a member.
+        if (buffer.type == BufferType.CHANNEL && !buffer.joined && buffer.pendingCloseAt == null) {
+            return@sending SendAcceptance.Rejected(SendRejectionReason.NOT_IN_CHANNEL)
+        }
         sendLocks.getOrPut(buffer.networkId) { Mutex() }.withLock {
             val client = clientFor(buffer.networkId)
             val ready = client?.state?.value as? IrcClientState.Ready
@@ -1398,6 +1404,11 @@ class ConnectionManagerImpl @Inject constructor(
                 ?: return@withLock SendAcceptance.Rejected(SendRejectionReason.BUFFER_NOT_FOUND)
             if (!isGenericRetryEligible(currentBuffer, current)) {
                 return@withLock SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
+            }
+            if (currentBuffer.type == BufferType.CHANNEL && !currentBuffer.joined &&
+                currentBuffer.pendingCloseAt == null
+            ) {
+                return@withLock SendAcceptance.Rejected(SendRejectionReason.NOT_IN_CHANNEL)
             }
             val label = newOutgoingLabel()
             currentCoroutineContext().ensureActive()

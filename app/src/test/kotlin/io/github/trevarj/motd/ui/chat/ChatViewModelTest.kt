@@ -187,6 +187,55 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `parted channel exposes parted state and surfaces not-in-channel rejection`() = runTest {
+        val parted = BufferEntity(
+            networkId = network.id,
+            name = "#left",
+            displayName = "#left",
+            type = BufferType.CHANNEL,
+            joined = false,
+        ).let { it.copy(id = db.bufferDao().insert(it)) }
+        val manager = FakeConnectionManager(
+            network.id,
+            sendRejection = io.github.trevarj.motd.service.SendRejectionReason.NOT_IN_CHANNEL,
+        )
+        val vm = viewModel(parted, manager)
+        vm.state.first { it.buffer != null }
+
+        assertTrue(vm.state.value.parted)
+
+        vm.saveDraft("hello?")
+        vm.submit("hello?", {}, {}).join()
+
+        assertTrue(manager.messages.isEmpty())
+        assertEquals(ChatUiEvent.NotInChannel, vm.uiEvents.value.single().value)
+    }
+
+    @Test
+    fun `retry while not in channel surfaces not-in-channel rejection`() = runTest {
+        val parted = BufferEntity(
+            networkId = network.id,
+            name = "#left",
+            displayName = "#left",
+            type = BufferType.CHANNEL,
+            joined = false,
+        ).let { it.copy(id = db.bufferDao().insert(it)) }
+        val manager = FakeConnectionManager(
+            network.id,
+            retryRejection = io.github.trevarj.motd.service.SendRejectionReason.NOT_IN_CHANNEL,
+        )
+        val messages = FakeMessageRepository()
+        val vm = viewModel(parted, manager, messages = messages)
+        vm.state.first { it.buffer != null }
+        val failed = message(parted.id, "try again", null, "me", id = 77).copy(failed = true)
+
+        vm.retry(failed)
+        advanceUntilIdle()
+
+        assertEquals(ChatUiEvent.NotInChannel, vm.uiEvents.value.single().value)
+    }
+
+    @Test
     fun `rapid duplicate submits of an unchanged draft send only once`() = runTest {
         val sendGate = CompletableDeferred<Unit>()
         val manager = FakeConnectionManager(network.id, sendGate = sendGate)
@@ -969,6 +1018,8 @@ class ChatViewModelTest {
         private val sendAccepted: Boolean = true,
         private val sendGate: CompletableDeferred<Unit>? = null,
         private val reactionError: Boolean = false,
+        private val sendRejection: io.github.trevarj.motd.service.SendRejectionReason? = null,
+        private val retryRejection: io.github.trevarj.motd.service.SendRejectionReason? = null,
     ) : ConnectionManager {
         override val connectionStates = MutableStateFlow(mapOf(networkId to state))
         override val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> =
@@ -989,6 +1040,9 @@ class ChatViewModelTest {
         override suspend fun disconnect(networkId: Long) = Unit
         override suspend fun reconnectStale() = Unit
         override suspend fun sendMessage(bufferId: Long, text: String, replyToEventId: Long?): io.github.trevarj.motd.service.SendAcceptance {
+            sendRejection?.let {
+                return io.github.trevarj.motd.service.SendAcceptance.Rejected(it)
+            }
             if (!sendAccepted) {
                 return io.github.trevarj.motd.service.SendAcceptance.Rejected(
                     io.github.trevarj.motd.service.SendRejectionReason.PERSISTENCE_FAILED,
@@ -1000,7 +1054,9 @@ class ChatViewModelTest {
             return io.github.trevarj.motd.service.SendAcceptance.Accepted(listOf(1L))
         }
         override suspend fun retryMessage(eventId: Long): io.github.trevarj.motd.service.SendAcceptance =
-            if (retryAccepted) {
+            retryRejection?.let {
+                io.github.trevarj.motd.service.SendAcceptance.Rejected(it)
+            } ?: if (retryAccepted) {
                 io.github.trevarj.motd.service.SendAcceptance.Accepted(listOf(eventId))
             } else {
                 io.github.trevarj.motd.service.SendAcceptance.Rejected(
