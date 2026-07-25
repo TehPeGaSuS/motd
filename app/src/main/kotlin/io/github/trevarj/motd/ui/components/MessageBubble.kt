@@ -585,7 +585,7 @@ private fun ComfortableActionBubble(
         ) {
             reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
-            Row(verticalAlignment = Alignment.Bottom) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 val avatarMod = Modifier
                     .padding(end = 6.dp, bottom = 1.dp)
                     .size(20.dp)
@@ -1457,8 +1457,7 @@ internal fun rememberMessageTimeFormatter(): (Long) -> String {
     val is24 = remember(context, locale) { DateFormat.is24HourFormat(context) }
     val formatter = remember(is24, locale) {
         // getTimeFormat honors the 12/24h system setting; not thread-safe but only used on the UI thread.
-        DateFormat.getTimeFormat(context) as? JavaDateFormat
-            ?: JavaDateFormat.getTimeInstance(JavaDateFormat.SHORT)
+        DateFormat.getTimeFormat(context) ?: JavaDateFormat.getTimeInstance(JavaDateFormat.SHORT)
     }
     return remember(formatter) {
         { ms: Long -> formatter.format(java.util.Date(ms)) }
