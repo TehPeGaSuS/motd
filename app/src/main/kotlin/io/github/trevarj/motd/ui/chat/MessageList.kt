@@ -53,6 +53,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTag as semanticsTestTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.paging.compose.LazyPagingItems
@@ -80,6 +81,7 @@ import io.github.trevarj.motd.ui.components.dayStart
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.LocalSpacing
+import io.github.trevarj.motd.ui.theme.MotdSpacing
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -160,6 +162,17 @@ fun showsSender(current: MessageEntity, olderNeighbor: MessageEntity?): Boolean 
     if (!sameActor || olderNeighbor.isSelf != current.isSelf) return true
     if (isSystemKind(olderNeighbor.kind) != isSystemKind(current.kind)) return true
     return current.serverTime - olderNeighbor.serverTime > GROUP_WINDOW_MS
+}
+
+/**
+ * Vertical gap to render before a bubble row. Reuses [showsSender] so the gap tracks the same-sender
+ * grouping window: a burst gap while a group continues, a break gap when a new group opens (sender,
+ * direction, or system-kind change, or >[GROUP_WINDOW_MS]). Zero when there is no older neighbor.
+ * Non-COMFORTABLE densities get 0 for both tokens, so this is a no-op there.
+ */
+fun bubbleGap(showSender: Boolean, hasOlder: Boolean, spacing: MotdSpacing): Dp {
+    if (!hasOlder) return 0.dp
+    return if (showSender) spacing.bubbleBreakGap else spacing.bubbleBurstGap
 }
 
 /**
@@ -664,6 +677,13 @@ private fun MessageRow(
         older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
     }
 
+    // Telegram-style inter-bubble gap (COMFORTABLE only): a small burst gap while a same-sender
+    // group continues, a larger break gap when a new group opens. Hoisted so the same value feeds
+    // both the gap spacer and the bubble's grouped-corner/header logic below.
+    val spacing = LocalSpacing.current
+    val showSender = showsSender(msg, older)
+    val gap = bubbleGap(showSender, older != null, spacing)
+
     // A row asks Room for its reply target only while it is composed. This avoids timeline-wide
     // loaded-window scans during fast traversal; collection is lifecycle-cancelled off-screen.
     val resolvedReply: ReplyPreviewData? = if (msg.replyToMsgid != null) {
@@ -747,6 +767,12 @@ private fun MessageRow(
         null
     }
 
+    // Gap sits on the older-neighbor side (before the bubble) so it separates this row from the
+    // previous burst; day separators and read markers live on the newer side (after the bubble), so
+    // the two never stack. 0.dp (no older neighbor, or non-COMFORTABLE) collapses the spacer in
+    // place — Compose skips zero-height spacers in measurement.
+    if (gap > 0.dp) Spacer(Modifier.height(gap))
+
     onCollapseFool?.let { FoolCollapseChip(sender = msg.sender, tag = foolCollapseTag(msg.msgid, msg.id), onCollapse = it) }
 
     SwipeToReplyContainer(
@@ -770,7 +796,7 @@ private fun MessageRow(
             formattedTime = formattedTime,
             isSelf = msg.isSelf,
             kind = msg.kind,
-            showSender = showsSender(msg, older),
+            showSender = showSender,
             hasMention = msg.hasMention,
             senderIsFriend = senderIsFriend,
             failed = msg.failed,

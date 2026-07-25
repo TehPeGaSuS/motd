@@ -15,6 +15,9 @@ class SpacingTest {
         assertEquals(0.dp, s.bubbleRowVPad)
         assertEquals(4.dp, s.bubbleInnerVPad)
         assertEquals(8.dp, s.bubbleInnerHPad)
+        // COMPACT keeps today's tight rows: no inter-bubble gap.
+        assertEquals(0.dp, s.bubbleBurstGap)
+        assertEquals(0.dp, s.bubbleBreakGap)
         assertEquals(14.dp, s.bubbleCorner)
         assertEquals(26.dp, s.bubbleAvatar)
         assertEquals(34.dp, s.bubbleAvatarColumn)
@@ -35,6 +38,9 @@ class SpacingTest {
         assertEquals(1.dp, s.bubbleRowVPad)
         assertEquals(6.dp, s.bubbleInnerVPad)
         assertEquals(10.dp, s.bubbleInnerHPad)
+        // COMFORTABLE opens Telegram-style gaps: tight within a burst, larger across a break.
+        assertEquals(2.dp, s.bubbleBurstGap)
+        assertEquals(8.dp, s.bubbleBreakGap)
         assertEquals(18.dp, s.bubbleCorner)
         assertEquals(32.dp, s.bubbleAvatar)
         assertEquals(40.dp, s.bubbleAvatarColumn)
@@ -54,6 +60,9 @@ class SpacingTest {
         assertEquals(2.dp, s.bubbleRowVPad)
         assertEquals(4.dp, s.bubbleInnerVPad)
         assertEquals(12.dp, s.bubbleInnerHPad)
+        // TWO_LINE keeps its compact rows: no inter-bubble gap.
+        assertEquals(0.dp, s.bubbleBurstGap)
+        assertEquals(0.dp, s.bubbleBreakGap)
         assertEquals(18.dp, s.bubbleCorner)
         assertEquals(20.dp, s.bubbleAvatar)
         assertEquals(28.dp, s.bubbleAvatarColumn)

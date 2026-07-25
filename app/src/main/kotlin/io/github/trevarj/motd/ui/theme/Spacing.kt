@@ -29,6 +29,11 @@ data class MotdSpacing(
     val bubbleRowVPad: Dp, // MessageBubble outer Row vertical padding
     val bubbleInnerVPad: Dp, // bubble Column inner vertical padding
     val bubbleInnerHPad: Dp, // bubble Column inner horizontal padding
+    // Telegram-style inter-bubble gaps (COMFORTABLE only). Burst = a same-sender group continues;
+    // break = a new group opens (sender/direction/system-kind change, or >GROUP_WINDOW_MS). Both
+    // are 0 for COMPACT/TWO_LINE so their rendering stays pixel-identical to today.
+    val bubbleBurstGap: Dp, // gap before a bubble continuing a same-sender group
+    val bubbleBreakGap: Dp, // gap before a bubble opening a new group
     val bubbleCorner: Dp, // base bubble corner radius (grouped inner corner stays 4.dp)
     val bubbleAvatar: Dp, // in-bubble sender avatar size
     val bubbleAvatarColumn: Dp, // reserved avatar column width (= bubbleAvatar + 8.dp)
@@ -49,6 +54,8 @@ fun spacingFor(density: LayoutDensity): MotdSpacing = when (density) {
         bubbleRowVPad = 0.dp,
         bubbleInnerVPad = 4.dp,
         bubbleInnerHPad = 8.dp,
+        bubbleBurstGap = 0.dp,
+        bubbleBreakGap = 0.dp,
         bubbleCorner = 14.dp,
         bubbleAvatar = 26.dp,
         bubbleAvatarColumn = 34.dp,
@@ -66,6 +73,8 @@ fun spacingFor(density: LayoutDensity): MotdSpacing = when (density) {
         bubbleRowVPad = 1.dp,
         bubbleInnerVPad = 6.dp,
         bubbleInnerHPad = 10.dp,
+        bubbleBurstGap = 2.dp,
+        bubbleBreakGap = 8.dp,
         bubbleCorner = 18.dp,
         bubbleAvatar = 32.dp,
         bubbleAvatarColumn = 40.dp,
@@ -86,6 +95,8 @@ fun spacingFor(density: LayoutDensity): MotdSpacing = when (density) {
         bubbleRowVPad = 2.dp,
         bubbleInnerVPad = 4.dp,
         bubbleInnerHPad = 12.dp,
+        bubbleBurstGap = 0.dp,
+        bubbleBreakGap = 0.dp,
         bubbleCorner = 18.dp,
         // Small header avatar (line 1) — smaller than the bubble avatar to keep the row compact.
         bubbleAvatar = 20.dp,

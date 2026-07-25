@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.chat
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
 import androidx.paging.LoadState
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -11,6 +12,7 @@ import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.ui.theme.spacingFor
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.client.IrcDisconnectedException
@@ -420,6 +422,23 @@ class ChatModelsTest {
 
         val partiallyEnriched = mappedCurrent.copy(senderAccount = "late-account")
         assertFalse(showsSender(partiallyEnriched, mappedOlder))
+    }
+
+    @Test fun `bubble gap tracks grouping and density`() {
+        val comfortable = spacingFor(LayoutDensity.COMFORTABLE)
+        val compact = spacingFor(LayoutDensity.COMPACT)
+
+        // No older neighbor => no gap (oldest row, nothing above to space from).
+        assertEquals(0.dp, bubbleGap(showSender = true, hasOlder = false, comfortable))
+        assertEquals(0.dp, bubbleGap(showSender = false, hasOlder = false, comfortable))
+
+        // Continuing a same-sender group (showsSender false) => burst; new group (showsSender true) => break.
+        assertEquals(2.dp, bubbleGap(showSender = false, hasOlder = true, comfortable))
+        assertEquals(8.dp, bubbleGap(showSender = true, hasOlder = true, comfortable))
+
+        // COMPACT tokens are 0 => no gap regardless of grouping.
+        assertEquals(0.dp, bubbleGap(showSender = false, hasOlder = true, compact))
+        assertEquals(0.dp, bubbleGap(showSender = true, hasOlder = true, compact))
     }
 
     @Test fun `typed UI queue replays in order and acknowledges by stable id`() {
