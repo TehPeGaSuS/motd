@@ -85,10 +85,7 @@ class AttachmentUploaderImpl @Inject constructor(
         source = source,
         config = config,
         fieldName = "file",
-        fields = buildList {
-            if (config.secretUrl) add("secret" to "")
-            config.expiry?.takeIf(String::isNotBlank)?.let { add("expires" to it) }
-        },
+        fields = multipart0x0Fields(config),
         progress = progress,
         parse = { body, connection ->
             val resultUrl = firstHttpsUrl(body)
@@ -226,6 +223,14 @@ class AttachmentUploaderImpl @Inject constructor(
             connection.disconnect()
         }
     }
+}
+
+/** Extra multipart fields for the 0x0-compatible upload path. x0.at ignores secret/expires, so it
+ * sends only the file field; other 0x0-compatible backends forward the secret-url and expiry prefs. */
+internal fun multipart0x0Fields(config: PasteBackendConfig): List<Pair<String, String>> = buildList {
+    if (config.backend == AttachmentBackend.X0_AT) return@buildList
+    if (config.secretUrl) add("secret" to "")
+    config.expiry?.takeIf(String::isNotBlank)?.let { add("expires" to it) }
 }
 
 private fun connection(endpoint: String, method: String) =

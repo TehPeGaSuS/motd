@@ -13,6 +13,9 @@ enum class AttachmentBackend(
 ) {
     CRAFTERBIN("CrafterBin", PasteProtocol.MULTIPART_0X0, "https://crafterbin.glennstack.dev", true),
     ZERO_X_ZERO("0x0.st", PasteProtocol.MULTIPART_0X0, "https://0x0.st", true),
+    // x0.at is a filehost2 instance with a 0x0-compatible wire format but a 1 GiB ceiling and
+    // no expires/secret/deletion support; retention is automatic and size-based (3-100 days).
+    X0_AT("x0.at", PasteProtocol.MULTIPART_0X0, "https://x0.at", true),
     CUSTOM_0X0("Custom 0x0-compatible", PasteProtocol.MULTIPART_0X0, null, true),
     CNET("paste.c-net.org", PasteProtocol.RAW_CNET, "https://paste.c-net.org", true),
     UGUU("Uguu", PasteProtocol.MULTIPART_UGUU, "https://uguu.se/upload", true),
@@ -81,6 +84,14 @@ interface AttachmentUploader {
 
 const val DEFAULT_PUBLIC_LIMIT_BYTES = 25L * 1024 * 1024
 const val MAX_CUSTOM_LIMIT_BYTES = 512L * 1024 * 1024
+const val MAX_X0AT_LIMIT_BYTES = 1024L * 1024 * 1024
+
+/** Per-backend upload ceiling. Custom endpoints and x0.at allow larger files than the public default. */
+fun backendMaxBytes(backend: AttachmentBackend): Long = when (backend) {
+    AttachmentBackend.CUSTOM_0X0 -> MAX_CUSTOM_LIMIT_BYTES
+    AttachmentBackend.X0_AT -> MAX_X0AT_LIMIT_BYTES
+    else -> DEFAULT_PUBLIC_LIMIT_BYTES
+}
 const val MAX_UPLOAD_HISTORY = 20
 const val DEFAULT_LITTERBOX_EXPIRY = "24h"
 val LITTERBOX_EXPIRIES = listOf("1h", "12h", "24h", "72h")
@@ -97,7 +108,7 @@ fun normalizedConfig(config: PasteBackendConfig): PasteBackendConfig {
         ?: AttachmentBackend.CRAFTERBIN.endpoint!!
     val backend = config.backend
     val endpoint = backend.endpoint ?: customEndpoint
-    val maximum = if (backend == AttachmentBackend.CUSTOM_0X0) MAX_CUSTOM_LIMIT_BYTES else DEFAULT_PUBLIC_LIMIT_BYTES
+    val maximum = backendMaxBytes(backend)
     return config.copy(
         backend = backend,
         endpoint = endpoint,

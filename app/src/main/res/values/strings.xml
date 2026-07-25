@@ -186,6 +186,7 @@
     <string name="settings_upload_uguu_warning">Uguu uploads are public to anyone with the link and expire after 3 hours.</string>
     <string name="settings_upload_cnet_warning">paste.c-net.org uses an unguessable link and supports deletion. Retention resets to 180 days whenever the file is accessed.</string>
     <string name="settings_upload_catbox_warning">Catbox uploads are long-lived, cannot be deleted anonymously, and may remain until 2 years without access.</string>
+    <string name="settings_upload_x0at_warning">x0.at uploads are public to anyone with the link, cannot be deleted, and expire after 3 to 100 days depending on file size (larger files expire sooner).</string>
     <string name="settings_upload_limits">Upload limit</string>
     <string name="settings_upload_limit">Maximum size (MiB)</string>
     <string name="settings_upload_limit_desc">Maximum for this endpoint: %1$d MiB.</string>

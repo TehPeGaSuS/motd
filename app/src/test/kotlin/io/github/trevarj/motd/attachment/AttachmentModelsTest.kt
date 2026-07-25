@@ -40,6 +40,19 @@ class AttachmentModelsTest {
         assertEquals(MAX_CUSTOM_LIMIT_BYTES, config.sizeLimitBytes)
     }
 
+    @Test fun x0atBackendUsesMultipart0x0AndOneGiBCeiling() {
+        assertEquals(PasteProtocol.MULTIPART_0X0, AttachmentBackend.X0_AT.protocol)
+        assertEquals("https://x0.at", AttachmentBackend.X0_AT.endpoint)
+        assertTrue(AttachmentBackend.X0_AT.acceptsBinary)
+        assertEquals(MAX_X0AT_LIMIT_BYTES, backendMaxBytes(AttachmentBackend.X0_AT))
+        val capped = normalizedConfig(PasteBackendConfig(
+            backend = AttachmentBackend.X0_AT,
+            sizeLimitBytes = MAX_X0AT_LIMIT_BYTES,
+        ))
+        assertEquals(MAX_X0AT_LIMIT_BYTES, capped.sizeLimitBytes)
+        assertEquals("https://x0.at", capped.endpoint)
+    }
+
     @Test fun litterboxExpiryIsNormalized() {
         assertEquals(DEFAULT_LITTERBOX_EXPIRY, normalizedConfig(PasteBackendConfig(litterboxExpiry = "7d")).litterboxExpiry)
         assertEquals("72h", normalizedConfig(PasteBackendConfig(litterboxExpiry = "72h")).litterboxExpiry)
@@ -77,5 +90,24 @@ class AttachmentModelsTest {
             BackendResponses.cnet("""{"url":"https://paste.c-net.org/id","delete_key":"delete-me"}"""),
         )
         assertEquals("https://files.catbox.moe/a.png", BackendResponses.plain("https://files.catbox.moe/a.png\n"))
+    }
+
+    @Test fun x0atUploadSendsNoSecretOrExpiryFields() {
+        // x0.at ignores secret/expires; only the file field is sent.
+        val config = PasteBackendConfig(
+            backend = AttachmentBackend.X0_AT,
+            secretUrl = true,
+            expiry = "7d",
+        )
+        assertEquals(emptyList<Pair<String, String>>(), multipart0x0Fields(normalizedConfig(config)))
+    }
+
+    @Test fun compatibleBackendsStillSendSecretAndExpiry() {
+        val config = normalizedConfig(PasteBackendConfig(
+            backend = AttachmentBackend.ZERO_X_ZERO,
+            secretUrl = true,
+            expiry = "7d",
+        ))
+        assertEquals(listOf("secret" to "", "expires" to "7d"), multipart0x0Fields(config))
     }
 }

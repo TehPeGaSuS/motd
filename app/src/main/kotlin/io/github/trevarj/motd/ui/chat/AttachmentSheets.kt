@@ -580,6 +580,7 @@ private fun sameDestination(a: PasteBackendConfig, b: PasteBackendConfig): Boole
 internal fun backendRetention(config: PasteBackendConfig): String = when (config.backend) {
     AttachmentBackend.CRAFTERBIN, AttachmentBackend.ZERO_X_ZERO, AttachmentBackend.CUSTOM_0X0 ->
         config.expiry ?: "server default"
+    AttachmentBackend.X0_AT -> "3–100 days by size"
     AttachmentBackend.CNET -> "rolling 180 days"
     AttachmentBackend.UGUU -> "3 hours"
     AttachmentBackend.LITTERBOX -> when (config.litterboxExpiry) {

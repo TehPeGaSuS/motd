@@ -43,6 +43,7 @@ class AttachmentUiModelsTest {
         assertEquals("3 hours", backendRetention(PasteBackendConfig(backend = AttachmentBackend.UGUU)))
         assertEquals("24 hours", backendRetention(PasteBackendConfig(backend = AttachmentBackend.LITTERBOX)))
         assertEquals("rolling 180 days", backendRetention(PasteBackendConfig(backend = AttachmentBackend.CNET)))
+        assertEquals("3–100 days by size", backendRetention(PasteBackendConfig(backend = AttachmentBackend.X0_AT)))
     }
 
     @Test fun byteFormattingUsesReadableUnits() {

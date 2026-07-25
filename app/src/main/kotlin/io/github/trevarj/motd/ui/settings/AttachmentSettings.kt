@@ -24,11 +24,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.attachment.AttachmentPrefs
-import io.github.trevarj.motd.attachment.DEFAULT_PUBLIC_LIMIT_BYTES
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.LITTERBOX_EXPIRIES
-import io.github.trevarj.motd.attachment.MAX_CUSTOM_LIMIT_BYTES
 import io.github.trevarj.motd.attachment.PasteBackendConfig
+import io.github.trevarj.motd.attachment.backendMaxBytes
 import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.attachment.validateEndpoint
 import javax.inject.Inject
@@ -132,6 +131,10 @@ fun UploadsSettingsContent(viewModel: AttachmentSettingsViewModel = hiltViewMode
             stringResource(io.github.trevarj.motd.R.string.settings_upload_uguu_warning),
             caution = false,
         )
+        AttachmentBackend.X0_AT -> UploadWarning(
+            stringResource(io.github.trevarj.motd.R.string.settings_upload_x0at_warning),
+            caution = false,
+        )
         AttachmentBackend.CNET -> UploadWarning(
             stringResource(io.github.trevarj.motd.R.string.settings_upload_cnet_warning),
             caution = false,
@@ -173,13 +176,12 @@ private fun UploadWarning(message: String, caution: Boolean = true) {
     }
 }
 
-internal fun uploadLimitMaximumMiB(backend: AttachmentBackend): Long =
-    if (backend == AttachmentBackend.CUSTOM_0X0) MAX_CUSTOM_LIMIT_BYTES / MIB
-    else DEFAULT_PUBLIC_LIMIT_BYTES / MIB
+internal fun uploadLimitMaximumMiB(backend: AttachmentBackend): Long = backendMaxBytes(backend) / MIB
 
 internal fun backendDescription(backend: AttachmentBackend): String = when (backend) {
     AttachmentBackend.CRAFTERBIN -> "Files, photos, and text • configurable expiry"
     AttachmentBackend.ZERO_X_ZERO -> "Files, photos, and text • public service"
+    AttachmentBackend.X0_AT -> "Files, photos, and text • 3–100 days by size • no deletion"
     AttachmentBackend.CUSTOM_0X0 -> "Your own HTTPS 0x0-compatible endpoint"
     AttachmentBackend.CNET -> "Files, photos, and text • rolling 180 days • deletable"
     AttachmentBackend.UGUU -> "Files, photos, and text • 3 hours"
