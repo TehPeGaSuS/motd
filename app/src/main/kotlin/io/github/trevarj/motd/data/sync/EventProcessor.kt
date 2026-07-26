@@ -1630,23 +1630,10 @@ class EventProcessor @Inject constructor(
             return
         }
         if (e.attrs.isEmpty()) return
-        val name = e.attrs["name"] ?: e.netId
-        val host = e.attrs["host"] ?: root.host
-        val port = e.attrs["port"]?.toIntOrNull() ?: root.port
-        val nick = e.attrs["nickname"] ?: root.nick
         if (existing == null) {
-            networkDao.insert(
-                root.copy(
-                    id = 0,
-                    name = name,
-                    role = NetworkRole.BOUNCER_CHILD,
-                    parentId = root.id,
-                    bouncerNetId = e.netId,
-                    host = host,
-                    port = port,
-                    nick = nick,
-                ),
-            )
+            // NETWORK notifications are discovery state, not local import intent. Explicit import
+            // paths create BOUNCER_CHILD rows; passive bouncer state only maintains existing rows.
+            return
         } else {
             // Preserve the row's current name on update: it may be a user-set alias, and the
             // bouncer name is only authoritative when the child is first created above. Soju may

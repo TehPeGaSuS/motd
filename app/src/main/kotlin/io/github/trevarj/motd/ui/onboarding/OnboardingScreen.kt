@@ -509,7 +509,6 @@ private fun BouncerNetworksSection(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("onboarding_bouncer_row_${row.netId}")
-                    .clickable { onToggleBouncer(row.netId) }
                     .padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

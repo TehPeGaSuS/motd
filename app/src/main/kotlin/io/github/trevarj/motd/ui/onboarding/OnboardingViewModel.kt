@@ -228,12 +228,10 @@ class OnboardingViewModel @Inject constructor(
         val rootId = s.networkId
         if (s.isZnc && rootId != null) bouncerKindPrefs.markZnc(rootId)
         if (s.isSoju && rootId != null) {
-            // The root's BOUNCER NETWORK handler may have already auto-created child rows from
-            // soju's notifications; dedup against them by bouncerNetId so we never create a second
-            // child for the same upstream (duplicate children bind the same netId and fail SASL
-            // 904). Then explicitly connect each imported child: a plain reconcile will not rebuild
-            // a child actor that parked on a transient failure during onboarding, but connect()
-            // force-rebuilds it, so the freshly imported network connects without an app restart.
+            // Explicitly import only selected rows. Then connect each imported child: a plain
+            // reconcile will not rebuild a child actor that parked on a transient failure during
+            // onboarding, but connect() force-rebuilds it, so the freshly imported network connects
+            // without an app restart.
             val existing = networkRepository.childrenOf(rootId)
             s.bouncerNetworks.filter { it.selected }.forEach { row ->
                 val childId = existing.firstOrNull { it.bouncerNetId == row.netId }?.id

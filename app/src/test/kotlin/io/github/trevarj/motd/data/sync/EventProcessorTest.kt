@@ -1923,7 +1923,7 @@ class EventProcessorTest {
     }
 
     @Test
-    fun bouncerNetworkState_mirrorsChildRow_thenDeletes() = runTest {
+    fun bouncerNetworkState_updatesImportedChild_thenDeletes() = runTest {
         val rootId = db.networkDao().insert(
             NetworkEntity(
                 name = "soju", role = NetworkRole.BOUNCER_ROOT,
@@ -1932,10 +1932,15 @@ class EventProcessorTest {
         )
         processor.process(rootId, IrcEvent.BouncerNetworkState("42", mapOf("name" to "OFTC", "host" to "irc.oftc.net")))
         var children = db.networkDao().childrenOf(rootId)
-        assertEquals(1, children.size)
-        assertEquals("OFTC", children.single().name)
-        assertEquals("42", children.single().bouncerNetId)
-        val child = children.single()
+        assertTrue(children.isEmpty())
+        val childId = db.networkDao().insert(
+            NetworkEntity(
+                name = "OFTC", role = NetworkRole.BOUNCER_CHILD, parentId = rootId,
+                bouncerNetId = "42", host = "irc.oftc.net", port = 6697, nick = "me",
+                username = "me", realname = "Me",
+            ),
+        )
+        val child = db.networkDao().byId(childId)!!
         val originalRoom = BufferEntity(
             networkId = child.id,
             name = "#layout",
@@ -1957,16 +1962,7 @@ class EventProcessorTest {
         assertTrue(children.isEmpty())
 
         processor.process(rootId, IrcEvent.BouncerNetworkState("42", mapOf("name" to "OFTC recreated")))
-        val recreatedChild = db.networkDao().childrenOf(rootId).single()
-        val recreatedRoom = BufferEntity(
-            networkId = recreatedChild.id,
-            name = "#layout",
-            displayName = "#layout",
-            type = BufferType.CHANNEL,
-        ).let { it.copy(id = db.bufferDao().insert(it)) }
-        assertNotEquals(child.id, recreatedChild.id)
-        assertNotEquals(originalRoom.id, recreatedRoom.id)
-        assertNull(recreatedRoom.layoutDensityOverride)
+        assertTrue(db.networkDao().childrenOf(rootId).isEmpty())
     }
 
     @Test
@@ -1977,9 +1973,13 @@ class EventProcessorTest {
                 host = "bnc.example", port = 6697, nick = "rootNick", username = "me", realname = "Me",
             ),
         )
-        processor.process(rootId, IrcEvent.BouncerNetworkState("42", mapOf(
-            "name" to "OFTC", "host" to "irc.oftc.net", "port" to "6698", "nickname" to "childNick",
-        )))
+        db.networkDao().insert(
+            NetworkEntity(
+                name = "OFTC", role = NetworkRole.BOUNCER_CHILD, parentId = rootId,
+                bouncerNetId = "42", host = "irc.oftc.net", port = 6698, nick = "childNick",
+                username = "me", realname = "Me",
+            ),
+        )
 
         // Soju's later NETWORK notifications may omit unchanged attrs. They must not replace the
         // child endpoint/nick with root defaults, which would churn the child's fingerprint.
