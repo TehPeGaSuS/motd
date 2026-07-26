@@ -107,6 +107,26 @@ val NetworkIdentityEntity.identityRules: IrcIdentityRules
     get() = IrcIdentityRules.from(caseMapping, chanTypes)
 
 @Entity(
+    tableName = "network_ignores",
+    indices = [
+        Index(value = ["networkId", "pattern"], unique = true),
+    ],
+    foreignKeys = [ForeignKey(
+        entity = NetworkEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["networkId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+)
+data class NetworkIgnoreEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val networkId: Long,
+    val pattern: String,
+    val enabled: Boolean = true,
+    val createdAt: Long,
+)
+
+@Entity(
     tableName = "buffers",
     indices = [
         Index(value = ["networkId", "name"], unique = true),

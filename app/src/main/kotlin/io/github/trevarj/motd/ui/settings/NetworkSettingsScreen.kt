@@ -82,6 +82,7 @@ fun NetworkSettingsScreen(
     // Round 5 (plans/16): soju bouncer manager + server-messages buffer.
     onOpenBouncerNetworks: (Long) -> Unit = {},
     onOpenBuffer: (Long) -> Unit = {},
+    onOpenNetworkTools: (Long) -> Unit = {},
     viewModel: NetworkSettingsViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(networkId) { viewModel.init(networkId) }
@@ -109,6 +110,7 @@ fun NetworkSettingsScreen(
         onSetAutoConnect = viewModel::setAutoConnect,
         onOpenBouncerNetworks = { onOpenBouncerNetworks(networkId) },
         onOpenServerMessages = { viewModel.openServerBuffer(onOpenBuffer) },
+        onOpenNetworkTools = { onOpenNetworkTools(networkId) },
         onAvatarUrlChange = viewModel::editAvatarUrl,
         onPublishAvatar = viewModel::publishAvatar,
         onClearAvatar = viewModel::clearPublishedAvatar,
@@ -141,6 +143,7 @@ fun NetworkSettingsContent(
     onSetAutoConnect: (Boolean) -> Unit = {},
     onOpenBouncerNetworks: () -> Unit = {},
     onOpenServerMessages: () -> Unit = {},
+    onOpenNetworkTools: () -> Unit = {},
     onAvatarUrlChange: (String) -> Unit = {},
     onPublishAvatar: () -> Unit = {},
     onClearAvatar: () -> Unit = {},
@@ -306,6 +309,13 @@ fun NetworkSettingsContent(
                         headlineContent = { Text(stringResource(R.string.network_settings_server_messages)) },
                         modifier = Modifier.testTag("network_settings_server_messages")
                             .clickable { onOpenServerMessages() },
+                        colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.network_settings_network_tools)) },
+                        supportingContent = { Text(stringResource(R.string.network_settings_network_tools_desc)) },
+                        modifier = Modifier.testTag("network_settings_network_tools")
+                            .clickable { onOpenNetworkTools() },
                         colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
                     )
                 }

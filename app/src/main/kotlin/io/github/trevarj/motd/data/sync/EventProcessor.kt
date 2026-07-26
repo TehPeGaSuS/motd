@@ -19,6 +19,7 @@ import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.TimelineEventId
 import io.github.trevarj.motd.data.db.UserEntity
 import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.data.repo.ignoredBy
 import io.github.trevarj.motd.bouncer.redactBouncerServCommand
 import io.github.trevarj.motd.bouncer.redactBouncerServReply
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
@@ -73,6 +74,7 @@ class EventProcessor @Inject constructor(
 
     private val networkDao get() = db.networkDao()
     private val networkIdentityDao get() = db.networkIdentityDao()
+    private val networkIgnoreDao get() = db.networkIgnoreDao()
     private val bufferDao get() = db.bufferDao()
     private val messageDao get() = db.messageDao()
     private val memberDao get() = db.memberDao()
@@ -323,6 +325,20 @@ class EventProcessor @Inject constructor(
         historyTarget: String?,
     ) {
         val st = stateFor(networkId)
+        val sourceSelfCandidate = e.isSelf || st.isSelfNick(e.source.nick)
+        if (!sourceSelfCandidate &&
+            !(e.kind == IrcEvent.ChatKind.NOTICE && isServerSource(e.source.nick)) &&
+            ignoredBy(networkIgnoreDao.enabledForNetwork(networkId), e.source, st.identityRules)
+        ) {
+            diagnostics.record("messages", "message_ignored_by_network_rule") {
+                mapOf(
+                    "network_id" to networkId,
+                    "origin" to origin.name,
+                    "sender_fp" to diagnostics.fingerprint(e.source.nick),
+                )
+            }
+            return
+        }
         val route = if (origin == EventOrigin.HISTORY) {
             activeHistoryChatRoutes[networkId]?.removeFirstOrNull()
                 ?: resolveChatRoute(networkId, e, st, historyTarget, origin)

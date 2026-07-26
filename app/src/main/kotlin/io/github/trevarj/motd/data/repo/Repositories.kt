@@ -6,7 +6,9 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.NetworkBufferToolRow
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkIgnoreEntity
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
@@ -26,6 +28,24 @@ interface NetworkRepository {
 
     /** Local BOUNCER_CHILD mirrors of a soju root (delegates to NetworkDao.childrenOf). */
     suspend fun childrenOf(rootId: Long): List<NetworkEntity>
+}
+
+interface NetworkIgnoreRepository {
+    fun observeIgnores(networkId: Long): Flow<List<NetworkIgnoreEntity>>
+    fun observeBuffers(networkId: Long): Flow<List<NetworkBufferToolRow>>
+    suspend fun addIgnore(networkId: Long, pattern: String): Result<Unit>
+    suspend fun setIgnoreEnabled(id: Long, enabled: Boolean)
+    suspend fun deleteIgnore(id: Long)
+    suspend fun setMuted(bufferId: Long, muted: Boolean)
+}
+
+object NoopNetworkIgnoreRepository : NetworkIgnoreRepository {
+    override fun observeIgnores(networkId: Long): Flow<List<NetworkIgnoreEntity>> = flowOf(emptyList())
+    override fun observeBuffers(networkId: Long): Flow<List<NetworkBufferToolRow>> = flowOf(emptyList())
+    override suspend fun addIgnore(networkId: Long, pattern: String): Result<Unit> = Result.success(Unit)
+    override suspend fun setIgnoreEnabled(id: Long, enabled: Boolean) = Unit
+    override suspend fun deleteIgnore(id: Long) = Unit
+    override suspend fun setMuted(bufferId: Long, muted: Boolean) = Unit
 }
 
 interface BufferRepository {

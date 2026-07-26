@@ -29,6 +29,7 @@ import io.github.trevarj.motd.ui.settings.ChatSettingsScreen
 import io.github.trevarj.motd.ui.settings.DeliverySettingsScreen
 import io.github.trevarj.motd.ui.settings.ManageNicksScreen
 import io.github.trevarj.motd.ui.settings.NetworkSettingsScreen
+import io.github.trevarj.motd.ui.settings.NetworkToolsScreen
 import io.github.trevarj.motd.ui.settings.NetworksSettingsScreen
 import io.github.trevarj.motd.ui.settings.NickListKind
 import io.github.trevarj.motd.ui.settings.SettingsScreen
@@ -211,6 +212,14 @@ fun MotdNavGraph(
                 // Round 5: soju root -> bouncer manager; "Server messages" -> the SERVER buffer.
                 onOpenBouncerNetworks = { navController.navigate(BouncerNetworksRoute(it)) },
                 onOpenBuffer = { navController.navigate(ChatRoute(it)) },
+                onOpenNetworkTools = { navController.navigate(NetworkToolsRoute(it)) },
+            )
+        }
+        composable<NetworkToolsRoute> { entry ->
+            val route = entry.toRoute<NetworkToolsRoute>()
+            NetworkToolsScreen(
+                networkId = route.networkId,
+                onBack = { navController.popBackStack() },
             )
         }
         composable<SearchRoute> { entry ->

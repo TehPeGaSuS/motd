@@ -13,6 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         NetworkEntity::class,
         NetworkIdentityEntity::class,
+        NetworkIgnoreEntity::class,
         RoomEntity::class,
         DiscardedMessageIdEntity::class,
         RoomAliasEntity::class,
@@ -30,13 +31,14 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 18,
+    version = 19,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
 abstract class MotdDatabase : RoomDatabase() {
     abstract fun networkDao(): NetworkDao
     abstract fun networkIdentityDao(): NetworkIdentityDao
+    abstract fun networkIgnoreDao(): NetworkIgnoreDao
     abstract fun bufferDao(): BufferDao
     abstract fun messageDao(): MessageDao
     abstract fun composerDraftDao(): ComposerDraftDao
@@ -560,6 +562,29 @@ val MIGRATION_17_18 = object : Migration(17, 18) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE networks ADD COLUMN pendingCredentialRequirements TEXT")
         db.execSQL("ALTER TABLE networks ADD COLUMN restoreAutoConnect INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+/**
+ * v18 -> v19: add per-network ignore masks. Existing networks start with no ignores; deletes cascade
+ * so removing a network also removes its local privacy rules.
+ */
+val MIGRATION_18_19 = object : Migration(18, 19) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `network_ignores` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `networkId` INTEGER NOT NULL,
+                `pattern` TEXT NOT NULL,
+                `enabled` INTEGER NOT NULL,
+                `createdAt` INTEGER NOT NULL,
+                FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `index_network_ignores_networkId_pattern` " +
+                "ON `network_ignores` (`networkId`, `pattern`)",
+        )
     }
 }
 

@@ -471,6 +471,7 @@ fun ChatScreen(
             },
             onToggleFriend = { viewModel.toggleFriend(sheet.nick) },
             onToggleFool = { viewModel.toggleFool(sheet.nick) },
+            onIgnoreNetwork = { viewModel.ignoreNickOnNetwork(sheet.nick) },
             onOp = { grant -> viewModel.setMemberMode(sheet.nick, 'o', grant) },
             onVoice = { grant -> viewModel.setMemberMode(sheet.nick, 'v', grant) },
             onKick = { reason -> viewModel.dismissNickSheet(); viewModel.kick(sheet.nick, reason) },

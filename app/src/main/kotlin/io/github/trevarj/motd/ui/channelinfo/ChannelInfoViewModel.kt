@@ -13,6 +13,8 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.repo.BufferRepository
+import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
+import io.github.trevarj.motd.data.repo.NoopNetworkIgnoreRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -75,6 +77,7 @@ class ChannelInfoViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val userDao: UserDao,
     private val networkIdentityDao: NetworkIdentityDao,
+    private val networkIgnoreRepository: NetworkIgnoreRepository = NoopNetworkIgnoreRepository,
 ) : ViewModel() {
 
     private val bufferIdFlow = MutableStateFlow<Long?>(null)
@@ -256,6 +259,12 @@ class ChannelInfoViewModel @Inject constructor(
         )
     }
 
+    fun ignoreNickOnNetwork(nick: String) = viewModelScope.launch {
+        val networkId = state.value.buffer?.networkId ?: return@launch
+        networkIgnoreRepository.addIgnore(networkId, nick)
+        dismissNickSheet()
+    }
+
     // --- nick sheet + whois (plans/16 §5.8) ---
 
     private val _nickSheet = MutableStateFlow<NickSheetState?>(null)
@@ -328,6 +337,29 @@ class ChannelInfoViewModel @Inject constructor(
         val buffer = state.value.buffer ?: return@launch
         connectionManager.clientFor(buffer.networkId)
             ?.send(IrcMessage(command = "MODE", params = listOf(buffer.ircTarget, "+b", banMask(nick))))
+    }
+
+    fun setBanMask(mask: String, grant: Boolean) = viewModelScope.launch {
+        val buffer = state.value.buffer ?: return@launch
+        val trimmed = mask.trim().takeIf(String::isNotBlank) ?: return@launch
+        val flag = if (grant) "+b" else "-b"
+        connectionManager.clientFor(buffer.networkId)
+            ?.send(IrcMessage(command = "MODE", params = listOf(buffer.ircTarget, flag, trimmed)))
+    }
+
+    fun invite(nick: String) = viewModelScope.launch {
+        val buffer = state.value.buffer ?: return@launch
+        val trimmed = nick.trim().takeIf(String::isNotBlank) ?: return@launch
+        connectionManager.clientFor(buffer.networkId)
+            ?.send(IrcMessage(command = "INVITE", params = listOf(trimmed, buffer.ircTarget)))
+    }
+
+    fun setChannelMode(modes: String, args: String) = viewModelScope.launch {
+        val buffer = state.value.buffer ?: return@launch
+        val trimmedModes = modes.trim().takeIf(String::isNotBlank) ?: return@launch
+        val params = listOf(buffer.ircTarget, trimmedModes) +
+            args.split(' ').map(String::trim).filter(String::isNotBlank)
+        connectionManager.clientFor(buffer.networkId)?.send(IrcMessage(command = "MODE", params = params))
     }
 
     /**

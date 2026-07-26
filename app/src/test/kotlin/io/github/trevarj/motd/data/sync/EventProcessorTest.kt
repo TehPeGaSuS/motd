@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.TimelineEventEntity
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkIgnoreEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.RoomAliasNamespace
@@ -113,6 +114,31 @@ class EventProcessorTest {
         assertEquals(1, rows.size)
         assertEquals("hello world", rows.single().text)
         assertFalse(rows.single().hasMention)
+    }
+
+    @Test
+    fun ignoredNetworkSender_isNotPersisted() = runTest {
+        db.networkIgnoreDao().upsert(
+            NetworkIgnoreEntity(networkId = networkId, pattern = "alice!*@*", createdAt = 1),
+        )
+
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "ignored"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice", "user", "host"), target = "#chan", text = "hidden",
+            isSelf = false, replyToMsgid = null,
+        ))
+        assertNull(db.bufferDao().byName(networkId, "#chan"))
+
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "shown", time = 1001), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("bob", "user", "host"), target = "#chan", text = "shown",
+            isSelf = false, replyToMsgid = null,
+        ))
+
+        val buffer = db.bufferDao().byName(networkId, "#chan")
+        assertNotNull(buffer)
+        val rows = pagingList(buffer!!.id)
+        assertEquals(listOf("shown"), rows.map { it.text })
     }
 
     @Test

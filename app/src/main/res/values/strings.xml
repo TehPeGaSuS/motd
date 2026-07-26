@@ -577,6 +577,42 @@
     <string name="network_settings_managed_by">Managed by %1$s</string>
     <string name="network_settings_managed_by_desc">Transport and login come from the soju connection</string>
     <string name="network_settings_server_messages">Server messages</string>
+    <string name="network_settings_network_tools">Privacy and operator tools</string>
+    <string name="network_settings_network_tools_desc">Manage ignores, muted chats, and advanced IRC operator commands</string>
+    <string name="network_tools_title">Network tools</string>
+    <string name="network_tools_privacy_section">Privacy</string>
+    <string name="network_tools_ignore_hint">Nick or mask</string>
+    <string name="network_tools_ignore_help">Examples: alice, alice!*@*, *!user@example.net</string>
+    <string name="network_tools_add_ignore">Add ignore</string>
+    <string name="network_tools_ignores_empty">No ignores on this network.</string>
+    <string name="network_tools_enabled">Enabled</string>
+    <string name="network_tools_disabled">Disabled</string>
+    <string name="network_tools_mutes_section">Muted chats</string>
+    <string name="network_tools_mutes_empty">No channel or direct-message buffers on this network.</string>
+    <string name="network_tools_operator_section">IRCop tools</string>
+    <string name="network_tools_operator_help">Requires server operator privileges. Server replies appear in Server messages.</string>
+    <string name="network_tools_disconnected">Connect to this network before sending operator commands.</string>
+    <string name="network_tools_status">Status: %1$s</string>
+    <string name="network_tools_oper_user">OPER username</string>
+    <string name="network_tools_oper_password">OPER password</string>
+    <string name="network_tools_send_oper">Oper up</string>
+    <string name="network_tools_target">Target</string>
+    <string name="network_tools_modes">Modes</string>
+    <string name="network_tools_mode_args">Mode arguments</string>
+    <string name="network_tools_send_mode">Send MODE</string>
+    <string name="network_tools_kill_nick">Nick to kill</string>
+    <string name="network_tools_reason">Reason</string>
+    <string name="network_tools_send_kill">Kill user</string>
+    <string name="network_tools_rehash_server">Server, optional</string>
+    <string name="network_tools_send_rehash">Rehash</string>
+    <string name="network_tools_connect_server">Server to connect</string>
+    <string name="network_tools_connect_port">Port, optional</string>
+    <string name="network_tools_connect_remote">Remote server, optional</string>
+    <string name="network_tools_send_connect">Connect server</string>
+    <string name="network_tools_squit_server">Server to disconnect</string>
+    <string name="network_tools_send_squit">Disconnect server</string>
+    <string name="network_tools_confirm_title">Send %1$s?</string>
+    <string name="network_tools_confirm_message">This command can affect users or servers. Send it to %1$s?</string>
 
     <!-- Add network (WP-V2, §5.4) -->
     <string name="add_network_title">Add network</string>
@@ -729,6 +765,7 @@
     <string name="nick_sheet_remove_friend">Remove from friends</string>
     <string name="nick_sheet_add_fool">Add to fools</string>
     <string name="nick_sheet_remove_fool">Remove from fools</string>
+    <string name="nick_sheet_ignore_network">Ignore on this network</string>
     <string name="nick_sheet_give_op">Give op</string>
     <string name="nick_sheet_take_op">Take op</string>
     <string name="nick_sheet_give_voice">Give voice</string>
@@ -759,6 +796,12 @@
     <string name="channelinfo_topic_edit_action">Edit topic</string>
     <string name="channelinfo_topic_edit_hint">Channel topic</string>
     <string name="channelinfo_topic_edit_save">Save</string>
+    <string name="channelinfo_operator_tools">Operator tools</string>
+    <string name="channelinfo_invite_nick">Nick to invite</string>
+    <string name="channelinfo_invite">Invite</string>
+    <string name="channelinfo_ban_mask">Ban mask</string>
+    <string name="channelinfo_set_ban">Set ban</string>
+    <string name="channelinfo_remove_ban">Remove ban</string>
 
     <!-- Delete chat/buffer from the chat list (swipe-to-dismiss + long-press menu). Appended at
          end to avoid a same-file clobber with the parallel webpush-strings agent. -->

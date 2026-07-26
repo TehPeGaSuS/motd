@@ -27,12 +27,14 @@ import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -92,6 +94,9 @@ fun ChannelInfoScreen(
         onLeave = { viewModel.part(onBack) },
         onMemberClick = viewModel::openNickSheet,
         onSetTopic = viewModel::setTopic,
+        onInvite = viewModel::invite,
+        onSetBanMask = viewModel::setBanMask,
+        onSetChannelMode = viewModel::setChannelMode,
         onRetryMembers = viewModel::retryMembers,
         onQueryChange = viewModel::setQuery,
     )
@@ -100,6 +105,7 @@ fun ChannelInfoScreen(
     nickSheet?.let { sheet ->
         NickActionSheet(
             nick = sheet.nick,
+            networkId = state.buffer?.networkId,
             isSelf = false,
             isFriend = state.identityRules.matchesConfiguredNick(sheet.nick, state.friends),
             isFool = state.identityRules.matchesConfiguredNick(sheet.nick, state.fools),
@@ -111,6 +117,7 @@ fun ChannelInfoScreen(
             onMention = { viewModel.dismissNickSheet(); viewModel.mentionMember(sheet.nick, onDone = onBack) },
             onToggleFriend = { viewModel.toggleFriend(sheet.nick) },
             onToggleFool = { viewModel.toggleFool(sheet.nick) },
+            onIgnoreNetwork = { viewModel.ignoreNickOnNetwork(sheet.nick) },
             onOp = { grant -> viewModel.setMemberMode(sheet.nick, 'o', grant) },
             onVoice = { grant -> viewModel.setMemberMode(sheet.nick, 'v', grant) },
             onKick = { reason -> viewModel.dismissNickSheet(); viewModel.kick(sheet.nick, reason) },
@@ -129,6 +136,9 @@ fun ChannelInfoContent(
     onLeave: () -> Unit,
     onMemberClick: (String) -> Unit = {},
     onSetTopic: (String) -> Unit = {},
+    onInvite: (String) -> Unit = {},
+    onSetBanMask: (String, Boolean) -> Unit = { _, _ -> },
+    onSetChannelMode: (String, String) -> Unit = { _, _ -> },
     onRetryMembers: () -> Unit = {},
     onQueryChange: (String) -> Unit = {},
 ) {
@@ -175,6 +185,15 @@ fun ChannelInfoContent(
                     onSetMuted = onSetMuted,
                     onLeave = { showLeaveConfirm = true },
                 )
+            }
+            if (state.canModerate && buffer?.type == BufferType.CHANNEL) {
+                item(key = "channel-tools") {
+                    ChannelManagementTools(
+                        onInvite = onInvite,
+                        onSetBanMask = onSetBanMask,
+                        onSetChannelMode = onSetChannelMode,
+                    )
+                }
             }
             item(key = "search-field") {
                 OutlinedTextField(
@@ -487,6 +506,76 @@ private fun ActionItem(
     ) {
         Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
         Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+@Composable
+private fun ChannelManagementTools(
+    onInvite: (String) -> Unit,
+    onSetBanMask: (String, Boolean) -> Unit,
+    onSetChannelMode: (String, String) -> Unit,
+) {
+    var inviteNick by remember { mutableStateOf("") }
+    var banMask by remember { mutableStateOf("") }
+    var modes by remember { mutableStateOf("") }
+    var modeArgs by remember { mutableStateOf("") }
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.channelinfo_operator_tools),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold,
+        )
+        OutlinedTextField(
+            value = inviteNick,
+            onValueChange = { inviteNick = it },
+            label = { Text(stringResource(R.string.channelinfo_invite_nick)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("channelinfo_invite_nick"),
+        )
+        Button(
+            onClick = { onInvite(inviteNick); inviteNick = "" },
+            enabled = inviteNick.isNotBlank(),
+        ) { Text(stringResource(R.string.channelinfo_invite)) }
+        OutlinedTextField(
+            value = banMask,
+            onValueChange = { banMask = it },
+            label = { Text(stringResource(R.string.channelinfo_ban_mask)) },
+            supportingText = { Text(stringResource(R.string.network_tools_ignore_help)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("channelinfo_ban_mask"),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { onSetBanMask(banMask, true) },
+                enabled = banMask.isNotBlank(),
+            ) { Text(stringResource(R.string.channelinfo_set_ban)) }
+            OutlinedButton(
+                onClick = { onSetBanMask(banMask, false); banMask = "" },
+                enabled = banMask.isNotBlank(),
+            ) { Text(stringResource(R.string.channelinfo_remove_ban)) }
+        }
+        OutlinedTextField(
+            value = modes,
+            onValueChange = { modes = it },
+            label = { Text(stringResource(R.string.network_tools_modes)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("channelinfo_modes"),
+        )
+        OutlinedTextField(
+            value = modeArgs,
+            onValueChange = { modeArgs = it },
+            label = { Text(stringResource(R.string.network_tools_mode_args)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedButton(
+            onClick = { onSetChannelMode(modes, modeArgs); modes = ""; modeArgs = "" },
+            enabled = modes.isNotBlank(),
+        ) { Text(stringResource(R.string.network_tools_send_mode)) }
     }
 }
 

@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.AlternateEmail
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -60,6 +61,7 @@ fun NickActionSheet(
     onMention: () -> Unit,
     onToggleFriend: () -> Unit,
     onToggleFool: () -> Unit,
+    onIgnoreNetwork: () -> Unit = {},
     onOp: (grant: Boolean) -> Unit,
     onVoice: (grant: Boolean) -> Unit,
     onKick: (reason: String?) -> Unit,
@@ -96,6 +98,7 @@ fun NickActionSheet(
                     stringResource(if (isFool) R.string.nick_sheet_remove_fool else R.string.nick_sheet_add_fool),
                     onToggleFool,
                 )
+                NickAction(Icons.Outlined.Block, stringResource(R.string.nick_sheet_ignore_network), onIgnoreNetwork)
             }
 
             if (canModerate && !isSelf) {
@@ -193,12 +196,11 @@ private fun WhoisSummary(whois: WhoisInfo?, presence: PresenceState?) {
         whois.idleSecs?.let {
             Text(stringResource(R.string.whois_idle, "${it}s"), style = MaterialTheme.typography.bodySmall)
         }
-        whois.awayMessage?.takeIf { it.isNotBlank() }?.let {
-            Text(stringResource(R.string.whois_away, it), style = MaterialTheme.typography.bodySmall)
-        } ?: if (whois.away == true) {
+        val awayMessage = whois.awayMessage?.takeIf { it.isNotBlank() }
+        if (awayMessage != null) {
+            Text(stringResource(R.string.whois_away, awayMessage), style = MaterialTheme.typography.bodySmall)
+        } else if (whois.away == true) {
             Text(stringResource(R.string.nick_sheet_away), style = MaterialTheme.typography.bodySmall)
-        } else {
-            Unit
         }
     }
 }

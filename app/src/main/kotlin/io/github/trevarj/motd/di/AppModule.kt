@@ -33,6 +33,8 @@ import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.data.repo.NetworkRepositoryImpl
+import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
+import io.github.trevarj.motd.data.repo.NetworkIgnoreRepositoryImpl
 import io.github.trevarj.motd.data.repo.SearchRepository
 import io.github.trevarj.motd.data.repo.SearchRepositoryImpl
 import io.github.trevarj.motd.data.sync.ChatHistoryMediatorFactoryImpl
@@ -100,6 +102,9 @@ internal abstract class AppModule {
     // -- data/repo (WP4) --
     @Binds @Singleton
     abstract fun networkRepository(impl: NetworkRepositoryImpl): NetworkRepository
+
+    @Binds @Singleton
+    abstract fun networkIgnoreRepository(impl: NetworkIgnoreRepositoryImpl): NetworkIgnoreRepository
 
     @Binds @Singleton
     abstract fun bufferRepository(impl: BufferRepositoryImpl): BufferRepository

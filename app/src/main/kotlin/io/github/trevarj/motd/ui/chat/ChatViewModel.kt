@@ -27,6 +27,8 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
+import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
+import io.github.trevarj.motd.data.repo.NoopNetworkIgnoreRepository
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.SettingsRepository
@@ -187,6 +189,7 @@ class ChatViewModel @Inject constructor(
     private val visibilityReader: MessageVisibilityReader,
     private val historyResyncCoordinator: HistoryResyncController,
     private val userDao: UserDao,
+    private val networkIgnoreRepository: NetworkIgnoreRepository = NoopNetworkIgnoreRepository,
     contentPreviewPrefs: ContentPreviewPrefs,
     appearancePrefs: AppearancePrefs,
 ) : ViewModel() {
@@ -991,6 +994,12 @@ class ChatViewModel @Inject constructor(
             rules.normalize(it.trim()) == rules.normalize(nick.trim())
         }
         settingsRepository.setFool(nick, !exists, rules)
+    }
+
+    fun ignoreNickOnNetwork(nick: String) = viewModelScope.launch {
+        val networkId = state.value.buffer?.networkId ?: return@launch
+        networkIgnoreRepository.addIgnore(networkId, nick)
+        dismissNickSheet()
     }
 
     /**

@@ -105,6 +105,24 @@ interface NetworkIdentityDao {
 }
 
 @Dao
+interface NetworkIgnoreDao {
+    @Query("SELECT * FROM network_ignores WHERE networkId = :networkId ORDER BY enabled DESC, createdAt DESC, id DESC")
+    fun observeForNetwork(networkId: Long): Flow<List<NetworkIgnoreEntity>>
+
+    @Query("SELECT * FROM network_ignores WHERE networkId = :networkId AND enabled = 1 ORDER BY id")
+    suspend fun enabledForNetwork(networkId: Long): List<NetworkIgnoreEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(ignore: NetworkIgnoreEntity): Long
+
+    @Query("UPDATE network_ignores SET enabled = :enabled WHERE id = :id")
+    suspend fun setEnabled(id: Long, enabled: Boolean): Int
+
+    @Query("DELETE FROM network_ignores WHERE id = :id")
+    suspend fun delete(id: Long): Int
+}
+
+@Dao
 interface BufferDao {
     // Chat-list projection: each non-SERVER buffer joins one newest preview-eligible message by
     // identity. JOIN/PART/QUIT are timeline-only events and never become previews or activity.
@@ -216,6 +234,14 @@ interface BufferDao {
              AND pendingCloseAt IS NULL AND redirectToRoomId IS NULL ORDER BY id""",
     )
     suspend fun openTargets(networkId: Long): List<BufferTargetRow>
+
+    @Query(
+        """SELECT id AS bufferId, displayName AS displayName, type AS type, muted AS muted
+           FROM buffers WHERE networkId = :networkId AND type IN ('CHANNEL', 'QUERY')
+             AND dismissed = 0 AND pendingCloseAt IS NULL AND redirectToRoomId IS NULL
+           ORDER BY muted DESC, displayName COLLATE NOCASE""",
+    )
+    fun observeNetworkBufferTools(networkId: Long): Flow<List<NetworkBufferToolRow>>
 
     @Query(
         """SELECT id FROM buffers WHERE networkId = :networkId AND pendingCloseAt IS NULL
@@ -515,6 +541,13 @@ data class ChatListRow(
 )
 
 data class BufferTargetRow(val id: Long, val name: String)
+
+data class NetworkBufferToolRow(
+    val bufferId: Long,
+    val displayName: String,
+    val type: BufferType,
+    val muted: Boolean,
+)
 
 data class BufferReadMarkerRow(
     val bufferId: Long,
