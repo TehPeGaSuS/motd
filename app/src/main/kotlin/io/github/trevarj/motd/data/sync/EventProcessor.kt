@@ -269,22 +269,24 @@ class EventProcessor @Inject constructor(
             is IrcEvent.ChatMessage -> onChat(networkId, event, origin, historyTarget)
             is IrcEvent.TagMessage -> onTag(networkId, event, origin, historyTarget)
             is IrcEvent.HistoryBatch -> onHistoryBatch(networkId, event, expectedHistoryRoomId)
+            is IrcEvent.ReplayBatch -> onReplayBatch(networkId, event)
             is IrcEvent.NetworkBatch -> onNetworkBatch(networkId, event, origin, historyTarget)
-            is IrcEvent.Joined -> if (origin == EventOrigin.LIVE) onJoined(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalJoined(networkId, event)
-            is IrcEvent.Parted -> if (origin == EventOrigin.LIVE) onParted(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalParted(networkId, event)
-            is IrcEvent.Quit -> if (origin == EventOrigin.LIVE) onQuit(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalQuit(networkId, event, historyTarget)
-            is IrcEvent.Kicked -> if (origin == EventOrigin.LIVE) onKicked(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalKicked(networkId, event)
-            is IrcEvent.NickChanged -> if (origin == EventOrigin.LIVE) onNickChanged(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalNickChanged(networkId, event, historyTarget)
+            is IrcEvent.Joined -> if (origin.mutatesSessionState) onJoined(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalJoined(networkId, event)
+            is IrcEvent.Parted -> if (origin.mutatesSessionState) onParted(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalParted(networkId, event)
+            is IrcEvent.Quit -> if (origin.mutatesSessionState) onQuit(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalQuit(networkId, event, historyTarget)
+            is IrcEvent.Kicked -> if (origin.mutatesSessionState) onKicked(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalKicked(networkId, event)
+            is IrcEvent.NickChanged -> if (origin.mutatesSessionState) onNickChanged(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalNickChanged(networkId, event, historyTarget)
             is IrcEvent.NamesStarted -> if (origin.mutatesSessionState) onNamesStarted(networkId, event)
             is IrcEvent.Names -> if (origin.mutatesSessionState) onNames(networkId, event)
             is IrcEvent.TopicSnapshot -> if (origin.mutatesSessionState) onTopicSnapshot(networkId, event)
             is IrcEvent.TopicChanged -> when (origin) {
-                EventOrigin.LIVE -> onTopicChanged(networkId, event)
+                EventOrigin.LIVE, EventOrigin.REPLAY -> onTopicChanged(networkId, event)
                 EventOrigin.HISTORY -> onHistoricalTopicChanged(networkId, event)
                 EventOrigin.PUSH -> Unit
             }
+            is IrcEvent.ChannelRenamed -> onChannelRenamed(networkId, event, origin)
             is IrcEvent.ModeChanged -> when (origin) {
-                EventOrigin.LIVE -> onModeChanged(networkId, event)
+                EventOrigin.LIVE, EventOrigin.REPLAY -> onModeChanged(networkId, event)
                 EventOrigin.HISTORY -> onHistoricalModeChanged(networkId, event)
                 EventOrigin.PUSH -> Unit
             }
@@ -304,6 +306,7 @@ class EventProcessor @Inject constructor(
             is IrcEvent.ReadMarker -> if (origin.mutatesSessionState) onReadMarker(networkId, event)
             is IrcEvent.BouncerNetworkState -> if (origin.mutatesSessionState) onBouncerNetworkState(networkId, event)
             is IrcEvent.Disconnected -> if (origin.mutatesSessionState) onDisconnected(networkId, event)
+            is IrcEvent.StandardReply -> if (origin != EventOrigin.PUSH) onStandardReply(networkId, event, origin)
             is IrcEvent.ServerError -> if (origin.mutatesSessionState) onServerError(networkId, event)
             is IrcEvent.Raw -> onRaw(networkId, event, origin, historyTarget)
             is IrcEvent.CapsChanged,
@@ -323,6 +326,8 @@ class EventProcessor @Inject constructor(
         val route = if (origin == EventOrigin.HISTORY) {
             activeHistoryChatRoutes[networkId]?.removeFirstOrNull()
                 ?: resolveChatRoute(networkId, e, st, historyTarget, origin)
+        } else if (origin == EventOrigin.REPLAY) {
+            resolveChatRoute(networkId, e, st, historyTarget, origin)
         } else {
             resolveChatRoute(networkId, e, st, historyTarget = null, origin = origin)
         }
@@ -432,7 +437,7 @@ class EventProcessor @Inject constructor(
                     is IngestResult.Ignored -> "canonical_ignore"
                 },
                 canonical,
-                origin == EventOrigin.HISTORY,
+                origin != EventOrigin.LIVE,
             )
             if (isRootServiceReply && origin == EventOrigin.LIVE) {
                 bufferDao.advanceLocalReadAnchor(canonical.bufferId, canonical.serverTime, canonical.id)
@@ -629,6 +634,27 @@ class EventProcessor @Inject constructor(
         }
     }
 
+    private suspend fun onReplayBatch(networkId: Long, batch: IrcEvent.ReplayBatch) {
+        val st = stateFor(networkId)
+        existingRoom(networkId, batch.target, st)?.let { room ->
+            activeHistoryTargets[networkId] = ActiveHistoryTarget(
+                batch.target,
+                room.id,
+                room.type,
+                room.name,
+            )
+        }
+        try {
+            db.withTransaction {
+                activeHistoryOccurrences[networkId] = mutableMapOf()
+                for (ev in batch.events) processEvent(networkId, ev, EventOrigin.REPLAY, batch.target)
+            }
+        } finally {
+            activeHistoryOccurrences.remove(networkId)
+            activeHistoryTargets.remove(networkId)
+        }
+    }
+
     /**
      * Keep discarded history out permanently. A different msgid at the exact floor remains
      * potentially new, but an equal-time replay with no msgid cannot be distinguished from the
@@ -646,8 +672,10 @@ class EventProcessor @Inject constructor(
             is IrcEvent.Kicked -> event.ctx
             is IrcEvent.NickChanged -> event.ctx
             is IrcEvent.TopicChanged -> event.ctx
+            is IrcEvent.ChannelRenamed -> event.ctx
             is IrcEvent.ModeChanged -> event.ctx
             is IrcEvent.Invited -> event.ctx
+            is IrcEvent.StandardReply -> event.ctx
             else -> null
         } ?: return false
         val msgid = context.msgid
@@ -950,7 +978,7 @@ class EventProcessor @Inject constructor(
             insertNetworkBatch(bufferId, batch, children, st)
             return
         }
-        if (origin != EventOrigin.LIVE) return
+        if (!origin.mutatesSessionState) return
         val st = stateFor(networkId)
         val affected = LinkedHashMap<Long, MutableList<Pair<String, MessageContext>>>()
         db.withTransaction {
@@ -1403,6 +1431,41 @@ class EventProcessor @Inject constructor(
         insertSystem(bufferId, e.ctx, MessageKind.TOPIC, e.setBy ?: "", "topic: ${e.topic}")
     }
 
+    private suspend fun onChannelRenamed(
+        networkId: Long,
+        e: IrcEvent.ChannelRenamed,
+        origin: EventOrigin,
+    ) {
+        val st = stateFor(networkId)
+        val text = buildString {
+            e.actor?.takeIf(String::isNotBlank)?.let { append(it).append(' ') }
+            append("renamed ").append(e.oldName).append(" to ").append(e.newName)
+            e.reason?.takeIf(String::isNotBlank)?.let { append(" (").append(it).append(')') }
+        }
+        if (!origin.mutatesSessionState) {
+            val bufferId = ensureBuffer(networkId, e.oldName, BufferType.CHANNEL, st)
+            insertSystem(bufferId, e.ctx, MessageKind.SERVER_INFO, e.actor.orEmpty(), text, origin = EventOrigin.HISTORY)
+            return
+        }
+        val oldRoomId = existingChannelBuffer(networkId, e.oldName, st)?.id
+        val renamed = bufferStore.renameChannel(
+            networkId = networkId,
+            oldNormalizedName = st.normalize(e.oldName),
+            newNormalizedName = st.normalize(e.newName),
+            newDisplayName = e.newName,
+        ) ?: return
+        oldRoomId?.let { rosterSnapshots.remove(RosterKey(networkId, it)) }
+        rosterSnapshots.remove(RosterKey(networkId, renamed.id))
+        insertSystem(
+            renamed.id,
+            e.ctx,
+            MessageKind.SERVER_INFO,
+            e.actor.orEmpty(),
+            text,
+            origin = if (origin == EventOrigin.REPLAY) EventOrigin.REPLAY else EventOrigin.LIVE,
+        )
+    }
+
     private suspend fun onModeChanged(networkId: Long, e: IrcEvent.ModeChanged) {
         val st = stateFor(networkId)
         if (!isChannel(networkId, e.target, st)) return
@@ -1600,6 +1663,47 @@ class EventProcessor @Inject constructor(
     }
 
     // -- server buffer (plans/16 §5.6) --------------------------------------
+
+    private suspend fun onStandardReply(
+        networkId: Long,
+        e: IrcEvent.StandardReply,
+        origin: EventOrigin,
+    ) {
+        val st = stateFor(networkId)
+        val routed = e.context.firstNotNullOfOrNull { target ->
+            when {
+                isChannel(networkId, target, st) -> existingChannelBuffer(networkId, target, st)
+                else -> bufferStore.resolveQueryRoom(networkId, st.normalize(target), account = null)
+            }
+        }
+        val bufferId = routed?.id ?: ensureServerBuffer(networkId, st)
+        if (e.severity == IrcEvent.StandardReplySeverity.FAIL) {
+            e.ctx.label?.let { label ->
+                messageDao.failIfStillPending(bufferId, label)
+            } ?: if (e.commandName.equals("PRIVMSG", ignoreCase = true) ||
+                e.commandName.equals("NOTICE", ignoreCase = true)
+            ) {
+                messageDao.failLatestPending(bufferId)
+            } else {
+                Unit
+            }
+        }
+        val prefix = when (e.severity) {
+            IrcEvent.StandardReplySeverity.FAIL -> "failed"
+            IrcEvent.StandardReplySeverity.WARN -> "warning"
+            IrcEvent.StandardReplySeverity.NOTE -> "note"
+        }
+        val command = e.commandName.takeUnless { it == "*" }?.let { "$it " }.orEmpty()
+        val text = "$command$prefix (${e.code}): ${e.description}".trim()
+        insertSystem(
+            bufferId,
+            e.ctx,
+            if (e.severity == IrcEvent.StandardReplySeverity.FAIL) MessageKind.ERROR else MessageKind.SERVER_INFO,
+            "",
+            text,
+            origin = origin,
+        )
+    }
 
     /** ServerError → SERVER buffer, kind ERROR. The event carries no ctx, so use the wall clock. */
     private suspend fun onServerError(networkId: Long, e: IrcEvent.ServerError) {
@@ -2062,9 +2166,9 @@ class EventProcessor @Inject constructor(
         // prove an outgoing message. A source already bound to this query is incoming; otherwise an
         // event targeting the query peer is the historical-self/outgoing case.
         val sourceIsSelf = when {
-            origin == EventOrigin.HISTORY && historyPeer != null ->
+            (origin == EventOrigin.HISTORY || origin == EventOrigin.REPLAY) && historyPeer != null ->
                 !historySourceIsPeer && st.normalize(event.target) == st.normalize(historyPeer)
-            origin == EventOrigin.HISTORY -> event.isSelf
+            origin == EventOrigin.HISTORY || origin == EventOrigin.REPLAY -> event.isSelf
             else -> event.isSelf || st.isSelfNick(event.source.nick)
         }
         val bufferName = active?.target ?: if (isDm) {
@@ -2106,7 +2210,8 @@ class EventProcessor @Inject constructor(
             storedText,
             serverNotice = false,
             sourceIsSelf = sourceIsSelf,
-            selfAttributionAuthoritative = origin == EventOrigin.HISTORY && historyPeer != null,
+            selfAttributionAuthoritative = (origin == EventOrigin.HISTORY || origin == EventOrigin.REPLAY) &&
+                historyPeer != null,
         )
     }
 
@@ -2310,7 +2415,7 @@ class EventProcessor @Inject constructor(
 
     private fun EventOrigin.toObservationOrigin(): ObservationOrigin = when (this) {
         EventOrigin.LIVE -> ObservationOrigin.LIVE
-        EventOrigin.HISTORY -> ObservationOrigin.HISTORY
+        EventOrigin.HISTORY, EventOrigin.REPLAY -> ObservationOrigin.HISTORY
         EventOrigin.PUSH -> ObservationOrigin.PUSH
     }
 

@@ -357,6 +357,15 @@ interface BufferDao {
     @Query("UPDATE buffers SET joined = :joined WHERE id = :id")
     suspend fun setJoined(id: Long, joined: Boolean)
 
+    @Query(
+        """UPDATE buffers SET name = :normalizedName, displayName = :displayName
+           WHERE id = :id AND type = 'CHANNEL'""",
+    )
+    suspend fun renameChannel(id: RoomId, normalizedName: String, displayName: String): Int
+
+    @Query("UPDATE buffers SET name = :normalizedName WHERE id = :id")
+    suspend fun renameRoomKey(id: RoomId, normalizedName: String): Int
+
     @Query("UPDATE buffers SET membershipCycle = membershipCycle + 1 WHERE id = :id")
     suspend fun advanceMembershipCycle(id: RoomId)
 
@@ -1137,6 +1146,12 @@ interface RoomAliasDao {
            AND namespace IN ('VERIFIED_NICK', 'PROVISIONAL_NICK')""",
     )
     suspend fun deleteQueryAliases(roomId: RoomId)
+
+    @Query(
+        """DELETE FROM room_aliases
+           WHERE networkId = :networkId AND namespace = :namespace AND value = :value""",
+    )
+    suspend fun deleteAlias(networkId: Long, namespace: RoomAliasNamespace, value: String): Int
 
     @Query("UPDATE room_aliases SET roomId = :winnerId WHERE roomId = :loserId")
     suspend fun repoint(loserId: RoomId, winnerId: RoomId)

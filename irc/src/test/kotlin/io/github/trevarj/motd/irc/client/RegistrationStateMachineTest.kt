@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.irc.client
 
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.irc.event.IrcEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -131,6 +132,77 @@ class RegistrationStateMachineTest {
         val fail = actions.single() as RegistrationStateMachine.Action.Fail
         assertEquals("INVALID_NETID No such network", fail.reason)
         assertTrue(fail.fatal)
+    }
+
+    @Test
+    fun `pre-away sends AWAY before CAP END when capability is acked`() {
+        val machine = RegistrationStateMachine(
+            IrcClientConfig(
+                host = "irc.example",
+                port = 6697,
+                tls = true,
+                nick = "motd",
+                username = "motd",
+                realname = "motd",
+                initialAwayMessage = "back later",
+            ),
+        )
+
+        machine.start()
+        assertEquals(listOf("CAP REQ :draft/pre-away"), machine.onMessage(cap("LS", "draft/pre-away")).sentLines())
+        assertEquals(
+            listOf("AWAY :back later", "CAP END"),
+            machine.onMessage(cap("ACK", "draft/pre-away")).sentLines(),
+        )
+    }
+
+    @Test
+    fun `initial away falls back after welcome when pre-away is absent`() {
+        val machine = RegistrationStateMachine(
+            IrcClientConfig(
+                host = "irc.example",
+                port = 6697,
+                tls = true,
+                nick = "motd",
+                username = "motd",
+                realname = "motd",
+                initialAwayMessage = "back later",
+            ),
+        )
+
+        machine.start()
+        assertEquals(listOf("CAP END"), machine.onMessage(cap("LS", "")).sentLines())
+        val welcome = machine.onMessage(IrcMessage(command = "001", params = listOf("motd", "Welcome")))
+
+        assertTrue(welcome.any { it is RegistrationStateMachine.Action.Complete })
+        assertEquals(listOf("AWAY :back later"), welcome.sentLines())
+    }
+
+    @Test
+    fun `pre-away failure is reported and retried after welcome`() {
+        val machine = RegistrationStateMachine(
+            IrcClientConfig(
+                host = "irc.example",
+                port = 6697,
+                tls = true,
+                nick = "motd",
+                username = "motd",
+                realname = "motd",
+                initialAwayMessage = "back later",
+            ),
+        )
+
+        machine.start()
+        machine.onMessage(cap("LS", "draft/pre-away"))
+        machine.onMessage(cap("ACK", "draft/pre-away"))
+        val failure = machine.onMessage(
+            IrcMessage(command = "FAIL", params = listOf("AWAY", "INVALID_PARAMS", "rejected")),
+        ).single() as RegistrationStateMachine.Action.Emit
+        val reply = failure.event as IrcEvent.StandardReply
+        assertEquals("AWAY", reply.commandName)
+
+        val welcome = machine.onMessage(IrcMessage(command = "001", params = listOf("motd", "Welcome")))
+        assertEquals(listOf("AWAY :back later"), welcome.sentLines())
     }
 
     @Test

@@ -9,6 +9,7 @@ internal enum class EventOrigin(
 ) {
     LIVE(notifies = true, mutatesSessionState = true),
     HISTORY(notifies = false, mutatesSessionState = false),
+    REPLAY(notifies = false, mutatesSessionState = true),
     PUSH(notifies = true, mutatesSessionState = false),
     ;
 

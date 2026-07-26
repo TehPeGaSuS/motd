@@ -59,6 +59,8 @@ sealed interface IrcEvent {
         val events: List<IrcEvent>,
         val target: String? = null,
     ) : IrcEvent
+    /** Historical replay batch that still represents the bouncer's current session state. */
+    data class ReplayBatch(val target: String, val events: List<IrcEvent>) : IrcEvent
 
     // -- membership & user state
     data class Joined(val ctx: MessageContext, val nick: String, val channel: String, val account: String?, val realname: String?, val isSelf: Boolean) : IrcEvent
@@ -99,12 +101,28 @@ sealed interface IrcEvent {
     data class TopicChanged(val ctx: MessageContext, val channel: String, val topic: String, val setBy: String?) : IrcEvent
     /** Current channel topic supplied by RPL_TOPIC/RPL_NOTOPIC; this is state, not a timeline event. */
     data class TopicSnapshot(val channel: String, val topic: String) : IrcEvent
+    data class ChannelRenamed(
+        val ctx: MessageContext,
+        val actor: String?,
+        val oldName: String,
+        val newName: String,
+        val reason: String?,
+    ) : IrcEvent
     data class ModeChanged(val ctx: MessageContext, val target: String, val modes: String, val args: List<String>) : IrcEvent
     data class Invited(val ctx: MessageContext, val by: String, val nick: String, val channel: String) : IrcEvent
 
     // -- sync
     data class ReadMarker(val target: String, val timestamp: Long?) : IrcEvent  // MARKREAD; null = "*" (unset)
     data class BouncerNetworkState(val netId: String, val attrs: Map<String, String>) : IrcEvent // BOUNCER NETWORK notify
+    enum class StandardReplySeverity { FAIL, WARN, NOTE }
+    data class StandardReply(
+        val ctx: MessageContext,
+        val severity: StandardReplySeverity,
+        val commandName: String,
+        val code: String,
+        val context: List<String>,
+        val description: String,
+    ) : IrcEvent
     data class ServerError(val code: String, val params: List<String>, val text: String) : IrcEvent
     /** Escape hatch: anything not mapped above (raw numerics for motd text, WHOIS, etc.). */
     data class Raw(val message: IrcMessage) : IrcEvent

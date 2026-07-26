@@ -132,6 +132,12 @@ class BuildChildConfigTest {
     }
 
     @Test
+    fun `initial away is taken from the edited network row`() {
+        val cfg = buildChildConfig(child().copy(initialAwayMessage = "gone"), root())
+        assertEquals("gone", cfg.initialAwayMessage)
+    }
+
+    @Test
     fun `fingerprint changes when wsUrl changes so the actor restarts`() {
         val base = root()
         val fp1 = networkFingerprint(base)
@@ -165,5 +171,14 @@ class BuildChildConfigTest {
             assertNotEquals(baseline, networkFingerprint(child, changedRoot))
         }
         assertEquals(baseline, networkFingerprint(child, root))
+    }
+
+    @Test
+    fun `fingerprint changes when initial away changes`() {
+        val base = child()
+        assertNotEquals(
+            networkFingerprint(base, root()),
+            networkFingerprint(base.copy(initialAwayMessage = "gone"), root()),
+        )
     }
 }

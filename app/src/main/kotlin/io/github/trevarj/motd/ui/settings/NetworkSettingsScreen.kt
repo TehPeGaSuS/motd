@@ -91,6 +91,7 @@ fun NetworkSettingsScreen(
         onBack = onBack,
         onDisplayNameChange = viewModel::editDisplayName,
         onWsUrlChange = viewModel::editWsUrl,
+        onInitialAwayMessageChange = viewModel::editInitialAwayMessage,
         onObfsModeChange = viewModel::editObfsMode,
         onProxyHostChange = viewModel::editProxyHost,
         onProxyPortChange = viewModel::editProxyPort,
@@ -122,6 +123,7 @@ fun NetworkSettingsContent(
     onBack: () -> Unit,
     onDisplayNameChange: (String) -> Unit = {},
     onWsUrlChange: (String) -> Unit = {},
+    onInitialAwayMessageChange: (String) -> Unit = {},
     onObfsModeChange: (ObfsMode) -> Unit = {},
     onProxyHostChange: (String) -> Unit = {},
     onProxyPortChange: (String) -> Unit = {},
@@ -193,6 +195,7 @@ fun NetworkSettingsContent(
                             supportingContent = { Text(stringResource(R.string.network_settings_managed_by_desc)) },
                             colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
                         )
+                        InitialAwayField(state, onInitialAwayMessageChange)
                     }
                 } else {
                     SettingsGroup(title = stringResource(R.string.network_settings_connection_section)) {
@@ -235,6 +238,11 @@ fun NetworkSettingsContent(
                                     soju = state.entity?.role == NetworkRole.BOUNCER_ROOT,
                                 )
                             }
+                        }
+                    }
+                    if (state.entity?.role != NetworkRole.BOUNCER_ROOT) {
+                        SettingsGroup(title = stringResource(R.string.network_settings_presence_section)) {
+                            InitialAwayField(state, onInitialAwayMessageChange)
                         }
                     }
                 }
@@ -466,6 +474,29 @@ private fun AutoConnectRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit)
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
+}
+
+@Composable
+private fun InitialAwayField(
+    state: NetworkSettingsUiState,
+    onInitialAwayMessageChange: (String) -> Unit,
+) {
+    val error = initialAwayValidationError(state.initialAwayMessage)
+    OutlinedTextField(
+        value = state.initialAwayMessage,
+        onValueChange = onInitialAwayMessageChange,
+        label = { Text(stringResource(R.string.network_settings_initial_away)) },
+        supportingText = {
+            Text(error ?: stringResource(R.string.network_settings_initial_away_desc))
+        },
+        isError = error != null,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.Sentences,
+            imeAction = ImeAction.Done,
+        ),
+        modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("network_initial_away"),
+    )
 }
 
 /**

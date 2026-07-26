@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -13,6 +14,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -108,5 +110,38 @@ class BufferStoreTest {
         assertEquals("+Room", channel.ircTarget)
         assertEquals(channel.id, store.resolveChannelRoom(networkId, "+room")?.id)
         assertEquals(query.id, store.resolveQueryRoom(networkId, "+room", "account")?.id)
+    }
+
+    @Test
+    fun channelRenameRetiresOldAliasAndKeepsRoster() = runTest {
+        val store = BufferStore(db)
+        val old = store.getOrCreate(networkId, "#old", "#Old", BufferType.CHANNEL)
+        db.memberDao().upsert(MemberEntity(old.id, "alice", "@"))
+
+        val renamed = store.renameChannel(networkId, "#old", "#new", "#New")!!
+
+        assertEquals(old.id, renamed.id)
+        assertEquals("#new", db.bufferDao().rawById(old.id)?.name)
+        assertEquals("#New", db.bufferDao().rawById(old.id)?.displayName)
+        assertNull(store.resolveChannelRoom(networkId, "#old"))
+        assertEquals(old.id, store.resolveChannelRoom(networkId, "#new")?.id)
+        assertEquals(listOf(MemberEntity(old.id, "alice", "@")), db.memberDao().allNow(old.id))
+    }
+
+    @Test
+    fun channelRenameMergesExistingDestinationWithoutNameCollision() = runTest {
+        val store = BufferStore(db)
+        val old = store.getOrCreate(networkId, "#old", "#Old", BufferType.CHANNEL)
+        val destination = store.getOrCreate(networkId, "#new", "#New", BufferType.CHANNEL)
+        db.memberDao().upsert(MemberEntity(old.id, "alice", "@"))
+
+        val renamed = store.renameChannel(networkId, "#old", "#new", "#New")!!
+
+        assertEquals(old.id, renamed.id)
+        assertEquals("#new", db.bufferDao().rawById(old.id)?.name)
+        assertEquals(old.id, db.bufferDao().rawById(destination.id)?.redirectToRoomId)
+        assertNull(store.resolveChannelRoom(networkId, "#old"))
+        assertEquals(old.id, store.resolveChannelRoom(networkId, "#new")?.id)
+        assertEquals(listOf(MemberEntity(old.id, "alice", "@")), db.memberDao().allNow(old.id))
     }
 }

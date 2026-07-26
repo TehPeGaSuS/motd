@@ -11,6 +11,7 @@ internal object CapTiers {
         "cap-notify",
         "message-tags",
         "server-time",
+        "znc.in/server-time-iso",
         "batch",
         "labeled-response",
         "echo-message",
@@ -40,6 +41,10 @@ internal object CapTiers {
         "draft/read-marker",
         "soju.im/read",
         "draft/metadata-2",
+        "standard-replies",
+        "draft/relaymsg",
+        "draft/pre-away",
+        "draft/channel-rename",
         "soju.im/bouncer-networks",
         "soju.im/bouncer-networks-notify",
         "soju.im/webpush",
@@ -78,6 +83,9 @@ internal object CapNegotiator {
         val selectedReadMarker = preferredReadMarker(advertised)
         req.removeAll(READ_MARKER_ALIASES)
         if (selectedReadMarker != null) req.add(selectedReadMarker)
+        val selectedServerTime = preferredServerTime(advertised)
+        req.removeAll(SERVER_TIME_ALIASES)
+        if (selectedServerTime != null) req.add(selectedServerTime)
         return req
     }
 
@@ -88,6 +96,7 @@ internal object CapNegotiator {
             if (preferredNoImplicitNames(ackedNames) != null) addAll(NO_IMPLICIT_NAMES_ALIASES)
             if (preferredExtendedMonitor(ackedNames) != null) addAll(EXTENDED_MONITOR_ALIASES)
             if (preferredReadMarker(ackedNames) != null) addAll(READ_MARKER_ALIASES)
+            if (preferredServerTime(ackedNames) != null) addAll(SERVER_TIME_ALIASES)
         }
         val advertised = (newCaps - heldAliases) + ackedNames
         return requestSet(advertised, extraCaps) - ackedNames
@@ -135,4 +144,12 @@ val READ_MARKER_ALIASES: List<String> = listOf("draft/read-marker", "soju.im/rea
 fun preferredReadMarker(caps: Set<String>): String? {
     val names = caps.mapTo(HashSet()) { it.substringBefore('=') }
     return READ_MARKER_ALIASES.firstOrNull { it in names }
+}
+
+// IRCv3 server-time supersedes ZNC's legacy ISO timestamp cap; both produce the `time` tag.
+val SERVER_TIME_ALIASES: List<String> = listOf("server-time", "znc.in/server-time-iso")
+
+fun preferredServerTime(caps: Set<String>): String? {
+    val names = caps.mapTo(HashSet()) { it.substringBefore('=') }
+    return SERVER_TIME_ALIASES.firstOrNull { it in names }
 }

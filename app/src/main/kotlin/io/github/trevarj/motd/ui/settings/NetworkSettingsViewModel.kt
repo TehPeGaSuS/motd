@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.liberaEndpointChanged
 import io.github.trevarj.motd.ui.onboarding.AuthForm
@@ -45,6 +46,7 @@ data class NetworkSettingsUiState(
     val obfsLink: String = "",
     val server: ServerForm = ServerForm(),
     val auth: AuthForm = AuthForm(),
+    val initialAwayMessage: String = "",
     val isZnc: Boolean = false,
     val zncLogin: ZncLoginForm = ZncLoginForm(),
     // Round 5 (plans/16 §5.3): live status + autoConnect editing.
@@ -72,16 +74,28 @@ data class NetworkSettingsUiState(
             (obfsMode == ObfsMode.EMBEDDED_REALITY &&
                 obfsLink.trim().ifBlank { null } != current.obfsLink?.trim()?.ifBlank { null }) ||
             server != current.toServerForm() ||
+            initialAwayMessage.trim().ifBlank { null } != current.initialAwayMessage?.trim()?.ifBlank { null } ||
             (if (isZnc) zncLogin != parseZncLogin(current.saslUser.orEmpty(), current.saslPassword.orEmpty())
             else auth != current.toAuthForm()) || autoConnect != current.autoConnect
     }
-    val isValid: Boolean get() = server.isValid && (if (isZnc) zncLogin.isValid else auth.isValid) && vlessLinkError == null
+    val initialAwayValid: Boolean get() = initialAwayValidationError(initialAwayMessage) == null
+    val isValid: Boolean get() = server.isValid && (if (isZnc) zncLogin.isValid else auth.isValid) &&
+        vlessLinkError == null && initialAwayValid
     val canSave: Boolean get() = isValid && hasUnsavedChanges
 }
 
 /** User-safe validation copy for the VLESS field; never echoes a potentially sensitive URI. */
 internal fun vlessLinkValidationError(link: String): String? {
     return VlessLink.parse(link).exceptionOrNull()?.message
+}
+
+internal fun initialAwayValidationError(message: String): String? {
+    val trimmed = message.trim()
+    if (trimmed.isEmpty()) return null
+    return runCatching {
+        IrcMessage(command = "AWAY", params = listOf(trimmed)).serialize()
+        null
+    }.getOrElse { error -> error.message ?: "Invalid away message" }
 }
 
 /** Details displayed before changing the endpoint/credentials a bouncer's child mirrors inherit. */
@@ -142,6 +156,7 @@ class NetworkSettingsViewModel @Inject constructor(
                     obfsLink = n?.obfsLink.orEmpty(),
                     server = n?.toServerForm() ?: ServerForm(),
                     auth = n?.toAuthForm() ?: AuthForm(),
+                    initialAwayMessage = n?.initialAwayMessage.orEmpty(),
                     isZnc = isZnc,
                     zncLogin = n?.takeIf { isZnc }?.let {
                         parseZncLogin(it.saslUser.orEmpty(), it.saslPassword.orEmpty())
@@ -175,6 +190,7 @@ class NetworkSettingsViewModel @Inject constructor(
     fun editZncLogin(login: ZncLoginForm) { _state.value = _state.value.copy(zncLogin = login) }
     fun editDisplayName(name: String) { _state.value = _state.value.copy(displayName = name) }
     fun editWsUrl(url: String) { _state.value = _state.value.copy(wsUrl = url) }
+    fun editInitialAwayMessage(message: String) { _state.value = _state.value.copy(initialAwayMessage = message) }
 
     fun editObfsMode(mode: ObfsMode) { _state.value = _state.value.copy(obfsMode = mode) }
     fun editProxyHost(host: String) { _state.value = _state.value.copy(proxyHost = host) }
@@ -309,7 +325,10 @@ class NetworkSettingsViewModel @Inject constructor(
             proxyPort = _state.value.proxyPort.toIntOrNull(),
             obfsLink = _state.value.obfsLink,
             // Persist the current autoConnect value alongside the form fields.
-        ).copy(autoConnect = _state.value.autoConnect)
+        ).copy(
+            autoConnect = _state.value.autoConnect,
+            initialAwayMessage = _state.value.initialAwayMessage.trim().ifBlank { null },
+        )
     }
 
     fun delete(onDone: () -> Unit) = viewModelScope.launch {

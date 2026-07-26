@@ -1,6 +1,8 @@
 package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -26,11 +28,13 @@ class ChannelJoinOutcomeTest {
     fun `ircv3 fail join produces a target keyed rejection`() {
         val outcome = channelJoinOutcome(
             networkId = 7,
-            event = IrcEvent.Raw(
-                io.github.trevarj.motd.irc.proto.IrcMessage(
-                    command = "FAIL",
-                    params = listOf("JOIN", "CANNOT_JOIN", "#locked", "Cannot join channel"),
-                ),
+            event = IrcEvent.StandardReply(
+                ctx = MessageContext(null, 0, null, null, null, ServerTimeSource.LOCAL),
+                severity = IrcEvent.StandardReplySeverity.FAIL,
+                commandName = "JOIN",
+                code = "CANNOT_JOIN",
+                context = listOf("#locked"),
+                description = "Cannot join channel",
             ),
             identityRules = IrcIdentityRules(),
         )

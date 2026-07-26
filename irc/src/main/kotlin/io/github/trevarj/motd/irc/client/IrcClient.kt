@@ -63,6 +63,8 @@ data class IrcClientConfig(
     val saslPassword: String? = null,
     /** Optional IRC server password, sent with PASS before registration. */
     val serverPassword: String? = null,
+    /** Optional per-network away message to apply during or immediately after registration. */
+    val initialAwayMessage: String? = null,
     /** soju: bind this connection to a bouncer network before CAP END. */
     val bouncerNetId: String? = null,
     /** Extra caps to request beyond the built-in tiers (rarely needed). */
@@ -343,6 +345,7 @@ class IrcClient(
                 delay(a.delayMs)
                 if (transport === t) runCatching { t.send(a.line) }
             }
+            is RegistrationStateMachine.Action.Emit -> publish(criticalEvents, a.event)
             is RegistrationStateMachine.Action.SetNick -> selfNick.set(a.nick)
             is RegistrationStateMachine.Action.Complete -> {
                 selfNick.set(a.nick)
@@ -466,6 +469,9 @@ class IrcClient(
                     },
                 ),
             )
+        } else if (tree.type == "znc.in/playback") {
+            val target = tree.params.firstOrNull().orEmpty()
+            listOf(IrcEvent.ReplayBatch(target, flattened))
         } else {
             flattened
         }
@@ -932,13 +938,17 @@ class IrcClient(
                                 raw.command == "WEBPUSH" &&
                                     raw.params.getOrNull(0) == action &&
                                     raw.params.getOrNull(1) == endpoint -> WebPushResponse.Success
-                                raw.command == "FAIL" &&
-                                    raw.params.getOrNull(0) == "WEBPUSH" &&
-                                    raw.params.drop(1).any { it == action } -> WebPushResponse.Failure(
-                                        code = raw.params.getOrNull(1) ?: "FAIL",
-                                        text = raw.params.lastOrNull().orEmpty(),
-                                    )
                                 else -> null
+                            }
+                        }
+                        is IrcEvent.StandardReply -> {
+                            if (event.severity == IrcEvent.StandardReplySeverity.FAIL &&
+                                event.commandName == "WEBPUSH" &&
+                                event.context.any { it == action }
+                            ) {
+                                WebPushResponse.Failure(event.code, event.description)
+                            } else {
+                                null
                             }
                         }
                         is IrcEvent.Disconnected -> WebPushResponse.Disconnected(event.reason)

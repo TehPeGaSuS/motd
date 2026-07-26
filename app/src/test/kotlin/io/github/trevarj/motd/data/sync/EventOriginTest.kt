@@ -17,6 +17,13 @@ class EventOriginTest {
     }
 
     @Test
+    fun `replay persists silently while owning session state`() {
+        assertFalse(EventOrigin.REPLAY.notifies)
+        assertTrue(EventOrigin.REPLAY.mutatesSessionState)
+        assertTrue(EventOrigin.REPLAY.accepts(IrcEvent.Joined(context(), "alice", "#motd", null, null, false)))
+    }
+
+    @Test
     fun `push accepts only its persistence allowlist`() {
         assertTrue(EventOrigin.PUSH.notifies)
         assertFalse(EventOrigin.PUSH.mutatesSessionState)

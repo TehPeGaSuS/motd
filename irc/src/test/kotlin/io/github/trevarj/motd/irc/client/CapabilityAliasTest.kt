@@ -94,4 +94,32 @@ class CapabilityAliasTest {
             ),
         )
     }
+
+    @Test fun `server time requests modern name before ZNC legacy alias`() {
+        assertEquals(
+            setOf("server-time"),
+            CapNegotiator.requestSet(SERVER_TIME_ALIASES.toSet(), emptySet()),
+        )
+        assertEquals(
+            setOf("znc.in/server-time-iso"),
+            CapNegotiator.requestSet(setOf("znc.in/server-time-iso"), emptySet()),
+        )
+        assertEquals(null, preferredServerTime(emptySet()))
+    }
+
+    @Test fun `issue 32 capability set requests only real CAP names`() {
+        val advertised = setOf(
+            "standard-replies",
+            "draft/relaymsg",
+            "draft/pre-away",
+            "draft/channel-rename",
+            "message-ids",
+            "utf8only",
+            "znc.in/playback",
+        )
+        assertEquals(
+            setOf("standard-replies", "draft/relaymsg", "draft/pre-away", "draft/channel-rename"),
+            CapNegotiator.requestSet(advertised, emptySet()),
+        )
+    }
 }

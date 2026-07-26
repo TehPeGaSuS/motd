@@ -53,4 +53,30 @@ class EventMapperMessageTagsTest {
 
         assertTrue(event is IrcEvent.Raw)
     }
+
+    @Test
+    fun `standard replies map to typed events`() {
+        val event = mapper.map(
+            IrcMessage.parse("@label=attempt-1 :irc.example FAIL PRIVMSG CANNOTSENDTOCHAN #chan :Cannot send"),
+        ) as IrcEvent.StandardReply
+
+        assertEquals(IrcEvent.StandardReplySeverity.FAIL, event.severity)
+        assertEquals("PRIVMSG", event.commandName)
+        assertEquals("CANNOTSENDTOCHAN", event.code)
+        assertEquals(listOf("#chan"), event.context)
+        assertEquals("Cannot send", event.description)
+        assertEquals("attempt-1", event.ctx.label)
+    }
+
+    @Test
+    fun `channel rename maps to typed event`() {
+        val event = mapper.map(
+            IrcMessage.parse(":oper!u@h RENAME #old #new :moving"),
+        ) as IrcEvent.ChannelRenamed
+
+        assertEquals("oper", event.actor)
+        assertEquals("#old", event.oldName)
+        assertEquals("#new", event.newName)
+        assertEquals("moving", event.reason)
+    }
 }

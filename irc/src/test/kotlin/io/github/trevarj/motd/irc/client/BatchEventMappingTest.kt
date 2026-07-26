@@ -61,5 +61,18 @@ class BatchEventMappingTest {
         assertTrue(client.mapBatchTree(unknown).single() is IrcEvent.NetworkBatch)
     }
 
+    @Test fun `znc playback maps to replay batch`() {
+        val playback = BatchTree(
+            "znc",
+            "znc.in/playback",
+            listOf("#room"),
+            listOf(BatchChild.Message(msg("@time=2026-01-01T00:00:00Z :Alice!u@h PRIVMSG #room :missed"))),
+        )
+
+        val event = client.mapBatchTree(playback).single() as IrcEvent.ReplayBatch
+        assertEquals("#room", event.target)
+        assertTrue(event.events.single() is IrcEvent.ChatMessage)
+    }
+
     private fun msg(line: String) = IrcMessage.parse(line)
 }

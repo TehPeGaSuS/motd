@@ -108,6 +108,11 @@ class EventMapper(
                 val modes = msg.params.getOrNull(1).orEmpty()
                 IrcEvent.ModeChanged(c(), target, modes, msg.params.drop(2))
             }
+            "RENAME" -> {
+                val oldName = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
+                val newName = msg.params.getOrNull(1) ?: return IrcEvent.Raw(msg)
+                IrcEvent.ChannelRenamed(c(), msg.source?.nick, oldName, newName, msg.params.getOrNull(2))
+            }
             "INVITE" -> {
                 val nick = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
                 val channel = msg.params.getOrNull(1) ?: return IrcEvent.Raw(msg)
@@ -132,6 +137,7 @@ class EventMapper(
                 val nick = msg.source?.nick ?: return IrcEvent.Raw(msg)
                 IrcEvent.RealnameChanged(nick, msg.params.getOrNull(0).orEmpty())
             }
+            "FAIL", "WARN", "NOTE" -> mapStandardReply(msg, c())
             "MARKREAD" -> mapMarkRead(msg)
             // soju.im/read uses the READ command with the same timestamp= shape as MARKREAD. Only
             // map it on connections that negotiated soju's extension; otherwise stray READ traffic
@@ -248,6 +254,23 @@ class EventMapper(
             }
         }
         return IrcEvent.ReadMarker(target, ts)
+    }
+
+    private fun mapStandardReply(msg: IrcMessage, ctx: MessageContext): IrcEvent {
+        val commandName = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
+        val code = msg.params.getOrNull(1) ?: return IrcEvent.Raw(msg)
+        val description = msg.params.lastOrNull().orEmpty()
+        val context = if (msg.params.size <= 3) {
+            emptyList()
+        } else {
+            msg.params.subList(2, msg.params.lastIndex)
+        }
+        val severity = when (msg.command) {
+            "FAIL" -> IrcEvent.StandardReplySeverity.FAIL
+            "WARN" -> IrcEvent.StandardReplySeverity.WARN
+            else -> IrcEvent.StandardReplySeverity.NOTE
+        }
+        return IrcEvent.StandardReply(ctx, severity, commandName, code, context, description)
     }
 
     private fun mapBouncer(msg: IrcMessage): IrcEvent {

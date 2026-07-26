@@ -2,6 +2,7 @@ package io.github.trevarj.motd.irc.client
 
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.Isupport
+import io.github.trevarj.motd.irc.event.IrcEvent
 
 /**
  * Drives IRC registration (plans/02 steps 1-11): optional PASS → CAP LS 302 → CAP REQ/ACK → SASL →
@@ -19,6 +20,7 @@ internal class RegistrationStateMachine(
         /** Our nick changed (initial, or after a 433 retry) — client must update self-nick. */
         data class SetNick(val nick: String) : Action
         data class SendDeferred(val line: String, val delayMs: Long) : Action
+        data class Emit(val event: IrcEvent) : Action
         /** Registration succeeded. */
         data class Complete(
             val nick: String,
@@ -47,6 +49,8 @@ internal class RegistrationStateMachine(
 
     private val isupport = Isupport()
     private var sasl: SaslAuthenticator? = null
+    private var preAwayAttempted = false
+    private var preAwayRejected = false
 
     /** Opening lines: optional PASS, then CAP LS 302, NICK, USER. */
     fun start(): List<Action> {
@@ -73,7 +77,7 @@ internal class RegistrationStateMachine(
             "432", "433", "436" -> onNickError(msg)
             "001" -> onWelcome(msg)
             "005" -> { onIsupport(msg); emptyList() }
-            "FAIL" -> fail(msg.params.drop(1).joinToString(" ").ifBlank { "registration failed" }, fatal = true)
+            "FAIL" -> onFail(msg)
             "376", "422" -> emptyList() // end of motd; 001 already completed us
             "PING" -> listOf(Action.Send("PONG ${msg.params.firstOrNull().orEmpty()}"))
             "ERROR" -> fail("server ERROR: ${msg.params.lastOrNull().orEmpty()}", fatal = false)
@@ -174,6 +178,10 @@ internal class RegistrationStateMachine(
             phase = Phase.BIND
             actions.add(Action.Send("BOUNCER BIND ${config.bouncerNetId}"))
         }
+        initialAwayLine()?.takeIf { hasAcked("draft/pre-away") }?.let { line ->
+            preAwayAttempted = true
+            actions.add(Action.Send(line))
+        }
         phase = Phase.CAP_END
         actions.add(Action.Send("CAP END"))
         phase = Phase.WELCOME
@@ -198,10 +206,48 @@ internal class RegistrationStateMachine(
             Action.SetNick(nick),
             Action.Complete(nick, acked.toSet(), isupport),
         )
+        val fallbackAwayLine = initialAwayLine()
+        if (fallbackAwayLine != null && (!preAwayAttempted || preAwayRejected)) {
+            actions.add(Action.Send(fallbackAwayLine))
+        }
         for (cap in postWelcomeCapReqs.distinct().sorted()) {
             actions.add(Action.Send("CAP REQ :$cap"))
         }
         return actions
+    }
+
+    private fun onFail(msg: IrcMessage): List<Action> {
+        if (preAwayAttempted && phase == Phase.WELCOME && msg.params.firstOrNull()?.equals("AWAY", ignoreCase = true) == true) {
+            preAwayRejected = true
+            val code = msg.params.getOrNull(1) ?: "FAIL"
+            return listOf(
+                Action.Emit(
+                    IrcEvent.StandardReply(
+                        ctx = io.github.trevarj.motd.irc.event.MessageContext(
+                            msgid = msg.tags["msgid"],
+                            serverTime = System.currentTimeMillis(),
+                            account = msg.tags["account"],
+                            batchId = msg.tags["batch"],
+                            label = msg.tags["label"],
+                            serverTimeSource = io.github.trevarj.motd.irc.event.ServerTimeSource.LOCAL,
+                        ),
+                        severity = IrcEvent.StandardReplySeverity.FAIL,
+                        commandName = "AWAY",
+                        code = code,
+                        context = if (msg.params.size <= 3) emptyList() else msg.params.subList(2, msg.params.lastIndex),
+                        description = msg.params.lastOrNull().orEmpty(),
+                    ),
+                ),
+            )
+        }
+        return fail(msg.params.drop(1).joinToString(" ").ifBlank { "registration failed" }, fatal = true)
+    }
+
+    private fun initialAwayLine(): String? {
+        val message = config.initialAwayMessage?.takeIf { it.isNotBlank() } ?: return null
+        return runCatching {
+            IrcMessage(command = "AWAY", params = listOf(message)).serialize()
+        }.getOrNull()
     }
 
     /**

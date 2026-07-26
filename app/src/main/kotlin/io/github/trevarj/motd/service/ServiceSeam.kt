@@ -62,12 +62,11 @@ internal fun channelJoinOutcome(
         } else {
             return null
         }
-        is IrcEvent.Raw -> {
-            val message = event.message
-            if (!message.command.equals("FAIL", ignoreCase = true) ||
-                message.params.firstOrNull()?.equals("JOIN", ignoreCase = true) != true
+        is IrcEvent.StandardReply -> {
+            if (event.severity != IrcEvent.StandardReplySeverity.FAIL ||
+                !event.commandName.equals("JOIN", ignoreCase = true)
             ) return null
-            message.params.drop(1) to message.params.lastOrNull().orEmpty().ifBlank { "JOIN failed" }
+            event.context to event.description.ifBlank { event.code }
         }
         else -> return null
     }

@@ -1935,6 +1935,7 @@ internal fun buildChildConfig(row: NetworkEntity, root: NetworkEntity?): IrcClie
         saslUser = saslUser,
         saslPassword = endpoint.saslPassword,
         serverPassword = endpoint.serverPassword,
+        initialAwayMessage = row.initialAwayMessage,
         bouncerNetId = null,
         // WSS transport follows the physical endpoint: the bouncer's wsUrl for a bound child.
         wsUrl = endpoint.wsUrl,
@@ -2010,6 +2011,7 @@ internal fun networkFingerprint(row: NetworkEntity, root: NetworkEntity? = null)
     val endpoint = if (row.role == NetworkRole.BOUNCER_CHILD) root ?: row else row
     return "${endpoint.host}:${endpoint.port}:${endpoint.tls}:${row.nick}:${row.username}:${row.realname}:" +
         "${endpoint.saslMechanism}:${endpoint.saslUser}:${endpoint.saslPassword}:${endpoint.serverPassword}:" +
+        "${row.initialAwayMessage}:" +
         "${row.bouncerNetId}:" +
         "${endpoint.clientCertAlias}:${endpoint.wsUrl}:${endpoint.obfsMode}:${endpoint.proxyHost}:${endpoint.proxyPort}:${endpoint.obfsLink}"
 }

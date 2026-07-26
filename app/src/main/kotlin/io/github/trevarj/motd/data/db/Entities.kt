@@ -56,6 +56,7 @@ data class NetworkEntity(
     val saslUser: String? = null, val saslPassword: String? = null,
     /** Optional IRC PASS value. Kept separate because servers may require PASS with or without SASL. */
     val serverPassword: String? = null,
+    val initialAwayMessage: String? = null,
     val clientCertAlias: String? = null,
     val autoConnect: Boolean = true,
     val ordering: Int = 0,

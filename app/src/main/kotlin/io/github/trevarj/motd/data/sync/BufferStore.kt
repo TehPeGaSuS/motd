@@ -5,6 +5,7 @@ import io.github.trevarj.motd.data.db.AppStateEntity
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.HistoryCursorEntity
+import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.RoomAliasEntity
 import io.github.trevarj.motd.data.db.RoomAliasNamespace
@@ -293,6 +294,72 @@ class BufferStore @Inject constructor(
         }
         if (!nestedTransaction) drainCommittedRoomMerges()
         return merged
+    }
+
+    /** Apply an IRCv3 channel rename while retiring the old channel alias. */
+    suspend fun renameChannel(
+        networkId: Long,
+        oldNormalizedName: String,
+        newNormalizedName: String,
+        newDisplayName: String,
+    ): BufferEntity? {
+        val nestedTransaction = db.inTransaction()
+        val renamed = db.withTransaction {
+            val old = resolveChannelRoom(networkId, oldNormalizedName) ?: return@withTransaction null
+            val oldMembers = db.memberDao().allNow(old.id)
+            val destination = resolveChannelRoom(networkId, newNormalizedName)
+            if (destination != null && destination.id != old.id && old.id < destination.id) {
+                db.bufferDao().renameRoomKey(
+                    destination.id,
+                    "$newNormalizedName\u0000redirect:${destination.id}",
+                )
+            }
+            val canonical = if (destination != null && destination.id != old.id) {
+                mergeRooms(old.id, destination.id)
+            } else {
+                old
+            }
+            val canonicalId = db.bufferDao().canonicalId(canonical.id) ?: canonical.id
+            if (canonicalId != old.id) {
+                db.memberDao().replaceAll(
+                    canonicalId,
+                    oldMembers.map { MemberEntity(canonicalId, it.nick, it.prefixes) },
+                )
+            }
+            val current = checkNotNull(db.bufferDao().observeById(canonicalId))
+            val updated = current.copy(
+                name = if (current.name == oldNormalizedName || destination?.id == null) {
+                    newNormalizedName
+                } else {
+                    current.name
+                },
+                displayName = newDisplayName,
+                topic = old.topic ?: current.topic,
+                topicSetBy = old.topicSetBy ?: current.topicSetBy,
+                joined = old.joined || current.joined,
+                membershipCycle = maxOf(old.membershipCycle, current.membershipCycle),
+            )
+            if (updated.name != current.name || updated.displayName != current.displayName ||
+                updated.topic != current.topic || updated.joined != current.joined ||
+                updated.membershipCycle != current.membershipCycle
+            ) {
+                db.bufferDao().update(updated)
+            }
+            val aliases = db.roomAliasDao()
+            aliases.deleteAlias(networkId, RoomAliasNamespace.CHANNEL, oldNormalizedName)
+            aliases.insertIgnore(
+                RoomAliasEntity(
+                    networkId = networkId,
+                    namespace = RoomAliasNamespace.CHANNEL,
+                    value = newNormalizedName,
+                    roomId = updated.id,
+                    verified = true,
+                ),
+            )
+            updated
+        }
+        if (!nestedTransaction) drainCommittedRoomMerges()
+        return renamed
     }
 
     /** Newest draft version wins a room merge; reply ids are opaque local references, not FKs. */
