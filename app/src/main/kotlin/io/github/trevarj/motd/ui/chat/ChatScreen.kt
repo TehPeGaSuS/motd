@@ -91,6 +91,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -1808,7 +1809,7 @@ internal fun chatSubtitle(state: ChatState, context: android.content.Context): S
 }
 
 @Composable
-private fun ScrollToBottomFab(
+internal fun ScrollToBottomFab(
     visible: Boolean,
     unread: Int,
     mentionPending: Boolean,
@@ -1860,15 +1861,14 @@ private fun ScrollToBottomFab(
             // A custom hold-to-fire gesture owns both tap and long-press: a quick tap performs the
             // mention-walk/bottom jump via onClick, while holding past HOLD_MS draws a filling
             // progress ring and then fires onLongClick (skip straight to newest). The FAB's own
-            // onClick is inert — consuming the down here neutralizes its internal Surface click.
+            // onClick is inert; this recognizer consumes completed tap/hold releases instead.
             FloatingActionButton(
                 onClick = {},
                 modifier = Modifier
                     .testTag("chat_scroll_to_bottom_fab")
                     .pointerInput(Unit) {
                         awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            down.consume()
+                            awaitFirstDown(requireUnconsumed = false)
                             val holdJob = scope.launch {
                                 holdProgress.snapTo(0f)
                                 holdProgress.animateTo(
@@ -1879,10 +1879,11 @@ private fun ScrollToBottomFab(
                                     ),
                                 )
                             }
-                            // Wrapping the nullable pointer result distinguishes gesture
-                            // cancellation from the timeout that completes a hold.
+                            // Observe the release before the FAB's internal Surface click consumes
+                            // it. The Surface onClick remains inert, but the custom tap path must
+                            // still see a completed physical tap.
                             val releaseResult = withTimeoutOrNull(SCROLL_TO_BOTTOM_FAB_HOLD_MS.toLong()) {
-                                Result.success(waitForUpOrCancellation())
+                                Result.success(waitForUpOrCancellation(PointerEventPass.Initial))
                             }
                             holdJob.cancel()
                             when {
@@ -1891,7 +1892,7 @@ private fun ScrollToBottomFab(
                                     fire()
                                     // Swallow the trailing release so it doesn't leak to handlers
                                     // behind the FAB.
-                                    waitForUpOrCancellation()?.consume()
+                                    waitForUpOrCancellation(PointerEventPass.Initial)?.consume()
                                 }
                                 releaseResult.getOrNull() != null -> {
                                     // Released early: settle the partial ring and perform a tap.
