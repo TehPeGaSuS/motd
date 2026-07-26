@@ -572,6 +572,49 @@ class EventProcessorTest {
     }
 
     @Test
+    fun dismissedQueryDropsReconnectReplayAtDiscardBoundaryAndRevivesForNewerDm() = runTest {
+        val old = IrcEvent.ChatMessage(
+            ctx(msgid = null, time = 100),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("bob"),
+            "me",
+            "discard me",
+            false,
+            null,
+        )
+        processor.process(networkId, old)
+        val query = db.bufferDao().byName(networkId, "bob")!!
+        db.bufferDao().deleteBuffer(query.id)
+
+        processor.process(
+            networkId,
+            IrcEvent.ReplayBatch(
+                "bob",
+                listOf(old.copy(ctx = old.ctx.copy(batchId = "reconnect-playback"))),
+            ),
+        )
+
+        assertTrue(db.bufferDao().rawById(query.id)!!.dismissed)
+        assertTrue(pagingList(query.id).isEmpty())
+
+        processor.process(
+            networkId,
+            IrcEvent.ReplayBatch(
+                "bob",
+                listOf(
+                    old.copy(
+                        ctx = ctx(msgid = null, time = 101).copy(batchId = "reconnect-playback"),
+                        text = "new dm",
+                    ),
+                ),
+            ),
+        )
+
+        assertFalse(db.bufferDao().rawById(query.id)!!.dismissed)
+        assertEquals(listOf("new dm"), pagingList(query.id).map { it.text })
+    }
+
+    @Test
     fun dismissedQueryConservativelyRevivesForEqualTimeDifferentMsgid() = runTest {
         processor.process(
             networkId,

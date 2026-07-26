@@ -364,10 +364,12 @@ class EventProcessor @Inject constructor(
         val storedText = route.storedText
         val sourceIsSelf = route.sourceIsSelf
         val isDm = type == BufferType.QUERY
-        if (isDm && origin == EventOrigin.HISTORY && shouldDiscardHistoricalEvent(bufferId, e)) {
+        // CHATHISTORY and reconnect playback must both honor a forgotten query's discard boundary.
+        val usesDiscardBoundary = origin == EventOrigin.HISTORY || origin == EventOrigin.REPLAY
+        if (isDm && usesDiscardBoundary && shouldDiscardHistoricalEvent(bufferId, e)) {
             return
         }
-        if (isDm && origin != EventOrigin.HISTORY && isExactDiscardedEvent(bufferId, e.ctx)) {
+        if (isDm && !usesDiscardBoundary && isExactDiscardedEvent(bufferId, e.ctx)) {
             return
         }
         val isBouncerServQuery = isDm && bufferName.equals("BouncerServ", ignoreCase = true)
