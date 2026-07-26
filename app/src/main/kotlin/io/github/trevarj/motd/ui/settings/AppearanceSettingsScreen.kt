@@ -51,8 +51,9 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
-import io.github.trevarj.motd.data.prefs.isFixedPalette
+import io.github.trevarj.motd.data.prefs.familyPreset
 import io.github.trevarj.motd.data.prefs.isDark
+import io.github.trevarj.motd.data.prefs.systemPartner
 import io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.FONT_SCALE_STEP_PERCENT
 import io.github.trevarj.motd.data.prefs.MAX_FONT_SCALE_PERCENT
@@ -83,7 +84,6 @@ fun AppearanceSettingsScreen(
         onOpenNickColors = onOpenNickColors,
         onThemePreset = viewModel::setThemePreset,
         onTrueBlack = viewModel::setTrueBlack,
-        onFollowSystem = viewModel::setFollowSystem,
         onDynamicColor = viewModel::setDynamicColor,
         onLayoutDensity = viewModel::setLayoutDensity,
         onAvatarStyle = viewModel::setAvatarStyle,
@@ -103,7 +103,6 @@ fun AppearanceSettingsContent(
     onOpenNickColors: () -> Unit,
     onThemePreset: (ColorThemePreset) -> Unit,
     onTrueBlack: (Boolean) -> Unit,
-    onFollowSystem: (Boolean) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
     onLayoutDensity: (LayoutDensity) -> Unit,
     onAvatarStyle: (AvatarStyle) -> Unit,
@@ -114,7 +113,9 @@ fun AppearanceSettingsContent(
     onConversationFontScale: (Int) -> Unit,
 ) {
     var showThemeSheet by rememberSaveable { mutableStateOf(false) }
-    val trueBlackAvailable = appearance.theme == ColorThemePreset.SYSTEM || appearance.theme.isDark
+    val trueBlackAvailable = appearance.theme == ColorThemePreset.SYSTEM ||
+        appearance.theme.isDark || appearance.theme.systemPartner != null
+    val dynamicColorAvailable = appearance.theme == ColorThemePreset.SYSTEM
     SettingsScaffold(title = stringResource(R.string.settings_appearance), onBack = onBack) {
         SettingsGroup(title = stringResource(R.string.settings_theme_section)) {
             SettingsNavigationRow(
@@ -142,27 +143,15 @@ fun AppearanceSettingsContent(
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
-                title = stringResource(R.string.settings_follow_system),
-                subtitle = stringResource(
-                    if (appearance.theme.isFixedPalette) R.string.settings_follow_system_desc
-                    else R.string.settings_follow_system_unavailable_desc,
-                ),
-                checked = appearance.followSystem,
-                onCheckedChange = onFollowSystem,
-                switchTag = "settings_switch_follow_system",
-                enabled = appearance.theme.isFixedPalette,
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            SwitchRow(
                 title = stringResource(R.string.settings_dynamic_color),
                 subtitle = stringResource(
-                    if (appearance.theme.isFixedPalette) R.string.settings_dynamic_color_unavailable
-                    else R.string.settings_dynamic_color_desc,
+                    if (dynamicColorAvailable) R.string.settings_dynamic_color_desc
+                    else R.string.settings_dynamic_color_unavailable,
                 ),
-                checked = settings.dynamicColor && !appearance.theme.isFixedPalette,
+                checked = settings.dynamicColor && dynamicColorAvailable,
                 onCheckedChange = onDynamicColor,
                 switchTag = "settings_switch_dynamic_color",
-                enabled = !appearance.theme.isFixedPalette,
+                enabled = dynamicColorAvailable,
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
@@ -306,15 +295,21 @@ private fun ThemePickerSheet(
             }
             val groups = listOf(
                 R.string.settings_theme_system_group to filtered(listOf(ColorThemePreset.SYSTEM)),
-                R.string.settings_theme_light_group to filtered(LIGHT_THEME_PRESETS),
-                R.string.settings_theme_dark_group to filtered(DARK_THEME_PRESETS),
+                R.string.settings_theme_family_group to filtered(THEME_FAMILY_PRESETS),
+                R.string.settings_theme_dark_only_group to filtered(DARK_ONLY_THEME_PRESETS),
             )
             groups.forEach { (title, modes) ->
                 if (modes.isNotEmpty()) {
                     item { SubLabel(stringResource(title)) }
                     items(modes.size) { index ->
                         val mode = modes[index]
-                        ThemeRadioRow(mode, current == mode, trueBlack, dynamicColor, onSelect)
+                        ThemeRadioRow(
+                            mode,
+                            current.familyPreset == mode.familyPreset,
+                            trueBlack,
+                            dynamicColor,
+                            onSelect,
+                        )
                     }
                 }
             }
@@ -371,72 +366,95 @@ private fun themePresetLabel(mode: ColorThemePreset): String = stringResource(th
 
 internal fun themePresetLabelText(mode: ColorThemePreset): String = when (mode) {
     ColorThemePreset.SYSTEM -> "System default"
-    ColorThemePreset.LIGHT -> "Light"
-    ColorThemePreset.DARK -> "Dark"
+    ColorThemePreset.LIGHT,
+    ColorThemePreset.DARK,
+    -> "Light / Dark"
     ColorThemePreset.AMOLED -> "AMOLED (true black)"
-    ColorThemePreset.AYU_DARK -> "Ayu Dark"
-    ColorThemePreset.AYU_LIGHT -> "Ayu Light"
+    ColorThemePreset.AYU_DARK,
+    ColorThemePreset.AYU_LIGHT,
+    -> "Ayu"
     ColorThemePreset.AYU_MIRAGE -> "Ayu Mirage"
-    ColorThemePreset.CATPPUCCIN_LATTE -> "Catppuccin Latte"
-    ColorThemePreset.CATPPUCCIN_MOCHA -> "Catppuccin Mocha"
+    ColorThemePreset.CATPPUCCIN_LATTE,
+    ColorThemePreset.CATPPUCCIN_MOCHA,
+    -> "Catppuccin"
     ColorThemePreset.DRACULA -> "Dracula"
-    ColorThemePreset.EVERFOREST_DARK -> "Everforest Dark"
-    ColorThemePreset.EVERFOREST_LIGHT -> "Everforest Light"
-    ColorThemePreset.GRUVBOX_DARK -> "Gruvbox Dark"
-    ColorThemePreset.GRUVBOX_LIGHT -> "Gruvbox Light"
+    ColorThemePreset.EVERFOREST_DARK,
+    ColorThemePreset.EVERFOREST_LIGHT,
+    -> "Everforest"
+    ColorThemePreset.GRUVBOX_DARK,
+    ColorThemePreset.GRUVBOX_LIGHT,
+    -> "Gruvbox"
     ColorThemePreset.KANAGAWA_DRAGON -> "Kanagawa Dragon"
-    ColorThemePreset.KANAGAWA_LOTUS -> "Kanagawa Lotus"
-    ColorThemePreset.KANAGAWA_WAVE -> "Kanagawa Wave"
-    ColorThemePreset.MODUS_OPERANDI -> "Modus Operandi"
-    ColorThemePreset.MODUS_VIVENDI -> "Modus Vivendi"
+    ColorThemePreset.KANAGAWA_LOTUS,
+    ColorThemePreset.KANAGAWA_WAVE,
+    -> "Kanagawa"
+    ColorThemePreset.MODUS_OPERANDI,
+    ColorThemePreset.MODUS_VIVENDI,
+    -> "Modus"
     ColorThemePreset.MONOKAI -> "Monokai"
-    ColorThemePreset.NORD -> "Nord"
+    ColorThemePreset.NORD,
+    ColorThemePreset.NORD_LIGHT,
+    -> "Nord"
     ColorThemePreset.ONE_DARK -> "One Dark"
-    ColorThemePreset.ROSE_PINE -> "Rosé Pine"
-    ColorThemePreset.ROSE_PINE_DAWN -> "Rosé Pine Dawn"
+    ColorThemePreset.ROSE_PINE,
+    ColorThemePreset.ROSE_PINE_DAWN,
+    -> "Rosé Pine"
     ColorThemePreset.ROSE_PINE_MOON -> "Rosé Pine Moon"
-    ColorThemePreset.SOLARIZED_DARK -> "Solarized Dark"
-    ColorThemePreset.SOLARIZED_LIGHT -> "Solarized Light"
+    ColorThemePreset.SOLARIZED_DARK,
+    ColorThemePreset.SOLARIZED_LIGHT,
+    -> "Solarized"
     ColorThemePreset.TOKYO_NIGHT -> "Tokyo Night"
     ColorThemePreset.ZENBURN -> "Zenburn"
 }
 
 private fun themePresetLabelRes(mode: ColorThemePreset): Int = when (mode) {
     ColorThemePreset.SYSTEM -> R.string.settings_theme_system
-    ColorThemePreset.LIGHT -> R.string.settings_theme_light
-    ColorThemePreset.DARK -> R.string.settings_theme_dark
+    ColorThemePreset.LIGHT,
+    ColorThemePreset.DARK,
+    -> R.string.settings_theme_light_dark
     ColorThemePreset.AMOLED -> R.string.settings_theme_amoled
-    ColorThemePreset.AYU_DARK -> R.string.settings_theme_ayu_dark
-    ColorThemePreset.AYU_LIGHT -> R.string.settings_theme_ayu_light
+    ColorThemePreset.AYU_DARK,
+    ColorThemePreset.AYU_LIGHT,
+    -> R.string.settings_theme_ayu
     ColorThemePreset.AYU_MIRAGE -> R.string.settings_theme_ayu_mirage
-    ColorThemePreset.CATPPUCCIN_LATTE -> R.string.settings_theme_catppuccin_latte
-    ColorThemePreset.CATPPUCCIN_MOCHA -> R.string.settings_theme_catppuccin_mocha
+    ColorThemePreset.CATPPUCCIN_LATTE,
+    ColorThemePreset.CATPPUCCIN_MOCHA,
+    -> R.string.settings_theme_catppuccin
     ColorThemePreset.DRACULA -> R.string.settings_theme_dracula
-    ColorThemePreset.EVERFOREST_DARK -> R.string.settings_theme_everforest_dark
-    ColorThemePreset.EVERFOREST_LIGHT -> R.string.settings_theme_everforest_light
-    ColorThemePreset.GRUVBOX_DARK -> R.string.settings_theme_gruvbox_dark
-    ColorThemePreset.GRUVBOX_LIGHT -> R.string.settings_theme_gruvbox_light
+    ColorThemePreset.EVERFOREST_DARK,
+    ColorThemePreset.EVERFOREST_LIGHT,
+    -> R.string.settings_theme_everforest
+    ColorThemePreset.GRUVBOX_DARK,
+    ColorThemePreset.GRUVBOX_LIGHT,
+    -> R.string.settings_theme_gruvbox
     ColorThemePreset.KANAGAWA_DRAGON -> R.string.settings_theme_kanagawa_dragon
-    ColorThemePreset.KANAGAWA_LOTUS -> R.string.settings_theme_kanagawa_lotus
-    ColorThemePreset.KANAGAWA_WAVE -> R.string.settings_theme_kanagawa_wave
-    ColorThemePreset.MODUS_OPERANDI -> R.string.settings_theme_modus_operandi
-    ColorThemePreset.MODUS_VIVENDI -> R.string.settings_theme_modus_vivendi
+    ColorThemePreset.KANAGAWA_LOTUS,
+    ColorThemePreset.KANAGAWA_WAVE,
+    -> R.string.settings_theme_kanagawa
+    ColorThemePreset.MODUS_OPERANDI,
+    ColorThemePreset.MODUS_VIVENDI,
+    -> R.string.settings_theme_modus
     ColorThemePreset.MONOKAI -> R.string.settings_theme_monokai
-    ColorThemePreset.NORD -> R.string.settings_theme_nord
+    ColorThemePreset.NORD,
+    ColorThemePreset.NORD_LIGHT,
+    -> R.string.settings_theme_nord
     ColorThemePreset.ONE_DARK -> R.string.settings_theme_one_dark
-    ColorThemePreset.ROSE_PINE -> R.string.settings_theme_rose_pine
-    ColorThemePreset.ROSE_PINE_DAWN -> R.string.settings_theme_rose_pine_dawn
+    ColorThemePreset.ROSE_PINE,
+    ColorThemePreset.ROSE_PINE_DAWN,
+    -> R.string.settings_theme_rose_pine
     ColorThemePreset.ROSE_PINE_MOON -> R.string.settings_theme_rose_pine_moon
-    ColorThemePreset.SOLARIZED_DARK -> R.string.settings_theme_solarized_dark
-    ColorThemePreset.SOLARIZED_LIGHT -> R.string.settings_theme_solarized_light
+    ColorThemePreset.SOLARIZED_DARK,
+    ColorThemePreset.SOLARIZED_LIGHT,
+    -> R.string.settings_theme_solarized
     ColorThemePreset.TOKYO_NIGHT -> R.string.settings_theme_tokyo_night
     ColorThemePreset.ZENBURN -> R.string.settings_theme_zenburn
 }
 
-internal val LIGHT_THEME_PRESETS = ColorThemePreset.entries.filter { !it.isDark && it != ColorThemePreset.SYSTEM }
+internal val THEME_FAMILY_PRESETS = ColorThemePreset.entries
+    .filter { it.systemPartner != null && it == it.familyPreset }
     .sortedBy(::themePresetLabelText)
-internal val DARK_THEME_PRESETS = ColorThemePreset.entries
-    .filter { it.isDark && it != ColorThemePreset.AMOLED }
+internal val DARK_ONLY_THEME_PRESETS = ColorThemePreset.entries
+    .filter { it.isDark && it.systemPartner == null && it != ColorThemePreset.AMOLED }
     .sortedBy(::themePresetLabelText)
 
 @Composable
@@ -537,7 +555,7 @@ private fun AppearanceSettingsPreview() {
         AppearanceSettingsContent(
             settings = Settings(dynamicColor = true),
             appearance = io.github.trevarj.motd.data.prefs.AppearanceConfig(theme = ColorThemePreset.DARK),
-            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onFollowSystem = {}, onDynamicColor = {},
+            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onDynamicColor = {},
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
             onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
             onConversationFontScale = {},
@@ -552,7 +570,7 @@ private fun AppearanceSettingsMinTextPreview() {
         AppearanceSettingsContent(
             settings = Settings(dynamicColor = true),
             appearance = io.github.trevarj.motd.data.prefs.AppearanceConfig(uiFontScalePercent = 80),
-            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onFollowSystem = {}, onDynamicColor = {},
+            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onDynamicColor = {},
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
             onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
             onConversationFontScale = {},
@@ -567,7 +585,7 @@ private fun AppearanceSettingsMaxTextPreview() {
         AppearanceSettingsContent(
             settings = Settings(dynamicColor = true),
             appearance = io.github.trevarj.motd.data.prefs.AppearanceConfig(uiFontScalePercent = 140),
-            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onFollowSystem = {}, onDynamicColor = {},
+            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onDynamicColor = {},
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
             onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
             onConversationFontScale = {},

@@ -30,7 +30,7 @@ class AppearancePrefsTest {
         prefs.setTrueBlack(true)
         prefs.setFollowSystem(true)
         prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RELAY, 73))
-        assertEquals(ColorThemePreset.KANAGAWA_WAVE, prefs.config.first().theme)
+        assertEquals(ColorThemePreset.KANAGAWA_LOTUS, prefs.config.first().theme)
         assertEquals(true, prefs.config.first().trueBlack)
         assertEquals(true, prefs.config.first().followSystem)
         assertEquals(WallpaperSelection(ChatWallpaperPreset.RELAY, 73), prefs.config.first().wallpaper)
@@ -44,21 +44,28 @@ class AppearancePrefsTest {
         assertEquals(false, prefs.config.first().followSystem)
     }
 
-    @Test fun legacyAmoledTheme_migratesToDarkWithTrueBlack() {
+    @Test fun legacyAmoledTheme_migratesToAutomaticFamilyWithTrueBlack() {
         assertEquals(
-            StoredThemeResolution(ColorThemePreset.DARK, true),
+            StoredThemeResolution(ColorThemePreset.LIGHT, true),
             resolveStoredTheme(ColorThemePreset.AMOLED.name, explicitTrueBlack = null),
         )
         assertEquals(
-            StoredThemeResolution(ColorThemePreset.DARK, false),
+            StoredThemeResolution(ColorThemePreset.LIGHT, false),
             resolveStoredTheme(ColorThemePreset.AMOLED.name, explicitTrueBlack = false),
         )
     }
 
     @Test fun legacyAmoledSetter_preservesCompatibility() = runTest {
         prefs.setTheme(ColorThemePreset.AMOLED)
-        assertEquals(ColorThemePreset.DARK, prefs.config.first().theme)
+        assertEquals(ColorThemePreset.LIGHT, prefs.config.first().theme)
         assertEquals(true, prefs.config.first().trueBlack)
+    }
+
+    @Test fun storedDarkSibling_migratesToAutomaticThemeFamily() {
+        assertEquals(
+            StoredThemeResolution(ColorThemePreset.CATPPUCCIN_LATTE, false),
+            resolveStoredTheme(ColorThemePreset.CATPPUCCIN_MOCHA.name, explicitTrueBlack = false),
+        )
     }
 
     @Test fun wallpaperIntensity_isClampedAtomically() = runTest {

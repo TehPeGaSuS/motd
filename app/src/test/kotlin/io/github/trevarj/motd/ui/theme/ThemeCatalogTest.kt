@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.NickColorPalette
+import io.github.trevarj.motd.data.prefs.familyPreset
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.isFixedPalette
 import io.github.trevarj.motd.data.prefs.resolveAutoPalette
@@ -32,7 +33,9 @@ class ThemeCatalogTest {
                 return@forEach
             }
             assertEquals("$partner is the reverse partner of $preset", preset, partner.systemPartner)
-            assertNotNull("$partner must resolve as a fixed palette", fixedThemeScheme(partner))
+            if (partner.isFixedPalette) {
+                assertNotNull("$partner must resolve as a fixed palette", fixedThemeScheme(partner))
+            }
             // A paired preset always swaps to the opposite OS mode.
             assertNotEquals(
                 "$preset and partner $partner must differ in isDark",
@@ -45,12 +48,9 @@ class ThemeCatalogTest {
     @Test fun systemPartners_stayNullForDarkOnlyAndAlternateDarkPalettes() {
         val neverPaired = setOf(
             ColorThemePreset.SYSTEM,
-            ColorThemePreset.LIGHT,
-            ColorThemePreset.DARK,
             ColorThemePreset.AMOLED,
             ColorThemePreset.DRACULA,
             ColorThemePreset.MONOKAI,
-            ColorThemePreset.NORD,
             ColorThemePreset.ONE_DARK,
             ColorThemePreset.TOKYO_NIGHT,
             ColorThemePreset.ZENBURN,
@@ -61,21 +61,25 @@ class ThemeCatalogTest {
         neverPaired.forEach { assertNull("$it must not auto-swap", it.systemPartner) }
     }
 
-    @Test fun resolveAutoPalette_swapsPairedPalettesAndIgnoresOthers() {
-        // Paired dark palette flips to its light sibling when the OS is light; stays put when dark.
-        assertEquals(ColorThemePreset.KANAGAWA_LOTUS, resolveAutoPalette(ColorThemePreset.KANAGAWA_WAVE, followSystem = true, systemDark = false))
-        assertEquals(ColorThemePreset.KANAGAWA_WAVE, resolveAutoPalette(ColorThemePreset.KANAGAWA_WAVE, followSystem = true, systemDark = true))
-        // Paired light palette flips to its dark sibling when the OS is dark.
-        assertEquals(ColorThemePreset.GRUVBOX_DARK, resolveAutoPalette(ColorThemePreset.GRUVBOX_LIGHT, followSystem = true, systemDark = true))
-        assertEquals(ColorThemePreset.GRUVBOX_LIGHT, resolveAutoPalette(ColorThemePreset.GRUVBOX_LIGHT, followSystem = true, systemDark = false))
+    @Test fun resolveAutoPalette_alwaysSwapsPairedFamiliesAndIgnoresDarkOnlyThemes() {
+        assertEquals(ColorThemePreset.KANAGAWA_LOTUS, resolveAutoPalette(ColorThemePreset.KANAGAWA_WAVE, systemDark = false))
+        assertEquals(ColorThemePreset.KANAGAWA_WAVE, resolveAutoPalette(ColorThemePreset.KANAGAWA_WAVE, systemDark = true))
+        assertEquals(ColorThemePreset.GRUVBOX_DARK, resolveAutoPalette(ColorThemePreset.GRUVBOX_LIGHT, systemDark = true))
+        assertEquals(ColorThemePreset.GRUVBOX_LIGHT, resolveAutoPalette(ColorThemePreset.GRUVBOX_LIGHT, systemDark = false))
+        assertEquals(ColorThemePreset.DARK, resolveAutoPalette(ColorThemePreset.LIGHT, systemDark = true))
+        assertEquals(ColorThemePreset.LIGHT, resolveAutoPalette(ColorThemePreset.DARK, systemDark = false))
         // Dark-only palettes have no partner and stay dark in both OS modes.
-        assertEquals(ColorThemePreset.DRACULA, resolveAutoPalette(ColorThemePreset.DRACULA, followSystem = true, systemDark = false))
-        assertEquals(ColorThemePreset.DRACULA, resolveAutoPalette(ColorThemePreset.DRACULA, followSystem = true, systemDark = true))
-        // With follow-system off, nothing swaps regardless of OS mode.
-        assertEquals(ColorThemePreset.KANAGAWA_WAVE, resolveAutoPalette(ColorThemePreset.KANAGAWA_WAVE, followSystem = false, systemDark = false))
-        // Meta presets are never auto-resolved; SYSTEM keeps its own identity (MotdTheme maps it to OS).
-        assertEquals(ColorThemePreset.SYSTEM, resolveAutoPalette(ColorThemePreset.SYSTEM, followSystem = true, systemDark = true))
-        assertEquals(ColorThemePreset.LIGHT, resolveAutoPalette(ColorThemePreset.LIGHT, followSystem = true, systemDark = true))
+        assertEquals(ColorThemePreset.DRACULA, resolveAutoPalette(ColorThemePreset.DRACULA, systemDark = false))
+        assertEquals(ColorThemePreset.DRACULA, resolveAutoPalette(ColorThemePreset.DRACULA, systemDark = true))
+        assertEquals(ColorThemePreset.SYSTEM, resolveAutoPalette(ColorThemePreset.SYSTEM, systemDark = true))
+    }
+
+    @Test fun familyPreset_canonicalizesEveryPairToItsLightSibling() {
+        ColorThemePreset.entries.forEach { preset ->
+            val canonical = preset.familyPreset
+            if (preset.systemPartner == null) assertEquals(preset, canonical)
+            else assertTrue("$preset family must use its light sibling", !canonical.isDark)
+        }
     }
 
     @Test fun everyStaticPalette_meetsReadableRoleContrast() {
@@ -91,6 +95,7 @@ class ThemeCatalogTest {
             assertTextPair(preset, "tertiary container", scheme.onTertiaryContainer, scheme.tertiaryContainer)
             assertTextPair(preset, "error", scheme.onError, scheme.error)
             assertTextPair(preset, "error container", scheme.onErrorContainer, scheme.errorContainer)
+            assertBubbleContainers(preset, scheme)
 
             neutralSurfaces(scheme).forEachIndexed { index, surface ->
                 assertContrast(preset, "onSurface on neutral $index", scheme.onSurface, surface, 4.5)
@@ -111,6 +116,7 @@ class ThemeCatalogTest {
             assertEquals("$preset true-black background", Color.Black, scheme.background)
             assertEquals("$preset true-black surface", Color.Black, scheme.surface)
             assertEquals("$preset keeps primary", source.primary, scheme.primary)
+            assertBubbleContainers(preset, scheme)
             assertTrue("$preset elevation order", scheme.surfaceContainerLow.luminanceValue() < scheme.surfaceContainerHigh.luminanceValue())
             assertTrue("$preset raised surface", scheme.surfaceContainerHigh.luminanceValue() < scheme.surfaceContainerHighest.luminanceValue())
             neutralSurfaces(scheme).forEachIndexed { index, surface ->
@@ -196,6 +202,16 @@ class ThemeCatalogTest {
 
     private fun assertTextPair(preset: ColorThemePreset, role: String, foreground: Color, background: Color) {
         assertContrast(preset, role, foreground, background, 4.5)
+    }
+
+    private fun assertBubbleContainers(preset: ColorThemePreset, scheme: ColorScheme) {
+        listOf(
+            "other bubble" to scheme.surfaceContainerHigh,
+            "own bubble" to scheme.primaryContainer,
+            "mention bubble" to scheme.secondaryContainer,
+        ).forEach { (role, container) ->
+            assertContrast(preset, "$role against background", container, scheme.background, BUBBLE_CONTAINER_CONTRAST)
+        }
     }
 
     private fun assertContrast(

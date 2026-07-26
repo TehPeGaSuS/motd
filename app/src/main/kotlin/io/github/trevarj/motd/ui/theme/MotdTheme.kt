@@ -93,7 +93,6 @@ fun MotdTheme(
     themePreset: ColorThemePreset = ColorThemePreset.SYSTEM,
     trueBlack: Boolean = false,
     dynamicColor: Boolean = true,
-    followSystem: Boolean = false,
     // Round 4 (plans/13); all defaulted so existing call sites (incl. previews) stay unchanged.
     layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
     nickColorsEnabled: Boolean = true,
@@ -107,15 +106,13 @@ fun MotdTheme(
     // fixed palette must not change this function's slot structure and dispose stateful content.
     val systemDark = isSystemInDarkTheme()
     val context = LocalContext.current
-    // Follow-system swaps a fixed palette to its family's opposite-mode sibling when the OS mode
-    // disagrees. Meta presets (SYSTEM/LIGHT/DARK/AMOLED) and palettes without a partner keep their
-    // own mode; SYSTEM already follows the OS via the dynamic/default branch below.
-    val resolvedPreset = resolveAutoPalette(themePreset, followSystem, systemDark)
+    val resolvedPreset = resolveAutoPalette(themePreset, systemDark)
     val dark = if (resolvedPreset == ColorThemePreset.SYSTEM) systemDark else resolvedPreset.isDark
     val effectivePreset = if (resolvedPreset == ColorThemePreset.AMOLED) ColorThemePreset.DARK else resolvedPreset
     val resolvedScheme = fixedThemeScheme(effectivePreset) ?: when {
         // Material You dynamic color, API 31+.
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        resolvedPreset == ColorThemePreset.SYSTEM &&
+            dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             accessibleColorScheme(
                 if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context),
                 dark,

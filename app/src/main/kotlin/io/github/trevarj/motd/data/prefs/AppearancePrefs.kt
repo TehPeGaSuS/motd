@@ -14,7 +14,7 @@ enum class ColorThemePreset {
     KANAGAWA_DRAGON, KANAGAWA_LOTUS, KANAGAWA_WAVE,
     MODUS_OPERANDI, MODUS_VIVENDI,
     MONOKAI,
-    NORD,
+    NORD, NORD_LIGHT,
     ONE_DARK,
     ROSE_PINE, ROSE_PINE_DAWN, ROSE_PINE_MOON,
     SOLARIZED_DARK, SOLARIZED_LIGHT,
@@ -40,6 +40,7 @@ val ColorThemePreset.isDark: Boolean
         ColorThemePreset.GRUVBOX_LIGHT,
         ColorThemePreset.KANAGAWA_LOTUS,
         ColorThemePreset.MODUS_OPERANDI,
+        ColorThemePreset.NORD_LIGHT,
         ColorThemePreset.ROSE_PINE_DAWN,
         ColorThemePreset.SOLARIZED_LIGHT,
         -> false
@@ -47,14 +48,13 @@ val ColorThemePreset.isDark: Boolean
     }
 
 /**
- * Opposite-mode sibling for follow-system auto-switching: each light palette maps to its family's
- * canonical dark counterpart and vice versa. Returns null for the meta mode presets
- * (SYSTEM/LIGHT/DARK/AMOLED), dark-only palettes (Dracula, Monokai, Nord, OneDark, Tokyo Night,
- * Zenburn), and alternate dark variants (Ayu Mirage, Kanagawa Dragon, Rose Pine Moon) — those keep
- * their fixed mode when follow-system is on.
+ * Opposite-mode sibling for automatic system-mode switching. Light and dark variants are one
+ * selectable family; dark-only and alternate-dark palettes keep their fixed mode.
  */
 val ColorThemePreset.systemPartner: ColorThemePreset?
     get() = when (this) {
+        ColorThemePreset.LIGHT -> ColorThemePreset.DARK
+        ColorThemePreset.DARK -> ColorThemePreset.LIGHT
         ColorThemePreset.AYU_LIGHT -> ColorThemePreset.AYU_DARK
         ColorThemePreset.AYU_DARK -> ColorThemePreset.AYU_LIGHT
         ColorThemePreset.CATPPUCCIN_LATTE -> ColorThemePreset.CATPPUCCIN_MOCHA
@@ -67,6 +67,8 @@ val ColorThemePreset.systemPartner: ColorThemePreset?
         ColorThemePreset.KANAGAWA_WAVE -> ColorThemePreset.KANAGAWA_LOTUS
         ColorThemePreset.MODUS_OPERANDI -> ColorThemePreset.MODUS_VIVENDI
         ColorThemePreset.MODUS_VIVENDI -> ColorThemePreset.MODUS_OPERANDI
+        ColorThemePreset.NORD_LIGHT -> ColorThemePreset.NORD
+        ColorThemePreset.NORD -> ColorThemePreset.NORD_LIGHT
         ColorThemePreset.ROSE_PINE_DAWN -> ColorThemePreset.ROSE_PINE
         ColorThemePreset.ROSE_PINE -> ColorThemePreset.ROSE_PINE_DAWN
         ColorThemePreset.SOLARIZED_LIGHT -> ColorThemePreset.SOLARIZED_DARK
@@ -75,17 +77,16 @@ val ColorThemePreset.systemPartner: ColorThemePreset?
     }
 
 /**
- * Resolves the palette to render when follow-system is on. A fixed palette whose OS mode disagrees
- * swaps to its [systemPartner]; everything else (meta presets, dark-only palettes, palettes without
- * a partner) keeps its own mode. Pure so the resolution can be unit-tested without composition.
+ * Stable stored/picker identity for a theme family. The light sibling is canonical so an existing
+ * explicitly dark selection migrates cleanly to the same automatic family.
  */
-fun resolveAutoPalette(
-    themePreset: ColorThemePreset,
-    followSystem: Boolean,
-    systemDark: Boolean,
-): ColorThemePreset {
-    if (!followSystem || !themePreset.isFixedPalette) return themePreset
-    return if (systemDark != themePreset.isDark) themePreset.systemPartner ?: themePreset else themePreset
+val ColorThemePreset.familyPreset: ColorThemePreset
+    get() = if (isDark) systemPartner ?: this else this
+
+/** Resolve a paired family against the current OS mode; fixed-mode themes retain their identity. */
+fun resolveAutoPalette(themePreset: ColorThemePreset, systemDark: Boolean): ColorThemePreset {
+    val partner = themePreset.systemPartner ?: return themePreset
+    return listOf(themePreset, partner).first { it.isDark == systemDark }
 }
 
 enum class ChatWallpaperPreset { NONE, CHATTER, CHANNELS, TERMINAL, RELAY, SIGNALS, PIXELS }

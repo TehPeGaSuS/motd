@@ -17,6 +17,7 @@ import kotlin.math.min
 
 private const val TEXT_CONTRAST = 4.5
 private const val NON_TEXT_CONTRAST = 3.0
+internal const val BUBBLE_CONTAINER_CONTRAST = 1.30
 
 private val MotdSecondary = Color(0xFF66708E)
 private val MotdTertiary = Color(0xFF2E9B67)
@@ -81,16 +82,50 @@ internal fun bestOnColor(background: Color): Color =
     if (contrastRatio(Color.White, background) >= contrastRatio(Color.Black, background)) Color.White
     else Color.Black
 
+/** Preserve hue where possible while making a filled surface visibly distinct from the canvas. */
+private fun ensureContainerContrast(
+    container: Color,
+    background: Color,
+    dark: Boolean,
+    minimum: Double,
+): Color {
+    if (contrastRatio(container, background) >= minimum) return container
+    val target = if (dark) Color.White else Color.Black
+    var low = 0f
+    var high = 1f
+    repeat(24) {
+        val mid = (low + high) / 2f
+        if (contrastRatio(lerp(container, target, mid), background) >= minimum) high = mid
+        else low = mid
+    }
+    return lerp(container, target, high)
+}
+
 internal fun accessibleColorScheme(raw: ColorScheme, dark: Boolean): ColorScheme {
+    val surfaceContainerLow = ensureContainerContrast(
+        raw.surfaceContainerLow, raw.background, dark, 1.08,
+    )
+    val surfaceContainer = ensureContainerContrast(
+        raw.surfaceContainer, raw.background, dark, 1.16,
+    )
+    val surfaceContainerHigh = ensureContainerContrast(
+        raw.surfaceContainerHigh, raw.background, dark, BUBBLE_CONTAINER_CONTRAST,
+    )
+    val surfaceContainerHighest = ensureContainerContrast(
+        raw.surfaceContainerHighest, raw.background, dark, 1.45,
+    )
+    val surfaceVariant = ensureContainerContrast(
+        raw.surfaceVariant, raw.background, dark, BUBBLE_CONTAINER_CONTRAST,
+    )
     val neutralSurfaces = listOf(
         raw.background,
         raw.surface,
         raw.surfaceContainerLowest,
-        raw.surfaceContainerLow,
-        raw.surfaceContainer,
-        raw.surfaceContainerHigh,
-        raw.surfaceContainerHighest,
-        raw.surfaceVariant,
+        surfaceContainerLow,
+        surfaceContainer,
+        surfaceContainerHigh,
+        surfaceContainerHighest,
+        surfaceVariant,
     )
     val onSurface = ensureContrast(raw.onSurface, neutralSurfaces)
     val onSurfaceVariant = ensureContrast(raw.onSurfaceVariant, neutralSurfaces)
@@ -98,7 +133,12 @@ internal fun accessibleColorScheme(raw: ColorScheme, dark: Boolean): ColorScheme
     val secondary = ensureContrast(raw.secondary, neutralSurfaces)
     val tertiary = ensureContrast(raw.tertiary, neutralSurfaces)
 
-    fun container(accent: Color): Color = lerp(raw.background, accent, if (dark) 0.22f else 0.16f)
+    fun container(accent: Color): Color = ensureContainerContrast(
+        lerp(raw.background, accent, if (dark) 0.22f else 0.16f),
+        raw.background,
+        dark,
+        BUBBLE_CONTAINER_CONTRAST,
+    )
     val primaryContainer = container(raw.primary)
     val secondaryContainer = container(raw.secondary)
     val tertiaryContainer = container(raw.tertiary)
@@ -129,8 +169,12 @@ internal fun accessibleColorScheme(raw: ColorScheme, dark: Boolean): ColorScheme
         onBackground = ensureContrast(raw.onBackground, neutralSurfaces),
         surface = raw.surface,
         onSurface = onSurface,
-        surfaceVariant = raw.surfaceVariant,
+        surfaceVariant = surfaceVariant,
         onSurfaceVariant = onSurfaceVariant,
+        surfaceContainerLow = surfaceContainerLow,
+        surfaceContainer = surfaceContainer,
+        surfaceContainerHigh = surfaceContainerHigh,
+        surfaceContainerHighest = surfaceContainerHighest,
         outline = outline,
         outlineVariant = outlineVariant,
         error = error,
@@ -142,8 +186,8 @@ internal fun accessibleColorScheme(raw: ColorScheme, dark: Boolean): ColorScheme
         inversePrimary = inversePrimary,
         surfaceTint = primary,
         scrim = Color.Black,
-        surfaceDim = if (dark) raw.surfaceContainerLowest else raw.surfaceContainerHighest,
-        surfaceBright = if (dark) raw.surfaceContainerHighest else raw.surfaceContainerLowest,
+        surfaceDim = if (dark) raw.surfaceContainerLowest else surfaceContainerHighest,
+        surfaceBright = if (dark) surfaceContainerHighest else raw.surfaceContainerLowest,
     )
 }
 
@@ -166,6 +210,7 @@ private val FixedSchemes: Map<ColorThemePreset, ColorScheme> by lazy {
         ColorThemePreset.MODUS_VIVENDI to accessibleColorScheme(ModusVivendiScheme, true),
         ColorThemePreset.MONOKAI to accessibleColorScheme(MonokaiScheme, true),
         ColorThemePreset.NORD to accessibleColorScheme(NordScheme, true),
+        ColorThemePreset.NORD_LIGHT to accessibleColorScheme(NordLightScheme, false),
         ColorThemePreset.ONE_DARK to accessibleColorScheme(OneDarkScheme, true),
         ColorThemePreset.ROSE_PINE to accessibleColorScheme(RosePineScheme, true),
         ColorThemePreset.ROSE_PINE_DAWN to accessibleColorScheme(RosePineDawnScheme, false),
@@ -201,10 +246,14 @@ internal fun ColorScheme.withTrueBlackSurfaces(): ColorScheme {
     val identity = surfaceContainerHighest.hslIdentity()
     val saturation = identity.saturation.coerceAtMost(0.18f)
     fun layer(lightness: Float) = hslColor(identity.hue, saturation, lightness)
-    val low = layer(0.04f)
-    val container = layer(0.065f)
-    val high = layer(0.09f)
-    val highest = layer(0.12f)
+    val low = layer(0.05f)
+    val container = layer(0.085f)
+    val high = ensureContainerContrast(
+        layer(0.14f), Color.Black, dark = true, minimum = BUBBLE_CONTAINER_CONTRAST,
+    )
+    val highest = ensureContainerContrast(
+        layer(0.18f), Color.Black, dark = true, minimum = 1.45,
+    )
     return copy(
         background = Color.Black,
         surface = Color.Black,
@@ -215,7 +264,7 @@ internal fun ColorScheme.withTrueBlackSurfaces(): ColorScheme {
         surfaceContainerHigh = high,
         surfaceContainerHighest = highest,
         surfaceVariant = highest,
-        surfaceBright = layer(0.16f),
+        surfaceBright = layer(0.22f),
     )
 }
 

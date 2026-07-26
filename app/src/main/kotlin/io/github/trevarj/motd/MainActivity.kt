@@ -117,7 +117,6 @@ class MainActivity : ComponentActivity() {
                 themePreset = appearance.theme,
                 trueBlack = appearance.trueBlack,
                 dynamicColor = settings.dynamicColor,
-                followSystem = appearance.followSystem,
                 layoutDensity = settings.layoutDensity,
                 nickColorsEnabled = settings.nickColorsEnabled,
                 nickColorPalette = settings.nickColorPalette,

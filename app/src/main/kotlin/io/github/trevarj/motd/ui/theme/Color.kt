@@ -170,6 +170,33 @@ val NordScheme = darkColorScheme(
     surfaceContainerHighest = Color(0xFF4C566A),
 )
 
+val NordLightScheme = lightColorScheme(
+    primary = Color(0xFF5E81AC),      // nord frost 4
+    onPrimary = Color(0xFFECEFF4),
+    primaryContainer = Color(0xFFD8DEE9),
+    onPrimaryContainer = Color(0xFF2E3440),
+    secondary = Color(0xFF81A1C1),    // nord frost 3
+    onSecondary = Color(0xFF2E3440),
+    secondaryContainer = Color(0xFFE5E9F0),
+    onSecondaryContainer = Color(0xFF3B4252),
+    tertiary = Color(0xFFB48EAD),     // nord aurora 5
+    onTertiary = Color(0xFF2E3440),
+    tertiaryContainer = Color(0xFFE5E9F0),
+    onTertiaryContainer = Color(0xFF3B4252),
+    background = Color(0xFFECEFF4),
+    onBackground = Color(0xFF2E3440),
+    surface = Color(0xFFE5E9F0),
+    onSurface = Color(0xFF2E3440),
+    surfaceVariant = Color(0xFFD8DEE9),
+    onSurfaceVariant = Color(0xFF3B4252),
+    outline = Color(0xFF4C566A),
+    surfaceContainerLowest = Color(0xFFF4F6F9),
+    surfaceContainerLow = Color(0xFFE5E9F0),
+    surfaceContainer = Color(0xFFD8DEE9),
+    surfaceContainerHigh = Color(0xFFD1D7E2),
+    surfaceContainerHighest = Color(0xFFC8D0DD),
+)
+
 // -- Catppuccin (Latte = light, Mocha = dark) --------------------------------
 val CatppuccinLatteScheme = lightColorScheme(
     primary = Color(0xFF1E66F5),      // latte blue
