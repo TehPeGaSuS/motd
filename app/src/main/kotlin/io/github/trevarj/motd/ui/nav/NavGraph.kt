@@ -24,6 +24,7 @@ import io.github.trevarj.motd.ui.imageviewer.ImageViewerScreen
 import io.github.trevarj.motd.ui.onboarding.OnboardingScreen
 import io.github.trevarj.motd.ui.search.SearchScreen
 import io.github.trevarj.motd.ui.settings.AppearanceSettingsScreen
+import io.github.trevarj.motd.ui.settings.BackupRestoreScreen
 import io.github.trevarj.motd.ui.settings.ChatSettingsScreen
 import io.github.trevarj.motd.ui.settings.DeliverySettingsScreen
 import io.github.trevarj.motd.ui.settings.ManageNicksScreen
@@ -148,6 +149,7 @@ fun MotdNavGraph(
                 onOpenChat = { navController.navigate(ChatSettingsRoute) },
                 onOpenDelivery = { navController.navigate(DeliverySettingsRoute) },
                 onOpenNetworks = { navController.navigate(NetworksSettingsRoute) },
+                onOpenBackupRestore = { navController.navigate(BackupRestoreRoute) },
                 onOpenAbout = { navController.navigate(AboutRoute) },
             )
         }
@@ -173,6 +175,9 @@ fun MotdNavGraph(
                 onOpenNetwork = { navController.navigate(NetworkSettingsRoute(it)) },
                 onOpenAddNetwork = { navController.navigate(AddNetworkRoute) },
             )
+        }
+        composable<BackupRestoreRoute> {
+            BackupRestoreScreen(onBack = { navController.popBackStack() })
         }
         composable<FriendsRoute> {
             ManageNicksScreen(NickListKind.FRIENDS, onBack = { navController.popBackStack() })

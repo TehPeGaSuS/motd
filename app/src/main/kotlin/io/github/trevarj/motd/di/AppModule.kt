@@ -75,6 +75,8 @@ import io.github.trevarj.motd.bouncer.BouncerServClient
 import io.github.trevarj.motd.bouncer.BouncerServClientImpl
 import io.github.trevarj.motd.bouncer.BouncerServSessionProvider
 import io.github.trevarj.motd.bouncer.ConnectionBouncerServSessionProvider
+import io.github.trevarj.motd.data.backup.ConfigurationBackupRepository
+import io.github.trevarj.motd.data.backup.ConfigurationBackupRepositoryImpl
 import javax.inject.Singleton
 
 /**
@@ -100,6 +102,11 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun linkPreviewRepository(impl: LinkPreviewRepositoryImpl): LinkPreviewRepository
+
+    @Binds @Singleton
+    abstract fun configurationBackupRepository(
+        impl: ConfigurationBackupRepositoryImpl,
+    ): ConfigurationBackupRepository
 
     // -- data/prefs (WP4): DataStoreSettingsRepository implements both seams --
     @Binds @Singleton

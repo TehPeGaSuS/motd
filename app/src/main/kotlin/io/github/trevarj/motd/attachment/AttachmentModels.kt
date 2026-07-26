@@ -2,6 +2,7 @@ package io.github.trevarj.motd.attachment
 
 import android.net.Uri
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
 
 enum class PasteProtocol { TERMBIN, MULTIPART_0X0, RAW_CNET, MULTIPART_UGUU, MULTIPART_CATBOX }
 
@@ -41,6 +42,7 @@ sealed interface AttachmentSource {
     data class Photo(val uri: Uri, val name: String, val mimeType: String?, val size: Long?) : AttachmentSource
 }
 
+@Serializable
 data class PasteBackendConfig(
     val backend: AttachmentBackend = AttachmentBackend.CRAFTERBIN,
     val endpoint: String = EndpointPreset.CRAFTERBIN.endpoint!!,

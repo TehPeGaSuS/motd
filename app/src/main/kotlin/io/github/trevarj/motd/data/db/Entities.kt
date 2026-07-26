@@ -72,6 +72,10 @@ data class NetworkEntity(
     val proxyPort: Int? = null,
     /** Pasted VLESS+REALITY link. It contains credentials, so [toString] must never expose it. */
     val obfsLink: String? = null,
+    /** Comma-separated portable credential requirements left unresolved by a credentials-excluded import. */
+    val pendingCredentialRequirements: String? = null,
+    /** Desired auto-connect value restored once [pendingCredentialRequirements] has been repaired. */
+    val restoreAutoConnect: Boolean = false,
 ) {
     // Redact secrets (saslPassword, serverPassword, obfsLink) from logs; proxyHost/port are
     // non-sensitive so keep them out

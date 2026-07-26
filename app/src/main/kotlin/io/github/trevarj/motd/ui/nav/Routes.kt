@@ -17,6 +17,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object ChatSettingsRoute
 @Serializable data object DeliverySettingsRoute
 @Serializable data object NetworksSettingsRoute
+@Serializable data object BackupRestoreRoute
 @Serializable data class NetworkSettingsRoute(val networkId: Long)
 @Serializable data class SearchRoute(val bufferId: Long? = null)
 @Serializable data class ChannelInfoRoute(val bufferId: Long)

@@ -30,7 +30,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 17,
+    version = 18,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -548,6 +548,18 @@ val MIGRATION_15_16 = object : Migration(15, 16) {
 val MIGRATION_16_17 = object : Migration(16, 17) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE networks ADD COLUMN initialAwayMessage TEXT")
+    }
+}
+
+/**
+ * v17 -> v18 records unresolved credentials after importing a credentials-excluded configuration.
+ * The connection layer already observes `autoConnect`; imports set it false until the user repairs
+ * the missing credential fields, then restore the saved desired value.
+ */
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE networks ADD COLUMN pendingCredentialRequirements TEXT")
+        db.execSQL("ALTER TABLE networks ADD COLUMN restoreAutoConnect INTEGER NOT NULL DEFAULT 0")
     }
 }
 

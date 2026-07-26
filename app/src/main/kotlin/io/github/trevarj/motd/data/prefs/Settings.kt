@@ -3,6 +3,7 @@ package io.github.trevarj.motd.data.prefs
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
 
 enum class ThemeMode {
     SYSTEM, LIGHT, DARK, AMOLED,
@@ -46,6 +47,7 @@ val ThemeMode.isTerminalTheme: Boolean
         else -> true
     }
 
+@Serializable
 data class Settings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = true,

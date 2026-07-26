@@ -77,6 +77,7 @@ fun SettingsScreen(
     onOpenChat: () -> Unit = {},
     onOpenDelivery: () -> Unit = {},
     onOpenNetworks: () -> Unit = {},
+    onOpenBackupRestore: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
 ) {
     var localPage by rememberSaveable { mutableStateOf(SettingsLocalPage.ROOT) }
@@ -119,6 +120,7 @@ fun SettingsScreen(
                 onOpenDelivery = onOpenDelivery,
                 onOpenNetworks = onOpenNetworks,
                 onOpenUploads = { localPage = SettingsLocalPage.UPLOADS },
+                onOpenBackupRestore = onOpenBackupRestore,
                 onOpenAbout = onOpenAbout,
             )
         }
@@ -136,6 +138,7 @@ fun SettingsContent(
     onOpenDelivery: () -> Unit,
     onOpenNetworks: () -> Unit,
     onOpenUploads: () -> Unit,
+    onOpenBackupRestore: () -> Unit,
     onOpenAbout: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -178,6 +181,13 @@ fun SettingsContent(
             summary = stringResource(R.string.settings_uploads_summary),
             modifier = Modifier.testTag("settings_category_uploads"),
             onClick = onOpenUploads,
+        )
+        CategoryRow(
+            icon = Icons.Outlined.CloudUpload,
+            title = "Backup and restore",
+            summary = "Export networks and settings or import them on this device.",
+            modifier = Modifier.testTag("settings_category_backup_restore"),
+            onClick = onOpenBackupRestore,
         )
         CategoryRow(
             icon = Icons.Outlined.Info,
@@ -425,7 +435,8 @@ private fun SettingsContentPreview() {
     io.github.trevarj.motd.ui.theme.MotdTheme {
         SettingsContent(
             onBack = {}, onOpenAppearance = {}, onOpenChat = {},
-            onOpenDelivery = {}, onOpenNetworks = {}, onOpenUploads = {}, onOpenAbout = {},
+            onOpenDelivery = {}, onOpenNetworks = {}, onOpenUploads = {},
+            onOpenBackupRestore = {}, onOpenAbout = {},
         )
     }
 }

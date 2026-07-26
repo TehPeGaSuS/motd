@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.prefs
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
 
 /** App-owned color presets kept separate from the frozen settings contract. */
 enum class ColorThemePreset {
@@ -89,6 +90,7 @@ fun resolveAutoPalette(
 
 enum class ChatWallpaperPreset { NONE, CHATTER, CHANNELS, TERMINAL, RELAY, SIGNALS, PIXELS }
 
+@Serializable
 data class WallpaperSelection(
     val preset: ChatWallpaperPreset = ChatWallpaperPreset.CHATTER,
     val intensity: Int = DEFAULT_WALLPAPER_INTENSITY,
@@ -96,6 +98,7 @@ data class WallpaperSelection(
     fun normalized() = copy(intensity = intensity.coerceIn(0, 100))
 }
 
+@Serializable
 data class AppearanceConfig(
     val theme: ColorThemePreset = ColorThemePreset.SYSTEM,
     val wallpaper: WallpaperSelection = WallpaperSelection(),
