@@ -1474,6 +1474,23 @@ fun ChatContent(
                         onJumpNewest = { scope.launch { scrollToNewest(animate = true, reason = "jump_fab") } },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                     )
+
+                    val stagedVoicePlaybackId = voiceState.staged?.let { "voice:${it.file.toURI()}" }
+                    if (audioPlaybackState.activeId != stagedVoicePlaybackId) {
+                        AudioMiniPlayer(
+                            state = audioPlaybackState,
+                            onToggle = onAudioToggleActive,
+                            onCancelLoading = onAudioCancelLoading,
+                            onRetry = onAudioRetry,
+                            onDismiss = onAudioDismiss,
+                            onSeek = { positionMs ->
+                                audioPlaybackState.attachment?.let { onAudioSeek(it, positionMs) }
+                            },
+                            onOpenOrigin = onOpenAudioOrigin,
+                            includeNetwork = audioPlaybackState.origin?.networkId != state.buffer?.networkId,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
+                    }
                 }
 
                 val completions = remember(composerText, memberNicks, recentSpeakers) {
@@ -1496,21 +1513,6 @@ fun ChatContent(
                         kotlinx.coroutines.delay(AUTOCOMPLETE_SHOW_DEBOUNCE_MS)
                         showAutocomplete = true
                     }
-                }
-                val stagedVoicePlaybackId = voiceState.staged?.let { "voice:${it.file.toURI()}" }
-                if (audioPlaybackState.activeId != stagedVoicePlaybackId) {
-                    AudioMiniPlayer(
-                        state = audioPlaybackState,
-                        onToggle = onAudioToggleActive,
-                        onCancelLoading = onAudioCancelLoading,
-                        onRetry = onAudioRetry,
-                        onDismiss = onAudioDismiss,
-                        onSeek = { positionMs ->
-                            audioPlaybackState.attachment?.let { onAudioSeek(it, positionMs) }
-                        },
-                        onOpenOrigin = onOpenAudioOrigin,
-                        includeNetwork = audioPlaybackState.origin?.networkId != state.buffer?.networkId,
-                    )
                 }
                 VoiceComposerPanel(
                     state = voiceState,

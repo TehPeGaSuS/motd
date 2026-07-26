@@ -5,7 +5,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
@@ -71,89 +71,95 @@ fun AudioMiniPlayer(
         ?: duration?.takeIf { it > 0 }?.let { state.bufferedMs.toFloat() / it }
         ?: 0f
     val originLabel = state.origin?.contextLabel(state.networkName, includeNetwork)
-    val time = "${formatAudioDuration(state.positionMs)} / ${formatAudioDuration(duration)}"
+    val context = if (attachment.voice) {
+        originLabel ?: attachment.title
+    } else {
+        listOfNotNull(attachment.title, originLabel).joinToString(" · ")
+    }
+    val status = if (state.error != null) {
+        "Couldn’t play"
+    } else {
+        "${formatAudioDuration(state.positionMs)} / ${formatAudioDuration(duration)}"
+    }
 
     Surface(
         modifier = modifier.fillMaxWidth().height(MINI_PLAYER_HEIGHT).testTag("audio_mini_player"),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 2.dp,
     ) {
-        Column {
-            Row(
-                modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(
-                    onClick = when {
-                        state.loading -> onCancelLoading
-                        state.error != null -> onRetry
-                        else -> onToggle
-                    },
-                    modifier = Modifier.size(44.dp).testTag(
-                        when {
-                            state.loading -> "audio_mini_cancel_loading"
-                            state.error != null -> "audio_mini_retry"
-                            else -> "audio_mini_toggle"
-                        },
-                    ),
-                ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = when {
+                    state.loading -> onCancelLoading
+                    state.error != null -> onRetry
+                    else -> onToggle
+                },
+                modifier = Modifier.size(36.dp).testTag(
                     when {
-                        state.loading -> state.loadingFraction?.let { fraction ->
-                            CircularProgressIndicator(
-                                progress = { fraction },
-                                modifier = Modifier.size(22.dp),
-                                strokeWidth = 2.5.dp,
-                            )
-                        } ?: CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            strokeWidth = 2.5.dp,
+                        state.loading -> "audio_mini_cancel_loading"
+                        state.error != null -> "audio_mini_retry"
+                        else -> "audio_mini_toggle"
+                    },
+                ),
+            ) {
+                when {
+                    state.loading -> state.loadingFraction?.let { fraction ->
+                        CircularProgressIndicator(
+                            progress = { fraction },
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
                         )
-                        state.error != null -> Icon(Icons.Filled.Refresh, "Retry audio")
-                        state.playing -> Icon(Icons.Filled.Pause, "Pause audio")
-                        else -> Icon(Icons.Filled.PlayArrow, "Play audio")
-                    }
-                }
-                Spacer(Modifier.width(4.dp))
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .combinedClickable(
-                            onClick = { state.origin?.let(onOpenOrigin) },
-                            onLongClick = { showDetails = true },
-                        )
-                        .testTag("audio_mini_context"),
-                ) {
-                    Text(
-                        text = if (attachment.voice) originLabel ?: attachment.title else attachment.title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    } ?: CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
                     )
-                    Text(
-                        text = state.error?.let { "Couldn’t play · $it" }
-                            ?: if (attachment.voice) time else listOfNotNull(originLabel, time).joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (state.error == null) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.error
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                IconButton(onClick = onDismiss, modifier = Modifier.size(44.dp).testTag("audio_mini_close")) {
-                    Icon(Icons.Filled.Close, "Close audio player")
+                    state.error != null -> Icon(Icons.Filled.Refresh, "Retry audio", Modifier.size(22.dp))
+                    state.playing -> Icon(Icons.Filled.Pause, "Pause audio", Modifier.size(22.dp))
+                    else -> Icon(Icons.Filled.PlayArrow, "Play audio", Modifier.size(22.dp))
                 }
             }
+            Spacer(Modifier.width(2.dp))
+            Text(
+                text = context,
+                modifier = Modifier
+                    .weight(1f)
+                    .combinedClickable(
+                        onClick = { state.origin?.let(onOpenOrigin) },
+                        onLongClick = { showDetails = true },
+                    )
+                    .testTag("audio_mini_context"),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.width(6.dp))
             BufferedProgressScrubber(
                 played = played,
                 buffered = buffered,
                 enabled = duration != null && duration > 0 && !state.loading,
                 onSeek = { fraction -> duration?.let { onSeek((fraction * it).toLong()) } },
-                modifier = Modifier.fillMaxWidth().testTag("audio_mini_scrubber"),
+                modifier = Modifier.width(64.dp).testTag("audio_mini_scrubber"),
             )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = status,
+                modifier = Modifier.widthIn(max = 88.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (state.error == null) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp).testTag("audio_mini_close")) {
+                Icon(Icons.Filled.Close, "Close audio player", Modifier.size(20.dp))
+            }
         }
     }
 
@@ -217,4 +223,4 @@ private fun BufferedProgressScrubber(
     }
 }
 
-private val MINI_PLAYER_HEIGHT = 56.dp
+private val MINI_PLAYER_HEIGHT = 42.dp
