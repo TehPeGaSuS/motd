@@ -27,6 +27,8 @@
 #   ./test/e2e/local-stack.sh start-soju  # restart the preserved soju instance
 #   ./test/e2e/local-stack.sh status    # show pids + soju network status
 #   ./test/e2e/local-stack.sh history-check # retained TARGETS + LATEST CHATHISTORY proof
+#   ./test/e2e/local-stack.sh filehost-check # empty audio upload + retrieval proof
+#   ./test/e2e/local-stack.sh tls-fingerprint # lowercase SHA-256 of fixture certificate
 #   ./test/e2e/local-stack.sh control-check # BouncerServ admin/non-admin and mutation proof
 #   ./test/e2e/local-stack.sh read-marker-check # two-client marker broadcast/reconnect proof
 #   ./test/e2e/local-stack.sh invite-check # direct sender -> soju downstream INVITE proof
@@ -61,9 +63,11 @@ export MOTD_STACK_PROFILE="$STACK_PROFILE"
 # Endpoints + creds (mirror the hermetic stack so onboarding is identical).
 ERGO_PORT="${MOTD_ERGO_PORT:-6667}"
 SOJU_PORT="${MOTD_SOJU_PORT:-6697}"
+SOJU_HTTP_PORT="${MOTD_SOJU_HTTP_PORT:-6696}"
 export ERGO_HOST=127.0.0.1
 export ERGO_PORT
 export SOJU_PORT
+export SOJU_HTTP_PORT
 if [ "$STACK_PROFILE" = showcase ]; then
   export MOTD_SHOWCASE_CHANNELS='#guix #debian #emacs #rust'
   export TEST_CHANNEL="${MOTD_STACK_CHANNEL:-#guix}"
@@ -109,7 +113,7 @@ die() { printf '\033[31m[local-stack] FATAL:\033[0m %s\n' "$*" >&2; exit 1; }
 # nix shell providing whatever the command needs but is missing from PATH.
 need_reexec=false
 case "$CMD" in
-  control-check|history-check|read-marker-check|invite-check|ready-up|ready-check|ready-down)
+  control-check|history-check|filehost-check|tls-fingerprint|read-marker-check|invite-check|ready-up|ready-check|ready-down)
     command -v soju >/dev/null 2>&1 && command -v ergo >/dev/null 2>&1 && \
       command -v python3 >/dev/null 2>&1 || need_reexec=true ;;
   obfs-*)
@@ -209,7 +213,10 @@ YAML
 hostname localhost
 db sqlite3 $RUN/soju/soju.db
 message-store db
+file-upload fs $RUN/soju/uploads
 listen ircs://:$SOJU_PORT
+listen https://:$SOJU_HTTP_PORT
+http-ingress https://127.0.0.1:$SOJU_HTTP_PORT
 tls $RUN/soju/tls/cert.pem $RUN/soju/tls/key.pem
 listen unix+admin://$ADMIN_SOCK
 EOF
@@ -232,7 +239,8 @@ recorded_soju_running() {
 
 wait_for_soju_listener() {
   local i=0
-  until [ -S "$ADMIN_SOCK" ] && nc -z 127.0.0.1 "$SOJU_PORT" 2>/dev/null; do
+  until [ -S "$ADMIN_SOCK" ] && nc -z 127.0.0.1 "$SOJU_PORT" 2>/dev/null &&
+      nc -z 127.0.0.1 "$SOJU_HTTP_PORT" 2>/dev/null; do
     i=$((i + 1)); [ "$i" -gt 60 ] && die "soju listener did not become ready (see $RUN/soju.log)"; sleep 1
   done
 }
@@ -254,6 +262,9 @@ start_recorded_soju() {
   if nc -z 127.0.0.1 "$SOJU_PORT" 2>/dev/null; then
     die "port $SOJU_PORT has a foreign listener; refusing to replace it"
   fi
+  if nc -z 127.0.0.1 "$SOJU_HTTP_PORT" 2>/dev/null; then
+    die "port $SOJU_HTTP_PORT has a foreign listener; refusing to replace it"
+  fi
   rm -f "$ADMIN_SOCK"
   setsid soju -config "$CONF_SOJU" >>"$RUN/soju.log" 2>&1 &
   echo $! >"$RUN/soju.pid"
@@ -271,7 +282,7 @@ up() {
   stop_pids
   # Guard: a stale/foreign ergo/soju on these ports would silently hijack the run
   # (provisioning would talk to the wrong daemon). Fail loudly instead.
-  for pp in "$ERGO_PORT" "$SOJU_PORT"; do
+  for pp in "$ERGO_PORT" "$SOJU_PORT" "$SOJU_HTTP_PORT"; do
     if nc -z 127.0.0.1 "$pp" 2>/dev/null; then
       die "port $pp already in use (another stack?). Inspect: ss -ltnp | grep :$pp — then kill it or run '$0 down'"
     fi
@@ -334,6 +345,8 @@ up() {
 
   log "adb reverse tcp:$SOJU_PORT (device 127.0.0.1:$SOJU_PORT -> host soju)"
   adb reverse "tcp:$SOJU_PORT" "tcp:$SOJU_PORT" || log "adb reverse failed (no device?) — set it up manually"
+  log "adb reverse tcp:$SOJU_HTTP_PORT (device FILEHOST -> host soju)"
+  adb reverse "tcp:$SOJU_HTTP_PORT" "tcp:$SOJU_HTTP_PORT" || log "FILEHOST adb reverse failed (no device?)"
 
   cat >&2 <<EOF
 
@@ -342,6 +355,7 @@ up() {
 Onboard the app (motd debug) → "I have a soju bouncer":
   Host:     127.0.0.1
   Port:     $SOJU_PORT     (TLS on; tap Trust on the self-signed cert prompt)
+  FILEHOST: https://127.0.0.1:$SOJU_HTTP_PORT/uploads
   Username: $SOJU_USER
   Password: $SOJU_PASS
 Import the bouncer network "$NETWORK_NAME", then open $TEST_CHANNEL (seeded history).
@@ -369,6 +383,7 @@ down() {
   log "stopping ergo/soju"
   stop_pids
   adb reverse --remove "tcp:$SOJU_PORT" 2>/dev/null || true
+  adb reverse --remove "tcp:$SOJU_HTTP_PORT" 2>/dev/null || true
   log "down (state kept at $RUN; rm -rf it to wipe)"
 }
 
@@ -397,6 +412,19 @@ history_check() {
   log "proving retained TARGETS discovery and LATEST playback through Soju"
   local exact_text="${1:-hello, this is a seeded plain line}"
   python3 "$REPO/test/e2e/fixtures/chathistory-probe.py" --port "$SOJU_PORT" --seed-text "$exact_text"
+}
+
+filehost_check() {
+  wait_for_soju_ready
+  local fixture="$RUN/empty-audio.ogg"
+  : >"$fixture"
+  python3 "$REPO/test/e2e/fixtures/filehost-probe.py" \
+    --irc-port "$SOJU_PORT" --http-port "$SOJU_HTTP_PORT" --file "$fixture"
+}
+
+tls_fingerprint() {
+  [ -f "$RUN/soju/tls/cert.pem" ] || die "Soju fixture certificate is absent"
+  openssl x509 -in "$RUN/soju/tls/cert.pem" -outform der | sha256sum | awk '{print tolower($1)}'
 }
 
 read_marker_check() {
@@ -907,6 +935,8 @@ case "$CMD" in
   status) status ;;
   control-check) control_check ;;
   history-check) history_check "${2:-}" ;;
+  filehost-check) filehost_check ;;
+  tls-fingerprint) tls_fingerprint ;;
   read-marker-check) read_marker_check ;;
   soju-read-marker-check) soju_read_marker_check ;;
   invite-check) invite_check ;;
@@ -921,5 +951,5 @@ case "$CMD" in
   obfs-xray-validate) xray_obfs_validate ;;
   obfs-xray-history-check) xray_obfs_history_check ;;
   obfs-xray-negative) xray_obfs_negative ;;
-  *) die "unknown command '$CMD' (want up|down|seed|showcase|showcase-hold|burst|jpq|push|canonical|reconnect-gap|reconnect-current|pause-soju|resume-soju|stop-soju|start-soju|status|history-check|control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-history-check|obfs-xray-negative)" ;;
+  *) die "unknown command '$CMD' (want up|down|seed|showcase|showcase-hold|burst|jpq|push|canonical|reconnect-gap|reconnect-current|pause-soju|resume-soju|stop-soju|start-soju|status|history-check|filehost-check|tls-fingerprint|control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-history-check|obfs-xray-negative)" ;;
 esac

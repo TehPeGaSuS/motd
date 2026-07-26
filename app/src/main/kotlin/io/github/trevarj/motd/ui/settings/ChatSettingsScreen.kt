@@ -2,14 +2,22 @@ package io.github.trevarj.motd.ui.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -19,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.VoiceConfig
+import io.github.trevarj.motd.audio.VoiceRecordingQuality
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ReplyConfig
@@ -56,6 +65,8 @@ fun ChatSettingsScreen(
         onShowLinkPreviews = viewModel::setShowLinkPreviews,
         onShowSharedAvatars = viewModel::setShowSharedAvatars,
         onVoiceEncryptionDefault = viewModel::setVoiceEncryptionDefault,
+        onVoiceQuality = viewModel::setVoiceQuality,
+        onVoiceNoiseReduction = viewModel::setVoiceNoiseReduction,
         onClearAudioCache = viewModel::clearAudioCache,
     )
 }
@@ -79,8 +90,11 @@ fun ChatSettingsContent(
     onShowLinkPreviews: (Boolean) -> Unit,
     onShowSharedAvatars: (Boolean) -> Unit,
     onVoiceEncryptionDefault: (Boolean) -> Unit,
+    onVoiceQuality: (VoiceRecordingQuality) -> Unit,
+    onVoiceNoiseReduction: (Boolean) -> Unit,
     onClearAudioCache: () -> Unit,
 ) {
+    var qualitySheetOpen by remember { mutableStateOf(false) }
     SettingsScaffold(title = stringResource(R.string.settings_chat), onBack = onBack) {
         SettingsGroup(title = stringResource(R.string.settings_messages_section)) {
             SwitchRow(
@@ -139,6 +153,26 @@ fun ChatSettingsContent(
                 onCheckedChange = onVisibleReplyPrefix,
                 switchTag = "settings_switch_reply_prefix",
             )
+        }
+        SettingsGroup(title = stringResource(R.string.settings_voice_section)) {
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_voice_quality)) },
+                supportingContent = {
+                    Text(
+                        "${voiceQualityLabel(voice.quality)} · ${voiceQualityDescription(voice.quality)}",
+                    )
+                },
+                modifier = Modifier.clickable { qualitySheetOpen = true }
+                    .testTag("settings_voice_quality"),
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_voice_noise_reduction),
+                subtitle = stringResource(R.string.settings_voice_noise_reduction_desc),
+                checked = voice.noiseReduction,
+                onCheckedChange = onVoiceNoiseReduction,
+                switchTag = "settings_switch_voice_noise_reduction",
+            )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
                 title = stringResource(R.string.settings_voice_encryption),
@@ -175,6 +209,53 @@ fun ChatSettingsContent(
             FoolsModeGroup(current = settings.foolsMode, onSelect = onFoolsMode)
         }
     }
+    if (qualitySheetOpen) {
+        VoiceQualitySheet(
+            selected = voice.quality,
+            onSelect = {
+                onVoiceQuality(it)
+                qualitySheetOpen = false
+            },
+            onDismiss = { qualitySheetOpen = false },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VoiceQualitySheet(
+    selected: VoiceRecordingQuality,
+    onSelect: (VoiceRecordingQuality) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("settings_voice_quality_sheet")) {
+        Column(Modifier.fillMaxWidth().selectableGroup()) {
+            SubLabel(stringResource(R.string.settings_voice_quality))
+            VoiceRecordingQuality.entries.forEach { quality ->
+                RadioRow(
+                    label = voiceQualityLabel(quality),
+                    subtitle = voiceQualityDescription(quality),
+                    selected = selected == quality,
+                    enabled = true,
+                    onClick = { onSelect(quality) },
+                    modifier = Modifier.testTag("settings_voice_quality_${quality.name.lowercase()}"),
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+        }
+    }
+}
+
+private fun voiceQualityLabel(quality: VoiceRecordingQuality): String = when (quality) {
+    VoiceRecordingQuality.DATA_SAVER -> "Data saver"
+    VoiceRecordingQuality.BALANCED -> "Balanced"
+    VoiceRecordingQuality.HIGH -> "High"
+}
+
+private fun voiceQualityDescription(quality: VoiceRecordingQuality): String = when (quality) {
+    VoiceRecordingQuality.DATA_SAVER -> "Opus 24 kbps · AAC 32 kbps"
+    VoiceRecordingQuality.BALANCED -> "Opus 48 kbps · AAC 64 kbps"
+    VoiceRecordingQuality.HIGH -> "Opus 64 kbps · AAC 96 kbps"
 }
 
 @Composable
@@ -215,6 +296,7 @@ private fun ChatSettingsPreview() {
             onVisibleReplyPrefix = {},
             onShowImages = {}, onShowLinkPreviews = {}, onShowSharedAvatars = {},
             onVoiceEncryptionDefault = {}, onClearAudioCache = {},
+            onVoiceQuality = {}, onVoiceNoiseReduction = {},
         )
     }
 }

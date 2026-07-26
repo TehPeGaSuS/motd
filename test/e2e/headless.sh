@@ -15,6 +15,7 @@ AVD_NAME="${MOTD_HEADLESS_AVD_NAME:-motd-api34-headless}"
 EMULATOR_PORT="${MOTD_HEADLESS_EMULATOR_PORT:-5556}"
 ERGO_PORT="${MOTD_HEADLESS_ERGO_PORT:-16667}"
 SOJU_PORT="${MOTD_HEADLESS_SOJU_PORT:-16697}"
+SOJU_HTTP_PORT="${MOTD_HEADLESS_SOJU_HTTP_PORT:-16698}"
 SERIAL="emulator-${EMULATOR_PORT}"
 PID_FILE="$STATE_DIR/emulator.pid"
 SERIAL_FILE="$STATE_DIR/emulator.serial"
@@ -53,7 +54,8 @@ emulator_alive() {
 stack_alive() {
   [ -f "$STACK_DIR/ergo.pid" ] && [ -f "$STACK_DIR/soju.pid" ] &&
     kill -0 "$(<"$STACK_DIR/ergo.pid")" 2>/dev/null &&
-    kill -0 "$(<"$STACK_DIR/soju.pid")" 2>/dev/null
+    kill -0 "$(<"$STACK_DIR/soju.pid")" 2>/dev/null &&
+    grep -q '^file-upload fs ' "$STACK_DIR/soju.config" 2>/dev/null
 }
 
 ensure_avd() {
@@ -116,12 +118,13 @@ ensure_stack() {
   if stack_alive; then
     log "native soju/ergo stack already running"
     adb_e reverse "tcp:$SOJU_PORT" "tcp:$SOJU_PORT" >/dev/null
+    adb_e reverse "tcp:$SOJU_HTTP_PORT" "tcp:$SOJU_HTTP_PORT" >/dev/null
     return
   fi
   log "starting isolated native soju/ergo stack"
   ANDROID_SERIAL="$SERIAL" MOTD_STACK_DIR="$STACK_DIR" \
     MOTD_STACK_PROFILE="${MOTD_STACK_PROFILE:-default}" \
-    MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" \
+    MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" MOTD_SOJU_HTTP_PORT="$SOJU_HTTP_PORT" \
     "$E2E_DIR/local-stack.sh" up
 }
 
@@ -133,13 +136,13 @@ ensure_seed_member() {
     log "holding the deterministic showcase member in #guix and companion channels"
     setsid env ANDROID_SERIAL="$SERIAL" MOTD_STACK_DIR="$STACK_DIR" \
       MOTD_STACK_PROFILE=showcase MOTD_STACK_CHANNEL='#guix' \
-      MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" \
+      MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" MOTD_SOJU_HTTP_PORT="$SOJU_HTTP_PORT" \
       SEED_HOLD_SECONDS=900 "$E2E_DIR/local-stack.sh" showcase-hold >"$SEED_LOG_FILE" 2>&1 &
   else
     log "holding the deterministic second nick in ##motdtest"
     setsid env ANDROID_SERIAL="$SERIAL" MOTD_STACK_DIR="$STACK_DIR" \
       MOTD_STACK_PROFILE=default \
-      MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" \
+      MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" MOTD_SOJU_HTTP_PORT="$SOJU_HTTP_PORT" \
       SEED_HOLD_SECONDS=900 "$E2E_DIR/local-stack.sh" seed >"$SEED_LOG_FILE" 2>&1 &
   fi
   printf '%s\n' "$!" >"$SEED_PID_FILE"
@@ -153,10 +156,14 @@ up() {
 }
 
 fast() {
+  local tls_sha256
   up
+  tls_sha256="$(MOTD_STACK_DIR="$STACK_DIR" MOTD_SOJU_PORT="$SOJU_PORT" \
+    MOTD_SOJU_HTTP_PORT="$SOJU_HTTP_PORT" "$E2E_DIR/local-stack.sh" tls-fingerprint)"
   log "discovering and running isolated fast journeys only on $SERIAL"
   if SERIAL="$SERIAL" FAST_E2E_OUT_DIR="$ARTIFACTS" \
     FAST_E2E_SOJU_HOST=127.0.0.1 FAST_E2E_SOJU_PORT="$SOJU_PORT" \
+    FAST_E2E_SOJU_TLS_SHA256="$tls_sha256" \
     FAST_E2E_STACK_KIND=native FAST_E2E_NATIVE_STACK_DIR="$STACK_DIR" \
     FAST_E2E_NATIVE_ERGO_PORT="$ERGO_PORT" \
     nix develop "$REPO" -c "$E2E_DIR/fast-suite.sh" direct; then
@@ -220,7 +227,7 @@ down() {
   fi
   if [ -f "$SERIAL_FILE" ]; then
     ANDROID_SERIAL="$SERIAL" MOTD_STACK_DIR="$STACK_DIR" \
-      MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" \
+      MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" MOTD_SOJU_HTTP_PORT="$SOJU_HTTP_PORT" \
       "$E2E_DIR/local-stack.sh" down || true
   fi
   if emulator_alive; then

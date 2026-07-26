@@ -47,7 +47,6 @@ import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Mic
-import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
@@ -64,13 +63,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -135,6 +134,9 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioPlaybackState
+import io.github.trevarj.motd.audio.AudioPlaybackRequest
+import io.github.trevarj.motd.audio.AudioPlaybackOrigin
+import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.audio.CachedAudioMetadata
 import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.formatAudioDuration
@@ -152,9 +154,11 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.HistoryRefreshRange
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
+import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.MotdMotion
@@ -229,6 +233,7 @@ fun ChatScreen(
     onOpenImage: (String) -> Unit = {},
     // /msg and /query resolve-or-create a QUERY buffer via the VM, then navigate to it.
     onOpenBuffer: (Long) -> Unit = {},
+    onOpenAudioOrigin: (AudioPlaybackOrigin) -> Unit = {},
     // Round 5 (plans/16): /list opens the channel browser. Body lands in WP-V3.
     onOpenChannelList: (Long) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
@@ -321,6 +326,7 @@ fun ChatScreen(
     )
     val contentPreviews by viewModel.contentPreviews.collectAsStateWithLifecycle()
     val audioPlaybackState by viewModel.audioPlaybackState.collectAsStateWithLifecycle()
+    val audioWaveforms by viewModel.audioWaveforms.collectAsStateWithLifecycle()
     val replyConfig by viewModel.replyConfig.collectAsStateWithLifecycle()
     val historyAvailability by viewModel.historyAvailability.collectAsStateWithLifecycle()
     // Round 5: nick sheet + replay-safe UI events (plans/16 §5.6/§5.8).
@@ -385,10 +391,15 @@ fun ChatScreen(
         loadAudioMetadata = viewModel::audioMetadata,
         cachedAudioMetadata = viewModel::cachedAudioMetadata,
         audioPlaybackState = audioPlaybackState,
+        audioWaveforms = audioWaveforms,
         onAudioToggle = viewModel::toggleAudio,
         onAudioSeek = viewModel::seekAudio,
         onAudioSpeed = viewModel::setAudioSpeed,
         onAudioToggleActive = viewModel::toggleActiveAudio,
+        onAudioCancelLoading = viewModel::cancelAudioLoading,
+        onAudioRetry = viewModel::retryActiveAudio,
+        onAudioDismiss = viewModel::dismissActiveAudio,
+        onOpenAudioOrigin = onOpenAudioOrigin,
         voiceState = voiceState,
         voiceEnabled = !isServerBuffer && (!state.parted),
         onVoiceTap = { startVoiceRecording(locked = true) },
@@ -401,6 +412,7 @@ fun ChatScreen(
         onVoiceToggleEncryption = voiceViewModel::toggleEncryption,
         onVoiceDestinationSelected = voiceViewModel::setDestination,
         onVoiceErrorDismissed = voiceViewModel::clearError,
+        onVoiceNoticeDismissed = voiceViewModel::clearNotice,
         consumePrefill = viewModel::consumePrefill,
         composerDraft = composerDraft,
         onDraftChanged = viewModel::saveDraft,
@@ -491,10 +503,15 @@ fun ChatContent(
     loadAudioMetadata: suspend (String, Long?) -> AudioMetadata? = { _, _ -> null },
     cachedAudioMetadata: (String) -> CachedAudioMetadata? = { null },
     audioPlaybackState: AudioPlaybackState = AudioPlaybackState(),
-    onAudioToggle: (AudioAttachment, Long?) -> Unit = { _, _ -> },
+    audioWaveforms: Map<String, AudioWaveform> = emptyMap(),
+    onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
     onAudioSeek: (AudioAttachment, Long) -> Unit = { _, _ -> },
     onAudioSpeed: (AudioAttachment, Float) -> Unit = { _, _ -> },
     onAudioToggleActive: () -> Unit = {},
+    onAudioCancelLoading: () -> Unit = {},
+    onAudioRetry: () -> Unit = {},
+    onAudioDismiss: () -> Unit = {},
+    onOpenAudioOrigin: (AudioPlaybackOrigin) -> Unit = {},
     voiceState: VoiceMessageUiState = VoiceMessageUiState(),
     voiceEnabled: Boolean = true,
     onVoiceTap: () -> Unit = {},
@@ -505,8 +522,9 @@ fun ChatContent(
     onVoiceDelete: () -> Unit = {},
     onVoiceSend: () -> Unit = {},
     onVoiceToggleEncryption: () -> Unit = {},
-    onVoiceDestinationSelected: (io.github.trevarj.motd.attachment.PasteBackendConfig) -> Unit = {},
+    onVoiceDestinationSelected: (io.github.trevarj.motd.attachment.PasteBackendConfig?) -> Unit = {},
     onVoiceErrorDismissed: () -> Unit = {},
+    onVoiceNoticeDismissed: () -> Unit = {},
     reactionChips: (String) -> List<io.github.trevarj.motd.ui.components.ReactionChip> = { emptyList() },
     replyPreview: (String) -> kotlinx.coroutines.flow.StateFlow<io.github.trevarj.motd.ui.components.ReplyPreviewData?> = {
         kotlinx.coroutines.flow.MutableStateFlow(null)
@@ -617,6 +635,11 @@ fun ChatContent(
     val clipboard: Clipboard = LocalClipboard.current
     val ctx = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(voiceState.notice) {
+        val notice = voiceState.notice ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(notice)
+        onVoiceNoticeDismissed()
+    }
     // The ViewModel owns the durable value; this local state only retains cursor/selection details.
     var composerText by remember(traceBufferId) {
         mutableStateOf(TextFieldValue(""))
@@ -1352,6 +1375,9 @@ fun ChatContent(
                             liveEntryId = consumeLiveEntryId(liveEntryId, id)
                         },
                         networkId = state.buffer?.networkId,
+                        bufferId = state.buffer?.id,
+                        conversationName = state.buffer?.displayName,
+                        directMessage = state.buffer?.type == BufferType.QUERY,
                         // Frozen read-marker so the "New messages" divider stays put (plans/15 #2).
                         readMarkerTime = readMarkerSnapshot,
                         reactionChips = reactionChips,
@@ -1378,6 +1404,7 @@ fun ChatContent(
                         loadAudioMetadata = loadAudioMetadata,
                         cachedAudioMetadata = cachedAudioMetadata,
                         audioPlaybackState = audioPlaybackState,
+                        audioWaveforms = audioWaveforms,
                         onAudioToggle = onAudioToggle,
                         onAudioSeek = onAudioSeek,
                         onAudioSpeed = onAudioSpeed,
@@ -1469,16 +1496,29 @@ fun ChatContent(
                         showAutocomplete = true
                     }
                 }
-                AudioMiniPlayer(
-                    state = audioPlaybackState,
-                    onToggle = onAudioToggleActive,
-                )
+                val stagedVoicePlaybackId = voiceState.staged?.let { "voice:${it.file.toURI()}" }
+                if (audioPlaybackState.activeId != stagedVoicePlaybackId) {
+                    AudioMiniPlayer(
+                        state = audioPlaybackState,
+                        onToggle = onAudioToggleActive,
+                        onCancelLoading = onAudioCancelLoading,
+                        onRetry = onAudioRetry,
+                        onDismiss = onAudioDismiss,
+                        onSeek = { positionMs ->
+                            audioPlaybackState.attachment?.let { onAudioSeek(it, positionMs) }
+                        },
+                        onOpenOrigin = onOpenAudioOrigin,
+                        includeNetwork = audioPlaybackState.origin?.networkId != state.buffer?.networkId,
+                    )
+                }
                 VoiceComposerPanel(
                     state = voiceState,
                     playbackState = audioPlaybackState,
                     onDelete = onVoiceDelete,
+                    onCancelRecording = onVoiceHoldCancel,
                     onSend = onVoiceSend,
-                    onPreview = { attachment -> onAudioToggle(attachment, null) },
+                    onPreview = { attachment -> onAudioToggle(AudioPlaybackRequest(attachment, null)) },
+                    onPreviewSeek = { attachment, positionMs -> onAudioSeek(attachment, positionMs) },
                     onToggleEncryption = onVoiceToggleEncryption,
                     onDestinationSelected = onVoiceDestinationSelected,
                     onErrorDismissed = onVoiceErrorDismissed,
@@ -1526,7 +1566,7 @@ fun ChatContent(
                     },
                     showEmojiButton = showComposerEmoji,
                     onAttachment = { uploadCurrentDraftDirectly = false; attachmentSheetOpen = true },
-                    voiceEnabled = voiceEnabled && composerText.text.isBlank(),
+                    voiceEnabled = voiceEnabled && voiceState.staged == null && composerText.text.isBlank(),
                     voiceRecording = voiceState.recording != null,
                     onVoiceTap = onVoiceTap,
                     onVoiceHoldStart = onVoiceHoldStart,
@@ -2147,10 +2187,12 @@ private fun VoiceComposerPanel(
     state: VoiceMessageUiState,
     playbackState: AudioPlaybackState,
     onDelete: () -> Unit,
+    onCancelRecording: () -> Unit,
     onSend: () -> Unit,
     onPreview: (AudioAttachment) -> Unit,
+    onPreviewSeek: (AudioAttachment, Long) -> Unit,
     onToggleEncryption: () -> Unit,
-    onDestinationSelected: (io.github.trevarj.motd.attachment.PasteBackendConfig) -> Unit,
+    onDestinationSelected: (io.github.trevarj.motd.attachment.PasteBackendConfig?) -> Unit,
     onErrorDismissed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -2167,21 +2209,40 @@ private fun VoiceComposerPanel(
             ) {
                 Icon(Icons.Outlined.Mic, null)
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    if (recording.locked) {
-                        "Recording · locked · ${formatAudioDuration(recording.elapsedMs)}"
-                    } else {
-                        "Recording · ${formatAudioDuration(recording.elapsedMs)}"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (recording.locked) "Recording locked" else "Recording",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        if (recording.locked) {
+                            "${formatAudioDuration(recording.elapsedMs)} · Tap stop to review"
+                        } else {
+                            "${formatAudioDuration(recording.elapsedMs)} · Slide left to cancel"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+                if (recording.locked) {
+                    IconButton(onClick = onCancelRecording, modifier = Modifier.testTag("voice_cancel_locked")) {
+                        Icon(Icons.Filled.Delete, "Cancel recording")
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.testTag("voice_lock_hint"),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Icon(Icons.Outlined.Lock, null, modifier = Modifier.size(20.dp))
+                        Text("Swipe up", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         }
     }
     state.staged?.let { staged ->
         val progress = state.progress
-        val destination = staged.destination ?: state.config.rememberedDestination
+        val destination = staged.destination
         val preview = remember(staged.file, staged.durationMs, staged.mimeType, staged.sizeBytes) {
             AudioAttachment(
                 url = staged.file.toURI().toString(),
@@ -2192,13 +2253,16 @@ private fun VoiceComposerPanel(
                 voice = true,
             )
         }
-        val previewPlaying = playbackState.activeId == preview.playbackId && playbackState.playing
+        val previewActive = playbackState.activeId == preview.playbackId
+        val previewPlaying = previewActive && playbackState.playing
+        val previewDurationMs = playbackState.durationMs?.takeIf { previewActive && it > 0 } ?: staged.durationMs
+        val previewPositionMs = playbackState.positionMs.takeIf { previewActive } ?: 0L
         Surface(
             modifier = modifier.fillMaxWidth().testTag("voice_preview_panel"),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 2.dp,
         ) {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.Mic, null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(8.dp))
@@ -2217,24 +2281,58 @@ private fun VoiceComposerPanel(
                         Icon(Icons.Filled.Delete, "Delete")
                     }
                 }
+                WaveformScrubber(
+                    value = (previewPositionMs.toFloat() / previewDurationMs.coerceAtLeast(1L)).coerceIn(0f, 1f),
+                    onValueChange = { fraction ->
+                        onPreviewSeek(preview, (fraction * previewDurationMs).toLong())
+                    },
+                    onValueChangeFinished = {},
+                    seed = preview.playbackId,
+                    enabled = progress == null && previewActive && !playbackState.loading,
+                    bufferedValue = if (previewActive && previewDurationMs > 0) {
+                        (playbackState.bufferedMs.toFloat() / previewDurationMs).coerceIn(0f, 1f)
+                    } else {
+                        0f
+                    },
+                    waveform = staged.waveform,
+                    modifier = Modifier.fillMaxWidth().testTag("voice_preview_scrubber"),
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(if (staged.encrypted) Icons.Outlined.Lock else Icons.Outlined.Public, null)
+                    Icon(Icons.Outlined.Lock, null)
                     Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (staged.encrypted) "Host-blind encryption" else "Interoperable link",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    TextButton(onClick = onToggleEncryption, enabled = progress == null, modifier = Modifier.testTag("voice_encryption_toggle")) {
-                        Text(if (staged.encrypted) "Off" else "On")
+                    Column(Modifier.weight(1f)) {
+                        Text("Encrypt upload", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Text(
+                            if (staged.encrypted) {
+                                "The host cannot listen. IRC servers and bouncers can see the key in the link."
+                            } else {
+                                "Standard audio link. The host and anyone with the link can play it in any client."
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
+                    Switch(
+                        checked = staged.encrypted,
+                        onCheckedChange = { onToggleEncryption() },
+                        enabled = progress == null,
+                        modifier = Modifier.testTag("voice_encryption_toggle"),
+                    )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        destination?.backend?.label ?: "Auto destination",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            destination?.backend?.label ?: "Soju file host",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            destination?.let(::backendRetention)
+                                ?: "Uses the file host advertised by this IRC network",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     TextButton(onClick = { destinationSheet = true }, enabled = progress == null, modifier = Modifier.testTag("voice_destination")) {
                         Text("Change")
                     }
@@ -2254,15 +2352,10 @@ private fun VoiceComposerPanel(
                     null,
                     -> Unit
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onDelete, enabled = progress == null, modifier = Modifier.weight(1f)) {
-                        Text("Delete")
-                    }
-                    Button(onClick = onSend, enabled = progress == null, modifier = Modifier.weight(1f).testTag("voice_send")) {
-                        Icon(Icons.Outlined.CloudUpload, null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Send")
-                    }
+                Button(onClick = onSend, enabled = progress == null, modifier = Modifier.fillMaxWidth().testTag("voice_send")) {
+                    Icon(Icons.Outlined.CloudUpload, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Send")
                 }
             }
         }
@@ -2293,12 +2386,17 @@ private fun VoiceComposerPanel(
 private fun VoiceDestinationSheet(
     staged: StagedVoiceMessage,
     config: io.github.trevarj.motd.attachment.PasteBackendConfig,
-    onSelect: (io.github.trevarj.motd.attachment.PasteBackendConfig) -> Unit,
+    onSelect: (io.github.trevarj.motd.attachment.PasteBackendConfig?) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text("Voice destination", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            androidx.compose.material3.ListItem(
+                headlineContent = { Text("Soju file host", fontWeight = FontWeight.SemiBold) },
+                supportingContent = { Text("Use the file host advertised by this IRC network") },
+                modifier = Modifier.clickable { onSelect(null) },
+            )
             uploadDestinations(staged.source, config).forEach { destination ->
                 androidx.compose.material3.ListItem(
                     headlineContent = { Text(destination.label, fontWeight = FontWeight.SemiBold) },
@@ -2307,52 +2405,6 @@ private fun VoiceDestinationSheet(
                 )
             }
             Spacer(Modifier.height(20.dp))
-        }
-    }
-}
-
-@Composable
-private fun AudioMiniPlayer(
-    state: AudioPlaybackState,
-    onToggle: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    if (state.activeId == null) return
-    Surface(
-        modifier = modifier.fillMaxWidth().testTag("audio_mini_player"),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 2.dp,
-    ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onToggle, modifier = Modifier.size(40.dp)) {
-                    Icon(
-                        if (state.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (state.playing) "Pause audio" else "Play audio",
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        state.title ?: "Audio",
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        io.github.trevarj.motd.audio.formatAudioDuration(state.positionMs),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            val duration = state.durationMs
-            if (duration != null && duration > 0) {
-                LinearProgressIndicator(
-                    progress = { (state.positionMs.toFloat() / duration).coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
         }
     }
 }

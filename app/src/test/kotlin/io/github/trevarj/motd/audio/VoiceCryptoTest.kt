@@ -13,7 +13,13 @@ import org.robolectric.RobolectricTestRunner
 class VoiceCryptoTest {
     @Test fun encryptedVoiceRoundTripsThroughKeyFragment() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val crypto = VoiceCrypto(AudioCacheStore(context))
+        val crypto = VoiceCrypto(
+            AudioCacheStore(
+                context,
+                AudioMediaCache(context),
+                AudioWaveformRepository(context),
+            ),
+        )
         val plain = File.createTempFile("voice-plain-", ".opus", context.cacheDir).apply {
             writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6))
         }

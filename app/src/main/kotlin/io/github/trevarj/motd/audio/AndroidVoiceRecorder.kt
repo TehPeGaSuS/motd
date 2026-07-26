@@ -14,30 +14,78 @@ class AndroidVoiceRecorder @Inject constructor(
 ) : VoiceRecorder {
     private var recorder: MediaRecorder? = null
     private var active: ActiveVoiceRecording? = null
+    private val amplitudes = mutableListOf<Int>()
 
-    override fun start(nowMs: Long): ActiveVoiceRecording {
+    init {
+        recordingDirectory().listFiles()?.forEach(File::delete)
+    }
+
+    override fun start(profile: VoiceRecordingProfile, nowMs: Long): ActiveVoiceRecording {
         check(recorder == null) { "A voice recording is already active." }
         val format = recordingFormat()
-        val file = File(context.cacheDir, "voice-recordings").also { it.mkdirs() }
-            .let { dir -> File.createTempFile("voice-", format.extension, dir) }
+        amplitudes.clear()
+        return try {
+            startRecorder(format, profile, nowMs, processingFallback = false)
+        } catch (processedError: Exception) {
+            if (!profile.noiseReduction) throw processedError
+            try {
+                startRecorder(format, profile.copy(noiseReduction = false), nowMs, processingFallback = true)
+            } catch (naturalError: Exception) {
+                naturalError.addSuppressed(processedError)
+                throw naturalError
+            }
+        }
+    }
+
+    override fun currentAmplitude(): Int? = recorder?.let { activeRecorder ->
+        runCatching { activeRecorder.maxAmplitude }.getOrNull()?.also(amplitudes::add)
+    }
+
+    private fun startRecorder(
+        format: Format,
+        profile: VoiceRecordingProfile,
+        nowMs: Long,
+        processingFallback: Boolean,
+    ): ActiveVoiceRecording {
+        val file = File.createTempFile("voice-", format.extension, recordingDirectory())
         val mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             MediaRecorder(context)
         } else {
             @Suppress("DEPRECATION")
             MediaRecorder()
         }
-        mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC)
-        mediaRecorder.setOutputFormat(format.outputFormat)
-        mediaRecorder.setAudioEncoder(format.audioEncoder)
-        mediaRecorder.setAudioEncodingBitRate(AUDIO_BIT_RATE)
-        mediaRecorder.setAudioSamplingRate(AUDIO_SAMPLE_RATE)
-        mediaRecorder.setOutputFile(file.absolutePath)
-        mediaRecorder.prepare()
-        mediaRecorder.start()
-        val started = ActiveVoiceRecording(file, nowMs, format.mimeType, format.extension)
-        recorder = mediaRecorder
-        active = started
-        return started
+        return try {
+            mediaRecorder.setAudioSource(
+                if (profile.noiseReduction) {
+                    MediaRecorder.AudioSource.DEFAULT
+                } else {
+                    MediaRecorder.AudioSource.MIC
+                },
+            )
+            mediaRecorder.setOutputFormat(format.outputFormat)
+            mediaRecorder.setAudioEncoder(format.audioEncoder)
+            mediaRecorder.setAudioChannels(AUDIO_CHANNELS)
+            mediaRecorder.setAudioEncodingBitRate(profile.quality.bitRate(format.opus))
+            mediaRecorder.setAudioSamplingRate(AUDIO_SAMPLE_RATE)
+            mediaRecorder.setOutputFile(file.absolutePath)
+            mediaRecorder.prepare()
+            mediaRecorder.start()
+            ActiveVoiceRecording(
+                file = file,
+                startedAtMs = nowMs,
+                mimeType = format.mimeType,
+                extension = format.extension,
+                processingFallback = processingFallback,
+            ).also {
+                recorder = mediaRecorder
+                active = it
+            }
+        } catch (error: Exception) {
+            runCatching { mediaRecorder.reset() }
+            runCatching { mediaRecorder.release() }
+            file.delete()
+            throw error
+        }
     }
 
     override fun stop(nowMs: Long): CompletedVoiceRecording? {
@@ -61,6 +109,7 @@ class AndroidVoiceRecorder @Inject constructor(
                     mimeType = started.mimeType,
                     extension = started.extension,
                     sizeBytes = size,
+                    waveform = AudioWaveform.fromAmplitudes(amplitudes),
                 )
             }
         } catch (error: RuntimeException) {
@@ -79,6 +128,7 @@ class AndroidVoiceRecorder @Inject constructor(
         runCatching { mediaRecorder?.reset() }
         runCatching { mediaRecorder?.release() }
         started?.file?.delete()
+        amplitudes.clear()
     }
 
     private data class Format(
@@ -86,7 +136,10 @@ class AndroidVoiceRecorder @Inject constructor(
         val audioEncoder: Int,
         val mimeType: String,
         val extension: String,
+        val opus: Boolean,
     )
+
+    private fun recordingDirectory() = File(context.cacheDir, "voice-recordings").also { it.mkdirs() }
 
     private fun recordingFormat(): Format =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -95,6 +148,7 @@ class AndroidVoiceRecorder @Inject constructor(
                 audioEncoder = MediaRecorder.AudioEncoder.OPUS,
                 mimeType = "audio/ogg",
                 extension = ".ogg",
+                opus = true,
             )
         } else {
             Format(
@@ -102,11 +156,12 @@ class AndroidVoiceRecorder @Inject constructor(
                 audioEncoder = MediaRecorder.AudioEncoder.AAC,
                 mimeType = "audio/mp4",
                 extension = ".m4a",
+                opus = false,
             )
         }
 
     private companion object {
-        const val AUDIO_BIT_RATE = 24_000
+        const val AUDIO_CHANNELS = 1
         const val AUDIO_SAMPLE_RATE = 48_000
         const val MIN_VALID_DURATION_MS = 1_000L
     }

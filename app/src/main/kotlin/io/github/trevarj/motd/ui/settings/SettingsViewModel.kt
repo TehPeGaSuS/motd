@@ -6,6 +6,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.audio.AudioCacheStore
 import io.github.trevarj.motd.audio.VoiceConfig
 import io.github.trevarj.motd.audio.VoicePrefs
+import io.github.trevarj.motd.audio.VoiceRecordingQuality
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
@@ -221,6 +222,14 @@ class SettingsViewModel @Inject constructor(
 
     fun setVoiceEncryptionDefault(enabled: Boolean) = viewModelScope.launch {
         voicePrefs.setEncryptionDefault(enabled)
+    }
+
+    fun setVoiceQuality(quality: VoiceRecordingQuality) = viewModelScope.launch {
+        voicePrefs.setQuality(quality)
+    }
+
+    fun setVoiceNoiseReduction(enabled: Boolean) = viewModelScope.launch {
+        voicePrefs.setNoiseReduction(enabled)
     }
 
     fun clearAudioCache() = viewModelScope.launch {

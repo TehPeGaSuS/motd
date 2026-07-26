@@ -35,6 +35,15 @@ history_check() {
   python3 "$E2E_DIR/fixtures/chathistory-probe.py" --port 6697 --seed-text "$exact_text"
 }
 
+filehost_check() {
+  local fixture
+  wait_for_soju_ready
+  fixture="$(mktemp /tmp/motd-filehost-empty.XXXXXX.ogg)"
+  trap 'rm -f "$fixture"' RETURN
+  python3 "$E2E_DIR/fixtures/filehost-probe.py" \
+    --irc-port 6697 --http-port 6696 --file "$fixture"
+}
+
 stop_soju() {
   if [ -z "$(compose ps -q soju)" ]; then
     return 0
@@ -73,10 +82,11 @@ case "${1:-}" in
   reconnect-gap) : "${2:?usage: $0 reconnect-gap TOKEN}"; seed_reconnect reconnect-gap "$2" ;;
   reconnect-current) : "${2:?usage: $0 reconnect-current TOKEN}"; seed_reconnect reconnect-current "$2" ;;
   history-check) history_check "${2:-}" ;;
+  filehost-check) filehost_check ;;
   stop-soju) stop_soju ;;
   start-soju) start_soju ;;
   tls-fingerprint) tls_fingerprint ;;
   down) compose down -v ;;
   validate) compose config --quiet ;;
-  *) echo "usage: $0 {up|status|logs|capture OUTPUT_DIR|reconnect-gap TOKEN|reconnect-current TOKEN|history-check [EXACT_TEXT]|stop-soju|start-soju|tls-fingerprint|down|validate}" >&2; exit 2 ;;
+  *) echo "usage: $0 {up|status|logs|capture OUTPUT_DIR|reconnect-gap TOKEN|reconnect-current TOKEN|history-check [EXACT_TEXT]|filehost-check|stop-soju|start-soju|tls-fingerprint|down|validate}" >&2; exit 2 ;;
 esac

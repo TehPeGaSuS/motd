@@ -82,6 +82,8 @@ services:
     ports:
       # Publish soju's TLS listener on the host so the emulator hits 10.0.2.2:6697.
       - "6697:6697"
+      # FILEHOST is advertised separately and serves uploaded test fixtures.
+      - "6696:6696"
     environment:
       ERGO_ADDR: "ergo:6667"
       ERGO_ACCOUNT: motd

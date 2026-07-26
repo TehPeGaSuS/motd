@@ -10,6 +10,7 @@ import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioMetadataRepository
 import io.github.trevarj.motd.audio.AudioPlaybackController
+import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.audio.CachedAudioMetadata
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
@@ -747,9 +748,10 @@ class ChatViewModel @Inject constructor(
         if (contentPreviews.value.showLinkPreviews) audioMetadataRepository.cached(url) else null
 
     val audioPlaybackState = audioPlaybackController.state
+    val audioWaveforms = audioPlaybackController.waveforms
 
-    fun toggleAudio(attachment: AudioAttachment, networkId: Long?) =
-        audioPlaybackController.toggle(attachment, networkId)
+    fun toggleAudio(request: AudioPlaybackRequest) =
+        audioPlaybackController.toggle(request)
 
     fun seekAudio(attachment: AudioAttachment, positionMs: Long) =
         audioPlaybackController.seekTo(attachment.playbackId, positionMs)
@@ -758,6 +760,12 @@ class ChatViewModel @Inject constructor(
         audioPlaybackController.setSpeed(attachment.playbackId, speed)
 
     fun toggleActiveAudio() = audioPlaybackController.toggleActive()
+
+    fun cancelAudioLoading() = audioPlaybackController.cancelLoading()
+
+    fun retryActiveAudio() = audioPlaybackController.retryActive()
+
+    fun dismissActiveAudio() = audioPlaybackController.state.value.activeId?.let(audioPlaybackController::dismiss)
 
     fun refreshHistory(range: HistoryRefreshRange = HistoryRefreshRange.MISSING) {
         val currentBuffer = buffer.value ?: return

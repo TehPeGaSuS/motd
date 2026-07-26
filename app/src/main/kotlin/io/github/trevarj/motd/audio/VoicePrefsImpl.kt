@@ -2,6 +2,7 @@ package io.github.trevarj.motd.audio
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -15,6 +16,7 @@ import kotlinx.serialization.json.Json
 
 private val Context.voiceDataStore by preferencesDataStore("voice")
 private val CONFIG = stringPreferencesKey("config_v1")
+private val NOISE_FALLBACK_NOTICED = booleanPreferencesKey("noise_fallback_noticed")
 
 @Singleton
 class VoicePrefsImpl @Inject constructor(
@@ -41,6 +43,36 @@ class VoicePrefsImpl @Inject constructor(
         store.edit { prefs ->
             val current = prefs[CONFIG]?.let(::decode)?.getOrNull() ?: VoiceConfig()
             prefs[CONFIG] = encode(current.copy(rememberedDestination = config?.let(::normalizedConfig)))
+        }
+    }
+
+    override suspend fun setQuality(quality: VoiceRecordingQuality) {
+        update { it.copy(quality = quality) }
+    }
+
+    override suspend fun setNoiseReduction(enabled: Boolean) {
+        update { it.copy(noiseReduction = enabled) }
+    }
+
+    override suspend fun replace(config: VoiceConfig) {
+        store.edit { prefs -> prefs[CONFIG] = encode(config) }
+    }
+
+    override suspend fun takeNoiseFallbackNotice(): Boolean {
+        var show = false
+        store.edit { prefs ->
+            if (prefs[NOISE_FALLBACK_NOTICED] != true) {
+                prefs[NOISE_FALLBACK_NOTICED] = true
+                show = true
+            }
+        }
+        return show
+    }
+
+    private suspend fun update(transform: (VoiceConfig) -> VoiceConfig) {
+        store.edit { prefs ->
+            val current = prefs[CONFIG]?.let(::decode)?.getOrNull() ?: VoiceConfig()
+            prefs[CONFIG] = encode(transform(current))
         }
     }
 

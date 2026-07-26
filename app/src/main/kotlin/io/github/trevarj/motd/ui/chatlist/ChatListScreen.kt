@@ -115,12 +115,16 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.core.view.HapticFeedbackConstantsCompat
 import androidx.core.view.ViewCompat
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.audio.AudioPlaybackOrigin
+import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.components.ConnectionBanner
+import io.github.trevarj.motd.ui.components.AudioMiniPlayer
+import io.github.trevarj.motd.ui.components.AudioPlaybackViewModel
 import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.MotdMotion
@@ -135,6 +139,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChatListScreen(
     onOpenBuffer: (Long) -> Unit = {},
+    onOpenAudioOrigin: (AudioPlaybackOrigin) -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onOpenOnboarding: () -> Unit = {},
@@ -143,8 +148,10 @@ fun ChatListScreen(
     onOpenAddNetwork: () -> Unit = {},
     onOpenChannelList: (Long) -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
+    audioViewModel: AudioPlaybackViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val audioPlaybackState by audioViewModel.state.collectAsStateWithLifecycle()
 
     // No networks configured -> jump straight into onboarding (once loaded).
     LaunchedEffect(state.loading, state.networks.isEmpty()) {
@@ -155,6 +162,13 @@ fun ChatListScreen(
 
     ChatListContent(
         state = state,
+        audioPlaybackState = audioPlaybackState,
+        onAudioToggle = audioViewModel::toggle,
+        onAudioCancelLoading = audioViewModel::cancelLoading,
+        onAudioRetry = audioViewModel::retry,
+        onAudioDismiss = audioViewModel::dismiss,
+        onAudioSeek = audioViewModel::seek,
+        onOpenAudioOrigin = onOpenAudioOrigin,
         onOpenBuffer = onOpenBuffer,
         onOpenSettings = onOpenSettings,
         onOpenSearch = onOpenSearch,
@@ -182,6 +196,13 @@ fun ChatListScreen(
 @Composable
 fun ChatListContent(
     state: ChatListState,
+    audioPlaybackState: AudioPlaybackState = AudioPlaybackState(),
+    onAudioToggle: () -> Unit = {},
+    onAudioCancelLoading: () -> Unit = {},
+    onAudioRetry: () -> Unit = {},
+    onAudioDismiss: () -> Unit = {},
+    onAudioSeek: (Long) -> Unit = {},
+    onOpenAudioOrigin: (AudioPlaybackOrigin) -> Unit = {},
     onOpenBuffer: (Long) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSearch: () -> Unit,
@@ -349,6 +370,18 @@ fun ChatListContent(
                         contentDescription = stringResource(R.string.chatlist_new_conversation),
                     )
                 }
+            },
+            bottomBar = {
+                AudioMiniPlayer(
+                    state = audioPlaybackState,
+                    onToggle = onAudioToggle,
+                    onCancelLoading = onAudioCancelLoading,
+                    onRetry = onAudioRetry,
+                    onDismiss = onAudioDismiss,
+                    onSeek = onAudioSeek,
+                    onOpenOrigin = onOpenAudioOrigin,
+                    includeNetwork = state.networks.size > 1,
+                )
             },
         ) { padding ->
             Column(modifier = Modifier.fillMaxSize().padding(padding)) {

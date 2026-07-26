@@ -107,6 +107,16 @@ fun MotdNavGraph(
         composable<ChatListRoute> {
             ChatListScreen(
                 onOpenBuffer = { navController.navigate(ChatRoute(it)) },
+                onOpenAudioOrigin = { origin ->
+                    navController.navigate(
+                        ChatRoute(
+                            bufferId = origin.bufferId,
+                            jumpToMsgid = origin.msgid,
+                            jumpToTime = origin.serverTime,
+                            jumpToEventId = origin.eventId,
+                        ),
+                    ) { launchSingleTop = true }
+                },
                 onOpenSettings = { navController.navigate(SettingsRoute) },
                 onOpenSearch = { navController.navigate(SearchRoute()) },
                 onOpenOnboarding = { navController.navigate(OnboardingRoute) },
@@ -126,6 +136,11 @@ fun MotdNavGraph(
                 onOpenImage = { navController.navigate(ImageViewerRoute(it)) },
                 // /msg and /query navigate to the resolved QUERY buffer.
                 onOpenBuffer = { navController.navigate(ChatRoute(it)) },
+                onOpenAudioOrigin = { origin ->
+                    navController.navigate(
+                        ChatRoute(origin.bufferId, origin.msgid, origin.serverTime, origin.eventId),
+                    ) { launchSingleTop = true }
+                },
                 // Round 5: /list opens the channel browser for the current network.
                 onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
             )

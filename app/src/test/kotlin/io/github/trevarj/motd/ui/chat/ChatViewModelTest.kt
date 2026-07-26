@@ -1269,10 +1269,14 @@ class ChatViewModelTest {
 
     private class FakeAudioPlaybackController : AudioPlaybackController {
         override val state = MutableStateFlow(AudioPlaybackState())
-        override fun play(attachment: AudioAttachment, networkId: Long?, speed: Float) = Unit
-        override fun toggle(attachment: AudioAttachment, networkId: Long?) = Unit
+        override val waveforms = MutableStateFlow<Map<String, io.github.trevarj.motd.audio.AudioWaveform>>(emptyMap())
+        override fun play(request: io.github.trevarj.motd.audio.AudioPlaybackRequest, speed: Float) = Unit
+        override fun toggle(request: io.github.trevarj.motd.audio.AudioPlaybackRequest) = Unit
         override fun toggleActive() = Unit
         override fun pause() = Unit
+        override fun dismiss(itemId: String) = Unit
+        override fun cancelLoading() = Unit
+        override fun retryActive() = Unit
         override fun seekTo(itemId: String, positionMs: Long) = Unit
         override fun setSpeed(itemId: String, speed: Float) = Unit
     }

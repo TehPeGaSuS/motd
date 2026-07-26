@@ -51,15 +51,30 @@ class MessageLifecycleProbe(
     private val milestones: E2eMilestoneRecorder,
 ) {
     suspend fun awaitCanonical(token: String, bufferId: Long, timeoutMs: Long = 20_000): MessageEntity =
+        awaitCanonicalMatch(token, bufferId, timeoutMs) { it.text == token }
+
+    suspend fun awaitCanonicalContaining(
+        query: String,
+        expectedSubstring: String,
+        bufferId: Long,
+        timeoutMs: Long = 20_000,
+    ): MessageEntity = awaitCanonicalMatch(query, bufferId, timeoutMs) { it.text.contains(expectedSubstring) }
+
+    private suspend fun awaitCanonicalMatch(
+        query: String,
+        bufferId: Long,
+        timeoutMs: Long,
+        matches: (MessageEntity) -> Boolean,
+    ): MessageEntity =
         try {
             withTimeout(timeoutMs) {
-                search.search(token, bufferId).first { hits ->
+                search.search(query, bufferId).first { hits ->
                     hits.count { hit ->
-                        hit.message.isSelf && hit.message.text == token && hit.message.msgid != null &&
+                        hit.message.isSelf && matches(hit.message) && hit.message.msgid != null &&
                             hit.message.pendingLabel == null && !hit.message.failed
                     } == 1
                 }.single { hit ->
-                    hit.message.isSelf && hit.message.text == token && hit.message.msgid != null &&
+                    hit.message.isSelf && matches(hit.message) && hit.message.msgid != null &&
                         hit.message.pendingLabel == null && !hit.message.failed
                 }.message.also { milestones.record("canonical_message", "buffer=$bufferId event=${it.id}") }
             }

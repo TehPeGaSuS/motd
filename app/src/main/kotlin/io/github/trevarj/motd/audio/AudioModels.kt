@@ -48,6 +48,7 @@ data class AudioAttachment(
     val expiry: String? = null,
     val cleartextHttp: Boolean = url.startsWith("http://", ignoreCase = true),
     val discoveredByHead: Boolean = false,
+    val waveform: AudioWaveform? = audioWaveformFromUrl(url),
 ) {
     val playbackId: String = "${if (voice) "voice" else "audio"}:$url"
 }

@@ -7,6 +7,8 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
+import io.github.trevarj.motd.audio.VoiceSendProgress
+import io.github.trevarj.motd.audio.VoiceSendRequest
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.e2e.BootstrappedNetwork
 import io.github.trevarj.motd.e2e.BufferProbe
@@ -24,10 +26,12 @@ import io.github.trevarj.motd.e2e.robots.SettingsRobot
 import io.github.trevarj.motd.e2e.robots.ThemeSheetRobot
 import io.github.trevarj.motd.e2e.robots.TimelineRobot
 import io.github.trevarj.motd.e2e.robots.NetworksRobot
+import java.io.File
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -107,6 +111,33 @@ class RequiredHeadlessE2eTest {
         val after = runBlocking { probe.awaitCanonical(token, bufferId) }
         assertEquals(canonical.id, after.id)
         TimelineRobot(compose).assertMessage(token)
+
+        val fixture = File(
+            InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,
+            "required-${bootstrap.args.runId}.ogg",
+        )
+        fixture.delete()
+        assertTrue(fixture.createNewFile())
+        try {
+            val upload = runBlocking {
+                bootstrap.seams.voiceMessages().send(
+                    VoiceSendRequest(
+                        bufferId = bufferId,
+                        file = fixture,
+                        durationMs = 1_000,
+                        mimeType = "audio/ogg",
+                        extension = ".ogg",
+                        sizeBytes = 0,
+                        encrypt = false,
+                    ),
+                ).filterIsInstance<VoiceSendProgress.Complete>().first()
+            }
+            runBlocking { probe.awaitCanonicalContaining("voice", upload.url, bufferId) }
+            TimelineRobot(compose).assertCompactAudioPlayer()
+            milestones.record("filehost_audio_rendered", "buffer=$bufferId")
+        } finally {
+            fixture.delete()
+        }
     }
 
     @Test

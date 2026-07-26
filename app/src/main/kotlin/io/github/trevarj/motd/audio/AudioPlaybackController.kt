@@ -2,6 +2,24 @@ package io.github.trevarj.motd.audio
 
 import kotlinx.coroutines.flow.StateFlow
 
+data class AudioPlaybackOrigin(
+    val bufferId: Long,
+    val networkId: Long,
+    val conversation: String,
+    val sender: String,
+    val isSelf: Boolean,
+    val directMessage: Boolean,
+    val eventId: Long,
+    val msgid: String?,
+    val serverTime: Long,
+)
+
+data class AudioPlaybackRequest(
+    val attachment: AudioAttachment,
+    val networkId: Long?,
+    val origin: AudioPlaybackOrigin? = null,
+)
+
 data class AudioPlaybackState(
     val activeId: String? = null,
     val title: String? = null,
@@ -13,14 +31,23 @@ data class AudioPlaybackState(
     val bufferedMs: Long = 0,
     val speed: Float = 1f,
     val error: String? = null,
+    val attachment: AudioAttachment? = null,
+    val origin: AudioPlaybackOrigin? = null,
+    val networkName: String? = null,
+    val loadingFraction: Float? = null,
+    val waveform: AudioWaveform? = attachment?.waveform,
 )
 
 interface AudioPlaybackController {
     val state: StateFlow<AudioPlaybackState>
-    fun play(attachment: AudioAttachment, networkId: Long?, speed: Float = 1f)
-    fun toggle(attachment: AudioAttachment, networkId: Long?)
+    val waveforms: StateFlow<Map<String, AudioWaveform>>
+    fun play(request: AudioPlaybackRequest, speed: Float = 1f)
+    fun toggle(request: AudioPlaybackRequest)
     fun toggleActive()
     fun pause()
+    fun dismiss(itemId: String)
+    fun cancelLoading()
+    fun retryActive()
     fun seekTo(itemId: String, positionMs: Long)
     fun setSpeed(itemId: String, speed: Float)
 }

@@ -11,6 +11,30 @@ import org.junit.Test
 
 class ComposerPanelTest {
     @Test
+    fun `voice gesture locks on a dominant upward swipe`() {
+        assertEquals(
+            VoiceGestureTarget.LOCK,
+            voiceGestureTarget(deltaX = -30f, deltaY = -90f, cancelThreshold = 72f, lockThreshold = 72f),
+        )
+    }
+
+    @Test
+    fun `voice gesture cancels on a left swipe`() {
+        assertEquals(
+            VoiceGestureTarget.CANCEL,
+            voiceGestureTarget(deltaX = -90f, deltaY = -20f, cancelThreshold = 72f, lockThreshold = 72f),
+        )
+    }
+
+    @Test
+    fun `voice gesture ignores movement below both thresholds`() {
+        assertEquals(
+            VoiceGestureTarget.NONE,
+            voiceGestureTarget(deltaX = -40f, deltaY = -40f, cancelThreshold = 72f, lockThreshold = 72f),
+        )
+    }
+
+    @Test
     fun autocomplete_popup_is_placed_above_the_composer_without_layout_height() {
         assertEquals(
             IntOffset(12, 456),

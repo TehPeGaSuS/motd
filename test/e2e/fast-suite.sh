@@ -15,8 +15,8 @@ STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 . "$E2E_DIR/fast-suite-privacy.sh"
 
 mkdir -p "$OUT_DIR"
-rm -rf "$OUT_DIR/required-e2e"
-rm -f "$SUMMARY" "$OUT_DIR/pretest.json"
+# Each audit covers only this attempt; stale failure captures are intentionally not admissible.
+find "$OUT_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 printf '{"phase":"launcher_started"}\n' >"$OUT_DIR/fixture.jsonl"
 cd "$REPO"
 
@@ -81,7 +81,7 @@ discover_direct_methods() {
 }
 
 run_direct_suite() {
-  local app_apk test_apk runner method rc=0
+  local app_apk test_apk runner method channel_arg instrument_output rc=0
   local -a methods
   app_apk="${FAST_E2E_APP_APK:-$REPO/app/build/outputs/apk/foss/e2e/app-foss-e2e.apk}"
   test_apk="${FAST_E2E_TEST_APK:-$REPO/app/build/outputs/apk/androidTest/foss/e2e/app-foss-e2e-androidTest.apk}"
@@ -90,15 +90,23 @@ run_direct_suite() {
   e2e_adb install -r "$test_apk" >/dev/null
   runner="$(e2e_adb shell pm list instrumentation | sed -n "s#^instrumentation:\([^ ]*\) (target=${FAST_E2E_TARGET_PACKAGE})#\1#p" | head -1 | tr -d '\r')"
   [ -n "$runner" ] || return 1
+  channel_arg="'$FAST_E2E_CHANNEL'"
   mapfile -t methods < <(discover_direct_methods "$runner")
   [ "${#methods[@]}" -eq 3 ] || { echo "required fast suite must discover exactly 3 Class#method cases" >&2; return 1; }
   for method in "${methods[@]}"; do
     e2e_adb shell pm clear "$FAST_E2E_TARGET_PACKAGE" >/dev/null
-    e2e_adb shell am instrument -w -r -e class "$method" \
+    instrument_output="$(e2e_adb shell am instrument -w -r -e class "$method" \
       -e sojuHost "$FAST_E2E_SOJU_HOST" -e sojuPort "$FAST_E2E_SOJU_PORT" \
       -e sojuUser "$FAST_E2E_SOJU_USER" -e sojuPassword "$FAST_E2E_SOJU_PASSWORD" \
-      -e nick "$FAST_E2E_NICK" -e channel "$FAST_E2E_CHANNEL" \
-      -e sojuTlsSha256 "$TLS_SHA256" -e e2eRunId "$FAST_E2E_RUN_ID" "$runner" >/dev/null || rc=$?
+      -e nick "$FAST_E2E_NICK" -e channel "$channel_arg" \
+      -e sojuTlsSha256 "$TLS_SHA256" -e e2eRunId "$FAST_E2E_RUN_ID" "$runner" 2>&1)" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      printf '%s\n' "$instrument_output" | tr -d '\r' | grep -qx 'INSTRUMENTATION_CODE: -1' || rc=1
+      if printf '%s\n' "$instrument_output" | grep -Eq 'INSTRUMENTATION_(FAILED|ABORTED)|FAILURES!!!|Process crashed'; then
+        rc=1
+      fi
+    fi
+    unset instrument_output
     e2e_pull_required_e2e_artifacts "$OUT_DIR"
     [ "$rc" -eq 0 ] || return "$rc"
   done
@@ -122,7 +130,11 @@ if [ "$MODE" != direct ] && [ "$rc" -eq 0 ]; then assert_three_gradle_results ||
 declared="$(pretest_classification)"
 classification="$(e2e_classify_attempt "$OUT_DIR" "$declared")"
 started=false
-e2e_attempt_started "$OUT_DIR" && started=true
+if [ "$MODE" = direct ] && [ "$rc" -eq 0 ]; then
+  started=true
+else
+  e2e_attempt_started "$OUT_DIR" && started=true
+fi
 if [ "$rc" -ne 0 ] && [ "$started" = false ] && e2e_retry_allowed "$classification"; then
   attempts=2
   rc=0

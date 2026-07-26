@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import androidx.core.net.toUri
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,24 +26,24 @@ import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +58,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioPlaybackState
+import io.github.trevarj.motd.audio.AudioPlaybackOrigin
+import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.ui.chat.formatBytes
 
@@ -72,6 +75,8 @@ fun AudioAttachmentPlayers(
     onSeek: (AudioAttachment, Long) -> Unit,
     onSpeed: (AudioAttachment, Float) -> Unit,
     modifier: Modifier = Modifier,
+    origin: AudioPlaybackOrigin? = null,
+    derivedWaveforms: Map<String, AudioWaveform> = emptyMap(),
 ) {
     if (attachments.isEmpty()) return
     var expanded by remember(attachments) { mutableStateOf(false) }
@@ -81,17 +86,19 @@ fun AudioAttachmentPlayers(
         horizontalAlignment = if (isSelf) Alignment.End else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        visible.forEachIndexed { index, attachment ->
+        visible.forEach { attachment ->
             AudioAttachmentPlayer(
                 attachment = attachment,
                 playbackState = playbackState,
                 networkId = networkId,
+                origin = origin,
+                derivedWaveform = derivedWaveforms[attachment.playbackId],
                 onToggle = onToggle,
                 onSeek = onSeek,
                 onSpeed = onSpeed,
                 modifier = Modifier
                     .widthIn(max = 360.dp)
-                    .testTag("audio_player_${index}_${attachment.playbackId.hashCode()}"),
+                    .testTag("audio_player"),
             )
         }
         if (!expanded && attachments.size > MAX_COLLAPSED_AUDIO_PLAYERS) {
@@ -113,6 +120,8 @@ private fun AudioAttachmentPlayer(
     attachment: AudioAttachment,
     playbackState: AudioPlaybackState,
     networkId: Long?,
+    origin: AudioPlaybackOrigin?,
+    derivedWaveform: AudioWaveform?,
     onToggle: (AudioAttachment, Long?) -> Unit,
     onSeek: (AudioAttachment, Long) -> Unit,
     onSpeed: (AudioAttachment, Float) -> Unit,
@@ -121,12 +130,30 @@ private fun AudioAttachmentPlayer(
     val context = LocalContext.current
     val active = playbackState.activeId == attachment.playbackId
     val playing = active && playbackState.playing
+    val loading = active && playbackState.loading
+    val error = playbackState.error.takeIf { active }
     val duration = (if (active) playbackState.durationMs else attachment.durationMs) ?: attachment.durationMs
     val position = if (active) playbackState.positionMs else 0L
     val speed = if (active) playbackState.speed else 1f
+    val bufferedFraction = if (active && duration != null && duration > 0) {
+        playbackState.loadingFraction
+            ?: (playbackState.bufferedMs.toFloat() / duration).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val waveform = if (active) {
+        playbackState.waveform ?: attachment.waveform ?: derivedWaveform
+    } else {
+        attachment.waveform ?: derivedWaveform
+    }
     var showDetails by remember { mutableStateOf(false) }
     var confirmHttp by remember { mutableStateOf(false) }
-    var scrubValue by remember(active, position) { mutableFloatStateOf(position.toFloat()) }
+    var scrubValue by remember(attachment.playbackId) { mutableFloatStateOf(position.toFloat()) }
+    var scrubbing by remember(attachment.playbackId) { mutableStateOf(false) }
+
+    LaunchedEffect(active, position) {
+        if (!scrubbing) scrubValue = position.toFloat()
+    }
 
     Surface(
         modifier = modifier.combinedClickable(
@@ -137,28 +164,54 @@ private fun AudioAttachmentPlayer(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 1.dp,
     ) {
-        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(
-                    onClick = {
-                        if (attachment.cleartextHttp && !active) confirmHttp = true else onToggle(attachment, networkId)
-                    },
-                    modifier = Modifier.size(42.dp),
-                ) {
-                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
-                        Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+        Row(
+            Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            IconButton(
+                onClick = {
+                    if (attachment.cleartextHttp && !active) confirmHttp = true else onToggle(attachment, networkId)
+                },
+                modifier = Modifier.size(42.dp),
+            ) {
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
+                    Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+                        if (loading) {
+                            playbackState.loadingFraction?.let { fraction ->
+                                CircularProgressIndicator(
+                                    progress = { fraction },
+                                    modifier = Modifier.size(20.dp),
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    strokeWidth = 2.5.dp,
+                                )
+                            } ?: CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 2.5.dp,
+                            )
+                        } else {
                             Icon(
-                                if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                contentDescription = if (playing) "Pause audio" else "Play audio",
+                                imageVector = when {
+                                    error != null -> Icons.Filled.Refresh
+                                    playing -> Icons.Filled.Pause
+                                    else -> Icons.Filled.PlayArrow
+                                },
+                                contentDescription = when {
+                                    error != null -> "Retry audio"
+                                    playing -> "Pause audio"
+                                    else -> "Play audio"
+                                },
                                 tint = MaterialTheme.colorScheme.onPrimary,
                             )
                         }
                     }
                 }
-                Column(Modifier.weight(1f).padding(start = 6.dp)) {
+            }
+            Column(Modifier.weight(1f).padding(start = 6.dp)) {
+                if (!attachment.voice) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            if (attachment.voice) Icons.Outlined.GraphicEq else Icons.Outlined.Info,
+                            Icons.Outlined.Info,
                             null,
                             modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -172,45 +225,68 @@ private fun AudioAttachmentPlayer(
                             fontWeight = FontWeight.Medium,
                         )
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "${formatAudioDuration(position)} / ${formatAudioDuration(duration)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (attachment.encrypted) {
+                }
+                val scrubDuration = (duration ?: 1L).coerceAtLeast(1L)
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    WaveformScrubber(
+                        value = (scrubValue / scrubDuration).coerceIn(0f, 1f),
+                        onValueChange = { fraction ->
+                            scrubbing = true
+                            scrubValue = fraction * scrubDuration
+                        },
+                        onValueChangeFinished = {
+                            onSeek(attachment, scrubValue.toLong())
+                            scrubbing = false
+                        },
+                        seed = attachment.playbackId,
+                        enabled = active && !loading && error == null && duration != null && duration > 0,
+                        bufferedValue = bufferedFraction,
+                        waveform = waveform,
+                        modifier = Modifier
+                            .padding(end = if (attachment.voice && active) 48.dp else 0.dp)
+                            .testTag("audio_player_scrubber"),
+                    )
+                    if (attachment.voice && active) {
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .clickable { onSpeed(attachment, nextVoiceSpeed(speed)) }
+                                .testTag("audio_speed"),
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        ) {
                             Text(
-                                " · encrypted",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                        if (attachment.cleartextHttp) {
-                            Icon(
-                                Icons.Outlined.Warning,
-                                null,
-                                modifier = Modifier.padding(start = 4.dp).size(14.dp),
-                                tint = MaterialTheme.colorScheme.error,
+                                "${speed.cleanSpeed()}x",
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
                             )
                         }
                     }
                 }
-            }
-            Slider(
-                value = scrubValue.coerceIn(0f, (duration ?: 1L).coerceAtLeast(1L).toFloat()),
-                onValueChange = { scrubValue = it },
-                onValueChangeFinished = { onSeek(attachment, scrubValue.toLong()) },
-                valueRange = 0f..(duration ?: 1L).coerceAtLeast(1L).toFloat(),
-                modifier = Modifier.height(28.dp).testTag("audio_player_scrubber"),
-            )
-            if (attachment.voice) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(1f, 1.5f, 2f).forEach { option ->
-                        FilterChip(
-                            selected = active && speed == option,
-                            onClick = { onSpeed(attachment, option) },
-                            label = { Text("${option.cleanSpeed()}x") },
-                            modifier = Modifier.testTag("audio_speed_${option.cleanSpeed()}"),
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        error?.let { "Couldn’t play · $it" }
+                            ?: "${formatAudioDuration(position)} / ${formatAudioDuration(duration)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (error == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (attachment.encrypted) {
+                        Text(
+                            " · encrypted",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    if (attachment.cleartextHttp) {
+                        Icon(
+                            Icons.Outlined.Warning,
+                            null,
+                            modifier = Modifier.padding(start = 4.dp).size(14.dp),
+                            tint = MaterialTheme.colorScheme.error,
                         )
                     }
                 }
@@ -239,6 +315,7 @@ private fun AudioAttachmentPlayer(
         ModalBottomSheet(onDismissRequest = { showDetails = false }) {
             AudioDetailsSheet(
                 attachment = attachment,
+                origin = origin,
                 onCopy = {
                     context.getSystemService(ClipboardManager::class.java)
                         ?.setPrimaryClip(ClipData.newPlainText(attachment.title, attachment.displayUrl))
@@ -253,33 +330,45 @@ private fun AudioAttachmentPlayer(
 }
 
 @Composable
-private fun AudioDetailsSheet(
+fun AudioDetailsSheet(
     attachment: AudioAttachment,
-    onCopy: () -> Unit,
-    onOpen: () -> Unit,
-    onSave: () -> Unit,
+    origin: AudioPlaybackOrigin? = null,
+    onCopy: (() -> Unit)? = null,
+    onOpen: (() -> Unit)? = null,
+    onSave: (() -> Unit)? = null,
 ) {
+    val context = LocalContext.current
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text("Audio", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         DetailRow("Link", attachment.displayUrl)
+        origin?.let {
+            DetailRow("From", if (it.isSelf) "You" else it.sender)
+            DetailRow("Conversation", it.conversation)
+        }
         DetailRow("Type", attachment.mimeType ?: "Unknown")
         DetailRow("Duration", formatAudioDuration(attachment.durationMs))
         DetailRow("Size", attachment.sizeBytes?.let(::formatBytes) ?: "Unknown")
         DetailRow("Expires", attachment.expiry ?: "Unknown")
         DetailRow("Encryption", if (attachment.encrypted) "Host-blind key in URL fragment" else "Off")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onCopy) {
+            TextButton(onClick = onCopy ?: {
+                context.getSystemService(ClipboardManager::class.java)
+                    ?.setPrimaryClip(ClipData.newPlainText(attachment.title, attachment.displayUrl))
+                Unit
+            }) {
                 Icon(Icons.Outlined.ContentCopy, null)
                 Spacer(Modifier.width(6.dp))
                 Text("Copy")
             }
-            TextButton(onClick = onOpen) {
+            TextButton(onClick = onOpen ?: {
+                context.startActivity(Intent(Intent.ACTION_VIEW, attachment.displayUrl.toUri()))
+            }) {
                 Icon(Icons.AutoMirrored.Outlined.OpenInNew, null)
                 Spacer(Modifier.width(6.dp))
                 Text("Open")
             }
-            TextButton(onClick = onSave) {
+            TextButton(onClick = onSave ?: { enqueueDownload(context, attachment) }) {
                 Icon(Icons.Outlined.Download, null)
                 Spacer(Modifier.width(6.dp))
                 Text("Save")
@@ -299,6 +388,12 @@ private fun DetailRow(label: String, value: String) {
 
 private fun Float.cleanSpeed(): String =
     if (this == toInt().toFloat()) toInt().toString() else toString()
+
+internal fun nextVoiceSpeed(speed: Float): Float = when {
+    speed < 1.25f -> 1.5f
+    speed < 1.75f -> 2f
+    else -> 1f
+}
 
 private fun enqueueDownload(context: Context, attachment: AudioAttachment) {
     val request = DownloadManager.Request(attachment.url.substringBefore('#').toUri())

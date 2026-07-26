@@ -63,6 +63,9 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioPlaybackState
+import io.github.trevarj.motd.audio.AudioPlaybackOrigin
+import io.github.trevarj.motd.audio.AudioPlaybackRequest
+import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.audio.CachedAudioMetadata
 import io.github.trevarj.motd.audio.displayTextForAudioMessage
 import io.github.trevarj.motd.audio.extensionlessAudioCandidates
@@ -205,6 +208,9 @@ fun MessageList(
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
     modifier: Modifier = Modifier,
+    bufferId: Long? = null,
+    conversationName: String? = null,
+    directMessage: Boolean = false,
     canRetry: (MessageEntity) -> Boolean = { true },
     loadPreview: suspend (String) -> LinkPreview?,
     richContentReady: Boolean,
@@ -215,7 +221,8 @@ fun MessageList(
     loadAudioMetadata: suspend (String, Long?) -> AudioMetadata? = { _, _ -> null },
     cachedAudioMetadata: (String) -> CachedAudioMetadata? = { null },
     audioPlaybackState: AudioPlaybackState = AudioPlaybackState(),
-    onAudioToggle: (AudioAttachment, Long?) -> Unit = { _, _ -> },
+    audioWaveforms: Map<String, AudioWaveform> = emptyMap(),
+    onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
     onAudioSeek: (AudioAttachment, Long) -> Unit = { _, _ -> },
     onAudioSpeed: (AudioAttachment, Float) -> Unit = { _, _ -> },
     liveEntryId: Long? = null,
@@ -353,6 +360,9 @@ fun MessageList(
                     MessageRow(
                         msg = msg,
                         networkId = networkId,
+                        bufferId = bufferId,
+                        conversationName = conversationName,
+                        directMessage = directMessage,
                         older = older,
                         formatTime = formatMessageTime,
                         readMarkerTime = readMarkerTime,
@@ -378,6 +388,7 @@ fun MessageList(
                         loadAudioMetadata = loadAudioMetadata,
                         cachedAudioMetadata = cachedAudioMetadata,
                         audioPlaybackState = audioPlaybackState,
+                        audioWaveforms = audioWaveforms,
                         onAudioToggle = onAudioToggle,
                         onAudioSeek = onAudioSeek,
                         onAudioSpeed = onAudioSpeed,
@@ -664,6 +675,9 @@ private sealed interface PreviewState {
 private fun MessageRow(
     msg: MessageEntity,
     networkId: Long?,
+    bufferId: Long?,
+    conversationName: String?,
+    directMessage: Boolean,
     older: MessageEntity?,
     formatTime: (Long) -> String,
     readMarkerTime: TimelineAnchor?,
@@ -686,7 +700,8 @@ private fun MessageRow(
     loadAudioMetadata: suspend (String, Long?) -> AudioMetadata?,
     cachedAudioMetadata: (String) -> CachedAudioMetadata?,
     audioPlaybackState: AudioPlaybackState,
-    onAudioToggle: (AudioAttachment, Long?) -> Unit,
+    audioWaveforms: Map<String, AudioWaveform>,
+    onAudioToggle: (AudioPlaybackRequest) -> Unit,
     onAudioSeek: (AudioAttachment, Long) -> Unit,
     onAudioSpeed: (AudioAttachment, Float) -> Unit,
     onOpenLink: (String) -> Unit,
@@ -886,9 +901,42 @@ private fun MessageRow(
         AudioAttachmentPlayers(
             attachments = audioAttachments,
             playbackState = audioPlaybackState,
+            derivedWaveforms = audioWaveforms,
             networkId = networkId,
             isSelf = msg.isSelf,
-            onToggle = onAudioToggle,
+            origin = if (bufferId != null && networkId != null && conversationName != null) {
+                AudioPlaybackOrigin(
+                    bufferId = bufferId,
+                    networkId = networkId,
+                    conversation = conversationName,
+                    sender = msg.sender,
+                    isSelf = msg.isSelf,
+                    directMessage = directMessage,
+                    eventId = msg.id,
+                    msgid = msg.msgid,
+                    serverTime = msg.serverTime,
+                )
+            } else {
+                null
+            },
+            onToggle = { attachment, routeNetworkId ->
+                val origin = if (bufferId != null && networkId != null && conversationName != null) {
+                    AudioPlaybackOrigin(
+                        bufferId = bufferId,
+                        networkId = networkId,
+                        conversation = conversationName,
+                        sender = msg.sender,
+                        isSelf = msg.isSelf,
+                        directMessage = directMessage,
+                        eventId = msg.id,
+                        msgid = msg.msgid,
+                        serverTime = msg.serverTime,
+                    )
+                } else {
+                    null
+                }
+                onAudioToggle(AudioPlaybackRequest(attachment, routeNetworkId, origin))
+            },
             onSeek = onAudioSeek,
             onSpeed = onAudioSpeed,
         )

@@ -3,6 +3,7 @@ package io.github.trevarj.motd.di
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import io.github.trevarj.motd.audio.VoiceMessageSender
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
@@ -18,4 +19,5 @@ interface RequiredE2eEntryPoint {
     fun search(): SearchRepository
     fun certTrust(): CertTrustStore
     fun connections(): ConnectionManager
+    fun voiceMessages(): VoiceMessageSender
 }

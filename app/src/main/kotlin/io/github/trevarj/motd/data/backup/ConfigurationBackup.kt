@@ -385,8 +385,7 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
         settings.replies?.let { replyPrefs.setVisibleChannelPrefix(it.visibleChannelPrefix) }
         settings.attachments?.let { attachmentPrefs.setConfig(it) }
         settings.voice?.let {
-            voicePrefs.setEncryptionDefault(it.encryptionDefault)
-            voicePrefs.setRememberedDestination(it.rememberedDestination)
+            voicePrefs.replace(it)
         }
         settings.showSharedAvatars?.let { avatarPrefs.setShowSharedAvatars(it) }
         settings.pushProvider?.let { pushProviderPrefs.setProvider(it) }

@@ -5,17 +5,26 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class AudioPlaybackService : MediaSessionService() {
+    @Inject lateinit var audioMediaCache: AudioMediaCache
     private var mediaSession: MediaSession? = null
     private var player: ExoPlayer? = null
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
-        val exoPlayer = ExoPlayer.Builder(this).build().apply {
+        val mediaSourceFactory = DefaultMediaSourceFactory(audioMediaCache.dataSourceFactory())
+        val exoPlayer = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .build()
+            .apply {
             setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)

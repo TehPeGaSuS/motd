@@ -212,6 +212,19 @@ private const val EMOJI_IME_RESTORE_TIMEOUT_MILLIS = 1_500L
 private const val IME_SETTLED_FRAME_COUNT = 3
 private val COMPACT_EMOJI_PICKER_HEIGHT = 250.dp
 
+internal enum class VoiceGestureTarget { NONE, CANCEL, LOCK }
+
+internal fun voiceGestureTarget(
+    deltaX: Float,
+    deltaY: Float,
+    cancelThreshold: Float,
+    lockThreshold: Float,
+): VoiceGestureTarget = when {
+    deltaY <= -lockThreshold && -deltaY >= -deltaX -> VoiceGestureTarget.LOCK
+    deltaX <= -cancelThreshold -> VoiceGestureTarget.CANCEL
+    else -> VoiceGestureTarget.NONE
+}
+
 /** Modern chat composer with embedded tools and a stable, separate primary send action. */
 @Composable
 fun Composer(
@@ -522,53 +535,65 @@ private fun VoiceRecordButton(
     val density = LocalDensity.current
     val cancelPx = with(density) { 72.dp.toPx() }
     val lockPx = with(density) { 72.dp.toPx() }
+    val latestRecording by rememberUpdatedState(recording)
+    val latestTap by rememberUpdatedState(onTap)
+    val latestHoldStart by rememberUpdatedState(onHoldStart)
+    val latestHoldStop by rememberUpdatedState(onHoldStop)
+    val latestHoldCancel by rememberUpdatedState(onHoldCancel)
+    val latestLock by rememberUpdatedState(onLock)
     FilledIconButton(
         onClick = {},
         enabled = enabled,
         modifier = Modifier
             .size(48.dp)
             .testTag("chat_composer_voice")
-            .pointerInput(enabled, recording, cancelPx, lockPx) {
+            .pointerInput(enabled, cancelPx, lockPx) {
                 if (!enabled) return@pointerInput
                 coroutineScope {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        if (recording) {
+                        if (latestRecording) {
                             waitForUpOrCancellation()
-                            onHoldStop()
+                            latestHoldStop()
                             return@awaitEachGesture
                         }
                         var started = false
                         var cancelled = false
-                        var locked = recording
+                        var locked = false
                         val longPress = this@coroutineScope.launch {
                             delay(viewConfiguration.longPressTimeoutMillis)
                             started = true
-                            onHoldStart()
+                            latestHoldStart()
                         }
                         while (true) {
                             val event = awaitPointerEvent()
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
                             val delta = change.position - down.position
-                            if (started && !locked && delta.y <= -lockPx) {
-                                locked = true
-                                change.consume()
-                                onLock()
-                            }
-                            if (started && delta.x <= -cancelPx) {
-                                cancelled = true
-                                change.consume()
-                                onHoldCancel()
-                                break
+                            if (started && !locked) {
+                                when (voiceGestureTarget(delta.x, delta.y, cancelPx, lockPx)) {
+                                    VoiceGestureTarget.LOCK -> {
+                                        locked = true
+                                        change.consume()
+                                        latestLock()
+                                        break
+                                    }
+                                    VoiceGestureTarget.CANCEL -> {
+                                        cancelled = true
+                                        change.consume()
+                                        latestHoldCancel()
+                                        break
+                                    }
+                                    VoiceGestureTarget.NONE -> Unit
+                                }
                             }
                             if (!change.pressed) break
                         }
                         longPress.cancel()
                         when {
-                            !started -> onTap()
+                            !started -> latestTap()
                             cancelled -> Unit
                             locked -> Unit
-                            else -> onHoldStop()
+                            else -> latestHoldStop()
                         }
                     }
                 }

@@ -29,5 +29,5 @@ RUN mkdir -p /var/lib/soju /etc/soju/tls
 COPY soju.config   /etc/soju/soju.config
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
-EXPOSE 6697
+EXPOSE 6696 6697
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

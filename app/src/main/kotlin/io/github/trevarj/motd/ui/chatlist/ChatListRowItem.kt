@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.Icon
@@ -40,6 +41,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.audio.displayTextForAudioMessage
+import io.github.trevarj.motd.audio.formatAudioDuration
+import io.github.trevarj.motd.audio.parseAudioAttachments
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.service.PresenceState
@@ -68,6 +72,21 @@ internal fun chatListBadgeState(row: ChatListRow): ChatListBadgeState =
             unread = row.unreadCount.takeIf { it > 0 },
         )
     }
+
+internal sealed interface ChatListMessagePreview {
+    data class Text(val value: String) : ChatListMessagePreview
+    data class Voice(val durationMs: Long?) : ChatListMessagePreview
+}
+
+internal fun chatListMessagePreview(text: String?): ChatListMessagePreview {
+    val value = text.orEmpty()
+    val attachments = parseAudioAttachments(value)
+    val voice = attachments.singleOrNull()?.takeIf { attachment ->
+        attachment.voice && displayTextForAudioMessage(value, attachments).isBlank()
+    }
+    return voice?.let { ChatListMessagePreview.Voice(it.durationMs) }
+        ?: ChatListMessagePreview.Text(value)
+}
 
 /**
  * One chat-list row: avatar, display name, supporting network/last-message line, relative time, and
@@ -207,6 +226,7 @@ fun ChatListRowItem(
                 // Channel previews lead with a sender label chip (no colon, which collided
                 // with nick mentions in the message text); queries read cleaner without it.
                 val lastMessage = row.lastMessageText
+                val preview = chatListMessagePreview(lastMessage)
                 val sender = row.lastMessageSender
                     ?.takeIf { row.type == BufferType.CHANNEL && lastMessage != null }
                 if (sender != null) {
@@ -220,8 +240,30 @@ fun ChatListRowItem(
                     )
                     Spacer(Modifier.width(6.dp))
                 }
+                if (preview is ChatListMessagePreview.Voice) {
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(5.dp))
+                }
                 Text(
-                    text = lastMessage.orEmpty(),
+                    text = when (preview) {
+                        is ChatListMessagePreview.Text -> preview.value
+                        is ChatListMessagePreview.Voice -> buildString {
+                            append(stringResource(R.string.chatlist_voice_message))
+                            preview.durationMs?.let { append(" · ${formatAudioDuration(it)}") }
+                        }
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = if (isUnread) FontWeight.Medium else FontWeight.Normal,
                     color = if (isUnread) {

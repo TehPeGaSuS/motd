@@ -5,13 +5,13 @@ import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploader
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
-import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.attachment.normalizedConfig
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.SendAcceptance
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.nio.charset.StandardCharsets
@@ -24,7 +24,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.withContext
@@ -36,6 +35,7 @@ data class VoiceSendRequest(
     val mimeType: String,
     val extension: String,
     val sizeBytes: Long,
+    val waveform: AudioWaveform = AudioWaveform.EMPTY,
     val encrypt: Boolean,
     val destination: PasteBackendConfig? = null,
 )
@@ -55,7 +55,6 @@ class VoiceMessageSenderImpl @Inject constructor(
     private val connectionManager: ConnectionManager,
     private val attachmentPrefs: AttachmentPrefs,
     private val attachmentUploader: AttachmentUploader,
-    private val voicePrefs: VoicePrefs,
     private val routeProvider: NetworkMediaRouteProvider,
     private val crypto: VoiceCrypto,
 ) : VoiceMessageSender {
@@ -79,21 +78,32 @@ class VoiceMessageSenderImpl @Inject constructor(
         } finally {
             encrypted?.file?.delete()
         }
-        val wireUrl = if (encrypted != null) {
+        val baseWireUrl = if (encrypted != null) {
             "${record.url}#${encrypted.keyFragment}"
         } else {
             record.url
         }
-        val wireText = voiceFallback(
+        val waveformUrl = appendAudioWaveform(baseWireUrl, request.waveform)
+        val waveformText = voiceFallback(
+            durationMs = request.durationMs,
+            mimeType = request.mimeType,
+            url = waveformUrl,
+            encrypted = encrypted != null,
+            expiry = record.expiry,
+        )
+        val wireUrl = if (wireBytes(buffer.name, waveformText) <= MAX_IRC_WIRE_BYTES) waveformUrl else baseWireUrl
+        val wireText = if (wireUrl == waveformUrl) waveformText else voiceFallback(
             durationMs = request.durationMs,
             mimeType = request.mimeType,
             url = wireUrl,
             encrypted = encrypted != null,
             expiry = record.expiry,
         )
-        when (connectionManager.sendMessage(request.bufferId, wireText)) {
+        when (val acceptance = connectionManager.sendMessage(request.bufferId, wireText)) {
             is SendAcceptance.Accepted -> send(VoiceSendProgress.Complete(wireUrl))
-            is SendAcceptance.Rejected -> throw VoiceSendException("Voice message could not be sent.")
+            is SendAcceptance.Rejected -> throw VoiceSendException(
+                "Upload finished, but IRC rejected the message (${acceptance.reason.name.lowercase()}).",
+            )
         }
     }
 
@@ -106,24 +116,33 @@ class VoiceMessageSenderImpl @Inject constructor(
         destination: PasteBackendConfig?,
         progress: suspend (Long, Long?) -> Unit,
     ): VoiceUploadRecord {
-        val fileHost = fileHostEndpoint(networkId)
-        if (fileHost != null) {
-            return uploadToFileHost(networkId, fileHost, file, name, mimeType, sizeBytes, progress)
+        val selected = destination?.let(::normalizedConfig)
+        if (selected == null) {
+            val fileHost = fileHostEndpoint(networkId)
+                ?: throw VoiceSendException(
+                    "This IRC network is not advertising a Soju file host. Choose another upload destination.",
+                )
+            return try {
+                uploadToFileHost(networkId, fileHost, file, name, mimeType, sizeBytes, progress)
+            } catch (error: VoiceSendException) {
+                throw error
+            } catch (error: IOException) {
+                throw VoiceSendException(
+                    "Could not upload to the Soju file host: ${error.message ?: "connection failed"}.",
+                    error,
+                )
+            }
         }
-        val config = normalizedConfig(
-            destination
-                ?: voicePrefs.config.first().rememberedDestination
-                ?: attachmentPrefs.config.first(),
-        )
         val source = AttachmentSource.LocalFile(file, name, mimeType, sizeBytes)
-        val result = attachmentUploader.upload(source, config)
+        val result = attachmentUploader.upload(source, selected)
             .onEach { update ->
                 if (update is UploadProgress.Transferring) progress(update.bytesSent, update.totalBytes)
             }
             .last()
         val record = (result as? UploadProgress.Complete)?.record
             ?: throw VoiceSendException("Upload did not complete.")
-        return VoiceUploadRecord(record.url, voiceExpiryFor(config), record)
+        attachmentPrefs.addUpload(record)
+        return VoiceUploadRecord(record.url, voiceExpiryFor(selected))
     }
 
     private fun fileHostEndpoint(networkId: Long): String? {
@@ -151,7 +170,7 @@ class VoiceMessageSenderImpl @Inject constructor(
         if (route.proxyError != null) throw VoiceSendException(route.proxyError)
         route.use {
             probeFileHost(route, endpoint, mimeType)
-            val connection = route.open(endpoint).apply {
+            val connection = route.open(endpoint, authenticated = true).apply {
                 requestMethod = "POST"
                 doOutput = true
                 useCaches = false
@@ -182,7 +201,7 @@ class VoiceMessageSenderImpl @Inject constructor(
                 if (code != HttpURLConnection.HTTP_CREATED || location.isNullOrBlank()) {
                     throw VoiceSendException("FILEHOST upload failed (HTTP $code).")
                 }
-                VoiceUploadRecord(resolveLocation(endpoint, location), expiry = null, uploadRecord = null)
+                VoiceUploadRecord(resolveLocation(endpoint, location), expiry = null)
             } finally {
                 connection.disconnect()
             }
@@ -214,7 +233,6 @@ class VoiceMessageSenderImpl @Inject constructor(
     private data class VoiceUploadRecord(
         val url: String,
         val expiry: String?,
-        val uploadRecord: UploadRecord?,
     )
 
     private fun resolveLocation(endpoint: String, location: String): String {
@@ -273,12 +291,16 @@ class VoiceMessageSenderImpl @Inject constructor(
         }
     }
 
+    private fun wireBytes(target: String, text: String): Int =
+        "PRIVMSG $target :$text\r\n".toByteArray(StandardCharsets.UTF_8).size
+
     private companion object {
         const val CONNECT_TIMEOUT_MS = 15_000
         const val READ_TIMEOUT_MS = 60_000
         const val STREAM_BUFFER_BYTES = 32 * 1024
         const val USER_AGENT = "motd-Android (https://github.com/trevarj/motd)"
+        const val MAX_IRC_WIRE_BYTES = 480
     }
 }
 
-class VoiceSendException(message: String) : java.io.IOException(message)
+class VoiceSendException(message: String, cause: Throwable? = null) : IOException(message, cause)

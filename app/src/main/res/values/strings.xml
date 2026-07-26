@@ -481,6 +481,11 @@
     <string name="settings_reply_prefix_desc">Prefix channel replies with the recipient’s nick for clients that do not render reply tags.</string>
     <string name="settings_voice_encryption">Encrypt voice messages by default</string>
     <string name="settings_voice_encryption_desc">Uploads use host-blind AES-GCM. IRC servers and bouncers still see the key in the link.</string>
+    <string name="settings_voice_section">Voice messages</string>
+    <string name="chatlist_voice_message">Voice message</string>
+    <string name="settings_voice_quality">Recording quality</string>
+    <string name="settings_voice_noise_reduction">Noise reduction</string>
+    <string name="settings_voice_noise_reduction_desc">Uses device voice processing when available. It may also adjust volume and tone.</string>
     <string name="settings_clear_audio_cache">Clear audio cache</string>
     <string name="settings_clear_audio_cache_desc">Remove downloaded audio and decrypted temporary playback files.</string>
     <string name="settings_wallpaper">Chat wallpaper</string>
