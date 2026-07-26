@@ -6,6 +6,11 @@ import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.audio.AudioAttachment
+import io.github.trevarj.motd.audio.AudioMetadata
+import io.github.trevarj.motd.audio.AudioMetadataRepository
+import io.github.trevarj.motd.audio.AudioPlaybackController
+import io.github.trevarj.motd.audio.CachedAudioMetadata
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
@@ -171,6 +176,8 @@ class ChatViewModel @Inject constructor(
     private val typingTracker: TypingTracker,
     private val foregroundBufferTracker: ForegroundBufferTracker,
     private val linkPreviewRepository: LinkPreviewRepository,
+    private val audioMetadataRepository: AudioMetadataRepository,
+    private val audioPlaybackController: AudioPlaybackController,
     private val draftStore: ComposerDraftStore,
     private val scrollPositionStore: ChatScrollPositionStore,
     private val eventSink: IrcEventSink,
@@ -732,6 +739,25 @@ class ChatViewModel @Inject constructor(
 
     fun cachedLinkPreview(url: String) =
         if (contentPreviews.value.showLinkPreviews) linkPreviewRepository.cachedPreview(url) else null
+
+    suspend fun audioMetadata(url: String, networkId: Long?): AudioMetadata? =
+        if (contentPreviews.value.showLinkPreviews) audioMetadataRepository.metadata(url, networkId) else null
+
+    fun cachedAudioMetadata(url: String): CachedAudioMetadata? =
+        if (contentPreviews.value.showLinkPreviews) audioMetadataRepository.cached(url) else null
+
+    val audioPlaybackState = audioPlaybackController.state
+
+    fun toggleAudio(attachment: AudioAttachment, networkId: Long?) =
+        audioPlaybackController.toggle(attachment, networkId)
+
+    fun seekAudio(attachment: AudioAttachment, positionMs: Long) =
+        audioPlaybackController.seekTo(attachment.playbackId, positionMs)
+
+    fun setAudioSpeed(attachment: AudioAttachment, speed: Float) =
+        audioPlaybackController.setSpeed(attachment.playbackId, speed)
+
+    fun toggleActiveAudio() = audioPlaybackController.toggleActive()
 
     fun refreshHistory(range: HistoryRefreshRange = HistoryRefreshRange.MISSING) {
         val currentBuffer = buffer.value ?: return

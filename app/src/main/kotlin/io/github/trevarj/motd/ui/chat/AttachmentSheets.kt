@@ -502,6 +502,7 @@ private fun AttachmentMetadata(source: AttachmentSource) {
                         is AttachmentSource.Text -> pluralStringResource(R.plurals.upload_character_count, source.text.length, source.text.length)
                         is AttachmentSource.Document -> stringResource(R.string.upload_metadata, source.mimeType ?: stringResource(R.string.upload_type_unknown), source.size?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown))
                         is AttachmentSource.Photo -> stringResource(R.string.upload_metadata, source.mimeType ?: stringResource(R.string.upload_type_photo), source.size?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown))
+                        is AttachmentSource.LocalFile -> stringResource(R.string.upload_metadata, source.mimeType, source.size?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown))
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -604,6 +605,7 @@ private fun AttachmentSource.displayName() = when (this) {
     is AttachmentSource.Text -> name
     is AttachmentSource.Document -> name
     is AttachmentSource.Photo -> name
+    is AttachmentSource.LocalFile -> name
 }
 private fun android.content.ContentResolver.queryMeta(uri: Uri): Pair<String, Long?> {
     var name = uri.lastPathSegment ?: "attachment"

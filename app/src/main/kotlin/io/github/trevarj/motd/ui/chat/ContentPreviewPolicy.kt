@@ -7,6 +7,7 @@ internal fun MessageUrls.gated(showImages: Boolean, showLinkPreviews: Boolean): 
     MessageUrls(
         imageUrl = imageUrl.takeIf { showImages },
         linkUrl = linkUrl.takeIf { showLinkPreviews },
+        audio = audio,
     )
 
 /** Link-card text remains visible when only thumbnail loading is disabled. */

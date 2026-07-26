@@ -3,6 +3,9 @@ package io.github.trevarj.motd.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.audio.AudioCacheStore
+import io.github.trevarj.motd.audio.VoiceConfig
+import io.github.trevarj.motd.audio.VoicePrefs
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
@@ -44,6 +47,7 @@ data class SettingsUiState(
     val appearance: AppearanceConfig = AppearanceConfig(),
     val reply: ReplyConfig = ReplyConfig(),
     val contentPreviews: ContentPreviewConfig = ContentPreviewConfig(),
+    val voice: VoiceConfig = VoiceConfig(),
     val avatars: AvatarConfig = AvatarConfig(),
 )
 
@@ -51,6 +55,7 @@ private data class ChatUiPrefs(
     val appearance: AppearanceConfig,
     val reply: ReplyConfig,
     val contentPreviews: ContentPreviewConfig,
+    val voice: VoiceConfig,
     val avatars: AvatarConfig,
 )
 
@@ -68,6 +73,8 @@ class SettingsViewModel @Inject constructor(
     private val appearancePrefs: AppearancePrefs,
     private val replyPrefs: ReplyPrefs,
     private val contentPreviewPrefs: ContentPreviewPrefs,
+    private val voicePrefs: VoicePrefs,
+    private val audioCacheStore: AudioCacheStore,
     private val avatarPrefs: AvatarPrefs,
     private val avatarController: AvatarController,
     private val pushDistributorController: PushDistributorController,
@@ -84,6 +91,7 @@ class SettingsViewModel @Inject constructor(
         appearancePrefs.config,
         replyPrefs.config,
         contentPreviewPrefs.config,
+        voicePrefs.config,
         avatarPrefs.config,
         ::ChatUiPrefs,
     )
@@ -98,7 +106,7 @@ class SettingsViewModel @Inject constructor(
             pushProviderPrefs.provider,
             appearanceReplyAndPreviews,
         ) { settings, networkPrefs, availability, provider, appearanceReplyPreviews ->
-            val (appearance, reply, contentPreviews, avatars) = appearanceReplyPreviews
+            val (appearance, reply, contentPreviews, voice, avatars) = appearanceReplyPreviews
             SettingsUiState(
                 settings = settings,
                 networks = networkPrefs.networks,
@@ -108,6 +116,7 @@ class SettingsViewModel @Inject constructor(
                 appearance = appearance,
                 reply = reply,
                 contentPreviews = contentPreviews,
+                voice = voice,
                 avatars = avatars,
             )
         }.stateIn(
@@ -208,5 +217,13 @@ class SettingsViewModel @Inject constructor(
 
     fun setShowLinkPreviews(show: Boolean) = viewModelScope.launch {
         contentPreviewPrefs.setShowLinkPreviews(show)
+    }
+
+    fun setVoiceEncryptionDefault(enabled: Boolean) = viewModelScope.launch {
+        voicePrefs.setEncryptionDefault(enabled)
+    }
+
+    fun clearAudioCache() = viewModelScope.launch {
+        audioCacheStore.clear()
     }
 }

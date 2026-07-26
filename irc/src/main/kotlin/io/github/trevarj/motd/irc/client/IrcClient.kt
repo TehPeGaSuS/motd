@@ -1125,6 +1125,7 @@ private fun isupportToMap(isupport: Isupport): Map<String, String> {
         "VAPID",
         "NETWORK",
         "CLIENTTAGDENY",
+        "soju.im/FILEHOST",
     )) {
         isupport[key]?.let { out[key] = it }
     }

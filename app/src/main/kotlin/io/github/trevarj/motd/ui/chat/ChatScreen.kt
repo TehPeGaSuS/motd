@@ -1,8 +1,12 @@
 package io.github.trevarj.motd.ui.chat
 
+import android.Manifest
 import android.content.ClipData
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Trace
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -19,25 +23,37 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -45,8 +61,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.SnackbarHost
@@ -98,11 +116,13 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -112,6 +132,12 @@ import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.audio.AudioAttachment
+import io.github.trevarj.motd.audio.AudioMetadata
+import io.github.trevarj.motd.audio.AudioPlaybackState
+import io.github.trevarj.motd.audio.CachedAudioMetadata
+import io.github.trevarj.motd.audio.VoiceSendProgress
+import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.FoolsMode
@@ -206,6 +232,7 @@ fun ChatScreen(
     // Round 5 (plans/16): /list opens the channel browser. Body lands in WP-V3.
     onOpenChannelList: (Long) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
+    voiceViewModel: VoiceMessageViewModel = hiltViewModel(),
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -223,14 +250,39 @@ fun ChatScreen(
     val items = viewModel.messages.collectAsLazyPagingItems()
     val memberNicks by viewModel.memberNicks.collectAsStateWithLifecycle()
     val knownNicks by viewModel.knownNicks.collectAsStateWithLifecycle()
+    val voiceState by voiceViewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var pendingVoiceStart by remember { mutableStateOf<Boolean?>(null) }
+    val microphonePermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val locked = pendingVoiceStart
+        pendingVoiceStart = null
+        if (granted && locked != null) voiceViewModel.startRecording(locked)
+        else voiceViewModel.clearError()
+    }
+
+    fun startVoiceRecording(locked: Boolean) {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            voiceViewModel.startRecording(locked)
+        } else {
+            pendingVoiceStart = locked
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     // Composition survives Home/recents, so use the actual resumed lifecycle instead of treating
     // "still composed" as foreground. This gates notifications and chat sounds correctly.
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, viewModel) {
+    DisposableEffect(lifecycleOwner, viewModel, voiceViewModel) {
         val gate = ChatForegroundLifecycleGate(
             onResume = viewModel::onResume,
-            onPause = viewModel::onPause,
+            onPause = {
+                viewModel.onPause()
+                voiceViewModel.stopForBackground()
+            },
         )
         val observer = LifecycleEventObserver { _, event -> gate.onEvent(event) }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -268,6 +320,7 @@ fun ChatScreen(
         initialValue = io.github.trevarj.motd.data.prefs.AppearanceConfig(),
     )
     val contentPreviews by viewModel.contentPreviews.collectAsStateWithLifecycle()
+    val audioPlaybackState by viewModel.audioPlaybackState.collectAsStateWithLifecycle()
     val replyConfig by viewModel.replyConfig.collectAsStateWithLifecycle()
     val historyAvailability by viewModel.historyAvailability.collectAsStateWithLifecycle()
     // Round 5: nick sheet + replay-safe UI events (plans/16 §5.6/§5.8).
@@ -329,6 +382,25 @@ fun ChatScreen(
         onRejoin = viewModel::rejoinChannel,
         loadPreview = viewModel::linkPreview,
         cachedPreview = viewModel::cachedLinkPreview,
+        loadAudioMetadata = viewModel::audioMetadata,
+        cachedAudioMetadata = viewModel::cachedAudioMetadata,
+        audioPlaybackState = audioPlaybackState,
+        onAudioToggle = viewModel::toggleAudio,
+        onAudioSeek = viewModel::seekAudio,
+        onAudioSpeed = viewModel::setAudioSpeed,
+        onAudioToggleActive = viewModel::toggleActiveAudio,
+        voiceState = voiceState,
+        voiceEnabled = !isServerBuffer && (!state.parted),
+        onVoiceTap = { startVoiceRecording(locked = true) },
+        onVoiceHoldStart = { startVoiceRecording(locked = false) },
+        onVoiceHoldStop = voiceViewModel::stopRecording,
+        onVoiceHoldCancel = voiceViewModel::cancelRecording,
+        onVoiceLock = voiceViewModel::lockRecording,
+        onVoiceDelete = voiceViewModel::deleteStaged,
+        onVoiceSend = voiceViewModel::send,
+        onVoiceToggleEncryption = voiceViewModel::toggleEncryption,
+        onVoiceDestinationSelected = voiceViewModel::setDestination,
+        onVoiceErrorDismissed = voiceViewModel::clearError,
         consumePrefill = viewModel::consumePrefill,
         composerDraft = composerDraft,
         onDraftChanged = viewModel::saveDraft,
@@ -416,6 +488,25 @@ fun ChatContent(
     onRetry: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> io.github.trevarj.motd.data.repo.LinkPreview?,
     cachedPreview: (String) -> io.github.trevarj.motd.data.repo.CachedLinkPreview? = { null },
+    loadAudioMetadata: suspend (String, Long?) -> AudioMetadata? = { _, _ -> null },
+    cachedAudioMetadata: (String) -> CachedAudioMetadata? = { null },
+    audioPlaybackState: AudioPlaybackState = AudioPlaybackState(),
+    onAudioToggle: (AudioAttachment, Long?) -> Unit = { _, _ -> },
+    onAudioSeek: (AudioAttachment, Long) -> Unit = { _, _ -> },
+    onAudioSpeed: (AudioAttachment, Float) -> Unit = { _, _ -> },
+    onAudioToggleActive: () -> Unit = {},
+    voiceState: VoiceMessageUiState = VoiceMessageUiState(),
+    voiceEnabled: Boolean = true,
+    onVoiceTap: () -> Unit = {},
+    onVoiceHoldStart: () -> Unit = {},
+    onVoiceHoldStop: () -> Unit = {},
+    onVoiceHoldCancel: () -> Unit = {},
+    onVoiceLock: () -> Unit = {},
+    onVoiceDelete: () -> Unit = {},
+    onVoiceSend: () -> Unit = {},
+    onVoiceToggleEncryption: () -> Unit = {},
+    onVoiceDestinationSelected: (io.github.trevarj.motd.attachment.PasteBackendConfig) -> Unit = {},
+    onVoiceErrorDismissed: () -> Unit = {},
     reactionChips: (String) -> List<io.github.trevarj.motd.ui.components.ReactionChip> = { emptyList() },
     replyPreview: (String) -> kotlinx.coroutines.flow.StateFlow<io.github.trevarj.motd.ui.components.ReplyPreviewData?> = {
         kotlinx.coroutines.flow.MutableStateFlow(null)
@@ -1284,6 +1375,12 @@ fun ChatContent(
                         showImages = showImages,
                         showLinkPreviews = showLinkPreviews,
                         cachedPreview = cachedPreview,
+                        loadAudioMetadata = loadAudioMetadata,
+                        cachedAudioMetadata = cachedAudioMetadata,
+                        audioPlaybackState = audioPlaybackState,
+                        onAudioToggle = onAudioToggle,
+                        onAudioSeek = onAudioSeek,
+                        onAudioSpeed = onAudioSpeed,
                         // Link-preview tap opens the URL in the system browser.
                         onOpenLink = { ctx.startActivity(Intent(Intent.ACTION_VIEW, it.toUri())) },
                         highlightMsgid = highlightMsgid,
@@ -1372,6 +1469,20 @@ fun ChatContent(
                         showAutocomplete = true
                     }
                 }
+                AudioMiniPlayer(
+                    state = audioPlaybackState,
+                    onToggle = onAudioToggleActive,
+                )
+                VoiceComposerPanel(
+                    state = voiceState,
+                    playbackState = audioPlaybackState,
+                    onDelete = onVoiceDelete,
+                    onSend = onVoiceSend,
+                    onPreview = { attachment -> onAudioToggle(attachment, null) },
+                    onToggleEncryption = onVoiceToggleEncryption,
+                    onDestinationSelected = onVoiceDestinationSelected,
+                    onErrorDismissed = onVoiceErrorDismissed,
+                )
                 if (state.parted) {
                     PartedChannelBanner(
                         channel = state.buffer?.displayName.orEmpty(),
@@ -1415,6 +1526,13 @@ fun ChatContent(
                     },
                     showEmojiButton = showComposerEmoji,
                     onAttachment = { uploadCurrentDraftDirectly = false; attachmentSheetOpen = true },
+                    voiceEnabled = voiceEnabled && composerText.text.isBlank(),
+                    voiceRecording = voiceState.recording != null,
+                    onVoiceTap = onVoiceTap,
+                    onVoiceHoldStart = onVoiceHoldStart,
+                    onVoiceHoldStop = onVoiceHoldStop,
+                    onVoiceHoldCancel = onVoiceHoldCancel,
+                    onVoiceLock = onVoiceLock,
                     chatWindowHeightPx = chatWindowHeightPx,
                     autocomplete = if (showAutocomplete && completions.isNotEmpty()) {
                         {
@@ -2021,6 +2139,221 @@ private fun ChatContentPreview() {
 private fun ChatContentLargeTextPreview() {
     MotdTheme {
         ChatContentPreviewBody(conversationFontScalePercent = 140)
+    }
+}
+
+@Composable
+private fun VoiceComposerPanel(
+    state: VoiceMessageUiState,
+    playbackState: AudioPlaybackState,
+    onDelete: () -> Unit,
+    onSend: () -> Unit,
+    onPreview: (AudioAttachment) -> Unit,
+    onToggleEncryption: () -> Unit,
+    onDestinationSelected: (io.github.trevarj.motd.attachment.PasteBackendConfig) -> Unit,
+    onErrorDismissed: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var destinationSheet by remember { mutableStateOf(false) }
+    state.recording?.let { recording ->
+        Surface(
+            modifier = modifier.fillMaxWidth().testTag("voice_recording_panel"),
+            color = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ) {
+            Row(
+                Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.Mic, null)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (recording.locked) {
+                        "Recording · locked · ${formatAudioDuration(recording.elapsedMs)}"
+                    } else {
+                        "Recording · ${formatAudioDuration(recording.elapsedMs)}"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+    }
+    state.staged?.let { staged ->
+        val progress = state.progress
+        val destination = staged.destination ?: state.config.rememberedDestination
+        val preview = remember(staged.file, staged.durationMs, staged.mimeType, staged.sizeBytes) {
+            AudioAttachment(
+                url = staged.file.toURI().toString(),
+                title = "Voice message",
+                mimeType = staged.mimeType,
+                durationMs = staged.durationMs,
+                sizeBytes = staged.sizeBytes,
+                voice = true,
+            )
+        }
+        val previewPlaying = playbackState.activeId == preview.playbackId && playbackState.playing
+        Surface(
+            modifier = modifier.fillMaxWidth().testTag("voice_preview_panel"),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 2.dp,
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Mic, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Voice message", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "${formatAudioDuration(staged.durationMs)} · ${staged.mimeType} · ${formatBytes(staged.sizeBytes)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { onPreview(preview) }, enabled = progress == null, modifier = Modifier.testTag("voice_preview_play")) {
+                        Icon(if (previewPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (previewPlaying) "Pause" else "Play")
+                    }
+                    IconButton(onClick = onDelete, enabled = progress == null, modifier = Modifier.testTag("voice_delete")) {
+                        Icon(Icons.Filled.Delete, "Delete")
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(if (staged.encrypted) Icons.Outlined.Lock else Icons.Outlined.Public, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (staged.encrypted) "Host-blind encryption" else "Interoperable link",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    TextButton(onClick = onToggleEncryption, enabled = progress == null, modifier = Modifier.testTag("voice_encryption_toggle")) {
+                        Text(if (staged.encrypted) "Off" else "On")
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        destination?.backend?.label ?: "Auto destination",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    TextButton(onClick = { destinationSheet = true }, enabled = progress == null, modifier = Modifier.testTag("voice_destination")) {
+                        Text("Change")
+                    }
+                }
+                when (progress) {
+                    is VoiceSendProgress.Uploading -> {
+                        if (progress.totalBytes != null && progress.totalBytes > 0) {
+                            LinearProgressIndicator(
+                                progress = { (progress.bytesSent.toFloat() / progress.totalBytes).coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                    is VoiceSendProgress.Complete,
+                    null,
+                    -> Unit
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onDelete, enabled = progress == null, modifier = Modifier.weight(1f)) {
+                        Text("Delete")
+                    }
+                    Button(onClick = onSend, enabled = progress == null, modifier = Modifier.weight(1f).testTag("voice_send")) {
+                        Icon(Icons.Outlined.CloudUpload, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Send")
+                    }
+                }
+            }
+        }
+        if (destinationSheet) {
+            VoiceDestinationSheet(
+                staged = staged,
+                config = destination ?: io.github.trevarj.motd.attachment.PasteBackendConfig(),
+                onSelect = {
+                    destinationSheet = false
+                    onDestinationSelected(it)
+                },
+                onDismiss = { destinationSheet = false },
+            )
+        }
+    }
+    state.error?.let { error ->
+        AlertDialog(
+            onDismissRequest = onErrorDismissed,
+            title = { Text("Voice message") },
+            text = { Text(error) },
+            confirmButton = { TextButton(onClick = onErrorDismissed) { Text("OK") } },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VoiceDestinationSheet(
+    staged: StagedVoiceMessage,
+    config: io.github.trevarj.motd.attachment.PasteBackendConfig,
+    onSelect: (io.github.trevarj.motd.attachment.PasteBackendConfig) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text("Voice destination", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            uploadDestinations(staged.source, config).forEach { destination ->
+                androidx.compose.material3.ListItem(
+                    headlineContent = { Text(destination.label, fontWeight = FontWeight.SemiBold) },
+                    supportingContent = { Text(backendRetention(destination.config)) },
+                    modifier = Modifier.clickable { onSelect(destination.config) },
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun AudioMiniPlayer(
+    state: AudioPlaybackState,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (state.activeId == null) return
+    Surface(
+        modifier = modifier.fillMaxWidth().testTag("audio_mini_player"),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 2.dp,
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onToggle, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        if (state.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (state.playing) "Pause audio" else "Play audio",
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        state.title ?: "Audio",
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        io.github.trevarj.motd.audio.formatAudioDuration(state.positionMs),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            val duration = state.durationMs
+            if (duration != null && duration > 0) {
+                LinearProgressIndicator(
+                    progress = { (state.positionMs.toFloat() / duration).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
     }
 }
 

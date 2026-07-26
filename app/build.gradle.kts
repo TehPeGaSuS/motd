@@ -296,6 +296,9 @@ dependencies {
     implementation(libs.paging.compose)
     implementation(libs.datastore.preferences)
     implementation(libs.coil.compose)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.session)
+    implementation(libs.media3.datasource)
     // Explicit for the IRC-over-WebSocket transport (plans/19 §3.3); already present transitively
     // via Coil, pinned to the same resolved version in libs.versions.toml so nothing new resolves.
     implementation(libs.okhttp)

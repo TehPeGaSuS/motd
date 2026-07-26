@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.attachment
 
 import android.net.Uri
+import java.io.File
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
 
@@ -40,6 +41,7 @@ sealed interface AttachmentSource {
     data class Text(val text: String, val name: String = "paste.txt") : AttachmentSource
     data class Document(val uri: Uri, val name: String, val mimeType: String?, val size: Long?) : AttachmentSource
     data class Photo(val uri: Uri, val name: String, val mimeType: String?, val size: Long?) : AttachmentSource
+    data class LocalFile(val file: File, val name: String, val mimeType: String, val size: Long? = file.length()) : AttachmentSource
 }
 
 @Serializable

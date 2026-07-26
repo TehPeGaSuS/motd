@@ -60,6 +60,13 @@ import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.audio.AudioAttachment
+import io.github.trevarj.motd.audio.AudioMetadata
+import io.github.trevarj.motd.audio.AudioPlaybackState
+import io.github.trevarj.motd.audio.CachedAudioMetadata
+import io.github.trevarj.motd.audio.displayTextForAudioMessage
+import io.github.trevarj.motd.audio.extensionlessAudioCandidates
+import io.github.trevarj.motd.audio.toAttachment
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
@@ -71,6 +78,7 @@ import io.github.trevarj.motd.data.repo.CachedLinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.MessageBubble
+import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.NewMessagesDivider
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
@@ -204,6 +212,12 @@ fun MessageList(
     showLinkPreviews: Boolean,
     onOpenLink: (String) -> Unit,
     cachedPreview: (String) -> CachedLinkPreview? = { null },
+    loadAudioMetadata: suspend (String, Long?) -> AudioMetadata? = { _, _ -> null },
+    cachedAudioMetadata: (String) -> CachedAudioMetadata? = { null },
+    audioPlaybackState: AudioPlaybackState = AudioPlaybackState(),
+    onAudioToggle: (AudioAttachment, Long?) -> Unit = { _, _ -> },
+    onAudioSeek: (AudioAttachment, Long) -> Unit = { _, _ -> },
+    onAudioSpeed: (AudioAttachment, Float) -> Unit = { _, _ -> },
     liveEntryId: Long? = null,
     onLiveEntryConsumed: (Long) -> Unit = {},
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
@@ -234,7 +248,7 @@ fun MessageList(
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
     // Scrolling postpones only cache misses. Parsed URLs and resolved previews remain renderable so
     // a recycled row does not lose rich content halfway through a fling.
-    val canStartNewRichContentWork = richContentReady && !scrolling && (showImages || showLinkPreviews)
+    val canStartNewRichContentWork = richContentReady && !scrolling
     val formatMessageTime = rememberMessageTimeFormatter()
     LazyColumn(
         state = listState,
@@ -361,6 +375,12 @@ fun MessageList(
                         showLinkPreviews = showLinkPreviews,
                         canStartNewRichContentWork = canStartNewRichContentWork,
                         cachedPreview = cachedPreview,
+                        loadAudioMetadata = loadAudioMetadata,
+                        cachedAudioMetadata = cachedAudioMetadata,
+                        audioPlaybackState = audioPlaybackState,
+                        onAudioToggle = onAudioToggle,
+                        onAudioSeek = onAudioSeek,
+                        onAudioSpeed = onAudioSpeed,
                         onOpenLink = onOpenLink,
                         onSenderClick = onSenderClick,
                         replyPreview = replyPreview,
@@ -663,6 +683,12 @@ private fun MessageRow(
     showLinkPreviews: Boolean,
     canStartNewRichContentWork: Boolean,
     cachedPreview: (String) -> CachedLinkPreview?,
+    loadAudioMetadata: suspend (String, Long?) -> AudioMetadata?,
+    cachedAudioMetadata: (String) -> CachedAudioMetadata?,
+    audioPlaybackState: AudioPlaybackState,
+    onAudioToggle: (AudioAttachment, Long?) -> Unit,
+    onAudioSeek: (AudioAttachment, Long) -> Unit,
+    onAudioSpeed: (AudioAttachment, Float) -> Unit,
     onOpenLink: (String) -> Unit,
     onSenderClick: (String) -> Unit,
     replyPreview: (String) -> StateFlow<ReplyPreviewData?>,
@@ -726,6 +752,35 @@ private fun MessageRow(
     val visibleUrls = richUrls?.gated(showImages, showLinkPreviews)
     val imageUrl = visibleUrls?.imageUrl
     val linkUrl = visibleUrls?.linkUrl
+    val immediateAudio = visibleUrls?.audio.orEmpty()
+    val headCandidates = remember(msg.id, msg.text, showLinkPreviews) {
+        if (showLinkPreviews) extensionlessAudioCandidates(msg.text) else emptyList()
+    }
+    var headAudio by remember(msg.id, headCandidates) {
+        mutableStateOf(
+            headCandidates.mapNotNull { cachedAudioMetadata(it)?.metadata?.toAttachment() },
+        )
+    }
+    val latestCachedAudioMetadata by rememberUpdatedState(cachedAudioMetadata)
+    val latestLoadAudioMetadata by rememberUpdatedState(loadAudioMetadata)
+    LaunchedEffect(msg.id, headCandidates, networkId) {
+        if (headCandidates.isEmpty()) return@LaunchedEffect
+        snapshotFlow { latestCanStartNewRichContentWork }.first { it }
+        val resolved = headCandidates.take(8).mapNotNull { url ->
+            latestCachedAudioMetadata(url)?.metadata
+                ?: try {
+                    latestLoadAudioMetadata(url, networkId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    null
+                }
+        }.map { it.toAttachment() }
+        headAudio = resolved
+    }
+    val audioAttachments = remember(immediateAudio, headAudio) {
+        (immediateAudio + headAudio).distinctBy { it.url }
+    }
 
     // A cached completion is rendered synchronously even while scrolling. A cache miss waits for
     // idle, then joins the repository's process-owned single-flight fetch. Null is a completed
@@ -788,14 +843,15 @@ private fun MessageRow(
         },
         onReply = { onReply(msg) },
     ) { rowModifier ->
+        Column(modifier = rowModifier.fillMaxWidth()) {
         MessageBubble(
             // Per-message handle for long-press/react/reply/deep-jump. Prefer the stable server
             // msgid; pending rows fall back to the local id for stable E2E selection.
-            modifier = rowModifier,
+            modifier = Modifier,
             sender = msg.sender,
             networkId = networkId,
             senderAccount = msg.senderAccount,
-            text = msg.text,
+            text = displayTextForAudioMessage(msg.text, audioAttachments),
             timeMs = msg.serverTime,
             formattedTime = formattedTime,
             isSelf = msg.isSelf,
@@ -827,6 +883,16 @@ private fun MessageRow(
             // Only non-self senders open the nick sheet (self has no social/moderation actions).
             onSenderClick = if (msg.isSelf) null else ({ onSenderClick(msg.sender) }),
         )
+        AudioAttachmentPlayers(
+            attachments = audioAttachments,
+            playbackState = audioPlaybackState,
+            networkId = networkId,
+            isSelf = msg.isSelf,
+            onToggle = onAudioToggle,
+            onSeek = onAudioSeek,
+            onSpeed = onAudioSpeed,
+        )
+        }
     }
     if (msg.failed) {
         RetryRow(

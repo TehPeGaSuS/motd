@@ -32,6 +32,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Mood
 import androidx.compose.material3.FilledIconButton
@@ -59,6 +61,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -95,6 +102,9 @@ import io.github.trevarj.motd.ui.chat.systemEmojiSearchEntries
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 data class ComposerReply(val sender: String, val text: String)
 
@@ -215,6 +225,13 @@ fun Composer(
     placeholder: String = stringResource(R.string.chat_composer_placeholder),
     showEmojiButton: Boolean = true,
     onAttachment: (() -> Unit)? = null,
+    voiceEnabled: Boolean = false,
+    voiceRecording: Boolean = false,
+    onVoiceTap: () -> Unit = {},
+    onVoiceHoldStart: () -> Unit = {},
+    onVoiceHoldStop: () -> Unit = {},
+    onVoiceHoldCancel: () -> Unit = {},
+    onVoiceLock: () -> Unit = {},
     chatWindowHeightPx: Int = 0,
     autocomplete: (@Composable () -> Unit)? = null,
 ) {
@@ -435,31 +452,49 @@ fun Composer(
                 }
 
                 val canSend = enabled && value.text.isNotBlank()
-                FilledIconButton(
-                    onClick = {
-                        dismissEmojiPicker()
-                        onSend()
-                    },
-                    enabled = canSend,
-                    modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
-                    shape = CircleShape,
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
-                    ),
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center,
+                if (canSend || !voiceEnabled) {
+                    FilledIconButton(
+                        onClick = {
+                            dismissEmojiPicker()
+                            onSend()
+                        },
+                        enabled = canSend,
+                        modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
+                        shape = CircleShape,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
+                        ),
                     ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Send,
-                            stringResource(R.string.chat_composer_send),
-                            modifier = Modifier.size(24.dp),
-                        )
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                stringResource(R.string.chat_composer_send),
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
                     }
+                } else {
+                    VoiceRecordButton(
+                        enabled = enabled,
+                        recording = voiceRecording,
+                        onTap = {
+                            dismissEmojiPicker()
+                            onVoiceTap()
+                        },
+                        onHoldStart = {
+                            dismissEmojiPicker()
+                            onVoiceHoldStart()
+                        },
+                        onHoldStop = onVoiceHoldStop,
+                        onHoldCancel = onVoiceHoldCancel,
+                        onLock = onVoiceLock,
+                    )
                 }
             }
 
@@ -470,6 +505,86 @@ fun Composer(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun VoiceRecordButton(
+    enabled: Boolean,
+    recording: Boolean,
+    onTap: () -> Unit,
+    onHoldStart: () -> Unit,
+    onHoldStop: () -> Unit,
+    onHoldCancel: () -> Unit,
+    onLock: () -> Unit,
+) {
+    val viewConfiguration = LocalViewConfiguration.current
+    val density = LocalDensity.current
+    val cancelPx = with(density) { 72.dp.toPx() }
+    val lockPx = with(density) { 72.dp.toPx() }
+    FilledIconButton(
+        onClick = {},
+        enabled = enabled,
+        modifier = Modifier
+            .size(48.dp)
+            .testTag("chat_composer_voice")
+            .pointerInput(enabled, recording, cancelPx, lockPx) {
+                if (!enabled) return@pointerInput
+                coroutineScope {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        if (recording) {
+                            waitForUpOrCancellation()
+                            onHoldStop()
+                            return@awaitEachGesture
+                        }
+                        var started = false
+                        var cancelled = false
+                        var locked = recording
+                        val longPress = this@coroutineScope.launch {
+                            delay(viewConfiguration.longPressTimeoutMillis)
+                            started = true
+                            onHoldStart()
+                        }
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            val delta = change.position - down.position
+                            if (started && !locked && delta.y <= -lockPx) {
+                                locked = true
+                                change.consume()
+                                onLock()
+                            }
+                            if (started && delta.x <= -cancelPx) {
+                                cancelled = true
+                                change.consume()
+                                onHoldCancel()
+                                break
+                            }
+                            if (!change.pressed) break
+                        }
+                        longPress.cancel()
+                        when {
+                            !started -> onTap()
+                            cancelled -> Unit
+                            locked -> Unit
+                            else -> onHoldStop()
+                        }
+                    }
+                }
+            },
+        shape = CircleShape,
+        colors = IconButtonDefaults.filledIconButtonColors(
+            containerColor = if (recording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            contentColor = if (recording) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary,
+        ),
+    ) {
+        Icon(
+            if (recording) Icons.Filled.Stop else Icons.Filled.Mic,
+            contentDescription = stringResource(
+                if (recording) R.string.voice_stop_recording else R.string.voice_record,
+            ),
+        )
     }
 }
 

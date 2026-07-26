@@ -1,16 +1,23 @@
 package io.github.trevarj.motd.ui.chat
 
 import java.util.LinkedHashMap
+import io.github.trevarj.motd.audio.AudioAttachment
+import io.github.trevarj.motd.audio.isImmediateAudioUrl
+import io.github.trevarj.motd.audio.parseAudioAttachments
 
 /** URL detection shared by the composer/bubble. Deliberately conservative (http/https only). */
 private val URL_REGEX = Regex("""https?://[^\s<>]+""")
 
 private val IMAGE_EXT = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
 
-/** First inline-image and first previewable link discovered in one URL-regex pass. */
-data class MessageUrls(val imageUrl: String?, val linkUrl: String?) {
+/** First inline-image, first previewable link, and audio links discovered in one URL-regex pass. */
+data class MessageUrls(
+    val imageUrl: String?,
+    val linkUrl: String?,
+    val audio: List<AudioAttachment> = emptyList(),
+) {
     companion object {
-        val Empty = MessageUrls(imageUrl = null, linkUrl = null)
+        val Empty = MessageUrls(imageUrl = null, linkUrl = null, audio = emptyList())
     }
 }
 
@@ -52,7 +59,7 @@ fun extractUrls(text: String): List<String> =
  * the URL contains no matching `(` — otherwise Wikipedia-style paths like `…/Foo_(bar)` would break
  * (plans/15 #29). Brackets/braces get the same balance check.
  */
-private fun trimUrl(raw: String): String {
+internal fun trimUrl(raw: String): String {
     var url = raw
     while (url.isNotEmpty()) {
         val last = url.last()
@@ -89,13 +96,19 @@ fun firstLinkUrl(text: String): String? = messageUrls(text).linkUrl
 fun messageUrls(text: String): MessageUrls {
     var image: String? = null
     var link: String? = null
+    val audio = parseAudioAttachments(text)
+    val audioUrls = audio.asSequence().map { it.url }.toSet()
     for (url in extractUrls(text)) {
         if (isImageUrl(url)) {
             if (image == null) image = url
-        } else if (link == null) {
+        } else if (link == null && url !in audioUrls && !isImmediateAudioUrl(url)) {
             link = url
         }
         if (image != null && link != null) break
     }
-    return if (image == null && link == null) MessageUrls.Empty else MessageUrls(image, link)
+    return if (image == null && link == null && audio.isEmpty()) {
+        MessageUrls.Empty
+    } else {
+        MessageUrls(image, link, audio)
+    }
 }

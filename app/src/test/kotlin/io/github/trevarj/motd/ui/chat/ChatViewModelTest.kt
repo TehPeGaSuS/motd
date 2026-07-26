@@ -41,6 +41,11 @@ import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.audio.AudioAttachment
+import io.github.trevarj.motd.audio.AudioMetadata
+import io.github.trevarj.motd.audio.AudioMetadataRepository
+import io.github.trevarj.motd.audio.AudioPlaybackController
+import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcClientConfig
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -981,6 +986,8 @@ class ChatViewModelTest {
             userDao = db.userDao(),
             contentPreviewPrefs = FakeContentPreviewPrefs(),
             appearancePrefs = FakeAppearancePrefs(),
+            audioMetadataRepository = FakeAudioMetadataRepository(),
+            audioPlaybackController = FakeAudioPlaybackController(),
         )
     }
 
@@ -1254,5 +1261,19 @@ class ChatViewModelTest {
         override suspend fun setWallpaper(selection: io.github.trevarj.motd.data.prefs.WallpaperSelection) = Unit
         override suspend fun setUiFontScale(percent: Int) = Unit
         override suspend fun setConversationFontScale(percent: Int) = Unit
+    }
+
+    private class FakeAudioMetadataRepository : AudioMetadataRepository {
+        override suspend fun metadata(url: String, networkId: Long?): AudioMetadata? = null
+    }
+
+    private class FakeAudioPlaybackController : AudioPlaybackController {
+        override val state = MutableStateFlow(AudioPlaybackState())
+        override fun play(attachment: AudioAttachment, networkId: Long?, speed: Float) = Unit
+        override fun toggle(attachment: AudioAttachment, networkId: Long?) = Unit
+        override fun toggleActive() = Unit
+        override fun pause() = Unit
+        override fun seekTo(itemId: String, positionMs: Long) = Unit
+        override fun setSpeed(itemId: String, speed: Float) = Unit
     }
 }

@@ -189,6 +189,7 @@ class AttachmentUploaderImpl @Inject constructor(
         is AttachmentSource.Text -> text.byteInputStream(StandardCharsets.UTF_8)
         is AttachmentSource.Document -> resolver.openInputStream(uri)
         is AttachmentSource.Photo -> resolver.openInputStream(uri)
+        is AttachmentSource.LocalFile -> file.inputStream()
     } ?: throw IOException("Unable to open attachment")
 
     private suspend fun streamSource(
@@ -306,16 +307,19 @@ private fun AttachmentSource.displayName() = when (this) {
     is AttachmentSource.Text -> name
     is AttachmentSource.Document -> name
     is AttachmentSource.Photo -> name
+    is AttachmentSource.LocalFile -> name
 }
 private fun AttachmentSource.mimeType() = when (this) {
     is AttachmentSource.Text -> "text/plain; charset=utf-8"
     is AttachmentSource.Document -> mimeType ?: "application/octet-stream"
     is AttachmentSource.Photo -> mimeType ?: "image/*"
+    is AttachmentSource.LocalFile -> mimeType
 }
 private fun AttachmentSource.sizeOrNull() = when (this) {
     is AttachmentSource.Text -> text.toByteArray(StandardCharsets.UTF_8).size.toLong()
     is AttachmentSource.Document -> size
     is AttachmentSource.Photo -> size
+    is AttachmentSource.LocalFile -> size
 }
 
 class UploadException(message: String) : IOException(message)

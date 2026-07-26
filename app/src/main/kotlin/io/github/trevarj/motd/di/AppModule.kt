@@ -61,6 +61,16 @@ import io.github.trevarj.motd.service.ReadMarkerRepository
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.ui.settings.PushAvailabilityProvider
+import io.github.trevarj.motd.audio.AndroidVoiceRecorder
+import io.github.trevarj.motd.audio.AudioMetadataRepository
+import io.github.trevarj.motd.audio.AudioMetadataRepositoryImpl
+import io.github.trevarj.motd.audio.AudioPlaybackController
+import io.github.trevarj.motd.audio.AudioPlaybackControllerImpl
+import io.github.trevarj.motd.audio.VoiceMessageSender
+import io.github.trevarj.motd.audio.VoiceMessageSenderImpl
+import io.github.trevarj.motd.audio.VoicePrefs
+import io.github.trevarj.motd.audio.VoicePrefsImpl
+import io.github.trevarj.motd.audio.VoiceRecorder
 import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
 import io.github.trevarj.motd.attachment.AttachmentUploader
@@ -148,6 +158,21 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun attachmentUploader(impl: AttachmentUploaderImpl): AttachmentUploader
+
+    @Binds @Singleton
+    abstract fun voicePrefs(impl: VoicePrefsImpl): VoicePrefs
+
+    @Binds @Singleton
+    abstract fun voiceRecorder(impl: AndroidVoiceRecorder): VoiceRecorder
+
+    @Binds @Singleton
+    abstract fun voiceMessageSender(impl: VoiceMessageSenderImpl): VoiceMessageSender
+
+    @Binds @Singleton
+    abstract fun audioMetadataRepository(impl: AudioMetadataRepositoryImpl): AudioMetadataRepository
+
+    @Binds @Singleton
+    abstract fun audioPlaybackController(impl: AudioPlaybackControllerImpl): AudioPlaybackController
 
     @Binds @Singleton
     abstract fun avatarPrefs(impl: AvatarPrefsImpl): AvatarPrefs

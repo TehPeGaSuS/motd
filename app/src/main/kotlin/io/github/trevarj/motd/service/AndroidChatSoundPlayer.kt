@@ -7,6 +7,8 @@ import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.BuildConfig
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.audio.AudioActivityTracker
+import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
@@ -252,6 +254,8 @@ class AndroidChatSoundPlayer @Inject internal constructor(
     private val foregroundBufferTracker: ForegroundBufferTracker,
     private val settingsRepository: SettingsRepository,
     private val backend: SoundPoolChatSoundBackend,
+    private val audioPlaybackController: AudioPlaybackController,
+    private val audioActivityTracker: AudioActivityTracker,
 ) : ChatSoundPlayer {
     private val receiveMelody = ChatReceiveMelody()
 
@@ -288,6 +292,7 @@ class AndroidChatSoundPlayer @Inject internal constructor(
         normalizedActor: String?,
     ) {
         val buffer = db.bufferDao().observeById(bufferId) ?: return
+        if (audioActivityTracker.recording.value || audioPlaybackController.state.value.playing) return
         val settings = settingsRepository.settings.first()
         val identityRules = db.networkIdentityDao().byNetwork(buffer.networkId)?.identityRules
             ?: IrcIdentityRules()
@@ -312,6 +317,7 @@ class AndroidChatSoundPlayer @Inject internal constructor(
 
     override suspend fun onOutgoingAccepted(bufferId: Long) {
         val buffer = db.bufferDao().observeById(bufferId) ?: return
+        if (audioActivityTracker.recording.value || audioPlaybackController.state.value.playing) return
         val settings = settingsRepository.settings.first()
         val cue = outgoingChatSoundCue(
             enabled = settings.chatSoundsEnabled,

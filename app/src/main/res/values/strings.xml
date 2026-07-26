@@ -331,6 +331,8 @@
     <string name="chat_composer_replying_to">Replying to %1$s</string>
     <string name="chat_composer_cancel_reply">Cancel reply</string>
     <string name="chat_composer_attachment">Add attachment</string>
+    <string name="voice_record">Record voice message</string>
+    <string name="voice_stop_recording">Stop recording</string>
     <string name="upload_add_title">Share something</string>
     <string name="upload_add_subtitle">Choose what to add to your message</string>
     <string name="upload_photo">Photo</string>
@@ -477,6 +479,10 @@
     <string name="settings_chat_sounds_desc">Play subtle sounds when sending or receiving in the open chat.</string>
     <string name="settings_reply_prefix">Visible reply prefix</string>
     <string name="settings_reply_prefix_desc">Prefix channel replies with the recipient’s nick for clients that do not render reply tags.</string>
+    <string name="settings_voice_encryption">Encrypt voice messages by default</string>
+    <string name="settings_voice_encryption_desc">Uploads use host-blind AES-GCM. IRC servers and bouncers still see the key in the link.</string>
+    <string name="settings_clear_audio_cache">Clear audio cache</string>
+    <string name="settings_clear_audio_cache_desc">Remove downloaded audio and decrypted temporary playback files.</string>
     <string name="settings_wallpaper">Chat wallpaper</string>
     <string name="settings_wallpaper_none">None</string>
     <string name="settings_people">People</string>

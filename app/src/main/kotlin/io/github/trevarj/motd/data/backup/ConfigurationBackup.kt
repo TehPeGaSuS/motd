@@ -4,6 +4,8 @@ import androidx.room.withTransaction
 import io.github.trevarj.motd.BuildConfig
 import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.PasteBackendConfig
+import io.github.trevarj.motd.audio.VoiceConfig
+import io.github.trevarj.motd.audio.VoicePrefs
 import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.avatar.SelfAvatarSetting
 import io.github.trevarj.motd.data.db.MotdDatabase
@@ -87,6 +89,7 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
     private val contentPreviewPrefs: ContentPreviewPrefs,
     private val replyPrefs: ReplyPrefs,
     private val attachmentPrefs: AttachmentPrefs,
+    private val voicePrefs: VoicePrefs,
     private val avatarPrefs: AvatarPrefs,
     private val bouncerKindPrefs: BouncerKindPrefs,
     private val pushProviderPrefs: PushProviderPrefs,
@@ -239,6 +242,7 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
                 contentPreviews = contentPreviewPrefs.config.first(),
                 replies = replyPrefs.config.first(),
                 attachments = attachmentPrefs.config.first(),
+                voice = voicePrefs.config.first(),
                 showSharedAvatars = avatarPrefs.config.first().showSharedAvatars,
                 selfAvatars = selfAvatars,
                 pushProvider = pushProviderPrefs.provider.first(),
@@ -380,6 +384,10 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
         }
         settings.replies?.let { replyPrefs.setVisibleChannelPrefix(it.visibleChannelPrefix) }
         settings.attachments?.let { attachmentPrefs.setConfig(it) }
+        settings.voice?.let {
+            voicePrefs.setEncryptionDefault(it.encryptionDefault)
+            voicePrefs.setRememberedDestination(it.rememberedDestination)
+        }
         settings.showSharedAvatars?.let { avatarPrefs.setShowSharedAvatars(it) }
         settings.pushProvider?.let { pushProviderPrefs.setProvider(it) }
     }
@@ -483,6 +491,7 @@ private data class PortableSettings(
     val contentPreviews: ContentPreviewConfig? = null,
     val replies: ReplyConfig? = null,
     val attachments: PasteBackendConfig? = null,
+    val voice: VoiceConfig? = null,
     val showSharedAvatars: Boolean? = null,
     val selfAvatars: List<PortableSelfAvatar> = emptyList(),
     val pushProvider: PushProvider? = null,
@@ -493,6 +502,7 @@ private data class PortableSettings(
         if (contentPreviews != null) add("content previews")
         if (replies != null) add("replies")
         if (attachments != null) add("uploads")
+        if (voice != null) add("voice")
         if (showSharedAvatars != null || selfAvatars.isNotEmpty()) add("avatars")
         if (pushProvider != null) add("delivery")
     }

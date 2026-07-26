@@ -18,6 +18,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.audio.VoiceConfig
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ReplyConfig
@@ -41,6 +42,7 @@ fun ChatSettingsScreen(
         settings = state.settings,
         reply = state.reply,
         contentPreviews = state.contentPreviews,
+        voice = state.voice,
         avatars = state.avatars,
         onBack = onBack,
         onOpenFriends = onOpenFriends,
@@ -53,6 +55,8 @@ fun ChatSettingsScreen(
         onShowImages = viewModel::setShowImages,
         onShowLinkPreviews = viewModel::setShowLinkPreviews,
         onShowSharedAvatars = viewModel::setShowSharedAvatars,
+        onVoiceEncryptionDefault = viewModel::setVoiceEncryptionDefault,
+        onClearAudioCache = viewModel::clearAudioCache,
     )
 }
 
@@ -61,6 +65,7 @@ fun ChatSettingsContent(
     settings: Settings,
     reply: ReplyConfig,
     contentPreviews: ContentPreviewConfig,
+    voice: VoiceConfig,
     avatars: AvatarConfig,
     onBack: () -> Unit,
     onOpenFriends: () -> Unit,
@@ -73,6 +78,8 @@ fun ChatSettingsContent(
     onShowImages: (Boolean) -> Unit,
     onShowLinkPreviews: (Boolean) -> Unit,
     onShowSharedAvatars: (Boolean) -> Unit,
+    onVoiceEncryptionDefault: (Boolean) -> Unit,
+    onClearAudioCache: () -> Unit,
 ) {
     SettingsScaffold(title = stringResource(R.string.settings_chat), onBack = onBack) {
         SettingsGroup(title = stringResource(R.string.settings_messages_section)) {
@@ -132,6 +139,21 @@ fun ChatSettingsContent(
                 onCheckedChange = onVisibleReplyPrefix,
                 switchTag = "settings_switch_reply_prefix",
             )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_voice_encryption),
+                subtitle = stringResource(R.string.settings_voice_encryption_desc),
+                checked = voice.encryptionDefault,
+                onCheckedChange = onVoiceEncryptionDefault,
+                switchTag = "settings_switch_voice_encryption",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_clear_audio_cache)) },
+                supportingContent = { Text(stringResource(R.string.settings_clear_audio_cache_desc)) },
+                modifier = Modifier.clickable(onClick = onClearAudioCache)
+                    .testTag("settings_clear_audio_cache"),
+            )
         }
         SettingsGroup(title = stringResource(R.string.settings_people)) {
             SettingsNavigationRow(
@@ -185,12 +207,14 @@ private fun ChatSettingsPreview() {
             settings = Settings(friends = setOf("alice"), fools = setOf("bob", "carol")),
             reply = ReplyConfig(),
             contentPreviews = ContentPreviewConfig(),
+            voice = VoiceConfig(),
             avatars = AvatarConfig(),
             onBack = {}, onOpenFriends = {}, onOpenFools = {},
             onShowJoinPartQuit = {}, onFoolsMode = {}, onShowComposerEmoji = {},
             onChatSoundsEnabled = {},
             onVisibleReplyPrefix = {},
             onShowImages = {}, onShowLinkPreviews = {}, onShowSharedAvatars = {},
+            onVoiceEncryptionDefault = {}, onClearAudioCache = {},
         )
     }
 }
