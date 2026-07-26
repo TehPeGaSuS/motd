@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.semantics.SemanticsProperties
 
 internal open class BaseRobot(protected val compose: ComposeTestRule) {
     fun isPresent(tag: String): Boolean =
@@ -27,9 +28,14 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
         compose.onNodeWithTag(tag, useUnmergedTree = true).performClick()
     }
 
-    fun turnOn(tag: String, timeoutMs: Long = 30_000) {
-        awaitTag(tag, timeoutMs)
-        val node = compose.onNodeWithTag(tag, useUnmergedTree = true)
+    fun turnOnPrefix(prefix: String, timeoutMs: Long = 30_000) {
+        val matcher = SemanticsMatcher("test tag starts with '$prefix'") { node ->
+            node.config.getOrElse(SemanticsProperties.TestTag) { "" }.startsWith(prefix)
+        }
+        compose.waitUntil(timeoutMs) {
+            compose.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        val node = compose.onAllNodes(matcher, useUnmergedTree = true)[0]
         node.performClick()
         node.assertIsOn()
     }
