@@ -195,6 +195,24 @@ class ConnectionRegistryTest {
     }
 
     @Test
+    fun callbackFailureCompletesFalse_withoutEscapingApplicationScope() = runTest {
+        val registry = ConnectionRegistry(
+            backgroundScope,
+            actorFactory = { _, _ -> FakeActor() },
+            isConfigurationFailure = { false },
+        )
+        registry.beginStart()
+        registry.reconcile(listOf(network() to "fp"), setOf(1), emptySet())
+        val generation = registry.snapshot.value.actors.getValue(1).generation
+
+        assertFalse(registry.runIfCurrent(1, generation) { error("post-ready setup failed") })
+        runCurrent()
+
+        assertEquals(0, registry.snapshot.value.callbackCount)
+        assertTrue(registry.snapshot.value.actors.containsKey(1))
+    }
+
+    @Test
     fun foregroundProbe_targetsReadyActors_andConflatesRepeatedRequests() = runTest {
         val created = mutableListOf<FakeActor>()
         val registry = ConnectionRegistry(

@@ -5,6 +5,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
@@ -288,6 +289,10 @@ internal class ConnectionRegistry(
                         } else {
                             command.result.complete(false)
                         }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        command.result.complete(false)
                     } finally {
                         command.result.complete(false)
                         commands.trySend(Command.CallbackFinished(token))
