@@ -409,6 +409,9 @@ class ConnectionManagerImpl @Inject constructor(
 
     private val _presenceStates = MutableStateFlow<Map<PresenceKey, PresenceState>>(emptyMap())
     override val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> = _presenceStates.asStateFlow()
+
+    private val _lagStates = MutableStateFlow<Map<Long, Long?>>(emptyMap())
+    override val lagStates: StateFlow<Map<Long, Long?>> = _lagStates.asStateFlow()
     private val monitoredTargets = java.util.concurrent.ConcurrentHashMap<Long, Map<String, String>>()
     private val monitorInitialized = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
     private val monitorLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
@@ -659,6 +662,7 @@ class ConnectionManagerImpl @Inject constructor(
             monitorInitialized.clear()
             monitorLocks.clear()
             _presenceStates.value = emptyMap()
+            _lagStates.value = emptyMap()
             eventProcessor.shutdown()
         }
     }
@@ -720,7 +724,10 @@ class ConnectionManagerImpl @Inject constructor(
             wantedIds = wantedIds,
             awaitingCertTrust = _certPrompts.value.mapTo(mutableSetOf()) { it.networkId },
         )
-        deletedIds.forEach { eventProcessor.evictNetwork(it) }
+        deletedIds.forEach {
+            eventProcessor.evictNetwork(it)
+            _lagStates.update { states -> states - it }
+        }
     }
 
     private fun createActor(row: NetworkEntity, generation: Long): ConnectionLifecycleActor {
@@ -755,6 +762,7 @@ class ConnectionManagerImpl @Inject constructor(
             onConnectionChanged = { id, connection ->
                 registry.actorConnection(id, generation, connection)
             },
+            onLag = { id, lag -> setLag(id, lag) },
             onStopped = { id -> registry.actorStopped(id, generation) },
             onReady = { conn ->
                 registry.runIfCurrent(row.id, generation) {
@@ -885,6 +893,13 @@ class ConnectionManagerImpl @Inject constructor(
 
     private fun setRosterState(bufferId: Long, state: RosterLoadState) {
         _rosterStates.update { it + (bufferId to state) }
+    }
+
+    /** Publish one network's latest latency reading; a null [lag] clears it (#34). */
+    private fun setLag(networkId: Long, lag: Long?) {
+        _lagStates.update { current ->
+            if (lag == null) current - networkId else current + (networkId to lag)
+        }
     }
 
     private suspend fun clearRoster(networkId: Long, channel: String) {

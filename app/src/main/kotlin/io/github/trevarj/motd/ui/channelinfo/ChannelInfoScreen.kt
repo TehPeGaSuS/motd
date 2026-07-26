@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.channelinfo
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -47,7 +48,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -61,7 +65,9 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
+import io.github.trevarj.motd.ui.chat.LagTone
 import io.github.trevarj.motd.ui.chat.NickActionSheet
+import io.github.trevarj.motd.ui.chat.lagTone
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.service.RosterLoadState
@@ -156,6 +162,8 @@ fun ChannelInfoContent(
                     memberCount = state.memberCount,
                     rosterState = state.rosterState,
                     hasStaleMembers = state.hasStaleMembers,
+                    lagMs = state.lagMs,
+                    connected = state.connected,
                     onRetryMembers = onRetryMembers,
                     onEditTopic = { showTopicEdit = true },
                 )
@@ -355,6 +363,8 @@ private fun ChannelHeader(
     memberCount: Int?,
     rosterState: RosterLoadState,
     hasStaleMembers: Boolean,
+    lagMs: Long?,
+    connected: Boolean,
     onEditTopic: () -> Unit = {},
     onRetryMembers: () -> Unit = {},
 ) {
@@ -412,6 +422,15 @@ private fun ChannelHeader(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp).testTag("channelinfo_roster_state"),
         )
+        // Subtle network latency readout (#34). Only shown once a PONG round-trip has completed on
+        // a Ready connection, so an offline/loading channel info page stays uncluttered.
+        val resolvedLag = lagMs?.takeIf { connected && it >= 0 }
+        if (resolvedLag != null) {
+            LagReadout(
+                lagMs = resolvedLag,
+                modifier = Modifier.padding(top = 6.dp).testTag("channelinfo_lag"),
+            )
+        }
         if (rosterState == RosterLoadState.FAILED) {
             TextButton(
                 onClick = onRetryMembers,
@@ -518,6 +537,45 @@ private fun ChannelInfoContentPreview() {
             ),
             onBack = {}, onSetPinned = {}, onSetMuted = {}, onLeave = {},
             onQueryChange = {},
+        )
+    }
+}
+
+/**
+ * Subtle latency readout for the Channel Info header (#34): a small status dot whose tone follows
+ * [lagTone] alongside the millisecond value. Inline (not a pill) so it reads as supporting metadata
+ * under the channel name rather than a prominent status banner.
+ */
+@Composable
+private fun LagReadout(
+    lagMs: Long,
+    modifier: Modifier = Modifier,
+) {
+    val tone = lagTone(lagMs)
+    val dotColor = when (tone) {
+        LagTone.GOOD -> MaterialTheme.colorScheme.primary
+        LagTone.DEGRADED -> MaterialTheme.colorScheme.tertiary
+        LagTone.BAD -> MaterialTheme.colorScheme.error
+    }
+    val description = stringResource(R.string.chat_lag_content_description, lagMs)
+    Row(
+        modifier = modifier.semantics(mergeDescendants = true) {
+            contentDescription = description
+        },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(dotColor),
+        )
+        Text(
+            text = stringResource(R.string.chat_lag_ms, lagMs),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
         )
     }
 }

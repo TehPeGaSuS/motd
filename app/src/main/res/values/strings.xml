@@ -416,6 +416,9 @@
         <item quantity="one">%1$d member</item>
         <item quantity="other">%1$d members</item>
     </plurals>
+    <!-- Lag indicator (#34) -->
+    <string name="chat_lag_ms">%1$d ms</string>
+    <string name="chat_lag_content_description">Network latency: %1$d ms</string>
     <!-- Image viewer (WP7) -->
     <string name="image_viewer_content_description">Full-screen image</string>
     <string name="image_viewer_back">Back</string>

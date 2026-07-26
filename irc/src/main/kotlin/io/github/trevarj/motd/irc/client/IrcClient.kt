@@ -174,7 +174,17 @@ class IrcClient(
 
     @Volatile private var transport: IrcTransport? = null
     @Volatile private var watchdog: PingWatchdog? = null
+    @Volatile private var lagMonitor: LagMonitor? = null
     private var runJob: Job? = null
+
+    private val _lag = MutableStateFlow<Long?>(null)
+    /**
+     * Latest PING/PONG round-trip latency in ms (issue #34); null until the first probe completes
+     * or while disconnected. Stable across the connection's lifetime: the active [LagMonitor] writes
+     * here directly, so a collector that attaches before the first probe still observes later
+     * readings instead of pinning a throwaway flow.
+     */
+    val lag: StateFlow<Long?> = _lag.asStateFlow()
 
     // Set once registration completes; used to gate steady-state routing.
     @Volatile private var registered = false
@@ -193,6 +203,8 @@ class IrcClient(
     fun stop() {
         watchdog?.stop()
         watchdog = null
+        lagMonitor?.stop()
+        lagMonitor = null
         runJob?.cancel()
         runJob = null
         criticalEventChannel.cancel(CancellationException("client stopped"))
@@ -275,6 +287,15 @@ class IrcClient(
         watchdog = wd
         wd.start()
 
+        val lm = LagMonitor(
+            scope = scope,
+            sendPing = { payload -> runCatching { t.send("PING $payload") } },
+            isRegistered = { registered },
+            sink = _lag,
+        )
+        lagMonitor = lm
+        lm.start()
+
         try {
             t.incoming.collect { line ->
                 wd.onInbound()
@@ -288,6 +309,9 @@ class IrcClient(
                     runCatching { t.send("PONG ${msg.params.firstOrNull().orEmpty()}") }
                     return@collect
                 }
+                // Correlate our own lag probes; an unmatched PONG (e.g. the watchdog's keepalive
+                // echo or an unsolicited server PONG) falls through to dispatch as before.
+                if (msg.command == "PONG" && lm.onPong(msg.params)) return@collect
                 if (!registered) {
                     // Bouncer children can receive valued CAP NEW immediately before the
                     // registration machine marks them Ready. Retain those values so the
@@ -314,6 +338,8 @@ class IrcClient(
             emitDisconnected(criticalEvents, disconnectedPublished, e.message)
         } finally {
             wd.stop()
+            lm.stop()
+            if (transport === t) lagMonitor = null
             if (currentCoroutineContext().isActive) {
                 labels.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
                 unlabeledChatHistory.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)

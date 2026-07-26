@@ -82,6 +82,7 @@ internal fun rosterStateAfterExplicitRefresh(completed: Boolean): RosterLoadStat
 
 private val EMPTY_ROSTER_STATES: StateFlow<Map<Long, RosterLoadState>> = MutableStateFlow(emptyMap())
 private val EMPTY_PRESENCE_STATES: StateFlow<Map<PresenceKey, PresenceState>> = MutableStateFlow(emptyMap())
+private val EMPTY_LAG_STATES: StateFlow<Map<Long, Long?>> = MutableStateFlow(emptyMap())
 
 /**
  * A pending TOFU cert-trust decision surfaced to the UI (plans/12). Published when a TLS handshake
@@ -105,6 +106,8 @@ interface ConnectionManager {
     val connectionStates: StateFlow<Map<Long, IrcClientState>>
     val rosterStates: StateFlow<Map<Long, RosterLoadState>> get() = EMPTY_ROSTER_STATES
     val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> get() = EMPTY_PRESENCE_STATES
+    /** Latest PING/PONG round-trip latency (ms) per network id; null = unknown/disconnected (#34). */
+    val lagStates: StateFlow<Map<Long, Long?>> get() = EMPTY_LAG_STATES
     val channelJoinOutcomes: Flow<ChannelJoinOutcome> get() = emptyFlow()
 
     /** Live client for a connected network, null otherwise. */

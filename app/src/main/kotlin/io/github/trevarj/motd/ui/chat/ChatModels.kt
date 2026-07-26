@@ -67,6 +67,16 @@ fun keepMessage(
 /** Grouping window: consecutive same-sender messages within this span share one header. */
 const val GROUP_WINDOW_MS: Long = 3 * 60 * 1000
 
+/** Tone bucket for the latency readout (#34); pure so the thresholds are unit-testable. */
+enum class LagTone { GOOD, DEGRADED, BAD }
+
+/** Classify a PING/PONG round-trip into a display tone. Thresholds chosen for IRC-scale latency. */
+fun lagTone(lagMs: Long): LagTone = when {
+    lagMs < 300 -> LagTone.GOOD
+    lagMs < 1_500 -> LagTone.DEGRADED
+    else -> LagTone.BAD
+}
+
 /**
  * Scroll-offset slack (px) within which the reverse list still counts as "at bottom" for autoscroll.
  * Small so a barely-nudged newest row keeps auto-following, but the user is not pinned once they

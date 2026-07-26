@@ -34,11 +34,20 @@ interface ManagedConnection {
     suspend fun awaitTermination()
 
     /**
+     * Latest PING/PONG round-trip latency in ms (issue #34), or null when no measurement is
+     * available. Defaults to a constant null flow for fakes that do not model latency.
+     */
+    val lag: StateFlow<Long?> get() = NULL_LAG_FLOW
+
+    /**
      * Send an immediate watchdog-style liveness probe. Implementations that do not expose a
      * transport-level probe retain the historical no-op/healthy behavior.
      */
     suspend fun probeLiveness(graceMs: Long): Boolean = true
 }
+
+/** Constant null latency flow backing [ManagedConnection.lag] for connections without a probe. */
+private val NULL_LAG_FLOW: StateFlow<Long?> = kotlinx.coroutines.flow.MutableStateFlow(null)
 
 /** Adapter wrapping a real [IrcClient]. */
 class IrcClientConnection(
@@ -47,6 +56,7 @@ class IrcClientConnection(
 ) : ManagedConnection {
     override val state: StateFlow<IrcClientState> get() = client.state
     override val criticalEvents: ReceiveChannel<IrcEvent> get() = client.criticalEvents
+    override val lag: StateFlow<Long?> get() = client.lag
     override fun start() = client.start()
     override suspend fun awaitTermination() = client.awaitTermination()
     override suspend fun probeLiveness(graceMs: Long): Boolean = client.probeLiveness(graceMs)
@@ -85,6 +95,7 @@ class ConnectionActor(
     private val onEvent: suspend (Long, IrcEvent) -> Unit,
     private val onReady: suspend (ManagedConnection) -> Unit,
     private val onConnectionChanged: (Long, ManagedConnection?) -> Unit = { _, _ -> },
+    private val onLag: (Long, Long?) -> Unit = { _, _ -> },
     private val onStopped: (Long) -> Unit = {},
     private val random: () -> Double = { Random.nextDouble() },
     /**
@@ -166,6 +177,11 @@ class ConnectionActor(
             val collector = attemptScope.launch {
                 for (event in conn.criticalEvents) onEvent(networkId, event)
             }
+            // Forward latency readings for this connection's lifetime; cancelled with the attempt
+            // scope so a replaced/destroyed actor never reports a stale measurement.
+            val lagCollector = attemptScope.launch {
+                conn.lag.collect { lag -> onLag(networkId, lag) }
+            }
             val outcome = try {
                 runConnection(conn) { attempt = 0 }
             } finally {
@@ -180,6 +196,10 @@ class ConnectionActor(
                 conn.stop()
                 connection = null
                 onConnectionChanged(networkId, null)
+                // Stop forwarding readings before clearing the published latency, so a final
+                // emission cannot race the null and repaint a stale RTT during backoff.
+                lagCollector.cancel()
+                onLag(networkId, null)
             }
 
             // TOFU: a cert failure parks the actor (awaiting user trust) rather than backoff-looping.

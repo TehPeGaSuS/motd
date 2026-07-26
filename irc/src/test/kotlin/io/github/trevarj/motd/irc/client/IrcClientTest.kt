@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -798,6 +799,51 @@ class IrcClientTest {
         assertFalse(probe.await())
         assertEquals(IrcClientState.Disconnected, client.state.value)
         assertTrue(ft.closed)
+    }
+
+    @Test
+    fun `lag probe measures round trip and consumes its pong`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+        val rawPongs = mutableListOf<IrcEvent.Raw>()
+        val rawJob = launch {
+            client.broadcastEvents.collect {
+                if (it is IrcEvent.Raw && it.message.command == "PONG") rawPongs += it
+            }
+        }
+        runCurrent()
+
+        assertNull(client.lag.value)
+        // The LagMonitor cadence is 30s; advancing past it fires the first probe.
+        advanceTimeBy(LagMonitor.DEFAULT_INTERVAL_MS + 1)
+        runCurrent()
+        val ping = ft.sent.last { it.startsWith("PING motd-lag-") }
+
+        // The matching PONG is consumed by the monitor and surfaces as a latency reading.
+        ft.feed(":srv PONG ${ping.substringAfter("PING ")}")
+        runCurrent()
+        val lag = client.lag.value
+        assertTrue("lag reading published", lag != null)
+        assertTrue("lag is non-negative", lag!! >= 0)
+
+        // The consumed PONG must not leak through as a Raw event.
+        rawJob.cancel()
+        assertTrue("matched PONG was not dispatched", rawPongs.isEmpty())
+    }
+
+    @Test
+    fun `unmatched pong still dispatches as raw`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+        val raws = clientScope().async {
+            client.broadcastEvents.first { it is IrcEvent.Raw && it.message.command == "PONG" } as IrcEvent.Raw
+        }
+        runCurrent()
+
+        // A watchdog keepalive PONG (motd-<epoch>) is not a lag probe and must still dispatch.
+        ft.feed(":srv PONG motd-1700000000000")
+        runCurrent()
+        assertEquals("motd-1700000000000", raws.await().message.params.first())
     }
 
     // -- LIST / listChannels (plans/16 §5.7) --

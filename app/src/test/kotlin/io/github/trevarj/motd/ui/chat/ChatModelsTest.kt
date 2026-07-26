@@ -685,4 +685,14 @@ class ChatModelsTest {
         assertTrue(gate.update(ready, nextGeneration))
         assertFalse(gate.update(ready, nextGeneration))
     }
+
+    @Test
+    fun `lag tone thresholds bucket latency`() {
+        assertEquals(LagTone.GOOD, lagTone(0))
+        assertEquals(LagTone.GOOD, lagTone(299))
+        assertEquals(LagTone.DEGRADED, lagTone(300))
+        assertEquals(LagTone.DEGRADED, lagTone(1_499))
+        assertEquals(LagTone.BAD, lagTone(1_500))
+        assertEquals(LagTone.BAD, lagTone(60_000))
+    }
 }

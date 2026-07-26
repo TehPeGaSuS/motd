@@ -52,6 +52,10 @@ data class ChannelInfoUiState(
     // instead of the prefix sections; null (query blank) means sectioned mode.
     val query: String = "",
     val searchResults: List<MemberEntity>? = null,
+    // Network latency for this channel's network (#34); null until the first PONG completes or
+    // while disconnected. Surfaced subtly in Channel Info rather than the chat header.
+    val lagMs: Long? = null,
+    val connected: Boolean = false,
 )
 
 internal data class RosterPresentation(val memberCount: Int?, val hasStaleMembers: Boolean)
@@ -127,13 +131,28 @@ class ChannelInfoViewModel @Inject constructor(
         DerivedRoster(lastSpoke, query, settings.friends, settings.fools, identityRules)
     }
 
+    // Network latency + Ready flag for this channel's network (#34). Pairs so a single 5-arg
+    // combine can carry both into [state] without exceeding the combine arity limit.
+    private val networkLagFlow = bufferFlow.flatMapLatest { buffer ->
+        if (buffer == null) {
+            flowOf<Pair<Long?, Boolean>>(null to false)
+        } else {
+            connectionManager.lagStates
+                .combine(connectionManager.connectionStates) { lags, states ->
+                    lags[buffer.networkId] to (states[buffer.networkId] is IrcClientState.Ready)
+                }
+        }
+    }
+
     val state: StateFlow<ChannelInfoUiState> =
         combine(
             bufferFlow,
             membersFlow,
             derivedRosterFlow,
             connectionManager.rosterStates,
-        ) { buffer, members, derived, rosterStates ->
+            networkLagFlow,
+        ) { buffer, members, derived, rosterStates, networkLag ->
+            val (lagMs, connected) = networkLag
             val order = prefixOrderForBuffer(buffer)
             val identityRules = derived.identityRules
             val lookup: (MemberEntity) -> Long? = { derived.lastSpoke[identityRules.normalize(it.nick)] }
@@ -168,6 +187,8 @@ class ChannelInfoViewModel @Inject constructor(
                 canModerate = viewerCanModerate(buffer, members, order),
                 query = derived.query,
                 searchResults = searchResults,
+                lagMs = lagMs,
+                connected = connected,
             )
         }.stateIn(
             scope = viewModelScope,
