@@ -378,6 +378,25 @@ class OnboardingReducerTest {
     }
 
     @Test
+    fun `transient empty bouncer list preserves selected imports`() {
+        val selected = reduce(
+            OnboardingState(step = OnboardingStep.CONNECT),
+            OnboardingAction.BouncerListed(
+                listOf(BouncerNetworkRow("libera", "Libera", selected = false)),
+            ),
+            OnboardingAction.ToggleBouncerNetwork("libera"),
+        )
+
+        val refreshed = onboardingReducer(
+            selected,
+            OnboardingAction.BouncerListed(emptyList()),
+        )
+
+        assertEquals(listOf("libera"), refreshed.bouncerNetworks.map { it.netId })
+        assertTrue(refreshed.bouncerNetworks.single().selected)
+    }
+
+    @Test
     fun `bouncer add appends a row`() {
         val s = reduce(
             OnboardingState(step = OnboardingStep.CONNECT),

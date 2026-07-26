@@ -290,14 +290,14 @@ fun onboardingReducer(state: OnboardingState, action: OnboardingAction): Onboard
             // LISTNETWORKS and soju's passive notification extension update the same live
             // snapshot. A late notification must not erase an import choice made from an earlier
             // snapshot, including a just-added network that has not yet been echoed back.
-            val selectedNetIds = state.bouncerNetworks.asSequence()
+            val selectedRows = state.bouncerNetworks.asSequence()
                 .filter { it.selected }
-                .map { it.netId }
-                .toSet()
+                .associateBy { it.netId }
+            val listedNetIds = action.rows.asSequence().map { it.netId }.toSet()
             state.copy(
                 bouncerNetworks = action.rows.map { row ->
-                    row.copy(selected = row.selected || row.netId in selectedNetIds)
-                },
+                    row.copy(selected = row.selected || row.netId in selectedRows)
+                } + selectedRows.values.filter { it.netId !in listedNetIds },
                 bouncerListLoaded = true,
             )
         }
