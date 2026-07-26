@@ -118,9 +118,12 @@ class ChatJumpResolverTest {
         assertEquals(2L, target.expectedEventId)
     }
 
-    @Test fun `only durable unresolved entry state presents the not-loaded snackbar`() {
-        assertTrue(shouldPresentUnresolvedEntrySnackbar(entryPositionUnresolved = true))
-        assertTrue(!shouldPresentUnresolvedEntrySnackbar(entryPositionUnresolved = false))
+    @Test fun `ordinary unresolved entry does not present the not-loaded snackbar`() {
+        assertTrue(!shouldPresentUnresolvedEntrySnackbar(entryMessageUnavailable = false))
+    }
+
+    @Test fun `explicit unresolved message jump presents the not-loaded snackbar`() {
+        assertTrue(shouldPresentUnresolvedEntrySnackbar(entryMessageUnavailable = true))
     }
 
     @Test fun `restored in-flight deep jump resolves again`() {

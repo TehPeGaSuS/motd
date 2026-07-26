@@ -311,7 +311,7 @@ fun ChatScreen(
     val jumpTarget by viewModel.jumpTarget.collectAsStateWithLifecycle()
     val initialTarget by viewModel.initialTarget.collectAsStateWithLifecycle()
     val entryPositionSettled by viewModel.entryPositionSettled.collectAsStateWithLifecycle()
-    val entryPositionUnresolved by viewModel.entryPositionUnresolved.collectAsStateWithLifecycle()
+    val entryMessageUnavailable by viewModel.entryMessageUnavailable.collectAsStateWithLifecycle()
     // Read marker frozen on entry so the "New messages" divider doesn't flash away (plans/15 #2).
     val readMarkerSnapshot by viewModel.readMarkerSnapshot.collectAsStateWithLifecycle()
     // Live read marker drives the FAB unread badge so it clears as messages are read (not on exit).
@@ -420,7 +420,7 @@ fun ChatScreen(
         jumpTarget = jumpTarget,
         initialTarget = initialTarget,
         entryPositionInitiallySettled = entryPositionSettled,
-        entryPositionUnresolved = entryPositionUnresolved,
+        entryMessageUnavailable = entryMessageUnavailable,
         onJumpHandled = viewModel::onJumpHandled,
         onInitialPositionHandled = viewModel::onInitialPositionHandled,
         onInitialPositionUnresolved = viewModel::onInitialPositionUnresolved,
@@ -564,7 +564,7 @@ fun ChatContent(
     jumpTarget: ChatPositionTarget? = null,
     initialTarget: ChatPositionTarget? = null,
     entryPositionInitiallySettled: Boolean = false,
-    entryPositionUnresolved: Boolean = false,
+    entryMessageUnavailable: Boolean = false,
     onJumpHandled: (Long) -> Unit = {},
     onInitialPositionHandled: () -> Unit = {},
     onInitialPositionUnresolved: () -> Unit = {},
@@ -726,9 +726,9 @@ fun ChatContent(
     }
 
     val jumpNotLoaded = stringResource(R.string.chat_jump_not_loaded)
-    // Entry failure is durable because the read gate remains closed until this destination exits.
-    LaunchedEffect(entryPositionUnresolved) {
-        if (shouldPresentUnresolvedEntrySnackbar(entryPositionUnresolved)) {
+    // Only an explicit message destination reports failure; normal entry positioning is silent.
+    LaunchedEffect(entryMessageUnavailable) {
+        if (shouldPresentUnresolvedEntrySnackbar(entryMessageUnavailable)) {
             snackbarHostState.showSnackbar(jumpNotLoaded)
         }
     }
@@ -1885,9 +1885,9 @@ internal fun composerTextForReply(
  * Header subtitle: typing summary if anyone is typing, else a localized member count for channels.
  * Uses the [Context] typing overload and a plural for the count (plans/15 #25).
  */
-/** The durable unresolved-entry state is the sole source of the not-loaded snackbar. */
-internal fun shouldPresentUnresolvedEntrySnackbar(entryPositionUnresolved: Boolean): Boolean =
-    entryPositionUnresolved
+/** A durable explicit-jump failure is the sole source of the not-loaded snackbar. */
+internal fun shouldPresentUnresolvedEntrySnackbar(entryMessageUnavailable: Boolean): Boolean =
+    entryMessageUnavailable
 
 /**
  * A completed REFRESH may still be followed by a Room/RemoteMediator APPEND. Do not decide entry

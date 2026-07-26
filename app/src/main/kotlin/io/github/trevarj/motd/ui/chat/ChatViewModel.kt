@@ -1267,6 +1267,12 @@ class ChatViewModel @Inject constructor(
     /** Durable explicit failure state: entry remains read-gated until the user navigates away. */
     val entryPositionUnresolved: StateFlow<Boolean> = _entryPositionUnresolved.asStateFlow()
 
+    private val _entryMessageUnavailable = MutableStateFlow(
+        savedStateHandle.get<Boolean>(ENTRY_MESSAGE_UNAVAILABLE_KEY) == true,
+    )
+    /** True only when an explicit message jump, rather than normal entry positioning, failed. */
+    val entryMessageUnavailable: StateFlow<Boolean> = _entryMessageUnavailable.asStateFlow()
+
     // Re-resolve is allowed exactly once per normal-entry target; explicit jump requests carry
     // their own guard so a superseded request cannot spend the newer request's retry.
     private var initialReresolveUsed = false
@@ -1517,7 +1523,7 @@ class ChatViewModel @Inject constructor(
         jumpResolveJob = null
         activeJumpRequest = null
         if (request.settlesEntryPosition) {
-            markEntryPositionUnresolved()
+            markEntryPositionUnresolved(messageUnavailable = true)
         } else {
             request.msgid?.let { msgid ->
                 uiEventQueue.enqueue(ChatUiEvent.ReplyJumpUnavailable(ReplyJumpRequest(msgid)))
@@ -1530,8 +1536,12 @@ class ChatViewModel @Inject constructor(
         _entryPositionSettled.value = true
     }
 
-    private fun markEntryPositionUnresolved() {
+    private fun markEntryPositionUnresolved(messageUnavailable: Boolean = false) {
         savedStateHandle[ENTRY_POSITION_UNRESOLVED_KEY] = true
+        if (messageUnavailable) {
+            savedStateHandle[ENTRY_MESSAGE_UNAVAILABLE_KEY] = true
+            _entryMessageUnavailable.value = true
+        }
         _entryPositionUnresolved.value = true
     }
 
@@ -1593,6 +1603,7 @@ class ChatViewModel @Inject constructor(
         const val JUMP_CONSUMED_KEY = "jump_consumed"
         const val ENTRY_POSITION_SETTLED_KEY = "entry_position_settled"
         const val ENTRY_POSITION_UNRESOLVED_KEY = "entry_position_unresolved"
+        const val ENTRY_MESSAGE_UNAVAILABLE_KEY = "entry_message_unavailable"
 
         // Max wait for a pending own message's msgid to land before a queued reaction gives up.
         // Urgent history recovery may wait behind one unlabeled 30s wire request before its own

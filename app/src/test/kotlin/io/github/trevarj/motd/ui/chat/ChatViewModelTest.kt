@@ -903,6 +903,31 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `ordinary unresolved entry remains read gated without a message error`() = runTest {
+        val vm = viewModel(channel, FakeConnectionManager(network.id))
+        vm.state.first { it.buffer != null }
+
+        vm.onInitialPositionUnresolved()
+
+        assertTrue(vm.entryPositionUnresolved.value)
+        assertFalse(vm.entryMessageUnavailable.value)
+    }
+
+    @Test
+    fun `missing entry message jump reports the unavailable target`() = runTest {
+        val vm = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            jumpToMsgid = "missing-message",
+        )
+
+        advanceUntilIdle()
+
+        assertTrue(vm.entryPositionUnresolved.value)
+        assertTrue(vm.entryMessageUnavailable.value)
+    }
+
+    @Test
     fun `coalesced saved viewport follows canonical event and retains pixel offset`() = runTest {
         val winnerId = db.messageDao().insertAll(
             listOf(message(channel.id, "history", "server-id", "alice").copy(serverTime = 500)),
@@ -963,10 +988,13 @@ class ChatViewModelTest {
         scrollPositions: ChatScrollPositionStore = ChatScrollPositionStore(),
         settings: FakeSettingsRepository = FakeSettingsRepository(),
         buffers: FakeBufferRepository = FakeBufferRepository(buffer, routeBufferId),
+        jumpToMsgid: String? = null,
     ): ChatViewModel {
         val eventSink: IrcEventSink = processor
+        val routeState = mutableMapOf<String, Any>("bufferId" to routeBufferId)
+        jumpToMsgid?.let { routeState["jumpToMsgid"] = it }
         return ChatViewModel(
-            savedStateHandle = SavedStateHandle(mapOf("bufferId" to routeBufferId)),
+            savedStateHandle = SavedStateHandle(routeState),
             messageRepository = messages,
             bufferRepository = buffers,
             networkIdentityDao = db.networkIdentityDao(),
