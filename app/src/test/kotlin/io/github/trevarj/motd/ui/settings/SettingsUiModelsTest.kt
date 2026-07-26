@@ -4,7 +4,6 @@ import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
-import io.github.trevarj.motd.data.prefs.familyPreset
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
 import io.github.trevarj.motd.ui.onboarding.ServerForm
@@ -15,22 +14,19 @@ import org.junit.Test
 
 class SettingsUiModelsTest {
     @Test
-    fun `theme groups expose each automatic family once and keep dark only themes separate`() {
-        val selectableFamilies = ColorThemePreset.entries
-            .filter { it != ColorThemePreset.AMOLED }
-            .map { it.familyPreset }
-            .toSet()
-        val grouped = listOf(ColorThemePreset.SYSTEM) + THEME_FAMILY_PRESETS + DARK_ONLY_THEME_PRESETS
+    fun `theme groups expose every exact light and dark selection once`() {
+        val selectableThemes = ColorThemePreset.entries.filter { it != ColorThemePreset.AMOLED }.toSet()
+        val grouped = listOf(ColorThemePreset.SYSTEM) + LIGHT_THEME_PRESETS + DARK_THEME_PRESETS
 
-        assertEquals(selectableFamilies, grouped.toSet())
+        assertEquals(selectableThemes, grouped.toSet())
         assertEquals(grouped.size, grouped.distinct().size)
         assertEquals(
-            THEME_FAMILY_PRESETS.map(::themePresetLabelText).sorted(),
-            THEME_FAMILY_PRESETS.map(::themePresetLabelText),
+            LIGHT_THEME_PRESETS.map(::themePresetLabelText).sorted(),
+            LIGHT_THEME_PRESETS.map(::themePresetLabelText),
         )
         assertEquals(
-            DARK_ONLY_THEME_PRESETS.map(::themePresetLabelText).sorted(),
-            DARK_ONLY_THEME_PRESETS.map(::themePresetLabelText),
+            DARK_THEME_PRESETS.map(::themePresetLabelText).sorted(),
+            DARK_THEME_PRESETS.map(::themePresetLabelText),
         )
     }
 

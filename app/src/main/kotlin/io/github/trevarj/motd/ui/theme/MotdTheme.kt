@@ -93,6 +93,7 @@ fun MotdTheme(
     themePreset: ColorThemePreset = ColorThemePreset.SYSTEM,
     trueBlack: Boolean = false,
     dynamicColor: Boolean = true,
+    followSystem: Boolean = false,
     // Round 4 (plans/13); all defaulted so existing call sites (incl. previews) stay unchanged.
     layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
     nickColorsEnabled: Boolean = true,
@@ -106,7 +107,7 @@ fun MotdTheme(
     // fixed palette must not change this function's slot structure and dispose stateful content.
     val systemDark = isSystemInDarkTheme()
     val context = LocalContext.current
-    val resolvedPreset = resolveAutoPalette(themePreset, systemDark)
+    val resolvedPreset = resolveAutoPalette(themePreset, followSystem, systemDark)
     val dark = if (resolvedPreset == ColorThemePreset.SYSTEM) systemDark else resolvedPreset.isDark
     val effectivePreset = if (resolvedPreset == ColorThemePreset.AMOLED) ColorThemePreset.DARK else resolvedPreset
     val resolvedScheme = fixedThemeScheme(effectivePreset) ?: when {

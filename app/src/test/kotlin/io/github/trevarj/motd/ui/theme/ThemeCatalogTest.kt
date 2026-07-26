@@ -5,7 +5,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.NickColorPalette
-import io.github.trevarj.motd.data.prefs.familyPreset
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.isFixedPalette
 import io.github.trevarj.motd.data.prefs.resolveAutoPalette
@@ -61,25 +60,29 @@ class ThemeCatalogTest {
         neverPaired.forEach { assertNull("$it must not auto-swap", it.systemPartner) }
     }
 
-    @Test fun resolveAutoPalette_alwaysSwapsPairedFamiliesAndIgnoresDarkOnlyThemes() {
-        assertEquals(ColorThemePreset.KANAGAWA_LOTUS, resolveAutoPalette(ColorThemePreset.KANAGAWA_WAVE, systemDark = false))
-        assertEquals(ColorThemePreset.KANAGAWA_WAVE, resolveAutoPalette(ColorThemePreset.KANAGAWA_WAVE, systemDark = true))
-        assertEquals(ColorThemePreset.GRUVBOX_DARK, resolveAutoPalette(ColorThemePreset.GRUVBOX_LIGHT, systemDark = true))
-        assertEquals(ColorThemePreset.GRUVBOX_LIGHT, resolveAutoPalette(ColorThemePreset.GRUVBOX_LIGHT, systemDark = false))
-        assertEquals(ColorThemePreset.DARK, resolveAutoPalette(ColorThemePreset.LIGHT, systemDark = true))
-        assertEquals(ColorThemePreset.LIGHT, resolveAutoPalette(ColorThemePreset.DARK, systemDark = false))
-        // Dark-only palettes have no partner and stay dark in both OS modes.
-        assertEquals(ColorThemePreset.DRACULA, resolveAutoPalette(ColorThemePreset.DRACULA, systemDark = false))
-        assertEquals(ColorThemePreset.DRACULA, resolveAutoPalette(ColorThemePreset.DRACULA, systemDark = true))
-        assertEquals(ColorThemePreset.SYSTEM, resolveAutoPalette(ColorThemePreset.SYSTEM, systemDark = true))
+    @Test fun resolveAutoPalette_keepsExplicitVariantWhenSystemFollowingIsDisabled() {
+        assertEquals(
+            ColorThemePreset.KANAGAWA_WAVE,
+            resolveAutoPalette(ColorThemePreset.KANAGAWA_WAVE, followSystem = false, systemDark = false),
+        )
+        assertEquals(
+            ColorThemePreset.GRUVBOX_LIGHT,
+            resolveAutoPalette(ColorThemePreset.GRUVBOX_LIGHT, followSystem = false, systemDark = true),
+        )
     }
 
-    @Test fun familyPreset_canonicalizesEveryPairToItsLightSibling() {
-        ColorThemePreset.entries.forEach { preset ->
-            val canonical = preset.familyPreset
-            if (preset.systemPartner == null) assertEquals(preset, canonical)
-            else assertTrue("$preset family must use its light sibling", !canonical.isDark)
-        }
+    @Test fun resolveAutoPalette_swapsPairedFamiliesAndIgnoresDarkOnlyThemes() {
+        assertEquals(ColorThemePreset.KANAGAWA_LOTUS, resolveAutoPalette(ColorThemePreset.KANAGAWA_WAVE, followSystem = true, systemDark = false))
+        assertEquals(ColorThemePreset.KANAGAWA_WAVE, resolveAutoPalette(ColorThemePreset.KANAGAWA_WAVE, followSystem = true, systemDark = true))
+        assertEquals(ColorThemePreset.GRUVBOX_DARK, resolveAutoPalette(ColorThemePreset.GRUVBOX_LIGHT, followSystem = true, systemDark = true))
+        assertEquals(ColorThemePreset.GRUVBOX_LIGHT, resolveAutoPalette(ColorThemePreset.GRUVBOX_LIGHT, followSystem = true, systemDark = false))
+        assertEquals(ColorThemePreset.DARK, resolveAutoPalette(ColorThemePreset.LIGHT, followSystem = true, systemDark = true))
+        assertEquals(ColorThemePreset.LIGHT, resolveAutoPalette(ColorThemePreset.DARK, followSystem = true, systemDark = false))
+        assertEquals(ColorThemePreset.NORD_LIGHT, resolveAutoPalette(ColorThemePreset.NORD, followSystem = true, systemDark = false))
+        // Dark-only palettes have no partner and stay dark in both OS modes.
+        assertEquals(ColorThemePreset.DRACULA, resolveAutoPalette(ColorThemePreset.DRACULA, followSystem = true, systemDark = false))
+        assertEquals(ColorThemePreset.DRACULA, resolveAutoPalette(ColorThemePreset.DRACULA, followSystem = true, systemDark = true))
+        assertEquals(ColorThemePreset.SYSTEM, resolveAutoPalette(ColorThemePreset.SYSTEM, followSystem = true, systemDark = true))
     }
 
     @Test fun everyStaticPalette_meetsReadableRoleContrast() {

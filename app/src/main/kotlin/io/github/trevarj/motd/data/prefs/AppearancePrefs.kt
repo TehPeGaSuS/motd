@@ -48,8 +48,8 @@ val ColorThemePreset.isDark: Boolean
     }
 
 /**
- * Opposite-mode sibling for automatic system-mode switching. Light and dark variants are one
- * selectable family; dark-only and alternate-dark palettes keep their fixed mode.
+ * Opposite-mode sibling for optional system-mode switching. Dark-only and alternate-dark palettes
+ * keep their fixed mode.
  */
 val ColorThemePreset.systemPartner: ColorThemePreset?
     get() = when (this) {
@@ -76,15 +76,13 @@ val ColorThemePreset.systemPartner: ColorThemePreset?
         else -> null
     }
 
-/**
- * Stable stored/picker identity for a theme family. The light sibling is canonical so an existing
- * explicitly dark selection migrates cleanly to the same automatic family.
- */
-val ColorThemePreset.familyPreset: ColorThemePreset
-    get() = if (isDark) systemPartner ?: this else this
-
-/** Resolve a paired family against the current OS mode; fixed-mode themes retain their identity. */
-fun resolveAutoPalette(themePreset: ColorThemePreset, systemDark: Boolean): ColorThemePreset {
+/** Resolve a paired family against the OS only when the user opted into system-mode following. */
+fun resolveAutoPalette(
+    themePreset: ColorThemePreset,
+    followSystem: Boolean,
+    systemDark: Boolean,
+): ColorThemePreset {
+    if (!followSystem) return themePreset
     val partner = themePreset.systemPartner ?: return themePreset
     return listOf(themePreset, partner).first { it.isDark == systemDark }
 }

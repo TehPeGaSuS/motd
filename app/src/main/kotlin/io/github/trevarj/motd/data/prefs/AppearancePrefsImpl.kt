@@ -31,7 +31,7 @@ internal fun resolveStoredTheme(name: String?, explicitTrueBlack: Boolean?): Sto
         ?: ColorThemePreset.SYSTEM
     val legacyAmoled = storedTheme == ColorThemePreset.AMOLED
     return StoredThemeResolution(
-        theme = (if (legacyAmoled) ColorThemePreset.DARK else storedTheme).familyPreset,
+        theme = if (legacyAmoled) ColorThemePreset.DARK else storedTheme,
         trueBlack = explicitTrueBlack ?: legacyAmoled,
     )
 }
@@ -65,10 +65,10 @@ class AppearancePrefsImpl @Inject constructor(
     override suspend fun setTheme(theme: ColorThemePreset) {
         store.edit {
             if (theme == ColorThemePreset.AMOLED) {
-                it[THEME] = ColorThemePreset.LIGHT.name
+                it[THEME] = ColorThemePreset.DARK.name
                 it[TRUE_BLACK] = true
             } else {
-                it[THEME] = theme.familyPreset.name
+                it[THEME] = theme.name
             }
         }
     }

@@ -30,7 +30,7 @@ class AppearancePrefsTest {
         prefs.setTrueBlack(true)
         prefs.setFollowSystem(true)
         prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RELAY, 73))
-        assertEquals(ColorThemePreset.KANAGAWA_LOTUS, prefs.config.first().theme)
+        assertEquals(ColorThemePreset.KANAGAWA_WAVE, prefs.config.first().theme)
         assertEquals(true, prefs.config.first().trueBlack)
         assertEquals(true, prefs.config.first().followSystem)
         assertEquals(WallpaperSelection(ChatWallpaperPreset.RELAY, 73), prefs.config.first().wallpaper)
@@ -46,24 +46,24 @@ class AppearancePrefsTest {
 
     @Test fun legacyAmoledTheme_migratesToAutomaticFamilyWithTrueBlack() {
         assertEquals(
-            StoredThemeResolution(ColorThemePreset.LIGHT, true),
+            StoredThemeResolution(ColorThemePreset.DARK, true),
             resolveStoredTheme(ColorThemePreset.AMOLED.name, explicitTrueBlack = null),
         )
         assertEquals(
-            StoredThemeResolution(ColorThemePreset.LIGHT, false),
+            StoredThemeResolution(ColorThemePreset.DARK, false),
             resolveStoredTheme(ColorThemePreset.AMOLED.name, explicitTrueBlack = false),
         )
     }
 
     @Test fun legacyAmoledSetter_preservesCompatibility() = runTest {
         prefs.setTheme(ColorThemePreset.AMOLED)
-        assertEquals(ColorThemePreset.LIGHT, prefs.config.first().theme)
+        assertEquals(ColorThemePreset.DARK, prefs.config.first().theme)
         assertEquals(true, prefs.config.first().trueBlack)
     }
 
-    @Test fun storedDarkSibling_migratesToAutomaticThemeFamily() {
+    @Test fun storedDarkSibling_remainsAnExplicitSelection() {
         assertEquals(
-            StoredThemeResolution(ColorThemePreset.CATPPUCCIN_LATTE, false),
+            StoredThemeResolution(ColorThemePreset.CATPPUCCIN_MOCHA, false),
             resolveStoredTheme(ColorThemePreset.CATPPUCCIN_MOCHA.name, explicitTrueBlack = false),
         )
     }
