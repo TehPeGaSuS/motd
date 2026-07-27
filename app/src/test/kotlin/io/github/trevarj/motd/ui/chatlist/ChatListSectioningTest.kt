@@ -61,6 +61,19 @@ class ChatListSectioningTest {
     }
 
     @Test
+    fun `optimistic unarchive overrides move rows before room emits`() {
+        val archived = row(id = 1, name = "alice", type = BufferType.QUERY).copy(archived = true)
+        val remainingArchived = row(id = 2, name = "#old", type = BufferType.CHANNEL).copy(archived = true)
+
+        val (activeRows, archivedRows) = partitionArchivedRows(
+            applyArchiveOverrides(listOf(archived, remainingArchived), mapOf(archived.bufferId to false)),
+        )
+
+        assertEquals(listOf(archived.copy(archived = false)), activeRows)
+        assertEquals(listOf(remainingArchived), archivedRows)
+    }
+
+    @Test
     fun `archive overrides settle when room projection matches`() {
         val archived = row(id = 1, name = "alice", type = BufferType.QUERY).copy(archived = true)
         val active = row(id = 2, name = "bob", type = BufferType.QUERY)

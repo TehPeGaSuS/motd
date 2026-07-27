@@ -726,6 +726,7 @@ private fun ChatList(
         }
     }
     val currentDispatchArchiveEvent by rememberUpdatedState(::dispatchArchiveEvent)
+    val archiveFolderRevealed = archivePullState.phase == ArchiveFolderPullPhase.REVEALED
     val revealArchiveActionLabel = stringResource(R.string.chatlist_archived_reveal_action)
 
     Box(
@@ -733,11 +734,11 @@ private fun ChatList(
             .fillMaxSize()
             .clipToBounds()
             .nestedScroll(archiveFolderPullConnection)
-            .pointerInput(archiveFolderPullEligible) {
-                if (!archiveFolderPullEligible) return@pointerInput
+            .pointerInput(archiveFolderPullEligible, archiveFolderRevealed) {
+                // Once revealed, leave taps to the folder and use nested scroll to hide it.
+                if (!archiveFolderPullEligible || archiveFolderRevealed) return@pointerInput
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                    val gestureStartedRevealed = archivePullState.phase == ArchiveFolderPullPhase.REVEALED
                     archiveSettleJob?.cancel()
                     archiveSettleJob = null
                     archiveSettling = false
@@ -748,17 +749,13 @@ private fun ChatList(
                     while (pointerEvent.changes.any { it.pressed }) {
                         pointerEvent = awaitPointerEvent(PointerEventPass.Final)
                     }
-                    if (gestureStartedRevealed) {
-                        currentDispatchArchiveEvent(ArchiveFolderPullEvent.Cancel)
+                    val event = if (pointerEvent.type == PointerEventType.Release) {
+                        ArchiveFolderPullEvent.Release(SystemClock.uptimeMillis())
                     } else {
-                        val event = if (pointerEvent.type == PointerEventType.Release) {
-                            ArchiveFolderPullEvent.Release(SystemClock.uptimeMillis())
-                        } else {
-                            ArchiveFolderPullEvent.Cancel
-                        }
-                        val result = currentDispatchArchiveEvent(event)
-                        settleArchivePull(archiveFolderPullSettleTarget(result.state, archiveFolderGeometry))
+                        ArchiveFolderPullEvent.Cancel
                     }
+                    val result = currentDispatchArchiveEvent(event)
+                    settleArchivePull(archiveFolderPullSettleTarget(result.state, archiveFolderGeometry))
                 }
             }
             .semantics {
@@ -1175,12 +1172,20 @@ private fun SelectableChatListRow(
 ) {
     val currentArchive by rememberUpdatedState(onArchive)
     val dismissState = rememberSwipeToDismissBoxState()
+    val scope = rememberCoroutineScope()
     SwipeToDismissBox(
         state = dismissState,
         enableDismissFromStartToEnd = false,
         enableDismissFromEndToStart = !selectionActive,
         onDismiss = { direction ->
-            if (direction == SwipeToDismissBoxValue.EndToStart) currentArchive()
+            if (direction == SwipeToDismissBoxValue.EndToStart) {
+                scope.launch {
+                    // Lazy items may retain composition after moving between active/archive lists.
+                    // Settle before moving the row so a reused state cannot fire the inverse action.
+                    dismissState.snapTo(SwipeToDismissBoxValue.Settled)
+                    currentArchive()
+                }
+            }
         },
         backgroundContent = { ArchiveSwipeBackground(archiveMode) },
         modifier = modifier,

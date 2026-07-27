@@ -236,4 +236,35 @@ class ChatListDeleteTest {
         assertEquals(listOf(active.bufferId), vm.state.value.archivedRows.map(ChatListRow::bufferId))
         collection.cancel()
     }
+
+    @Test
+    fun unarchiveAction_movesRowsBeforeRepositoryProjectionEmits() = runTest {
+        val ops = mutableListOf<String>()
+        val archived = row(7, BufferType.QUERY, "alice").copy(archived = true)
+        val remainingArchived = row(8, BufferType.QUERY, "bob").copy(archived = true)
+        val rows = MutableStateFlow(listOf(archived, remainingArchived))
+        val buffers = object : FakeBufferRepository() {
+            override fun observeChatList(): Flow<List<ChatListRow>> = rows
+            override suspend fun setArchived(id: Long, archived: Boolean) {
+                ops += "archive:$id:$archived"
+            }
+        }
+        val vm = vm(buffers, FakeConnectionManager(ops), FakeChannelCloseCoordinator(ops))
+        val collection = launch { vm.state.collect {} }
+        runCurrent()
+
+        vm.setArchived(listOf(archived.bufferId), false)
+        runCurrent()
+
+        assertEquals(listOf(archived.bufferId), vm.state.value.rows.map(ChatListRow::bufferId))
+        assertEquals(listOf(remainingArchived.bufferId), vm.state.value.archivedRows.map(ChatListRow::bufferId))
+        assertEquals(listOf("archive:${archived.bufferId}:false"), ops)
+
+        rows.value = listOf(archived.copy(archived = false), remainingArchived)
+        runCurrent()
+
+        assertEquals(listOf(archived.bufferId), vm.state.value.rows.map(ChatListRow::bufferId))
+        assertEquals(listOf(remainingArchived.bufferId), vm.state.value.archivedRows.map(ChatListRow::bufferId))
+        collection.cancel()
+    }
 }

@@ -7,6 +7,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -133,7 +134,7 @@ class ChatListSelectionUiTest {
         }
     }
 
-    @Test fun archiving_query_reveals_archived_folder_immediately() {
+    @Test fun archiving_query_round_trip_moves_the_same_row_once_each_way() {
         val active = row()
         val remaining = row().copy(bufferId = 2, displayName = "bob")
         val archived = active.copy(archived = true)
@@ -145,8 +146,12 @@ class ChatListSelectionUiTest {
                     onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
                     onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
                     onSetArchived = { ids, archivedFlag ->
-                        if (ids == listOf(active.bufferId) && archivedFlag) {
-                            state.value = state.value.copy(rows = listOf(remaining), archivedRows = listOf(archived))
+                        if (ids == listOf(active.bufferId)) {
+                            state.value = if (archivedFlag) {
+                                state.value.copy(rows = listOf(remaining), archivedRows = listOf(archived))
+                            } else {
+                                state.value.copy(rows = listOf(active, remaining), archivedRows = emptyList())
+                            }
                         }
                     },
                     onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
@@ -158,6 +163,50 @@ class ChatListSelectionUiTest {
 
         compose.onNodeWithTag("chatlist_archived_folder").assertIsDisplayed()
         compose.onNodeWithText("Archived Chats (1)").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_archived_folder").performTouchInput { click() }
+        compose.onNodeWithText("Archived Chats").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
+
+        compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeLeft() }
+        compose.onNodeWithText("Archived Chats").assertIsDisplayed()
+        compose.onNodeWithText("No archived chats yet").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_selection_close").performClick()
+
+        compose.onNodeWithText("motd").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
+    }
+
+    @Test fun unarchiving_query_stays_in_archive_until_back_then_shows_restored_row() {
+        val active = row().copy(bufferId = 2, displayName = "bob")
+        val archived = row().copy(archived = true)
+        val restored = archived.copy(archived = false)
+        val state = mutableStateOf(ChatListState(rows = listOf(active), archivedRows = listOf(archived), networks = listOf(network()), loading = false))
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatListContent(
+                    state = state.value,
+                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
+                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
+                    onSetArchived = { ids, archivedFlag ->
+                        if (ids == listOf(archived.bufferId) && !archivedFlag) {
+                            state.value = state.value.copy(rows = listOf(restored, active), archivedRows = emptyList())
+                        }
+                    },
+                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                )
+            }
+        }
+
+        compose.onNodeWithText("Archived Chats (1)").performTouchInput { click() }
+        compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeLeft() }
+
+        compose.onNodeWithText("Archived Chats").assertIsDisplayed()
+        compose.onNodeWithText("No archived chats yet").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_selection_close").performClick()
+
+        compose.onNodeWithText("motd").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
+        assertEquals(0, compose.onAllNodesWithText("No archived chats yet").fetchSemanticsNodes().size)
     }
 
     @Test fun disabled_swipe_directions_do_not_archive() {
