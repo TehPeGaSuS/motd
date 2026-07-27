@@ -82,6 +82,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentBackend
+import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
@@ -104,8 +105,15 @@ private sealed interface AttachmentFlow {
 
 internal data class UploadDestination(val label: String, val config: PasteBackendConfig)
 
-internal fun uploadDestinations(source: AttachmentSource, config: PasteBackendConfig): List<UploadDestination> {
-    return AttachmentBackend.entries.filter { it.supports(source) }.map { backend ->
+internal fun uploadDestinations(
+    source: AttachmentSource,
+    config: PasteBackendConfig,
+    sojuFileHostAvailable: Boolean = false,
+): List<UploadDestination> {
+    return AttachmentBackend.entries.filter { backend ->
+        backend.supports(source) &&
+            (backend != AttachmentBackend.SOJU_FILEHOST || sojuFileHostAvailable)
+    }.map { backend ->
         UploadDestination(backend.label, config.forBackend(backend))
     }
 }
@@ -115,6 +123,8 @@ internal fun uploadDestinations(source: AttachmentSource, config: PasteBackendCo
 fun AttachmentSheets(
     open: Boolean,
     currentDraft: String,
+    networkId: Long?,
+    sojuFileHostAvailable: Boolean,
     startWithCurrentDraft: Boolean = false,
     onDismiss: () -> Unit,
     onInsertUrl: (String) -> Unit,
@@ -159,7 +169,11 @@ fun AttachmentSheets(
     fun startUpload(request: AttachmentFlow.Confirm) {
         lastAttempt = request
         flow = AttachmentFlow.Idle
-        viewModel.upload(request.source, request.config) { record ->
+        viewModel.upload(
+            request.source,
+            request.config,
+            AttachmentUploadContext(networkId),
+        ) { record ->
             if (request.replaceDraft) onReplaceDraft(record.url) else onInsertUrl(record.url)
             lastAttempt = null
             onDismiss()
@@ -216,6 +230,7 @@ fun AttachmentSheets(
         )
         is AttachmentFlow.Confirm -> ConfirmationSheet(
             request = current,
+            sojuFileHostAvailable = sojuFileHostAvailable,
             onChangeDestination = {
                 backendPickerRequest = current
                 flow = AttachmentFlow.Idle
@@ -229,6 +244,7 @@ fun AttachmentSheets(
         BackendPickerSheet(
             source = request.source,
             config = request.config,
+            sojuFileHostAvailable = sojuFileHostAvailable,
             onSelect = { selected ->
                 flow = request.copy(config = selected)
                 backendPickerRequest = null
@@ -412,6 +428,7 @@ private fun TextPasteSheet(text: String, onTextChange: (String) -> Unit, onDismi
 @Composable
 private fun ConfirmationSheet(
     request: AttachmentFlow.Confirm,
+    sojuFileHostAvailable: Boolean,
     onChangeDestination: () -> Unit,
     onDismiss: () -> Unit,
     onUpload: () -> Unit,
@@ -426,6 +443,7 @@ private fun ConfirmationSheet(
             null
         }
     }
+    val sojuUnavailable = request.config.backend == AttachmentBackend.SOJU_FILEHOST && !sojuFileHostAvailable
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(stringResource(R.string.upload_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -441,14 +459,22 @@ private fun ConfirmationSheet(
             Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             ListItem(
                 headlineContent = { Text(request.config.backend.label, fontWeight = FontWeight.SemiBold) },
-                supportingContent = { Text(backendRetention(request.config)) },
+                supportingContent = {
+                    Text(
+                        if (sojuUnavailable) {
+                            stringResource(R.string.upload_soju_unavailable)
+                        } else {
+                            backendRetention(request.config)
+                        },
+                    )
+                },
                 trailingContent = { Text(stringResource(R.string.upload_destination_change), color = MaterialTheme.colorScheme.primary) },
                 modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onChangeDestination),
             )
             Spacer(Modifier.height(12.dp))
             UploadPrivacyCard(request.config)
             Spacer(Modifier.height(16.dp))
-            Button(onClick = onUpload, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+            Button(onClick = onUpload, enabled = !sojuUnavailable, modifier = Modifier.fillMaxWidth().height(52.dp)) {
                 Icon(Icons.Outlined.CloudUpload, null)
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.upload_action))
@@ -464,6 +490,7 @@ private fun ConfirmationSheet(
 private fun BackendPickerSheet(
     source: AttachmentSource,
     config: PasteBackendConfig,
+    sojuFileHostAvailable: Boolean,
     onSelect: (PasteBackendConfig) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -474,7 +501,7 @@ private fun BackendPickerSheet(
         ) {
             Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
-            uploadDestinations(source, config).forEach { destination ->
+            uploadDestinations(source, config, sojuFileHostAvailable).forEach { destination ->
                 ListItem(
                     headlineContent = { Text(destination.label, fontWeight = FontWeight.SemiBold) },
                     supportingContent = { Text(backendRetention(destination.config)) },
@@ -516,6 +543,7 @@ private fun AttachmentMetadata(source: AttachmentSource) {
 private fun UploadPrivacyCard(config: PasteBackendConfig) {
     val termbin = config.backend == AttachmentBackend.TERMBIN
     val safe = config.backend == AttachmentBackend.CNET ||
+        config.backend == AttachmentBackend.SOJU_FILEHOST ||
         (config.protocol == io.github.trevarj.motd.attachment.PasteProtocol.MULTIPART_0X0 && config.secretUrl)
     val semanticColors = LocalMotdSemanticColors.current
     Surface(
@@ -530,6 +558,7 @@ private fun UploadPrivacyCard(config: PasteBackendConfig) {
                 Text(
                     when {
                         termbin -> stringResource(R.string.upload_termbin_unencrypted)
+                        config.backend == AttachmentBackend.SOJU_FILEHOST -> stringResource(R.string.upload_soju_private_title)
                         config.backend == AttachmentBackend.CNET -> "Unguessable, deletable link"
                         safe -> stringResource(R.string.upload_privacy_title)
                         else -> "Public link"
@@ -538,7 +567,9 @@ private fun UploadPrivacyCard(config: PasteBackendConfig) {
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    if (config.backend == AttachmentBackend.CATBOX) {
+                    if (config.backend == AttachmentBackend.SOJU_FILEHOST) {
+                        stringResource(R.string.upload_soju_private_desc)
+                    } else if (config.backend == AttachmentBackend.CATBOX) {
                         "Anyone with the link can access it. Anonymous uploads cannot be deleted."
                     } else {
                         stringResource(
@@ -592,6 +623,7 @@ internal fun backendRetention(config: PasteBackendConfig): String = when (config
         else -> config.litterboxExpiry
     }
     AttachmentBackend.CATBOX -> "up to 2 years without access"
+    AttachmentBackend.SOJU_FILEHOST -> "server policy"
     AttachmentBackend.TERMBIN -> "server default"
 }
 

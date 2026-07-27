@@ -131,6 +131,7 @@ import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.attachment.sojuFileHostEndpoint
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
 import io.github.trevarj.motd.audio.AudioMetadata
@@ -1607,6 +1608,10 @@ fun ChatContent(
     AttachmentSheets(
         open = attachmentSheetOpen,
         currentDraft = composerText.text,
+        networkId = state.buffer?.networkId,
+        sojuFileHostAvailable = (state.connState as? IrcClientState.Ready)
+            ?.isupport
+            ?.let(::sojuFileHostEndpoint) != null,
         startWithCurrentDraft = uploadCurrentDraftDirectly,
         onDismiss = { attachmentSheetOpen = false; uploadCurrentDraftDirectly = false },
         onInsertUrl = {

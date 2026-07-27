@@ -5,7 +5,7 @@ import java.io.File
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
 
-enum class PasteProtocol { TERMBIN, MULTIPART_0X0, RAW_CNET, MULTIPART_UGUU, MULTIPART_CATBOX }
+enum class PasteProtocol { TERMBIN, MULTIPART_0X0, RAW_CNET, MULTIPART_UGUU, MULTIPART_CATBOX, SOJU_FILEHOST }
 
 enum class AttachmentBackend(
     val label: String,
@@ -28,6 +28,7 @@ enum class AttachmentBackend(
         true,
     ),
     CATBOX("Catbox", PasteProtocol.MULTIPART_CATBOX, "https://catbox.moe/user/api.php", true),
+    SOJU_FILEHOST("Soju file host", PasteProtocol.SOJU_FILEHOST, null, true),
     TERMBIN("Termbin", PasteProtocol.TERMBIN, null, false),
 }
 
@@ -68,6 +69,10 @@ data class UploadRecord(
     val endpoint: String? = null,
 )
 
+data class AttachmentUploadContext(
+    val networkId: Long? = null,
+)
+
 sealed interface UploadProgress {
     data class Transferring(val bytesSent: Long, val totalBytes: Long?) : UploadProgress
     data class Complete(val record: UploadRecord) : UploadProgress
@@ -82,7 +87,11 @@ interface AttachmentPrefs {
 }
 
 interface AttachmentUploader {
-    fun upload(source: AttachmentSource, config: PasteBackendConfig): Flow<UploadProgress>
+    fun upload(
+        source: AttachmentSource,
+        config: PasteBackendConfig,
+        context: AttachmentUploadContext = AttachmentUploadContext(),
+    ): Flow<UploadProgress>
     suspend fun delete(record: UploadRecord)
 }
 
@@ -104,6 +113,15 @@ fun validateEndpoint(value: String): String? = runCatching {
     val url = java.net.URL(value.trim().trimEnd('/'))
     require(url.protocol == "https" && !url.host.isNullOrBlank() && url.userInfo == null)
     url.toString().trimEnd('/')
+}.getOrNull()
+
+fun sojuFileHostEndpoint(isupport: Map<String, String>): String? =
+    validateSojuFileHostEndpoint(isupport["soju.im/FILEHOST"])
+
+fun validateSojuFileHostEndpoint(value: String?): String? = runCatching {
+    val uri = java.net.URI(value?.trim()?.takeIf(String::isNotBlank) ?: return null)
+    require(uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank() && uri.userInfo == null)
+    uri.toString()
 }.getOrNull()
 
 fun normalizedConfig(config: PasteBackendConfig): PasteBackendConfig {

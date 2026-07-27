@@ -3,14 +3,20 @@ package io.github.trevarj.motd.attachment
 import android.content.ContentResolver
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.audio.NetworkMediaRoute
+import io.github.trevarj.motd.audio.NetworkMediaRouteProvider
+import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.service.ConnectionManager
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.Socket
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -42,10 +48,16 @@ internal object MultipartEncoding {
 @Singleton
 class AttachmentUploaderImpl @Inject constructor(
     @ApplicationContext context: Context,
+    private val connectionManager: ConnectionManager,
+    private val routeProvider: NetworkMediaRouteProvider,
 ) : AttachmentUploader {
     private val resolver: ContentResolver = context.contentResolver
 
-    override fun upload(source: AttachmentSource, config: PasteBackendConfig): Flow<UploadProgress> = flow {
+    override fun upload(
+        source: AttachmentSource,
+        config: PasteBackendConfig,
+        context: AttachmentUploadContext,
+    ): Flow<UploadProgress> = flow {
         val safe = normalizedConfig(config)
         val knownSize = source.sizeOrNull()
         if (knownSize != null && knownSize > safe.sizeLimitBytes) throw UploadException("File exceeds the configured upload limit")
@@ -59,6 +71,7 @@ class AttachmentUploaderImpl @Inject constructor(
             PasteProtocol.RAW_CNET -> emit(uploadCNet(source, safe, progress))
             PasteProtocol.MULTIPART_UGUU -> emit(uploadUguu(source, safe, progress))
             PasteProtocol.MULTIPART_CATBOX -> emit(uploadCatbox(source, safe, progress))
+            PasteProtocol.SOJU_FILEHOST -> emit(uploadSojuFileHost(source, safe, context, progress))
         }
     }.flowOn(Dispatchers.IO)
 
@@ -147,6 +160,69 @@ class AttachmentUploaderImpl @Inject constructor(
         }
     }
 
+    private suspend fun uploadSojuFileHost(
+        source: AttachmentSource,
+        config: PasteBackendConfig,
+        context: AttachmentUploadContext,
+        progress: suspend (Long, Long?) -> Unit,
+    ): UploadProgress.Complete {
+        val networkId = context.networkId
+            ?: throw UploadException("Choose a chat with a connected Soju file host.")
+        val ready = connectionManager.connectionStates.value[networkId] as? IrcClientState.Ready
+            ?: throw UploadException("This IRC network is not connected.")
+        val endpoint = sojuFileHostEndpoint(ready.isupport)
+            ?: throw UploadException("This IRC network is not advertising a Soju file host.")
+        val route = routeProvider.routeForNetwork(networkId)
+            ?: throw UploadException("No route for this network.")
+        if (route.proxyError != null) throw UploadException(route.proxyError)
+        return route.use {
+            probeSojuFileHost(route, endpoint, source.mimeType())
+            val connection = route.open(endpoint, authenticated = true).apply {
+                requestMethod = "POST"
+                doOutput = true
+                useCaches = false
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = READ_TIMEOUT_MS
+                setRequestProperty("Content-Type", source.mimeType())
+                setRequestProperty("Content-Disposition", "attachment; filename=\"${source.displayName().sanitizeHeader()}\"")
+                setRequestProperty("User-Agent", USER_AGENT)
+                source.sizeOrNull()?.let(::setFixedLengthStreamingMode)
+                    ?: setChunkedStreamingMode(STREAM_BUFFER_BYTES)
+            }
+            executeUpload(connection) {
+                connection.outputStream.use { output -> streamSource(source, config, output, progress) }
+                val code = connection.responseCode
+                val location = connection.getHeaderField("Location")
+                if (code != HttpURLConnection.HTTP_CREATED || location.isNullOrBlank()) {
+                    throw UploadException("Soju file host upload failed (HTTP $code).")
+                }
+                UploadProgress.Complete(record(source, config.copy(endpoint = endpoint), resolveSojuLocation(endpoint, location)))
+            }
+        }
+    }
+
+    private fun probeSojuFileHost(route: NetworkMediaRoute, endpoint: String, mimeType: String) {
+        val connection = route.open(endpoint, authenticated = true).apply {
+            requestMethod = "OPTIONS"
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            setRequestProperty("Accept", "*/*")
+            setRequestProperty("User-Agent", USER_AGENT)
+        }
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299 && code != HttpURLConnection.HTTP_NO_CONTENT) {
+                throw UploadException("Soju file host probe failed (HTTP $code).")
+            }
+            val acceptPost = connection.getHeaderField("Accept-Post")
+            if (!acceptPost.isNullOrBlank() && !acceptPost.acceptsMime(mimeType)) {
+                throw UploadException("Soju file host does not accept $mimeType.")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private suspend fun uploadMultipart(
         source: AttachmentSource,
         config: PasteBackendConfig,
@@ -223,6 +299,24 @@ class AttachmentUploaderImpl @Inject constructor(
             cancellationHandle?.dispose()
             connection.disconnect()
         }
+    }
+}
+
+internal fun resolveSojuLocation(endpoint: String, location: String): String {
+    val resolved = URI(endpoint).resolve(location).toString()
+    return validateSojuFileHostEndpoint(resolved)
+        ?: throw UploadException("Soju file host returned an invalid HTTPS URL.")
+}
+
+private fun String.sanitizeHeader(): String =
+    replace("\\", "_").replace("\"", "_").replace("\r", "_").replace("\n", "_")
+
+private fun String.acceptsMime(mimeType: String): Boolean {
+    val requested = mimeType.lowercase(Locale.ROOT)
+    return split(',').map { it.substringBefore(';').trim().lowercase(Locale.ROOT) }.any { accepted ->
+        accepted == "*/*" ||
+            accepted == requested ||
+            accepted.endsWith("/*") && requested.startsWith(accepted.removeSuffix("*"))
     }
 }
 
@@ -327,3 +421,4 @@ private const val CONNECT_TIMEOUT_MS = 15_000
 private const val READ_TIMEOUT_MS = 60_000
 private const val STREAM_BUFFER_BYTES = 32 * 1024
 private const val MAX_RESPONSE_CHARS = 64 * 1024
+private const val USER_AGENT = "motd-Android (https://github.com/trevarj/motd)"

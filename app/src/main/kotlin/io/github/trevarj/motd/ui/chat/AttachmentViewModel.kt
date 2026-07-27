@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploader
@@ -32,12 +33,17 @@ class AttachmentViewModel @Inject constructor(
     val error: StateFlow<String?> = _error.asStateFlow()
     private var job: Job? = null
 
-    fun upload(source: AttachmentSource, override: PasteBackendConfig = config.value, onComplete: (UploadRecord) -> Unit) {
+    fun upload(
+        source: AttachmentSource,
+        override: PasteBackendConfig = config.value,
+        context: AttachmentUploadContext = AttachmentUploadContext(),
+        onComplete: (UploadRecord) -> Unit,
+    ) {
         job?.cancel()
         _error.value = null
         job = viewModelScope.launch {
             try {
-                uploader.upload(source, override).collect { update ->
+                uploader.upload(source, override, context).collect { update ->
                     _progress.value = update
                     if (update is UploadProgress.Complete) {
                         prefs.addUpload(update.record)

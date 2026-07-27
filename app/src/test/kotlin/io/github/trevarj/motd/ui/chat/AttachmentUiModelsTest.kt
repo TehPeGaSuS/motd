@@ -15,7 +15,20 @@ import org.robolectric.RobolectricTestRunner
 class AttachmentUiModelsTest {
     @Test fun textOffersTermbinAndCompatibleDestinations() {
         val options = uploadDestinations(AttachmentSource.Text("hello"), PasteBackendConfig())
-        assertEquals(AttachmentBackend.entries.map { it.label }, options.map { it.label })
+        assertEquals(
+            AttachmentBackend.entries.filterNot { it == AttachmentBackend.SOJU_FILEHOST }.map { it.label },
+            options.map { it.label },
+        )
+    }
+
+    @Test fun sojuFileHostIsOnlyOfferedWhenAdvertised() {
+        val source = AttachmentSource.Text("hello")
+        assertFalse(uploadDestinations(source, PasteBackendConfig()).any {
+            it.config.backend == AttachmentBackend.SOJU_FILEHOST
+        })
+        assertTrue(uploadDestinations(source, PasteBackendConfig(), sojuFileHostAvailable = true).any {
+            it.config.backend == AttachmentBackend.SOJU_FILEHOST
+        })
     }
 
     @Test fun filesNeverOfferTermbin() {
@@ -44,6 +57,7 @@ class AttachmentUiModelsTest {
         assertEquals("24 hours", backendRetention(PasteBackendConfig(backend = AttachmentBackend.LITTERBOX)))
         assertEquals("rolling 180 days", backendRetention(PasteBackendConfig(backend = AttachmentBackend.CNET)))
         assertEquals("3–100 days by size", backendRetention(PasteBackendConfig(backend = AttachmentBackend.X0_AT)))
+        assertEquals("server policy", backendRetention(PasteBackendConfig(backend = AttachmentBackend.SOJU_FILEHOST)))
     }
 
     @Test fun byteFormattingUsesReadableUnits() {

@@ -17,6 +17,7 @@ class AttachmentModelsTest {
         assertEquals(PasteProtocol.RAW_CNET, AttachmentBackend.CNET.protocol)
         assertEquals(PasteProtocol.MULTIPART_UGUU, AttachmentBackend.UGUU.protocol)
         assertEquals(PasteProtocol.MULTIPART_CATBOX, AttachmentBackend.LITTERBOX.protocol)
+        assertEquals(PasteProtocol.SOJU_FILEHOST, AttachmentBackend.SOJU_FILEHOST.protocol)
     }
 
     @Test fun endpointValidationRejectsCredentialsAndHttp() {
@@ -25,9 +26,39 @@ class AttachmentModelsTest {
         assertEquals("https://paste.example/upload", validateEndpoint("https://paste.example/upload/"))
     }
 
+    @Test fun sojuFileHostEndpointRequiresHttpsWithoutCredentials() {
+        assertEquals(
+            "https://irc.example/uploads/",
+            sojuFileHostEndpoint(mapOf("soju.im/FILEHOST" to "https://irc.example/uploads/")),
+        )
+        assertNull(sojuFileHostEndpoint(emptyMap()))
+        assertNull(sojuFileHostEndpoint(mapOf("soju.im/FILEHOST" to "http://irc.example/uploads")))
+        assertNull(sojuFileHostEndpoint(mapOf("soju.im/FILEHOST" to "https://user:pass@irc.example/uploads")))
+    }
+
+    @Test fun sojuFileHostLocationResolvesRelativeHttpsUrls() {
+        assertEquals(
+            "https://irc.example/files/voice.ogg",
+            resolveSojuLocation("https://irc.example/uploads/", "../files/voice.ogg"),
+        )
+        assertEquals(
+            "https://cdn.example/voice.ogg",
+            resolveSojuLocation("https://irc.example/uploads/", "https://cdn.example/voice.ogg"),
+        )
+    }
+
     @Test fun publicLimitIsCappedAt25MiB() {
         val config = normalizedConfig(PasteBackendConfig(sizeLimitBytes = MAX_CUSTOM_LIMIT_BYTES))
         assertEquals(DEFAULT_PUBLIC_LIMIT_BYTES, config.sizeLimitBytes)
+    }
+
+    @Test fun sojuFileHostUsesDefaultUploadCeiling() {
+        val config = normalizedConfig(PasteBackendConfig(
+            backend = AttachmentBackend.SOJU_FILEHOST,
+            sizeLimitBytes = MAX_CUSTOM_LIMIT_BYTES,
+        ))
+        assertEquals(DEFAULT_PUBLIC_LIMIT_BYTES, config.sizeLimitBytes)
+        assertTrue(AttachmentBackend.SOJU_FILEHOST.acceptsBinary)
     }
 
     @Test fun customLimitAllows512MiB() {

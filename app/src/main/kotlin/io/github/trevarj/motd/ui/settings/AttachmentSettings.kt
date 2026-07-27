@@ -140,6 +140,10 @@ fun UploadsSettingsContent(viewModel: AttachmentSettingsViewModel = hiltViewMode
             caution = false,
         )
         AttachmentBackend.CATBOX -> UploadWarning(stringResource(io.github.trevarj.motd.R.string.settings_upload_catbox_warning))
+        AttachmentBackend.SOJU_FILEHOST -> UploadWarning(
+            stringResource(io.github.trevarj.motd.R.string.settings_upload_soju_warning),
+            caution = false,
+        )
         AttachmentBackend.TERMBIN -> Unit
     }
 
@@ -187,6 +191,7 @@ internal fun backendDescription(backend: AttachmentBackend): String = when (back
     AttachmentBackend.UGUU -> "Files, photos, and text • 3 hours"
     AttachmentBackend.LITTERBOX -> "Files, photos, and text • 1–72 hours"
     AttachmentBackend.CATBOX -> "Files, photos, and text • long-lived"
+    AttachmentBackend.SOJU_FILEHOST -> "Files, photos, and text • current chat's bouncer"
     AttachmentBackend.TERMBIN -> "Text only • unencrypted TCP"
 }
 

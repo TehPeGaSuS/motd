@@ -194,6 +194,7 @@
     <string name="settings_upload_cnet_warning">paste.c-net.org uses an unguessable link and supports deletion. Retention resets to 180 days whenever the file is accessed.</string>
     <string name="settings_upload_catbox_warning">Catbox uploads are long-lived, cannot be deleted anonymously, and may remain until 2 years without access.</string>
     <string name="settings_upload_x0at_warning">x0.at uploads are public to anyone with the link, cannot be deleted, and expire after 3 to 100 days depending on file size (larger files expire sooner).</string>
+    <string name="settings_upload_soju_warning">Uses the file host advertised by the active IRC network. Uploads only work in connected chats whose bouncer exposes a Soju file host.</string>
     <string name="settings_upload_limits">Upload limit</string>
     <string name="settings_upload_limit">Maximum size (MiB)</string>
     <string name="settings_upload_limit_desc">Maximum for this endpoint: %1$d MiB.</string>
@@ -365,6 +366,9 @@
     <string name="upload_privacy_secret">Anyone with the link can access it. Expires: %1$s.</string>
     <string name="upload_privacy_public">This is a public upload. Do not include sensitive information. Expires: %1$s.</string>
     <string name="upload_termbin_unencrypted">Unencrypted public upload</string>
+    <string name="upload_soju_unavailable">This chat is not connected to a Soju file host.</string>
+    <string name="upload_soju_private_title">Network file host</string>
+    <string name="upload_soju_private_desc">The upload uses this chat network\'s authenticated Soju file host. Retention follows the server policy.</string>
     <string name="upload_uploading">Uploading…</string>
     <string name="upload_progress_of">%1$s of %2$s</string>
     <string name="upload_failed">Upload failed</string>
