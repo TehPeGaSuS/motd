@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -299,10 +300,11 @@ private fun AudioAttachmentPlayer(
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (attachment.encrypted) {
-                        Text(
-                            " · encrypted",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                        Icon(
+                            Icons.Outlined.Lock,
+                            contentDescription = "Encrypted audio",
+                            modifier = Modifier.padding(start = 4.dp).size(13.dp),
+                            tint = MaterialTheme.colorScheme.primary,
                         )
                     }
                     formattedTime?.let { time ->
