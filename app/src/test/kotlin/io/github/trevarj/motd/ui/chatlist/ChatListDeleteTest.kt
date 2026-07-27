@@ -28,6 +28,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -203,5 +204,36 @@ class ChatListDeleteTest {
         runCurrent()
 
         assertEquals(listOf("pending:7", "delete:9"), ops)
+    }
+
+    @Test
+    fun archiveAction_movesRowsBeforeRepositoryProjectionEmits() = runTest {
+        val ops = mutableListOf<String>()
+        val active = row(7, BufferType.QUERY, "alice")
+        val remaining = row(8, BufferType.QUERY, "bob")
+        val rows = MutableStateFlow(listOf(active, remaining))
+        val buffers = object : FakeBufferRepository() {
+            override fun observeChatList(): Flow<List<ChatListRow>> = rows
+            override suspend fun setArchived(id: Long, archived: Boolean) {
+                ops += "archive:$id:$archived"
+            }
+        }
+        val vm = vm(buffers, FakeConnectionManager(ops), FakeChannelCloseCoordinator(ops))
+        val collection = launch { vm.state.collect {} }
+        runCurrent()
+
+        vm.setArchived(listOf(active.bufferId), true)
+        runCurrent()
+
+        assertEquals(listOf(remaining.bufferId), vm.state.value.rows.map(ChatListRow::bufferId))
+        assertEquals(listOf(active.bufferId), vm.state.value.archivedRows.map(ChatListRow::bufferId))
+        assertEquals(listOf("archive:${active.bufferId}:true"), ops)
+
+        rows.value = listOf(active.copy(archived = true), remaining)
+        runCurrent()
+
+        assertEquals(listOf(remaining.bufferId), vm.state.value.rows.map(ChatListRow::bufferId))
+        assertEquals(listOf(active.bufferId), vm.state.value.archivedRows.map(ChatListRow::bufferId))
+        collection.cancel()
     }
 }

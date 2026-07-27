@@ -48,6 +48,33 @@ class ChatListSectioningTest {
     }
 
     @Test
+    fun `optimistic archive overrides move rows before room emits`() {
+        val active = row(id = 1, name = "alice", type = BufferType.QUERY)
+        val remaining = row(id = 2, name = "#active", type = BufferType.CHANNEL)
+
+        val (activeRows, archivedRows) = partitionArchivedRows(
+            applyArchiveOverrides(listOf(active, remaining), mapOf(active.bufferId to true)),
+        )
+
+        assertEquals(listOf(remaining), activeRows)
+        assertEquals(listOf(active.copy(archived = true)), archivedRows)
+    }
+
+    @Test
+    fun `archive overrides settle when room projection matches`() {
+        val archived = row(id = 1, name = "alice", type = BufferType.QUERY).copy(archived = true)
+        val active = row(id = 2, name = "bob", type = BufferType.QUERY)
+
+        assertEquals(
+            setOf(archived.bufferId),
+            settledArchiveOverrideIds(
+                rows = listOf(archived, active),
+                overrides = mapOf(archived.bufferId to true, active.bufferId to true),
+            ),
+        )
+    }
+
+    @Test
     fun `archive folder remains reachable when active scope is empty`() {
         val archived = row(id = 2, name = "alice").copy(archived = true)
 

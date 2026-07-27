@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -74,10 +75,17 @@ class ChatListViewModel @Inject constructor(
 
     // Scope selection survives config changes; null = unified list (default).
     private val selection = MutableStateFlow(savedStateHandle.get<Long?>(KEY_SELECTED))
+    private val archiveOverrides = MutableStateFlow<Map<Long, Boolean>>(emptyMap())
+    private val chatListRows = bufferRepository.observeChatList()
+        .onEach { rows ->
+            val settledIds = settledArchiveOverrideIds(rows, archiveOverrides.value)
+            if (settledIds.isNotEmpty()) archiveOverrides.value = archiveOverrides.value - settledIds
+        }
+        .combine(archiveOverrides, ::applyArchiveOverrides)
 
     val state: StateFlow<ChatListState> =
         combine(
-            bufferRepository.observeChatList(),
+            chatListRows,
             networkRepository.observeNetworks(),
             connectionManager.connectionStates.combine(connectionManager.presenceStates) { connection, presence ->
                 connection to presence
@@ -140,7 +148,14 @@ class ChatListViewModel @Inject constructor(
     fun setArchived(bufferIds: Collection<Long>, archived: Boolean) {
         val ids = bufferIds.toList().distinct()
         if (ids.isEmpty()) return
-        viewModelScope.launch { ids.forEach { bufferRepository.setArchived(it, archived) } }
+        archiveOverrides.value = archiveOverrides.value + ids.associateWith { archived }
+        viewModelScope.launch {
+            runCatching {
+                ids.forEach { bufferRepository.setArchived(it, archived) }
+            }.onFailure {
+                archiveOverrides.value = archiveOverrides.value - ids.toSet()
+            }
+        }
     }
 
     fun joinChannel(networkId: Long, channel: String) = viewModelScope.launch {
@@ -234,3 +249,25 @@ internal fun unreadBufferIds(rows: List<ChatListRow>): List<Long> = rows
     .map { it.bufferId }
     .distinct()
     .toList()
+
+/** Pending archive writes should move rows immediately, then disappear once Room agrees. */
+internal fun applyArchiveOverrides(
+    rows: List<ChatListRow>,
+    overrides: Map<Long, Boolean>,
+): List<ChatListRow> {
+    if (overrides.isEmpty()) return rows
+    return rows.map { row ->
+        val archived = overrides[row.bufferId] ?: return@map row
+        if (row.archived == archived) row else row.copy(archived = archived)
+    }
+}
+
+/** Override entries are only optimistic; matched Room emissions become authoritative again. */
+internal fun settledArchiveOverrideIds(
+    rows: List<ChatListRow>,
+    overrides: Map<Long, Boolean>,
+): Set<Long> {
+    if (overrides.isEmpty()) return emptySet()
+    val byId = rows.associateBy(ChatListRow::bufferId)
+    return overrides.filter { (id, archived) -> byId[id]?.archived == archived }.keys
+}
