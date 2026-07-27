@@ -111,6 +111,74 @@ sealed interface IrcEvent {
     data class ModeChanged(val ctx: MessageContext, val target: String, val modes: String, val args: List<String>) : IrcEvent
     data class Invited(val ctx: MessageContext, val by: String, val nick: String, val channel: String) : IrcEvent
 
+    // -- DCC / CTCP direct connections
+    enum class DccFileProtocol { SEND, SSEND }
+    enum class DccChatProtocol { CHAT, SCHAT }
+    enum class DccAddressKind { IPV4_INTEGER, IPV4_DOTTED, IPV6_LITERAL }
+    enum class DccUnsupportedReason { UNKNOWN_COMMAND, MALFORMED }
+    data class DccEndpoint(
+        val address: String,
+        /** DCC passive/reverse offers use port 0 and carry a non-empty token. */
+        val port: Int,
+        val addressKind: DccAddressKind,
+    )
+    data class DccSendOffer(
+        val protocol: DccFileProtocol,
+        val filename: String,
+        val endpoint: DccEndpoint,
+        val sizeBytes: Long?,
+        val token: String?,
+    )
+    data class DccChatOffer(
+        val protocol: DccChatProtocol,
+        val endpoint: DccEndpoint,
+        val token: String?,
+    )
+    data class DccResumeRequest(
+        val filename: String,
+        val port: Int,
+        val positionBytes: Long,
+        val token: String?,
+    )
+    data class DccResumeAccepted(
+        val filename: String,
+        val port: Int,
+        val positionBytes: Long,
+        val token: String?,
+    )
+    data class DccSend(
+        val ctx: MessageContext,
+        val source: io.github.trevarj.motd.irc.proto.Prefix,
+        val target: String,
+        val offer: DccSendOffer,
+    ) : IrcEvent
+    data class DccChat(
+        val ctx: MessageContext,
+        val source: io.github.trevarj.motd.irc.proto.Prefix,
+        val target: String,
+        val offer: DccChatOffer,
+    ) : IrcEvent
+    data class DccResume(
+        val ctx: MessageContext,
+        val source: io.github.trevarj.motd.irc.proto.Prefix,
+        val target: String,
+        val request: DccResumeRequest,
+    ) : IrcEvent
+    data class DccAccept(
+        val ctx: MessageContext,
+        val source: io.github.trevarj.motd.irc.proto.Prefix,
+        val target: String,
+        val accepted: DccResumeAccepted,
+    ) : IrcEvent
+    data class UnsupportedDcc(
+        val ctx: MessageContext,
+        val source: io.github.trevarj.motd.irc.proto.Prefix,
+        val target: String,
+        val command: String?,
+        val reason: DccUnsupportedReason,
+        val rawPayload: String,
+    ) : IrcEvent
+
     // -- sync
     data class ReadMarker(val target: String, val timestamp: Long?) : IrcEvent  // MARKREAD; null = "*" (unset)
     data class BouncerNetworkState(val netId: String, val attrs: Map<String, String>) : IrcEvent // BOUNCER NETWORK notify
