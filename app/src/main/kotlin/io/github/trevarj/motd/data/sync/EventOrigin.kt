@@ -18,6 +18,8 @@ internal enum class EventOrigin(
         is IrcEvent.ChatMessage,
         is IrcEvent.TagMessage,
         is IrcEvent.Invited,
+        is IrcEvent.DccSend,
+        is IrcEvent.UnsupportedDcc,
         is IrcEvent.Raw,
         -> true
         else -> false

@@ -3,6 +3,11 @@ package io.github.trevarj.motd.data.sync
 import androidx.room.withTransaction
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.DccAddressKind
+import io.github.trevarj.motd.data.db.DccDirection
+import io.github.trevarj.motd.data.db.DccTransferEntity
+import io.github.trevarj.motd.data.db.DccTransferProtocol
+import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -80,6 +85,7 @@ class EventProcessor @Inject constructor(
     private val memberDao get() = db.memberDao()
     private val reactionDao get() = db.reactionDao()
     private val userDao get() = db.userDao()
+    private val dccTransferDao get() = db.dccTransferDao()
     private val sequencer = NetworkEventSequencer()
 
     private val states = ConcurrentHashMap<Long, NetworkState>()
@@ -305,6 +311,10 @@ class EventProcessor @Inject constructor(
             -> Unit
             is IrcEvent.MonitorLimitExceeded -> if (origin.mutatesSessionState) onMonitorLimitExceeded(networkId, event)
             is IrcEvent.Invited -> onInvited(networkId, event, origin)
+            is IrcEvent.DccSend -> onDccSend(networkId, event, origin)
+            is IrcEvent.DccResume -> onDccResume(networkId, event, origin)
+            is IrcEvent.DccAccept -> onDccAccept(networkId, event, origin)
+            is IrcEvent.UnsupportedDcc -> onUnsupportedDcc(networkId, event, origin)
             is IrcEvent.ReadMarker -> if (origin.mutatesSessionState) onReadMarker(networkId, event)
             is IrcEvent.BouncerNetworkState -> if (origin.mutatesSessionState) onBouncerNetworkState(networkId, event)
             is IrcEvent.Disconnected -> if (origin.mutatesSessionState) onDisconnected(networkId, event)
@@ -693,6 +703,10 @@ class EventProcessor @Inject constructor(
             is IrcEvent.ChannelRenamed -> event.ctx
             is IrcEvent.ModeChanged -> event.ctx
             is IrcEvent.Invited -> event.ctx
+            is IrcEvent.DccSend -> event.ctx
+            is IrcEvent.DccResume -> event.ctx
+            is IrcEvent.DccAccept -> event.ctx
+            is IrcEvent.UnsupportedDcc -> event.ctx
             is IrcEvent.StandardReply -> event.ctx
             else -> null
         } ?: return false
@@ -1177,6 +1191,237 @@ class EventProcessor @Inject constructor(
                 notifier.onInvitation(networkId, result.event.bufferId, result.event.id)
             }
         }
+    }
+
+    // -- DCC direct connections ---------------------------------------------
+
+    private suspend fun onDccSend(networkId: Long, e: IrcEvent.DccSend, origin: EventOrigin) {
+        val st = stateFor(networkId)
+        val room = ensureDccPeerQuery(networkId, e.source.nick, e.ctx.account, st)
+        val normalizedPeer = st.normalize(e.source.nick)
+        val offer = e.offer
+        val offerKey = dccFileOfferKey(e, normalizedPeer)
+        val historical = origin == EventOrigin.HISTORY || e.ctx.batchId != null
+        val payload = DccFileOfferPayloadV1(
+            protocol = offer.protocol.name,
+            filename = offer.filename,
+            address = offer.endpoint.address,
+            addressKind = offer.endpoint.addressKind.name,
+            port = offer.endpoint.port,
+            sizeBytes = offer.sizeBytes,
+            token = offer.token,
+            offerKey = offerKey,
+        )
+        val text = "DCC file offer: ${sanitizeDccFilename(offer.filename)}" +
+            (offer.sizeBytes?.let { " (${formatBytes(it)})" } ?: "")
+        val row = MessageEntity(
+            bufferId = room.id,
+            msgid = e.ctx.msgid,
+            serverTime = e.ctx.serverTime,
+            sender = e.source.nick,
+            normalizedActor = normalizedPeer,
+            senderAccount = e.ctx.account,
+            kind = MessageKind.DCC_TRANSFER,
+            text = text,
+            dedupKey = offerKey,
+            eventKey = offerKey,
+            eventPayload = payload.encode(),
+            serverTimeAuthoritative = e.ctx.serverTimeSource == ServerTimeSource.TAG,
+        )
+        val result = canonicalTimeline.ingest(
+            TimelineObservation(
+                networkId = networkId,
+                event = row,
+                origin = origin.toObservationOrigin(),
+                connectionGeneration = connectionGenerations[networkId],
+                label = e.ctx.label,
+                batchId = e.ctx.batchId,
+                timeProvenance = e.ctx.serverTimeSource.toTimeProvenance(),
+                persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
+            ),
+        )
+        traceMessageWrite("canonical_dcc_file_offer", result.event, historical)
+        dccTransferDao.insertIgnore(
+            DccTransferEntity(
+                networkId = networkId,
+                timelineEventId = result.event.id,
+                offerKey = offerKey,
+                direction = DccDirection.INCOMING,
+                protocol = if (offer.protocol == IrcEvent.DccFileProtocol.SSEND) {
+                    DccTransferProtocol.SSEND
+                } else {
+                    DccTransferProtocol.SEND
+                },
+                peerNick = e.source.nick,
+                normalizedPeer = normalizedPeer,
+                filename = offer.filename,
+                displayFilename = sanitizeDccFilename(offer.filename),
+                address = offer.endpoint.address,
+                addressKind = offer.endpoint.addressKind.toDbAddressKind(),
+                port = offer.endpoint.port,
+                sizeBytes = offer.sizeBytes,
+                token = offer.token,
+                state = if (historical) DccTransferState.EXPIRED else DccTransferState.OFFERED,
+                createdAt = e.ctx.serverTime,
+                expiresAt = if (historical) e.ctx.serverTime else e.ctx.serverTime + DCC_OFFER_EXPIRY_MS,
+                updatedAt = e.ctx.serverTime,
+            ),
+        )
+        if (origin.notifies && !historical) {
+            presentNotification(result.event.id) {
+                notifier.onDccTransferOffer(networkId, result.event.bufferId, result.event.id)
+            }
+        }
+    }
+
+    private suspend fun onDccResume(networkId: Long, e: IrcEvent.DccResume, origin: EventOrigin) {
+        val st = stateFor(networkId)
+        val room = ensureDccPeerQuery(networkId, e.source.nick, e.ctx.account, st)
+        val text = "DCC resume requested for ${sanitizeDccFilename(e.request.filename)} at ${formatBytes(e.request.positionBytes)}"
+        insertDccControl(room.id, networkId, e.ctx, e.source.nick, st.normalize(e.source.nick), text, origin)
+    }
+
+    private suspend fun onDccAccept(networkId: Long, e: IrcEvent.DccAccept, origin: EventOrigin) {
+        val st = stateFor(networkId)
+        val room = ensureDccPeerQuery(networkId, e.source.nick, e.ctx.account, st)
+        val text = "DCC resume accepted for ${sanitizeDccFilename(e.accepted.filename)} at ${formatBytes(e.accepted.positionBytes)}"
+        insertDccControl(room.id, networkId, e.ctx, e.source.nick, st.normalize(e.source.nick), text, origin)
+    }
+
+    private suspend fun onUnsupportedDcc(networkId: Long, e: IrcEvent.UnsupportedDcc, origin: EventOrigin) {
+        val st = stateFor(networkId)
+        val room = ensureDccPeerQuery(networkId, e.source.nick, e.ctx.account, st)
+        val text = when (e.reason) {
+            IrcEvent.DccUnsupportedReason.UNKNOWN_COMMAND -> "Unsupported DCC ${e.command.orEmpty()} request".trim()
+            IrcEvent.DccUnsupportedReason.MALFORMED -> "Malformed DCC request"
+        }
+        val payload = UnsupportedDccPayloadV1(e.command, e.reason.name, e.rawPayload)
+        val key = e.ctx.msgid?.let { "dcc:unsupported:msgid:$it" }
+            ?: "dcc:unsupported:" + SemanticIdentity.keyFor(e.ctx, e.source.nick, e.rawPayload)
+        val row = MessageEntity(
+            bufferId = room.id,
+            msgid = e.ctx.msgid,
+            serverTime = e.ctx.serverTime,
+            sender = e.source.nick,
+            normalizedActor = st.normalize(e.source.nick),
+            senderAccount = e.ctx.account,
+            kind = MessageKind.DCC_UNSUPPORTED,
+            text = text,
+            dedupKey = key,
+            eventKey = key,
+            eventPayload = payload.encode(),
+            serverTimeAuthoritative = e.ctx.serverTimeSource == ServerTimeSource.TAG,
+        )
+        val result = canonicalTimeline.ingest(
+            TimelineObservation(
+                networkId = networkId,
+                event = row,
+                origin = origin.toObservationOrigin(),
+                connectionGeneration = connectionGenerations[networkId],
+                label = e.ctx.label,
+                batchId = e.ctx.batchId,
+                timeProvenance = e.ctx.serverTimeSource.toTimeProvenance(),
+                persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
+            ),
+        )
+        traceMessageWrite("canonical_dcc_unsupported", result.event, origin == EventOrigin.HISTORY || e.ctx.batchId != null)
+    }
+
+    private suspend fun insertDccControl(
+        roomId: RoomId,
+        networkId: Long,
+        ctx: MessageContext,
+        sender: String,
+        normalizedSender: String,
+        text: String,
+        origin: EventOrigin,
+    ) {
+        val key = ctx.msgid?.let { "dcc:control:msgid:$it" }
+            ?: "dcc:control:" + SemanticIdentity.keyFor(ctx, sender, text)
+        val row = MessageEntity(
+            bufferId = roomId,
+            msgid = ctx.msgid,
+            serverTime = ctx.serverTime,
+            sender = sender,
+            normalizedActor = normalizedSender,
+            kind = MessageKind.DCC_TRANSFER,
+            text = text,
+            dedupKey = key,
+            eventKey = key,
+            serverTimeAuthoritative = ctx.serverTimeSource == ServerTimeSource.TAG,
+        )
+        val result = canonicalTimeline.ingest(
+            TimelineObservation(
+                networkId = networkId,
+                event = row,
+                origin = origin.toObservationOrigin(),
+                connectionGeneration = connectionGenerations[networkId],
+                label = ctx.label,
+                batchId = ctx.batchId,
+                timeProvenance = ctx.serverTimeSource.toTimeProvenance(),
+                persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
+            ),
+        )
+        traceMessageWrite("canonical_dcc_control", result.event, origin == EventOrigin.HISTORY || ctx.batchId != null)
+    }
+
+    private suspend fun ensureDccPeerQuery(
+        networkId: Long,
+        peerNick: String,
+        account: String?,
+        st: NetworkState,
+    ): BufferEntity {
+        val normalizedPeer = st.normalize(peerNick)
+        val provisional = bufferStore.resolveQueryRoom(networkId, normalizedPeer, account = null)
+            ?: bufferStore.resolveQueryRoom(networkId, normalizedPeer, account)
+            ?: ensureBufferEntity(networkId, peerNick, BufferType.QUERY, st)
+        return bufferStore.bindQueryIdentity(
+            roomId = provisional.id,
+            networkId = networkId,
+            normalizedNick = normalizedPeer,
+            displayNick = peerNick,
+            account = account,
+        )
+    }
+
+    private fun dccFileOfferKey(e: IrcEvent.DccSend, normalizedPeer: String): String =
+        e.ctx.msgid?.let { "dcc:file:msgid:$it" }
+            ?: "dcc:file:" + SemanticIdentity.keyFor(
+                null,
+                e.ctx.serverTime,
+                normalizedPeer,
+                listOf(
+                    e.offer.protocol.name,
+                    e.offer.filename,
+                    e.offer.endpoint.address,
+                    e.offer.endpoint.port.toString(),
+                    e.offer.sizeBytes?.toString().orEmpty(),
+                    e.offer.token.orEmpty(),
+                ).joinToString("|"),
+            )
+
+    private fun IrcEvent.DccAddressKind.toDbAddressKind(): DccAddressKind = when (this) {
+        IrcEvent.DccAddressKind.IPV4_INTEGER -> DccAddressKind.IPV4_INTEGER
+        IrcEvent.DccAddressKind.IPV4_DOTTED -> DccAddressKind.IPV4_DOTTED
+        IrcEvent.DccAddressKind.IPV6_LITERAL -> DccAddressKind.IPV6_LITERAL
+    }
+
+    private fun sanitizeDccFilename(filename: String): String {
+        val clean = filename
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+            .map { ch -> if (ch.isISOControl() || ch == ':' || ch == '"' || ch == '<' || ch == '>') '_' else ch }
+            .joinToString("")
+            .trim()
+            .trim('.')
+        return clean.ifBlank { "download" }
+    }
+
+    private fun formatBytes(bytes: Long): String = when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> "${bytes / 1024} KiB"
+        bytes < 1024L * 1024L * 1024L -> "${bytes / (1024L * 1024L)} MiB"
+        else -> "${bytes / (1024L * 1024L * 1024L)} GiB"
     }
 
     // -- membership ----------------------------------------------------------
@@ -2452,6 +2697,7 @@ class EventProcessor @Inject constructor(
         // The server confirms you are no longer on this channel. Flip joined=false so the channel
         // UI shows its parted banner instead of an enabled composer.
         val NOT_IN_CHANNEL_NUMERICS: Set<String> = setOf("403", "442")
+        const val DCC_OFFER_EXPIRY_MS: Long = 5 * 60 * 1000
     }
 }
 
@@ -2520,6 +2766,9 @@ interface MessageNotifier {
 
     /** Cancel notification state after Join/Dismiss resolves an invitation. */
     suspend fun onInvitationResolved(messageId: Long) = Unit
+
+    /** A newly persisted live DCC file offer. */
+    suspend fun onDccTransferOffer(networkId: Long, bufferId: Long, messageId: Long) = Unit
 
     /** No-op notifier for tests / headless contexts. */
     object Noop : MessageNotifier {

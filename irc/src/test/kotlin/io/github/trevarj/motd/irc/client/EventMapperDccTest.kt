@@ -42,22 +42,6 @@ class EventMapperDccTest {
     }
 
     @Test
-    fun `dcc chat and schat map to typed offers`() {
-        val chat = mapper.map(
-            IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC CHAT chat 192.0.2.10 5000\u0001"),
-        ) as IrcEvent.DccChat
-        val schat = mapper.map(
-            IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC SCHAT chat 2001:db8::2 0 reverse-token\u0001"),
-        ) as IrcEvent.DccChat
-
-        assertEquals(IrcEvent.DccChatProtocol.CHAT, chat.offer.protocol)
-        assertEquals(IrcEvent.DccChatProtocol.SCHAT, schat.offer.protocol)
-        assertEquals(5000, chat.offer.endpoint.port)
-        assertEquals(0, schat.offer.endpoint.port)
-        assertEquals("reverse-token", schat.offer.token)
-    }
-
-    @Test
     fun `dcc resume and accept map to typed requests`() {
         val resume = mapper.map(
             IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC RESUME \"big file.bin\" 49152 65536 token-7\u0001"),
@@ -110,10 +94,10 @@ class EventMapperDccTest {
     @Test
     fun `invalid ipv6 literal is malformed`() {
         val event = mapper.map(
-            IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC CHAT chat bad::address 5000\u0001"),
+            IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC SEND file.bin bad::address 5000 100\u0001"),
         ) as IrcEvent.UnsupportedDcc
 
-        assertEquals("CHAT", event.command)
+        assertEquals("SEND", event.command)
         assertEquals(IrcEvent.DccUnsupportedReason.MALFORMED, event.reason)
     }
 

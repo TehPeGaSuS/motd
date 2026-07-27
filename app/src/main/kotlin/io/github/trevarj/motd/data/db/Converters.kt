@@ -30,6 +30,30 @@ internal class Converters {
     @TypeConverter
     fun stringToInviteState(v: String?): InviteState? = v?.let { InviteState.valueOf(it) }
 
+    @TypeConverter
+    fun dccDirectionToString(v: DccDirection): String = v.name
+
+    @TypeConverter
+    fun stringToDccDirection(v: String): DccDirection = DccDirection.valueOf(v)
+
+    @TypeConverter
+    fun dccTransferProtocolToString(v: DccTransferProtocol): String = v.name
+
+    @TypeConverter
+    fun stringToDccTransferProtocol(v: String): DccTransferProtocol = DccTransferProtocol.valueOf(v)
+
+    @TypeConverter
+    fun dccAddressKindToString(v: DccAddressKind): String = v.name
+
+    @TypeConverter
+    fun stringToDccAddressKind(v: String): DccAddressKind = DccAddressKind.valueOf(v)
+
+    @TypeConverter
+    fun dccTransferStateToString(v: DccTransferState): String = v.name
+
+    @TypeConverter
+    fun stringToDccTransferState(v: String): DccTransferState = DccTransferState.valueOf(v)
+
     // Nullable: the obfsMode column is null on legacy/direct rows (plans/20 Phase 1).
     @TypeConverter
     fun obfsModeToString(v: ObfsMode?): String? = v?.name

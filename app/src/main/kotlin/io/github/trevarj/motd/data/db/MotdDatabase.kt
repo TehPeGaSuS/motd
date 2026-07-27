@@ -30,8 +30,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ReactionEntity::class,
         UserEntity::class,
         MemberEntity::class,
+        DccTransferEntity::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -45,6 +46,7 @@ abstract class MotdDatabase : RoomDatabase() {
     abstract fun memberDao(): MemberDao
     abstract fun reactionDao(): ReactionDao
     abstract fun userDao(): UserDao
+    abstract fun dccTransferDao(): DccTransferDao
     abstract fun canonicalTimelineDao(): CanonicalTimelineDao
     abstract fun roomAliasDao(): RoomAliasDao
     abstract fun historyCursorDao(): HistoryCursorDao
@@ -585,6 +587,54 @@ val MIGRATION_18_19 = object : Migration(18, 19) {
             "CREATE UNIQUE INDEX IF NOT EXISTS `index_network_ignores_networkId_pattern` " +
                 "ON `network_ignores` (`networkId`, `pattern`)",
         )
+    }
+}
+
+/**
+ * v19 -> v20 adds durable DCC transfer and direct-chat session state. Timeline rows still own the
+ * user-visible history; these tables track offer/session progress and retain history after a row is
+ * deleted.
+ */
+val MIGRATION_19_20 = object : Migration(19, 20) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `dcc_transfers` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `networkId` INTEGER NOT NULL,
+                `timelineEventId` INTEGER,
+                `offerKey` TEXT NOT NULL,
+                `direction` TEXT NOT NULL,
+                `protocol` TEXT NOT NULL,
+                `peerNick` TEXT NOT NULL,
+                `normalizedPeer` TEXT NOT NULL,
+                `filename` TEXT NOT NULL,
+                `displayFilename` TEXT NOT NULL,
+                `address` TEXT NOT NULL,
+                `addressKind` TEXT NOT NULL,
+                `port` INTEGER NOT NULL,
+                `sizeBytes` INTEGER,
+                `token` TEXT,
+                `state` TEXT NOT NULL,
+                `bytesTransferred` INTEGER NOT NULL,
+                `destinationUri` TEXT,
+                `partialUri` TEXT,
+                `error` TEXT,
+                `createdAt` INTEGER NOT NULL,
+                `expiresAt` INTEGER,
+                `acceptedAt` INTEGER,
+                `completedAt` INTEGER,
+                `updatedAt` INTEGER NOT NULL,
+                FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
+                FOREIGN KEY(`timelineEventId`) REFERENCES `messages`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL
+            )""",
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `index_dcc_transfers_networkId_offerKey` " +
+                "ON `dcc_transfers` (`networkId`, `offerKey`)",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_dcc_transfers_networkId_peerNick` ON `dcc_transfers` (`networkId`, `peerNick`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_dcc_transfers_timelineEventId` ON `dcc_transfers` (`timelineEventId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_dcc_transfers_state_updatedAt` ON `dcc_transfers` (`state`, `updatedAt`)")
     }
 }
 

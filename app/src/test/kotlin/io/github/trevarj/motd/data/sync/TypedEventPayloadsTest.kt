@@ -24,4 +24,24 @@ class TypedEventPayloadsTest {
         assertNull(NetworkBatchPayloadV1.decode("network-v2:YQ:Yg:QWxpY2U"))
         assertNull(NetworkBatchPayloadV1.decode("network-v1:YQ"))
     }
+
+    @Test fun `dcc payloads round trip endpoint metadata`() {
+        val file = DccFileOfferPayloadV1(
+            protocol = "SSEND",
+            filename = "photo:set.jpg",
+            address = "2001:db8::1",
+            addressKind = "IPV6_LITERAL",
+            port = 0,
+            sizeBytes = 42,
+            token = "reverse:token",
+            offerKey = "offer:key",
+        )
+        val unsupported = UnsupportedDccPayloadV1("VOICE", "UNKNOWN_COMMAND", "DCC VOICE chat 1 2")
+
+        assertEquals(file, DccFileOfferPayloadV1.decode(file.encode()))
+        assertEquals(unsupported, UnsupportedDccPayloadV1.decode(unsupported.encode()))
+        assertNull(DccFileOfferPayloadV1.decode("dcc-file-v2:YQ"))
+        assertNull(UnsupportedDccPayloadV1.decode("dcc-unsupported-v1:YQ"))
+        assertNull(DccFileOfferPayloadV1.decode("dcc-file-v1:U0VORA:Zg:MQ:SVBWN:1:not-a-size::aw"))
+    }
 }

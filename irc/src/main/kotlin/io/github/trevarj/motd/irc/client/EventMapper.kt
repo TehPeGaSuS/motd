@@ -199,7 +199,6 @@ class EventMapper(
                 inner.startsWith("DCC") && msg.command == "PRIVMSG" -> {
                     return when (val dcc = parseDccPayload(inner)) {
                         is ParsedDcc.Send -> IrcEvent.DccSend(ctx, source, target, dcc.offer)
-                        is ParsedDcc.Chat -> IrcEvent.DccChat(ctx, source, target, dcc.offer)
                         is ParsedDcc.Resume -> IrcEvent.DccResume(ctx, source, target, dcc.request)
                         is ParsedDcc.Accept -> IrcEvent.DccAccept(ctx, source, target, dcc.accepted)
                         is ParsedDcc.Unsupported -> IrcEvent.UnsupportedDcc(

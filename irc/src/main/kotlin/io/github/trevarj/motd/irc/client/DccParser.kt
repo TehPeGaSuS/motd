@@ -6,7 +6,6 @@ import java.net.InetAddress
 
 internal sealed interface ParsedDcc {
     data class Send(val offer: IrcEvent.DccSendOffer) : ParsedDcc
-    data class Chat(val offer: IrcEvent.DccChatOffer) : ParsedDcc
     data class Resume(val request: IrcEvent.DccResumeRequest) : ParsedDcc
     data class Accept(val accepted: IrcEvent.DccResumeAccepted) : ParsedDcc
     data class Unsupported(
@@ -27,7 +26,6 @@ internal fun parseDccPayload(payload: String): ParsedDcc? {
         ?: return ParsedDcc.Unsupported(null, IrcEvent.DccUnsupportedReason.MALFORMED)
     return when (command) {
         "SEND", "SSEND" -> parseDccSend(command, tokens)
-        "CHAT", "SCHAT" -> parseDccChat(command, tokens)
         "RESUME" -> parseDccResume(tokens)
         "ACCEPT" -> parseDccAccept(tokens)
         else -> ParsedDcc.Unsupported(command, IrcEvent.DccUnsupportedReason.UNKNOWN_COMMAND)
@@ -58,26 +56,6 @@ private fun parseDccSend(command: String, tokens: List<String>): ParsedDcc {
             filename = filename,
             endpoint = endpoint,
             sizeBytes = size,
-            token = token,
-        ),
-    )
-}
-
-private fun parseDccChat(command: String, tokens: List<String>): ParsedDcc {
-    if (tokens.size !in 5..6 || tokens[2].lowercase() != "chat") {
-        return ParsedDcc.Unsupported(command, IrcEvent.DccUnsupportedReason.MALFORMED)
-    }
-    val endpoint = parseDccEndpoint(tokens[3], tokens[4], token = tokens.getOrNull(5))
-        ?: return ParsedDcc.Unsupported(command, IrcEvent.DccUnsupportedReason.MALFORMED)
-    val token = parseOptionalDccToken(tokens.getOrNull(5))
-        ?: if (tokens.size >= 6) return ParsedDcc.Unsupported(
-            command,
-            IrcEvent.DccUnsupportedReason.MALFORMED,
-        ) else null
-    return ParsedDcc.Chat(
-        IrcEvent.DccChatOffer(
-            protocol = if (command == "SCHAT") IrcEvent.DccChatProtocol.SCHAT else IrcEvent.DccChatProtocol.CHAT,
-            endpoint = endpoint,
             token = token,
         ),
     )

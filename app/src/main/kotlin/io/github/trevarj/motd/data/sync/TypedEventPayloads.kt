@@ -54,3 +54,77 @@ data class NetworkBatchPayloadV1(val serverA: String, val serverB: String, val n
         private fun decodeField(value: String) = String(DECODER.decode(value), Charsets.UTF_8)
     }
 }
+
+data class DccFileOfferPayloadV1(
+    val protocol: String,
+    val filename: String,
+    val address: String,
+    val addressKind: String,
+    val port: Int,
+    val sizeBytes: Long?,
+    val token: String?,
+    val offerKey: String,
+) {
+    fun encode(): String = listOf(
+        VERSION,
+        encodePayloadField(protocol),
+        encodePayloadField(filename),
+        encodePayloadField(address),
+        encodePayloadField(addressKind),
+        port.toString(),
+        sizeBytes?.toString().orEmpty(),
+        token?.let(::encodePayloadField).orEmpty(),
+        encodePayloadField(offerKey),
+    ).joinToString(":")
+
+    companion object {
+        fun decode(value: String?): DccFileOfferPayloadV1? = runCatching {
+            val parts = value?.split(':') ?: return null
+            if (parts.size != 9 || parts[0] != VERSION) return null
+            val protocol = decodePayloadField(parts[1])
+            val filename = decodePayloadField(parts[2])
+            val address = decodePayloadField(parts[3])
+            val addressKind = decodePayloadField(parts[4])
+            val port = parts[5].toIntOrNull() ?: return null
+            val size = if (parts[6].isEmpty()) null else parts[6].toLongOrNull() ?: return null
+            val token = parts[7].takeIf(String::isNotEmpty)?.let(::decodePayloadField)
+            val offerKey = decodePayloadField(parts[8])
+            if (protocol.isBlank() || filename.isBlank() || address.isBlank() || offerKey.isBlank()) return null
+            DccFileOfferPayloadV1(protocol, filename, address, addressKind, port, size, token, offerKey)
+        }.getOrNull()
+
+        private const val VERSION = "dcc-file-v1"
+    }
+}
+
+data class UnsupportedDccPayloadV1(val command: String?, val reason: String, val rawPayload: String) {
+    fun encode(): String = listOf(
+        VERSION,
+        command?.let(::encodePayloadField).orEmpty(),
+        encodePayloadField(reason),
+        encodePayloadField(rawPayload),
+    ).joinToString(":")
+
+    companion object {
+        fun decode(value: String?): UnsupportedDccPayloadV1? = runCatching {
+            val parts = value?.split(':') ?: return null
+            if (parts.size != 4 || parts[0] != VERSION) return null
+            val command = parts[1].takeIf(String::isNotEmpty)?.let(::decodePayloadField)
+            val reason = decodePayloadField(parts[2])
+            val rawPayload = decodePayloadField(parts[3])
+            if (reason.isBlank() || rawPayload.isBlank()) return null
+            UnsupportedDccPayloadV1(command, reason, rawPayload)
+        }.getOrNull()
+
+        private const val VERSION = "dcc-unsupported-v1"
+    }
+}
+
+private val PAYLOAD_ENCODER = Base64.getUrlEncoder().withoutPadding()
+private val PAYLOAD_DECODER = Base64.getUrlDecoder()
+
+private fun encodePayloadField(value: String): String =
+    PAYLOAD_ENCODER.encodeToString(value.toByteArray(Charsets.UTF_8))
+
+private fun decodePayloadField(value: String): String =
+    String(PAYLOAD_DECODER.decode(value), Charsets.UTF_8)

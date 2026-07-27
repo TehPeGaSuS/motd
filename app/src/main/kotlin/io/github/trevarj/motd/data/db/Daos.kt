@@ -155,7 +155,10 @@ interface BufferDao {
                     )
                 )
                 AND m.isSelf = 0
-                AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')) AS unreadCount,
+                AND (
+                    m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+                    OR (m.kind = 'DCC_TRANSFER' AND m.eventPayload IS NOT NULL)
+                )) AS unreadCount,
             (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id
                 AND (
                     m.serverTime > MAX(COALESCE(b.localReadAnchorTime, 0), COALESCE(b.localUnreadFloorTime, 0))
@@ -1497,11 +1500,33 @@ interface CanonicalTimelineDao {
                  (m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
                     AND b.type != 'SERVER' AND (b.type = 'QUERY' OR m.hasMention = 1))
                  OR (m.kind = 'INVITE' AND m.inviteState IN ('PENDING', 'FAILED'))
+                 OR (m.kind = 'DCC_TRANSFER' AND m.eventPayload IS NOT NULL)
              )
            ORDER BY m.serverTime, m.id
            LIMIT :limit""",
     )
     suspend fun pendingNotifications(limit: Int): List<TimelineEventEntity>
+}
+
+@Dao
+interface DccTransferDao {
+    @Query("SELECT * FROM dcc_transfers WHERE id = :id")
+    suspend fun byId(id: Long): DccTransferEntity?
+
+    @Query("SELECT * FROM dcc_transfers WHERE networkId = :networkId AND offerKey = :offerKey LIMIT 1")
+    suspend fun byOfferKey(networkId: Long, offerKey: String): DccTransferEntity?
+
+    @Query("SELECT * FROM dcc_transfers ORDER BY updatedAt DESC, id DESC")
+    fun observeAll(): Flow<List<DccTransferEntity>>
+
+    @Query("SELECT * FROM dcc_transfers WHERE networkId = :networkId ORDER BY updatedAt DESC, id DESC")
+    fun observeForNetwork(networkId: Long): Flow<List<DccTransferEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnore(transfer: DccTransferEntity): Long
+
+    @Update
+    suspend fun update(transfer: DccTransferEntity)
 }
 
 @Dao

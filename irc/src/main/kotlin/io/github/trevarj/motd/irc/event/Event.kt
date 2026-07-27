@@ -113,7 +113,6 @@ sealed interface IrcEvent {
 
     // -- DCC / CTCP direct connections
     enum class DccFileProtocol { SEND, SSEND }
-    enum class DccChatProtocol { CHAT, SCHAT }
     enum class DccAddressKind { IPV4_INTEGER, IPV4_DOTTED, IPV6_LITERAL }
     enum class DccUnsupportedReason { UNKNOWN_COMMAND, MALFORMED }
     data class DccEndpoint(
@@ -127,11 +126,6 @@ sealed interface IrcEvent {
         val filename: String,
         val endpoint: DccEndpoint,
         val sizeBytes: Long?,
-        val token: String?,
-    )
-    data class DccChatOffer(
-        val protocol: DccChatProtocol,
-        val endpoint: DccEndpoint,
         val token: String?,
     )
     data class DccResumeRequest(
@@ -151,12 +145,6 @@ sealed interface IrcEvent {
         val source: io.github.trevarj.motd.irc.proto.Prefix,
         val target: String,
         val offer: DccSendOffer,
-    ) : IrcEvent
-    data class DccChat(
-        val ctx: MessageContext,
-        val source: io.github.trevarj.motd.irc.proto.Prefix,
-        val target: String,
-        val offer: DccChatOffer,
     ) : IrcEvent
     data class DccResume(
         val ctx: MessageContext,

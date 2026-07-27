@@ -37,11 +37,18 @@ enum class ObservationOrigin { LIVE, PUSH, HISTORY, LOCAL_SEND }
 enum class TimeProvenance { SERVER_TAG, LOCAL_CLOCK }
 enum class MessageKind {
     PRIVMSG, NOTICE, ACTION, JOIN, PART, QUIT, KICK, NICK, MODE, TOPIC, ERROR, SERVER_INFO,
-    INVITE, NETSPLIT, NETJOIN,
+    INVITE, NETSPLIT, NETJOIN, DCC_TRANSFER, DCC_UNSUPPORTED,
 }
 
 /** Durable state for an invitation timeline event. Null for every non-invitation message. */
 enum class InviteState { PENDING, JOINING, JOINED, DISMISSED, FAILED, HISTORICAL }
+
+enum class DccDirection { INCOMING, OUTGOING }
+enum class DccTransferProtocol { SEND, SSEND }
+enum class DccAddressKind { IPV4_INTEGER, IPV4_DOTTED, IPV6_LITERAL }
+enum class DccTransferState {
+    OFFERED, ACCEPTING, ACTIVE, PARTIAL, COMPLETED, FAILED, REJECTED, EXPIRED, REMOVED,
+}
 
 @Entity(tableName = "networks")
 data class NetworkEntity(
@@ -277,6 +284,57 @@ data class TimelineEventEntity(
 
 /** Compatibility name retained while presentation callers migrate to canonical event ids. */
 typealias MessageEntity = TimelineEventEntity
+
+@Entity(
+    tableName = "dcc_transfers",
+    indices = [
+        Index(value = ["networkId", "offerKey"], unique = true),
+        Index(value = ["networkId", "peerNick"]),
+        Index(value = ["timelineEventId"]),
+        Index(value = ["state", "updatedAt"]),
+    ],
+    foreignKeys = [
+        ForeignKey(
+            entity = NetworkEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["networkId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = TimelineEventEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["timelineEventId"],
+            onDelete = ForeignKey.SET_NULL,
+        ),
+    ],
+)
+data class DccTransferEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val networkId: Long,
+    val timelineEventId: TimelineEventId?,
+    val offerKey: String,
+    val direction: DccDirection,
+    val protocol: DccTransferProtocol,
+    val peerNick: String,
+    val normalizedPeer: String,
+    val filename: String,
+    val displayFilename: String,
+    val address: String,
+    val addressKind: DccAddressKind,
+    val port: Int,
+    val sizeBytes: Long?,
+    val token: String?,
+    val state: DccTransferState,
+    val bytesTransferred: Long = 0,
+    val destinationUri: String? = null,
+    val partialUri: String? = null,
+    val error: String? = null,
+    val createdAt: Long,
+    val expiresAt: Long?,
+    val acceptedAt: Long? = null,
+    val completedAt: Long? = null,
+    val updatedAt: Long,
+)
 
 @Fts4(contentEntity = TimelineEventEntity::class)
 @Entity(tableName = "messages_fts")

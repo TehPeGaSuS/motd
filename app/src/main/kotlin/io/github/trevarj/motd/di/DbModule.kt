@@ -10,6 +10,8 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.github.trevarj.motd.data.db.BufferDao
+import io.github.trevarj.motd.data.db.DccTransferDao
+import io.github.trevarj.motd.data.db.HistoryCursorDao
 import io.github.trevarj.motd.data.db.MemberDao
 import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.MIGRATION_1_2
@@ -30,13 +32,13 @@ import io.github.trevarj.motd.data.db.MIGRATION_15_16
 import io.github.trevarj.motd.data.db.MIGRATION_16_17
 import io.github.trevarj.motd.data.db.MIGRATION_17_18
 import io.github.trevarj.motd.data.db.MIGRATION_18_19
+import io.github.trevarj.motd.data.db.MIGRATION_19_20
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.NetworkIgnoreDao
 import io.github.trevarj.motd.data.db.ReactionDao
 import io.github.trevarj.motd.data.db.UserDao
-import io.github.trevarj.motd.data.db.HistoryCursorDao
 import javax.inject.Singleton
 
 @Module
@@ -75,6 +77,7 @@ internal object DbModule {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             // Downgrades only happen in dev when switching between branches with different schema
             // versions (e.g. the obfs branch's v3 vs main's v2); released builds only ever move the
@@ -90,5 +93,6 @@ internal object DbModule {
     @Provides fun provideMemberDao(db: MotdDatabase): MemberDao = db.memberDao()
     @Provides fun provideReactionDao(db: MotdDatabase): ReactionDao = db.reactionDao()
     @Provides fun provideUserDao(db: MotdDatabase): UserDao = db.userDao()
+    @Provides fun provideDccTransferDao(db: MotdDatabase): DccTransferDao = db.dccTransferDao()
     @Provides fun provideHistoryCursorDao(db: MotdDatabase): HistoryCursorDao = db.historyCursorDao()
 }

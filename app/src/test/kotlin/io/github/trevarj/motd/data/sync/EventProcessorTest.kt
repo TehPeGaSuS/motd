@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import android.content.Context
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.HistoryCursorEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -2990,6 +2991,85 @@ class EventProcessorTest {
         recording.process(networkId, invite)
         assertEquals(InviteState.JOINED, db.messageDao().byId(row.id)?.inviteState)
         assertEquals(1, notified.size)
+    }
+
+    // --- DCC direct connections -----------------------------------------
+
+    @Test
+    fun dccFileOffer_createsQueryTimelineRow_transferState_andNotification() = runTest {
+        val notified = mutableListOf<Triple<Long, Long, Long>>()
+        val recording = EventProcessor(db, TypingTrackerImpl(), object : MessageNotifier {
+            override suspend fun onIncoming(
+                networkId: Long,
+                bufferId: Long,
+                type: BufferType,
+                hasMention: Boolean,
+                message: IrcEvent.ChatMessage,
+            ) = Unit
+
+            override suspend fun onDccTransferOffer(networkId: Long, bufferId: Long, messageId: Long) {
+                notified += Triple(networkId, bufferId, messageId)
+            }
+        })
+        recording.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+        val offer = IrcEvent.DccSend(
+            ctx = ctx("dcc-file-1", 10_000, account = "alice-account"),
+            source = Prefix("Alice"),
+            target = "me",
+            offer = IrcEvent.DccSendOffer(
+                protocol = IrcEvent.DccFileProtocol.SEND,
+                filename = "../photo set.jpg",
+                endpoint = IrcEvent.DccEndpoint(
+                    address = "192.0.2.10",
+                    port = 49_152,
+                    addressKind = IrcEvent.DccAddressKind.IPV4_DOTTED,
+                ),
+                sizeBytes = 1_024,
+                token = null,
+            ),
+        )
+
+        recording.process(networkId, offer)
+        recording.process(networkId, offer)
+
+        val buffer = db.bufferDao().byName(networkId, "alice")!!
+        assertEquals(BufferType.QUERY, buffer.type)
+        val row = pagingList(buffer.id).single()
+        assertEquals(MessageKind.DCC_TRANSFER, row.kind)
+        assertEquals("DCC file offer: photo set.jpg (1 KiB)", row.text)
+        val payload = DccFileOfferPayloadV1.decode(row.eventPayload)!!
+        assertEquals("dcc:file:msgid:dcc-file-1", payload.offerKey)
+        assertEquals("SEND", payload.protocol)
+        assertEquals("../photo set.jpg", payload.filename)
+        val transfer = db.dccTransferDao().byOfferKey(networkId, payload.offerKey)!!
+        assertEquals(row.id, transfer.timelineEventId)
+        assertEquals(DccTransferState.OFFERED, transfer.state)
+        assertEquals("photo set.jpg", transfer.displayFilename)
+        assertEquals(310_000L, transfer.expiresAt)
+        assertEquals(1, notified.size)
+        assertEquals(row.id, notified.single().third)
+    }
+
+    @Test
+    fun unsupportedDcc_createsInertQueryTimelineRow_withoutTransferState() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.UnsupportedDcc(
+                ctx = ctx("dcc-unsupported-1", 30_000),
+                source = Prefix("Alice"),
+                target = "me",
+                command = "VOICE",
+                reason = IrcEvent.DccUnsupportedReason.UNKNOWN_COMMAND,
+                rawPayload = "DCC VOICE chat 192.0.2.10 49152",
+            ),
+        )
+
+        val buffer = db.bufferDao().byName(networkId, "alice")!!
+        val row = pagingList(buffer.id).single()
+        assertEquals(MessageKind.DCC_UNSUPPORTED, row.kind)
+        assertEquals("Unsupported DCC VOICE request", row.text)
+        assertEquals("VOICE", UnsupportedDccPayloadV1.decode(row.eventPayload)?.command)
+        assertNull(db.dccTransferDao().byOfferKey(networkId, "dcc:file:msgid:dcc-unsupported-1"))
     }
 
     @Test
