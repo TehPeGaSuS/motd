@@ -2034,10 +2034,12 @@ internal fun ScrollToBottomFab(
         ) {
             // A custom hold-to-fire gesture owns both tap and long-press: a quick tap performs the
             // mention-walk/bottom jump via onClick, while holding past HOLD_MS draws a filling
-            // progress ring and then fires onLongClick (skip straight to newest). The FAB's own
-            // onClick is inert; this recognizer consumes completed tap/hold releases instead.
+            // progress ring and then fires onLongClick (skip straight to newest). The semantic
+            // onClick remains available to accessibility and non-touch input.
             FloatingActionButton(
-                onClick = {},
+                // Keep the semantic click functional for accessibility and non-touch input. The
+                // custom pointer recognizer consumes physical releases before Surface sees them.
+                onClick = latestOnClick,
                 modifier = Modifier
                     .testTag("chat_scroll_to_bottom_fab")
                     .pointerInput(Unit) {
@@ -2053,9 +2055,8 @@ internal fun ScrollToBottomFab(
                                     ),
                                 )
                             }
-                            // Observe the release before the FAB's internal Surface click consumes
-                            // it. The Surface onClick remains inert, but the custom tap path must
-                            // still see a completed physical tap.
+                            // Observe and consume the release before the FAB's internal Surface
+                            // click so the physical tap dispatches exactly once through this path.
                             val releaseResult = withTimeoutOrNull(SCROLL_TO_BOTTOM_FAB_HOLD_MS.toLong()) {
                                 Result.success(waitForUpOrCancellation(PointerEventPass.Initial))
                             }
