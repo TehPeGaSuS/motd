@@ -237,6 +237,12 @@ fun ChatListContent(
     val selectedRows = orderedSelectedRows(visibleRows, selectedIds)
     val selectionActive = selectedRows.isNotEmpty()
     var confirmRemoval by remember { mutableStateOf(false) }
+    var archiveRevealSignal by rememberSaveable(state.selectedNetworkId) { mutableStateOf(0) }
+
+    fun setArchivedWithReveal(ids: Collection<Long>, archived: Boolean) {
+        onSetArchived(ids, archived)
+        if (!archiveMode && archived && ids.isNotEmpty()) archiveRevealSignal += 1
+    }
 
     LaunchedEffect(visibleRows) {
         selectedIds = pruneSelectedIds(selectedIds, visibleRows)
@@ -340,7 +346,7 @@ fun ChatListContent(
                                 modifier = Modifier.testTag("chatlist_selection_mute"),
                             ) { Icon(if (muteTarget) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications, stringResource(if (muteTarget) R.string.chatlist_mute else R.string.chatlist_unmute)) }
                             IconButton(
-                                onClick = { onSetArchived(selectedRows.map(ChatListRow::bufferId), !archiveMode); selectedIds = emptyList() },
+                                onClick = { setArchivedWithReveal(selectedRows.map(ChatListRow::bufferId), !archiveMode); selectedIds = emptyList() },
                                 modifier = Modifier.testTag("chatlist_selection_archive"),
                             ) { Icon(archiveActionIcon(archiveMode), stringResource(if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive)) }
                             IconButton(onClick = { confirmRemoval = true }, modifier = Modifier.testTag("chatlist_selection_remove")) {
@@ -429,6 +435,7 @@ fun ChatListContent(
                         rows = visibleRows,
                         archivedRows = state.archivedRows,
                         archiveMode = archiveMode,
+                        archiveRevealSignal = archiveRevealSignal,
                         onOpenArchive = { archiveMode = true },
                         presence = state.queryPresence,
                         friends = state.friends,
@@ -437,7 +444,7 @@ fun ChatListContent(
                         onOpenBuffer = onOpenBuffer,
                         onSetPinned = onSetPinned,
                         onSetMuted = onSetMuted,
-                        onSetArchived = onSetArchived,
+                        onSetArchived = ::setArchivedWithReveal,
                         onDeleteBuffers = onDeleteBuffers,
                         selectedIds = selectedIds.toSet(),
                         selectionActive = selectionActive,
@@ -556,6 +563,7 @@ private fun ChatList(
     rows: List<ChatListRow>,
     archivedRows: List<ChatListRow>,
     archiveMode: Boolean,
+    archiveRevealSignal: Int,
     onOpenArchive: () -> Unit,
     presence: Map<Long, io.github.trevarj.motd.service.PresenceState>,
     friends: Set<String>,
@@ -590,6 +598,7 @@ private fun ChatList(
     var archiveSettling by remember { mutableStateOf(false) }
     var archiveSettleJob by remember { mutableStateOf<Job?>(null) }
     var archiveAnnouncement by remember { mutableStateOf<String?>(null) }
+    var handledArchiveRevealSignal by remember { mutableStateOf(archiveRevealSignal) }
     val view = LocalView.current
     val archivedRevealedAnnouncement = stringResource(R.string.chatlist_archived_revealed_announcement)
     val archivedHiddenAnnouncement = stringResource(R.string.chatlist_archived_hidden_announcement)
@@ -661,6 +670,18 @@ private fun ChatList(
     }
 
     DisposableEffect(Unit) { onDispose { archiveSettleJob?.cancel() } }
+
+    LaunchedEffect(archiveRevealSignal, archiveFolderPullEligible, archivedOnly) {
+        if (archiveRevealSignal == handledArchiveRevealSignal || archiveMode) return@LaunchedEffect
+        if (archivedOnly) {
+            handledArchiveRevealSignal = archiveRevealSignal
+            return@LaunchedEffect
+        }
+        if (!archiveFolderPullEligible) return@LaunchedEffect
+        val result = dispatchArchiveEvent(ArchiveFolderPullEvent.RevealAccessibilityAction)
+        archiveDisplayExposurePx = result.state.exposurePx
+        handledArchiveRevealSignal = archiveRevealSignal
+    }
 
     val archiveFolderPullConnection = remember(archiveFolderPullEligible, archiveSettling) {
         object : NestedScrollConnection {

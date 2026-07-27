@@ -133,6 +133,33 @@ class ChatListSelectionUiTest {
         }
     }
 
+    @Test fun archiving_query_reveals_archived_folder_immediately() {
+        val active = row()
+        val remaining = row().copy(bufferId = 2, displayName = "bob")
+        val archived = active.copy(archived = true)
+        val state = mutableStateOf(ChatListState(rows = listOf(active, remaining), networks = listOf(network()), loading = false))
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatListContent(
+                    state = state.value,
+                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
+                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
+                    onSetArchived = { ids, archivedFlag ->
+                        if (ids == listOf(active.bufferId) && archivedFlag) {
+                            state.value = state.value.copy(rows = listOf(remaining), archivedRows = listOf(archived))
+                        }
+                    },
+                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeLeft() }
+
+        compose.onNodeWithTag("chatlist_archived_folder").assertIsDisplayed()
+        compose.onNodeWithText("Archived Chats (1)").assertIsDisplayed()
+    }
+
     @Test fun disabled_swipe_directions_do_not_archive() {
         val archiveCalls = mutableListOf<Pair<List<Long>, Boolean>>()
         compose.setContent {
