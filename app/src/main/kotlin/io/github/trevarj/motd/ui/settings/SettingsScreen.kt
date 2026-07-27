@@ -22,13 +22,15 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Chat
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.SettingsBackupRestore
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -49,12 +51,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -147,55 +149,69 @@ fun SettingsContent(
         onBack = onBack,
         modifier = Modifier.testTag("screen_settings"),
     ) {
-        CategoryRow(
-            icon = Icons.Outlined.Language,
-            title = stringResource(R.string.settings_networks),
-            summary = stringResource(R.string.settings_networks_summary),
-            modifier = Modifier.testTag("settings_category_networks"),
-            onClick = onOpenNetworks,
-        )
-        CategoryRow(
-            icon = Icons.Outlined.Palette,
-            title = stringResource(R.string.settings_appearance),
-            summary = stringResource(R.string.settings_appearance_summary),
-            modifier = Modifier.testTag("settings_category_appearance"),
-            onClick = onOpenAppearance,
-        )
-        CategoryRow(
-            icon = Icons.AutoMirrored.Outlined.Chat,
-            title = stringResource(R.string.settings_chat),
-            summary = stringResource(R.string.settings_chat_summary),
-            modifier = Modifier.testTag("settings_category_chat"),
-            onClick = onOpenChat,
-        )
-        CategoryRow(
-            icon = Icons.Outlined.Notifications,
-            title = stringResource(R.string.settings_delivery),
-            summary = stringResource(R.string.settings_delivery_summary),
-            modifier = Modifier.testTag("settings_category_delivery"),
-            onClick = onOpenDelivery,
-        )
-        CategoryRow(
-            icon = Icons.Outlined.CloudUpload,
-            title = stringResource(R.string.settings_uploads),
-            summary = stringResource(R.string.settings_uploads_summary),
-            modifier = Modifier.testTag("settings_category_uploads"),
-            onClick = onOpenUploads,
-        )
-        CategoryRow(
-            icon = Icons.Outlined.CloudUpload,
-            title = "Backup and restore",
-            summary = "Export networks and settings or import them on this device.",
-            modifier = Modifier.testTag("settings_category_backup_restore"),
-            onClick = onOpenBackupRestore,
-        )
-        CategoryRow(
-            icon = Icons.Outlined.Info,
-            title = stringResource(R.string.settings_about),
-            summary = stringResource(R.string.settings_about_summary, appVersion(context)),
-            modifier = Modifier.testTag("settings_category_about"),
-            onClick = onOpenAbout,
-        )
+        Surface(
+            modifier = Modifier.fillMaxWidth().testTag("settings_category_group"),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+        ) {
+            Column {
+                CategoryRow(
+                    icon = Icons.Outlined.Language,
+                    title = stringResource(R.string.settings_networks),
+                    summary = stringResource(R.string.settings_networks_summary),
+                    modifier = Modifier.testTag("settings_category_networks"),
+                    onClick = onOpenNetworks,
+                )
+                CategoryDivider()
+                CategoryRow(
+                    icon = Icons.Outlined.Palette,
+                    title = stringResource(R.string.settings_appearance),
+                    summary = stringResource(R.string.settings_appearance_summary),
+                    modifier = Modifier.testTag("settings_category_appearance"),
+                    onClick = onOpenAppearance,
+                )
+                CategoryDivider()
+                CategoryRow(
+                    icon = Icons.AutoMirrored.Outlined.Chat,
+                    title = stringResource(R.string.settings_chat),
+                    summary = stringResource(R.string.settings_chat_summary),
+                    modifier = Modifier.testTag("settings_category_chat"),
+                    onClick = onOpenChat,
+                )
+                CategoryDivider()
+                CategoryRow(
+                    icon = Icons.Outlined.Notifications,
+                    title = stringResource(R.string.settings_delivery),
+                    summary = stringResource(R.string.settings_delivery_summary),
+                    modifier = Modifier.testTag("settings_category_delivery"),
+                    onClick = onOpenDelivery,
+                )
+                CategoryDivider()
+                CategoryRow(
+                    icon = Icons.Outlined.CloudUpload,
+                    title = stringResource(R.string.settings_uploads),
+                    summary = stringResource(R.string.settings_uploads_summary),
+                    modifier = Modifier.testTag("settings_category_uploads"),
+                    onClick = onOpenUploads,
+                )
+                CategoryDivider()
+                CategoryRow(
+                    icon = Icons.Outlined.SettingsBackupRestore,
+                    title = stringResource(R.string.settings_backup_restore),
+                    summary = stringResource(R.string.settings_backup_restore_summary),
+                    modifier = Modifier.testTag("settings_category_backup_restore"),
+                    onClick = onOpenBackupRestore,
+                )
+                CategoryDivider()
+                CategoryRow(
+                    icon = Icons.Outlined.Info,
+                    title = stringResource(R.string.settings_about),
+                    summary = stringResource(R.string.settings_about_summary, appVersion(context)),
+                    modifier = Modifier.testTag("settings_category_about"),
+                    onClick = onOpenAbout,
+                )
+            }
+        }
     }
 }
 
@@ -208,14 +224,21 @@ private fun CategoryRow(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    Surface(
+    SettingsNavigationRow(
+        icon = icon,
+        title = title,
+        summary = summary,
         modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 1.dp,
-    ) {
-        SettingsNavigationRow(icon = icon, title = title, summary = summary, onClick = onClick)
-    }
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun CategoryDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 72.dp, end = 16.dp),
+        color = MaterialTheme.colorScheme.outlineVariant,
+    )
 }
 
 // -- Shared building blocks (used by the category sub-screens in this package) --------------------

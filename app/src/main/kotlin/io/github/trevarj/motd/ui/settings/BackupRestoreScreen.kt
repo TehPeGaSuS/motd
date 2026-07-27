@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -37,6 +38,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.backup.BackupExportMode
 import io.github.trevarj.motd.data.backup.BackupImportMode
 import io.github.trevarj.motd.data.backup.ConfigurationBackupRepository
@@ -72,7 +74,7 @@ fun BackupRestoreScreen(
     }
 
     SettingsScaffold(
-        title = "Backup and restore",
+        title = stringResource(R.string.settings_backup_restore),
         onBack = onBack,
         modifier = Modifier.testTag("screen_backup_restore"),
     ) {
