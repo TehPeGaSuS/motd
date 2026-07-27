@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -188,7 +189,7 @@ private fun BufferedProgressScrubber(
     val playedColor = MaterialTheme.colorScheme.primary
     Canvas(
         modifier = modifier
-            .height(8.dp)
+            .height(MINI_PLAYER_HEIGHT)
             .semantics {
                 contentDescription = "Audio position"
                 progressBarRangeInfo = ProgressBarRangeInfo(playedFraction, 0f..1f)
@@ -217,9 +218,10 @@ private fun BufferedProgressScrubber(
             },
     ) {
         val y = size.height / 2f
-        drawLine(remainingColor, Offset.Zero.copy(y = y), Offset(size.width, y), strokeWidth = size.height / 2f)
-        drawLine(bufferedColor, Offset.Zero.copy(y = y), Offset(size.width * bufferedFraction, y), strokeWidth = size.height / 2f)
-        drawLine(playedColor, Offset.Zero.copy(y = y), Offset(size.width * playedFraction, y), strokeWidth = size.height / 2f)
+        val trackWidth = 4.dp.toPx()
+        drawLine(remainingColor, Offset.Zero.copy(y = y), Offset(size.width, y), trackWidth, StrokeCap.Round)
+        drawLine(bufferedColor, Offset.Zero.copy(y = y), Offset(size.width * bufferedFraction, y), trackWidth, StrokeCap.Round)
+        drawLine(playedColor, Offset.Zero.copy(y = y), Offset(size.width * playedFraction, y), trackWidth, StrokeCap.Round)
     }
 }
 

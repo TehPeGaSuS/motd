@@ -1,14 +1,19 @@
 package io.github.trevarj.motd
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
+import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -75,6 +80,31 @@ class AudioPlayerUiTest {
 
         compose.onNodeWithContentDescription("Encrypted audio").assertIsDisplayed()
         compose.onNodeWithText("12:34 PM").assertIsDisplayed()
+    }
+
+    @Test fun mini_player_scrubber_uses_the_full_player_height() {
+        val attachment = audio()
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                AudioMiniPlayer(
+                    state = AudioPlaybackState(
+                        activeId = attachment.playbackId,
+                        attachment = attachment,
+                        durationMs = 60_000,
+                    ),
+                    onToggle = {},
+                    onCancelLoading = {},
+                    onRetry = {},
+                    onDismiss = {},
+                    onSeek = {},
+                    onOpenOrigin = {},
+                )
+            }
+        }
+
+        val bounds = compose.onNodeWithTag("audio_mini_scrubber").getUnclippedBoundsInRoot()
+        val height = bounds.bottom - bounds.top
+        assertTrue("scrubber touch height was $height", height >= 32.dp)
     }
 
     private fun audio() = AudioAttachment(
