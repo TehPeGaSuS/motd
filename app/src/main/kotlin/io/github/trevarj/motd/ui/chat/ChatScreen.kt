@@ -132,6 +132,7 @@ import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.AudioAttachment
+import io.github.trevarj.motd.audio.AudioCacheStatus
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.audio.AudioPlaybackRequest
@@ -327,6 +328,7 @@ fun ChatScreen(
     val contentPreviews by viewModel.contentPreviews.collectAsStateWithLifecycle()
     val audioPlaybackState by viewModel.audioPlaybackState.collectAsStateWithLifecycle()
     val audioWaveforms by viewModel.audioWaveforms.collectAsStateWithLifecycle()
+    val audioCacheStatuses by viewModel.audioCacheStatuses.collectAsStateWithLifecycle()
     val replyConfig by viewModel.replyConfig.collectAsStateWithLifecycle()
     val historyAvailability by viewModel.historyAvailability.collectAsStateWithLifecycle()
     // Round 5: nick sheet + replay-safe UI events (plans/16 §5.6/§5.8).
@@ -392,7 +394,9 @@ fun ChatScreen(
         cachedAudioMetadata = viewModel::cachedAudioMetadata,
         audioPlaybackState = audioPlaybackState,
         audioWaveforms = audioWaveforms,
+        audioCacheStatuses = audioCacheStatuses,
         onAudioToggle = viewModel::toggleAudio,
+        onAudioCacheInspect = viewModel::inspectAudioCache,
         onAudioSeek = viewModel::seekAudio,
         onAudioSpeed = viewModel::setAudioSpeed,
         onAudioToggleActive = viewModel::toggleActiveAudio,
@@ -505,7 +509,9 @@ fun ChatContent(
     cachedAudioMetadata: (String) -> CachedAudioMetadata? = { null },
     audioPlaybackState: AudioPlaybackState = AudioPlaybackState(),
     audioWaveforms: Map<String, AudioWaveform> = emptyMap(),
+    audioCacheStatuses: Map<String, AudioCacheStatus> = emptyMap(),
     onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
+    onAudioCacheInspect: (AudioAttachment) -> Unit = {},
     onAudioSeek: (AudioAttachment, Long) -> Unit = { _, _ -> },
     onAudioSpeed: (AudioAttachment, Float) -> Unit = { _, _ -> },
     onAudioToggleActive: () -> Unit = {},
@@ -1406,7 +1412,9 @@ fun ChatContent(
                         cachedAudioMetadata = cachedAudioMetadata,
                         audioPlaybackState = audioPlaybackState,
                         audioWaveforms = audioWaveforms,
+                        audioCacheStatuses = audioCacheStatuses,
                         onAudioToggle = onAudioToggle,
+                        onAudioCacheInspect = onAudioCacheInspect,
                         onAudioSeek = onAudioSeek,
                         onAudioSpeed = onAudioSpeed,
                         // Link-preview tap opens the URL in the system browser.

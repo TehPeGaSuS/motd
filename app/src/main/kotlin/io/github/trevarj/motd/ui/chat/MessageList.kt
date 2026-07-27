@@ -62,6 +62,7 @@ import androidx.paging.compose.itemKey
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
+import io.github.trevarj.motd.audio.AudioCacheStatus
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.audio.AudioPlaybackOrigin
 import io.github.trevarj.motd.audio.AudioPlaybackRequest
@@ -222,7 +223,9 @@ fun MessageList(
     cachedAudioMetadata: (String) -> CachedAudioMetadata? = { null },
     audioPlaybackState: AudioPlaybackState = AudioPlaybackState(),
     audioWaveforms: Map<String, AudioWaveform> = emptyMap(),
+    audioCacheStatuses: Map<String, AudioCacheStatus> = emptyMap(),
     onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
+    onAudioCacheInspect: (AudioAttachment) -> Unit = {},
     onAudioSeek: (AudioAttachment, Long) -> Unit = { _, _ -> },
     onAudioSpeed: (AudioAttachment, Float) -> Unit = { _, _ -> },
     liveEntryId: Long? = null,
@@ -389,7 +392,9 @@ fun MessageList(
                         cachedAudioMetadata = cachedAudioMetadata,
                         audioPlaybackState = audioPlaybackState,
                         audioWaveforms = audioWaveforms,
+                        audioCacheStatuses = audioCacheStatuses,
                         onAudioToggle = onAudioToggle,
+                        onAudioCacheInspect = onAudioCacheInspect,
                         onAudioSeek = onAudioSeek,
                         onAudioSpeed = onAudioSpeed,
                         onOpenLink = onOpenLink,
@@ -701,7 +706,9 @@ private fun MessageRow(
     cachedAudioMetadata: (String) -> CachedAudioMetadata?,
     audioPlaybackState: AudioPlaybackState,
     audioWaveforms: Map<String, AudioWaveform>,
+    audioCacheStatuses: Map<String, AudioCacheStatus>,
     onAudioToggle: (AudioPlaybackRequest) -> Unit,
+    onAudioCacheInspect: (AudioAttachment) -> Unit,
     onAudioSeek: (AudioAttachment, Long) -> Unit,
     onAudioSpeed: (AudioAttachment, Float) -> Unit,
     onOpenLink: (String) -> Unit,
@@ -796,6 +803,11 @@ private fun MessageRow(
     val audioAttachments = remember(immediateAudio, headAudio) {
         (immediateAudio + headAudio).distinctBy { it.url }
     }
+    val messageText = remember(msg.text, audioAttachments) {
+        displayTextForAudioMessage(msg.text, audioAttachments)
+    }
+    val standaloneVoice = audioAttachments.size == 1 && audioAttachments.single().voice &&
+        messageText.isBlank() && reply == null
 
     // A cached completion is rendered synchronously even while scrolling. A cache miss waits for
     // idle, then joins the repository's process-owned single-flight fetch. Null is a completed
@@ -859,14 +871,14 @@ private fun MessageRow(
         onReply = { onReply(msg) },
     ) { rowModifier ->
         Column(modifier = rowModifier.fillMaxWidth()) {
-        MessageBubble(
+        if (!standaloneVoice) MessageBubble(
             // Per-message handle for long-press/react/reply/deep-jump. Prefer the stable server
             // msgid; pending rows fall back to the local id for stable E2E selection.
             modifier = Modifier,
             sender = msg.sender,
             networkId = networkId,
             senderAccount = msg.senderAccount,
-            text = displayTextForAudioMessage(msg.text, audioAttachments),
+            text = messageText,
             timeMs = msg.serverTime,
             formattedTime = formattedTime,
             isSelf = msg.isSelf,
@@ -902,8 +914,12 @@ private fun MessageRow(
             attachments = audioAttachments,
             playbackState = audioPlaybackState,
             derivedWaveforms = audioWaveforms,
+            cacheStatuses = audioCacheStatuses,
             networkId = networkId,
             isSelf = msg.isSelf,
+            formattedTime = if (standaloneVoice) formattedTime else null,
+            pending = msg.pendingLabel != null,
+            failed = msg.failed,
             origin = if (bufferId != null && networkId != null && conversationName != null) {
                 AudioPlaybackOrigin(
                     bufferId = bufferId,
@@ -937,8 +953,12 @@ private fun MessageRow(
                 }
                 onAudioToggle(AudioPlaybackRequest(attachment, routeNetworkId, origin))
             },
+            onInspectCache = onAudioCacheInspect,
             onSeek = onAudioSeek,
             onSpeed = onAudioSpeed,
+            onLongPress = { onLongPress(msg) },
+            reactions = if (standaloneVoice) reactions else emptyList(),
+            onReact = { emoji -> onReact(msg, emoji) },
         )
         }
     }

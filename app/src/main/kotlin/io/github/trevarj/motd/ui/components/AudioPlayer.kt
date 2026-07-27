@@ -24,12 +24,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -57,6 +57,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.audio.AudioAttachment
+import io.github.trevarj.motd.audio.AudioCacheStatus
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.audio.AudioPlaybackOrigin
 import io.github.trevarj.motd.audio.AudioWaveform
@@ -77,6 +78,14 @@ fun AudioAttachmentPlayers(
     modifier: Modifier = Modifier,
     origin: AudioPlaybackOrigin? = null,
     derivedWaveforms: Map<String, AudioWaveform> = emptyMap(),
+    cacheStatuses: Map<String, AudioCacheStatus> = emptyMap(),
+    formattedTime: String? = null,
+    pending: Boolean = false,
+    failed: Boolean = false,
+    onInspectCache: (AudioAttachment) -> Unit = {},
+    onLongPress: (() -> Unit)? = null,
+    reactions: List<ReactionChip> = emptyList(),
+    onReact: (String) -> Unit = {},
 ) {
     if (attachments.isEmpty()) return
     var expanded by remember(attachments) { mutableStateOf(false) }
@@ -93,11 +102,18 @@ fun AudioAttachmentPlayers(
                 networkId = networkId,
                 origin = origin,
                 derivedWaveform = derivedWaveforms[attachment.playbackId],
+                cacheStatus = cacheStatuses[attachment.playbackId] ?: AudioCacheStatus.UNKNOWN,
+                formattedTime = formattedTime,
+                pending = pending,
+                failed = failed,
+                onInspectCache = onInspectCache,
                 onToggle = onToggle,
                 onSeek = onSeek,
                 onSpeed = onSpeed,
+                onLongPress = onLongPress,
                 modifier = Modifier
-                    .widthIn(max = 360.dp)
+                    .fillMaxWidth(0.60f)
+                    .widthIn(max = 216.dp)
                     .testTag("audio_player"),
             )
         }
@@ -111,6 +127,7 @@ fun AudioAttachmentPlayers(
                 Text("+${attachments.size - MAX_COLLAPSED_AUDIO_PLAYERS}")
             }
         }
+        ReactionRow(reactions = reactions, onReact = onReact)
     }
 }
 
@@ -122,9 +139,15 @@ private fun AudioAttachmentPlayer(
     networkId: Long?,
     origin: AudioPlaybackOrigin?,
     derivedWaveform: AudioWaveform?,
+    cacheStatus: AudioCacheStatus,
+    formattedTime: String?,
+    pending: Boolean,
+    failed: Boolean,
+    onInspectCache: (AudioAttachment) -> Unit,
     onToggle: (AudioAttachment, Long?) -> Unit,
     onSeek: (AudioAttachment, Long) -> Unit,
     onSpeed: (AudioAttachment, Float) -> Unit,
+    onLongPress: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -132,6 +155,7 @@ private fun AudioAttachmentPlayer(
     val playing = active && playbackState.playing
     val loading = active && playbackState.loading
     val error = playbackState.error.takeIf { active }
+    val needsDownload = !active && cacheStatus != AudioCacheStatus.CACHED
     val duration = (if (active) playbackState.durationMs else attachment.durationMs) ?: attachment.durationMs
     val position = if (active) playbackState.positionMs else 0L
     val speed = if (active) playbackState.speed else 1f
@@ -155,10 +179,14 @@ private fun AudioAttachmentPlayer(
         if (!scrubbing) scrubValue = position.toFloat()
     }
 
+    LaunchedEffect(attachment.playbackId) {
+        onInspectCache(attachment)
+    }
+
     Surface(
         modifier = modifier.combinedClickable(
             onClick = {},
-            onLongClick = { showDetails = true },
+            onLongClick = onLongPress ?: { showDetails = true },
         ),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -194,11 +222,13 @@ private fun AudioAttachmentPlayer(
                                 imageVector = when {
                                     error != null -> Icons.Filled.Refresh
                                     playing -> Icons.Filled.Pause
+                                    needsDownload -> Icons.Outlined.Download
                                     else -> Icons.Filled.PlayArrow
                                 },
                                 contentDescription = when {
                                     error != null -> "Retry audio"
                                     playing -> "Pause audio"
+                                    needsDownload -> "Download audio"
                                     else -> "Play audio"
                                 },
                                 tint = MaterialTheme.colorScheme.onPrimary,
@@ -210,13 +240,6 @@ private fun AudioAttachmentPlayer(
             Column(Modifier.weight(1f).padding(start = 6.dp)) {
                 if (!attachment.voice) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Outlined.Info,
-                            null,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.width(4.dp))
                         Text(
                             attachment.title,
                             maxLines = 1,
@@ -269,6 +292,7 @@ private fun AudioAttachmentPlayer(
                     Text(
                         error?.let { "Couldn’t play · $it" }
                             ?: "${formatAudioDuration(position)} / ${formatAudioDuration(duration)}",
+                        modifier = Modifier.weight(1f, fill = false),
                         style = MaterialTheme.typography.labelSmall,
                         color = if (error == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                         maxLines = 1,
@@ -281,12 +305,36 @@ private fun AudioAttachmentPlayer(
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
+                    formattedTime?.let { time ->
+                        Spacer(Modifier.width(6.dp))
+                        MessageStatusIcon(isSelf = origin?.isSelf == true, pending = pending, failed = failed)
+                        Text(
+                            time,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (failed) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1,
+                        )
+                    }
                     if (attachment.cleartextHttp) {
                         Icon(
                             Icons.Outlined.Warning,
                             null,
                             modifier = Modifier.padding(start = 4.dp).size(14.dp),
                             tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    IconButton(
+                        onClick = { showDetails = true },
+                        modifier = Modifier.size(28.dp).testTag("audio_player_details"),
+                    ) {
+                        Icon(
+                            Icons.Filled.MoreVert,
+                            contentDescription = "Audio details",
+                            modifier = Modifier.size(18.dp),
                         )
                     }
                 }

@@ -752,9 +752,13 @@ class ChatViewModel @Inject constructor(
 
     val audioPlaybackState = audioPlaybackController.state
     val audioWaveforms = audioPlaybackController.waveforms
+    val audioCacheStatuses = audioPlaybackController.cacheStatuses
 
     fun toggleAudio(request: AudioPlaybackRequest) =
         audioPlaybackController.toggle(request)
+
+    fun inspectAudioCache(attachment: AudioAttachment) =
+        audioPlaybackController.inspectCache(attachment)
 
     fun seekAudio(attachment: AudioAttachment, positionMs: Long) =
         audioPlaybackController.seekTo(attachment.playbackId, positionMs)
