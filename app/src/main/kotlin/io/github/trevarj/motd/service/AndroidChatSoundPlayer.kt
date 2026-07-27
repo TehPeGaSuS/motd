@@ -131,6 +131,34 @@ internal class ChatReceiveMelody {
     }
 }
 
+internal data class PendingChatSoundPlayback(
+    val cue: ChatSoundCue,
+    val playbackRate: Float,
+)
+
+internal class ChatSoundReadinessQueue {
+    private val pending = EnumMap<ChatSoundCue, PendingChatSoundPlayback>(ChatSoundCue::class.java)
+
+    fun request(cue: ChatSoundCue, playbackRate: Float, ready: Boolean): PendingChatSoundPlayback? =
+        synchronized(this) {
+            val playback = PendingChatSoundPlayback(cue, playbackRate)
+            if (ready) {
+                playback
+            } else {
+                pending[cue] = playback
+                null
+            }
+        }
+
+    fun markLoaded(cue: ChatSoundCue): PendingChatSoundPlayback? = synchronized(this) {
+        pending.remove(cue)
+    }
+
+    fun markLoadFailed(cue: ChatSoundCue) = synchronized(this) {
+        pending.remove(cue)
+    }
+}
+
 /**
  * Process-lifetime sonification using two small, original PCM samples. Sonification attributes
  * keep the cues subordinate to Android's ringer/silent policy without requesting audio focus.
@@ -157,6 +185,7 @@ internal class SoundPoolChatSoundBackend @Inject constructor(
     private val sampleIds = EnumMap<ChatSoundCue, Int>(ChatSoundCue::class.java)
     private val cuesBySampleId = ConcurrentHashMap<Int, ChatSoundCue>()
     private val readySampleIds = ConcurrentHashMap.newKeySet<Int>()
+    private val readinessQueue = ChatSoundReadinessQueue()
 
     init {
         soundPool?.setOnLoadCompleteListener { _, sampleId, status ->
@@ -164,7 +193,11 @@ internal class SoundPoolChatSoundBackend @Inject constructor(
             if (status == LOAD_SUCCESS) {
                 readySampleIds += sampleId
                 trace("loaded", cue, "status" to status)
+                cue?.let { loadedCue ->
+                    readinessQueue.markLoaded(loadedCue)?.let(::playReady)
+                }
             } else {
+                cue?.let(readinessQueue::markLoadFailed)
                 trace("load_failed", cue, "status" to status)
             }
         }
@@ -189,10 +222,24 @@ internal class SoundPoolChatSoundBackend @Inject constructor(
     }
 
     fun play(cue: ChatSoundCue, playbackRate: Float = NORMAL_RATE) {
-        val pool = soundPool ?: return
         val sampleId = sampleIds[cue]
-        if (sampleId == null || sampleId !in readySampleIds) {
+        if (sampleId == null) {
             trace("not_ready", cue)
+            return
+        }
+        val playback = readinessQueue.request(cue, playbackRate, sampleId in readySampleIds)
+        if (playback == null) {
+            trace("queued_not_ready", cue)
+            return
+        }
+        playReady(playback)
+    }
+
+    private fun playReady(playback: PendingChatSoundPlayback) {
+        val pool = soundPool ?: return
+        val sampleId = sampleIds[playback.cue]
+        if (sampleId == null || sampleId !in readySampleIds) {
+            trace("not_ready", playback.cue)
             return
         }
         val streamId = try {
@@ -202,16 +249,16 @@ internal class SoundPoolChatSoundBackend @Inject constructor(
                 PLAYBACK_VOLUME,
                 PLAYBACK_PRIORITY,
                 NO_LOOP,
-                playbackRate,
+                playback.playbackRate,
             )
         } catch (error: Exception) {
-            trace("play_failed", cue, "error" to error::class.simpleName)
+            trace("play_failed", playback.cue, "error" to error::class.simpleName)
             return
         }
         if (streamId == PLAY_FAILED) {
-            trace("play_failed", cue)
+            trace("play_failed", playback.cue)
         } else {
-            trace("played", cue)
+            trace("played", playback.cue)
         }
     }
 

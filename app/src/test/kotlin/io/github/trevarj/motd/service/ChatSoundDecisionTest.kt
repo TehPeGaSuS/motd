@@ -58,6 +58,53 @@ class ChatSoundDecisionTest {
     }
 
     @Test
+    fun `sound readiness queues a cue until its sample loads`() {
+        val queue = ChatSoundReadinessQueue()
+
+        assertNull(queue.request(ChatSoundCue.RECEIVE, playbackRate = 1.25f, ready = false))
+
+        assertEquals(
+            PendingChatSoundPlayback(ChatSoundCue.RECEIVE, playbackRate = 1.25f),
+            queue.markLoaded(ChatSoundCue.RECEIVE),
+        )
+        assertNull(queue.markLoaded(ChatSoundCue.RECEIVE))
+    }
+
+    @Test
+    fun `sound readiness keeps the latest queued playback rate`() {
+        val queue = ChatSoundReadinessQueue()
+
+        assertNull(queue.request(ChatSoundCue.RECEIVE, playbackRate = 1f, ready = false))
+        assertNull(queue.request(ChatSoundCue.RECEIVE, playbackRate = 1.5f, ready = false))
+
+        assertEquals(
+            PendingChatSoundPlayback(ChatSoundCue.RECEIVE, playbackRate = 1.5f),
+            queue.markLoaded(ChatSoundCue.RECEIVE),
+        )
+    }
+
+    @Test
+    fun `sound readiness plays ready samples immediately`() {
+        val queue = ChatSoundReadinessQueue()
+
+        assertEquals(
+            PendingChatSoundPlayback(ChatSoundCue.SEND, playbackRate = 1f),
+            queue.request(ChatSoundCue.SEND, playbackRate = 1f, ready = true),
+        )
+        assertNull(queue.markLoaded(ChatSoundCue.SEND))
+    }
+
+    @Test
+    fun `sound readiness drops queued playback after load failure`() {
+        val queue = ChatSoundReadinessQueue()
+
+        assertNull(queue.request(ChatSoundCue.SEND, playbackRate = 1f, ready = false))
+        queue.markLoadFailed(ChatSoundCue.SEND)
+
+        assertNull(queue.markLoaded(ChatSoundCue.SEND))
+    }
+
+    @Test
     fun `send and receive select distinct cues`() {
         assertEquals(
             ChatSoundCue.SEND,
