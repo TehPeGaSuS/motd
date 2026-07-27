@@ -36,7 +36,12 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
             compose.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
         val node = compose.onAllNodes(matcher, useUnmergedTree = true)[0]
-        node.performClick()
+        if (runCatching { node.assertIsOn() }.isFailure) node.performClick()
+        compose.waitUntil(timeoutMs) {
+            runCatching {
+                compose.onAllNodes(matcher, useUnmergedTree = true)[0].assertIsOn()
+            }.isSuccess
+        }
         node.assertIsOn()
     }
 
