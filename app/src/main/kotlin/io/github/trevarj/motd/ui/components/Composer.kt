@@ -70,8 +70,10 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -533,6 +535,7 @@ private fun VoiceRecordButton(
 ) {
     val viewConfiguration = LocalViewConfiguration.current
     val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
     val cancelPx = with(density) { 72.dp.toPx() }
     val lockPx = with(density) { 72.dp.toPx() }
     val latestRecording by rememberUpdatedState(recording)
@@ -574,6 +577,8 @@ private fun VoiceRecordButton(
                                     VoiceGestureTarget.LOCK -> {
                                         locked = true
                                         change.consume()
+                                        // Confirm the transition to hands-free recording as soon as it locks.
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                         latestLock()
                                         break
                                     }
