@@ -5,10 +5,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performTouchInput
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertTrue
 
@@ -36,7 +34,7 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
         val heightDp = player.fetchSemanticsNode().boundsInRoot.height / density
         assertTrue("audio player height was ${heightDp}dp", heightDp <= 84f)
-        player.performTouchInput { longClick() }
+        click("audio_player_details")
         rule.onNodeWithText("Link", useUnmergedTree = true).assertIsDisplayed()
     }
 }
