@@ -4,16 +4,18 @@ import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -26,8 +28,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -78,9 +80,12 @@ fun BackupRestoreScreen(
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Messages, chat history, drafts, generated push keys, cached previews, upload history, certificate pins, and runtime state are not exported.")
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(role = Role.Switch) { includeSecrets = !includeSecrets }
+                        .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text("Include credentials", fontWeight = FontWeight.Medium)
@@ -92,19 +97,17 @@ fun BackupRestoreScreen(
                     }
                     Switch(
                         checked = includeSecrets,
-                        onCheckedChange = { includeSecrets = it },
+                        onCheckedChange = null,
                         modifier = Modifier.testTag("backup_export_include_credentials"),
                     )
                 }
                 if (includeSecrets) {
-                    OutlinedTextField(
+                    PasswordField(
                         value = exportPassword,
                         onValueChange = { exportPassword = it },
                         modifier = Modifier.fillMaxWidth().testTag("backup_export_password"),
-                        label = { Text("Export password") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        supportingText = { Text("Use 12 to 128 characters.") },
-                        singleLine = true,
+                        label = "Export password",
+                        supportingText = "Use 12 to 128 characters.",
                     )
                 }
                 Button(
@@ -136,13 +139,11 @@ fun BackupRestoreScreen(
                     Text("Choose backup")
                 }
                 if (state.importNeedsPassword) {
-                    OutlinedTextField(
+                    PasswordField(
                         value = importPassword,
                         onValueChange = { importPassword = it },
                         modifier = Modifier.fillMaxWidth().testTag("backup_import_password"),
-                        label = { Text("Backup password") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true,
+                        label = "Backup password",
                     )
                     Button(
                         onClick = { viewModel.previewImport(importPassword) },
@@ -186,11 +187,14 @@ fun BackupRestoreScreen(
 }
 
 @Composable
-private fun ImportModeRow(
+internal fun ImportModeRow(
     selected: BackupImportMode,
     onSelected: (BackupImportMode) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(
+        modifier = Modifier.selectableGroup(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         Text("Import mode", fontWeight = FontWeight.Medium)
         ImportModeOption("Merge", "Update matching networks and keep local-only networks.", BackupImportMode.MERGE, selected, onSelected)
         ImportModeOption("Replace", "Remove local-only networks and their local history.", BackupImportMode.REPLACE, selected, onSelected)
@@ -205,9 +209,18 @@ private fun ImportModeOption(
     selected: BackupImportMode,
     onSelected: (BackupImportMode) -> Unit,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        RadioButton(selected = selected == mode, onClick = { onSelected(mode) })
-        Column {
+    val isSelected = selected == mode
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(selected = isSelected, role = Role.RadioButton) { onSelected(mode) }
+            .testTag("backup_import_mode_${mode.name.lowercase()}")
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        RadioButton(selected = isSelected, onClick = null)
+        Column(Modifier.weight(1f)) {
             Text(label)
             Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
