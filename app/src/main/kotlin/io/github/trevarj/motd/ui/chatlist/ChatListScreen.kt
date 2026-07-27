@@ -377,7 +377,72 @@ fun ChatListContent(
                     )
                 }
             },
-            bottomBar = {
+        ) { padding ->
+            Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    ConnectionBanner(
+                        states = state.connection,
+                        networkName = { id -> state.networks.firstOrNull { it.id == id }?.name },
+                    )
+
+                    // Active-scope chip: keeps the filter discoverable/escapable without the drawer.
+                    if (state.selectedNetworkId != null) {
+                        ScopeChip(
+                            name = state.selectedNetworkName.orEmpty(),
+                            onClear = { onSelectNetwork(null) },
+                        )
+                    }
+
+                    if (!shouldRenderChatList(archiveMode, state.rows, state.archivedRows) &&
+                        !state.loading && (archiveMode || state.networks.isNotEmpty())
+                    ) {
+                        EmptyState(
+                            icon = if (archiveMode) Icons.Outlined.Archive else Icons.Outlined.Forum,
+                            title = stringResource(
+                                if (archiveMode) {
+                                    R.string.chatlist_archived_empty_title
+                                } else if (state.selectedNetworkId != null) {
+                                    R.string.chatlist_scoped_empty_title
+                                } else {
+                                    R.string.chatlist_empty_title
+                                },
+                            ),
+                            message = if (archiveMode) {
+                                null
+                            } else {
+                                stringResource(
+                                    if (state.selectedNetworkId != null) {
+                                        R.string.chatlist_scoped_empty_message
+                                    } else {
+                                        R.string.chatlist_empty_message
+                                    },
+                                )
+                            },
+                        )
+                    } else {
+                        ChatList(
+                            rows = visibleRows,
+                            archivedRows = state.archivedRows,
+                            archiveMode = archiveMode,
+                            archiveRevealSignal = archiveRevealSignal,
+                            onOpenArchive = { archiveMode = true },
+                            presence = state.queryPresence,
+                            friends = state.friends,
+                            fools = state.fools,
+                            multiNetwork = showNetworkChip,
+                            onOpenBuffer = onOpenBuffer,
+                            onSetPinned = onSetPinned,
+                            onSetMuted = onSetMuted,
+                            onSetArchived = ::setArchivedWithReveal,
+                            onDeleteBuffers = onDeleteBuffers,
+                            selectedIds = selectedIds.toSet(),
+                            selectionActive = selectionActive,
+                            onToggleSelection = { id -> selectedIds = toggleSelectedId(selectedIds, id) },
+                            onStartSelection = { id -> selectedIds = addSelectedId(selectedIds, id) },
+                            onRemoveSelection = { ids -> selectedIds = selectedIds.filterNot(ids::contains) },
+                        )
+                    }
+                }
                 AudioMiniPlayer(
                     state = audioPlaybackState,
                     onToggle = onAudioToggle,
@@ -387,72 +452,8 @@ fun ChatListContent(
                     onSeek = onAudioSeek,
                     onOpenOrigin = onOpenAudioOrigin,
                     includeNetwork = state.networks.size > 1,
+                    modifier = Modifier.align(Alignment.TopCenter),
                 )
-            },
-        ) { padding ->
-            Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-                ConnectionBanner(
-                    states = state.connection,
-                    networkName = { id -> state.networks.firstOrNull { it.id == id }?.name },
-                )
-
-                // Active-scope chip: keeps the filter discoverable/escapable without the drawer.
-                if (state.selectedNetworkId != null) {
-                    ScopeChip(
-                        name = state.selectedNetworkName.orEmpty(),
-                        onClear = { onSelectNetwork(null) },
-                    )
-                }
-
-                if (!shouldRenderChatList(archiveMode, state.rows, state.archivedRows) &&
-                    !state.loading && (archiveMode || state.networks.isNotEmpty())
-                ) {
-                    EmptyState(
-                        icon = if (archiveMode) Icons.Outlined.Archive else Icons.Outlined.Forum,
-                        title = stringResource(
-                            if (archiveMode) {
-                                R.string.chatlist_archived_empty_title
-                            } else if (state.selectedNetworkId != null) {
-                                R.string.chatlist_scoped_empty_title
-                            } else {
-                                R.string.chatlist_empty_title
-                            },
-                        ),
-                        message = if (archiveMode) {
-                            null
-                        } else {
-                            stringResource(
-                                if (state.selectedNetworkId != null) {
-                                    R.string.chatlist_scoped_empty_message
-                                } else {
-                                    R.string.chatlist_empty_message
-                                },
-                            )
-                        },
-                    )
-                } else {
-                    ChatList(
-                        rows = visibleRows,
-                        archivedRows = state.archivedRows,
-                        archiveMode = archiveMode,
-                        archiveRevealSignal = archiveRevealSignal,
-                        onOpenArchive = { archiveMode = true },
-                        presence = state.queryPresence,
-                        friends = state.friends,
-                        fools = state.fools,
-                        multiNetwork = showNetworkChip,
-                        onOpenBuffer = onOpenBuffer,
-                        onSetPinned = onSetPinned,
-                        onSetMuted = onSetMuted,
-                        onSetArchived = ::setArchivedWithReveal,
-                        onDeleteBuffers = onDeleteBuffers,
-                        selectedIds = selectedIds.toSet(),
-                        selectionActive = selectionActive,
-                        onToggleSelection = { id -> selectedIds = toggleSelectedId(selectedIds, id) },
-                        onStartSelection = { id -> selectedIds = addSelectedId(selectedIds, id) },
-                        onRemoveSelection = { ids -> selectedIds = selectedIds.filterNot(ids::contains) },
-                    )
-                }
             }
         }
     }

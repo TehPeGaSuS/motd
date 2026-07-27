@@ -97,7 +97,7 @@ fun AudioMiniPlayer(
                     state.error != null -> onRetry
                     else -> onToggle
                 },
-                modifier = Modifier.size(36.dp).testTag(
+                modifier = Modifier.size(30.dp).testTag(
                     when {
                         state.loading -> "audio_mini_cancel_loading"
                         state.error != null -> "audio_mini_retry"
@@ -109,16 +109,16 @@ fun AudioMiniPlayer(
                     state.loading -> state.loadingFraction?.let { fraction ->
                         CircularProgressIndicator(
                             progress = { fraction },
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(16.dp),
                             strokeWidth = 2.dp,
                         )
                     } ?: CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
                     )
-                    state.error != null -> Icon(Icons.Filled.Refresh, "Retry audio", Modifier.size(22.dp))
-                    state.playing -> Icon(Icons.Filled.Pause, "Pause audio", Modifier.size(22.dp))
-                    else -> Icon(Icons.Filled.PlayArrow, "Play audio", Modifier.size(22.dp))
+                    state.error != null -> Icon(Icons.Filled.Refresh, "Retry audio", Modifier.size(18.dp))
+                    state.playing -> Icon(Icons.Filled.Pause, "Pause audio", Modifier.size(18.dp))
+                    else -> Icon(Icons.Filled.PlayArrow, "Play audio", Modifier.size(18.dp))
                 }
             }
             Spacer(Modifier.width(2.dp))
@@ -157,8 +157,8 @@ fun AudioMiniPlayer(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp).testTag("audio_mini_close")) {
-                Icon(Icons.Filled.Close, "Close audio player", Modifier.size(20.dp))
+            IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp).testTag("audio_mini_close")) {
+                Icon(Icons.Filled.Close, "Close audio player", Modifier.size(18.dp))
             }
         }
     }
@@ -223,4 +223,4 @@ private fun BufferedProgressScrubber(
     }
 }
 
-private val MINI_PLAYER_HEIGHT = 42.dp
+private val MINI_PLAYER_HEIGHT = 32.dp
