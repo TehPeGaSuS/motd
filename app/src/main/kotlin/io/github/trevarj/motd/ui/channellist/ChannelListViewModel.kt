@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.CancellationException
@@ -69,6 +70,9 @@ class ChannelListViewModel @Inject constructor(
     val state: StateFlow<ChannelListUiState> = _state.asStateFlow()
 
     private var started = false
+    private var fetchJob: Job? = null
+    private var activeFetchQuery: String? = null
+    private var queuedFetchQuery: String? = null
 
     /** Idempotent entry point: mirrors connection state and auto-fetches once Ready. */
     fun start() {
@@ -160,10 +164,24 @@ class ChannelListViewModel @Inject constructor(
     /** Fetch (or re-fetch) via LIST/ELIST, then sort by user count descending. */
     fun fetch() {
         val s = _state.value
-        if (s.loading || s.isRoot || !s.isReady) return
-        val args = listArgsFor(s.query)
+        if (s.isRoot || !s.isReady) return
+        val requestedQuery = s.query
+        if (fetchJob?.isActive == true) {
+            if (shouldQueueChannelListFetch(activeFetchQuery, requestedQuery)) {
+                queuedFetchQuery = requestedQuery
+            }
+            return
+        }
+        startFetch(requestedQuery)
+    }
+
+    private fun startFetch(query: String) {
+        val s = _state.value
+        if (s.isRoot || !s.isReady) return
+        val args = listArgsFor(query)
+        activeFetchQuery = query
         _state.value = s.copy(loading = true, error = null)
-        viewModelScope.launch {
+        fetchJob = viewModelScope.launch {
             val client = withTimeoutOrNull(CLIENT_WAIT_TIMEOUT_MS) {
                 var current = connectionManager.clientFor(networkId)
                 while (current == null) {
@@ -178,15 +196,25 @@ class ChannelListViewModel @Inject constructor(
                 client.listChannels(
                     mask = args.mask,
                     minUsers = args.minUsers,
-                    cap = channelListLimit(s.query),
+                    cap = channelListLimit(query),
                 )
             }
-            _state.value = _state.value.copy(
-                loading = false,
-                loaded = result.isSuccess,
-                listings = result.getOrNull()?.let(::sortListings) ?: _state.value.listings,
-                error = result.exceptionOrNull()?.message,
-            )
+            val latest = _state.value
+            if (shouldApplyChannelListFetchResult(query, latest.query)) {
+                _state.value = latest.copy(
+                    loading = false,
+                    loaded = result.isSuccess,
+                    listings = result.getOrNull()?.let(::sortListings) ?: latest.listings,
+                    error = result.exceptionOrNull()?.message,
+                )
+            } else {
+                _state.value = latest.copy(loading = false)
+            }
+            activeFetchQuery = null
+            queuedFetchQuery?.let { queued ->
+                queuedFetchQuery = null
+                if (_state.value.isReady && !_state.value.isRoot) startFetch(queued)
+            }
         }
     }
 

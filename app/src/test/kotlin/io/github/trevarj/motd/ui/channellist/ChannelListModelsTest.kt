@@ -155,4 +155,20 @@ class ChannelListModelsTest {
     fun `search query allows the larger result cap`() {
         assertEquals(CHANNEL_SEARCH_LIMIT, channelListLimit("kotlin"))
     }
+
+    @Test
+    fun `active fetch queues only changed search queries`() {
+        assertEquals(false, shouldQueueChannelListFetch(null, ""))
+        assertEquals(false, shouldQueueChannelListFetch("", ""))
+        assertEquals(true, shouldQueueChannelListFetch("", "linux"))
+        assertEquals(true, shouldQueueChannelListFetch("linux", "guix"))
+    }
+
+    @Test
+    fun `late channel list results apply only to the query that requested them`() {
+        assertEquals(true, shouldApplyChannelListFetchResult("", ""))
+        assertEquals(true, shouldApplyChannelListFetchResult("linux", "linux"))
+        assertEquals(false, shouldApplyChannelListFetchResult("", "linux"))
+        assertEquals(false, shouldApplyChannelListFetchResult("linux", "guix"))
+    }
 }

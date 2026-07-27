@@ -69,6 +69,14 @@ fun listArgsFor(query: String): ListArgs =
 fun channelListLimit(query: String): Int =
     if (query.isBlank()) POPULAR_CHANNEL_LIMIT else CHANNEL_SEARCH_LIMIT
 
+/** While LIST is in flight, only a different query should be queued for the next request. */
+fun shouldQueueChannelListFetch(activeQuery: String?, requestedQuery: String): Boolean =
+    activeQuery != null && activeQuery != requestedQuery
+
+/** Prevent a slow popular LIST from being rendered as results for a newer typed search. */
+fun shouldApplyChannelListFetchResult(fetchQuery: String, currentQuery: String): Boolean =
+    fetchQuery == currentQuery
+
 enum class ChannelJoinStatus { JOIN, JOINING, JOINED }
 
 /** Applies the current server CASEMAPPING to persisted or optimistic channel names. */
