@@ -38,11 +38,20 @@ data class AudioPlaybackState(
     val waveform: AudioWaveform? = attachment?.waveform,
 )
 
+enum class AudioCacheStatus {
+    UNKNOWN,
+    NOT_CACHED,
+    PARTIAL,
+    CACHED,
+}
+
 interface AudioPlaybackController {
     val state: StateFlow<AudioPlaybackState>
     val waveforms: StateFlow<Map<String, AudioWaveform>>
+    val cacheStatuses: StateFlow<Map<String, AudioCacheStatus>>
     fun play(request: AudioPlaybackRequest, speed: Float = 1f)
     fun toggle(request: AudioPlaybackRequest)
+    fun inspectCache(attachment: AudioAttachment)
     fun toggleActive()
     fun pause()
     fun dismiss(itemId: String)

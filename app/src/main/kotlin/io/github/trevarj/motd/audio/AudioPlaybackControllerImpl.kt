@@ -18,6 +18,7 @@ import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.di.IoDispatcher
 import java.io.File
 import java.net.HttpURLConnection
+import java.util.LinkedHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
@@ -52,6 +53,8 @@ class AudioPlaybackControllerImpl @Inject constructor(
     private val _state = MutableStateFlow(AudioPlaybackState())
     override val state: StateFlow<AudioPlaybackState> = _state.asStateFlow()
     override val waveforms: StateFlow<Map<String, AudioWaveform>> = waveformRepository.waveforms
+    private val _cacheStatuses = MutableStateFlow<Map<String, AudioCacheStatus>>(emptyMap())
+    override val cacheStatuses: StateFlow<Map<String, AudioCacheStatus>> = _cacheStatuses.asStateFlow()
     private var controller: MediaController? = null
     private val controllerReady = CompletableDeferred<MediaController>()
     private var decryptedTemp: File? = null
@@ -109,6 +112,7 @@ class AudioPlaybackControllerImpl @Inject constructor(
         activeRequest = request
         cleanupPlaintext()
         val attachment = request.attachment
+        inspectCache(attachment)
         _state.value = AudioPlaybackState(
             activeId = attachment.playbackId,
             title = attachment.title,
@@ -175,6 +179,29 @@ class AudioPlaybackControllerImpl @Inject constructor(
         }
     }
 
+    override fun inspectCache(attachment: AudioAttachment) {
+        val playbackId = attachment.playbackId
+        if (_cacheStatuses.value[playbackId] == AudioCacheStatus.CACHED) return
+        applicationScope.launch(ioDispatcher) {
+            val status = if (attachment.encrypted) {
+                val cachedBytes = cacheStore.ciphertextFile(attachment.url.substringBefore('#'))
+                    .takeIf { it.isFile }
+                    ?.length()
+                    ?: 0L
+                if (cachedBytes > 0L) {
+                    AudioCacheStatus.CACHED
+                } else {
+                    AudioCacheStatus.NOT_CACHED
+                }
+            } else if (attachment.url.startsWith("http", ignoreCase = true)) {
+                mediaCache.status(attachment.url)
+            } else {
+                AudioCacheStatus.CACHED
+            }
+            putCacheStatus(playbackId, status)
+        }
+    }
+
     override fun pause() {
         applicationScope.launch(Dispatchers.Main.immediate) {
             controller?.pause()
@@ -198,6 +225,7 @@ class AudioPlaybackControllerImpl @Inject constructor(
             _state.value = AudioPlaybackState()
         }
         requestToAnalyze?.let(::analyzeCachedAudio)
+        requestToAnalyze?.attachment?.let(::inspectCache)
     }
 
     override fun cancelLoading() {
@@ -283,6 +311,7 @@ class AudioPlaybackControllerImpl @Inject constructor(
                 }
             },
         )
+        putCacheStatus(attachment.playbackId, AudioCacheStatus.CACHED)
         currentCoroutineContext().ensureActive()
         val plain = withContext(ioDispatcher) { crypto.decrypt(cipherText, fragment) }
         if (session != generation) {
@@ -408,6 +437,16 @@ class AudioPlaybackControllerImpl @Inject constructor(
         }
     }
 
+    private fun putCacheStatus(playbackId: String, status: AudioCacheStatus) {
+        _cacheStatuses.value = LinkedHashMap(_cacheStatuses.value).apply {
+            remove(playbackId)
+            put(playbackId, status)
+            while (size > MAX_CACHE_STATUS_ENTRIES) {
+                remove(keys.first())
+            }
+        }
+    }
+
     private inline fun <T> NetworkMediaRoute?.useOrNull(block: (NetworkMediaRoute?) -> T): T =
         try {
             block(this)
@@ -420,6 +459,7 @@ class AudioPlaybackControllerImpl @Inject constructor(
         const val CONNECT_TIMEOUT_MS = 15_000
         const val READ_TIMEOUT_MS = 60_000
         const val DOWNLOAD_BUFFER_BYTES = 32 * 1024
+        const val MAX_CACHE_STATUS_ENTRIES = 256
         const val USER_AGENT = "motd-Android (https://github.com/trevarj/motd)"
         const val EXTRA_BUFFER_ID = "motd.audio.buffer_id"
         const val EXTRA_EVENT_ID = "motd.audio.event_id"

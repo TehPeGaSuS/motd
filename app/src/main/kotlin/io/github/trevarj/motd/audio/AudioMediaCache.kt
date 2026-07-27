@@ -72,6 +72,17 @@ class AudioMediaCache @Inject constructor(
         }
     }
 
+    suspend fun status(url: String): AudioCacheStatus = withContext(Dispatchers.IO) {
+        val key = url.substringBefore('#')
+        val length = ContentMetadata.getContentLength(cache.getContentMetadata(key))
+        val cachedBytes = cache.getCachedSpans(key).sumOf { span -> span.length }
+        when {
+            length > 0 && cache.isCached(key, 0, length) -> AudioCacheStatus.CACHED
+            cachedBytes > 0L -> AudioCacheStatus.PARTIAL
+            else -> AudioCacheStatus.NOT_CACHED
+        }
+    }
+
     suspend fun clear() = withContext(Dispatchers.IO) {
         cache.keys.toList().forEach { key -> runCatching { cache.removeResource(key) } }
     }
