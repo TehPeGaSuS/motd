@@ -215,7 +215,11 @@ fun ChatListRowItem(
                 // with the sender label.
                 if (showNetworkChip) {
                     Spacer(Modifier.width(6.dp))
-                    NetworkChip(name = row.networkName)
+                    NetworkChip(
+                        name = row.networkName,
+                        dimmed = true,
+                        emphasized = isUnread,
+                    )
                 }
             }
             Spacer(Modifier.size(2.dp))

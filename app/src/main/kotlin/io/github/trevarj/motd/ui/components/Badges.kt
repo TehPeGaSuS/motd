@@ -71,19 +71,34 @@ fun MutedActivityBadge(count: Int, modifier: Modifier = Modifier) {
 
 /** Quiet metadata naming the network; shown when more than one network is present. */
 @Composable
-fun NetworkChip(name: String, modifier: Modifier = Modifier) {
+fun NetworkChip(
+    name: String,
+    modifier: Modifier = Modifier,
+    dimmed: Boolean = false,
+    emphasized: Boolean = false,
+) {
+    val containerAlpha = when {
+        !dimmed -> 1f
+        emphasized -> 0.14f
+        else -> 0.08f
+    }
+    val labelAlpha = when {
+        !dimmed -> 1f
+        emphasized -> 0.90f
+        else -> 0.60f
+    }
     Box(
         modifier = modifier
             .widthIn(max = 92.dp)
             .background(
-                MaterialTheme.colorScheme.surfaceContainerHigh,
+                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = containerAlpha),
                 RoundedCornerShape(6.dp),
             )
             .padding(horizontal = 6.dp, vertical = 1.dp),
     ) {
         Text(
             text = name,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = labelAlpha),
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
