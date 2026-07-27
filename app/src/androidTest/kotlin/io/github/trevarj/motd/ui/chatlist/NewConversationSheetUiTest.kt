@@ -5,6 +5,8 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.performTextInput
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -53,4 +55,35 @@ class NewConversationSheetUiTest {
             compose.onAllNodesWithTag("new_conversation_browse").fetchSemanticsNodes().size,
         )
     }
+
+    @Test
+    fun keyboardDone_joinsTheEnteredChannel() {
+        var joined: Pair<Long, String>? = null
+        compose.setContent {
+            MotdTheme {
+                NewConversationSheetContent(
+                    networks = listOf(network()),
+                    onJoinChannel = { networkId, channel -> joined = networkId to channel },
+                    onMessageUser = { _, _ -> },
+                )
+            }
+        }
+
+        val input = compose.onNodeWithTag("new_conversation_input")
+        input.performTextInput("motd")
+        input.performImeAction()
+
+        compose.runOnIdle { assertEquals(1L to "#motd", joined) }
+    }
+
+    private fun network() = NetworkEntity(
+        id = 1,
+        name = "Libera",
+        role = NetworkRole.DIRECT,
+        host = "irc.libera.chat",
+        port = 6697,
+        nick = "me",
+        username = "me",
+        realname = "Me",
+    )
 }
