@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import androidx.core.net.toUri
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -64,6 +65,7 @@ import io.github.trevarj.motd.audio.AudioPlaybackOrigin
 import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.ui.chat.formatBytes
+import io.github.trevarj.motd.ui.theme.MotdMotion
 
 private const val MAX_COLLAPSED_AUDIO_PLAYERS = 3
 
@@ -88,47 +90,58 @@ fun AudioAttachmentPlayers(
     reactions: List<ReactionChip> = emptyList(),
     onReact: (String) -> Unit = {},
 ) {
-    if (attachments.isEmpty()) return
     var expanded by remember(attachments) { mutableStateOf(false) }
     val visible = if (expanded) attachments else attachments.take(MAX_COLLAPSED_AUDIO_PLAYERS)
     Column(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .animateContentSize(
+                animationSpec = MotdMotion.contentSize,
+                alignment = if (isSelf) Alignment.TopEnd else Alignment.TopStart,
+            ),
         horizontalAlignment = if (isSelf) Alignment.End else Alignment.Start,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        visible.forEach { attachment ->
-            AudioAttachmentPlayer(
-                attachment = attachment,
-                playbackState = playbackState,
-                networkId = networkId,
-                origin = origin,
-                derivedWaveform = derivedWaveforms[attachment.playbackId],
-                cacheStatus = cacheStatuses[attachment.playbackId] ?: AudioCacheStatus.UNKNOWN,
-                formattedTime = formattedTime,
-                pending = pending,
-                failed = failed,
-                onInspectCache = onInspectCache,
-                onToggle = onToggle,
-                onSeek = onSeek,
-                onSpeed = onSpeed,
-                onLongPress = onLongPress,
-                modifier = Modifier
-                    .fillMaxWidth(0.60f)
-                    .widthIn(max = 216.dp)
-                    .testTag("audio_player"),
-            )
-        }
-        if (!expanded && attachments.size > MAX_COLLAPSED_AUDIO_PLAYERS) {
-            TextButton(
-                onClick = { expanded = true },
-                modifier = Modifier.testTag("audio_player_expand"),
+        if (attachments.isNotEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                horizontalAlignment = if (isSelf) Alignment.End else Alignment.Start,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Icon(Icons.Filled.ExpandMore, null)
-                Spacer(Modifier.width(4.dp))
-                Text("+${attachments.size - MAX_COLLAPSED_AUDIO_PLAYERS}")
+                visible.forEach { attachment ->
+                    AudioAttachmentPlayer(
+                        attachment = attachment,
+                        playbackState = playbackState,
+                        networkId = networkId,
+                        origin = origin,
+                        derivedWaveform = derivedWaveforms[attachment.playbackId],
+                        cacheStatus = cacheStatuses[attachment.playbackId] ?: AudioCacheStatus.UNKNOWN,
+                        formattedTime = formattedTime,
+                        pending = pending,
+                        failed = failed,
+                        onInspectCache = onInspectCache,
+                        onToggle = onToggle,
+                        onSeek = onSeek,
+                        onSpeed = onSpeed,
+                        onLongPress = onLongPress,
+                        modifier = Modifier
+                            .fillMaxWidth(0.60f)
+                            .widthIn(max = 216.dp)
+                            .testTag("audio_player"),
+                    )
+                }
+                if (!expanded && attachments.size > MAX_COLLAPSED_AUDIO_PLAYERS) {
+                    TextButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.testTag("audio_player_expand"),
+                    ) {
+                        Icon(Icons.Filled.ExpandMore, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("+${attachments.size - MAX_COLLAPSED_AUDIO_PLAYERS}")
+                    }
+                }
+                ReactionRow(reactions = reactions, onReact = onReact)
             }
         }
-        ReactionRow(reactions = reactions, onReact = onReact)
     }
 }
 

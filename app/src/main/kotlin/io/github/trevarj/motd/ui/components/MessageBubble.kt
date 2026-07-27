@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.components
 
 import android.text.format.DateFormat
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -1401,6 +1402,10 @@ internal fun ReplyMiniBubble(
     Row(
         modifier = Modifier
             .testTag("chat_reply_preview")
+            .animateContentSize(
+                animationSpec = MotdMotion.contentSize,
+                alignment = Alignment.TopStart,
+            )
             .padding(vertical = 2.dp)
             .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))

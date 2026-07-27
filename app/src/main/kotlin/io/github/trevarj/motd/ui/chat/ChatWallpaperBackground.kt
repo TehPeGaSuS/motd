@@ -81,9 +81,9 @@ fun ChatWallpaperBackground(
         requestedAlpha = maxAlpha * wallpaper.intensity.coerceIn(0, 100) / 100f,
         foregrounds = foregrounds,
     )
-    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
-    val rasterKey = remember(wallpaper, canvasSize, density, gradient, pattern) {
-        canvasSize.takeIf { it.width > 0 && it.height > 0 }?.let {
+    var rasterCoverage by remember { mutableStateOf(IntSize.Zero) }
+    val rasterKey = remember(wallpaper, rasterCoverage, density, gradient, pattern) {
+        rasterCoverage.takeIf { it.width > 0 && it.height > 0 }?.let {
             WallpaperRasterKey(
                 preset = wallpaper.preset,
                 width = rasterDimension(it.width),
@@ -96,23 +96,33 @@ fun ChatWallpaperBackground(
     }
     val raster by produceState<ImageBitmap?>(initialValue = null, rasterKey) {
         val key = rasterKey ?: return@produceState
-        value = WallpaperRasterCache.get(key)
-        if (value == null) {
-            value = withContext(Dispatchers.Default) {
-                WallpaperRasterCache.get(key) ?: renderWallpaperRaster(context.assets, key)
-                    .also { WallpaperRasterCache.put(key, it) }
-            }
+        WallpaperRasterCache.get(key)?.let {
+            value = it
+            return@produceState
+        }
+        // Keep drawing the previous raster while a larger or differently themed replacement is
+        // rendered. Clearing it here produced a visible plain-background frame between rasters.
+        value = withContext(Dispatchers.Default) {
+            WallpaperRasterCache.get(key) ?: renderWallpaperRaster(context.assets, key)
+                .also { WallpaperRasterCache.put(key, it) }
         }
     }
 
     Box(
         modifier
             .fillMaxSize()
-            .onSizeChanged { if (canvasSize != it) canvasSize = it }
+            .onSizeChanged {
+                val expanded = expandedRasterCoverage(rasterCoverage, it)
+                if (rasterCoverage != expanded) rasterCoverage = expanded
+            }
             .drawBehind {
                 val image = raster
                 if (image == null) drawRect(base) else drawImage(
                     image = image,
+                    srcSize = wallpaperRasterSourceSize(
+                        rasterSize = IntSize(image.width, image.height),
+                        canvasSize = IntSize(size.width.toInt(), size.height.toInt()),
+                    ),
                     dstSize = IntSize(size.width.toInt(), size.height.toInt()),
                     filterQuality = FilterQuality.Medium,
                 )
@@ -261,6 +271,18 @@ private fun parseTransform(value: String): FloatArray {
     val match = requireNotNull(TRANSFORM.matchEntire(value)) { "unsupported wallpaper transform: $value" }
     return FloatArray(4) { match.groupValues[it + 1].toFloat() }
 }
+
+/** A shrinking chat viewport crops the existing raster instead of starting a new render. */
+internal fun expandedRasterCoverage(current: IntSize, measured: IntSize): IntSize = IntSize(
+    width = maxOf(current.width, measured.width),
+    height = maxOf(current.height, measured.height),
+)
+
+/** Crop a retained raster at its native scale so layout changes do not stretch the pattern. */
+internal fun wallpaperRasterSourceSize(rasterSize: IntSize, canvasSize: IntSize): IntSize = IntSize(
+    width = minOf(rasterSize.width, rasterDimension(canvasSize.width)),
+    height = minOf(rasterSize.height, rasterDimension(canvasSize.height)),
+)
 
 private fun rasterDimension(fullSize: Int) = (fullSize * WALLPAPER_RASTER_SCALE).toInt().coerceAtLeast(1)
 

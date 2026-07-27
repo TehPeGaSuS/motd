@@ -264,9 +264,31 @@ class ChatModelsTest {
         assertNull(tracker.onTimelineChangedWithEntry(13, 9).liveEntryId)
     }
 
-    @Test fun `stale live entry completion preserves a newer pending entry`() {
-        assertEquals(9L, consumeLiveEntryId(current = 9L, consumed = 8L))
-        assertNull(consumeLiveEntryId(current = 9L, consumed = 9L))
+    @Test fun `burst arrivals retain every in-flight live entry`() {
+        val first = appendLiveEntryId(emptySet(), 8L)
+        val burst = appendLiveEntryId(first, 9L)
+
+        assertEquals(setOf(8L, 9L), appendLiveEntryId(burst, null))
+    }
+
+    @Test fun `live entry disposal consumes only its own identity`() {
+        val burst = setOf(8L, 9L)
+
+        assertEquals(setOf(9L), consumeLiveEntryId(current = burst, consumed = 8L))
+        assertEquals(emptySet<Long>(), consumeLiveEntryId(current = setOf(9L), consumed = 9L))
+    }
+
+    @Test fun `system run extension updates its existing pill without entry motion`() {
+        val rows = listOf(
+            message(id = 9L, kind = MessageKind.JOIN),
+            message(id = 8L, kind = MessageKind.PART),
+            message(id = 7L),
+        )
+
+        assertTrue(extendsSystemRun(9L, rows.size, rows::getOrNull))
+        assertFalse(extendsSystemRun(7L, rows.size, rows::getOrNull))
+        assertFalse(extendsSystemRun(9L, 1) { rows.getOrNull(it) })
+        assertFalse(extendsSystemRun(null, rows.size, rows::getOrNull))
     }
 
     @Test fun `paging invalidation cannot break following live arrivals`() {

@@ -600,7 +600,7 @@ fun ChatContent(
 ) {
     val listState = rememberLazyListState()
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
-    var liveEntryId by remember { mutableStateOf<Long?>(null) }
+    var liveEntryIds by remember(state.buffer?.id) { mutableStateOf(emptySet<Long>()) }
     val visibilityPolicy = remember(
         showJoinPartQuit,
         fools,
@@ -1118,7 +1118,7 @@ fun ChatContent(
                 val followingBefore = autoFollow.following
                 if (suppressNextAutoFollow) {
                     autoFollow.reset(newCount, atBottom, newestEffectiveId)
-                    liveEntryId = null
+                    liveEntryIds = emptySet()
                     suppressNextAutoFollow = false
                     AutoFollowTrace.record("paging_initial", traceBufferId, traceSessionId) {
                         "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
@@ -1127,7 +1127,10 @@ fun ChatContent(
                     }
                 } else {
                     val change = autoFollow.onTimelineChangedWithEntry(newCount, newestEffectiveId)
-                    liveEntryId = change.liveEntryId
+                    val animatedEntryId = change.liveEntryId?.takeUnless {
+                        extendsSystemRun(it, newCount, items::peek)
+                    }
+                    liveEntryIds = appendLiveEntryId(liveEntryIds, animatedEntryId)
                     val newest = if (newCount > 0) items.peek(0) else null
                     AutoFollowTrace.record("follow_decision", traceBufferId, traceSessionId) {
                         "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
@@ -1138,7 +1141,12 @@ fun ChatContent(
                             "refresh=${loadStateName(items.loadState.refresh)} " +
                             "append=${loadStateName(items.loadState.append)}"
                     }
-                    if (change.shouldFollow) scrollToNewest(animate = false, reason = "live_arrival")
+                    if (change.shouldFollow) {
+                        // Apply the new index-zero anchor to the same remeasure that presents the
+                        // Paging update. A suspending scroll can expose the old anchor for one frame.
+                        autoFollow.requestFollow()
+                        listState.requestScrollToItem(0)
+                    }
                 }
             }
     }
@@ -1378,9 +1386,9 @@ fun ChatContent(
                     MessageList(
                         items = items,
                         listState = listState,
-                        liveEntryId = liveEntryId,
+                        liveEntryIds = liveEntryIds,
                         onLiveEntryConsumed = { id ->
-                            liveEntryId = consumeLiveEntryId(liveEntryId, id)
+                            liveEntryIds = consumeLiveEntryId(liveEntryIds, id)
                         },
                         networkId = state.buffer?.networkId,
                         bufferId = state.buffer?.id,

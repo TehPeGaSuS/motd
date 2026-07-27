@@ -1,5 +1,10 @@
 package io.github.trevarj.motd.ui.chat
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -31,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -43,9 +49,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -96,11 +103,9 @@ import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdSpacing
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Limit collapsed system-event work per composed row during high-velocity history traversal. */
@@ -228,7 +233,7 @@ fun MessageList(
     onAudioCacheInspect: (AudioAttachment) -> Unit = {},
     onAudioSeek: (AudioAttachment, Long) -> Unit = { _, _ -> },
     onAudioSpeed: (AudioAttachment, Float) -> Unit = { _, _ -> },
-    liveEntryId: Long? = null,
+    liveEntryIds: Set<Long> = emptySet(),
     onLiveEntryConsumed: (Long) -> Unit = {},
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
     replyPreview: (String) -> StateFlow<ReplyPreviewData?> = { MutableStateFlow(null) },
@@ -289,7 +294,7 @@ fun MessageList(
             val newer = if (index - 1 >= 0) items.peek(index - 1) else null
 
             if (msg.kind == MessageKind.INVITE) {
-                LiveTimelineEntry(liveEntryId, msg.id, onLiveEntryConsumed) {
+                LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
                     InvitationCard(
                         message = msg,
                         onJoin = { onAcceptInvite(msg.id) },
@@ -300,7 +305,7 @@ fun MessageList(
             }
 
             if (msg.kind == MessageKind.NETSPLIT || msg.kind == MessageKind.NETJOIN) {
-                LiveTimelineEntry(liveEntryId, msg.id, onLiveEntryConsumed) {
+                LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
                     NetworkBatchPill(msg)
                 }
                 return@items
@@ -311,7 +316,7 @@ fun MessageList(
             // whose just-newer neighbor is not a system event.
             if (isSystemKind(msg.kind)) {
                 if (!isSystemRunChunkHead(index, newer?.let { isSystemKind(it.kind) } == true)) return@items
-                LiveTimelineEntry(liveEntryId, msg.id, onLiveEntryConsumed) {
+                LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
                     SystemEventRun(
                         items = items,
                         index = index,
@@ -328,7 +333,7 @@ fun MessageList(
             val isFool = foolsMode == FoolsMode.COLLAPSE &&
                 isFoolMessage(msg, fools, identityRules)
             if (isFool && !foolExpanded(msg.id)) {
-                LiveTimelineEntry(liveEntryId, msg.id, onLiveEntryConsumed) {
+                LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
                     FoolPlaceholderRow(
                         msg = msg,
                         older = older,
@@ -404,7 +409,7 @@ fun MessageList(
                     )
                 }
             }
-            LiveTimelineEntry(liveEntryId, msg.id, onLiveEntryConsumed, rowContent)
+            LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed, rowContent)
         }
 
         // Append spinner / end-of-history / error affordances (plans/15 #27). This item sits at the
@@ -444,12 +449,12 @@ internal fun MessagePlaceholderRow() {
 /** Applies the one-shot entrance uniformly to every kind of rendered, meaningful timeline row. */
 @Composable
 private fun LiveTimelineEntry(
-    liveEntryId: Long?,
+    liveEntryIds: Set<Long>,
     messageId: Long,
     onConsumed: (Long) -> Unit,
     content: @Composable () -> Unit,
 ) {
-    if (liveEntryId == messageId) {
+    if (messageId in liveEntryIds) {
         LiveMessageEntry(messageId = messageId, onConsumed = onConsumed, content = content)
     } else {
         content()
@@ -457,8 +462,9 @@ private fun LiveTimelineEntry(
 }
 
 /**
- * One-shot live-message entrance. Transforming the already-measured row avoids changing the
- * reverse list's height while it is following a burst of IRC arrivals.
+ * One-shot live-message entrance. The row reveals upward from the bottom so older messages move by
+ * the same smooth amount as the new row grows. The content subtree remains mounted after completion
+ * so reply, preview, and audio state cannot restart at the end of the animation.
  */
 @Composable
 private fun LiveMessageEntry(
@@ -466,29 +472,40 @@ private fun LiveMessageEntry(
     onConsumed: (Long) -> Unit,
     content: @Composable () -> Unit,
 ) {
-    val initialOffset = with(LocalDensity.current) { 8.dp.toPx() }
-    val alpha = remember(messageId) { Animatable(0f) }
-    val scale = remember(messageId) { Animatable(0.96f) }
-    val translationY = remember(messageId, initialOffset) { Animatable(initialOffset) }
+    val reveal = remember(messageId) { Animatable(0f) }
+    var complete by remember(messageId) { mutableStateOf(false) }
+    val latestOnConsumed = rememberUpdatedState(onConsumed)
 
-    LaunchedEffect(messageId) {
-        coroutineScope {
-            launch { alpha.animateTo(1f, MotdMotion.fadeIn) }
-            launch { scale.animateTo(1f, MotdMotion.softSpring) }
-            launch { translationY.animateTo(0f, MotdMotion.softSpring) }
-        }
-        onConsumed(messageId)
+    DisposableEffect(messageId) {
+        onDispose { latestOnConsumed.value(messageId) }
     }
 
+    LaunchedEffect(messageId) {
+        reveal.animateTo(1f, MotdMotion.fadeIn)
+        complete = true
+    }
+
+    val motion = if (complete) {
+        Modifier
+    } else {
+        Modifier
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                val revealedHeight = (placeable.height * reveal.value).toInt()
+                    .coerceIn(0, placeable.height)
+                layout(placeable.width, revealedHeight) {
+                    // Bottom alignment makes the bubble grow into the conversation instead of
+                    // sliding its full height over the composer.
+                    placeable.placeRelative(0, revealedHeight - placeable.height)
+                }
+            }
+            .graphicsLayer { alpha = reveal.value }
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .graphicsLayer {
-                this.alpha = alpha.value
-                scaleX = scale.value
-                scaleY = scale.value
-                this.translationY = translationY.value
-            },
+            .clipToBounds()
+            .then(motion),
     ) {
         content()
     }
@@ -871,72 +888,77 @@ private fun MessageRow(
         onReply = { onReply(msg) },
     ) { rowModifier ->
         Column(modifier = rowModifier.fillMaxWidth()) {
-        if (!standaloneVoice) MessageBubble(
-            // Per-message handle for long-press/react/reply/deep-jump. Prefer the stable server
-            // msgid; pending rows fall back to the local id for stable E2E selection.
-            modifier = Modifier,
-            sender = msg.sender,
-            networkId = networkId,
-            senderAccount = msg.senderAccount,
-            text = messageText,
-            timeMs = msg.serverTime,
-            formattedTime = formattedTime,
-            isSelf = msg.isSelf,
-            kind = msg.kind,
-            showSender = showSender,
-            hasMention = msg.hasMention,
-            senderIsFriend = senderIsFriend,
-            failed = msg.failed,
-            // Subtle "sending…" state before the 30s failure flip (plans/15 #21).
-            pending = msg.pendingLabel != null,
-            reply = reply,
-            onReplyClick = if (resolvedReply != null) {
-                msg.replyToMsgid?.let { parentMsgid -> { onReplyPreviewClick(parentMsgid) } }
-            } else {
-                null
-            },
-            imageUrl = imageUrl,
-            linkPreview = preview,
-            linkPreviewLoading = previewLoading,
-            linkPreviewResolved = previewResolved,
-            reactions = reactions,
-            knownNicks = knownNicks,
-            identityRules = identityRules,
-            onLongPress = { onLongPress(msg) },
-            // Pass the entity, not just msgid: the VM also handles a pending reaction uniformly.
-            onReact = { emoji -> onReact(msg, emoji) },
-            onImageClick = onImageClick,
-            onLinkPreviewClick = { linkUrl?.let(onOpenLink) },
-            // Only non-self senders open the nick sheet (self has no social/moderation actions).
-            onSenderClick = if (msg.isSelf) null else ({ onSenderClick(msg.sender) }),
-        )
-        AudioAttachmentPlayers(
-            attachments = audioAttachments,
-            playbackState = audioPlaybackState,
-            derivedWaveforms = audioWaveforms,
-            cacheStatuses = audioCacheStatuses,
-            networkId = networkId,
-            isSelf = msg.isSelf,
-            formattedTime = if (standaloneVoice) formattedTime else null,
-            pending = msg.pendingLabel != null,
-            failed = msg.failed,
-            origin = if (bufferId != null && networkId != null && conversationName != null) {
-                AudioPlaybackOrigin(
-                    bufferId = bufferId,
-                    networkId = networkId,
-                    conversation = conversationName,
+            val messageBubble: @Composable () -> Unit = {
+                MessageBubble(
+                    // Per-message handle for long-press/react/reply/deep-jump. Prefer the stable
+                    // server msgid; pending rows fall back to the local id for E2E selection.
+                    modifier = Modifier,
                     sender = msg.sender,
+                    networkId = networkId,
+                    senderAccount = msg.senderAccount,
+                    text = messageText,
+                    timeMs = msg.serverTime,
+                    formattedTime = formattedTime,
                     isSelf = msg.isSelf,
-                    directMessage = directMessage,
-                    eventId = msg.id,
-                    msgid = msg.msgid,
-                    serverTime = msg.serverTime,
+                    kind = msg.kind,
+                    showSender = showSender,
+                    hasMention = msg.hasMention,
+                    senderIsFriend = senderIsFriend,
+                    failed = msg.failed,
+                    // Subtle "sending…" state before the 30s failure flip (plans/15 #21).
+                    pending = msg.pendingLabel != null,
+                    reply = reply,
+                    onReplyClick = if (resolvedReply != null) {
+                        msg.replyToMsgid?.let { parentMsgid -> { onReplyPreviewClick(parentMsgid) } }
+                    } else {
+                        null
+                    },
+                    imageUrl = imageUrl,
+                    linkPreview = preview,
+                    linkPreviewLoading = previewLoading,
+                    linkPreviewResolved = previewResolved,
+                    reactions = reactions,
+                    knownNicks = knownNicks,
+                    identityRules = identityRules,
+                    onLongPress = { onLongPress(msg) },
+                    // Pass the entity, not just msgid: the VM handles pending reactions uniformly.
+                    onReact = { emoji -> onReact(msg, emoji) },
+                    onImageClick = onImageClick,
+                    onLinkPreviewClick = { linkUrl?.let(onOpenLink) },
+                    // Only non-self senders open the nick sheet.
+                    onSenderClick = if (msg.isSelf) null else ({ onSenderClick(msg.sender) }),
                 )
-            } else {
-                null
-            },
-            onToggle = { attachment, routeNetworkId ->
-                val origin = if (bufferId != null && networkId != null && conversationName != null) {
+            }
+            if (headCandidates.isNotEmpty()) {
+                // An extensionless URL may resolve into a standalone voice message after HEAD
+                // metadata arrives. Shrink the provisional bubble while the player grows.
+                AnimatedVisibility(
+                    visible = !standaloneVoice,
+                    enter = expandVertically(
+                        animationSpec = MotdMotion.contentSize,
+                        expandFrom = Alignment.Bottom,
+                    ) + fadeIn(MotdMotion.microFadeIn),
+                    exit = shrinkVertically(
+                        animationSpec = MotdMotion.contentSize,
+                        shrinkTowards = Alignment.Bottom,
+                    ) + fadeOut(MotdMotion.microFadeOut),
+                ) {
+                    messageBubble()
+                }
+            } else if (!standaloneVoice) {
+                messageBubble()
+            }
+            AudioAttachmentPlayers(
+                attachments = audioAttachments,
+                playbackState = audioPlaybackState,
+                derivedWaveforms = audioWaveforms,
+                cacheStatuses = audioCacheStatuses,
+                networkId = networkId,
+                isSelf = msg.isSelf,
+                formattedTime = if (standaloneVoice) formattedTime else null,
+                pending = msg.pendingLabel != null,
+                failed = msg.failed,
+                origin = if (bufferId != null && networkId != null && conversationName != null) {
                     AudioPlaybackOrigin(
                         bufferId = bufferId,
                         networkId = networkId,
@@ -950,16 +972,32 @@ private fun MessageRow(
                     )
                 } else {
                     null
-                }
-                onAudioToggle(AudioPlaybackRequest(attachment, routeNetworkId, origin))
-            },
-            onInspectCache = onAudioCacheInspect,
-            onSeek = onAudioSeek,
-            onSpeed = onAudioSpeed,
-            onLongPress = { onLongPress(msg) },
-            reactions = if (standaloneVoice) reactions else emptyList(),
-            onReact = { emoji -> onReact(msg, emoji) },
-        )
+                },
+                onToggle = { attachment, routeNetworkId ->
+                    val origin = if (bufferId != null && networkId != null && conversationName != null) {
+                        AudioPlaybackOrigin(
+                            bufferId = bufferId,
+                            networkId = networkId,
+                            conversation = conversationName,
+                            sender = msg.sender,
+                            isSelf = msg.isSelf,
+                            directMessage = directMessage,
+                            eventId = msg.id,
+                            msgid = msg.msgid,
+                            serverTime = msg.serverTime,
+                        )
+                    } else {
+                        null
+                    }
+                    onAudioToggle(AudioPlaybackRequest(attachment, routeNetworkId, origin))
+                },
+                onInspectCache = onAudioCacheInspect,
+                onSeek = onAudioSeek,
+                onSpeed = onAudioSpeed,
+                onLongPress = { onLongPress(msg) },
+                reactions = if (standaloneVoice) reactions else emptyList(),
+                onReact = { emoji -> onReact(msg, emoji) },
+            )
         }
     }
     if (msg.failed) {

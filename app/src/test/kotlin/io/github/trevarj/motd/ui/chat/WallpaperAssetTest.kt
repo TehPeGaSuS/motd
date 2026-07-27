@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.chat
 
 import android.content.Context
 import android.util.Xml
+import androidx.compose.ui.unit.IntSize
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import org.junit.Assert.assertEquals
@@ -38,5 +39,24 @@ class WallpaperAssetTest {
                 assertTrue("$preset must contain paths", paths >= 16)
             }
         }
+    }
+
+    @Test fun rasterCoverageOnlyExpandsAcrossViewportChanges() {
+        val initial = expandedRasterCoverage(IntSize.Zero, IntSize(1080, 1800))
+        val keyboardOpen = expandedRasterCoverage(initial, IntSize(1080, 1100))
+        val wider = expandedRasterCoverage(keyboardOpen, IntSize(1200, 1600))
+
+        assertEquals(IntSize(1080, 1800), keyboardOpen)
+        assertEquals(IntSize(1200, 1800), wider)
+    }
+
+    @Test fun retainedRasterIsCroppedAtNativeScale() {
+        assertEquals(
+            IntSize(540, 600),
+            wallpaperRasterSourceSize(
+                rasterSize = IntSize(540, 900),
+                canvasSize = IntSize(1080, 1200),
+            ),
+        )
     }
 }

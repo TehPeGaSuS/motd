@@ -202,9 +202,27 @@ internal data class TimelineChange(
     val liveEntryId: Long?,
 )
 
-/** An older animation completion must not consume a newer live-entry identity. */
-internal fun consumeLiveEntryId(current: Long?, consumed: Long): Long? =
-    current.takeUnless { it == consumed }
+/** Timeline invalidations must retain in-flight entries while independent burst rows arrive. */
+internal fun appendLiveEntryId(current: Set<Long>, arrived: Long?): Set<Long> =
+    if (arrived == null || arrived in current) current else current + arrived
+
+/** A disposed row consumes only its own entrance identity. */
+internal fun consumeLiveEntryId(current: Set<Long>, consumed: Long): Set<Long> = current - consumed
+
+/** Replacing a collapsed system-run head is an in-place summary update, not a new visual row. */
+internal fun extendsSystemRun(
+    liveEntryId: Long?,
+    itemCount: Int,
+    peek: (Int) -> MessageEntity?,
+): Boolean {
+    liveEntryId ?: return false
+    val index = (0 until minOf(itemCount, MAX_PLACEHOLDER_PROBES))
+        .firstOrNull { peek(it)?.id == liveEntryId } ?: return false
+    if (index + 1 >= itemCount) return false
+    val current = peek(index) ?: return false
+    val older = peek(index + 1) ?: return false
+    return isSystemKind(current.kind) && isSystemKind(older.kind)
+}
 
 fun newestEffectiveMessageId(
     itemCount: Int,
