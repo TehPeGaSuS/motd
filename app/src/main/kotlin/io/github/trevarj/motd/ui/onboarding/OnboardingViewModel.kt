@@ -16,12 +16,16 @@ import io.github.trevarj.motd.ui.settings.buildNetworkEntity
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.settings.addnetwork.networkPreset
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+private const val BOUNCER_CLIENT_WAIT_ATTEMPTS = 40
+private const val BOUNCER_CLIENT_WAIT_DELAY_MS = 250L
 
 /**
  * Drives the onboarding wizard's side effects and folds their results back through the pure
@@ -177,7 +181,13 @@ class OnboardingViewModel @Inject constructor(
     private fun loadBouncerNetworks(networkId: Long) {
         stopBouncerNetworkSync()
         bouncerNetworksJob = viewModelScope.launch {
-            val client = connectionManager.clientFor(networkId) ?: return@launch
+            val client = awaitCurrentOnboardingResource(
+                expectedNetworkId = networkId,
+                currentNetworkId = { _state.value.networkId },
+                lookup = connectionManager::clientFor,
+                maxAttempts = BOUNCER_CLIENT_WAIT_ATTEMPTS,
+                delayMs = BOUNCER_CLIENT_WAIT_DELAY_MS,
+            ) ?: return@launch
             launch {
                 client.bouncerNetworks.collect { networks ->
                     // A retry can replace the root while a late notification from the old
@@ -256,4 +266,20 @@ class OnboardingViewModel @Inject constructor(
             parentId = rootParentId,
             bouncerNetId = row.netId,
         )
+}
+
+internal suspend fun <T> awaitCurrentOnboardingResource(
+    expectedNetworkId: Long,
+    currentNetworkId: () -> Long?,
+    lookup: (Long) -> T?,
+    maxAttempts: Int,
+    delayMs: Long,
+): T? {
+    repeat(maxAttempts.coerceAtLeast(0)) {
+        if (currentNetworkId() != expectedNetworkId) return null
+        lookup(expectedNetworkId)?.let { return it }
+        delay(delayMs)
+    }
+    if (currentNetworkId() != expectedNetworkId) return null
+    return lookup(expectedNetworkId)
 }
