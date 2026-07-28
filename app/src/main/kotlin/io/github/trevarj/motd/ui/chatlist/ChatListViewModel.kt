@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -34,6 +35,7 @@ data class ChatListState(
     val queryPresence: Map<Long, PresenceState> = emptyMap(),
     val networks: List<NetworkEntity> = emptyList(),
     val loading: Boolean = true,
+    val onboardingComplete: Boolean = false,
     // Round 4 (plans/13 §3.5): global friend/fool sets drive chat-list sectioning.
     val friends: Set<String> = emptySet(),
     val fools: Set<String> = emptySet(),
@@ -64,6 +66,7 @@ class ChatListViewModel @Inject constructor(
     private val channelCloseCoordinator: ChannelCloseCoordinator,
     private val readMarkerRepository: ReadMarkerSnapshotter,
     private val settingsRepository: SettingsRepository,
+    onboardingPrefs: OnboardingPrefs,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -82,6 +85,11 @@ class ChatListViewModel @Inject constructor(
             if (settledIds.isNotEmpty()) archiveOverrides.value = archiveOverrides.value - settledIds
         }
         .combine(archiveOverrides, ::applyArchiveOverrides)
+    private val settingsAndOnboarding = combine(
+        settingsRepository.settings,
+        onboardingPrefs.completed,
+        ::Pair,
+    )
 
     val state: StateFlow<ChatListState> =
         combine(
@@ -90,10 +98,11 @@ class ChatListViewModel @Inject constructor(
             connectionManager.connectionStates.combine(connectionManager.presenceStates) { connection, presence ->
                 connection to presence
             },
-            settingsRepository.settings,
+            settingsAndOnboarding,
             selection,
-        ) { rows, networks, connectionAndPresence, settings, selected ->
+        ) { rows, networks, connectionAndPresence, settingsAndOnboarding, selected ->
             val (connection, presence) = connectionAndPresence
+            val (settings, onboardingComplete) = settingsAndOnboarding
             // If the selected network was deleted, fall back to the unified list.
             val validSelection = selected?.takeIf { id -> networks.any { it.id == id } }
             if (validSelection != selected) setSelection(validSelection)
@@ -114,6 +123,7 @@ class ChatListViewModel @Inject constructor(
                     .toMap(),
                 networks = networks,
                 loading = false,
+                onboardingComplete = onboardingComplete,
                 friends = settings.friends,
                 fools = settings.fools,
                 selectedNetworkId = validSelection,

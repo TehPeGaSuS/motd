@@ -84,6 +84,7 @@ fun OnboardingScreen(
         state = state,
         onNext = viewModel::next,
         onBack = viewModel::back,
+        onSkip = { viewModel.skip(onDone) },
         onChoose = viewModel::chooseConnection,
         onChooseBouncerKind = viewModel::chooseBouncerKind,
         onSelectPreset = viewModel::selectPreset,
@@ -105,6 +106,7 @@ fun OnboardingContent(
     state: OnboardingState,
     onNext: () -> Unit,
     onBack: () -> Unit,
+    onSkip: () -> Unit,
     onChoose: (ConnectionChoice) -> Unit,
     onChooseBouncerKind: (BouncerKind) -> Unit,
     onSelectPreset: (NetworkPresetId) -> Unit,
@@ -153,6 +155,7 @@ fun OnboardingContent(
             state = state,
             onNext = onNext,
             onBack = onBack,
+            onSkip = onSkip,
             onFinish = onFinish,
         )
     }
@@ -182,6 +185,7 @@ private fun WizardBar(
     state: OnboardingState,
     onNext: () -> Unit,
     onBack: () -> Unit,
+    onSkip: () -> Unit,
     onFinish: () -> Unit,
 ) {
     Row(
@@ -195,7 +199,9 @@ private fun WizardBar(
                 Text(stringResource(R.string.onboarding_back))
             }
         } else {
-            Spacer(Modifier.size(1.dp))
+            TextButton(onClick = onSkip, modifier = Modifier.testTag("onboarding_skip_button")) {
+                Text(stringResource(R.string.onboarding_skip))
+            }
         }
         // Single stable handle for the forward button whose label varies (Get started/Next/Finish).
         val forwardTag = Modifier.testTag("onboarding_forward_button")
@@ -584,7 +590,7 @@ private fun OnboardingChoicePreview() {
         Surface {
             OnboardingContent(
                 state = OnboardingState(step = OnboardingStep.CHOICE, choice = ConnectionChoice.NETWORK),
-                onNext = {}, onBack = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
+                onNext = {}, onBack = {}, onSkip = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
                 onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
                 onToggleBouncer = {}, onAddBouncer = { _, _ -> }, onFinish = {},
                 onConfirmPlaintext = {}, onDismissPlaintext = {},
@@ -610,7 +616,7 @@ private fun OnboardingConnectPreview() {
                         BouncerNetworkRow("2", "OFTC", selected = false),
                     ),
                 ),
-                onNext = {}, onBack = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
+                onNext = {}, onBack = {}, onSkip = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
                 onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
                 onToggleBouncer = {}, onAddBouncer = { _, _ -> }, onFinish = {},
                 onConfirmPlaintext = {}, onDismissPlaintext = {},

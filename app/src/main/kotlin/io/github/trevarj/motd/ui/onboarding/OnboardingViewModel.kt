@@ -8,6 +8,7 @@ import io.github.trevarj.motd.bouncer.SojuLoginForm
 import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -36,6 +37,7 @@ class OnboardingViewModel @Inject constructor(
     private val networkRepository: NetworkRepository,
     private val connectionManager: ConnectionManager,
     private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
+    private val onboardingPrefs: OnboardingPrefs,
     private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
 ) : ViewModel() {
 
@@ -92,6 +94,11 @@ class OnboardingViewModel @Inject constructor(
     }
 
     fun dismissPlaintextWarning() = dispatch(OnboardingAction.DismissPlaintextWarning)
+
+    fun skip(onDone: () -> Unit) = viewModelScope.launch {
+        onboardingPrefs.markCompleted()
+        onDone()
+    }
 
     // -- side effects --------------------------------------------------------------------------
 
@@ -251,6 +258,7 @@ class OnboardingViewModel @Inject constructor(
                 connectionManager.connect(childId)
             }
         }
+        onboardingPrefs.markCompleted()
         onDone()
     }
 

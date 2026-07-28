@@ -23,6 +23,8 @@ import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefsImpl
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefsImpl
+import io.github.trevarj.motd.data.prefs.OnboardingPrefs
+import io.github.trevarj.motd.data.prefs.OnboardingPrefsImpl
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.BufferRepositoryImpl
@@ -143,6 +145,9 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun historySyncPrefs(impl: HistorySyncPrefsImpl): HistorySyncPrefs
+
+    @Binds @Singleton
+    abstract fun onboardingPrefs(impl: OnboardingPrefsImpl): OnboardingPrefs
 
     @Binds @Singleton
     abstract fun historyResyncController(impl: HistoryResyncCoordinator): HistoryResyncController

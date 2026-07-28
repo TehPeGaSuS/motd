@@ -14,6 +14,8 @@
     <string name="chatlist_pinned">Pinned</string>
     <string name="chatlist_empty_title">No conversations yet</string>
     <string name="chatlist_empty_message">Connect to a network to start chatting.</string>
+    <string name="chatlist_no_networks_title">No networks configured</string>
+    <string name="chatlist_no_networks_message">Add a network, or import a backup from Settings.</string>
     <string name="chatlist_archived_empty_title">No archived chats yet</string>
     <string name="chat_refresh_history">Refresh history</string>
     <plurals name="chat_history_updated">
@@ -53,6 +55,7 @@
     <string name="onboarding_welcome_title">Welcome to motd</string>
     <string name="onboarding_welcome_tagline">A modern IRC client, built for the way you chat.</string>
     <string name="onboarding_get_started">Get started</string>
+    <string name="onboarding_skip">Skip</string>
     <string name="onboarding_next">Next</string>
     <string name="onboarding_back">Back</string>
     <string name="onboarding_finish">Finish</string>

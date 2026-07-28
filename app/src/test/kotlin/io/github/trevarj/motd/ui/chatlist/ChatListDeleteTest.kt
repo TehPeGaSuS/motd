@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
+import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
@@ -136,6 +137,10 @@ class ChatListDeleteTest {
                 ): List<BufferReadMarker> = emptyList()
             },
             settingsRepository = FakeSettingsRepository(),
+            onboardingPrefs = object : OnboardingPrefs {
+                override val completed = flowOf(true)
+                override suspend fun markCompleted() = Unit
+            },
             savedStateHandle = SavedStateHandle(),
         )
 

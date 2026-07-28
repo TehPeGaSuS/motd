@@ -153,9 +153,9 @@ fun ChatListScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val audioPlaybackState by audioViewModel.state.collectAsStateWithLifecycle()
 
-    // No networks configured -> jump straight into onboarding (once loaded).
-    LaunchedEffect(state.loading, state.networks.isEmpty()) {
-        if (!state.loading && state.networks.isEmpty()) {
+    // Fresh installs enter onboarding once state is loaded; a durable skip keeps the empty main UI.
+    LaunchedEffect(state.loading, state.networks.isEmpty(), state.onboardingComplete) {
+        if (shouldOpenOnboarding(state)) {
             onOpenOnboarding()
         }
     }
@@ -393,13 +393,14 @@ fun ChatListContent(
                         )
                     }
 
-                    if (!shouldRenderChatList(archiveMode, state.rows, state.archivedRows) &&
-                        !state.loading && (archiveMode || state.networks.isNotEmpty())
-                    ) {
+                    if (!shouldRenderChatList(archiveMode, state.rows, state.archivedRows) && !state.loading) {
+                        val noNetworks = !archiveMode && state.networks.isEmpty()
                         EmptyState(
                             icon = if (archiveMode) Icons.Outlined.Archive else Icons.Outlined.Forum,
                             title = stringResource(
-                                if (archiveMode) {
+                                if (noNetworks) {
+                                    R.string.chatlist_no_networks_title
+                                } else if (archiveMode) {
                                     R.string.chatlist_archived_empty_title
                                 } else if (state.selectedNetworkId != null) {
                                     R.string.chatlist_scoped_empty_title
@@ -409,6 +410,8 @@ fun ChatListContent(
                             ),
                             message = if (archiveMode) {
                                 null
+                            } else if (noNetworks) {
+                                stringResource(R.string.chatlist_no_networks_message)
                             } else {
                                 stringResource(
                                     if (state.selectedNetworkId != null) {
@@ -418,6 +421,8 @@ fun ChatListContent(
                                     },
                                 )
                             },
+                            actionLabel = if (noNetworks) stringResource(R.string.drawer_add_network) else null,
+                            onAction = if (noNetworks) onOpenAddNetwork else null,
                         )
                     } else {
                         ChatList(
@@ -533,6 +538,9 @@ fun ChatListContent(
         }
     }
 }
+
+internal fun shouldOpenOnboarding(state: ChatListState): Boolean =
+    !state.loading && state.networks.isEmpty() && !state.onboardingComplete
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
