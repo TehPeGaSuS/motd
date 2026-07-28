@@ -23,7 +23,7 @@ the exact upstream sources remain at the pinned public revisions below.
 - Java toolchain: OpenJDK 21
 - Vendored artifact: `app/libs/libbox.aar`, **arm64-v8a-only**, used by the
   main Android application build
-- Artifact SHA-256: `63261bffaf3e6ac101a7351eed0058f7984ba356625c3ef31b6cdb21fc41245e`
+- Artifact SHA-256: `3fdbd30eba2450935389c100efd88475721d44870bbab870340533ee4ba84977`
 - Artifact build manifest: `app/libs/libbox-v1.13.12.manifest`
 
 ## Controlled build
@@ -31,8 +31,8 @@ the exact upstream sources remain at the pinned public revisions below.
 The regular project shell deliberately does not carry this large native toolchain.
 The `libbox` shell contains the pinned Go/JDK build tools but deliberately does
 not compose an Android SDK: that would force Nix to fetch the NDK before the
-shell starts. Supply an Android SDK with platform 35, plus either an
-already-extracted r28 NDK or the exact Google archive; the build script
+shell starts. Supply an Android SDK with platform 23, plus either an
+already-extracted r28c NDK or the exact Google archive; the build script
 validates both archive hashes before extracting the NDK to an external cache.
 
 With an extracted NDK:
@@ -44,7 +44,7 @@ tar -xf /path/to/go-go1.25.12.tar -C /tmp/motd-go
 nix develop .#libbox -c bash -c '
   export GOROOT=/tmp/motd-go
   export PATH="$GOROOT/bin:$PATH"
-  export LIBBOX_NDK_HOME=/path/to/android-ndk-r28
+  export LIBBOX_NDK_HOME=/path/to/android-ndk-r28c
   exec ./third_party/sing-box/build-libbox.sh
 '
 ```
@@ -56,14 +56,14 @@ operator):
 nix develop .#libbox -c bash -c '
   export GOROOT=/tmp/motd-go
   export PATH="$GOROOT/bin:$PATH"
-  export LIBBOX_NDK_ARCHIVE=/path/to/android-ndk-r28-linux.zip
+  export LIBBOX_NDK_ARCHIVE=/path/to/android-ndk-r28c-linux.zip
   exec ./third_party/sing-box/build-libbox.sh
 '
 ```
 
 The archive must match the URL, SHA-1, and SHA-256 pinned in `source.lock`.
 It is extracted only after verification into
-`${XDG_CACHE_HOME:-$HOME/.cache}/motd/libbox/android-ndk-r28` (override with
+`${XDG_CACHE_HOME:-$HOME/.cache}/motd/libbox/android-ndk-r28c` (override with
 `LIBBOX_NDK_CACHE_DIR`), never into the repository.
 Set `LIBBOX_PREPARE_NDK_ONLY=1` with the same command to validate and prepare
 that external cache without fetching sing-box or building an AAR.
@@ -121,7 +121,7 @@ The packaged inner source archives can be rebuilt without cloning upstream:
 LIBBOX_SOURCE_ARCHIVE=/path/to/sing-box-v1.13.12.tar \
 LIBBOX_ANDROID_SOURCE_ARCHIVE=/path/to/sing-box-for-android-772879ce....tar \
 LIBBOX_GOMOBILE_SOURCE_ARCHIVE=/path/to/gomobile-v0.1.12.tar \
-LIBBOX_NDK_ARCHIVE=/path/to/android-ndk-r28-linux.zip \
+LIBBOX_NDK_ARCHIVE=/path/to/android-ndk-r28c-linux.zip \
   nix develop .#libbox -c ./third_party/sing-box/build-libbox.sh
 ```
 

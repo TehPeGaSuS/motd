@@ -1,0 +1,19 @@
+name: Setup MOTD native toolchain
+description: Install and expose the exact Android NDK pinned for libbox and APK packaging.
+
+runs:
+  using: composite
+  steps:
+    - name: Install pinned Android SDK packages
+      shell: bash
+      run: |
+        set -euo pipefail
+        # shellcheck disable=SC1091
+        source third_party/sing-box/source.lock
+        sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+        "$sdkmanager" --sdk_root="$ANDROID_HOME" --install \
+          "platforms;android-23" "platforms;android-37" "build-tools;36.0.0" \
+          "ndk;$ANDROID_NDK_VERSION"
+        ndk_home="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+        grep -Fx "Pkg.Revision = $ANDROID_NDK_VERSION" "$ndk_home/source.properties"
+        printf 'ANDROID_NDK_HOME=%s\nANDROID_NDK_ROOT=%s\n' "$ndk_home" "$ndk_home" >> "$GITHUB_ENV"

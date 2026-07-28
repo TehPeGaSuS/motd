@@ -111,7 +111,7 @@ This archive is the complete libbox source snapshot distributed beside motd ${re
 It contains the exact git archives for Go, sing-box, its Android submodule, and gomobile, plus motd's
 pinned build inputs and rebuild procedure. The inner archive hashes are fixed in source.lock.
 
-To rebuild, provide the verified Android NDK r28 archive described in
+To rebuild, provide the verified Android NDK r28c archive described in
 motd/third_party/sing-box/README.md. Build Go from the included source first,
 then use that toolchain (Nix's Go is bootstrap-only):
 
@@ -125,7 +125,7 @@ then use that toolchain (Nix's Go is bootstrap-only):
       export LIBBOX_SOURCE_ARCHIVE=../upstream/$(basename "$sing_box_tar")
       export LIBBOX_ANDROID_SOURCE_ARCHIVE=../upstream/$(basename "$android_tar")
       export LIBBOX_GOMOBILE_SOURCE_ARCHIVE=../upstream/$(basename "$gomobile_tar")
-      export LIBBOX_NDK_ARCHIVE=/path/to/android-ndk-r28-linux.zip
+      export LIBBOX_NDK_ARCHIVE=/path/to/android-ndk-r28c-linux.zip
       exec ./third_party/sing-box/build-libbox.sh
     '
 EOF

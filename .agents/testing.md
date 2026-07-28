@@ -27,7 +27,7 @@ nix develop -c ./gradlew \
 Full release-parity Gradle verification:
 
 ```sh
-nix develop -c ./gradlew \
+nix develop .#native -c ./gradlew \
   :irc:build \
   :app:testFossDebugUnitTest :app:testFossReleaseUnitTest \
   :app:lintFossDebug :app:lintFossRelease :app:assembleFossRelease \

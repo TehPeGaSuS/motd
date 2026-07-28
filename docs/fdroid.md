@@ -60,7 +60,7 @@ submodules and F-Droid's pinned Go toolchain:
 
 ```yaml
 rm: app/libs/libbox.aar,app/src/google,firebase
-ndk: 28.0.13004108
+ndk: 28.2.13676358
 submodules: true
 srclibs: go@go1.25.12
 build:
@@ -95,7 +95,7 @@ recursive submodule initialization supplies all three exact revisions without
 custom `srclibs` metadata. Their revisions are also recorded in
 [`third_party/sing-box/source.lock`](../third_party/sing-box/source.lock).
 The source builder verifies each checkout, requires Go `1.25.12` and OpenJDK
-21, validates NDK `28.0.13004108`, and rejects any JNI entry other than
+21, validates NDK `28.2.13676358`, and rejects any JNI entry other than
 `jni/arm64-v8a/libbox.so`. Go fetches the checksummed modules needed by the
 normal build; no redundant `go mod download` step is required. The shared
 F-Droid NDK is validated but not patched.

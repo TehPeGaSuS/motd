@@ -73,6 +73,7 @@ verify_ndk_home() {
 
 ndk_archive_verified_sha256=""
 ndk_from_archive=0
+ndk_archive_root="${ANDROID_NDK_ARCHIVE_ROOT:-android-ndk-r28c}"
 
 # Google distributes the Linux NDK host tools for FHS systems.  They request
 # /lib64/ld-linux-x86-64.so.2 and depend on libz, neither of which exists at
@@ -137,19 +138,19 @@ if [[ -n "${LIBBOX_NDK_ARCHIVE:-}" ]]; then
   ndk_from_archive=1
 
   cache_root="${LIBBOX_NDK_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/motd/libbox}"
-  ndk_home="$cache_root/android-ndk-r28"
+  ndk_home="$cache_root/$ndk_archive_root"
   if [[ ! -e "$ndk_home" ]]; then
     mkdir -p "$cache_root"
-    staging_dir="$(mktemp -d "$cache_root/.android-ndk-r28.XXXXXX")"
+    staging_dir="$(mktemp -d "$cache_root/.${ndk_archive_root}.XXXXXX")"
     cleanup_staging() { rm -rf "$staging_dir"; }
     trap cleanup_staging EXIT
     unzip -q "$ndk_archive" -d "$staging_dir"
-    verify_ndk_home "$staging_dir/android-ndk-r28" || {
-      echo "Android NDK archive did not contain r$ANDROID_NDK_VERSION" >&2; exit 1;
+    verify_ndk_home "$staging_dir/$ndk_archive_root" || {
+      echo "Android NDK archive did not contain $ndk_archive_root" >&2; exit 1;
     }
     # Rename only a fully verified extraction into the cache. If another build
     # won the race, retain that cache entry only when it is also valid.
-    if ! mv "$staging_dir/android-ndk-r28" "$ndk_home" 2>/dev/null; then
+    if ! mv "$staging_dir/$ndk_archive_root" "$ndk_home" 2>/dev/null; then
       verify_ndk_home "$ndk_home" || {
         echo "could not create a valid NDK cache at $ndk_home" >&2; exit 1;
       }
@@ -250,26 +251,43 @@ fi
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/motd-libbox.XXXXXX")"
 patched_java_check_file=""
 java_check_backup=""
+patched_gomobile_env_file=""
+gomobile_env_backup=""
 cleanup_work_dir() {
   if [[ -n "$patched_java_check_file" && -f "$java_check_backup" ]]; then
     cp "$java_check_backup" "$patched_java_check_file"
   fi
+  if [[ -n "$patched_gomobile_env_file" && -f "$gomobile_env_backup" ]]; then
+    cp "$gomobile_env_backup" "$patched_gomobile_env_file"
+  fi
+  # Go intentionally marks downloaded module directories read-only. Make the
+  # disposable cache writable again so a successful build does not fail while
+  # removing its temporary workspace.
+  chmod -R u+w "$work_dir" 2>/dev/null || true
   rm -rf "$work_dir"
 }
 trap cleanup_work_dir EXIT
 
-source_dir="${LIBBOX_SOURCE_DIR:-}"
-source_checkout=0
-[[ -z "$source_dir" ]] || source_checkout=1
-if [[ -z "$source_dir" && -e "$root_dir/third_party/sing-box/source/.git" ]]; then
-  source_dir="$root_dir/third_party/sing-box/source"
-  source_checkout=1
-fi
-[[ -n "$source_dir" ]] || source_dir="$work_dir/sing-box"
 source_archive="${LIBBOX_SOURCE_ARCHIVE:-}"
 android_source_archive="${LIBBOX_ANDROID_SOURCE_ARCHIVE:-}"
 android_source_dir="${LIBBOX_ANDROID_SOURCE_DIR:-}"
 gomobile_source_archive="${LIBBOX_GOMOBILE_SOURCE_ARCHIVE:-}"
+source_dir="${LIBBOX_SOURCE_DIR:-}"
+source_checkout=0
+if [[ -n "$source_archive" || -n "$android_source_archive" ]]; then
+  [[ -z "$source_dir" ]] || {
+    echo "set either LIBBOX_SOURCE_DIR or source archives, not both" >&2
+    exit 1
+  }
+  source_dir="$work_dir/sing-box"
+elif [[ -n "$source_dir" ]]; then
+  source_checkout=1
+elif [[ -e "$root_dir/third_party/sing-box/source/.git" ]]; then
+  source_dir="$root_dir/third_party/sing-box/source"
+  source_checkout=1
+else
+  source_dir="$work_dir/sing-box"
+fi
 if [[ -z "${GOMOBILE_SOURCE_DIR:-}" && -z "$gomobile_source_archive" &&
   -e "$root_dir/third_party/gomobile/.git" ]]; then
   export GOMOBILE_SOURCE_DIR="$root_dir/third_party/gomobile"
@@ -302,7 +320,8 @@ if [[ -n "$gomobile_source_archive" ]]; then
   git -C "$gomobile_source_dir" config user.email "source-rebuild@invalid"
   git -C "$gomobile_source_dir" add --all
   GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
-    git -C "$gomobile_source_dir" commit --quiet --message "$GOMOBILE_VERSION source archive"
+    git -C "$gomobile_source_dir" -c commit.gpgSign=false \
+      commit --quiet --message "$GOMOBILE_VERSION source archive"
   git -C "$gomobile_source_dir" tag "$GOMOBILE_VERSION"
   export GOMOBILE_SOURCE_DIR="$gomobile_source_dir"
 fi
@@ -340,7 +359,8 @@ if [[ -n "$source_archive" || -n "$android_source_archive" ]]; then
   git -C "$source_dir" config user.email "source-rebuild@invalid"
   git -C "$source_dir" add --all
   GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
-    git -C "$source_dir" commit --quiet --message "$SING_BOX_VERSION source archive"
+    git -C "$source_dir" -c commit.gpgSign=false \
+      commit --quiet --message "$SING_BOX_VERSION source archive"
   git -C "$source_dir" tag "$SING_BOX_VERSION"
 elif ((source_checkout)); then
   source_dir="$(cd "$source_dir" && pwd)"
@@ -442,7 +462,10 @@ fi
   exit 1
 }
 
-gopath_bin="$(go env GOPATH | cut -d: -f1)/bin"
+# Keep generated gomobile tools and caches inside the disposable build tree;
+# never write them to a developer's ambient GOPATH.
+export GOPATH="$work_dir/gopath"
+gopath_bin="$GOPATH/bin"
 mkdir -p "$gopath_bin"
 if [[ -n "${GOMOBILE_SOURCE_DIR:-}" ]]; then
   gomobile_source_dir="$(cd "$GOMOBILE_SOURCE_DIR" && pwd)"
@@ -459,6 +482,23 @@ if [[ -n "${GOMOBILE_SOURCE_DIR:-}" ]]; then
       echo "gomobile source archive verification failed" >&2
       exit 1
     }
+  fi
+  # The pinned gomobile release clears the subprocess environment before
+  # invoking gobind. Preserve the isolated GOPATH and configured module policy.
+  gomobile_env_file="$gomobile_source_dir/cmd/gomobile/bind_androidapp.go"
+  [[ -f "$gomobile_env_file" ]] || {
+    echo "gomobile Android bind environment setup is missing" >&2
+    exit 1
+  }
+  gomobile_env_backup="$work_dir/gomobile-bind-androidapp.go"
+  cp "$gomobile_env_file" "$gomobile_env_backup"
+  patched_gomobile_env_file="$gomobile_env_file"
+  if grep -F 'cmd.Env = append(cmd.Env, "GOOS=android")' "$gomobile_env_file" >/dev/null; then
+    sed -i 's/cmd.Env = append(cmd.Env, "GOOS=android")/cmd.Env = append(os.Environ(), "GOOS=android")/' \
+      "$gomobile_env_file"
+  elif ! grep -F 'cmd.Env = append(os.Environ(), "GOOS=android")' "$gomobile_env_file" >/dev/null; then
+    echo "unrecognized gomobile Android bind environment setup" >&2
+    exit 1
   fi
   (
     cd "$gomobile_source_dir"
@@ -489,7 +529,7 @@ done
 # sing-box does not use gomobile's optional OpenAL support. Creating the
 # toolchain directory directly avoids gomobile init's unpinned
 # `go install .../gobind@latest` step and keeps offline builds reproducible.
-gomobile_path="$(go env GOPATH | cut -d: -f1)/pkg/gomobile"
+gomobile_path="$GOPATH/pkg/gomobile"
 rm -rf "$gomobile_path"
 mkdir -p "$gomobile_path"
 

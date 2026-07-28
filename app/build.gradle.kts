@@ -36,6 +36,12 @@ val libboxAar = providers.gradleProperty("motdLibboxAar").orNull?.let(::file)
     ?: file("libs/libbox.aar")
 val libboxManifest = providers.gradleProperty("motdLibboxManifest").orNull?.let(::file)
     ?: file("libs/libbox-v1.13.12.manifest")
+val libboxNdkVersion = rootProject.file("third_party/sing-box/source.lock")
+    .readLines()
+    .singleOrNull { it.startsWith("ANDROID_NDK_VERSION=") }
+    ?.substringAfter('=')
+    ?.takeIf(String::isNotBlank)
+    ?: error("third_party/sing-box/source.lock must pin ANDROID_NDK_VERSION")
 
 // The release/debug APKs ship the pinned arm64 native core. Hermetic UI tests exercise plain IRC
 // on an x86_64 emulator, so derive an AAR that retains the generated Java API but omits JNI. This
@@ -53,6 +59,7 @@ abstract class VerifyLibboxArtifact : DefaultTask() {
     @get:InputFile abstract val aar: RegularFileProperty
     @get:InputFile abstract val manifest: RegularFileProperty
     @get:Input abstract val expectedVersion: Property<String>
+    @get:Input abstract val expectedNdkVersion: Property<String>
     @get:Input abstract val expectedSha256: Property<String>
     @get:Input abstract val enforcePinnedSha256: Property<Boolean>
 
@@ -65,6 +72,9 @@ abstract class VerifyLibboxArtifact : DefaultTask() {
         val values = Properties().also { manifest.get().asFile.inputStream().use(it::load) }
         check(values.getProperty("sing-box-version") == expectedVersion.get()) {
             "libbox manifest version must be ${expectedVersion.get()}"
+        }
+        check(values.getProperty("android-ndk-version") == expectedNdkVersion.get()) {
+            "libbox manifest NDK must be ${expectedNdkVersion.get()}"
         }
         check(values.getProperty("abis") == "arm64-v8a") {
             "libbox manifest must declare only arm64-v8a"
@@ -118,6 +128,8 @@ val sourceCommit = System.getenv("MOTD_SOURCE_COMMIT")
 android {
     namespace = "io.github.trevarj.motd"
     compileSdk = 37
+    // The same pinned NDK builds libbox and performs final native packaging.
+    ndkVersion = libboxNdkVersion
 
     // F-Droid rejects AGP's dependency metadata APK signing block. Dependency provenance is
     // pinned and published separately through the fdroiddata recipe and release source bundle.
@@ -256,7 +268,8 @@ val verifyLibboxArtifact by tasks.registering(VerifyLibboxArtifact::class) {
     aar.set(libboxAar)
     manifest.set(libboxManifest)
     expectedVersion.set("v1.13.12")
-    expectedSha256.set("63261bffaf3e6ac101a7351eed0058f7984ba356625c3ef31b6cdb21fc41245e")
+    expectedNdkVersion.set(libboxNdkVersion)
+    expectedSha256.set("3fdbd30eba2450935389c100efd88475721d44870bbab870340533ee4ba84977")
     enforcePinnedSha256.set(!libboxSourceBuild)
 }
 

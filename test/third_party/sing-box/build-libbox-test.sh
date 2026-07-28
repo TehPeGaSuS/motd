@@ -3,13 +3,15 @@ set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 builder="$root_dir/third_party/sing-box/build-libbox.sh"
+# shellcheck disable=SC1091
+source "$root_dir/third_party/sing-box/source.lock"
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/motd-libbox-test.XXXXXX")"
 trap 'rm -rf "$work_dir"' EXIT
 
 make_fake_ndk() {
   local ndk_dir="$1"
   mkdir -p "$ndk_dir/toolchains/llvm/prebuilt/linux-x86_64/bin"
-  printf 'Pkg.Revision = %s\n' "${2:-28.0.13004108}" > "$ndk_dir/source.properties"
+  printf 'Pkg.Revision = %s\n' "${2:-$ANDROID_NDK_VERSION}" > "$ndk_dir/source.properties"
   printf '#!/bin/sh\nexit 0\n' \
     > "$ndk_dir/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
   chmod +x "$ndk_dir/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"

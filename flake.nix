@@ -3,7 +3,6 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/767b0d3ec98a143ad9ed7dfc0d5553510ac27133";
-    # libbox v1.13.12 requires Go >= 1.24.7 and Android NDK 28.0.13004108.
     # Keep this build-only toolchain separate from the app's stable SDK shell.
     nixpkgs-libbox.url = "github:NixOS/nixpkgs/767b0d3ec98a143ad9ed7dfc0d5553510ac27133";
     flake-utils.url = "github:numtide/flake-utils";
@@ -26,6 +25,10 @@
             android_sdk.accept_license = true;
           };
         };
+        nativeNdkVersion = pkgs.lib.removePrefix "ANDROID_NDK_VERSION="
+          (builtins.head (pkgs.lib.filter
+            (line: pkgs.lib.hasPrefix "ANDROID_NDK_VERSION=" line)
+            (pkgs.lib.splitString "\n" (builtins.readFile ./third_party/sing-box/source.lock))));
         # Match compileSdk/buildTools used by the current Gradle configuration.
         androidComposition = pkgs.androidenv.composeAndroidPackages {
           platformVersions = [ "37.0" ];
@@ -36,6 +39,20 @@
         };
         androidSdk = androidComposition.androidsdk;
         sdkRoot = "${androidSdk}/libexec/android-sdk";
+        # Native release work needs the same NDK used for the checked-in
+        # libbox AAR. Keep it out of the ordinary shell so UI/JVM work does
+        # not pay for the 690 MiB toolchain closure.
+        nativeAndroidComposition = pkgs.androidenv.composeAndroidPackages {
+          platformVersions = [ "23" "37.0" ];
+          buildToolsVersions = [ "36.0.0" ];
+          platformToolsVersion = "35.0.2";
+          includeNDK = true;
+          ndkVersions = [ nativeNdkVersion ];
+          includeEmulator = false;
+          includeSystemImages = false;
+        };
+        nativeAndroidSdk = nativeAndroidComposition.androidsdk;
+        nativeAndroidSdkRoot = "${nativeAndroidSdk}/libexec/android-sdk";
         # Opt-in, large emulator closure for the local headless E2E loop. Keeping this separate
         # avoids making every ordinary build fetch an API image and emulator runtime.
         emulatorComposition = pkgs.androidenv.composeAndroidPackages {
@@ -58,6 +75,15 @@
           # AGP downloads a dynamically-linked aapt2 that won't run outside FHS;
           # point Gradle at the Nix-provided one instead.
           GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/36.0.0/aapt2";
+        };
+        devShells.native = pkgs.mkShell {
+          packages = [ pkgs.jdk21 pkgs.nodejs_22 nativeAndroidSdk ];
+          JAVA_HOME = pkgs.jdk21.home;
+          ANDROID_HOME = nativeAndroidSdkRoot;
+          ANDROID_SDK_ROOT = nativeAndroidSdkRoot;
+          ANDROID_NDK_HOME = "${nativeAndroidSdkRoot}/ndk/${nativeNdkVersion}";
+          ANDROID_NDK_ROOT = "${nativeAndroidSdkRoot}/ndk/${nativeNdkVersion}";
+          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${nativeAndroidSdkRoot}/build-tools/36.0.0/aapt2";
         };
         devShells.emulator = pkgs.mkShell {
           packages = [ pkgs.jdk21 emulatorSdk ];
