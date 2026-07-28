@@ -48,6 +48,7 @@ internal object CapTiers {
         "soju.im/bouncer-networks",
         "soju.im/bouncer-networks-notify",
         "soju.im/webpush",
+        MULTILINE_CAP,
     )
 
     val ALL: Set<String> = TIER1 + TIER2 + TIER3
@@ -70,6 +71,11 @@ internal object CapNegotiator {
         // metadata-2 uses metadata batches for snapshots and therefore requires batch.
         if ("draft/metadata-2" in req && "batch" !in advertised) {
             req.remove("draft/metadata-2")
+        }
+        if (MULTILINE_CAP in req &&
+            listOf("batch", "message-tags", "standard-replies").any { it !in advertised }
+        ) {
+            req.remove(MULTILINE_CAP)
         }
         val selectedNames = preferredNoImplicitNames(advertised)
         req.removeAll(NO_IMPLICIT_NAMES_ALIASES)

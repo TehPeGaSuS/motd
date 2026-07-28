@@ -40,6 +40,20 @@ class OutgoingMessagePlanTest {
     }
 
     @Test
+    fun `logical multiline planning preserves blank lines in one durable row`() {
+        val chunks = prepareOutgoingMessageChunks(
+            "alpha\r\n\r\nbeta",
+            isBouncerServ = false,
+            preferLogicalMultiline = true,
+        )
+
+        assertEquals(
+            listOf(OutgoingMessageChunk("alpha\n\nbeta", "alpha\n\nbeta", MessageKind.PRIVMSG)),
+            chunks,
+        )
+    }
+
+    @Test
     fun `long action chunks are individually valid actions and keep display text clean`() {
         val text = "/me " + "😀".repeat(80)
         val chunks = prepareOutgoingMessageChunks(text, isBouncerServ = false, maxBytes = 40)

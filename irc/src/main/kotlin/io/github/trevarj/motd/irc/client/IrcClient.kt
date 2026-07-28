@@ -162,6 +162,7 @@ class IrcClient(
     private val labels = LabelCorrelator()
     private val unlabeledChatHistory = UnlabeledChatHistoryCorrelator()
     private val unlabeledChatHistoryLock = Mutex()
+    private val outboundLock = Mutex()
     private val batches = BatchAssembler()
     private val typingOutbox = TypingOutbox()
     private val eventMapper = EventMapper(
@@ -277,7 +278,7 @@ class IrcClient(
 
         val wd = PingWatchdog(
             scope = scope,
-            sendPing = { payload -> runCatching { t.send("PING $payload") } },
+            sendPing = { payload -> runCatching { sendSerialized(t, "PING $payload") } },
             onDead = {
                 _state.value = IrcClientState.Disconnected
                 emitDisconnected(criticalEvents, disconnectedPublished, "watchdog timeout")
@@ -289,7 +290,7 @@ class IrcClient(
 
         val lm = LagMonitor(
             scope = scope,
-            sendPing = { payload -> runCatching { t.send("PING $payload") } },
+            sendPing = { payload -> runCatching { sendSerialized(t, "PING $payload") } },
             isRegistered = { registered },
             sink = _lag,
         )
@@ -306,7 +307,7 @@ class IrcClient(
                 }
                 // Answer server PING immediately, before any mapping.
                 if (msg.command == "PING") {
-                    runCatching { t.send("PONG ${msg.params.firstOrNull().orEmpty()}") }
+                    runCatching { sendSerialized(t, "PONG ${msg.params.firstOrNull().orEmpty()}") }
                     return@collect
                 }
                 // Correlate our own lag probes; an unmatched PONG (e.g. the watchdog's keepalive
@@ -366,10 +367,10 @@ class IrcClient(
         disconnectedPublished: AtomicBoolean,
     ) {
         when (a) {
-            is RegistrationStateMachine.Action.Send -> runCatching { t.send(a.line) }
+            is RegistrationStateMachine.Action.Send -> runCatching { sendSerialized(t, a.line) }
             is RegistrationStateMachine.Action.SendDeferred -> scope.launch {
                 delay(a.delayMs)
-                if (transport === t) runCatching { t.send(a.line) }
+                if (transport === t) runCatching { sendSerialized(t, a.line) }
             }
             is RegistrationStateMachine.Action.Emit -> publish(criticalEvents, a.event)
             is RegistrationStateMachine.Action.SetNick -> selfNick.set(a.nick)
@@ -422,7 +423,7 @@ class IrcClient(
             BatchAssembler.Outcome.PassThrough -> {
                 val ev = eventMapper.map(msg, batchId = null) { reply ->
                     // CTCP auto-reply (e.g. VERSION) — fire and forget on the client scope.
-                    scope.launch { runCatching { t.send(reply.serialize()) } }
+                    scope.launch { runCatching { sendSerialized(t, reply) } }
                 }
                 if (ev != null) emitEvent(ev, criticalEvents)
             }
@@ -451,6 +452,11 @@ class IrcClient(
     }
 
     internal fun mapBatchTree(tree: BatchTree): List<IrcEvent> {
+        if (tree.type == MULTILINE_CAP) {
+            mapMultilineBatch(tree)?.let { return listOf(it) }
+            return mapMalformedMultiline(tree)
+        }
+
         if (tree.type == "netsplit" || tree.type == "netjoin") {
             val leaves = tree.leafMessages()
             val expected = if (tree.type == "netsplit") "QUIT" else "JOIN"
@@ -503,6 +509,55 @@ class IrcClient(
         }
     }
 
+    private fun mapMultilineBatch(tree: BatchTree): IrcEvent.ChatMessage? {
+        val target = tree.params.firstOrNull() ?: return null
+        val messages = tree.children.map {
+            (it as? BatchChild.Message)?.message ?: return null
+        }
+        if (messages.isEmpty()) return null
+        val command = messages.first().command
+        if (command != "PRIVMSG" && command != "NOTICE") return null
+        if (messages.any { it.command != command || it.params.getOrNull(0) != target }) return null
+        if (messages.any { MULTILINE_CONCAT_TAG in it.tags && it.params.getOrNull(1).orEmpty().isEmpty() }) {
+            return null
+        }
+
+        val combined = StringBuilder()
+        var sawNonBlank = false
+        messages.forEachIndexed { index, message ->
+            val text = message.params.getOrNull(1).orEmpty()
+            val concat = MULTILINE_CONCAT_TAG in message.tags
+            if (concat && index == 0) return null
+            if (text.isNotEmpty()) sawNonBlank = true
+            if (index > 0 && !concat) combined.append('\n')
+            combined.append(text)
+        }
+        if (!sawNonBlank) return null
+
+        val first = messages.first()
+        val synthetic = IrcMessage(
+            tags = tree.opening.tags,
+            source = first.source ?: tree.opening.source,
+            command = command,
+            params = listOf(target, combined.toString()),
+        )
+        return eventMapper.map(synthetic, batchId = tree.opening.tags["batch"] ?: tree.ref) as? IrcEvent.ChatMessage
+    }
+
+    private fun mapMalformedMultiline(tree: BatchTree): List<IrcEvent> = tree.children.flatMap { child ->
+        when (child) {
+            is BatchChild.Message -> {
+                val text = child.message.params.getOrNull(1).orEmpty()
+                if ((child.message.command == "PRIVMSG" || child.message.command == "NOTICE") && text.isEmpty()) {
+                    emptyList()
+                } else {
+                    listOfNotNull(eventMapper.map(child.message, batchId = tree.ref))
+                }
+            }
+            is BatchChild.Nested -> mapBatchTree(child.batch)
+        }
+    }
+
     private fun BatchTree.leafMessages(): List<Pair<IrcMessage, String>> = children.flatMap { child ->
         when (child) {
             is BatchChild.Message -> listOf(child.message to ref)
@@ -525,7 +580,7 @@ class IrcClient(
                 val alreadyAcked = ackedCaps.get().map { it.substringBefore('=') }.toSet()
                 val want = CapNegotiator.runtimeRequestSet(caps, alreadyAcked, config.extraCaps)
                 if (want.isNotEmpty()) {
-                    for (b in CapNegotiator.batches(want)) runCatching { t.send("CAP REQ :$b") }
+                    for (b in CapNegotiator.batches(want)) runCatching { sendSerialized(t, "CAP REQ :$b") }
                 }
             }
             "DEL" -> {
@@ -611,16 +666,23 @@ class IrcClient(
         _events.emit(event)
     }
 
+    private suspend fun sendSerialized(t: IrcTransport, msg: IrcMessage) =
+        sendSerialized(t, msg.serialize())
+
+    private suspend fun sendSerialized(t: IrcTransport, line: String) {
+        outboundLock.withLock { t.send(line) }
+    }
+
     // -- public send API --
 
     suspend fun send(msg: IrcMessage) {
-        transport?.send(msg.serialize())
+        transport?.let { sendSerialized(it, msg) }
     }
 
     /** Send one raw IRC message and report whether a live transport accepted the write. */
     suspend fun sendIfConnected(msg: IrcMessage): Boolean {
         val t = transport ?: return false
-        t.send(msg.serialize())
+        sendSerialized(t, msg)
         return true
     }
 
@@ -633,7 +695,7 @@ class IrcClient(
         val t = transport ?: throw IrcDisconnectedException(msg.command, null)
         // Degrade without labeled-response: send unlabeled, complete immediately with empty list.
         if (!hasCap("labeled-response")) {
-            t.send(msg.serialize())
+            sendSerialized(t, msg)
             return CorrelatedResponse(emptyList(), rootBatch = null)
         }
         val label = labels.next()
@@ -641,7 +703,7 @@ class IrcClient(
         labels.register(label, msg.command, deferred)
         val labeled = msg.copy(tags = msg.tags + ("label" to label))
         return try {
-            t.send(labeled.serialize())
+            sendSerialized(t, labeled)
             withTimeout(LABEL_TIMEOUT_MS) { deferred.await() }
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             throw IrcTimeoutException(label)
@@ -656,18 +718,34 @@ class IrcClient(
         text: String,
         replyToMsgid: String?,
         label: String,
+        forceLegacy: Boolean = false,
     ): Boolean {
         requireValidChatLabel(label)
         val t = transport ?: return false
-        val tags = buildMap { if (replyToMsgid != null) put("+reply", replyToMsgid) }
-        val base = IrcMessage(tags = tags, command = "PRIVMSG", params = listOf(target, text))
-        if (!hasCap("labeled-response")) {
-            t.send(base.serialize())
-            return true
-        }
+        val labelTag = label.takeIf { hasCap("labeled-response") }
+        val plan = planChatMessage(
+            target = target,
+            text = text,
+            replyToMsgid = replyToMsgid,
+            label = labelTag,
+            multilineLimits = if (hasMultilineWireSupport() && !forceLegacy) multilineLimits else null,
+            forceLegacy = forceLegacy,
+        ) ?: return false
         // Do NOT register a correlator deferred: the labeled echo must flow through as a normal
         // self ChatMessage event (carrying label in ctx) so the app can dedup the pending row.
-        t.send(base.copy(tags = base.tags + ("label" to label)).serialize())
+        when (plan) {
+            is MultilineSendPlan.Single -> {
+                if (plan.message.params.any { it.any { char -> char == '\r' || char == '\n' } }) {
+                    return false
+                }
+                sendSerialized(t, plan.message)
+            }
+            is MultilineSendPlan.Batch -> outboundLock.withLock {
+                t.send(plan.opening.serialize())
+                plan.components.forEach { t.send(it.serialize()) }
+                t.send(plan.closing.serialize())
+            }
+        }
         return true
     }
 
@@ -676,7 +754,7 @@ class IrcClient(
         val t = transport ?: return
         if (!typingOutbox.shouldSend(target, state)) return
         val msg = IrcMessage(tags = mapOf("+typing" to state), command = "TAGMSG", params = listOf(target))
-        t.send(msg.serialize())
+        sendSerialized(t, msg)
     }
 
     suspend fun sendReact(target: String, msgid: String, emoji: String) {
@@ -687,7 +765,7 @@ class IrcClient(
             command = "TAGMSG",
             params = listOf(target),
         )
-        t.send(msg.serialize())
+        sendSerialized(t, msg)
     }
 
     suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
@@ -754,7 +832,7 @@ class IrcClient(
         val deferred = CompletableDeferred<CorrelatedResponse>()
         unlabeledChatHistory.register(request, deferred)
         try {
-            t.send(message.serialize())
+            sendSerialized(t, message)
             withTimeout(LABEL_TIMEOUT_MS) { deferred.await() }
         } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
             throw IrcTimeoutException("CHATHISTORY")
@@ -766,13 +844,13 @@ class IrcClient(
     suspend fun markRead(target: String, timestampMs: Long) {
         val t = transport ?: return
         val command = readMarkerCommand() ?: return
-        t.send(ReadMarkerCommands.set(command, target, timestampMs).serialize())
+        sendSerialized(t, ReadMarkerCommands.set(command, target, timestampMs))
     }
 
     suspend fun fetchReadMarker(target: String) {
         val t = transport ?: return
         val command = readMarkerCommand() ?: return
-        t.send(ReadMarkerCommands.get(command, target).serialize())
+        sendSerialized(t, ReadMarkerCommands.get(command, target))
     }
 
     /**
@@ -833,7 +911,7 @@ class IrcClient(
             }
         }
         return try {
-            t.send(WhoxCommands.request(mask, token).serialize())
+            sendSerialized(t, WhoxCommands.request(mask, token))
             val completed = withTimeoutOrNull(WHOX_TIMEOUT_MS) {
                 collector.await()
                 true
@@ -854,7 +932,7 @@ class IrcClient(
         // accumulate in _bouncerNetworks. Send an explicit LISTNETWORKS to force a refresh for
         // servers that do not push, then return the snapshot once it settles (notifications
         // usually arrive by the time the caller reaches Ready).
-        runCatching { t.send(BouncerCommands.listNetworks().serialize()) }
+        runCatching { sendSerialized(t, BouncerCommands.listNetworks()) }
         if (_bouncerNetworks.value.isEmpty()) {
             withTimeoutOrNull(2000) { while (_bouncerNetworks.value.isEmpty()) delay(50) }
         }
@@ -910,7 +988,7 @@ class IrcClient(
                 }
             }
         }
-        transport?.send(msg.serialize())
+        transport?.let { sendSerialized(it, msg) }
         kotlinx.coroutines.withTimeoutOrNull(LIST_TIMEOUT_MS) { collector.join() }
         collector.cancelAndJoin()
         return out.toList()
@@ -983,7 +1061,7 @@ class IrcClient(
                 }.first()
             }
             try {
-                t.send(message.serialize())
+                sendSerialized(t, message)
                 when (val reply = withTimeout(WEBPUSH_TIMEOUT_MS) { response.await() }) {
                     WebPushResponse.Success -> Unit
                     is WebPushResponse.Failure -> throw IrcCommandException(
@@ -1007,8 +1085,28 @@ class IrcClient(
     /** Caps ACKed on this connection; empty until Ready. */
     val caps: Set<String> get() = ackedCaps.get()
 
+    val multilineLimits: MultilineLimits?
+        get() = multilineLimits(caps)
+
     fun hasCap(cap: String): Boolean =
         ackedCaps.get().any { it == cap || it.startsWith("$cap=") }
+
+    fun canSendMultilineMessage(text: String): Boolean =
+        hasMultilineWireSupport() &&
+            planChatMessage(
+                target = "#motd-check",
+                text = text,
+                replyToMsgid = null,
+                label = "motd-check",
+                multilineLimits = multilineLimits,
+            ) is MultilineSendPlan.Batch
+
+    private fun hasMultilineWireSupport(): Boolean =
+        hasCap(MULTILINE_CAP) &&
+            hasCap("batch") &&
+            hasCap("labeled-response") &&
+            hasCap("echo-message") &&
+            multilineLimits != null
 
     /** Live ISUPPORT state (normalize(), prefixModes, ...); empty until Ready. */
     val isupport: Isupport get() = _isupport.get()

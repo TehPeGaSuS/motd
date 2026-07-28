@@ -110,9 +110,21 @@ internal fun prepareOutgoingMessageChunks(
     text: String,
     isBouncerServ: Boolean,
     maxBytes: Int = ConnectionManagerImpl.MAX_BYTES,
+    preferLogicalMultiline: Boolean = false,
 ): List<OutgoingMessageChunk> {
     if (isBouncerServ && ('\r' in text || '\n' in text || text.toByteArray(Charsets.UTF_8).size > maxBytes)) {
         return emptyList()
+    }
+    val normalized = text.replace("\r\n", "\n").replace('\r', '\n')
+    if (preferLogicalMultiline && !isBouncerServ && !normalized.startsWith("/me ")) {
+        if (normalized.split('\n').all(String::isEmpty)) return emptyList()
+        return listOf(
+            OutgoingMessageChunk(
+                wireText = normalized,
+                displayText = normalized,
+                kind = MessageKind.PRIVMSG,
+            ),
+        )
     }
     val lines = text.split(Regex("\\r\\n|\\r|\\n")).filter { it.isNotEmpty() }
     if (lines.isEmpty()) return emptyList()
@@ -417,6 +429,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val monitorLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
     private val sendLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
     private val sendLifecycle = DurableSendLifecycle()
+    private val multilineFallbackLabels = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val pendingRecoveryLock = Mutex()
     private var pendingRecovered = false
 
@@ -821,6 +834,7 @@ class ConnectionManagerImpl @Inject constructor(
                 invalidateRosters(networkId)
                 invalidatePresence(networkId)
             }
+            is IrcEvent.MultilineRejected -> onMultilineRejected(networkId, event)
             is IrcEvent.MonitorOnline -> onMonitorOnline(networkId, event)
             is IrcEvent.MonitorOffline -> updatePresence(networkId, event.nicks, PresenceState.OFFLINE)
             is IrcEvent.MonitorLimitExceeded -> {
@@ -1017,6 +1031,66 @@ class ConnectionManagerImpl @Inject constructor(
         row,
         if (row.role == NetworkRole.BOUNCER_CHILD) row.parentId?.let { networksById[it] } else null,
     )
+
+    private suspend fun onMultilineRejected(networkId: Long, event: IrcEvent.MultilineRejected) {
+        if (!multilineFallbackLabels.add(event.label)) return
+        val pending = eventProcessor.pendingOutgoingByLabel(networkId, event.label) ?: return
+        if (pending.kind != MessageKind.PRIVMSG || !pending.isSelf || pending.msgid != null || pending.failed) return
+        val buffer = bufferDao.observeById(pending.bufferId) ?: return
+        if (buffer.networkId != networkId || buffer.ircTarget.equals("BouncerServ", ignoreCase = true)) return
+        val client = clientFor(networkId)
+        val ready = client?.state?.value as? IrcClientState.Ready
+        val wireReply = pending.replyToMsgid?.takeIf {
+            ready != null && canSendClientTag(ready.caps, ready.isupport, "+reply")
+        }
+        replanAndWriteLegacyFallback(
+            buffer = buffer,
+            client = client,
+            ready = ready,
+            eventId = pending.id,
+            oldLabel = event.label,
+            text = pending.text,
+            replyToMsgid = wireReply,
+        )
+    }
+
+    private suspend fun replanAndWriteLegacyFallback(
+        buffer: BufferEntity,
+        client: IrcClient?,
+        ready: IrcClientState.Ready?,
+        eventId: Long,
+        oldLabel: String,
+        text: String,
+        replyToMsgid: String?,
+    ): ImmediateWireAcceptance {
+        val chunks = prepareOutgoingMessageChunks(text, isBouncerServ = false)
+        if (chunks.isEmpty()) {
+            eventProcessor.failPendingEvents(listOf(eventId))
+            return ImmediateWireAcceptance.FAILED
+        }
+        val planned = chunks.map { chunk -> PlannedOutgoingChunk(chunk, newOutgoingLabel()) }
+        val replanned = eventProcessor.replanPendingOutgoing(
+            networkId = buffer.networkId,
+            eventId = eventId,
+            oldLabel = oldLabel,
+            events = planned.map { OutgoingEventPlan(it.label, it.chunk.displayText, it.chunk.kind) },
+        ) ?: return ImmediateWireAcceptance.FAILED
+        val currentBuffer = bufferDao.observeById(replanned.bufferId) ?: buffer
+        return writeDurablePlan(
+            buffer = currentBuffer,
+            client = client,
+            ready = ready,
+            planned = planned,
+            eventIds = replanned.events.map { it.eventId },
+            replyToMsgid = replyToMsgid,
+            forceLegacy = true,
+        )
+    }
+
+    private fun requiresMultilineWire(chunk: OutgoingMessageChunk): Boolean =
+        chunk.kind == MessageKind.PRIVMSG &&
+            (chunk.wireText.any { it == '\r' || it == '\n' } ||
+                chunk.wireText.toByteArray(Charsets.UTF_8).size > MAX_BYTES)
 
     private suspend fun buildConnection(row: NetworkEntity): IrcClientConnection {
         // A BOUNCER_CHILD is a *bound connection to the bouncer*, not a direct socket to the
@@ -1379,9 +1453,16 @@ class ConnectionManagerImpl @Inject constructor(
                 visibleChannelPrefix = parent?.let { replyPrefs.config.first().visibleChannelPrefix } == true,
                 replyTagAllowed = replyTagAllowed,
             )
+            val isBouncerServ = buffer.ircTarget.equals("BouncerServ", ignoreCase = true)
+            val preferLogicalMultiline = client != null &&
+                ready != null &&
+                !isBouncerServ &&
+                !delivery.text.replace("\r\n", "\n").replace('\r', '\n').startsWith("/me ") &&
+                client.canSendMultilineMessage(delivery.text)
             val chunks = prepareOutgoingMessageChunks(
                 delivery.text,
-                buffer.ircTarget.equals("BouncerServ", ignoreCase = true),
+                isBouncerServ,
+                preferLogicalMultiline = preferLogicalMultiline,
             )
             if (chunks.isEmpty()) {
                 return@withLock SendAcceptance.Rejected(SendRejectionReason.INVALID_CONTENT)
@@ -1499,6 +1580,7 @@ class ConnectionManagerImpl @Inject constructor(
         planned: List<PlannedOutgoingChunk>,
         eventIds: List<Long>,
         replyToMsgid: String?,
+        forceLegacy: Boolean = false,
     ): ImmediateWireAcceptance {
         if (planned.size != eventIds.size) {
             eventProcessor.failPendingEvents(eventIds)
@@ -1508,11 +1590,25 @@ class ConnectionManagerImpl @Inject constructor(
             eventProcessor.failPendingEvents(eventIds)
             return ImmediateWireAcceptance.DISCONNECTED
         }
+        if (!forceLegacy && planned.size == 1 && eventIds.size == 1) {
+            val item = planned.single()
+            if (requiresMultilineWire(item.chunk) && !client.canSendMultilineMessage(item.chunk.wireText)) {
+                return replanAndWriteLegacyFallback(
+                    buffer = buffer,
+                    client = client,
+                    ready = ready,
+                    eventId = eventIds.single(),
+                    oldLabel = item.label,
+                    text = item.chunk.displayText,
+                    replyToMsgid = replyToMsgid,
+                )
+            }
+        }
         return transmitDurableOutgoingPlan(
             eventIds = eventIds,
             write = { index ->
                 val item = planned[index]
-                if (client.sendMessage(buffer.ircTarget, item.chunk.wireText, replyToMsgid, item.label)) {
+                if (client.sendMessage(buffer.ircTarget, item.chunk.wireText, replyToMsgid, item.label, forceLegacy)) {
                     ImmediateWireAcceptance.ACCEPTED
                 } else {
                     ImmediateWireAcceptance.DISCONNECTED

@@ -59,6 +59,8 @@ class IrcClientTest {
         "sasl cap-notify message-tags server-time batch labeled-response echo-message " +
             "multi-prefix account-tag extended-join userhost-in-names " +
             "draft/chathistory draft/read-marker soju.im/bouncer-networks"
+    private val multilineLs =
+        "$fullLs standard-replies draft/multiline=max-bytes=4096,max-lines=16"
 
     private fun responseLabel(line: String): String =
         checkNotNull(Regex("label=(motd-\\d+)").find(line)) { "missing response label in $line" }
@@ -217,6 +219,82 @@ class IrcClientTest {
         assertTrue(chat.isSelf)
         assertEquals(label, chat.ctx.label)
         assertEquals("abc", chat.ctx.msgid)
+    }
+
+    @Test
+    fun `labeled multiline send opens one client batch with blank lines preserved`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft, multilineLs)
+
+        assertTrue(client.sendMessage("#chan", "alpha\n\nbeta", null, "motd-multi"))
+        runCurrent()
+
+        assertEquals(
+            listOf(
+                "@label=motd-multi BATCH +motd-multi draft/multiline #chan",
+                "@batch=motd-multi PRIVMSG #chan alpha",
+                "@batch=motd-multi PRIVMSG #chan :",
+                "@batch=motd-multi PRIVMSG #chan beta",
+                "BATCH -motd-multi",
+            ),
+            ft.sent.takeLast(5),
+        )
+    }
+
+    @Test
+    fun `long logical line uses multiline concat fragments`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft, multilineLs)
+        val body = "x".repeat(410)
+
+        assertTrue(client.sendMessage("#chan", body, null, "motd-long"))
+        runCurrent()
+
+        val sent = ft.sent.takeLast(4)
+        assertEquals("@label=motd-long BATCH +motd-long draft/multiline #chan", sent[0])
+        assertEquals("@batch=motd-long PRIVMSG #chan ${"x".repeat(400)}", sent[1])
+        assertEquals("@batch=motd-long;draft/multiline-concat PRIVMSG #chan ${"x".repeat(10)}", sent[2])
+        assertEquals("BATCH -motd-long", sent[3])
+    }
+
+    @Test
+    fun `incoming multiline batch maps to one logical chat message`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft, multilineLs)
+        val collected = mutableListOf<IrcEvent>()
+        val job = launch { client.broadcastEvents.toList(collected) }
+        runCurrent()
+
+        ft.feed("@label=motd-multi;msgid=abc;+reply=parent BATCH +srv1 draft/multiline #chan")
+        ft.feed("@batch=srv1 :alice!u@h PRIVMSG #chan alpha")
+        ft.feed("@batch=srv1 :alice!u@h PRIVMSG #chan :")
+        ft.feed("@batch=srv1 :alice!u@h PRIVMSG #chan beta")
+        ft.feed("BATCH -srv1")
+        runCurrent()
+        job.cancel()
+
+        val chat = collected.filterIsInstance<IrcEvent.ChatMessage>().single()
+        assertEquals("alpha\n\nbeta", chat.text)
+        assertEquals("abc", chat.ctx.msgid)
+        assertEquals("motd-multi", chat.ctx.label)
+        assertEquals("parent", chat.replyToMsgid)
+    }
+
+    @Test
+    fun `multiline rejection is exposed as a typed event`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft, multilineLs)
+        val collected = mutableListOf<IrcEvent>()
+        val job = launch { client.broadcastEvents.toList(collected) }
+        runCurrent()
+
+        ft.feed("@label=motd-multi FAIL BATCH MULTILINE_MAX_LINES :too many lines")
+        runCurrent()
+        job.cancel()
+
+        val rejection = collected.filterIsInstance<IrcEvent.MultilineRejected>().single()
+        assertEquals("motd-multi", rejection.label)
+        assertEquals("MULTILINE_MAX_LINES", rejection.code)
     }
 
     @Test
@@ -1051,13 +1129,16 @@ class IrcClientTest {
     // -- helpers --
 
     /** Registers a client through the happy path (no SASL) and returns it in Ready state. */
-    private suspend fun kotlinx.coroutines.test.TestScope.registered(ft: FakeTransport): IrcClient {
+    private suspend fun kotlinx.coroutines.test.TestScope.registered(
+        ft: FakeTransport,
+        caps: String = fullLs,
+    ): IrcClient {
         val client = IrcClient(config(), ft.factory(), clientScope())
         client.start()
         runCurrent()
-        ft.feed(":srv CAP * LS :$fullLs")
+        ft.feed(":srv CAP * LS :$caps")
         runCurrent()
-        ft.feed(":srv CAP motd ACK :$fullLs")
+        ft.feed(":srv CAP motd ACK :$caps")
         runCurrent()
         ft.feed(":srv 001 motd :Welcome")
         ft.feed(":srv 005 motd CHATHISTORY=100 :are supported")

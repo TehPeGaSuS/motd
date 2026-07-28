@@ -134,6 +134,54 @@ class CanonicalTimelineStore @Inject constructor(
         event.copy(pendingLabel = label, failed = false)
     }
 
+    suspend fun replanPendingLocalSend(
+        networkId: Long,
+        eventId: TimelineEventId,
+        oldLabel: String,
+        events: List<OutgoingEventPlan>,
+        connectionGeneration: Long?,
+    ): List<TimelineEventEntity>? = db.withTransaction {
+        if (events.isEmpty()) return@withTransaction null
+        val canonicalId = dao.canonicalEventId(eventId)
+        val original = dao.eventById(canonicalId) ?: return@withTransaction null
+        if (original.pendingLabel != oldLabel || original.msgid != null || original.failed || !original.isSelf) {
+            return@withTransaction null
+        }
+
+        dao.deleteOwnedAlias(networkId, EventAliasNamespace.LABEL, bytes(oldLabel), canonicalId)
+        val firstPlan = events.first()
+        val first = original.copy(
+            kind = firstPlan.kind,
+            text = firstPlan.text,
+            pendingLabel = firstPlan.label,
+            dedupKey = SemanticIdentity.pendingKey(firstPlan.label),
+            failed = false,
+        )
+        dao.updateEvent(first)
+        insertLocalSendAttempt(networkId, first, firstPlan.label, connectionGeneration)
+
+        buildList {
+            add(first)
+            events.drop(1).forEach { plan ->
+                val inserted = first.copy(
+                    id = 0,
+                    kind = plan.kind,
+                    text = plan.text,
+                    pendingLabel = plan.label,
+                    dedupKey = SemanticIdentity.pendingKey(plan.label),
+                    notificationHandled = false,
+                    notificationClaimed = false,
+                    notificationClaimOwner = null,
+                    soundHandled = false,
+                )
+                val insertedId = dao.insertEvent(inserted)
+                val event = inserted.copy(id = insertedId)
+                insertLocalSendAttempt(networkId, event, plan.label, connectionGeneration)
+                add(event)
+            }
+        }
+    }
+
     suspend fun claimSound(eventId: TimelineEventId): Boolean =
         dao.claimSound(eventId) == 1
 
@@ -427,6 +475,36 @@ class CanonicalTimelineStore @Inject constructor(
                 },
                 oldestServerTime = minOf(oldest ?: event.serverTime, event.serverTime),
                 historyComplete = current?.historyComplete == true,
+            ),
+        )
+    }
+
+    private suspend fun insertLocalSendAttempt(
+        networkId: Long,
+        event: TimelineEventEntity,
+        label: String,
+        connectionGeneration: Long?,
+    ) {
+        dao.insertAliasIgnore(
+            EventAliasEntity(
+                networkId = networkId,
+                namespace = EventAliasNamespace.LABEL,
+                value = bytes(label),
+                timelineEventId = event.id,
+            ),
+        )
+        dao.insertObservation(
+            EventObservationEntity(
+                networkId = networkId,
+                timelineEventId = event.id,
+                origin = ObservationOrigin.LOCAL_SEND,
+                connectionGeneration = connectionGeneration,
+                receiveOrder = dao.nextReceiveOrder(networkId),
+                batchId = null,
+                timeProvenance = TimeProvenance.LOCAL_CLOCK,
+                semanticFingerprint = digest(event.kind.name, event.normalizedActor, event.text),
+                batchExactOrdinal = null,
+                observedAt = System.currentTimeMillis(),
             ),
         )
     }

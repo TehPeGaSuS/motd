@@ -6,6 +6,7 @@ internal data class BatchTree(
     val ref: String,
     val type: String,
     val params: List<String>,
+    val opening: IrcMessage,
     val children: List<BatchChild>,
 )
 
@@ -26,6 +27,7 @@ internal class BatchAssembler {
         val ref: String,
         val type: String,
         val params: List<String>,
+        val opening: IrcMessage,
         val parent: String?,
     ) {
         val children = mutableListOf<MutableChild>()
@@ -48,7 +50,7 @@ internal class BatchAssembler {
             val ref = msg.params[0].substring(1)
             if (ref.isEmpty() || ref in open) return Outcome.PassThrough
             val parent = msg.tags["batch"]?.takeIf { it in open }
-            open[ref] = OpenBatch(ref, msg.params.getOrNull(1).orEmpty(), msg.params.drop(2), parent)
+            open[ref] = OpenBatch(ref, msg.params.getOrNull(1).orEmpty(), msg.params.drop(2), msg, parent)
             parent?.let { open[it]?.children?.add(MutableChild.Pending(ref)) }
             return Outcome.Buffered
         }
@@ -80,6 +82,7 @@ internal class BatchAssembler {
         ref = ref,
         type = type,
         params = params.toList(),
+        opening = opening,
         children = children.mapNotNull { child ->
             when (child) {
                 is MutableChild.Message -> BatchChild.Message(child.message)

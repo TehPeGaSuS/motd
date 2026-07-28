@@ -19,7 +19,7 @@ class BatchEventMappingTest {
     )
 
     @Test fun `typed netsplit survives inside chathistory`() {
-        val split = BatchTree(
+        val split = batch(
             "split",
             "netsplit",
             listOf("a.example", "b.example"),
@@ -28,7 +28,7 @@ class BatchEventMappingTest {
                 BatchChild.Message(msg("@time=2026-01-01T00:00:01Z :Bob!u@h QUIT :split")),
             ),
         )
-        val history = BatchTree(
+        val history = batch(
             "history",
             "chathistory",
             listOf("#room"),
@@ -43,7 +43,7 @@ class BatchEventMappingTest {
     }
 
     @Test fun `malformed known batch recursively degrades while typed child survives unknown parent`() {
-        val malformed = BatchTree(
+        val malformed = batch(
             "bad",
             "netsplit",
             listOf("only-one-server"),
@@ -51,18 +51,18 @@ class BatchEventMappingTest {
         )
         assertTrue(client.mapBatchTree(malformed).single() is IrcEvent.Quit)
 
-        val typed = BatchTree(
+        val typed = batch(
             "join",
             "netjoin",
             listOf("a", "b"),
             listOf(BatchChild.Message(msg(":Alice!u@h JOIN #room"))),
         )
-        val unknown = BatchTree("outer", "vendor/unknown", emptyList(), listOf(BatchChild.Nested(typed)))
+        val unknown = batch("outer", "vendor/unknown", emptyList(), listOf(BatchChild.Nested(typed)))
         assertTrue(client.mapBatchTree(unknown).single() is IrcEvent.NetworkBatch)
     }
 
     @Test fun `znc playback maps to replay batch`() {
-        val playback = BatchTree(
+        val playback = batch(
             "znc",
             "znc.in/playback",
             listOf("#room"),
@@ -73,6 +73,9 @@ class BatchEventMappingTest {
         assertEquals("#room", event.target)
         assertTrue(event.events.single() is IrcEvent.ChatMessage)
     }
+
+    private fun batch(ref: String, type: String, params: List<String>, children: List<BatchChild>) =
+        BatchTree(ref, type, params, IrcMessage(command = "BATCH", params = listOf("+$ref", type) + params), children)
 
     private fun msg(line: String) = IrcMessage.parse(line)
 }

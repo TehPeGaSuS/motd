@@ -587,6 +587,36 @@ class EchoFlowTest {
     }
 
     @Test
+    fun `rejected logical send is replanned into legacy chunks without a failed duplicate`() = runTest {
+        val durable = processor.persistOutgoingPlan(
+            bufferId = bufferId,
+            sender = "me",
+            events = listOf(OutgoingEventPlan("motd-logical", "one\n\nthree", MessageKind.PRIVMSG)),
+            replyToEventId = null,
+            replyToMsgid = null,
+        ).single()
+
+        val replanned = processor.replanPendingOutgoing(
+            networkId = networkId,
+            eventId = durable.eventId,
+            oldLabel = "motd-logical",
+            events = listOf(
+                OutgoingEventPlan("motd-legacy-1", "one", MessageKind.PRIVMSG),
+                OutgoingEventPlan("motd-legacy-2", "three", MessageKind.PRIVMSG),
+            ),
+        )
+
+        assertEquals(bufferId, replanned?.bufferId)
+        assertEquals(durable.eventId, replanned?.events?.first()?.eventId)
+        assertEquals(2, replanned?.events?.map { it.eventId }?.distinct()?.size)
+        assertNull(processor.pendingOutgoingByLabel(networkId, "motd-logical"))
+        assertEquals("one", processor.pendingOutgoingByLabel(networkId, "motd-legacy-1")?.text)
+        assertEquals("three", processor.pendingOutgoingByLabel(networkId, "motd-legacy-2")?.text)
+        assertEquals(2, rows().size)
+        assertTrue(rows().none { it.failed })
+    }
+
+    @Test
     fun `retry keeps event id and old label accepts a late echo`() = runTest {
         val eventId = processor.insertPending(
             bufferId,

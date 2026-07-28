@@ -179,6 +179,13 @@ sealed interface IrcEvent {
         val context: List<String>,
         val description: String,
     ) : IrcEvent
+    data class MultilineRejected(
+        val ctx: MessageContext,
+        val label: String,
+        val code: String,
+        val context: List<String>,
+        val description: String,
+    ) : IrcEvent
     data class ServerError(val code: String, val params: List<String>, val text: String) : IrcEvent
     /** Escape hatch: anything not mapped above (raw numerics for motd text, WHOIS, etc.). */
     data class Raw(val message: IrcMessage) : IrcEvent

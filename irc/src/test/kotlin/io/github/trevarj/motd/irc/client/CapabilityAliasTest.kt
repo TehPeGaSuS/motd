@@ -122,4 +122,18 @@ class CapabilityAliasTest {
             CapNegotiator.requestSet(advertised, emptySet()),
         )
     }
+
+    @Test fun `multiline is requested only when its dependencies are advertised`() {
+        assertEquals(
+            setOf("batch", "message-tags", "standard-replies", "draft/multiline"),
+            CapNegotiator.requestSet(
+                setOf("batch", "message-tags", "standard-replies", "draft/multiline"),
+                emptySet(),
+            ),
+        )
+        assertEquals(
+            setOf("batch", "message-tags"),
+            CapNegotiator.requestSet(setOf("batch", "message-tags", "draft/multiline"), emptySet()),
+        )
+    }
 }

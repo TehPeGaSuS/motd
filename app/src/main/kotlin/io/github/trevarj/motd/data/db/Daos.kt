@@ -665,6 +665,17 @@ interface MessageDao {
     suspend fun byPendingLabel(bufferId: Long, label: String): MessageEntity?
 
     @Query(
+        """SELECT m.* FROM messages m
+           JOIN buffers b ON b.id = m.bufferId
+           WHERE b.networkId = :networkId
+             AND m.pendingLabel = :label
+             AND m.msgid IS NULL
+             AND m.failed = 0
+           LIMIT 1""",
+    )
+    suspend fun pendingByNetworkLabel(networkId: Long, label: String): MessageEntity?
+
+    @Query(
         """SELECT * FROM messages
            WHERE bufferId = :bufferId AND pendingLabel IS NOT NULL AND msgid IS NULL AND failed = 0
            ORDER BY id DESC LIMIT 1""",

@@ -286,6 +286,13 @@ class EventMapper(
             "WARN" -> IrcEvent.StandardReplySeverity.WARN
             else -> IrcEvent.StandardReplySeverity.NOTE
         }
+        if (severity == IrcEvent.StandardReplySeverity.FAIL &&
+            commandName.equals("BATCH", ignoreCase = true) &&
+            code in MULTILINE_REJECTION_CODES &&
+            ctx.label != null
+        ) {
+            return IrcEvent.MultilineRejected(ctx, ctx.label, code, context, description)
+        }
         return IrcEvent.StandardReply(ctx, severity, commandName, code, context, description)
     }
 

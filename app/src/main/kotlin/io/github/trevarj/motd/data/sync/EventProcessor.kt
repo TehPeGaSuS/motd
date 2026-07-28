@@ -56,6 +56,11 @@ data class DurableOutgoingEvent(
     val label: String,
 )
 
+data class ReplannedOutgoingPlan(
+    val bufferId: RoomId,
+    val events: List<DurableOutgoingEvent>,
+)
+
 internal data class PersistedHistoryPage(val roomId: RoomId, val inserted: Int)
 
 /**
@@ -319,6 +324,7 @@ class EventProcessor @Inject constructor(
             is IrcEvent.BouncerNetworkState -> if (origin.mutatesSessionState) onBouncerNetworkState(networkId, event)
             is IrcEvent.Disconnected -> if (origin.mutatesSessionState) onDisconnected(networkId, event)
             is IrcEvent.StandardReply -> if (origin != EventOrigin.PUSH) onStandardReply(networkId, event, origin)
+            is IrcEvent.MultilineRejected -> Unit
             is IrcEvent.ServerError -> if (origin.mutatesSessionState) onServerError(networkId, event)
             is IrcEvent.Raw -> onRaw(networkId, event, origin, historyTarget)
             is IrcEvent.CapsChanged,
@@ -708,6 +714,7 @@ class EventProcessor @Inject constructor(
             is IrcEvent.DccAccept -> event.ctx
             is IrcEvent.UnsupportedDcc -> event.ctx
             is IrcEvent.StandardReply -> event.ctx
+            is IrcEvent.MultilineRejected -> event.ctx
             else -> null
         } ?: return false
         val msgid = context.msgid
@@ -2199,6 +2206,31 @@ class EventProcessor @Inject constructor(
             }
         }
     }
+
+    suspend fun pendingOutgoingByLabel(networkId: Long, label: String): MessageEntity? =
+        sequencer.withNetwork(networkId) {
+            messageDao.pendingByNetworkLabel(networkId, label)
+        }
+
+    suspend fun replanPendingOutgoing(
+        networkId: Long,
+        eventId: TimelineEventId,
+        oldLabel: String,
+        events: List<OutgoingEventPlan>,
+    ): ReplannedOutgoingPlan? =
+        sequencer.withNetwork(networkId) {
+            val replanned = canonicalTimeline.replanPendingLocalSend(
+                networkId = networkId,
+                eventId = eventId,
+                oldLabel = oldLabel,
+                events = events,
+                connectionGeneration = connectionGenerations[networkId],
+            ) ?: return@withNetwork null
+            ReplannedOutgoingPlan(
+                bufferId = replanned.first().bufferId,
+                events = replanned.map { DurableOutgoingEvent(it.id, requireNotNull(it.pendingLabel)) },
+            )
+        }
 
     suspend fun failPendingEvents(eventIds: List<TimelineEventId>) {
         if (eventIds.isEmpty()) return
