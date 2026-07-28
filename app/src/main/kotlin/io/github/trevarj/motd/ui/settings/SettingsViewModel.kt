@@ -32,8 +32,12 @@ import io.github.trevarj.motd.avatar.AvatarController
 import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.push.PushDistributorController
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -65,6 +69,17 @@ private data class NetworkPrefs(
     val zncNetworkIds: Set<Long>,
 )
 
+enum class AudioCacheClearEvent { CLEARED, FAILED }
+
+internal suspend fun audioCacheClearEvent(clear: suspend () -> Unit): AudioCacheClearEvent = try {
+    clear()
+    AudioCacheClearEvent.CLEARED
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (_: Exception) {
+    AudioCacheClearEvent.FAILED
+}
+
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
@@ -81,6 +96,9 @@ class SettingsViewModel @Inject constructor(
     private val pushDistributorController: PushDistributorController,
     private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
 ) : ViewModel() {
+
+    private val _audioCacheClearEvents = MutableSharedFlow<AudioCacheClearEvent>()
+    val audioCacheClearEvents: SharedFlow<AudioCacheClearEvent> = _audioCacheClearEvents.asSharedFlow()
 
     private val networkPrefs = combine(
         networkRepository.observeNetworks(),
@@ -233,6 +251,6 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun clearAudioCache() = viewModelScope.launch {
-        audioCacheStore.clear()
+        _audioCacheClearEvents.emit(audioCacheClearEvent(audioCacheStore::clear))
     }
 }

@@ -7,12 +7,43 @@ import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
 import io.github.trevarj.motd.ui.onboarding.ServerForm
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SettingsUiModelsTest {
+    @Test
+    fun `audio cache feedback follows completion and reports failures`() = runTest {
+        var completed = false
+
+        val cleared = audioCacheClearEvent {
+            completed = true
+        }
+        val failed = audioCacheClearEvent {
+            throw IllegalStateException("disk error")
+        }
+
+        assertTrue(completed)
+        assertEquals(AudioCacheClearEvent.CLEARED, cleared)
+        assertEquals(AudioCacheClearEvent.FAILED, failed)
+    }
+
+    @Test
+    fun `audio cache feedback preserves cancellation`() = runTest {
+        var cancellation: CancellationException? = null
+
+        try {
+            audioCacheClearEvent { throw CancellationException("cancelled") }
+        } catch (caught: CancellationException) {
+            cancellation = caught
+        }
+
+        assertEquals("cancelled", cancellation?.message)
+    }
+
     @Test
     fun `theme groups expose every exact light and dark selection once`() {
         val selectableThemes = ColorThemePreset.entries.filter { it != ColorThemePreset.AMOLED }.toSet()

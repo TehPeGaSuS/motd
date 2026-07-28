@@ -1242,21 +1242,52 @@ fun ChatContent(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             AnimatedContent(
-                                targetState = chatSubtitle(state, ctx),
+                                targetState = chatSubtitleModel(
+                                    state,
+                                    ctx,
+                                    historyUiState,
+                                    historyResyncState,
+                                ),
                                 transitionSpec = {
                                     fadeIn(MotdMotion.microFadeIn) togetherWith
                                         fadeOut(MotdMotion.microFadeOut)
                                 },
                                 label = "chat_subtitle",
                             ) { subtitle ->
-                                if (subtitle != null) {
-                                    Text(
-                                        text = subtitle,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
+                                when (subtitle) {
+                                    is ChatSubtitleModel.Text -> {
+                                        Text(
+                                            text = subtitle.value,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    ChatSubtitleModel.HistoryLoading -> {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("chat_history_loading_subtitle"),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(12.dp),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                strokeWidth = 2.dp,
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                text = stringResource(R.string.chat_history_loading_title),
+                                                modifier = Modifier.weight(1f),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+                                    null -> Unit
                                 }
                             }
                         }
@@ -2005,30 +2036,60 @@ internal fun composerNeedsMemberNicks(value: TextFieldValue): Boolean {
     return token.text.length >= 2 || atPrefixed
 }
 
-internal fun chatSubtitle(state: ChatState, context: android.content.Context): String? {
+internal sealed interface ChatSubtitleModel {
+    data class Text(val value: String) : ChatSubtitleModel
+    data object HistoryLoading : ChatSubtitleModel
+}
+
+internal fun chatSubtitle(state: ChatState, context: android.content.Context): String? =
+    (
+        chatSubtitleModel(
+            state,
+            context,
+            ChatHistoryUiState.Hidden,
+            HistoryResyncState.Idle,
+        ) as? ChatSubtitleModel.Text
+    )?.value
+
+internal fun chatSubtitleModel(
+    state: ChatState,
+    context: android.content.Context,
+    historyUiState: ChatHistoryUiState,
+    historyResyncState: HistoryResyncState,
+): ChatSubtitleModel? {
     when (val connection = state.connState) {
         null -> return null
-        IrcClientState.Connecting -> return context.getString(R.string.drawer_state_connecting)
-        IrcClientState.Registering -> return context.getString(R.string.drawer_state_registering)
-        IrcClientState.Disconnected -> return context.getString(R.string.drawer_state_disconnected)
+        IrcClientState.Connecting -> return ChatSubtitleModel.Text(context.getString(R.string.drawer_state_connecting))
+        IrcClientState.Registering -> return ChatSubtitleModel.Text(context.getString(R.string.drawer_state_registering))
+        IrcClientState.Disconnected -> return ChatSubtitleModel.Text(context.getString(R.string.drawer_state_disconnected))
         is IrcClientState.Failed -> return if (connection.fatal) {
-            connection.reason
+            ChatSubtitleModel.Text(connection.reason)
         } else {
-            context.getString(R.string.drawer_state_connecting)
+            ChatSubtitleModel.Text(context.getString(R.string.drawer_state_connecting))
         }
         is IrcClientState.Ready -> Unit
     }
     if (state.typingNicks.isNotEmpty()) {
-        return typingText(context, state.typingNicks)
+        return ChatSubtitleModel.Text(typingText(context, state.typingNicks))
+    }
+    if (isChatHistoryLoading(historyUiState, historyResyncState)) {
+        return ChatSubtitleModel.HistoryLoading
     }
     val buffer = state.buffer ?: return null
     return if (buffer.type == BufferType.CHANNEL && state.memberCount != null) {
         val n = state.memberCount
-        context.resources.getQuantityString(R.plurals.chat_member_count, n, n)
+        ChatSubtitleModel.Text(context.resources.getQuantityString(R.plurals.chat_member_count, n, n))
     } else {
         null
     }
 }
+
+internal fun isChatHistoryLoading(
+    historyUiState: ChatHistoryUiState,
+    historyResyncState: HistoryResyncState,
+): Boolean = historyUiState == ChatHistoryUiState.Loading ||
+    historyResyncState is HistoryResyncState.Running ||
+    historyResyncState == HistoryResyncState.WaitingForCapability
 
 @Composable
 internal fun ScrollToBottomFab(

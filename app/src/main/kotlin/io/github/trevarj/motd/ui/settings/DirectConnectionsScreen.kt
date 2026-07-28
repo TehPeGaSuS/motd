@@ -3,8 +3,6 @@ package io.github.trevarj.motd.ui.settings
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -53,7 +51,7 @@ fun DirectConnectionsContent(
     onRemove: (Long) -> Unit,
 ) {
     SettingsScaffold(title = stringResource(R.string.settings_direct_connections), onBack = onBack) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+        Column(Modifier.fillMaxWidth()) {
             ListItem(
                 headlineContent = { Text(stringResource(R.string.settings_direct_connections_disclosure)) },
                 supportingContent = {

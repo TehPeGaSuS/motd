@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -13,12 +14,14 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
@@ -49,6 +52,18 @@ fun ChatSettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val audioCacheCleared = stringResource(R.string.settings_audio_cache_cleared)
+    val audioCacheClearFailed = stringResource(R.string.settings_audio_cache_clear_failed)
+    LaunchedEffect(viewModel, context, audioCacheCleared, audioCacheClearFailed) {
+        viewModel.audioCacheClearEvents.collect { event ->
+            val message = when (event) {
+                AudioCacheClearEvent.CLEARED -> audioCacheCleared
+                AudioCacheClearEvent.FAILED -> audioCacheClearFailed
+            }
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
     ChatSettingsContent(
         settings = state.settings,
         reply = state.reply,

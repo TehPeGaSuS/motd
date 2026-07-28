@@ -419,6 +419,7 @@
     <string name="chat_empty_message">Say hello to start the conversation.</string>
     <string name="chat_history_error">Couldn\'t load older messages</string>
     <string name="chat_history_incomplete">Older history may be incomplete</string>
+    <string name="chat_history_loading_title">Loading history…</string>
     <plurals name="chat_history_capped">
         <item quantity="one">Stopped after %1$d message; older history may remain</item>
         <item quantity="other">Stopped after %1$d messages; older history may remain</item>
@@ -511,6 +512,8 @@
     <string name="settings_voice_noise_reduction_desc">Uses device voice processing when available. It may also adjust volume and tone.</string>
     <string name="settings_clear_audio_cache">Clear audio cache</string>
     <string name="settings_clear_audio_cache_desc">Remove downloaded audio and decrypted temporary playback files.</string>
+    <string name="settings_audio_cache_cleared">Audio cache cleared</string>
+    <string name="settings_audio_cache_clear_failed">Couldn\'t clear audio cache</string>
     <string name="settings_wallpaper">Chat wallpaper</string>
     <string name="settings_wallpaper_none">None</string>
     <string name="settings_people">People</string>
