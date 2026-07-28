@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.dcc
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -429,8 +430,9 @@ class DccTransferControllerImpl @Inject constructor(
         private const val PROGRESS_STEP_BYTES = 256L * 1024L
         const val MAX_DCC_FILE_SIZE_BYTES = 0xffff_ffffL
 
+        // DCC SSEND has no CA-backed peer identity model; the UI labels it as encrypted only.
         private val TRUST_ALL_SSL_FACTORY: SSLSocketFactory by lazy {
-            val trustAll = object : X509TrustManager {
+            val trustAll = @SuppressLint("CustomX509TrustManager") object : X509TrustManager {
                 override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) = Unit
                 override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) = Unit
                 override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = emptyArray()
