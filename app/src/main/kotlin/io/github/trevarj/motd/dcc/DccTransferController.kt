@@ -27,7 +27,6 @@ import java.net.NetworkInterface
 import java.net.Proxy
 import java.net.ServerSocket
 import java.net.Socket
-import java.nio.ByteBuffer
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -284,28 +283,18 @@ class DccTransferControllerImpl @Inject constructor(
         output: OutputStream,
         ack: OutputStream,
         expectedBytes: Long?,
-    ) = withContext(Dispatchers.IO) {
-        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-        var total = 0L
-        var lastPersisted = 0L
+    ): Long {
         transitions(transferId) { transfer, now ->
             transfer.copy(state = DccTransferState.ACTIVE, error = null, updatedAt = now)
         }
-        while (expectedBytes == null || total < expectedBytes) {
-            val limit = expectedBytes?.let { (it - total).coerceAtMost(buffer.size.toLong()).toInt() }
-                ?: buffer.size
-            val read = input.read(buffer, 0, limit)
-            if (read < 0) break
-            output.write(buffer, 0, read)
-            total += read
-            ack.write(ByteBuffer.allocate(4).putInt(total.toInt()).array())
-            if (total - lastPersisted >= PROGRESS_STEP_BYTES) {
-                lastPersisted = total
-                persistProgress(transferId, total)
-            }
-        }
-        output.flush()
-        persistProgress(transferId, total)
+        return receiveDccBytes(
+            input = input,
+            output = output,
+            ack = ack,
+            expectedBytes = expectedBytes,
+            maxBytes = MAX_DCC_FILE_SIZE_BYTES,
+            progressStepBytes = PROGRESS_STEP_BYTES,
+        ) { total -> persistProgress(transferId, total) }
     }
 
     private suspend fun sendBytes(
@@ -340,7 +329,12 @@ class DccTransferControllerImpl @Inject constructor(
 
     private suspend fun failTransfer(transferId: Long, message: String) {
         transitions(transferId) { transfer, now ->
-            transfer.copy(state = DccTransferState.FAILED, error = message.take(180), updatedAt = now)
+            val partial = transfer.direction == DccDirection.INCOMING && transfer.bytesTransferred > 0L
+            transfer.copy(
+                state = if (partial) DccTransferState.PARTIAL else DccTransferState.FAILED,
+                error = message.take(180),
+                updatedAt = now,
+            )
         }
     }
 
@@ -433,7 +427,7 @@ class DccTransferControllerImpl @Inject constructor(
         private const val READ_TIMEOUT_MS = 30_000
         private const val OUTGOING_OFFER_TIMEOUT_MS = 5 * 60_000L
         private const val PROGRESS_STEP_BYTES = 256L * 1024L
-        const val MAX_DCC_FILE_SIZE_BYTES = 4L * 1024L * 1024L * 1024L
+        const val MAX_DCC_FILE_SIZE_BYTES = 0xffff_ffffL
 
         private val TRUST_ALL_SSL_FACTORY: SSLSocketFactory by lazy {
             val trustAll = object : X509TrustManager {
