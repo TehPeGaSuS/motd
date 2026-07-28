@@ -126,6 +126,12 @@ class MessageBubbleTextTest {
     }
 
     @Test
+    fun action_accessibility_label_matches_classic_me_prefix() {
+        assertEquals("* alice waves hello", actionAccessibilityLabel("alice", "waves hello"))
+        assertEquals("* alice", actionAccessibilityLabel("alice", ""))
+    }
+
+    @Test
     fun action_body_preserves_links_mentions_code_and_friend_tint() {
         val friendTint = Color.Yellow
         val line = buildActionLine(

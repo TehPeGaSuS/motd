@@ -48,6 +48,7 @@ import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
@@ -83,6 +84,9 @@ import java.text.DateFormat as JavaDateFormat
 private const val TWO_LINE_ROW_TINT_ALPHA = 0.10f
 internal const val MENTION_ROW_TINT_ALPHA = 0.55f
 private const val ACTION_ROW_TINT_ALPHA = 0.22f
+
+internal fun actionAccessibilityLabel(sender: String, text: String): String =
+    if (text.isBlank()) "* $sender" else "* $sender $text"
 
 /** Persistent, non-animated mention marker shared by every message density. */
 private fun Modifier.mentionHighlight(accent: Color): Modifier = drawWithContent {
@@ -515,6 +519,7 @@ private fun ComfortableActionBubble(
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val actionDescription = stringResource(R.string.chat_action_message)
+    val actionLabel = remember(sender, text) { actionAccessibilityLabel(sender, text) }
     val rowColor = if (hasMention) {
         MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
     } else {
@@ -571,7 +576,10 @@ private fun ComfortableActionBubble(
                 .clip(shape)
                 .background(rowColor)
                 .testTag("chat_action_row")
-                .semantics { stateDescription = actionDescription }
+                .semantics {
+                    contentDescription = actionLabel
+                    stateDescription = actionDescription
+                }
                 .combinedClickable(
                     interactionSource = null,
                     indication = null,
@@ -697,6 +705,7 @@ private fun ActionMessageRow(
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val actionDescription = stringResource(R.string.chat_action_message)
+    val actionLabel = remember(sender, text) { actionAccessibilityLabel(sender, text) }
     val spacing = LocalSpacing.current
     val accent = if (hasMention) {
         MaterialTheme.colorScheme.secondary
@@ -755,7 +764,10 @@ private fun ActionMessageRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("chat_action_row")
-                .semantics { stateDescription = actionDescription }
+                .semantics {
+                    contentDescription = actionLabel
+                    stateDescription = actionDescription
+                }
                 .background(rowColor)
                 .actionAccentRail(accent)
                 .combinedClickable(

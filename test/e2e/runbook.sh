@@ -481,8 +481,8 @@ phase_c() {
   input_tag chat_composer_field "/me waves"
   redump
   tap_desc "Send"
-  # ACTION uses the same sender-prefixed text in every layout density.
-  if wait_for_text "* ${MOTD_NICK} waves" 8; then
+  # ACTION exposes the classic sender-prefixed line for automation in every layout density.
+  if wait_for_desc "* ${MOTD_NICK} waves" 8; then
     ok "/me action rendered"
   else
     fail "/me action did not render with its sender prefix"
@@ -1004,25 +1004,33 @@ phase_i() {
   echo ""
   echo "${_C_CYA}########## Phase I: teardown ##########${_C_RST}"
 
-  # 61. Delete a chat (swipe) — cancel to avoid destroying state mid-run.
-  step "Delete-chat swipe (cancel)"
+  # 61. Archive a chat (swipe). Archive is a local visibility flag; app-data reset below clears it.
+  step "Archive-chat swipe"
   wait_for_text "$MOTD_TEST_CHANNEL" 6 || true
   local b
   b="$(bounds_of_text "$MOTD_TEST_CHANNEL")"
   if [ -n "$b" ]; then
-    # Swipe end-to-start (right->left) across the row centre to arm delete.
+    # Swipe end-to-start (right->left) across the row centre to archive.
     # Only the y (row centre) is needed; x endpoints are the screen edges.
     local _cx cy
     read -r _cx cy <<EOF
 $(_e2e_center "$b")
 EOF
     adb_shell input swipe 980 "$cy" 120 "$cy" 250
-    redump
-    if [ -n "$(bounds_of_text "Delete chat?")" ]; then
-      assert_text "Delete chat?"
-      tap_text "Cancel"                  # do NOT delete; preserve for re-runs
+    local archived_seen=0
+    for _ in 1 2 3 4 5 6 7 8; do
+      redump
+      if [ -n "$(bounds_of_tag "chatlist_archived_folder")" ]; then
+        archived_seen=1
+        break
+      fi
+      sleep 1
+    done
+    if [ "$archived_seen" -eq 1 ]; then
+      assert_tag_present "chatlist_archived_folder"
+      assert_no_text "$MOTD_TEST_CHANNEL"
     else
-      fail "swipe did not arm the delete dialog"
+      fail "swipe did not archive the chat"
     fi
   else
     fail "seed channel row not present for swipe test"
