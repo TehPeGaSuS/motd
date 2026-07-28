@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive-icon foreground: the chat bubble + slash-command mark. The 0.68 scale keeps the
-     complete symbol inside Android's 66dp safe zone on this 108dp adaptive-icon canvas. -->
+<!-- Adaptive-icon foreground: tail-aware scaling keeps the complete mark inside Android's
+     66dp circular safe zone on this 108dp adaptive-icon canvas. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -9,8 +9,8 @@
     <group
         android:pivotX="96"
         android:pivotY="96"
-        android:scaleX="0.68"
-        android:scaleY="0.68">
+        android:scaleX="0.54"
+        android:scaleY="0.54">
         <path
             android:fillColor="#FFFFFF"
             android:fillType="evenOdd"

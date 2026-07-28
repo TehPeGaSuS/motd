@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android themed-icon layer. The slash is a real knockout so platform recoloring preserves
-     the same silhouette as the full-color launcher icon. -->
+<!-- Android themed-icon layer. Tail-aware scaling matches the full-color launcher icon, and the
+     slash is a real knockout so platform recoloring preserves the same silhouette. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -9,8 +9,8 @@
     <group
         android:pivotX="96"
         android:pivotY="96"
-        android:scaleX="0.68"
-        android:scaleY="0.68">
+        android:scaleX="0.54"
+        android:scaleY="0.54">
         <path
             android:fillColor="#FFFFFF"
             android:fillType="evenOdd"
