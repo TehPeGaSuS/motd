@@ -93,6 +93,38 @@ class IrcClientChathistoryTest {
     }
 
     @Test
+    fun `unlabeled chathistory reconstructs nested multiline message`() = runTest {
+        val transport = FakeTransport()
+        val client = registeredWithoutLabeledResponse(
+            transport,
+            "standard-replies draft/multiline=max-bytes=4096,max-lines=16",
+        )
+        val request = async {
+            client.chathistory(
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#room", limit = 100),
+            )
+        }
+        runCurrent()
+
+        transport.feed("BATCH +history chathistory #room")
+        transport.feed(
+            "@batch=history;msgid=multi-1;time=2026-07-28T20:17:04.564Z " +
+                ":motd!u@h BATCH +multi draft/multiline #room",
+        )
+        transport.feed("@batch=multi :motd!u@h PRIVMSG #room :first line")
+        transport.feed("@batch=multi :motd!u@h PRIVMSG #room :second line")
+        transport.feed("@batch=history BATCH -multi")
+        transport.feed("BATCH -history")
+        runCurrent()
+
+        val response = request.await() as ChatHistoryResponse.Messages
+        assertEquals(1, response.primaryMessageCount)
+        val message = response.events.single() as IrcEvent.ChatMessage
+        assertEquals("first line\nsecond line", message.text)
+        assertEquals("multi-1", message.ctx.msgid)
+    }
+
+    @Test
     fun `unlabeled bouncer failure reaches the CHATHISTORY caller`() = runTest {
         val transport = FakeTransport()
         val client = registeredWithoutLabeledResponse(transport)
@@ -356,7 +388,14 @@ class IrcClientChathistoryTest {
     private fun TestScope.clientScope(): CoroutineScope =
         CoroutineScope(backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler))
 
-    private suspend fun TestScope.registeredWithoutLabeledResponse(transport: FakeTransport): IrcClient {
+    private suspend fun TestScope.registeredWithoutLabeledResponse(
+        transport: FakeTransport,
+        extraCaps: String = "",
+    ): IrcClient {
+        val caps = listOf(
+            "batch message-tags server-time draft/chathistory",
+            extraCaps,
+        ).filter(String::isNotBlank).joinToString(" ")
         val client = IrcClient(
             IrcClientConfig("irc.example", 6697, true, "motd", "motd", "motd"),
             transport.factory(),
@@ -364,9 +403,9 @@ class IrcClientChathistoryTest {
         )
         client.start()
         runCurrent()
-        transport.feed(":srv CAP * LS :batch message-tags server-time draft/chathistory")
+        transport.feed(":srv CAP * LS :$caps")
         runCurrent()
-        transport.feed(":srv CAP motd ACK :batch message-tags server-time draft/chathistory")
+        transport.feed(":srv CAP motd ACK :$caps")
         transport.feed(":srv 005 motd CHATHISTORY=100 CASEMAPPING=rfc1459 :supported")
         transport.feed(":srv 001 motd :Welcome")
         runCurrent()

@@ -2,6 +2,7 @@ package io.github.trevarj.motd.irc.client
 
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.event.ServerTimeSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -466,6 +467,43 @@ class IrcClientTest {
             "👍",
             res.events.filterIsInstance<IrcEvent.Raw>().single().message.tags["+draft/unreact"],
         )
+    }
+
+    @Test
+    fun `labeled chathistory reconstructs nested multiline message`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft, multilineLs)
+
+        val result = clientScope().async {
+            client.chathistory(
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#chan", limit = 50),
+            )
+        }
+        runCurrent()
+
+        val label = responseLabel(ft.sent.last { it.contains("CHATHISTORY") })
+        ft.feed("@label=$label BATCH +hist chathistory #chan")
+        ft.feed(
+            "@batch=hist;msgid=multi-1;time=2026-07-28T20:17:04.564Z " +
+                ":motd!u@h BATCH +multi draft/multiline #chan",
+        )
+        ft.feed("@batch=multi :motd!u@h PRIVMSG #chan :first line")
+        ft.feed("@batch=multi :motd!u@h PRIVMSG #chan :second line")
+        ft.feed("@batch=hist BATCH -multi")
+        ft.feed("BATCH -hist")
+        runCurrent()
+
+        val response = result.await() as ChatHistoryResponse.Messages
+        assertEquals(1, response.primaryMessageCount)
+        assertEquals(ChatHistoryReference("multi-1", 1_785_269_824_564L), response.oldest)
+        assertEquals(response.oldest, response.newest)
+
+        val message = response.events.single() as IrcEvent.ChatMessage
+        assertEquals("first line\nsecond line", message.text)
+        assertEquals("multi-1", message.ctx.msgid)
+        assertEquals(1_785_269_824_564L, message.ctx.serverTime)
+        assertEquals(ServerTimeSource.TAG, message.ctx.serverTimeSource)
+        assertTrue(message.isSelf)
     }
 
     @Test

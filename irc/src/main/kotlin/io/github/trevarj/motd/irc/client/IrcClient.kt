@@ -803,11 +803,7 @@ class IrcClient(
         return if (req.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
             ChatHistoryResponse.Targets(parseTargets(response.messages), endOfHistory)
         } else {
-            val mapped = response.messages
-                .filter { it.command != "BATCH" } // drop nested batch open/close markers
-                .mapNotNull { message ->
-                    eventMapper.map(message, batchId = message.tags["batch"])?.let { message to it }
-                }
+            val mapped = mapCorrelatedHistory(root, response.messages)
             val primaryMessages = mapped.filter { (message, _) ->
                 "draft/chathistory-context" !in message.tags
             }
@@ -823,6 +819,46 @@ class IrcClient(
             )
         }
     }
+
+    /** Rebuild nested response framing so one multiline history item remains one logical event. */
+    private fun mapCorrelatedHistory(
+        root: IrcMessage,
+        messages: List<IrcMessage>,
+    ): List<Pair<IrcMessage, IrcEvent>> {
+        val assembler = BatchAssembler()
+        if (assembler.route(root) != BatchAssembler.Outcome.Buffered) {
+            throw IrcProtocolException("CHATHISTORY", "root batch could not be assembled")
+        }
+        messages.forEach { message ->
+            if (assembler.route(message) != BatchAssembler.Outcome.Buffered) {
+                throw IrcProtocolException("CHATHISTORY", "response contained a line outside its root batch")
+            }
+        }
+
+        val rootRef = root.params.firstOrNull()?.removePrefix("+").orEmpty()
+        val closed = assembler.route(IrcMessage(command = "BATCH", params = listOf("-$rootRef")))
+            as? BatchAssembler.Outcome.Closed
+            ?: throw IrcProtocolException("CHATHISTORY", "root batch did not assemble completely")
+        return mapCorrelatedHistoryChildren(closed.tree)
+    }
+
+    private fun mapCorrelatedHistoryChildren(tree: BatchTree): List<Pair<IrcMessage, IrcEvent>> =
+        tree.children.flatMap { child ->
+            when (child) {
+                is BatchChild.Message -> listOfNotNull(
+                    eventMapper.map(child.message, batchId = child.message.tags["batch"] ?: tree.ref)
+                        ?.let { child.message to it },
+                )
+                is BatchChild.Nested -> {
+                    val event = child.batch.takeIf { it.type == MULTILINE_CAP }?.let(::mapMultilineBatch)
+                    if (event != null) {
+                        listOf(child.batch.opening to event)
+                    } else {
+                        mapCorrelatedHistoryChildren(child.batch)
+                    }
+                }
+            }
+        }
 
     private suspend fun sendUnlabeledChatHistory(
         request: ChatHistoryRequest,

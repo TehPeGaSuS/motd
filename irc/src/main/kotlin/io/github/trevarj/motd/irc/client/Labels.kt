@@ -317,6 +317,7 @@ internal class UnlabeledChatHistoryCorrelator {
                         }
                         current.refs += ref
                         current.nestedParents[ref] = msg.tags.getValue("batch")
+                        current.buffered += msg
                         return true
                     }
                 }
@@ -327,6 +328,7 @@ internal class UnlabeledChatHistoryCorrelator {
                         failProtocol(current, "nested batch closed before its child batch")
                         return true
                     }
+                    if (ref != current.rootRef) current.buffered += msg
                     current.refs -= ref
                     current.nestedParents.remove(ref)
                     if (ref == current.rootRef) {
