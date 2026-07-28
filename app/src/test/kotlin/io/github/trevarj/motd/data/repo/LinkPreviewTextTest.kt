@@ -10,7 +10,8 @@ class LinkPreviewTextTest {
         assertEquals(LinkPreviewKind.TEXT, LinkPreviewRepositoryImpl.responseKind("text/plain"))
         assertEquals(LinkPreviewKind.TEXT, LinkPreviewRepositoryImpl.responseKind("application/problem+json"))
         assertEquals(LinkPreviewKind.TEXT, LinkPreviewRepositoryImpl.responseKind("application/rss+xml"))
-        assertNull(LinkPreviewRepositoryImpl.responseKind("application/octet-stream"))
+        assertEquals(LinkPreviewKind.VIDEO, LinkPreviewRepositoryImpl.responseKind("video/webm"))
+        assertEquals(LinkPreviewKind.FILE, LinkPreviewRepositoryImpl.responseKind("application/octet-stream"))
     }
 
     @Test fun text_normalizes_controls_and_uses_file_name() {
@@ -24,6 +25,18 @@ class LinkPreviewTextTest {
     @Test fun invalid_charset_falls_back_and_blank_text_is_negative() {
         assertEquals(Charsets.UTF_8, LinkPreviewRepositoryImpl.charsetFromContentType("text/plain; charset=does-not-exist"))
         assertNull(LinkPreviewRepositoryImpl.sanitizeText("\u0000\u001b\u202e"))
+    }
+
+    @Test fun file_preview_uses_the_filename_and_declared_media_type() {
+        val preview = LinkPreviewRepositoryImpl.filePreview(
+            url = "https://example.test/downloads/report.pdf",
+            contentType = "application/pdf; charset=binary",
+            kind = LinkPreviewKind.FILE,
+        )
+
+        assertEquals("report.pdf", preview.title)
+        assertEquals("application/pdf", preview.description)
+        assertEquals(LinkPreviewKind.FILE, preview.kind)
     }
 
     @Test fun sanitizer_truncates_at_a_unicode_safe_code_point_limit() {

@@ -5,6 +5,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.chat.isImageUrl
+import io.github.trevarj.motd.ui.chat.isVideoUrl
 import io.github.trevarj.motd.ui.chat.messageUrls
 import io.github.trevarj.motd.ui.chat.parseInlineCode
 import io.github.trevarj.motd.ui.components.linkifiedBody
@@ -53,8 +54,8 @@ class MessagePresentationGenerativeTest {
                 assertTrue("URL order changed for $url", next >= previous)
                 previous = next
             }
-            assertEquals(urls.firstOrNull(::isImageUrl), classified.imageUrl)
-            assertEquals(urls.firstOrNull { !isImageUrl(it) }, classified.linkUrl)
+            assertEquals(urls.firstOrNull { isImageUrl(it) || isVideoUrl(it) }, classified.imageUrl)
+            assertEquals(urls.firstOrNull { !isImageUrl(it) && !isVideoUrl(it) }, classified.linkUrl)
 
             body.spanStyles.forEach { range ->
                 assertTrue(range.start in 0..body.length)

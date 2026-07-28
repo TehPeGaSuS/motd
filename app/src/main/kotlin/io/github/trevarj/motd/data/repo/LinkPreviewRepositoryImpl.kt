@@ -31,7 +31,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-// Declared web/text link preview. HttpURLConnection GET, 5s connect/read timeouts, HTML body
+// Declared web/text/media link preview. HttpURLConnection GET, 5s connect/read timeouts, HTML body
 // capped at 512 KB, text body capped at 16 KB, and Wikipedia summaries capped at 128 KB.
 // Completed negative results live in a bounded process cache, while concurrent callers for the
 // same URL await one shared request. The OG parser remains dependency-free; Wikipedia summaries
@@ -148,7 +148,8 @@ class LinkPreviewRepositoryImpl @Inject constructor(
         url: String,
         connection: AtomicReference<HttpURLConnection?>,
     ): LinkPreview? = request(url, GENERIC_ACCEPT, connection) { conn ->
-        when (responseKind(conn.getHeaderField("Content-Type"))) {
+        val contentType = conn.getHeaderField("Content-Type")
+        when (val kind = responseKind(contentType)) {
             LinkPreviewKind.WEB -> parseOgTags(
                 conn.url.toString(),
                 conn.inputStream.readCapped(HTML_MAX_BYTES, Charsets.UTF_8),
@@ -159,6 +160,11 @@ class LinkPreviewRepositoryImpl @Inject constructor(
                     TEXT_MAX_BYTES,
                     charsetFromContentType(conn.getHeaderField("Content-Type")),
                 ),
+            )
+            LinkPreviewKind.VIDEO, LinkPreviewKind.FILE -> filePreview(
+                url = conn.url.toString(),
+                contentType = contentType,
+                kind = kind,
             )
             LinkPreviewKind.WIKIPEDIA, null -> null
         }
@@ -208,7 +214,7 @@ class LinkPreviewRepositoryImpl @Inject constructor(
         private const val TEXT_MAX_BYTES = 16 * 1024
         private const val WIKIPEDIA_MAX_BYTES = 128 * 1024
         private const val TEXT_MAX_CODE_POINTS = 2_048
-        private const val GENERIC_ACCEPT = "text/html, text/*, application/json, application/xml"
+        private const val GENERIC_ACCEPT = "text/html, text/*, application/json, application/xml, video/*, application/*;q=0.1"
         private const val WIKIPEDIA_ACCEPT = "application/json"
         private const val USER_AGENT = "motd-Android (https://github.com/trevarj/motd)"
         private const val WIKIPEDIA_SITE_NAME = "Wikipedia"
@@ -223,7 +229,9 @@ class LinkPreviewRepositoryImpl @Inject constructor(
                 mediaType.startsWith("text/") -> LinkPreviewKind.TEXT
                 mediaType == "application/json" || mediaType == "application/xml" ||
                     (mediaType.startsWith("application/") && (mediaType.endsWith("+json") || mediaType.endsWith("+xml"))) -> LinkPreviewKind.TEXT
-                else -> null
+                mediaType.startsWith("video/") -> LinkPreviewKind.VIDEO
+                mediaType.startsWith("audio/") || mediaType.startsWith("image/") || mediaType.isBlank() -> null
+                else -> LinkPreviewKind.FILE
             }
         }
 
@@ -266,6 +274,19 @@ class LinkPreviewRepositoryImpl @Inject constructor(
             val host = URL(url).host
             return LinkPreview(url, textTitle(url), body, null, host, LinkPreviewKind.TEXT)
         }
+
+        internal fun filePreview(
+            url: String,
+            contentType: String?,
+            kind: LinkPreviewKind,
+        ): LinkPreview = LinkPreview(
+            url = url,
+            title = textTitle(url),
+            description = contentType?.substringBefore(';')?.trim()?.takeIf(String::isNotBlank),
+            imageUrl = null,
+            siteName = URL(url).host,
+            kind = kind,
+        )
 
         internal fun wikipediaSummaryUrl(url: String): String? {
             val parsed = runCatching { URL(url) }.getOrNull() ?: return null
@@ -323,6 +344,17 @@ class LinkPreviewRepositoryImpl @Inject constructor(
         private val OG_DESCRIPTION = ogRegex("og:description")
         private val OG_IMAGE = ogRegex("og:image")
         private val OG_SITE_NAME = ogRegex("og:site_name")
+        private val OG_TYPE = ogRegex("og:type")
+        private val OG_VIDEO = ogRegex("og:video")
+        private val POPULAR_VIDEO_HOSTS = setOf(
+            "youtube.com",
+            "youtu.be",
+            "vimeo.com",
+            "dailymotion.com",
+            "twitch.tv",
+            "streamable.com",
+            "tiktok.com",
+        )
         private val TITLE_TAG = Regex(
             "<title[^>]*>(.*?)</title>",
             setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
@@ -353,6 +385,11 @@ class LinkPreviewRepositoryImpl @Inject constructor(
                 .replace("&#39;", "'")
                 .replace("&#x27;", "'")
 
+        internal fun isPopularVideoUrl(url: String): Boolean = runCatching {
+            val host = URL(url).host.lowercase().trimEnd('.')
+            POPULAR_VIDEO_HOSTS.any { root -> host == root || host.endsWith(".$root") }
+        }.getOrDefault(false)
+
         /** Pure OG/title extractor — unit-tested directly against fixture HTML. */
         fun parseOgTags(url: String, html: String): LinkPreview? {
             val title = OG_TITLE.firstGroup(html)
@@ -361,16 +398,20 @@ class LinkPreviewRepositoryImpl @Inject constructor(
             val description = OG_DESCRIPTION.firstGroup(html)
             val image = OG_IMAGE.firstGroup(html)
             val siteName = OG_SITE_NAME.firstGroup(html)
+            val video = isPopularVideoUrl(url) ||
+                OG_TYPE.firstGroup(html)?.startsWith("video", ignoreCase = true) == true ||
+                OG_VIDEO.firstGroup(html) != null
             // Nothing extractable → treat as no preview (negative-cacheable).
-            if (title == null && description == null && image == null && siteName == null) {
+            if (title == null && description == null && image == null && siteName == null && !video) {
                 return null
             }
             return LinkPreview(
                 url = url,
-                title = title,
+                title = title ?: URL(url).host.takeIf { video },
                 description = description,
                 imageUrl = image,
                 siteName = siteName,
+                kind = if (video) LinkPreviewKind.VIDEO else LinkPreviewKind.WEB,
             )
         }
     }

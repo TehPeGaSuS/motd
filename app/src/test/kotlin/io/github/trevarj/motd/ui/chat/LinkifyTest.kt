@@ -1,6 +1,8 @@
 package io.github.trevarj.motd.ui.chat
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LinkifyTest {
@@ -34,6 +36,18 @@ class LinkifyTest {
             messageUrls("read https://example.com/article then https://example.com/photo.webp"),
         )
         assertEquals(MessageUrls.Empty, messageUrls("ordinary IRC line"))
+    }
+
+    @Test fun resolves_direct_videos_as_inline_media() {
+        assertEquals(
+            MessageUrls(
+                imageUrl = "https://cdn.example.com/clip.webm?quality=high",
+                linkUrl = "https://example.com/article",
+            ),
+            messageUrls("watch https://cdn.example.com/clip.webm?quality=high then https://example.com/article"),
+        )
+        assertTrue(isVideoUrl("https://cdn.example.com/clip.MP4#start"))
+        assertFalse(isVideoUrl("https://cdn.example.com/clip.mp4.txt"))
     }
 
     @Test fun ignores_urls_inside_code_but_keeps_urls_outside() {

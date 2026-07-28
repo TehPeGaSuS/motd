@@ -121,7 +121,7 @@ interface LinkPreviewRepository {
     suspend fun preview(url: String): LinkPreview?
 }
 
-enum class LinkPreviewKind { WEB, TEXT, WIKIPEDIA }
+enum class LinkPreviewKind { WEB, VIDEO, FILE, TEXT, WIKIPEDIA }
 
 data class LinkPreview(
     val url: String,

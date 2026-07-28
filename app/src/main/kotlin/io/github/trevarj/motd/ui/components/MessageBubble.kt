@@ -42,7 +42,6 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLocale
@@ -65,7 +64,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.LinkPreview
@@ -407,10 +405,10 @@ fun MessageBubble(
             reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
             imageUrl?.let { url ->
-                AsyncImage(
-                    model = url,
-                    contentDescription = null,
-                    contentScale = ContentScale.FillWidth,
+                InlineMediaPreview(
+                    url = url,
+                    onImageClick = onImageClick,
+                    onLongPress = onLongPress,
                     // Reserve a 4:3 box until the bitmap lands so rows don't jump the reversed-list
                     // anchor (plans/15 #34).
                     modifier = Modifier
@@ -419,7 +417,6 @@ fun MessageBubble(
                         .heightIn(max = 280.dp)
                         .aspectRatio(4f / 3f)
                         .clip(RoundedCornerShape(12.dp))
-                        .combinedClickable(onClick = { onImageClick(url) }, onLongClick = onLongPress),
                 )
             }
 
@@ -638,17 +635,16 @@ private fun ComfortableActionBubble(
             }
 
             imageUrl?.let { url ->
-                AsyncImage(
-                    model = url,
-                    contentDescription = null,
-                    contentScale = ContentScale.FillWidth,
+                InlineMediaPreview(
+                    url = url,
+                    onImageClick = onImageClick,
+                    onLongPress = onLongPress,
                     modifier = Modifier
                         .padding(top = 2.dp)
                         .widthIn(max = 280.dp)
                         .heightIn(max = 240.dp)
                         .aspectRatio(4f / 3f)
                         .clip(RoundedCornerShape(10.dp))
-                        .combinedClickable(onClick = { onImageClick(url) }, onLongClick = onLongPress),
                 )
             }
 
@@ -805,17 +801,16 @@ private fun ActionMessageRow(
             }
 
             imageUrl?.let { url ->
-                AsyncImage(
-                    model = url,
-                    contentDescription = null,
-                    contentScale = ContentScale.FillWidth,
+                InlineMediaPreview(
+                    url = url,
+                    onImageClick = onImageClick,
+                    onLongPress = onLongPress,
                     modifier = Modifier
                         .padding(top = 2.dp)
                         .widthIn(max = 280.dp)
                         .heightIn(max = 240.dp)
                         .aspectRatio(4f / 3f)
                         .clip(RoundedCornerShape(10.dp))
-                        .combinedClickable(onClick = { onImageClick(url) }, onLongClick = onLongPress),
                 )
             }
 
@@ -1069,17 +1064,16 @@ private fun TwoLineMessageRow(
             }
 
             imageUrl?.let { url ->
-                AsyncImage(
-                    model = url,
-                    contentDescription = null,
-                    contentScale = ContentScale.FillWidth,
+                InlineMediaPreview(
+                    url = url,
+                    onImageClick = onImageClick,
+                    onLongPress = onLongPress,
                     modifier = Modifier
                         .padding(vertical = 2.dp)
                         .widthIn(max = 280.dp)
                         .heightIn(max = 240.dp)
                         .aspectRatio(4f / 3f)
                         .clip(RoundedCornerShape(10.dp))
-                        .combinedClickable(onClick = { onImageClick(url) }, onLongClick = onLongPress),
                 )
             }
 

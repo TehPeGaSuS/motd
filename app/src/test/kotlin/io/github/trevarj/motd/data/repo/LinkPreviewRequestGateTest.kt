@@ -69,7 +69,7 @@ class LinkPreviewRequestGateTest {
     }
 
     @Test
-    fun completed_negative_result_is_distinct_from_a_cache_miss() = runTest {
+    fun completed_file_result_is_distinct_from_a_cache_miss() = runTest {
         val repository = LinkPreviewRepositoryImpl(prefs, this, StandardTestDispatcher(testScheduler))
         val url = server.url("/binary").toString()
         server.enqueue(
@@ -79,9 +79,9 @@ class LinkPreviewRequestGateTest {
         )
 
         assertNull(repository.cachedPreview(url))
-        assertNull(repository.preview(url))
+        assertEquals(LinkPreviewKind.FILE, repository.preview(url)?.kind)
         assertNotNull(repository.cachedPreview(url))
-        assertNull(repository.cachedPreview(url)?.preview)
+        assertEquals(LinkPreviewKind.FILE, repository.cachedPreview(url)?.preview?.kind)
         assertEquals(1, server.requestCount)
     }
 

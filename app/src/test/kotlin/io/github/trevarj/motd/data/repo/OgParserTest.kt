@@ -1,7 +1,9 @@
 package io.github.trevarj.motd.data.repo
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 // Plain JVM fixture tests for the OG-tag extractor (no Android deps: parseOgTags uses only Regex).
@@ -55,6 +57,37 @@ class OgParserTest {
     fun noExtractableTags_returnsNull() {
         val html = "<html><body>no metadata at all</body></html>"
         assertNull(LinkPreviewRepositoryImpl.parseOgTags(url, html))
+    }
+
+    @Test
+    fun video_pages_use_a_playable_thumbnail_card() {
+        val preview = LinkPreviewRepositoryImpl.parseOgTags(
+            "https://www.youtube.com/watch?v=abc123",
+            """
+                <meta property="og:title" content="Demo video">
+                <meta property="og:image" content="https://i.ytimg.com/vi/abc123/hqdefault.jpg">
+            """.trimIndent(),
+        )!!
+
+        assertEquals("Demo video", preview.title)
+        assertEquals("https://i.ytimg.com/vi/abc123/hqdefault.jpg", preview.imageUrl)
+        assertEquals(LinkPreviewKind.VIDEO, preview.kind)
+    }
+
+    @Test
+    fun video_metadata_and_host_detection_do_not_match_lookalikes() {
+        assertTrue(LinkPreviewRepositoryImpl.isPopularVideoUrl("https://youtu.be/abc123"))
+        assertTrue(LinkPreviewRepositoryImpl.isPopularVideoUrl("https://www.vimeo.com/12345"))
+        assertFalse(LinkPreviewRepositoryImpl.isPopularVideoUrl("https://youtube.com.example.test/watch"))
+
+        val preview = LinkPreviewRepositoryImpl.parseOgTags(
+            url,
+            """
+                <meta property="og:type" content="video.other">
+                <meta property="og:video" content="https://cdn.example.com/clip.mp4">
+            """.trimIndent(),
+        )!!
+        assertEquals(LinkPreviewKind.VIDEO, preview.kind)
     }
 
     @Test

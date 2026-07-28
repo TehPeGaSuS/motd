@@ -9,6 +9,7 @@ import io.github.trevarj.motd.audio.parseAudioAttachments
 private val URL_REGEX = Regex("""https?://[^\s<>]+""")
 
 private val IMAGE_EXT = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
+private val VIDEO_EXT = setOf("mp4", "webm", "m4v", "mov")
 
 /** First inline-image, first previewable link, and audio links discovered in one URL-regex pass. */
 data class MessageUrls(
@@ -78,15 +79,19 @@ internal fun trimUrl(raw: String): String {
 
 /** True when [url]'s path ends in a known image extension. */
 fun isImageUrl(url: String): Boolean {
-    val path = url.substringBefore('?').substringBefore('#')
-    val ext = path.substringAfterLast('.', "").lowercase()
-    return ext in IMAGE_EXT
+    return urlExtension(url) in IMAGE_EXT
 }
 
-/** First image URL in [text], or null. */
+/** True when [url]'s path ends in a directly playable video extension. */
+fun isVideoUrl(url: String): Boolean = urlExtension(url) in VIDEO_EXT
+
+private fun urlExtension(url: String): String =
+    url.substringBefore('?').substringBefore('#').substringAfterLast('.', "").lowercase()
+
+/** First inline image or direct video URL in [text], or null. */
 fun firstImageUrl(text: String): String? = messageUrls(text).imageUrl
 
-/** First non-image URL in [text], or null (used for the link preview card). */
+/** First non-inline-media URL in [text], or null (used for the link preview card). */
 fun firstLinkUrl(text: String): String? = messageUrls(text).linkUrl
 
 /**
@@ -96,10 +101,12 @@ fun firstLinkUrl(text: String): String? = messageUrls(text).linkUrl
 fun messageUrls(text: String): MessageUrls {
     var image: String? = null
     var link: String? = null
-    val audio = parseAudioAttachments(text)
+    // WebM can carry either format. An explicit video suffix belongs to the inline video preview,
+    // rather than creating competing audio and video controls for the same attachment.
+    val audio = parseAudioAttachments(text).filterNot { isVideoUrl(it.url) }
     val audioUrls = audio.asSequence().map { it.url }.toSet()
     for (url in extractUrls(text)) {
-        if (isImageUrl(url)) {
+        if (isImageUrl(url) || isVideoUrl(url)) {
             if (image == null) image = url
         } else if (link == null && url !in audioUrls && !isImmediateAudioUrl(url)) {
             link = url

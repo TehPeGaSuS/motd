@@ -19,7 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -31,7 +30,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.LinkPreview
@@ -163,17 +161,16 @@ internal fun CompactMessageRow(
         }
 
         imageUrl?.let { url ->
-            AsyncImage(
-                model = url,
-                contentDescription = null,
-                contentScale = ContentScale.FillWidth,
+            InlineMediaPreview(
+                url = url,
+                onImageClick = onImageClick,
+                onLongPress = onLongPress,
                 modifier = Modifier
                     .padding(top = 2.dp)
                     .widthIn(max = 280.dp)
                     .heightIn(max = 200.dp)
                     .aspectRatio(4f / 3f)
                     .clip(RoundedCornerShape(8.dp))
-                    .combinedClickable(onClick = { onImageClick(url) }, onLongClick = onLongPress),
             )
         }
 

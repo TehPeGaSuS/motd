@@ -7,8 +7,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,6 +20,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -122,15 +126,7 @@ private fun LinkPreviewContent(preview: LinkPreview, onClick: () -> Unit) {
             .clickable { onClick() }
             .padding(8.dp),
     ) {
-        if (preview.kind != LinkPreviewKind.TEXT && preview.imageUrl != null) {
-            AsyncImage(
-                model = preview.imageUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)),
-            )
-            Spacer(Modifier.width(10.dp))
-        }
+        LinkPreviewLeading(preview)
         Column(modifier = Modifier.padding(vertical = 2.dp)) {
             preview.siteName?.let {
                 Text(
@@ -158,16 +154,65 @@ private fun LinkPreviewContent(preview: LinkPreview, onClick: () -> Unit) {
                     maxLines = when (preview.kind) {
                         LinkPreviewKind.TEXT -> 4
                         LinkPreviewKind.WIKIPEDIA -> 3
-                        LinkPreviewKind.WEB -> 2
+                        LinkPreviewKind.WEB, LinkPreviewKind.VIDEO, LinkPreviewKind.FILE -> 2
                     },
                     overflow = TextOverflow.Ellipsis,
                     modifier = when (preview.kind) {
                         LinkPreviewKind.TEXT -> Modifier.testTag("link_preview_text_body")
                         LinkPreviewKind.WIKIPEDIA -> Modifier.testTag("link_preview_wikipedia_body")
-                        LinkPreviewKind.WEB -> Modifier
+                        LinkPreviewKind.WEB, LinkPreviewKind.VIDEO, LinkPreviewKind.FILE -> Modifier
                     },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun LinkPreviewLeading(preview: LinkPreview) {
+    when {
+        preview.kind == LinkPreviewKind.FILE -> {
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.InsertDriveFile,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(56.dp).testTag("link_preview_file"),
+            )
+            Spacer(Modifier.width(10.dp))
+        }
+        preview.imageUrl != null -> {
+            Box(
+                contentAlignment = androidx.compose.ui.Alignment.Center,
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .testTag(if (preview.kind == LinkPreviewKind.VIDEO) "link_preview_video_thumbnail" else "link_preview_thumbnail"),
+            ) {
+                AsyncImage(
+                    model = preview.imageUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                if (preview.kind == LinkPreviewKind.VIDEO) {
+                    Icon(
+                        imageVector = Icons.Filled.PlayCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.background(MaterialTheme.colorScheme.surface.copy(alpha = 0.56f)),
+                    )
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+        }
+        preview.kind == LinkPreviewKind.VIDEO -> {
+            Icon(
+                imageVector = Icons.Filled.PlayCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(56.dp).testTag("link_preview_video_thumbnail"),
+            )
+            Spacer(Modifier.width(10.dp))
         }
     }
 }
