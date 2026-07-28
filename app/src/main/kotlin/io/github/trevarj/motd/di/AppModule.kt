@@ -89,6 +89,8 @@ import io.github.trevarj.motd.bouncer.BouncerServSessionProvider
 import io.github.trevarj.motd.bouncer.ConnectionBouncerServSessionProvider
 import io.github.trevarj.motd.data.backup.ConfigurationBackupRepository
 import io.github.trevarj.motd.data.backup.ConfigurationBackupRepositoryImpl
+import io.github.trevarj.motd.dcc.DccTransferController
+import io.github.trevarj.motd.dcc.DccTransferControllerImpl
 import javax.inject.Singleton
 
 /**
@@ -172,6 +174,9 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun voiceMessageSender(impl: VoiceMessageSenderImpl): VoiceMessageSender
+
+    @Binds @Singleton
+    abstract fun dccTransferController(impl: DccTransferControllerImpl): DccTransferController
 
     @Binds @Singleton
     abstract fun audioMetadataRepository(impl: AudioMetadataRepositoryImpl): AudioMetadataRepository
