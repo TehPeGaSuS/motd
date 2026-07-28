@@ -12,7 +12,7 @@ runs:
         source third_party/sing-box/source.lock
         sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
         "$sdkmanager" --sdk_root="$ANDROID_HOME" --install \
-          "platforms;android-23" "platforms;android-37" "build-tools;36.0.0" \
+          "platforms;android-23" "platforms;android-37.0" "build-tools;36.0.0" \
           "ndk;$ANDROID_NDK_VERSION"
         ndk_home="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
         grep -Fx "Pkg.Revision = $ANDROID_NDK_VERSION" "$ndk_home/source.properties"
