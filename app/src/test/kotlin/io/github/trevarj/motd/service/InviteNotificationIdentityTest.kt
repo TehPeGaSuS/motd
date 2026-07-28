@@ -12,4 +12,12 @@ class InviteNotificationIdentityTest {
         assertNotEquals(first, MotdNotifications.invitationNotificationId(42))
         assertTrue(first >= 0x40000000)
     }
+
+    @Test fun `transfer notification ids are stable positive and distinct from invitations`() {
+        val first = MotdNotifications.transferNotificationId(41)
+        assertEquals(first, MotdNotifications.transferNotificationId(41))
+        assertNotEquals(first, MotdNotifications.transferNotificationId(42))
+        assertNotEquals(first, MotdNotifications.invitationNotificationId(41))
+        assertTrue(first >= 0x50000000)
+    }
 }

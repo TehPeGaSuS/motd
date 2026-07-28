@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
+import android.net.Uri
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
@@ -14,6 +15,8 @@ import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.audio.CachedAudioMetadata
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.DccTransferDao
+import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
@@ -39,6 +42,7 @@ import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.dcc.DccTransferController
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
@@ -175,6 +179,8 @@ class ChatViewModel @Inject constructor(
     private val messageRepository: MessageRepository,
     private val bufferRepository: BufferRepository,
     private val networkIdentityDao: NetworkIdentityDao,
+    private val dccTransferDao: DccTransferDao,
+    private val dccTransferController: DccTransferController,
     private val connectionManager: ConnectionManager,
     private val typingTracker: TypingTracker,
     private val foregroundBufferTracker: ForegroundBufferTracker,
@@ -542,10 +548,41 @@ class ChatViewModel @Inject constructor(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, StateFlow<ReplyPreviewData?>>): Boolean =
             size > MAX_REPLY_PREVIEW_CACHE
     }
+    private val dccTransferCache = object : LinkedHashMap<Long, StateFlow<DccTransferEntity?>>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, StateFlow<DccTransferEntity?>>): Boolean =
+            size > MAX_REPLY_PREVIEW_CACHE
+    }
 
     fun replyPreview(msgid: String): StateFlow<ReplyPreviewData?> = synchronized(replyPreviewCache) {
         replyPreviewCache.getOrPut(msgid) {
             createReplyPreviewFlow(msgid, initialValue = null)
+        }
+    }
+
+    fun dccTransfer(message: MessageEntity): StateFlow<DccTransferEntity?> = synchronized(dccTransferCache) {
+        dccTransferCache.getOrPut(message.id) {
+            dccTransferDao.observeByTimelineEventId(message.id)
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        }
+    }
+
+    fun acceptDccTransfer(transferId: Long, destination: Uri, allowPrivateEndpoint: Boolean) {
+        viewModelScope.launch {
+            dccTransferController.acceptIncoming(transferId, destination, allowPrivateEndpoint)
+        }
+    }
+
+    fun rejectDccTransfer(transferId: Long) {
+        viewModelScope.launch { dccTransferController.reject(transferId) }
+    }
+
+    fun removeDccTransfer(transferId: Long) {
+        viewModelScope.launch { dccTransferController.removeRecord(transferId) }
+    }
+
+    fun sendDccFile(source: Uri) {
+        viewModelScope.launch {
+            dccTransferController.sendFile(operationalBufferId.value, source)
         }
     }
 

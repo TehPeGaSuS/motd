@@ -171,6 +171,18 @@
     <!-- Settings category submenu summaries (top-level Settings list). -->
     <string name="settings_appearance_summary">Personalize themes, text size, chat layout, avatars, and wallpaper.</string>
     <string name="settings_chat_summary">Control message previews, composer options, sounds, friends, and fools.</string>
+    <string name="settings_direct_connections">Direct connections</string>
+    <string name="settings_direct_connections_summary">DCC file transfers and safety policy.</string>
+    <string name="settings_direct_connections_disclosure">DCC file transfers connect directly to peers.</string>
+    <string name="settings_direct_connections_disclosure_desc">motd only supports DCC SEND and SSEND file transfer. DCC CHAT and SCHAT are intentionally unsupported. Plain SEND is not encrypted; SSEND is encrypted but peer identity is not verified.</string>
+    <string name="settings_direct_connections_mode">Connection mode</string>
+    <string name="settings_direct_connections_mode_desc">Auto uses active receive and direct active send. Private, local, and LAN offers require Allow once. Proxied networks never bypass the proxy; direct outgoing SEND is unavailable there until reverse mode is configured.</string>
+    <string name="settings_direct_connections_recent">Recent transfers</string>
+    <string name="settings_direct_connections_empty">No direct file transfers yet</string>
+    <string name="settings_direct_connections_empty_desc">File offers will appear here after someone sends one, or after you send a direct file from a query chat.</string>
+    <string name="dcc_direction_incoming">Incoming</string>
+    <string name="dcc_direction_outgoing">Outgoing</string>
+    <string name="dcc_remove_record">Remove record</string>
     <string name="settings_messages_section">Message display</string>
     <string name="settings_composer_section">Composer</string>
     <string name="settings_delivery_summary">Choose how messages arrive and keep background delivery reliable.</string>
@@ -343,6 +355,8 @@
     <string name="upload_photo_desc">From your gallery</string>
     <string name="upload_file">File</string>
     <string name="upload_file_desc">Choose a document</string>
+    <string name="dcc_send_file">Direct file</string>
+    <string name="dcc_send_file_desc">Peer-to-peer DCC SEND</string>
     <string name="upload_draft">Current draft</string>
     <string name="upload_draft_desc">Replace it with a link</string>
     <string name="upload_text">Text paste</string>

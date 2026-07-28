@@ -126,9 +126,11 @@ fun AttachmentSheets(
     networkId: Long?,
     sojuFileHostAvailable: Boolean,
     startWithCurrentDraft: Boolean = false,
+    directFileTransferAvailable: Boolean = false,
     onDismiss: () -> Unit,
     onInsertUrl: (String) -> Unit,
     onReplaceDraft: (String) -> Unit,
+    onDirectFile: (Uri) -> Unit = {},
     viewModel: AttachmentViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -183,6 +185,9 @@ fun AttachmentSheets(
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
         it?.let { uri -> select(uri, false) }
     }
+    val directFilePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
+        it?.let(onDirectFile)
+    }
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) {
         it?.let { uri -> select(uri, true) }
     }
@@ -200,6 +205,11 @@ fun AttachmentSheets(
             onFile = {
                 closeSourceSheet()
                 filePicker.launch(arrayOf("*/*"))
+            },
+            directFileTransferAvailable = directFileTransferAvailable,
+            onDirectFile = {
+                closeSourceSheet()
+                directFilePicker.launch(arrayOf("*/*"))
             },
             onCurrentDraft = {
                 closeSourceSheet()
@@ -311,6 +321,8 @@ private fun SourceSheet(
     onDismiss: () -> Unit,
     onPhoto: () -> Unit,
     onFile: () -> Unit,
+    directFileTransferAvailable: Boolean,
+    onDirectFile: () -> Unit,
     onCurrentDraft: () -> Unit,
     onNewText: () -> Unit,
     onInsertRecent: (UploadRecord) -> Unit,
@@ -325,6 +337,20 @@ private fun SourceSheet(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SourceCard(Icons.Outlined.Image, stringResource(R.string.upload_photo), stringResource(R.string.upload_photo_desc), true, onPhoto, Modifier.weight(1f))
                 SourceCard(Icons.Outlined.AttachFile, stringResource(R.string.upload_file), stringResource(R.string.upload_file_desc), true, onFile, Modifier.weight(1f))
+            }
+            if (directFileTransferAvailable) {
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SourceCard(
+                        Icons.Outlined.Lock,
+                        stringResource(R.string.dcc_send_file),
+                        stringResource(R.string.dcc_send_file_desc),
+                        true,
+                        onDirectFile,
+                        Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.weight(1f))
+                }
             }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -163,6 +163,7 @@ class MotdNotifications @Inject constructor(
                         )
                     }
                     MessageKind.INVITE -> onInvitation(buffer.networkId, buffer.id, event.id)
+                    MessageKind.DCC_TRANSFER -> onDccTransferOffer(buffer.networkId, buffer.id, event.id)
                     else -> Unit
                 }
                 dao.completeNotification(event.id)
@@ -191,6 +192,9 @@ class MotdNotifications @Inject constructor(
         )
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_INVITATIONS, "Invitations", NotificationManager.IMPORTANCE_HIGH),
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_TRANSFERS, "File transfers", NotificationManager.IMPORTANCE_HIGH),
         )
     }
 
@@ -575,16 +579,65 @@ class MotdNotifications @Inject constructor(
         }
     }
 
+    override suspend fun onDccTransferOffer(networkId: Long, bufferId: Long, messageId: Long) {
+        val message = db.messageDao().byCanonicalId(messageId) ?: return
+        val buffer = db.bufferDao().observeById(bufferId) ?: return
+        val foreground = foregroundBufferTracker.foregroundBufferId.value == bufferId
+        val incomingAnchor = TimelineAnchor(message.serverTime, message.id)
+        val alreadyRead = buffer.effectiveLocalReadAnchor?.let { incomingAnchor <= it } == true
+        if (foreground || buffer.muted || alreadyRead) return
+
+        val contentIntent = PendingIntent.getActivity(
+            context,
+            transferNotificationId(message.id),
+            Intent(context, MainActivity::class.java)
+                .setAction(ACTION_OPEN_BUFFER)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(EXTRA_BUFFER_ID, bufferId)
+                .putExtra(EXTRA_JUMP_MSGID, message.msgid)
+                .putExtra(EXTRA_JUMP_TIME, message.serverTime)
+                .putExtra(EXTRA_EVENT_ID, message.id),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_TRANSFERS)
+            .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
+            .setContentTitle("File offer from ${message.sender}")
+            .setContentText(message.text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message.text))
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setSilent(true)
+            .setAutoCancel(true)
+            .setContentIntent(contentIntent)
+            .addAction(android.R.drawable.ic_menu_save, "Open to save", contentIntent)
+            .build()
+        val canPost = android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (canPost) manager.notify(transferNotificationId(message.id), notification)
+        diagnostics.record("notifications", "dcc_transfer_post_finished") {
+            mapOf(
+                "network_id" to networkId,
+                "buffer_id" to bufferId,
+                "event_id" to message.id,
+                "permission" to canPost,
+            )
+        }
+    }
+
     companion object {
         const val CHANNEL_STATUS = "status"
         const val CHANNEL_MESSAGES = "messages"
         const val CHANNEL_MENTIONS = "mentions"
         const val CHANNEL_INVITATIONS = "invitations"
+        const val CHANNEL_TRANSFERS = "transfers"
         private const val MAX_NOTIFICATION_MESSAGES = 25
         private val RESETTABLE_CHANNELS = setOf(
             CHANNEL_MESSAGES,
             CHANNEL_MENTIONS,
             CHANNEL_INVITATIONS,
+            CHANNEL_TRANSFERS,
         )
         private const val V10_NOTIFICATION_RESET = "v10_notification_reset"
         private const val MAX_RECOVERY_NOTIFICATIONS = 200
@@ -600,6 +653,9 @@ class MotdNotifications @Inject constructor(
 
         internal fun invitationNotificationId(messageId: Long): Int =
             0x40000000 or (messageId xor (messageId ushr 32)).toInt().and(0x3fffffff)
+
+        internal fun transferNotificationId(messageId: Long): Int =
+            0x50000000 or (messageId xor (messageId ushr 32)).toInt().and(0x0fffffff)
     }
 }
 

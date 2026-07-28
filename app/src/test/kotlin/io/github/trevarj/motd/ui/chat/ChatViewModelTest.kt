@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.paging.PagingData
 import androidx.room.Room
@@ -8,6 +9,7 @@ import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
+import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.EventRedirectEntity
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
@@ -41,6 +43,7 @@ import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.dcc.DccTransferController
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioMetadataRepository
@@ -998,6 +1001,8 @@ class ChatViewModelTest {
             messageRepository = messages,
             bufferRepository = buffers,
             networkIdentityDao = db.networkIdentityDao(),
+            dccTransferDao = db.dccTransferDao(),
+            dccTransferController = FakeDccTransferController(),
             connectionManager = manager,
             typingTracker = FakeTypingTracker(),
             foregroundBufferTracker = foreground,
@@ -1044,6 +1049,19 @@ class ChatViewModelTest {
 
     private data class SentMessage(val bufferId: Long, val text: String, val replyTo: Long?)
     private data class SentReaction(val bufferId: Long, val msgid: String, val emoji: String)
+
+    private class FakeDccTransferController : DccTransferController {
+        override fun observeAll(): Flow<List<DccTransferEntity>> = flowOf(emptyList())
+        override fun observeForNetwork(networkId: Long): Flow<List<DccTransferEntity>> = flowOf(emptyList())
+        override suspend fun acceptIncoming(
+            transferId: Long,
+            destinationUri: Uri,
+            allowPrivateEndpoint: Boolean,
+        ) = Unit
+        override suspend fun reject(transferId: Long) = Unit
+        override suspend fun removeRecord(transferId: Long) = Unit
+        override suspend fun sendFile(bufferId: Long, sourceUri: Uri, secure: Boolean) = Unit
+    }
 
     private class FakeConnectionManager(
         networkId: Long,

@@ -35,6 +35,7 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.avatar.AvatarConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.PersonOutline
 
@@ -44,6 +45,7 @@ fun ChatSettingsScreen(
     onBack: () -> Unit = {},
     onOpenFriends: () -> Unit = {},
     onOpenFools: () -> Unit = {},
+    onOpenDirectConnections: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -56,6 +58,7 @@ fun ChatSettingsScreen(
         onBack = onBack,
         onOpenFriends = onOpenFriends,
         onOpenFools = onOpenFools,
+        onOpenDirectConnections = onOpenDirectConnections,
         onShowJoinPartQuit = viewModel::setShowJoinPartQuit,
         onFoolsMode = viewModel::setFoolsMode,
         onShowComposerEmoji = viewModel::setShowComposerEmoji,
@@ -81,6 +84,7 @@ fun ChatSettingsContent(
     onBack: () -> Unit,
     onOpenFriends: () -> Unit,
     onOpenFools: () -> Unit,
+    onOpenDirectConnections: () -> Unit,
     onShowJoinPartQuit: (Boolean) -> Unit,
     onFoolsMode: (FoolsMode) -> Unit,
     onShowComposerEmoji: (Boolean) -> Unit,
@@ -152,6 +156,15 @@ fun ChatSettingsContent(
                 checked = reply.visibleChannelPrefix,
                 onCheckedChange = onVisibleReplyPrefix,
                 switchTag = "settings_switch_reply_prefix",
+            )
+        }
+        SettingsGroup(title = stringResource(R.string.settings_direct_connections)) {
+            SettingsNavigationRow(
+                icon = Icons.Outlined.AttachFile,
+                title = stringResource(R.string.settings_direct_connections),
+                summary = stringResource(R.string.settings_direct_connections_summary),
+                modifier = Modifier.testTag("settings_direct_connections"),
+                onClick = onOpenDirectConnections,
             )
         }
         SettingsGroup(title = stringResource(R.string.settings_voice_section)) {
@@ -290,7 +303,7 @@ private fun ChatSettingsPreview() {
             contentPreviews = ContentPreviewConfig(),
             voice = VoiceConfig(),
             avatars = AvatarConfig(),
-            onBack = {}, onOpenFriends = {}, onOpenFools = {},
+            onBack = {}, onOpenFriends = {}, onOpenFools = {}, onOpenDirectConnections = {},
             onShowJoinPartQuit = {}, onFoolsMode = {}, onShowComposerEmoji = {},
             onChatSoundsEnabled = {},
             onVisibleReplyPrefix = {},

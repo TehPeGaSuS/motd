@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Trace
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -143,6 +144,7 @@ import io.github.trevarj.motd.audio.CachedAudioMetadata
 import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
@@ -169,6 +171,7 @@ import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.spacingFor
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -178,6 +181,11 @@ private const val AUTOCOMPLETE_SHOW_DEBOUNCE_MS = 250L
 private const val REACTION_PREFETCH_ROWS = 12
 private const val MAX_VISIBLE_REACTION_MSGIDS = 80
 private const val MAX_UNREAD_BADGE_COUNT = 100
+
+private data class PendingDccAccept(
+    val transferId: Long,
+    val allowPrivateEndpoint: Boolean,
+)
 
 /** How long (ms) the scroll-to-bottom FAB must be held to skip the mention walk and jump to newest. */
 internal const val SCROLL_TO_BOTTOM_FAB_HOLD_MS = 450
@@ -358,6 +366,11 @@ fun ChatScreen(
         reactionChips = reactionChipsForMessage,
         replyPreview = viewModel::replyPreview,
         onReplyPreviewClick = viewModel::jumpToRepliedMessage,
+        dccTransfer = viewModel::dccTransfer,
+        onAcceptDccTransfer = viewModel::acceptDccTransfer,
+        onRejectDccTransfer = viewModel::rejectDccTransfer,
+        onRemoveDccTransfer = viewModel::removeDccTransfer,
+        onSendDccFile = viewModel::sendDccFile,
         memberNicks = memberNicks,
         knownNicks = knownNicks,
         identityRules = identityRules,
@@ -534,10 +547,17 @@ fun ChatContent(
     onVoiceErrorDismissed: () -> Unit = {},
     onVoiceNoticeDismissed: () -> Unit = {},
     reactionChips: (String) -> List<io.github.trevarj.motd.ui.components.ReactionChip> = { emptyList() },
-    replyPreview: (String) -> kotlinx.coroutines.flow.StateFlow<io.github.trevarj.motd.ui.components.ReplyPreviewData?> = {
+    replyPreview: (String) -> StateFlow<io.github.trevarj.motd.ui.components.ReplyPreviewData?> = {
         kotlinx.coroutines.flow.MutableStateFlow(null)
     },
     onReplyPreviewClick: (String) -> Unit = {},
+    dccTransfer: (MessageEntity) -> StateFlow<DccTransferEntity?> = {
+        kotlinx.coroutines.flow.MutableStateFlow(null)
+    },
+    onAcceptDccTransfer: (Long, Uri, Boolean) -> Unit = { _, _, _ -> },
+    onRejectDccTransfer: (Long) -> Unit = {},
+    onRemoveDccTransfer: (Long) -> Unit = {},
+    onSendDccFile: (Uri) -> Unit = {},
     memberNicks: List<String> = emptyList(),
     knownNicks: Set<String> = emptySet(),
     identityRules: IrcIdentityRules = IrcIdentityRules(),
@@ -643,6 +663,16 @@ fun ChatContent(
     val clipboard: Clipboard = LocalClipboard.current
     val ctx = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    var pendingDccAccept by remember { mutableStateOf<PendingDccAccept?>(null) }
+    val dccDestinationPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri ->
+        val pending = pendingDccAccept
+        pendingDccAccept = null
+        if (uri != null && pending != null) {
+            onAcceptDccTransfer(pending.transferId, uri, pending.allowPrivateEndpoint)
+        }
+    }
     LaunchedEffect(voiceState.notice) {
         val notice = voiceState.notice ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(notice)
@@ -1412,6 +1442,13 @@ fun ChatContent(
                         onDelete = onDelete,
                         onAcceptInvite = onAcceptInvite,
                         onDismissInvite = onDismissInvite,
+                        dccTransfer = dccTransfer,
+                        onAcceptDccTransfer = { transferId, filename, allowPrivate ->
+                            pendingDccAccept = PendingDccAccept(transferId, allowPrivate)
+                            dccDestinationPicker.launch(filename)
+                        },
+                        onRejectDccTransfer = onRejectDccTransfer,
+                        onRemoveDccTransfer = onRemoveDccTransfer,
                         loadPreview = loadPreview,
                         richContentReady = initialPositionSettled,
                         showImages = showImages,
@@ -1621,6 +1658,8 @@ fun ChatContent(
             ?.isupport
             ?.let(::sojuFileHostEndpoint) != null,
         startWithCurrentDraft = uploadCurrentDraftDirectly,
+        directFileTransferAvailable = state.buffer?.type == BufferType.QUERY &&
+            state.connState is IrcClientState.Ready,
         onDismiss = { attachmentSheetOpen = false; uploadCurrentDraftDirectly = false },
         onInsertUrl = {
             composerText = io.github.trevarj.motd.ui.components.insertAtCursor(composerText, it)
@@ -1630,6 +1669,7 @@ fun ChatContent(
             composerText = TextFieldValue(it, androidx.compose.ui.text.TextRange(it.length))
             onDraftChanged(composerText.text)
         },
+        onDirectFile = onSendDccFile,
     )
     if (historyRefreshSheetOpen) {
         HistoryRefreshSheet(

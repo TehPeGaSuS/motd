@@ -1516,6 +1516,9 @@ interface DccTransferDao {
     @Query("SELECT * FROM dcc_transfers WHERE networkId = :networkId AND offerKey = :offerKey LIMIT 1")
     suspend fun byOfferKey(networkId: Long, offerKey: String): DccTransferEntity?
 
+    @Query("SELECT * FROM dcc_transfers WHERE timelineEventId = :timelineEventId LIMIT 1")
+    fun observeByTimelineEventId(timelineEventId: TimelineEventId): Flow<DccTransferEntity?>
+
     @Query("SELECT * FROM dcc_transfers ORDER BY updatedAt DESC, id DESC")
     fun observeAll(): Flow<List<DccTransferEntity>>
 

@@ -27,6 +27,7 @@ import io.github.trevarj.motd.ui.settings.AppearanceSettingsScreen
 import io.github.trevarj.motd.ui.settings.BackupRestoreScreen
 import io.github.trevarj.motd.ui.settings.ChatSettingsScreen
 import io.github.trevarj.motd.ui.settings.DeliverySettingsScreen
+import io.github.trevarj.motd.ui.settings.DirectConnectionsScreen
 import io.github.trevarj.motd.ui.settings.ManageNicksScreen
 import io.github.trevarj.motd.ui.settings.NetworkSettingsScreen
 import io.github.trevarj.motd.ui.settings.NetworkToolsScreen
@@ -180,7 +181,11 @@ fun MotdNavGraph(
                 onBack = { navController.popBackStack() },
                 onOpenFriends = { navController.navigate(FriendsRoute) },
                 onOpenFools = { navController.navigate(FoolsRoute) },
+                onOpenDirectConnections = { navController.navigate(DirectConnectionsRoute) },
             )
+        }
+        composable<DirectConnectionsRoute> {
+            DirectConnectionsScreen(onBack = { navController.popBackStack() })
         }
         composable<DeliverySettingsRoute> {
             DeliverySettingsScreen(onBack = { navController.popBackStack() })

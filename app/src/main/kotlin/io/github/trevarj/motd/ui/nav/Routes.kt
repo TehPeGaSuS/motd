@@ -15,6 +15,7 @@ import kotlinx.serialization.Serializable
 // Settings category sub-screens (reached from the top-level Settings list).
 @Serializable data object AppearanceSettingsRoute
 @Serializable data object ChatSettingsRoute
+@Serializable data object DirectConnectionsRoute
 @Serializable data object DeliverySettingsRoute
 @Serializable data object NetworksSettingsRoute
 @Serializable data object BackupRestoreRoute

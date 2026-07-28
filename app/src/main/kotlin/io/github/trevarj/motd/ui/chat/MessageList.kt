@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
@@ -79,11 +80,18 @@ import io.github.trevarj.motd.audio.displayTextForAudioMessage
 import io.github.trevarj.motd.audio.extensionlessAudioCandidates
 import io.github.trevarj.motd.audio.toAttachment
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.DccDirection
+import io.github.trevarj.motd.data.db.DccTransferEntity
+import io.github.trevarj.motd.data.db.DccTransferProtocol
+import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
+import io.github.trevarj.motd.dcc.DccEndpointRisk
+import io.github.trevarj.motd.dcc.dccEndpointRisk
+import io.github.trevarj.motd.dcc.resolveDccAddress
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.repo.CachedLinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreview
@@ -119,6 +127,7 @@ internal enum class MessageContentType {
     SYSTEM,
     NETWORK_BATCH,
     INVITE,
+    DCC_TRANSFER,
     ACTION,
     ACTION_FAILED,
     SELF,
@@ -143,6 +152,7 @@ fun isSystemKind(kind: MessageKind): Boolean = when (kind) {
 
 internal fun messageContentType(message: MessageEntity): MessageContentType = when {
     message.kind == MessageKind.INVITE -> MessageContentType.INVITE
+    message.kind == MessageKind.DCC_TRANSFER -> MessageContentType.DCC_TRANSFER
     message.kind == MessageKind.NETSPLIT || message.kind == MessageKind.NETJOIN -> MessageContentType.NETWORK_BATCH
     isSystemKind(message.kind) -> MessageContentType.SYSTEM
     message.kind == MessageKind.ACTION && message.failed -> MessageContentType.ACTION_FAILED
@@ -240,6 +250,10 @@ fun MessageList(
     onReplyPreviewClick: (String) -> Unit = {},
     onDelete: (MessageEntity) -> Unit = {},
     highlightMsgid: String? = null,
+    dccTransfer: (MessageEntity) -> StateFlow<DccTransferEntity?> = { MutableStateFlow(null) },
+    onAcceptDccTransfer: (Long, String, Boolean) -> Unit = { _, _, _ -> },
+    onRejectDccTransfer: (Long) -> Unit = {},
+    onRemoveDccTransfer: (Long) -> Unit = {},
     // Normalized nicks known in the current buffer (member list). Drives @mention coloring in the
     // message bodies (plans/17); passed straight through to each MessageBubble.
     knownNicks: Set<String> = emptySet(),
@@ -307,6 +321,21 @@ fun MessageList(
             if (msg.kind == MessageKind.NETSPLIT || msg.kind == MessageKind.NETJOIN) {
                 LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
                     NetworkBatchPill(msg)
+                }
+                return@items
+            }
+
+            if (msg.kind == MessageKind.DCC_TRANSFER) {
+                LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
+                    val transferFlow = remember(msg.id) { dccTransfer(msg) }
+                    val transfer by transferFlow.collectAsStateWithLifecycle()
+                    DccTransferCard(
+                        message = msg,
+                        transfer = transfer,
+                        onAccept = onAcceptDccTransfer,
+                        onReject = onRejectDccTransfer,
+                        onRemove = onRemoveDccTransfer,
+                    )
                 }
                 return@items
             }
@@ -421,6 +450,156 @@ fun MessageList(
             }
         }
     }
+}
+
+@Composable
+private fun DccTransferCard(
+    message: MessageEntity,
+    transfer: DccTransferEntity?,
+    onAccept: (Long, String, Boolean) -> Unit,
+    onReject: (Long) -> Unit,
+    onRemove: (Long) -> Unit,
+) {
+    if (transfer == null) {
+        SystemEventPill(
+            summary = message.text,
+            lineCount = 1,
+            loadLines = { listOf(message.text) },
+            contentKey = message.id,
+            modifier = Modifier.testTag("chat_dcc_transfer_compact_${message.id}"),
+        )
+        return
+    }
+    val privateRisk = remember(transfer.address, transfer.addressKind) {
+        runCatching { dccEndpointRisk(resolveDccAddress(transfer.address, transfer.addressKind)) }
+            .getOrDefault(DccEndpointRisk.UNSPECIFIED)
+            .takeIf { it != DccEndpointRisk.PUBLIC }
+    }
+    val progress = transfer.sizeBytes?.takeIf { it > 0 }?.let { size ->
+        (transfer.bytesTransferred.toFloat() / size.toFloat()).coerceIn(0f, 1f)
+    }
+    val direction = if (transfer.direction == DccDirection.INCOMING) "Incoming" else "Outgoing"
+    val protocol = when (transfer.protocol) {
+        DccTransferProtocol.SEND -> "Plain DCC SEND"
+        DccTransferProtocol.SSEND -> "Secure DCC SSEND · identity unverified"
+    }
+    val status = dccStatusText(transfer)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .testTag("chat_dcc_transfer_${transfer.id}"),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "$direction file",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(transfer.displayFilename, style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = listOfNotNull(
+                    transfer.sizeBytes?.let(::formatDccBytes),
+                    protocol,
+                    status,
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (privateRisk != null) {
+                Text(
+                    text = "Private or local endpoint: ${privateRisk.name.lowercase().replace('_', ' ')}. Allow only if you trust this peer and network.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            progress?.let {
+                LinearProgressIndicator(
+                    progress = { it },
+                    modifier = Modifier.fillMaxWidth().testTag("chat_dcc_progress_${transfer.id}"),
+                )
+                Text(
+                    text = "${formatDccBytes(transfer.bytesTransferred)} / ${formatDccBytes(transfer.sizeBytes)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            DccTransferActions(transfer, privateRisk, onAccept, onReject, onRemove)
+        }
+    }
+}
+
+@Composable
+private fun DccTransferActions(
+    transfer: DccTransferEntity,
+    privateRisk: DccEndpointRisk?,
+    onAccept: (Long, String, Boolean) -> Unit,
+    onReject: (Long) -> Unit,
+    onRemove: (Long) -> Unit,
+) {
+    val incoming = transfer.direction == DccDirection.INCOMING
+    val canAccept = incoming && transfer.state in setOf(
+        DccTransferState.OFFERED,
+        DccTransferState.PARTIAL,
+        DccTransferState.FAILED,
+    )
+    val terminal = transfer.state in setOf(
+        DccTransferState.COMPLETED,
+        DccTransferState.REJECTED,
+        DccTransferState.EXPIRED,
+        DccTransferState.FAILED,
+        DccTransferState.REMOVED,
+    )
+    if (!canAccept && !terminal) return
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (canAccept) {
+            Button(
+                onClick = {
+                    onAccept(transfer.id, transfer.displayFilename, privateRisk != null)
+                },
+                modifier = Modifier.testTag("chat_dcc_accept_${transfer.id}"),
+            ) {
+                Text(if (privateRisk == null) "Save" else "Allow once & save")
+            }
+            OutlinedButton(
+                onClick = { onReject(transfer.id) },
+                modifier = Modifier.testTag("chat_dcc_reject_${transfer.id}"),
+            ) {
+                Text("Reject")
+            }
+        }
+        if (terminal) {
+            TextButton(
+                onClick = { onRemove(transfer.id) },
+                modifier = Modifier.testTag("chat_dcc_remove_${transfer.id}"),
+            ) {
+                Text("Remove record")
+            }
+        }
+    }
+}
+
+private fun dccStatusText(transfer: DccTransferEntity): String = when (transfer.state) {
+    DccTransferState.OFFERED -> "Waiting"
+    DccTransferState.ACCEPTING -> "Starting"
+    DccTransferState.ACTIVE -> "Transferring"
+    DccTransferState.PARTIAL -> "Partial"
+    DccTransferState.COMPLETED -> "Complete"
+    DccTransferState.FAILED -> transfer.error?.let { "Failed: $it" } ?: "Failed"
+    DccTransferState.REJECTED -> "Rejected"
+    DccTransferState.EXPIRED -> "Expired"
+    DccTransferState.REMOVED -> "Removed"
+}
+
+private fun formatDccBytes(bytes: Long): String {
+    val units = listOf("B", "KiB", "MiB", "GiB")
+    var value = bytes.toDouble()
+    var unit = 0
+    while (value >= 1024.0 && unit < units.lastIndex) {
+        value /= 1024.0
+        unit++
+    }
+    return if (unit == 0) "$bytes ${units[unit]}" else "%.1f %s".format(value, units[unit])
 }
 
 /** A quiet, stable-height skeleton prevents placeholder-only pages from measuring as zero rows. */
