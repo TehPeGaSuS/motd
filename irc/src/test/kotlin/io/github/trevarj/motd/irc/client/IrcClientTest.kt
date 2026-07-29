@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
@@ -1010,6 +1011,16 @@ class IrcClientTest {
     // -- LIST / listChannels (plans/16 §5.7) --
 
     @Test
+    fun `raw LIST collector subscribes before the request can be sent`() = runTest {
+        val events = MutableSharedFlow<IrcEvent>()
+
+        val collector = backgroundScope.launchUnlabeledChannelListCollector(events) {}
+
+        assertEquals(1, events.subscriptionCount.value)
+        collector.cancel()
+    }
+
+    @Test
     fun `labeled LIST parses 321-322-323 batch into listings`() = runTest {
         val ft = FakeTransport()
         val client = registered(ft)
@@ -1080,6 +1091,29 @@ class IrcClientTest {
             listOf(ChannelListing("#a", 10, "topic a"), ChannelListing("#b", 5, "topic b")),
             listings,
         )
+    }
+
+    @Test
+    fun `raw LIST requests are serialized because their replies have no request identity`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredNoCaps(ft)
+
+        val first = clientScope().async { client.listChannels(mask = "*first*") }
+        val second = clientScope().async { client.listChannels(mask = "*second*") }
+        runCurrent()
+
+        assertEquals(1, ft.sent.count { it.startsWith("LIST") })
+        ft.feed(":srv 322 motd #first 10 :first topic")
+        ft.feed(":srv 323 motd :End of /LIST")
+        runCurrent()
+
+        assertEquals(2, ft.sent.count { it.startsWith("LIST") })
+        ft.feed(":srv 322 motd #second 20 :second topic")
+        ft.feed(":srv 323 motd :End of /LIST")
+        runCurrent()
+
+        assertEquals(listOf("#first"), first.await().map { it.name })
+        assertEquals(listOf("#second"), second.await().map { it.name })
     }
 
     @Test

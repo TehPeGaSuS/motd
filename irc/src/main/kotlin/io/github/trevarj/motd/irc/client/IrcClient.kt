@@ -90,6 +90,20 @@ data class BouncerNetwork(val netId: String, val attrs: Map<String, String>) // 
 /** One RPL_LIST (322) row. */
 data class ChannelListing(val name: String, val userCount: Int, val topic: String)
 
+/** Collects one unlabelled LIST response. The caller must start this before writing LIST. */
+internal fun CoroutineScope.launchUnlabeledChannelListCollector(
+    events: SharedFlow<IrcEvent>,
+    onListLine: (IrcMessage) -> Unit,
+): Job = launch(start = CoroutineStart.UNDISPATCHED) {
+    events.collect { event ->
+        if (event !is IrcEvent.Raw) return@collect
+        when (event.message.command) {
+            "322" -> onListLine(event.message)
+            "323" -> throw CancellationException("LIST end")
+        }
+    }
+}
+
 /** Memory-bounded accumulator that retains the busiest channels and preserves arrival order ties. */
 private class BoundedChannelListings(private val capacity: Int) {
     private data class Entry(val listing: ChannelListing, val order: Long)
@@ -162,6 +176,7 @@ class IrcClient(
     private val labels = LabelCorrelator()
     private val unlabeledChatHistory = UnlabeledChatHistoryCorrelator()
     private val unlabeledChatHistoryLock = Mutex()
+    private val unlabeledChannelListLock = Mutex()
     private val outboundLock = Mutex()
     private val batches = BatchAssembler()
     private val typingOutbox = TypingOutbox()
@@ -1044,23 +1059,21 @@ class IrcClient(
             return out.toList()
         }
 
-        // Raw fallback: subscribe BEFORE sending so no 322/323 lines are missed, then collect until
-        // the 323 terminator or a 15s timeout. Implemented inside IrcClient so the raw-numeric
-        // fallback does not leak protocol into :app.
-        val out = BoundedChannelListings(cap)
-        val collector = scope.launch {
-            broadcastEvents.collect { ev ->
-                if (ev !is IrcEvent.Raw) return@collect
-                when (ev.message.command) {
-                    "322" -> parseListMessage(ev.message)?.let(out::add)
-                    "323" -> throw kotlinx.coroutines.CancellationException("LIST end")
-                }
+        // Raw LIST numerics carry no request identity. Serialize requests and synchronously enter
+        // collection before writing so a fast server cannot answer before the subscriber exists.
+        return unlabeledChannelListLock.withLock {
+            val out = BoundedChannelListings(cap)
+            val collector = scope.launchUnlabeledChannelListCollector(broadcastEvents) { message ->
+                parseListMessage(message)?.let(out::add)
+            }
+            try {
+                transport?.let { sendSerialized(it, msg) }
+                withTimeoutOrNull(LIST_TIMEOUT_MS) { collector.join() }
+                out.toList()
+            } finally {
+                collector.cancelAndJoin()
             }
         }
-        transport?.let { sendSerialized(it, msg) }
-        kotlinx.coroutines.withTimeoutOrNull(LIST_TIMEOUT_MS) { collector.join() }
-        collector.cancelAndJoin()
-        return out.toList()
     }
 
     /** Parse an [IrcMessage] that is (or wraps) an RPL_LIST 322 into a [ChannelListing]. */
