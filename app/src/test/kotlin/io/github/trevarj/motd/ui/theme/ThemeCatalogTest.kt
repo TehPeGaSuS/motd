@@ -31,6 +31,24 @@ class ThemeCatalogTest {
         }
     }
 
+    @Test fun modusCatalog_includesEveryOfficialLightAndDarkVariant() {
+        val pairs = mapOf(
+            ColorThemePreset.MODUS_OPERANDI to ColorThemePreset.MODUS_VIVENDI,
+            ColorThemePreset.MODUS_OPERANDI_TINTED to ColorThemePreset.MODUS_VIVENDI_TINTED,
+            ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA to ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA,
+            ColorThemePreset.MODUS_OPERANDI_TRITANOPIA to ColorThemePreset.MODUS_VIVENDI_TRITANOPIA,
+        )
+
+        pairs.forEach { (light, dark) ->
+            assertTrue("$light must be light", !light.isDark)
+            assertTrue("$dark must be dark", dark.isDark)
+            assertEquals(dark, light.systemPartner)
+            assertEquals(light, dark.systemPartner)
+            assertNotNull(fixedThemeScheme(light))
+            assertNotNull(fixedThemeScheme(dark))
+        }
+    }
+
     @Test fun systemPartners_resolveToOppositeModeSchemeAndAreSymmetric() {
         ColorThemePreset.entries.forEach { preset ->
             val partner = preset.systemPartner

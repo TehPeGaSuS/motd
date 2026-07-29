@@ -417,6 +417,12 @@ internal fun themePresetLabelText(mode: ColorThemePreset): String = when (mode) 
     ColorThemePreset.KANAGAWA_WAVE -> "Kanagawa Wave"
     ColorThemePreset.MODUS_OPERANDI -> "Modus Operandi"
     ColorThemePreset.MODUS_VIVENDI -> "Modus Vivendi"
+    ColorThemePreset.MODUS_OPERANDI_TINTED -> "Modus Operandi Tinted"
+    ColorThemePreset.MODUS_VIVENDI_TINTED -> "Modus Vivendi Tinted"
+    ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA -> "Modus Operandi Deuteranopia"
+    ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA -> "Modus Vivendi Deuteranopia"
+    ColorThemePreset.MODUS_OPERANDI_TRITANOPIA -> "Modus Operandi Tritanopia"
+    ColorThemePreset.MODUS_VIVENDI_TRITANOPIA -> "Modus Vivendi Tritanopia"
     ColorThemePreset.MONOKAI -> "Monokai"
     ColorThemePreset.NORD -> "Nord"
     ColorThemePreset.NORD_LIGHT -> "Nord Light"
@@ -450,6 +456,12 @@ private fun themePresetLabelRes(mode: ColorThemePreset): Int = when (mode) {
     ColorThemePreset.KANAGAWA_WAVE -> R.string.settings_theme_kanagawa_wave
     ColorThemePreset.MODUS_OPERANDI -> R.string.settings_theme_modus_operandi
     ColorThemePreset.MODUS_VIVENDI -> R.string.settings_theme_modus_vivendi
+    ColorThemePreset.MODUS_OPERANDI_TINTED -> R.string.settings_theme_modus_operandi_tinted
+    ColorThemePreset.MODUS_VIVENDI_TINTED -> R.string.settings_theme_modus_vivendi_tinted
+    ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA -> R.string.settings_theme_modus_operandi_deuteranopia
+    ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA -> R.string.settings_theme_modus_vivendi_deuteranopia
+    ColorThemePreset.MODUS_OPERANDI_TRITANOPIA -> R.string.settings_theme_modus_operandi_tritanopia
+    ColorThemePreset.MODUS_VIVENDI_TRITANOPIA -> R.string.settings_theme_modus_vivendi_tritanopia
     ColorThemePreset.MONOKAI -> R.string.settings_theme_monokai
     ColorThemePreset.NORD -> R.string.settings_theme_nord
     ColorThemePreset.NORD_LIGHT -> R.string.settings_theme_nord_light

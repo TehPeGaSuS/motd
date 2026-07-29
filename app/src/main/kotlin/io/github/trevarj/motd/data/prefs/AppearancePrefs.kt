@@ -13,6 +13,9 @@ enum class ColorThemePreset {
     GRUVBOX_DARK, GRUVBOX_LIGHT,
     KANAGAWA_DRAGON, KANAGAWA_LOTUS, KANAGAWA_WAVE,
     MODUS_OPERANDI, MODUS_VIVENDI,
+    MODUS_OPERANDI_TINTED, MODUS_VIVENDI_TINTED,
+    MODUS_OPERANDI_DEUTERANOPIA, MODUS_VIVENDI_DEUTERANOPIA,
+    MODUS_OPERANDI_TRITANOPIA, MODUS_VIVENDI_TRITANOPIA,
     MONOKAI,
     NORD, NORD_LIGHT,
     ONE_DARK,
@@ -40,6 +43,9 @@ val ColorThemePreset.isDark: Boolean
         ColorThemePreset.GRUVBOX_LIGHT,
         ColorThemePreset.KANAGAWA_LOTUS,
         ColorThemePreset.MODUS_OPERANDI,
+        ColorThemePreset.MODUS_OPERANDI_TINTED,
+        ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA,
+        ColorThemePreset.MODUS_OPERANDI_TRITANOPIA,
         ColorThemePreset.NORD_LIGHT,
         ColorThemePreset.ROSE_PINE_DAWN,
         ColorThemePreset.SOLARIZED_LIGHT,
@@ -67,6 +73,12 @@ val ColorThemePreset.systemPartner: ColorThemePreset?
         ColorThemePreset.KANAGAWA_WAVE -> ColorThemePreset.KANAGAWA_LOTUS
         ColorThemePreset.MODUS_OPERANDI -> ColorThemePreset.MODUS_VIVENDI
         ColorThemePreset.MODUS_VIVENDI -> ColorThemePreset.MODUS_OPERANDI
+        ColorThemePreset.MODUS_OPERANDI_TINTED -> ColorThemePreset.MODUS_VIVENDI_TINTED
+        ColorThemePreset.MODUS_VIVENDI_TINTED -> ColorThemePreset.MODUS_OPERANDI_TINTED
+        ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA -> ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA
+        ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA -> ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA
+        ColorThemePreset.MODUS_OPERANDI_TRITANOPIA -> ColorThemePreset.MODUS_VIVENDI_TRITANOPIA
+        ColorThemePreset.MODUS_VIVENDI_TRITANOPIA -> ColorThemePreset.MODUS_OPERANDI_TRITANOPIA
         ColorThemePreset.NORD_LIGHT -> ColorThemePreset.NORD
         ColorThemePreset.NORD -> ColorThemePreset.NORD_LIGHT
         ColorThemePreset.ROSE_PINE_DAWN -> ColorThemePreset.ROSE_PINE

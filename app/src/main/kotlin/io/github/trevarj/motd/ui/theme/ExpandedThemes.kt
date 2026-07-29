@@ -115,6 +115,27 @@ val ModusOperandiScheme = lightEditorScheme(
 val ModusVivendiScheme = darkEditorScheme(
     0xFF000000, 0xFF1E1E1E, 0xFFFFFFFF, 0xFFBFC0C4, 0xFF2Fafff, 0xFF44BC44, 0xFFFEACD0,
 )
+val ModusOperandiTintedScheme = lightEditorScheme(
+    0xFFFBF7F0, 0xFFEFE9DD, 0xFF000000, 0xFF595959, 0xFF0031A9, 0xFF006300, 0xFF721045,
+)
+val ModusVivendiTintedScheme = darkEditorScheme(
+    0xFF0D0E1C, 0xFF1D2235, 0xFFFFFFFF, 0xFF989898, 0xFF2FAFFF, 0xFF44BC44, 0xFFFEACD0,
+)
+
+// The color-deficiency variants preserve the upstream semantic pairings: yellow/blue for
+// deuteranopia and red/cyan for tritanopia.
+val ModusOperandiDeuteranopiaScheme = lightEditorScheme(
+    0xFFFFFFFF, 0xFFF2F2F2, 0xFF000000, 0xFF595959, 0xFF0031A9, 0xFF695500, 0xFF973300,
+)
+val ModusVivendiDeuteranopiaScheme = darkEditorScheme(
+    0xFF000000, 0xFF1E1E1E, 0xFFFFFFFF, 0xFF989898, 0xFF2FAFFF, 0xFFCABF00, 0xFFFFA00F,
+)
+val ModusOperandiTritanopiaScheme = lightEditorScheme(
+    0xFFFFFFFF, 0xFFF2F2F2, 0xFF000000, 0xFF595959, 0xFF005E8B, 0xFFA60000, 0xFFA0132F,
+)
+val ModusVivendiTritanopiaScheme = darkEditorScheme(
+    0xFF000000, 0xFF1E1E1E, 0xFFFFFFFF, 0xFF989898, 0xFF00D3D0, 0xFFFF5F59, 0xFFFF7F86,
+)
 
 val MonokaiScheme = darkEditorScheme(
     0xFF272A30, 0xFF2E323C, 0xFFF8F8F0, 0xFFB1B1B1, 0xFF66D9EF, 0xFFA6E22E, 0xFFF92672,

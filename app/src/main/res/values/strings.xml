@@ -913,6 +913,12 @@
     <string name="settings_theme_kanagawa_wave">Kanagawa Wave</string>
     <string name="settings_theme_modus_operandi">Modus Operandi</string>
     <string name="settings_theme_modus_vivendi">Modus Vivendi</string>
+    <string name="settings_theme_modus_operandi_tinted">Modus Operandi Tinted</string>
+    <string name="settings_theme_modus_vivendi_tinted">Modus Vivendi Tinted</string>
+    <string name="settings_theme_modus_operandi_deuteranopia">Modus Operandi Deuteranopia</string>
+    <string name="settings_theme_modus_vivendi_deuteranopia">Modus Vivendi Deuteranopia</string>
+    <string name="settings_theme_modus_operandi_tritanopia">Modus Operandi Tritanopia</string>
+    <string name="settings_theme_modus_vivendi_tritanopia">Modus Vivendi Tritanopia</string>
     <string name="settings_theme_monokai">Monokai</string>
     <string name="settings_theme_one_dark">One Dark</string>
     <string name="settings_theme_rose_pine">Rosé Pine</string>
