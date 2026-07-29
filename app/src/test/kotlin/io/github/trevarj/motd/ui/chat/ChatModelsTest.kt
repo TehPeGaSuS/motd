@@ -583,6 +583,18 @@ class ChatModelsTest {
         assertEquals(request, retried)
     }
 
+    @Test fun `manual history refresh outcomes use the title-adjacent notice`() {
+        assertTrue(ChatUiEvent.HistoryOffline.isHistoryRefreshNotice())
+        assertTrue(ChatUiEvent.HistoryUpdated(1).isHistoryRefreshNotice())
+        assertTrue(ChatUiEvent.HistoryUpToDate.isHistoryRefreshNotice())
+        assertTrue(ChatUiEvent.HistoryUnsupported.isHistoryRefreshNotice())
+        assertTrue(ChatUiEvent.HistoryFailed.isHistoryRefreshNotice())
+        assertTrue(ChatUiEvent.HistoryIncomplete(1).isHistoryRefreshNotice())
+        assertTrue(ChatUiEvent.HistoryCapped(inserted = 1, limit = 2).isHistoryRefreshNotice())
+        assertFalse(ChatUiEvent.InvalidCommand.isHistoryRefreshNotice())
+        assertFalse(ChatUiEvent.ReplyJumpUnavailable(ReplyJumpRequest("id")).isHistoryRefreshNotice())
+    }
+
     @Test fun `history footer requires persisted completion and preserves partial outcomes`() {
         val ready = HistoryAvailability.Ready(setOf(HistoryReferenceType.MSGID), pageLimit = 50)
         val ended = LoadState.NotLoading(endOfPaginationReached = true)

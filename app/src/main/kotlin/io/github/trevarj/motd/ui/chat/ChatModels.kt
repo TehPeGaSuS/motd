@@ -411,6 +411,19 @@ internal fun ChatUiEvent.hasRetryAction(): Boolean =
         this is ChatUiEvent.HistoryIncomplete ||
         this is ChatUiEvent.HistoryCapped
 
+/** Manual history-refresh outcomes use a transient banner below the chat title. */
+internal fun ChatUiEvent.isHistoryRefreshNotice(): Boolean = when (this) {
+    ChatUiEvent.HistoryOffline,
+    is ChatUiEvent.HistoryUpdated,
+    ChatUiEvent.HistoryUpToDate,
+    ChatUiEvent.HistoryUnsupported,
+    ChatUiEvent.HistoryFailed,
+    is ChatUiEvent.HistoryIncomplete,
+    is ChatUiEvent.HistoryCapped,
+    -> true
+    else -> false
+}
+
 /** Run a snackbar action before acknowledging its replay-safe queued event. */
 internal fun handleChatUiEventResult(
     event: QueuedChatUiEvent,

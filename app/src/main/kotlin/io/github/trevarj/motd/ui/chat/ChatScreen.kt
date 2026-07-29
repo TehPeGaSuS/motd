@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
@@ -66,6 +67,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetState
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -663,6 +666,7 @@ fun ChatContent(
     val clipboard: Clipboard = LocalClipboard.current
     val ctx = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val historySnackbarHostState = remember { SnackbarHostState() }
     var pendingDccAccept by remember { mutableStateOf<PendingDccAccept?>(null) }
     val dccDestinationPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
@@ -806,10 +810,20 @@ fun ChatContent(
     LaunchedEffect(uiEvent?.id) {
         val pending = uiEvent ?: return@LaunchedEffect
         val text = eventText ?: return@LaunchedEffect
-        val result = snackbarHostState.showSnackbar(
-            message = text,
-            actionLabel = retryLabel.takeIf { pending.value.hasRetryAction() },
-        )
+        val actionLabel = retryLabel.takeIf { pending.value.hasRetryAction() }
+        val result = if (pending.value.isHistoryRefreshNotice()) {
+            historySnackbarHostState.showSnackbar(
+                message = text,
+                actionLabel = actionLabel,
+                withDismissAction = true,
+                duration = SnackbarDuration.Long,
+            )
+        } else {
+            snackbarHostState.showSnackbar(
+                message = text,
+                actionLabel = actionLabel,
+            )
+        }
         handleChatUiEventResult(
             event = pending,
             actionPerformed = result == SnackbarResult.ActionPerformed,
@@ -1678,6 +1692,37 @@ fun ChatContent(
                 )
             }
             }
+            SnackbarHost(
+                hostState = historySnackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .testTag("chat_history_notice"),
+                snackbar = { notice ->
+                    Snackbar(
+                        action = notice.visuals.actionLabel?.let { actionLabel ->
+                            {
+                                TextButton(onClick = { notice.performAction() }) {
+                                    Text(actionLabel)
+                                }
+                            }
+                        },
+                        dismissAction = {
+                            IconButton(
+                                onClick = { notice.dismiss() },
+                                modifier = Modifier.testTag("chat_history_notice_dismiss"),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = stringResource(R.string.action_dismiss),
+                                )
+                            }
+                        },
+                        content = { Text(notice.visuals.message) },
+                    )
+                },
+            )
         }
     }
 
