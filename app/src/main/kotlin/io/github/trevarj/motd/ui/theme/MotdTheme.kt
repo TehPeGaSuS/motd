@@ -142,7 +142,11 @@ fun MotdTheme(
     // Style-only concerns (spacing, nick colors, avatar style) flow through CompositionLocals so
     // components never receive them as parameters (plans/13 plumbing split).
     val typography = remember(uiFontScalePercent) { scaledTypography(uiFontScalePercent) }
-    MaterialTheme(colorScheme = colorScheme, typography = typography) {
+    MaterialTheme(
+        colorScheme = colorScheme,
+        shapes = MotdMaterialShapes,
+        typography = typography,
+    ) {
         CompositionLocalProvider(
             LocalSpacing provides spacingFor(layoutDensity),
             LocalNickColors provides NickColorScheme(

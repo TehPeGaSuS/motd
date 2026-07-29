@@ -4,8 +4,11 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 
-// Brand seed. Static color schemes derive from this accessible indigo when dynamic color is unavailable.
-val Indigo = Color(0xFF5266E8)
+// Brand seeds. Static light, dark, and AMOLED schemes use a role-coded teal/orchid/coral trio.
+// System dynamic color deliberately remains fully controlled by the platform palette.
+val MotdTeal = Color(0xFF006C70)
+val MotdOrchid = Color(0xFF8B4FA5)
+val MotdCoral = Color(0xFFB44C46)
 
 // ---------------------------------------------------------------------------
 // Terminal color schemes -- each gives a proper Material 3 ColorScheme.

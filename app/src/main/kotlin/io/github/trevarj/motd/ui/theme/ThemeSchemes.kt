@@ -19,19 +19,16 @@ private const val TEXT_CONTRAST = 4.5
 private const val NON_TEXT_CONTRAST = 3.0
 internal const val BUBBLE_CONTAINER_CONTRAST = 1.30
 
-private val MotdSecondary = Color(0xFF66708E)
-private val MotdTertiary = Color(0xFF2E9B67)
-
 private val MotdLightRaw = lightColorScheme(
-    primary = Indigo,
-    secondary = MotdSecondary,
-    tertiary = MotdTertiary,
+    primary = MotdTeal,
+    secondary = MotdOrchid,
+    tertiary = MotdCoral,
 )
 
 private val MotdDarkRaw = darkColorScheme(
-    primary = Indigo,
-    secondary = MotdSecondary,
-    tertiary = MotdTertiary,
+    primary = MotdTeal,
+    secondary = MotdOrchid,
+    tertiary = MotdCoral,
 )
 
 internal val MotdLightScheme: ColorScheme = accessibleColorScheme(MotdLightRaw, dark = false)

@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.theme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.isDark
@@ -18,6 +19,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ThemeCatalogTest {
+    @Test fun motdBrandSeeds_useTheApprovedRoleCodedTrio() {
+        assertEquals(0xFF006C70.toInt(), MotdTeal.toArgb())
+        assertEquals(0xFF8B4FA5.toInt(), MotdOrchid.toArgb())
+        assertEquals(0xFFB44C46.toInt(), MotdCoral.toArgb())
+    }
+
     @Test fun everyNamedTheme_resolvesToACompleteScheme() {
         ColorThemePreset.entries.filter { it.isFixedPalette }.forEach {
             assertNotNull("$it must resolve", fixedThemeScheme(it))
