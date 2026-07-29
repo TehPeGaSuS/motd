@@ -62,6 +62,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -1727,7 +1728,12 @@ fun ChatContent(
                     Snackbar(
                         action = notice.visuals.actionLabel?.let { actionLabel ->
                             {
-                                TextButton(onClick = { notice.performAction() }) {
+                                TextButton(
+                                    onClick = { notice.performAction() },
+                                    colors = ButtonDefaults.textButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.inversePrimary,
+                                    ),
+                                ) {
                                     Text(actionLabel)
                                 }
                             }

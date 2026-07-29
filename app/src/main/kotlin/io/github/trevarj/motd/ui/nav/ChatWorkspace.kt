@@ -73,7 +73,7 @@ internal fun chatWorkspacePolicy(
 /** List/detail shell whose fit decision is based on the pane's actual safe content width. */
 @Composable
 internal fun ChatWorkspace(
-    listPane: @Composable (compactHeader: Boolean) -> Unit,
+    listPane: @Composable (twoPane: Boolean) -> Unit,
     detailPane: (@Composable (showBack: Boolean) -> Unit)? = null,
 ) {
     BoxWithConstraints(

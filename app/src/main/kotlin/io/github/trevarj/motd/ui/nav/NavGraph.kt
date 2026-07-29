@@ -117,12 +117,11 @@ fun MotdNavGraph(
         composable<ChatListRoute> {
             var openedDefault by rememberSaveable { mutableStateOf(false) }
             ChatWorkspace(
-                listPane = { compactHeader ->
+                listPane = { twoPane ->
                     ChatListPane(
                         navController = navController,
-                        compactHeader = compactHeader,
                         onDefaultBufferAvailable = { bufferId ->
-                            if (compactHeader && !openedDefault) {
+                            if (twoPane && !openedDefault) {
                                 openedDefault = true
                                 navController.openChat(ChatRoute(bufferId), replaceCurrentChat = false)
                             }
@@ -134,11 +133,10 @@ fun MotdNavGraph(
         composable<ChatRoute> { entry ->
             val route = entry.toRoute<ChatRoute>()
             ChatWorkspace(
-                listPane = { compactHeader ->
+                listPane = {
                     ChatListPane(
                         navController = navController,
                         selectedBufferId = route.bufferId,
-                        compactHeader = compactHeader,
                         replaceCurrentChat = true,
                     )
                 },
@@ -310,7 +308,6 @@ fun MotdNavGraph(
 private fun ChatListPane(
     navController: NavHostController,
     selectedBufferId: Long? = null,
-    compactHeader: Boolean = false,
     replaceCurrentChat: Boolean = false,
     onDefaultBufferAvailable: (Long) -> Unit = {},
 ) {
@@ -336,7 +333,6 @@ private fun ChatListPane(
         onOpenAddNetwork = { navController.navigate(AddNetworkRoute) },
         onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
         selectedBufferId = selectedBufferId,
-        compactHeader = compactHeader,
         onDefaultBufferAvailable = onDefaultBufferAvailable,
     )
 }

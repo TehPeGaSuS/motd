@@ -56,7 +56,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
@@ -66,7 +65,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
@@ -151,7 +149,6 @@ fun ChatListScreen(
     onOpenAddNetwork: () -> Unit = {},
     onOpenChannelList: (Long) -> Unit = {},
     selectedBufferId: Long? = null,
-    compactHeader: Boolean = false,
     onDefaultBufferAvailable: (Long) -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
     audioViewModel: AudioPlaybackViewModel = hiltViewModel(),
@@ -199,7 +196,6 @@ fun ChatListScreen(
         onOpenChannelList = onOpenChannelList,
         onMarkAllRead = viewModel::markCurrentScopeRead,
         selectedBufferId = selectedBufferId,
-        compactHeader = compactHeader,
     )
 }
 
@@ -240,7 +236,6 @@ fun ChatListContent(
     onOpenChannelList: (Long) -> Unit = {},
     onMarkAllRead: () -> Unit = {},
     selectedBufferId: Long? = null,
-    compactHeader: Boolean = false,
 ) {
     var archiveMode by rememberSaveable { mutableStateOf(false) }
     var showSheet by remember { mutableStateOf(false) }
@@ -256,8 +251,6 @@ fun ChatListContent(
     val selectionActive = selectedRows.isNotEmpty()
     var confirmRemoval by remember { mutableStateOf(false) }
     var archiveRevealSignal by rememberSaveable(state.selectedNetworkId) { mutableStateOf(0) }
-    val topAppBarScrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    val expandedTopBar = !compactHeader && !selectionActive && !archiveMode
 
     fun setArchivedWithReveal(ids: Collection<Long>, archived: Boolean) {
         onSetArchived(ids, archived)
@@ -319,19 +312,9 @@ fun ChatListContent(
         },
     ) {
         Scaffold(
-            modifier = Modifier
-                .testTag("screen_chat_list")
-                .then(
-                    if (expandedTopBar) {
-                        Modifier.nestedScroll(topAppBarScrollBehavior.nestedScrollConnection)
-                    } else {
-                        Modifier
-                    },
-                ),
+            modifier = Modifier.testTag("screen_chat_list"),
             topBar = {
                 ChatListTopBar(
-                    expanded = expandedTopBar,
-                    scrollBehavior = topAppBarScrollBehavior,
                     modifier = Modifier.testTag(if (selectionActive) "chatlist_selection_top_app_bar" else "chatlist_top_app_bar"),
                     title = {
                         val scopedName = state.selectedNetworkName
@@ -1257,8 +1240,6 @@ private fun SelectableChatListRow(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatListTopBar(
-    expanded: Boolean,
-    scrollBehavior: TopAppBarScrollBehavior,
     modifier: Modifier = Modifier,
     title: @Composable () -> Unit,
     navigationIcon: @Composable () -> Unit,
@@ -1268,24 +1249,13 @@ private fun ChatListTopBar(
         containerColor = MaterialTheme.colorScheme.surface,
         scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     )
-    if (expanded) {
-        LargeTopAppBar(
-            modifier = modifier,
-            title = title,
-            navigationIcon = navigationIcon,
-            actions = actions,
-            colors = colors,
-            scrollBehavior = scrollBehavior,
-        )
-    } else {
-        TopAppBar(
-            modifier = modifier,
-            title = title,
-            navigationIcon = navigationIcon,
-            actions = actions,
-            colors = colors,
-        )
-    }
+    TopAppBar(
+        modifier = modifier,
+        title = title,
+        navigationIcon = navigationIcon,
+        actions = actions,
+        colors = colors,
+    )
 }
 
 /** End-to-start archive action uses a neutral archive container, never destructive styling. */

@@ -105,6 +105,8 @@ class ThemeCatalogTest {
             assertTextPair(preset, "tertiary container", scheme.onTertiaryContainer, scheme.tertiaryContainer)
             assertTextPair(preset, "error", scheme.onError, scheme.error)
             assertTextPair(preset, "error container", scheme.onErrorContainer, scheme.errorContainer)
+            assertTextPair(preset, "snackbar content", scheme.inverseOnSurface, scheme.inverseSurface)
+            assertTextPair(preset, "snackbar action", scheme.inversePrimary, scheme.inverseSurface)
             assertBubbleContainers(preset, scheme)
 
             neutralSurfaces(scheme).forEachIndexed { index, surface ->
