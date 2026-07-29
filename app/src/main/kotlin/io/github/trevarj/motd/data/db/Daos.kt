@@ -151,7 +151,13 @@ interface BufferDao {
                     OR (
                         m.serverTime = b.localReadAnchorTime
                         AND COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime
-                        AND m.id > COALESCE(b.localReadAnchorEventId, 0)
+                        AND (
+                            m.timelineOrder > COALESCE((SELECT timelineOrder FROM messages
+                                WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0))
+                            OR (m.timelineOrder = COALESCE((SELECT timelineOrder FROM messages
+                                WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0))
+                                AND m.id > COALESCE(b.localReadAnchorEventId, 0))
+                        )
                     )
                 )
                 AND m.isSelf = 0
@@ -165,7 +171,13 @@ interface BufferDao {
                     OR (
                         m.serverTime = b.localReadAnchorTime
                         AND COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime
-                        AND m.id > COALESCE(b.localReadAnchorEventId, 0)
+                        AND (
+                            m.timelineOrder > COALESCE((SELECT timelineOrder FROM messages
+                                WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0))
+                            OR (m.timelineOrder = COALESCE((SELECT timelineOrder FROM messages
+                                WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0))
+                                AND m.id > COALESCE(b.localReadAnchorEventId, 0))
+                        )
                     )
                 )
                 AND m.isSelf = 0
@@ -177,7 +189,7 @@ interface BufferDao {
         LEFT JOIN messages lm ON lm.id = (
             SELECT m.id FROM messages m
             WHERE m.bufferId = b.id AND m.kind NOT IN ('JOIN', 'PART', 'QUIT', 'NETSPLIT', 'NETJOIN')
-            ORDER BY m.serverTime DESC, m.id DESC
+            ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC
             LIMIT 1
         )
         WHERE b.type != 'SERVER' AND b.dismissed = 0
@@ -279,9 +291,13 @@ interface BufferDao {
                  AND b.localReadAnchorTime IS NOT NULL AND (
                      m.serverTime < b.localReadAnchorTime OR
                      (m.serverTime = b.localReadAnchorTime AND
-                      m.id <= COALESCE(b.localReadAnchorEventId, 0))
+                      (m.timelineOrder < COALESCE((SELECT timelineOrder FROM messages
+                           WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0))
+                       OR (m.timelineOrder = COALESCE((SELECT timelineOrder FROM messages
+                           WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0))
+                           AND m.id <= COALESCE(b.localReadAnchorEventId, 0))))
                  )
-               ORDER BY m.serverTime DESC, m.id DESC LIMIT 1
+               ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1
            )
            WHERE b.networkId = :networkId AND b.type != 'SERVER'
              AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL ORDER BY b.id""",
@@ -411,7 +427,17 @@ interface BufferDao {
         """UPDATE buffers SET localReadAnchorTime = :serverTime, localReadAnchorEventId = :eventId
            WHERE id = :id AND (
                localReadAnchorTime IS NULL OR localReadAnchorTime < :serverTime OR
-               (localReadAnchorTime = :serverTime AND COALESCE(localReadAnchorEventId, 0) < :eventId)
+               (localReadAnchorTime = :serverTime AND (
+                   COALESCE((SELECT timelineOrder FROM messages WHERE id = localReadAnchorEventId),
+                       COALESCE(localReadAnchorEventId, 0)) <
+                       COALESCE((SELECT timelineOrder FROM messages WHERE id = :eventId), :eventId)
+                   OR (
+                       COALESCE((SELECT timelineOrder FROM messages WHERE id = localReadAnchorEventId),
+                           COALESCE(localReadAnchorEventId, 0)) =
+                           COALESCE((SELECT timelineOrder FROM messages WHERE id = :eventId), :eventId)
+                       AND COALESCE(localReadAnchorEventId, 0) < :eventId
+                   )
+               ))
            )""",
     )
     suspend fun advanceLocalReadAnchor(id: RoomId, serverTime: Long, eventId: TimelineEventId)
@@ -466,7 +492,7 @@ interface BufferDao {
            FROM messages m
            WHERE m.bufferId = :id
              AND (m.msgid IS NOT NULL OR m.serverTimeAuthoritative = 1)
-           ORDER BY m.serverTime DESC, m.id DESC LIMIT 1""",
+           ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1""",
     )
     suspend fun latestBoundaryForBuffer(id: RoomId): MessageBoundaryRow?
 
@@ -564,7 +590,7 @@ data class LastSpokeRow(val nick: String, val lastSpokeAt: Long)
 
 @Dao
 interface MessageDao {
-    @Query("SELECT * FROM messages WHERE bufferId = :bufferId ORDER BY serverTime DESC, id DESC")
+    @Query("SELECT * FROM messages WHERE bufferId = :bufferId ORDER BY serverTime DESC, timelineOrder DESC, id DESC")
     fun pagingSource(bufferId: Long): PagingSource<Int, MessageEntity>
 
     /** Dynamic visibility predicates must run inside Room so placeholder counts match page rows. */
@@ -578,7 +604,16 @@ interface MessageDao {
     suspend fun rawCount(query: SupportSQLiteQuery): Int
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertAll(msgs: List<MessageEntity>): List<Long>
+    suspend fun insertAllRaw(msgs: List<MessageEntity>): List<Long>
+
+    @Query("UPDATE messages SET timelineOrder = :eventId WHERE id = :eventId AND timelineOrder = 0")
+    suspend fun initializeTimelineOrder(eventId: TimelineEventId)
+
+    /** Keep direct/import insertion on the same stable tie-order invariant as canonical ingestion. */
+    @Transaction
+    suspend fun insertAll(msgs: List<MessageEntity>): List<Long> = insertAllRaw(msgs).also { ids ->
+        ids.filter { it > 0 }.forEach { initializeTimelineOrder(it) }
+    }
 
     @Query("SELECT * FROM messages WHERE id = :id LIMIT 1")
     suspend fun byId(id: Long): MessageEntity?
@@ -595,11 +630,15 @@ interface MessageDao {
         """SELECT * FROM messages
            WHERE bufferId = :bufferId AND id != :excludeEventId
               AND isSelf = 0 AND failed = 0 AND (
-                  serverTime > :afterTime OR (serverTime = :afterTime AND id > :afterEventId)
+                  serverTime > :afterTime OR (serverTime = :afterTime AND (
+                      timelineOrder > COALESCE((SELECT timelineOrder FROM messages WHERE id = :afterEventId), :afterEventId)
+                      OR (timelineOrder = COALESCE((SELECT timelineOrder FROM messages WHERE id = :afterEventId), :afterEventId)
+                          AND id > :afterEventId)
+                  ))
               )
              AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
              AND (:queryRoom = 1 OR hasMention = 1)
-           ORDER BY serverTime DESC, id DESC
+           ORDER BY serverTime DESC, timelineOrder DESC, id DESC
            LIMIT :limit""",
     )
     suspend fun recentNotifiable(
@@ -752,7 +791,7 @@ interface MessageDao {
     )
     fun observeLastSpoke(bufferId: Long): Flow<List<LastSpokeRow>>
 
-    @Query("SELECT * FROM messages WHERE bufferId = :bufferId ORDER BY serverTime DESC, id DESC LIMIT 1")
+    @Query("SELECT * FROM messages WHERE bufferId = :bufferId ORDER BY serverTime DESC, timelineOrder DESC, id DESC LIMIT 1")
     suspend fun newestMessage(bufferId: RoomId): MessageEntity?
 
     @Query("SELECT MIN(serverTime) FROM messages WHERE bufferId = :bufferId")
@@ -760,27 +799,21 @@ interface MessageDao {
 
     @Query(
         """SELECT m.msgid,
-                  CASE WHEN m.serverTimeAuthoritative = 1 THEN m.serverTime ELSE (
-                      SELECT MAX(a.serverTime) FROM messages a
-                      WHERE a.bufferId = :bufferId AND a.serverTimeAuthoritative = 1
-                  ) END AS serverTime
+                  CASE WHEN m.serverTimeAuthoritative = 1 THEN m.serverTime ELSE NULL END AS serverTime
            FROM messages m
            WHERE m.bufferId = :bufferId
              AND (m.msgid IS NOT NULL OR m.serverTimeAuthoritative = 1)
-           ORDER BY m.serverTime DESC, m.id DESC LIMIT 1""",
+           ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1""",
     )
     suspend fun latestBoundary(bufferId: Long): MessageBoundaryRow?
 
     @Query(
         """SELECT m.msgid,
-                  CASE WHEN m.serverTimeAuthoritative = 1 THEN m.serverTime ELSE (
-                      SELECT MIN(a.serverTime) FROM messages a
-                      WHERE a.bufferId = :bufferId AND a.serverTimeAuthoritative = 1
-                  ) END AS serverTime
+                  CASE WHEN m.serverTimeAuthoritative = 1 THEN m.serverTime ELSE NULL END AS serverTime
            FROM messages m
            WHERE m.bufferId = :bufferId
              AND (m.msgid IS NOT NULL OR m.serverTimeAuthoritative = 1)
-           ORDER BY m.serverTime ASC, m.id ASC LIMIT 1""",
+           ORDER BY m.serverTime ASC, m.timelineOrder ASC, m.id ASC LIMIT 1""",
     )
     suspend fun oldestBoundary(bufferId: Long): MessageBoundaryRow?
 
@@ -805,7 +838,7 @@ interface MessageDao {
                SELECT newest.id FROM messages newest
                WHERE newest.bufferId = b.id AND newest.isSelf = 0
                  AND newest.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
-               ORDER BY newest.serverTime DESC, newest.id DESC LIMIT 1
+               ORDER BY newest.serverTime DESC, newest.timelineOrder DESC, newest.id DESC LIMIT 1
            )
            WHERE b.id IN (:bufferIds) AND b.type != 'SERVER'""",
     )
@@ -815,8 +848,12 @@ interface MessageDao {
         """SELECT id AS eventId, serverTime AS timestamp
            FROM messages WHERE bufferId = :bufferId AND serverTimeAuthoritative = 1
              AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
-             AND (serverTime < :serverTime OR (serverTime = :serverTime AND id <= :eventId))
-           ORDER BY serverTime DESC, id DESC LIMIT 1""",
+             AND (serverTime < :serverTime OR (serverTime = :serverTime AND (
+                 timelineOrder < COALESCE((SELECT timelineOrder FROM messages WHERE id = :eventId), :eventId)
+                 OR (timelineOrder = COALESCE((SELECT timelineOrder FROM messages WHERE id = :eventId), :eventId)
+                     AND id <= :eventId)
+             )))
+           ORDER BY serverTime DESC, timelineOrder DESC, id DESC LIMIT 1""",
     )
     suspend fun authoritativeChatAtOrBefore(
         bufferId: RoomId,
@@ -840,7 +877,7 @@ interface MessageDao {
         """SELECT * FROM messages WHERE bufferId = :bufferId AND isSelf = 0 AND msgid IS NOT NULL
           AND sender = :sender AND kind = :kind AND text = :text
           AND serverTime BETWEEN :lo AND :hi
-          ORDER BY serverTime DESC, id DESC LIMIT 2""",
+          ORDER BY serverTime DESC, timelineOrder DESC, id DESC LIMIT 2""",
     )
     suspend fun findDurableIncomingCandidates(
         bufferId: Long,
@@ -856,7 +893,7 @@ interface MessageDao {
         """SELECT * FROM messages WHERE bufferId = :bufferId AND isSelf = 0 AND msgid IS NOT NULL
           AND kind = :kind AND text = :text
           AND serverTime BETWEEN :lo AND :hi
-          ORDER BY serverTime DESC, id DESC LIMIT 8""",
+          ORDER BY serverTime DESC, timelineOrder DESC, id DESC LIMIT 8""",
     )
     suspend fun findDurableIncomingCandidatesByText(
         bufferId: Long,
@@ -899,7 +936,7 @@ interface MessageDao {
     @Query(
         """SELECT * FROM messages WHERE bufferId = :bufferId AND isSelf = 1 AND text = :text
           AND (pendingLabel IS NOT NULL OR serverTime BETWEEN :lo AND :hi)
-          ORDER BY (pendingLabel IS NOT NULL) DESC, serverTime DESC, id DESC LIMIT 1"""
+          ORDER BY (pendingLabel IS NOT NULL) DESC, serverTime DESC, timelineOrder DESC, id DESC LIMIT 1"""
     )
     suspend fun findSelfEchoCandidate(bufferId: Long, text: String, lo: Long, hi: Long): MessageEntity?
 
@@ -915,7 +952,7 @@ interface MessageDao {
      */
     @Query(
         """SELECT * FROM messages WHERE bufferId = :bufferId AND isSelf = 1 AND text = :text
-          AND msgid IS NULL ORDER BY serverTime DESC, id DESC LIMIT 1"""
+          AND msgid IS NULL ORDER BY serverTime DESC, timelineOrder DESC, id DESC LIMIT 1"""
     )
     suspend fun findSelfMsgidlessCandidate(bufferId: Long, text: String): MessageEntity?
 
@@ -923,12 +960,20 @@ interface MessageDao {
         """UPDATE buffers SET
                localReadAnchorTime = (SELECT serverTime FROM messages
                    WHERE bufferId = buffers.id AND id != :id AND
-                     (serverTime < :serverTime OR (serverTime = :serverTime AND id < :id))
-                   ORDER BY serverTime DESC, id DESC LIMIT 1),
+                     (serverTime < :serverTime OR (serverTime = :serverTime AND (
+                         timelineOrder < COALESCE((SELECT timelineOrder FROM messages WHERE id = :id), :id)
+                         OR (timelineOrder = COALESCE((SELECT timelineOrder FROM messages WHERE id = :id), :id)
+                             AND id < :id)
+                     )))
+                   ORDER BY serverTime DESC, timelineOrder DESC, id DESC LIMIT 1),
                localReadAnchorEventId = (SELECT id FROM messages
                    WHERE bufferId = buffers.id AND id != :id AND
-                     (serverTime < :serverTime OR (serverTime = :serverTime AND id < :id))
-                   ORDER BY serverTime DESC, id DESC LIMIT 1)
+                     (serverTime < :serverTime OR (serverTime = :serverTime AND (
+                         timelineOrder < COALESCE((SELECT timelineOrder FROM messages WHERE id = :id), :id)
+                         OR (timelineOrder = COALESCE((SELECT timelineOrder FROM messages WHERE id = :id), :id)
+                             AND id < :id)
+                     )))
+                   ORDER BY serverTime DESC, timelineOrder DESC, id DESC LIMIT 1)
            WHERE localReadAnchorEventId = :id""",
     )
     suspend fun fallbackReadAnchorBeforeDelete(id: TimelineEventId, serverTime: Long)
@@ -943,10 +988,14 @@ interface MessageDao {
         deleteById(event.id)
     }
 
-    /** 0-based reverse-list index: strict complement of pagingSource ORDER BY serverTime DESC, id DESC. */
+    /** 0-based reverse-list index: strict complement of pagingSource ORDER BY serverTime DESC, timelineOrder DESC, id DESC. */
     @Query(
         """SELECT COUNT(*) FROM messages WHERE bufferId = :bufferId
-          AND (serverTime > :serverTime OR (serverTime = :serverTime AND id > :id))"""
+          AND (serverTime > :serverTime OR (serverTime = :serverTime AND (
+              timelineOrder > COALESCE((SELECT timelineOrder FROM messages WHERE id = :id), :id)
+              OR (timelineOrder = COALESCE((SELECT timelineOrder FROM messages WHERE id = :id), :id)
+                  AND id > :id)
+          )))"""
     )
     suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int
 
@@ -984,7 +1033,7 @@ interface MessageDao {
         """SELECT m.sender, m.text, m.serverTime, m.isSelf
            FROM messages m JOIN buffers b ON b.id = m.bufferId
            WHERE b.networkId = :networkId AND lower(b.name) = 'bouncerserv'
-           ORDER BY m.serverTime DESC, m.id DESC LIMIT 100""",
+           ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 100""",
     )
     fun observeBouncerTranscript(networkId: Long): Flow<List<BouncerTranscriptRow>>
 }
@@ -1283,6 +1332,27 @@ interface CanonicalTimelineDao {
     suspend fun eventsForRoom(roomId: RoomId): List<TimelineEventEntity>
 
     @Query(
+        """SELECT * FROM messages
+           WHERE bufferId = :roomId AND serverTime = :serverTime
+           ORDER BY timelineOrder, id""",
+    )
+    suspend fun eventsAtTime(roomId: RoomId, serverTime: Long): List<TimelineEventEntity>
+
+    @Query(
+        """UPDATE messages
+           SET timelineOrder = :timelineOrder,
+               timelineOrderConfirmed = CASE
+                   WHEN :confirmed THEN 1 ELSE timelineOrderConfirmed
+               END
+           WHERE id = :eventId""",
+    )
+    suspend fun updateTimelineOrder(
+        eventId: TimelineEventId,
+        timelineOrder: Long,
+        confirmed: Boolean,
+    )
+
+    @Query(
         """SELECT batchExactOrdinal FROM event_observations
            WHERE timelineEventId = :eventId AND batchExactOrdinal IS NOT NULL
            ORDER BY id LIMIT 1""",
@@ -1513,7 +1583,7 @@ interface CanonicalTimelineDao {
                  OR (m.kind = 'INVITE' AND m.inviteState IN ('PENDING', 'FAILED'))
                  OR (m.kind = 'DCC_TRANSFER' AND m.eventPayload IS NOT NULL)
              )
-           ORDER BY m.serverTime, m.id
+           ORDER BY m.serverTime, m.timelineOrder, m.id
            LIMIT :limit""",
     )
     suspend fun pendingNotifications(limit: Int): List<TimelineEventEntity>

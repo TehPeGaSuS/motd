@@ -331,6 +331,58 @@ class ChatHistoryRemoteMediatorTest {
     }
 
     @Test
+    fun saturatedTimestampOnlyLatestStopsWithoutClaimingHistoryComplete() = runTest {
+        val history = FakeHistory(
+            latest = listOf(chatMsg("a", 100), chatMsg("b", 100)),
+            referenceTypes = setOf(HistoryReferenceType.TIMESTAMP),
+        )
+
+        val result = load(mediator(history, pageSize = 2), LoadType.APPEND)
+
+        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(2, rowCount())
+        assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+        assertFalse(db.historyCursorDao().byRoom(bufferId)!!.historyComplete)
+    }
+
+    @Test
+    fun saturatedTimestampOnlyBeforeStopsInsteadOfSkippingBoundaryPeers() = runTest {
+        processor.process(networkId, chatMsg("seed", 500))
+        val history = FakeHistory(
+            before = ArrayDeque(
+                listOf(listOf(chatMsg("a", 100), chatMsg("b", 100))),
+            ),
+            referenceTypes = setOf(HistoryReferenceType.TIMESTAMP),
+        )
+
+        val result = load(mediator(history, pageSize = 2), LoadType.APPEND)
+
+        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(3, rowCount())
+        assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+    }
+
+    @Test
+    fun unchangedBeforeBoundaryStopsTheMediatorWithoutClaimingCompletion() = runTest {
+        processor.process(networkId, chatMsg("seed", 500))
+        val history = FakeHistory(
+            responseFor = { request ->
+                if (request.subcommand == ChatHistoryRequest.Subcommand.BEFORE) {
+                    messages(listOf(chatMsg("seed", 500)))
+                } else {
+                    null
+                }
+            },
+        )
+
+        val result = load(mediator(history), LoadType.APPEND)
+
+        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(1, rowCount())
+        assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+    }
+
+    @Test
     fun positivePrimaryCountWithoutAdvertisedBoundaryIsAnIncompleteError() = runTest {
         processor.process(networkId, chatMsg("seed", 500))
         val malformed = ChatHistoryResponse.Messages(

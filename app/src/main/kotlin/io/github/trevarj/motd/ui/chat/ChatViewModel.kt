@@ -22,7 +22,6 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.ComposerDraftEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
-import io.github.trevarj.motd.data.db.effectiveLocalReadAnchor
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.db.UserDao
@@ -605,7 +604,7 @@ class ChatViewModel @Inject constructor(
     // to 0 and stays 0 when scrolling back up — instead of counting already-read messages until
     // re-entry (bug: badge doesn't clear until leaving the chat).
     val localReadAnchor: StateFlow<TimelineAnchor?> = buffer
-        .map { it?.effectiveLocalReadAnchor }
+        .map { room -> room?.let { visibilityReader.effectiveLocalReadAnchor(it) } }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -1341,14 +1340,16 @@ class ChatViewModel @Inject constructor(
         // you just sent. Null (no real marker, or nothing unread from others) hides both.
         viewModelScope.launch {
             val entrySpec = MessageVisibilitySpec.from(settingsRepository.settings.first())
-            val realMarker = bufferRepository.observeBuffer(bufferId).firstOrNull()?.effectiveLocalReadAnchor
+            val realMarker = bufferRepository.observeBuffer(bufferId).firstOrNull()?.let {
+                visibilityReader.effectiveLocalReadAnchor(it)
+            }
             // Oldest unread row past the marker (first message from someone else you have not seen),
             // computed once and shared by the frozen divider and the entry target.
             val firstUnread = realMarker?.let {
                 visibilityReader.firstVisibleUnreadAnchor(bufferId, it, entrySpec)
             }
             _readMarkerSnapshot.value = firstUnread
-                ?.let { TimelineAnchor(it.serverTime, it.eventId - 1L) }
+                ?.let { TimelineAnchor(it.serverTime, it.eventId - 1L, it.timelineOrder) }
             // A deep-link owns positioning. A normal open lands on the oldest unread message so the
             // first unseen row tops the viewport and the rest of the unread continues below it; the
             // scroll-to-bottom FAB (with its @-mention badge) is the natural next step. When the
@@ -1378,7 +1379,7 @@ class ChatViewModel @Inject constructor(
         anchor: TimelineAnchor,
         spec: MessageVisibilitySpec,
     ): ChatPositionTarget {
-        val index = visibilityReader.countTimelineNewer(bufferId, anchor.serverTime, anchor.eventId, spec)
+        val index = visibilityReader.countTimelineNewer(bufferId, anchor, spec)
         // forceScrollOnEntry: retained list state sits at the newest row on entry, so the gate must
         // still scroll to the (typically non-zero) anchor index instead of treating it as a no-op.
         // placeAtTop: ChatScreen realizes the top placement (off-screen load + measured snap) so the
@@ -1403,8 +1404,7 @@ class ChatViewModel @Inject constructor(
         }
         val index = visibilityReader.countTimelineNewer(
             bufferId,
-            anchor.serverTime,
-            anchor.id,
+            TimelineAnchor(anchor.serverTime, anchor.id, anchor.timelineOrder),
             spec,
         )
         val canonicalSavedId = visibilityReader.resolveCanonicalEventId(saved.rowId)
@@ -1436,8 +1436,7 @@ class ChatViewModel @Inject constructor(
         if (anchor.id != canonicalSavedId) return
         val index = visibilityReader.countTimelineNewer(
             bufferId,
-            anchor.serverTime,
-            anchor.id,
+            TimelineAnchor(anchor.serverTime, anchor.id, anchor.timelineOrder),
             spec,
         )
         scrollPositionStore.put(

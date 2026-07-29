@@ -18,8 +18,9 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.RoomEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
-import io.github.trevarj.motd.data.db.effectiveLocalReadAnchor
+import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.prefs.AvatarStyle
@@ -143,10 +144,10 @@ class MotdNotifications @Inject constructor(
                                     account = event.senderAccount,
                                     batchId = null,
                                     label = null,
-                                    serverTimeSource = if (event.serverTimeAuthoritative) {
-                                        ServerTimeSource.TAG
-                                    } else {
-                                        ServerTimeSource.LOCAL
+                                    serverTimeSource = when (event.timeProvenance) {
+                                        TimeProvenance.SERVER_TAG -> ServerTimeSource.TAG
+                                        TimeProvenance.LOCAL_CLOCK -> ServerTimeSource.LOCAL
+                                        TimeProvenance.UNKNOWN -> ServerTimeSource.UNKNOWN
                                     },
                                 ),
                                 kind = when (event.kind) {
@@ -283,9 +284,12 @@ class MotdNotifications @Inject constructor(
             canonicalEvent?.senderAccount ?: message.ctx.account,
             canonicalEvent?.normalizedActor ?: identityRules.normalize(message.source.nick),
         )
-        val incomingAnchor = canonicalEvent?.let { TimelineAnchor(it.serverTime, it.id) }
+        val incomingAnchor = canonicalEvent?.let {
+            TimelineAnchor(it.serverTime, it.id, it.timelineOrder)
+        }
             ?: TimelineAnchor(message.ctx.serverTime, 0L)
-        val alreadyRead = buffer?.effectiveLocalReadAnchor?.let { incomingAnchor <= it } == true
+        val effectiveReadAnchor = buffer?.let { effectiveLocalReadAnchor(it) }
+        val alreadyRead = effectiveReadAnchor?.let { incomingAnchor <= it } == true
         val decision = shouldPostNotification(foreground, muted, senderIsFriend, senderIsFool, alreadyRead)
         diagnostics.record("notifications", "message_evaluated") {
             mapOf(
@@ -317,8 +321,8 @@ class MotdNotifications @Inject constructor(
             runCatching {
                 db.messageDao().recentNotifiable(
                     bufferId = bufferId,
-                    afterTime = buffer?.effectiveLocalReadAnchor?.serverTime ?: Long.MIN_VALUE,
-                    afterEventId = buffer?.effectiveLocalReadAnchor?.eventId ?: Long.MIN_VALUE,
+                    afterTime = effectiveReadAnchor?.serverTime ?: Long.MIN_VALUE,
+                    afterEventId = effectiveReadAnchor?.eventId ?: Long.MIN_VALUE,
                     queryRoom = type == BufferType.QUERY,
                     excludeEventId = canonicalEventId ?: -1L,
                     limit = MAX_NOTIFICATION_MESSAGES - 1,
@@ -583,8 +587,8 @@ class MotdNotifications @Inject constructor(
         val message = db.messageDao().byCanonicalId(messageId) ?: return
         val buffer = db.bufferDao().observeById(bufferId) ?: return
         val foreground = foregroundBufferTracker.foregroundBufferId.value == bufferId
-        val incomingAnchor = TimelineAnchor(message.serverTime, message.id)
-        val alreadyRead = buffer.effectiveLocalReadAnchor?.let { incomingAnchor <= it } == true
+        val incomingAnchor = TimelineAnchor(message.serverTime, message.id, message.timelineOrder)
+        val alreadyRead = effectiveLocalReadAnchor(buffer)?.let { incomingAnchor <= it } == true
         if (foreground || buffer.muted || alreadyRead) return
 
         val contentIntent = PendingIntent.getActivity(
@@ -624,6 +628,18 @@ class MotdNotifications @Inject constructor(
                 "permission" to canPost,
             )
         }
+    }
+
+    private suspend fun effectiveLocalReadAnchor(buffer: RoomEntity): TimelineAnchor? {
+        val local = buffer.localReadAnchorTime?.let { serverTime ->
+            val eventId = buffer.localReadAnchorEventId ?: 0L
+            val event = db.messageDao().byCanonicalId(eventId)
+            TimelineAnchor(serverTime, event?.id ?: eventId, event?.timelineOrder ?: eventId)
+        }
+        val mute = buffer.localUnreadFloorTime?.let { serverTime ->
+            TimelineAnchor(serverTime, Long.MAX_VALUE, Long.MAX_VALUE)
+        }
+        return listOfNotNull(local, mute).maxOrNull()
     }
 
     companion object {
@@ -733,7 +749,7 @@ internal suspend fun resolveLatestNotificationAnchor(
     for (eventId in eventIds) {
         val event = db.messageDao().byCanonicalId(eventId) ?: continue
         if (db.bufferDao().canonicalId(event.bufferId) != canonicalRoomId) continue
-        val current = TimelineAnchor(event.serverTime, event.id)
+        val current = TimelineAnchor(event.serverTime, event.id, event.timelineOrder)
         if (latest == null || current > latest) latest = current
     }
     return latest

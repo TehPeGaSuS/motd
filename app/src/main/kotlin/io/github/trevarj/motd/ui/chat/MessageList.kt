@@ -173,7 +173,7 @@ private fun messageTag(msg: MessageEntity): String = timelineMessageTag(msg.msgi
 internal fun foolCollapseTag(msgid: String?, eventId: Long): String =
     "chat_fool_collapse_${msgid ?: eventId}"
 
-private fun MessageEntity.timelineAnchor(): TimelineAnchor = TimelineAnchor(serverTime, id)
+private fun MessageEntity.timelineAnchor(): TimelineAnchor = TimelineAnchor(serverTime, id, timelineOrder)
 
 /**
  * True when [current] should show its sender header: it opens a new same-sender ≤3-min group.

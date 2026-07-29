@@ -77,8 +77,16 @@ class MessageRepositoryImpl @Inject constructor(
         visibility: MessageVisibilitySpec,
     ): Int {
         val (roomId, identityRules) = resolvePagingContext(bufferId)
+        val timelineOrder = messageDao.byCanonicalId(id)?.timelineOrder ?: id
         return messageDao.rawCount(
-            countTimelineNewerQuery(roomId, serverTime, id, visibility, identityRules),
+            countTimelineNewerQuery(
+                roomId,
+                serverTime,
+                id,
+                timelineOrder,
+                visibility,
+                identityRules,
+            ),
         )
     }
 

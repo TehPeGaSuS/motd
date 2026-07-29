@@ -37,8 +37,8 @@ class EventMapper(
 
     private data class ParsedServerTime(val value: Long, val source: ServerTimeSource)
 
-    private fun ctx(msg: IrcMessage, batchId: String?): MessageContext {
-        val parsedTime = parseServerTime(msg.tags["time"])
+    private fun ctx(msg: IrcMessage, batchId: String?, historical: Boolean): MessageContext {
+        val parsedTime = parseServerTime(msg.tags["time"], historical)
         return MessageContext(
             msgid = msg.tags["msgid"],
             serverTime = parsedTime.value,
@@ -46,15 +46,26 @@ class EventMapper(
             batchId = batchId ?: msg.tags["batch"],
             label = msg.tags["label"],
             serverTimeSource = parsedTime.source,
+            isHistoryContext = "draft/chathistory-context" in msg.tags,
         )
     }
 
-    private fun parseServerTime(time: String?): ParsedServerTime {
-        if (time == null) return ParsedServerTime(now(), ServerTimeSource.LOCAL)
+    private fun parseServerTime(time: String?, historical: Boolean): ParsedServerTime {
+        if (time == null) {
+            return if (historical) {
+                ParsedServerTime(UNKNOWN_HISTORY_TIME, ServerTimeSource.UNKNOWN)
+            } else {
+                ParsedServerTime(now(), ServerTimeSource.LOCAL)
+            }
+        }
         return try {
             ParsedServerTime(Instant.parse(time).toEpochMilli(), ServerTimeSource.TAG)
         } catch (_: DateTimeParseException) {
-            ParsedServerTime(now(), ServerTimeSource.LOCAL)
+            if (historical) {
+                ParsedServerTime(UNKNOWN_HISTORY_TIME, ServerTimeSource.UNKNOWN)
+            } else {
+                ParsedServerTime(now(), ServerTimeSource.LOCAL)
+            }
         }
     }
 
@@ -69,8 +80,19 @@ class EventMapper(
      *
      * [ctcpReply] is invoked (fire-and-forget) with a NOTICE line to answer CTCP VERSION.
      */
-    fun map(msg: IrcMessage, batchId: String? = null, ctcpReply: (IrcMessage) -> Unit = {}): IrcEvent? {
-        val c = { ctx(msg, batchId) }
+    fun map(
+        msg: IrcMessage,
+        batchId: String? = null,
+        ctcpReply: (IrcMessage) -> Unit = {},
+    ): IrcEvent? = map(msg, batchId, historical = false, ctcpReply = ctcpReply)
+
+    fun map(
+        msg: IrcMessage,
+        batchId: String?,
+        historical: Boolean,
+        ctcpReply: (IrcMessage) -> Unit = {},
+    ): IrcEvent? {
+        val c = { ctx(msg, batchId, historical) }
         return when (msg.command) {
             "PRIVMSG", "NOTICE" -> mapChat(msg, c(), ctcpReply)
             "TAGMSG" -> mapTagMessage(msg, c())
@@ -166,6 +188,11 @@ class EventMapper(
             )
             else -> mapNumericOrRaw(msg)
         }
+    }
+
+    private companion object {
+        /** Stable sentinel: unknown history sorts before timestamped chat instead of as "now". */
+        const val UNKNOWN_HISTORY_TIME = 0L
     }
 
     private fun mapChat(msg: IrcMessage, ctx: MessageContext, ctcpReply: (IrcMessage) -> Unit): IrcEvent? {

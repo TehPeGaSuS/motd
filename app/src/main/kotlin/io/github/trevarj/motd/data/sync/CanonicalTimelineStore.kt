@@ -99,6 +99,80 @@ class CanonicalTimelineStore @Inject constructor(
             }
         }
 
+    /**
+     * Reconcile completed server playback with provisional local tie ordering. Server time remains
+     * the primary key; this only orders events sharing the same timestamp (including the stable
+     * unknown-history sentinel). A later contradictory confirmed batch is diagnosed and cannot
+     * make the UI oscillate.
+     */
+    suspend fun reconcilePlaybackOrder(
+        orderedEventIds: List<TimelineEventId>,
+        insertedEventIds: Set<TimelineEventId>,
+        prependUnanchored: Boolean,
+    ) = db.withTransaction {
+        val canonicalIds = buildList {
+            for (eventId in orderedEventIds) add(dao.canonicalEventId(eventId))
+        }.distinct()
+        val canonicalInsertedIds = buildSet {
+            for (eventId in insertedEventIds) add(dao.canonicalEventId(eventId))
+        }
+        val incomingEvents = canonicalIds.mapNotNull { id -> dao.eventById(id) }
+        incomingEvents.groupBy { it.bufferId to it.serverTime }.forEach { (key, incoming) ->
+            val existing = dao.eventsAtTime(key.first, key.second)
+            if (existing.size <= 1) {
+                incoming.forEachIndexed { index, event ->
+                    dao.updateTimelineOrder(event.id, index.toLong(), confirmed = true)
+                }
+                return@forEach
+            }
+
+            val incomingIds = incoming.map(TimelineEventEntity::id).distinct()
+            val incomingSet = incomingIds.toSet()
+            val existingBefore = existing.filterNot { it.id in canonicalInsertedIds }
+            val existingById = existingBefore.associateBy(TimelineEventEntity::id)
+            val common = incomingIds.filter(existingById::containsKey)
+            val existingCommon = existingBefore.map(TimelineEventEntity::id).filter(incomingSet::contains)
+            val confirmedConflict = common != existingCommon && common.all { id ->
+                existingById.getValue(id).timelineOrderConfirmed
+            }
+
+            val merged = existingBefore.map(TimelineEventEntity::id).toMutableList()
+            incomingIds.forEachIndexed { index, id ->
+                if (id in merged) return@forEachIndexed
+                val previous = incomingIds.take(index).lastOrNull(merged::contains)
+                val next = incomingIds.drop(index + 1).firstOrNull(merged::contains)
+                val insertion = when {
+                    previous != null -> merged.indexOf(previous) + 1
+                    next != null -> merged.indexOf(next)
+                    prependUnanchored -> 0
+                    else -> merged.size
+                }
+                merged.add(insertion, id)
+            }
+
+            if (!confirmedConflict) {
+                val positions = merged.indices.filter { merged[it] in incomingSet }
+                positions.zip(incomingIds).forEach { (position, id) -> merged[position] = id }
+            } else {
+                diagnostics.record("history", "playback_order_conflict") {
+                    mapOf(
+                        "buffer_id" to key.first,
+                        "server_time" to key.second,
+                        "events" to incomingIds.size,
+                    )
+                }
+            }
+
+            merged.forEachIndexed { index, id ->
+                dao.updateTimelineOrder(
+                    eventId = id,
+                    timelineOrder = index.toLong(),
+                    confirmed = id in incomingSet,
+                )
+            }
+        }
+    }
+
     /** Attach a new durable attempt label/observation to the same failed canonical event. */
     suspend fun beginRetry(
         networkId: Long,
@@ -175,7 +249,8 @@ class CanonicalTimelineStore @Inject constructor(
                     soundHandled = false,
                 )
                 val insertedId = dao.insertEvent(inserted)
-                val event = inserted.copy(id = insertedId)
+                val event = inserted.copy(id = insertedId, timelineOrder = insertedId)
+                dao.updateEvent(event)
                 insertLocalSendAttempt(networkId, event, plan.label, connectionGeneration)
                 add(event)
             }
@@ -258,6 +333,7 @@ class CanonicalTimelineStore @Inject constructor(
         val incoming = observation.event.copy(
             id = 0,
             serverTimeAuthoritative = observation.timeProvenance == TimeProvenance.SERVER_TAG,
+            timeProvenance = observation.timeProvenance,
         )
         val observedAt = System.currentTimeMillis()
         val receiveOrder = dao.nextReceiveOrder(observation.networkId)
@@ -368,7 +444,8 @@ class CanonicalTimelineStore @Inject constructor(
         val inserted: Boolean
         if (candidate == null) {
             val eventId = dao.insertEvent(incoming)
-            initial = incoming.copy(id = eventId)
+            initial = incoming.copy(id = eventId, timelineOrder = eventId)
+            dao.updateEvent(initial)
             inserted = true
         } else {
             initial = candidate
@@ -454,7 +531,10 @@ class CanonicalTimelineStore @Inject constructor(
         observation: TimelineObservation,
         event: TimelineEventEntity,
     ) {
-        if (observation.origin != ObservationOrigin.HISTORY) return
+        if (
+            observation.origin != ObservationOrigin.HISTORY ||
+            observation.timeProvenance != TimeProvenance.SERVER_TAG
+        ) return
         val cursorDao = db.historyCursorDao()
         val current = cursorDao.byRoom(event.bufferId)
         val oldest = current?.oldestServerTime
@@ -462,17 +542,15 @@ class CanonicalTimelineStore @Inject constructor(
         cursorDao.upsert(
             HistoryCursorEntity(
                 roomId = event.bufferId,
+                // Boundary fields are one atomic reference. Never retain a msgid from a
+                // different event when the timestamp endpoint advances.
                 newestMsgid = if (newest == null || event.serverTime >= newest) {
-                    event.msgid ?: current?.newestMsgid
-                } else {
-                    current.newestMsgid
-                },
+                    event.msgid
+                } else current.newestMsgid,
                 newestServerTime = maxOf(newest ?: event.serverTime, event.serverTime),
                 oldestMsgid = if (oldest == null || event.serverTime <= oldest) {
-                    event.msgid ?: current?.oldestMsgid
-                } else {
-                    current.oldestMsgid
-                },
+                    event.msgid
+                } else current.oldestMsgid,
                 oldestServerTime = minOf(oldest ?: event.serverTime, event.serverTime),
                 historyComplete = current?.historyComplete == true,
             ),
@@ -580,6 +658,11 @@ class CanonicalTimelineStore @Inject constructor(
             eventPayload = existing.eventPayload ?: incoming.eventPayload,
             inviteState = mergeInviteState(existing.inviteState, incoming.inviteState),
             serverTimeAuthoritative = existing.serverTimeAuthoritative || authoritative,
+            timeProvenance = if (existing.serverTimeAuthoritative || authoritative) {
+                TimeProvenance.SERVER_TAG
+            } else {
+                existing.timeProvenance
+            },
             notificationHandled = existing.notificationHandled || incoming.notificationHandled,
             notificationClaimed = existing.notificationClaimed || incoming.notificationClaimed,
             notificationClaimOwner = existing.notificationClaimOwner ?: incoming.notificationClaimOwner,
@@ -603,7 +686,10 @@ class CanonicalTimelineStore @Inject constructor(
     ): List<Pair<EventAliasNamespace, ByteArray>> = buildList {
         event.msgid?.let { add(EventAliasNamespace.MSGID to bytes(it)) }
         observation.label?.let { add(EventAliasNamespace.LABEL to labelBytes(it)) }
-        if (observation.timeProvenance == TimeProvenance.SERVER_TAG) {
+        if (
+            observation.timeProvenance == TimeProvenance.SERVER_TAG ||
+            observation.timeProvenance == TimeProvenance.UNKNOWN
+        ) {
             val ordinal = observation.batchExactOrdinal ?: 0
             if (ordinal == 0) {
                 add(
@@ -689,8 +775,7 @@ class CanonicalTimelineStore @Inject constructor(
 
     private fun bytes(value: String): ByteArray = value.toByteArray(StandardCharsets.UTF_8)
 
-    private fun provenanceOf(event: TimelineEventEntity): TimeProvenance =
-        if (event.serverTimeAuthoritative) TimeProvenance.SERVER_TAG else TimeProvenance.LOCAL_CLOCK
+    private fun provenanceOf(event: TimelineEventEntity): TimeProvenance = event.timeProvenance
 
     private fun TimelineEventEntity.hasContentConflict(other: TimelineEventEntity): Boolean =
         kind != other.kind || normalizedActor != other.normalizedActor || text != other.text

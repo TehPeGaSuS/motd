@@ -245,7 +245,9 @@ class BufferStore @Inject constructor(
             val readStateRooms = visibleRooms.ifEmpty { rooms }
             val localReadAnchor = readStateRooms.mapNotNull { room ->
                 room.localReadAnchorTime?.let {
-                    TimelineAnchor(it, room.localReadAnchorEventId ?: 0L)
+                    val eventId = room.localReadAnchorEventId ?: 0L
+                    val order = db.messageDao().byCanonicalId(eventId)?.timelineOrder ?: eventId
+                    TimelineAnchor(it, eventId, order)
                 }
             }.minOrNull()
             val discardedBoundary = rooms.maxWithOrNull(

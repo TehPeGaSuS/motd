@@ -4,6 +4,7 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.RoomEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -17,6 +18,7 @@ data class VisibleMessageAnchor(
     val id: Long,
     val msgid: String?,
     val serverTime: Long,
+    val timelineOrder: Long = id,
 )
 
 /** Policy-backed targeted reads sharing the Room paging predicate. */
@@ -24,6 +26,19 @@ data class VisibleMessageAnchor(
 class MessageVisibilityReader @Inject constructor(
     private val db: MotdDatabase,
 ) {
+    suspend fun effectiveLocalReadAnchor(buffer: RoomEntity): TimelineAnchor? {
+        val local = buffer.localReadAnchorTime?.let { serverTime ->
+            val eventId = buffer.localReadAnchorEventId ?: 0L
+            val canonicalId = resolveCanonicalEventId(eventId)
+            val order = db.canonicalTimelineDao().eventById(canonicalId)?.timelineOrder ?: eventId
+            TimelineAnchor(serverTime, eventId, order)
+        }
+        val mute = buffer.localUnreadFloorTime?.let { serverTime ->
+            TimelineAnchor(serverTime, Long.MAX_VALUE, Long.MAX_VALUE)
+        }
+        return listOfNotNull(local, mute).maxOrNull()
+    }
+
     fun observeLatestRawAnchor(bufferId: Long): Flow<TimelineAnchor?> =
         db.invalidationTracker.createFlow(
             "messages",
@@ -36,11 +51,11 @@ class MessageVisibilityReader @Inject constructor(
         db.invalidationTracker.createFlow(
             "event_redirects",
             emitInitialState = false,
-        ).map { Unit }
+        ).map { _: Set<String> -> }
 
     suspend fun latestRawAnchor(bufferId: Long): TimelineAnchor? =
         db.messageDao().newestMessage(canonicalRoomId(bufferId))?.let {
-            TimelineAnchor(it.serverTime, it.id)
+            TimelineAnchor(it.serverTime, it.id, it.timelineOrder)
         }
 
     suspend fun countTimelineNewer(
@@ -49,9 +64,30 @@ class MessageVisibilityReader @Inject constructor(
         id: Long,
         spec: MessageVisibilitySpec,
     ): Int {
+        val canonicalId = resolveCanonicalEventId(id)
+        val timelineOrder = db.canonicalTimelineDao().eventById(canonicalId)?.timelineOrder ?: id
+        return countTimelineNewer(
+            bufferId,
+            TimelineAnchor(serverTime, id, timelineOrder),
+            spec,
+        )
+    }
+
+    suspend fun countTimelineNewer(
+        bufferId: Long,
+        anchor: TimelineAnchor,
+        spec: MessageVisibilitySpec,
+    ): Int {
         val context = visibilityContext(bufferId)
         return db.messageDao().rawCount(
-            countTimelineNewerQuery(context.roomId, serverTime, id, spec, context.identityRules),
+            countTimelineNewerQuery(
+                context.roomId,
+                anchor.serverTime,
+                anchor.eventId,
+                anchor.timelineOrder,
+                spec,
+                context.identityRules,
+            ),
         )
     }
 
@@ -85,7 +121,7 @@ class MessageVisibilityReader @Inject constructor(
         return db.messageDao().rawMessage(
             firstVisibleUnreadQuery(context.roomId, after, spec, context.identityRules),
         )
-            ?.let { TimelineAnchor(it.serverTime, it.id) }
+            ?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
     }
 
     /**
@@ -118,6 +154,7 @@ class MessageVisibilityReader @Inject constructor(
         val context = visibilityContext(bufferId)
         val visibility = MessageVisibilitySql(spec, context.identityRules)
         val canonicalEventId = resolveCanonicalEventId(id)
+        val savedOrder = db.canonicalTimelineDao().eventById(canonicalEventId)?.timelineOrder ?: id
         val exact = queryMessage(
             where = when {
                 msgid != null -> "m.msgid = ?"
@@ -131,26 +168,28 @@ class MessageVisibilityReader @Inject constructor(
             },
             bufferId = context.roomId,
             visibility = visibility.anchor(),
-            order = "m.serverTime DESC, m.id DESC",
+            order = "m.serverTime DESC, m.timelineOrder DESC, m.id DESC",
         )
         if (exact != null) return exact.toAnchor()
 
         // Prefer the first meaningful row at or behind the old viewport, then the nearest newer
         // row. This avoids surprising forward jumps while history is being read.
         val older = queryMessage(
-            where = "m.serverTime < ? OR (m.serverTime = ? AND m.id < ?)",
-            args = listOf(serverTime, serverTime, id),
+            where = "m.serverTime < ? OR (m.serverTime = ? AND " +
+                "(m.timelineOrder < ? OR (m.timelineOrder = ? AND m.id < ?)))",
+            args = listOf(serverTime, serverTime, savedOrder, savedOrder, id),
             bufferId = context.roomId,
             visibility = visibility.anchor(),
-            order = "m.serverTime DESC, m.id DESC",
+            order = "m.serverTime DESC, m.timelineOrder DESC, m.id DESC",
         )
         if (older != null) return older.toAnchor()
         return queryMessage(
-            where = "m.serverTime > ? OR (m.serverTime = ? AND m.id > ?)",
-            args = listOf(serverTime, serverTime, id),
+            where = "m.serverTime > ? OR (m.serverTime = ? AND " +
+                "(m.timelineOrder > ? OR (m.timelineOrder = ? AND m.id > ?)))",
+            args = listOf(serverTime, serverTime, savedOrder, savedOrder, id),
             bufferId = context.roomId,
             visibility = visibility.anchor(),
-            order = "m.serverTime ASC, m.id ASC",
+            order = "m.serverTime ASC, m.timelineOrder ASC, m.id ASC",
         )?.toAnchor()
     }
 
@@ -165,7 +204,7 @@ class MessageVisibilityReader @Inject constructor(
             args = emptyList(),
             bufferId = context.roomId,
             visibility = MessageVisibilitySql(spec, context.identityRules).anchor(),
-            order = "m.serverTime DESC, m.id DESC",
+            order = "m.serverTime DESC, m.timelineOrder DESC, m.id DESC",
         )?.toAnchor()
     }
 
@@ -211,7 +250,7 @@ class MessageVisibilityReader @Inject constructor(
             args = emptyList(),
             bufferId = row.bufferId,
             visibility = visibility.preview(),
-            order = "m.serverTime DESC, m.id DESC",
+            order = "m.serverTime DESC, m.timelineOrder DESC, m.id DESC",
         )
         val unreadCount = chatListCount(row.bufferId, visibility.visibleUnread(), mentionsOnly = false)
         val mentionCount = chatListCount(row.bufferId, visibility.visibleUnread(), mentionsOnly = true)
@@ -250,13 +289,17 @@ class MessageVisibilityReader @Inject constructor(
                 "COALESCE(b.localUnreadFloorTime, 0)) OR (" +
                 "m.serverTime = b.localReadAnchorTime AND " +
                 "COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime " +
-                "AND m.id > COALESCE(b.localReadAnchorEventId, 0))) " +
+                "AND (m.timelineOrder > COALESCE((SELECT timelineOrder FROM messages " +
+                "WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0)) " +
+                "OR (m.timelineOrder = COALESCE((SELECT timelineOrder FROM messages " +
+                "WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0)) " +
+                "AND m.id > COALESCE(b.localReadAnchorEventId, 0))))) " +
                 "AND $visibility" + if (mentionsOnly) " AND m.hasMention = 1" else "",
             arrayOf(bufferId),
         ),
     )
 
-    private fun MessageEntity.toAnchor() = VisibleMessageAnchor(id, msgid, serverTime)
+    private fun MessageEntity.toAnchor() = VisibleMessageAnchor(id, msgid, serverTime, timelineOrder)
 
     private data class VisibilityContext(
         val roomId: Long,

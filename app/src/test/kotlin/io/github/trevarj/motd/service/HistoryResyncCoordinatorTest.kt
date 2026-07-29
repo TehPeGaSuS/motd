@@ -258,6 +258,25 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun saturatedTimestampOnlyMessagePageIsIncompleteInsteadOfSkippingTies() = runTest {
+        processor.process(networkId, message("seed", 100))
+        val source = FakeSource(msgidRefs = false, pageLimit = 2) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(
+                    events = listOf(message("one", 200), message("two", 200)),
+                )
+                else -> error("unexpected ${request.subcommand}")
+            }
+        }
+
+        val result = coordinator.resyncBuffer(networkId, bufferId, "#chan", source)
+
+        assertTrue(result is HistoryResyncState.Incomplete)
+        assertEquals(3, rows().size)
+        assertEquals(1, source.requests.size)
+    }
+
+    @Test
     fun emptyBoundaryUsesBoundedLatest() = runTest {
         val source = FakeSource { request ->
             FakeResponse(

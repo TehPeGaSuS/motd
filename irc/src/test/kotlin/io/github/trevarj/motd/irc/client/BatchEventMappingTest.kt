@@ -35,7 +35,8 @@ class BatchEventMappingTest {
             listOf(BatchChild.Nested(split)),
         )
 
-        val outer = client.mapBatchTree(history).single() as IrcEvent.HistoryBatch
+        val outer = client.mapBatchTree(history).single() as IrcEvent.PlaybackBatch
+        assertEquals(IrcEvent.PlaybackSource.CHATHISTORY, outer.source)
         val event = outer.events.single() as IrcEvent.NetworkBatch
         assertEquals(IrcEvent.NetworkBatchKind.NETSPLIT, event.kind)
         assertEquals("#room", event.target)
@@ -61,7 +62,7 @@ class BatchEventMappingTest {
         assertTrue(client.mapBatchTree(unknown).single() is IrcEvent.NetworkBatch)
     }
 
-    @Test fun `znc playback maps to replay batch`() {
+    @Test fun `znc playback maps to playback batch`() {
         val playback = batch(
             "znc",
             "znc.in/playback",
@@ -69,9 +70,12 @@ class BatchEventMappingTest {
             listOf(BatchChild.Message(msg("@time=2026-01-01T00:00:00Z :Alice!u@h PRIVMSG #room :missed"))),
         )
 
-        val event = client.mapBatchTree(playback).single() as IrcEvent.ReplayBatch
+        val event = client.mapBatchTree(playback).single() as IrcEvent.PlaybackBatch
+        assertEquals(IrcEvent.PlaybackSource.ZNC_PLAYBACK, event.source)
         assertEquals("#room", event.target)
         assertTrue(event.events.single() is IrcEvent.ChatMessage)
+        assertEquals(1_767_225_600_000L, event.items.single().serverTime)
+        assertEquals(null, event.items.single().msgid)
     }
 
     private fun batch(ref: String, type: String, params: List<String>, children: List<BatchChild>) =

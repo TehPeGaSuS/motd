@@ -13,6 +13,8 @@ sealed interface IrcClientState {
 enum class ServerTimeSource {
     TAG,
     LOCAL,
+    /** Historical event had no valid server-time tag; never substitute the device clock. */
+    UNKNOWN,
 }
 
 /** Context shared by chat-ish events. serverTime = epoch millis (from server-time tag or local clock). */
@@ -23,6 +25,7 @@ data class MessageContext(
     val batchId: String?,     // enclosing batch, null when live
     val label: String?,       // labeled-response echo correlation
     val serverTimeSource: ServerTimeSource = ServerTimeSource.TAG,
+    val isHistoryContext: Boolean = false,
 )
 
 sealed interface IrcEvent {
@@ -51,6 +54,41 @@ sealed interface IrcEvent {
     ) : IrcEvent
     /** Fully reassembled chathistory batch for one target, in server order. */
     data class HistoryBatch(val target: String, val events: List<IrcEvent>) : IrcEvent
+    enum class PlaybackSource { CHATHISTORY, ZNC_PLAYBACK }
+    enum class PlaybackPlacement { BEFORE, AFTER, LATEST, AUTOMATIC }
+    data class PlaybackItem(
+        val event: IrcEvent,
+        val ordinal: Int,
+        val isContext: Boolean = false,
+        /** Raw protocol identity. Null means the server supplied no usable value. */
+        val msgid: String? = null,
+        /** Raw valid server-time tag. Null is not replaced by a local timestamp. */
+        val serverTime: Long? = null,
+    ) {
+        companion object {
+            fun from(event: IrcEvent, ordinal: Int): PlaybackItem {
+                val context = event.messageContextOrNull()
+                return PlaybackItem(
+                    event = event,
+                    ordinal = ordinal,
+                    isContext = context?.isHistoryContext == true,
+                    msgid = context?.msgid,
+                    serverTime = context?.takeIf {
+                        it.serverTimeSource == ServerTimeSource.TAG
+                    }?.serverTime,
+                )
+            }
+        }
+    }
+    /** Common ordered representation for automatic CHATHISTORY and native bouncer playback. */
+    data class PlaybackBatch(
+        val source: PlaybackSource,
+        val target: String,
+        val items: List<PlaybackItem>,
+        val placement: PlaybackPlacement = PlaybackPlacement.AUTOMATIC,
+    ) : IrcEvent {
+        val events: List<IrcEvent> get() = items.map(PlaybackItem::event)
+    }
     enum class NetworkBatchKind { NETSPLIT, NETJOIN }
     data class NetworkBatch(
         val kind: NetworkBatchKind,
@@ -59,7 +97,7 @@ sealed interface IrcEvent {
         val events: List<IrcEvent>,
         val target: String? = null,
     ) : IrcEvent
-    /** Historical replay batch that still represents the bouncer's current session state. */
+    /** Compatibility wrapper for callers constructing native playback directly. */
     data class ReplayBatch(val target: String, val events: List<IrcEvent>) : IrcEvent
 
     // -- membership & user state
@@ -189,4 +227,25 @@ sealed interface IrcEvent {
     data class ServerError(val code: String, val params: List<String>, val text: String) : IrcEvent
     /** Escape hatch: anything not mapped above (raw numerics for motd text, WHOIS, etc.). */
     data class Raw(val message: IrcMessage) : IrcEvent
+}
+
+fun IrcEvent.messageContextOrNull(): MessageContext? = when (this) {
+    is IrcEvent.ChatMessage -> ctx
+    is IrcEvent.TagMessage -> ctx
+    is IrcEvent.Joined -> ctx
+    is IrcEvent.Parted -> ctx
+    is IrcEvent.Quit -> ctx
+    is IrcEvent.Kicked -> ctx
+    is IrcEvent.NickChanged -> ctx
+    is IrcEvent.TopicChanged -> ctx
+    is IrcEvent.ChannelRenamed -> ctx
+    is IrcEvent.ModeChanged -> ctx
+    is IrcEvent.Invited -> ctx
+    is IrcEvent.DccSend -> ctx
+    is IrcEvent.DccResume -> ctx
+    is IrcEvent.DccAccept -> ctx
+    is IrcEvent.UnsupportedDcc -> ctx
+    is IrcEvent.StandardReply -> ctx
+    is IrcEvent.MultilineRejected -> ctx
+    else -> null
 }

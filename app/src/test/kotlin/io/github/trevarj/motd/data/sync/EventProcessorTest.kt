@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.HistoryCursorEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.TimelineEventEntity
+import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkIgnoreEntity
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -24,6 +25,7 @@ import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.proto.Prefix
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.push.PushEventHandler
@@ -3310,6 +3312,177 @@ class EventProcessorTest {
         val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
         val modes = pagingList(bufferId).filter { it.kind == MessageKind.MODE }
         assertEquals(2, modes.size)
+    }
+
+    @Test
+    fun nativePlaybackPreservesRepeatedUnknownTimeMessagesWithoutDuplicatingOnReplay() = runTest {
+        val repeated = IrcEvent.ChatMessage(
+            ctx = ctx(msgid = null, time = 0).copy(
+                batchId = "znc-playback",
+                serverTimeSource = ServerTimeSource.UNKNOWN,
+            ),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"),
+            target = "#chan",
+            text = "same replayed body",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        val playback = IrcEvent.PlaybackBatch(
+            source = IrcEvent.PlaybackSource.ZNC_PLAYBACK,
+            target = "#chan",
+            items = listOf(repeated, repeated).mapIndexed { ordinal, event ->
+                IrcEvent.PlaybackItem(event, ordinal)
+            },
+        )
+
+        processor.process(networkId, playback)
+        processor.process(networkId, playback)
+
+        val rows = pagingList(db.bufferDao().byName(networkId, "#chan")!!.id)
+        assertEquals(2, rows.size)
+        assertTrue(rows.all { it.serverTime == 0L })
+        assertTrue(rows.all { it.timeProvenance == TimeProvenance.UNKNOWN })
+    }
+
+    @Test
+    fun nativePlaybackPersistsHistoricalStateWithoutOverwritingCurrentSessionState() = runTest {
+        processor.process(networkId, IrcEvent.Joined(ctx("self-join"), "me", "#chan", null, null, true))
+        processor.process(networkId, IrcEvent.TopicChanged(ctx("current-topic", 2_000), "#chan", "current", "alice"))
+        val room = db.bufferDao().byName(networkId, "#chan")!!
+
+        processor.process(
+            networkId,
+            IrcEvent.PlaybackBatch(
+                source = IrcEvent.PlaybackSource.ZNC_PLAYBACK,
+                target = "#chan",
+                items = listOf(
+                    IrcEvent.PlaybackItem(
+                        IrcEvent.TopicChanged(
+                            ctx("old-topic", 1_000).copy(batchId = "znc"),
+                            "#chan",
+                            "old",
+                            "bob",
+                        ),
+                        ordinal = 0,
+                    ),
+                    IrcEvent.PlaybackItem(
+                        IrcEvent.Joined(
+                            ctx("old-join", 1_100).copy(batchId = "znc"),
+                            "historical-user",
+                            "#chan",
+                            null,
+                            null,
+                            false,
+                        ),
+                        ordinal = 1,
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals("current", db.bufferDao().observeById(room.id)!!.topic)
+        assertTrue(db.memberDao().allNow(room.id).none { it.nick == "historical-user" })
+        assertEquals(1, pagingList(room.id).count { it.kind == MessageKind.TOPIC && it.text == "topic: old" })
+        assertEquals(1, pagingList(room.id).count { it.kind == MessageKind.JOIN && it.sender == "historical-user" })
+    }
+
+    @Test
+    fun completedPlaybackReconcilesEqualTimestampRowsToServerOrder() = runTest {
+        val first = IrcEvent.ChatMessage(
+            ctx("first", 5_000),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("alice"),
+            "#chan",
+            "first",
+            false,
+            null,
+        )
+        val second = first.copy(ctx = ctx("second", 5_000), text = "second")
+        processor.process(networkId, second)
+        processor.process(networkId, first)
+
+        processor.process(
+            networkId,
+            IrcEvent.PlaybackBatch(
+                source = IrcEvent.PlaybackSource.CHATHISTORY,
+                target = "#chan",
+                items = listOf(first, second).mapIndexed { ordinal, event ->
+                    IrcEvent.PlaybackItem(event, ordinal)
+                },
+                placement = IrcEvent.PlaybackPlacement.LATEST,
+            ),
+        )
+
+        val rows = pagingList(db.bufferDao().byName(networkId, "#chan")!!.id)
+        assertEquals(listOf("second", "first"), rows.map { it.text })
+        assertEquals(listOf(1L, 0L), rows.map { it.timelineOrder })
+        assertTrue(rows.all { it.timelineOrderConfirmed })
+        val secondRow = rows.first()
+        val firstRow = rows.last()
+        db.bufferDao().advanceLocalReadAnchor(secondRow.bufferId, secondRow.serverTime, secondRow.id)
+        db.bufferDao().advanceLocalReadAnchor(firstRow.bufferId, firstRow.serverTime, firstRow.id)
+        assertEquals(
+            secondRow.id,
+            db.bufferDao().observeById(secondRow.bufferId)!!.localReadAnchorEventId,
+        )
+    }
+
+    @Test
+    fun beforePlaybackPlacesNewEqualTimestampRowsAheadOfExistingTimelineRows() = runTest {
+        fun message(msgid: String, text: String) = IrcEvent.ChatMessage(
+            ctx(msgid, 6_000),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("alice"),
+            "#chan",
+            text,
+            false,
+            null,
+        )
+        processor.process(networkId, message("existing", "existing"))
+
+        processor.process(
+            networkId,
+            IrcEvent.PlaybackBatch(
+                source = IrcEvent.PlaybackSource.CHATHISTORY,
+                target = "#chan",
+                items = listOf(
+                    message("first", "first"),
+                    message("second", "second"),
+                ).mapIndexed { ordinal, event -> IrcEvent.PlaybackItem(event, ordinal) },
+                placement = IrcEvent.PlaybackPlacement.BEFORE,
+            ),
+        )
+
+        val rows = pagingList(db.bufferDao().byName(networkId, "#chan")!!.id)
+        assertEquals(listOf("existing", "second", "first"), rows.map { it.text })
+        assertEquals(listOf(2L, 1L, 0L), rows.map { it.timelineOrder })
+    }
+
+    @Test
+    fun historyCursorNeverPairsANewerTimestampWithAnOlderMsgid() = runTest {
+        val tagged = IrcEvent.ChatMessage(
+            ctx("identified", 100).copy(batchId = "history"),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("alice"),
+            "#chan",
+            "identified",
+            false,
+            null,
+        )
+        val msgidless = tagged.copy(
+            ctx = ctx(null, 200).copy(batchId = "history"),
+            text = "newer without msgid",
+        )
+
+        processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(tagged, msgidless)))
+
+        val room = db.bufferDao().byName(networkId, "#chan")!!
+        val cursor = db.historyCursorDao().byRoom(room.id)!!
+        assertEquals(200L, cursor.newestServerTime)
+        assertNull(cursor.newestMsgid)
+        assertEquals(100L, cursor.oldestServerTime)
+        assertEquals("identified", cursor.oldestMsgid)
     }
 
     @Test

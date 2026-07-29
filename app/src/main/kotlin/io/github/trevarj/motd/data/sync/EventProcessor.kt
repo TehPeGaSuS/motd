@@ -100,6 +100,10 @@ class EventProcessor @Inject constructor(
         ConcurrentHashMap<Long, Map<CanonicalBatchKey, CanonicalBatchMultiplicity>>()
     private val activeHistoryOccurrences =
         ConcurrentHashMap<Long, MutableMap<CanonicalBatchKey, Int>>()
+    private val activeHistoryCanonicalOrder =
+        ConcurrentHashMap<Long, MutableList<TimelineEventId>>()
+    private val activeHistoryInsertedIds =
+        ConcurrentHashMap<Long, MutableSet<TimelineEventId>>()
     private val activeHistoryChatRoutes =
         ConcurrentHashMap<Long, ArrayDeque<ChatRoute>>()
     private val activeHistoryTargets = ConcurrentHashMap<Long, ActiveHistoryTarget>()
@@ -282,25 +286,26 @@ class EventProcessor @Inject constructor(
             is IrcEvent.ChatMessage -> onChat(networkId, event, origin, historyTarget)
             is IrcEvent.TagMessage -> onTag(networkId, event, origin, historyTarget)
             is IrcEvent.HistoryBatch -> onHistoryBatch(networkId, event, expectedHistoryRoomId)
+            is IrcEvent.PlaybackBatch -> onPlaybackBatch(networkId, event, expectedHistoryRoomId)
             is IrcEvent.ReplayBatch -> onReplayBatch(networkId, event)
             is IrcEvent.NetworkBatch -> onNetworkBatch(networkId, event, origin, historyTarget)
-            is IrcEvent.Joined -> if (origin.mutatesSessionState) onJoined(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalJoined(networkId, event)
-            is IrcEvent.Parted -> if (origin.mutatesSessionState) onParted(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalParted(networkId, event)
-            is IrcEvent.Quit -> if (origin.mutatesSessionState) onQuit(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalQuit(networkId, event, historyTarget)
-            is IrcEvent.Kicked -> if (origin.mutatesSessionState) onKicked(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalKicked(networkId, event)
-            is IrcEvent.NickChanged -> if (origin.mutatesSessionState) onNickChanged(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalNickChanged(networkId, event, historyTarget)
+            is IrcEvent.Joined -> if (origin.mutatesSessionState) onJoined(networkId, event) else if (origin.isHistorical) onHistoricalJoined(networkId, event)
+            is IrcEvent.Parted -> if (origin.mutatesSessionState) onParted(networkId, event) else if (origin.isHistorical) onHistoricalParted(networkId, event)
+            is IrcEvent.Quit -> if (origin.mutatesSessionState) onQuit(networkId, event) else if (origin.isHistorical) onHistoricalQuit(networkId, event, historyTarget)
+            is IrcEvent.Kicked -> if (origin.mutatesSessionState) onKicked(networkId, event) else if (origin.isHistorical) onHistoricalKicked(networkId, event)
+            is IrcEvent.NickChanged -> if (origin.mutatesSessionState) onNickChanged(networkId, event) else if (origin.isHistorical) onHistoricalNickChanged(networkId, event, historyTarget)
             is IrcEvent.NamesStarted -> if (origin.mutatesSessionState) onNamesStarted(networkId, event)
             is IrcEvent.Names -> if (origin.mutatesSessionState) onNames(networkId, event)
             is IrcEvent.TopicSnapshot -> if (origin.mutatesSessionState) onTopicSnapshot(networkId, event)
             is IrcEvent.TopicChanged -> when (origin) {
-                EventOrigin.LIVE, EventOrigin.REPLAY -> onTopicChanged(networkId, event)
-                EventOrigin.HISTORY -> onHistoricalTopicChanged(networkId, event)
+                EventOrigin.LIVE -> onTopicChanged(networkId, event)
+                EventOrigin.HISTORY, EventOrigin.REPLAY -> onHistoricalTopicChanged(networkId, event)
                 EventOrigin.PUSH -> Unit
             }
             is IrcEvent.ChannelRenamed -> onChannelRenamed(networkId, event, origin)
             is IrcEvent.ModeChanged -> when (origin) {
-                EventOrigin.LIVE, EventOrigin.REPLAY -> onModeChanged(networkId, event)
-                EventOrigin.HISTORY -> onHistoricalModeChanged(networkId, event)
+                EventOrigin.LIVE -> onModeChanged(networkId, event)
+                EventOrigin.HISTORY, EventOrigin.REPLAY -> onHistoricalModeChanged(networkId, event)
                 EventOrigin.PUSH -> Unit
             }
             is IrcEvent.AwayChanged -> if (origin.mutatesSessionState) upsertUser(networkId, event.nick) { it.copy(away = event.awayMessage != null) }
@@ -355,11 +360,9 @@ class EventProcessor @Inject constructor(
             }
             return
         }
-        val route = if (origin == EventOrigin.HISTORY) {
+        val route = if (origin.isHistorical) {
             activeHistoryChatRoutes[networkId]?.removeFirstOrNull()
                 ?: resolveChatRoute(networkId, e, st, historyTarget, origin)
-        } else if (origin == EventOrigin.REPLAY) {
-            resolveChatRoute(networkId, e, st, historyTarget, origin)
         } else {
             resolveChatRoute(networkId, e, st, historyTarget = null, origin = origin)
         }
@@ -381,7 +384,7 @@ class EventProcessor @Inject constructor(
         val sourceIsSelf = route.sourceIsSelf
         val isDm = type == BufferType.QUERY
         // CHATHISTORY and reconnect playback must both honor a forgotten query's discard boundary.
-        val usesDiscardBoundary = origin == EventOrigin.HISTORY || origin == EventOrigin.REPLAY
+        val usesDiscardBoundary = origin.isHistorical
         if (isDm && usesDiscardBoundary && shouldDiscardHistoricalEvent(bufferId, e)) {
             return
         }
@@ -463,6 +466,7 @@ class EventProcessor @Inject constructor(
                 ingested
             }
             val canonical = result.event
+            recordPlaybackResult(networkId, result)
             traceMessageWrite(
                 when (result) {
                     is IngestResult.Inserted -> "canonical_insert"
@@ -590,6 +594,48 @@ class EventProcessor @Inject constructor(
         networkId: Long,
         batch: IrcEvent.HistoryBatch,
         expectedRoomId: RoomId? = null,
+    ) = onPlaybackEvents(
+        networkId = networkId,
+        target = batch.target,
+        events = batch.events,
+        origin = EventOrigin.HISTORY,
+        expectedRoomId = expectedRoomId,
+        placement = IrcEvent.PlaybackPlacement.AUTOMATIC,
+    )
+
+    private suspend fun onPlaybackBatch(
+        networkId: Long,
+        batch: IrcEvent.PlaybackBatch,
+        expectedRoomId: RoomId? = null,
+    ) = onPlaybackEvents(
+        networkId = networkId,
+        target = batch.target,
+        events = batch.events,
+        origin = if (batch.source == IrcEvent.PlaybackSource.ZNC_PLAYBACK) {
+            EventOrigin.REPLAY
+        } else {
+            EventOrigin.HISTORY
+        },
+        expectedRoomId = expectedRoomId,
+        placement = batch.placement,
+    )
+
+    private suspend fun onReplayBatch(networkId: Long, batch: IrcEvent.ReplayBatch) =
+        onPlaybackEvents(
+            networkId = networkId,
+            target = batch.target,
+            events = batch.events,
+            origin = EventOrigin.REPLAY,
+            placement = IrcEvent.PlaybackPlacement.AUTOMATIC,
+        )
+
+    private suspend fun onPlaybackEvents(
+        networkId: Long,
+        target: String,
+        events: List<IrcEvent>,
+        origin: EventOrigin,
+        expectedRoomId: RoomId? = null,
+        placement: IrcEvent.PlaybackPlacement,
     ) {
         // All events for one target are applied in a single Room transaction (idempotent by
         // dedupKey). They are historical replay, never live arrivals: persist them without posting
@@ -597,8 +643,9 @@ class EventProcessor @Inject constructor(
         diagnostics.record("history", "batch_started") {
             mapOf(
                 "network_id" to networkId,
-                "target_fp" to diagnostics.fingerprint(batch.target),
-                "events" to batch.events.size,
+                "target_fp" to diagnostics.fingerprint(target),
+                "events" to events.size,
+                "source" to origin.name,
             )
         }
         val targetRoom = expectedRoomId?.let { roomId ->
@@ -606,10 +653,10 @@ class EventProcessor @Inject constructor(
                 ?: error("history target $roomId no longer exists")
             check(room.networkId == networkId) { "history target $roomId belongs to another network" }
             room
-        } ?: existingRoom(networkId, batch.target, stateFor(networkId))
+        } ?: existingRoom(networkId, target, stateFor(networkId))
         targetRoom?.let { room ->
             activeHistoryTargets[networkId] = ActiveHistoryTarget(
-                batch.target,
+                target,
                 room.id,
                 room.type,
                 room.name,
@@ -620,7 +667,9 @@ class EventProcessor @Inject constructor(
                 activeHistoryChatRoutes[networkId] = ArrayDeque()
                 activeHistoryMultiplicities[networkId] = canonicalBatchMultiplicities(
                     networkId,
-                    batch,
+                    target,
+                    events,
+                    origin,
                 )
                 val routedRoomIds = linkedSetOf<RoomId>()
                 activeHistoryChatRoutes[networkId].orEmpty().forEach { route ->
@@ -634,7 +683,7 @@ class EventProcessor @Inject constructor(
                 contextRoomId?.let { roomId ->
                     bufferDao.observeById(roomId)?.let { room ->
                         activeHistoryTargets[networkId] = ActiveHistoryTarget(
-                            batch.target,
+                            target,
                             room.id,
                             room.type,
                             room.name,
@@ -642,50 +691,40 @@ class EventProcessor @Inject constructor(
                     }
                 }
                 val events = when {
-                    contextAmbiguous -> batch.events.filterIsInstance<IrcEvent.ChatMessage>()
-                    contextRoomId == null -> batch.events
+                    contextAmbiguous -> events.filterIsInstance<IrcEvent.ChatMessage>()
+                    contextRoomId == null -> events
                     else ->
-                    batch.events.filterNot { event ->
+                    events.filterNot { event ->
                         event !is IrcEvent.ChatMessage &&
                             shouldDiscardHistoricalEvent(contextRoomId, event)
                     }
                 }
                 activeHistoryOccurrences[networkId] = mutableMapOf()
-                for (ev in events) processEvent(networkId, ev, EventOrigin.HISTORY, batch.target)
+                activeHistoryCanonicalOrder[networkId] = mutableListOf()
+                activeHistoryInsertedIds[networkId] = mutableSetOf()
+                for (ev in events) processEvent(networkId, ev, origin, target)
+                canonicalTimeline.reconcilePlaybackOrder(
+                    orderedEventIds = activeHistoryCanonicalOrder[networkId].orEmpty(),
+                    insertedEventIds = activeHistoryInsertedIds[networkId].orEmpty(),
+                    prependUnanchored = placement == IrcEvent.PlaybackPlacement.BEFORE ||
+                        placement == IrcEvent.PlaybackPlacement.AUTOMATIC,
+                )
             }
         } finally {
             activeHistoryMultiplicities.remove(networkId)
             activeHistoryOccurrences.remove(networkId)
+            activeHistoryCanonicalOrder.remove(networkId)
+            activeHistoryInsertedIds.remove(networkId)
             activeHistoryChatRoutes.remove(networkId)
             activeHistoryTargets.remove(networkId)
         }
         diagnostics.record("history", "batch_finished") {
             mapOf(
                 "network_id" to networkId,
-                "target_fp" to diagnostics.fingerprint(batch.target),
-                "events" to batch.events.size,
+                "target_fp" to diagnostics.fingerprint(target),
+                "events" to events.size,
+                "source" to origin.name,
             )
-        }
-    }
-
-    private suspend fun onReplayBatch(networkId: Long, batch: IrcEvent.ReplayBatch) {
-        val st = stateFor(networkId)
-        existingRoom(networkId, batch.target, st)?.let { room ->
-            activeHistoryTargets[networkId] = ActiveHistoryTarget(
-                batch.target,
-                room.id,
-                room.type,
-                room.name,
-            )
-        }
-        try {
-            db.withTransaction {
-                activeHistoryOccurrences[networkId] = mutableMapOf()
-                for (ev in batch.events) processEvent(networkId, ev, EventOrigin.REPLAY, batch.target)
-            }
-        } finally {
-            activeHistoryOccurrences.remove(networkId)
-            activeHistoryTargets.remove(networkId)
         }
     }
 
@@ -776,7 +815,21 @@ class EventProcessor @Inject constructor(
                 try {
                     processEvent(
                         networkId,
-                        IrcEvent.HistoryBatch(request.target, response.events),
+                        IrcEvent.PlaybackBatch(
+                            source = IrcEvent.PlaybackSource.CHATHISTORY,
+                            target = request.target,
+                            items = response.events.mapIndexed { ordinal, event ->
+                                IrcEvent.PlaybackItem.from(event, ordinal)
+                            },
+                            placement = when (request.subcommand) {
+                                ChatHistoryRequest.Subcommand.BEFORE -> IrcEvent.PlaybackPlacement.BEFORE
+                                ChatHistoryRequest.Subcommand.AFTER -> IrcEvent.PlaybackPlacement.AFTER
+                                ChatHistoryRequest.Subcommand.AROUND -> IrcEvent.PlaybackPlacement.AUTOMATIC
+                                ChatHistoryRequest.Subcommand.BETWEEN -> IrcEvent.PlaybackPlacement.AFTER
+                                ChatHistoryRequest.Subcommand.LATEST -> IrcEvent.PlaybackPlacement.LATEST
+                                ChatHistoryRequest.Subcommand.TARGETS -> error("TARGETS is not a message page")
+                            },
+                        ),
                         EventOrigin.LIVE,
                         expectedHistoryRoomId = initialCanonicalId,
                     )
@@ -833,12 +886,14 @@ class EventProcessor @Inject constructor(
 
     private suspend fun canonicalBatchMultiplicities(
         networkId: Long,
-        batch: IrcEvent.HistoryBatch,
+        target: String,
+        events: List<IrcEvent>,
+        origin: EventOrigin,
     ): Map<CanonicalBatchKey, CanonicalBatchMultiplicity> {
         val st = stateFor(networkId)
-        val chatEvents = batch.events.filterIsInstance<IrcEvent.ChatMessage>()
+        val chatEvents = events.filterIsInstance<IrcEvent.ChatMessage>()
         var chatRoutes = chatEvents.map { event ->
-            resolveChatRoute(networkId, event, st, batch.target, EventOrigin.HISTORY)
+            resolveChatRoute(networkId, event, st, target, origin)
         }.map { route ->
             route.copy(bufferId = bufferDao.canonicalId(route.bufferId) ?: route.bufferId)
         }
@@ -860,7 +915,7 @@ class EventProcessor @Inject constructor(
         routedTargetRooms.singleOrNull()?.let { roomId ->
             bufferDao.observeById(roomId)?.let { room ->
                 activeHistoryTargets[networkId] = ActiveHistoryTarget(
-                    batch.target,
+                    target,
                     room.id,
                     room.type,
                     room.name,
@@ -868,10 +923,10 @@ class EventProcessor @Inject constructor(
             }
         }
         val routeIterator = chatRoutes.iterator()
-        val keys = batch.events.mapNotNull { event ->
+        val keys = events.mapNotNull { event ->
             historyBatchKey(
                 networkId,
-                batch.target,
+                target,
                 event,
                 st,
                 if (event is IrcEvent.ChatMessage) routeIterator.next() else null,
@@ -1003,7 +1058,7 @@ class EventProcessor @Inject constructor(
         if (batch.events.isEmpty()) return
         if (batch.kind == IrcEvent.NetworkBatchKind.NETSPLIT && batch.events.any { it !is IrcEvent.Quit }) return
         if (batch.kind == IrcEvent.NetworkBatchKind.NETJOIN && batch.events.any { it !is IrcEvent.Joined }) return
-        if (origin == EventOrigin.HISTORY) {
+        if (origin.isHistorical) {
             val target = batch.target ?: historyTarget ?: return
             val st = stateFor(networkId)
             val bufferId = ensureBuffer(networkId, target, BufferType.CHANNEL, st)
@@ -1109,6 +1164,7 @@ class EventProcessor @Inject constructor(
                 persistHistoryCursor = buffer.networkId !in activeProtocolPageCursorWrites,
             ),
         )
+        recordPlaybackResult(buffer.networkId, result)
         traceMessageWrite("canonical_network_batch", result.event, fromHistory)
     }
 
@@ -1128,7 +1184,7 @@ class EventProcessor @Inject constructor(
             !selfInvite && existingChannel != null -> existingChannel.id
             else -> ensureServerBuffer(networkId, st)
         }
-        val historical = origin == EventOrigin.HISTORY || e.ctx.batchId != null
+        val historical = origin.isHistorical || e.ctx.batchId != null
         val actionable = selfInvite && validChannel && !historical
         val state = when {
             historical -> InviteState.HISTORICAL
@@ -1192,6 +1248,7 @@ class EventProcessor @Inject constructor(
                 persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
             ),
         )
+        recordPlaybackResult(networkId, result)
         traceMessageWrite("canonical_invite", result.event, historical)
         if (actionable) {
             presentNotification(result.event.id) {
@@ -1208,7 +1265,7 @@ class EventProcessor @Inject constructor(
         val normalizedPeer = st.normalize(e.source.nick)
         val offer = e.offer
         val offerKey = dccFileOfferKey(e, normalizedPeer)
-        val historical = origin == EventOrigin.HISTORY || e.ctx.batchId != null
+        val historical = origin.isHistorical || e.ctx.batchId != null
         val payload = DccFileOfferPayloadV1(
             protocol = offer.protocol.name,
             filename = offer.filename,
@@ -1247,6 +1304,7 @@ class EventProcessor @Inject constructor(
                 persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
             ),
         )
+        recordPlaybackResult(networkId, result)
         traceMessageWrite("canonical_dcc_file_offer", result.event, historical)
         dccTransferDao.insertIgnore(
             DccTransferEntity(
@@ -1331,7 +1389,8 @@ class EventProcessor @Inject constructor(
                 persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
             ),
         )
-        traceMessageWrite("canonical_dcc_unsupported", result.event, origin == EventOrigin.HISTORY || e.ctx.batchId != null)
+        recordPlaybackResult(networkId, result)
+        traceMessageWrite("canonical_dcc_unsupported", result.event, origin.isHistorical || e.ctx.batchId != null)
     }
 
     private suspend fun insertDccControl(
@@ -1369,7 +1428,8 @@ class EventProcessor @Inject constructor(
                 persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
             ),
         )
-        traceMessageWrite("canonical_dcc_control", result.event, origin == EventOrigin.HISTORY || ctx.batchId != null)
+        recordPlaybackResult(networkId, result)
+        traceMessageWrite("canonical_dcc_control", result.event, origin.isHistorical || ctx.batchId != null)
     }
 
     private suspend fun ensureDccPeerQuery(
@@ -2589,6 +2649,7 @@ class EventProcessor @Inject constructor(
                 persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
             ),
         )
+        recordPlaybackResult(networkId, result)
         traceMessageWrite("canonical_system_${result::class.simpleName}", result.event, ctx.batchId != null)
     }
 
@@ -2612,6 +2673,13 @@ class EventProcessor @Inject constructor(
                 "pending" to (row.pendingLabel != null),
                 "failed" to row.failed,
             )
+        }
+    }
+
+    private fun recordPlaybackResult(networkId: Long, result: IngestResult) {
+        activeHistoryCanonicalOrder[networkId]?.add(result.event.id)
+        if (result is IngestResult.Inserted) {
+            activeHistoryInsertedIds[networkId]?.add(result.event.id)
         }
     }
 
@@ -2704,6 +2772,7 @@ class EventProcessor @Inject constructor(
     private fun ServerTimeSource.toTimeProvenance(): TimeProvenance = when (this) {
         ServerTimeSource.TAG -> TimeProvenance.SERVER_TAG
         ServerTimeSource.LOCAL -> TimeProvenance.LOCAL_CLOCK
+        ServerTimeSource.UNKNOWN -> TimeProvenance.UNKNOWN
     }
 
     private companion object {

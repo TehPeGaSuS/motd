@@ -1183,6 +1183,18 @@ class HistoryResyncCoordinator @Inject constructor(
                     highWater,
                     inserted,
                 )
+            if (
+                nextSelector.type == HistoryReferenceType.TIMESTAMP &&
+                page.primaryMessageCount >= requested.request.limit
+            ) {
+                return WorkResult(
+                    WorkStatus.Incomplete(
+                        "CHATHISTORY $subcommand saturated a timestamp-only boundary",
+                    ),
+                    highWater,
+                    inserted,
+                )
+            }
             val wrongTimestampDirection =
                 requested.selector.type == HistoryReferenceType.TIMESTAMP &&
                     nextSelector.type == HistoryReferenceType.TIMESTAMP &&

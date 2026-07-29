@@ -26,15 +26,22 @@ typealias TimelineEventId = Long
 data class TimelineAnchor(
     val serverTime: Long,
     val eventId: TimelineEventId,
+    val timelineOrder: Long = eventId,
 ) : Comparable<TimelineAnchor> {
     override fun compareTo(other: TimelineAnchor): Int =
-        compareValuesBy(this, other, TimelineAnchor::serverTime, TimelineAnchor::eventId)
+        compareValuesBy(
+            this,
+            other,
+            TimelineAnchor::serverTime,
+            TimelineAnchor::timelineOrder,
+            TimelineAnchor::eventId,
+        )
 }
 
 enum class RoomAliasNamespace { CHANNEL, ACCOUNT, VERIFIED_NICK, PROVISIONAL_NICK, LEGACY_NAME }
 enum class EventAliasNamespace { MSGID, LABEL, EXACT_FINGERPRINT, BATCH_POSITION, TYPED_EVENT }
 enum class ObservationOrigin { LIVE, PUSH, HISTORY, LOCAL_SEND }
-enum class TimeProvenance { SERVER_TAG, LOCAL_CLOCK }
+enum class TimeProvenance { SERVER_TAG, LOCAL_CLOCK, UNKNOWN }
 enum class MessageKind {
     PRIVMSG, NOTICE, ACTION, JOIN, PART, QUIT, KICK, NICK, MODE, TOPIC, ERROR, SERVER_INFO,
     INVITE, NETSPLIT, NETJOIN, DCC_TRANSFER, DCC_UNSUPPORTED,
@@ -196,14 +203,6 @@ data class DiscardedMessageIdEntity(
     val msgid: String,
 )
 
-/** Exact local presentation/count floor. The mute floor intentionally includes its whole ms. */
-val RoomEntity.effectiveLocalReadAnchor: TimelineAnchor?
-    get() {
-        val local = localReadAnchorTime?.let { TimelineAnchor(it, localReadAnchorEventId ?: 0L) }
-        val mute = localUnreadFloorTime?.let { TimelineAnchor(it, Long.MAX_VALUE) }
-        return listOfNotNull(local, mute).maxOrNull()
-    }
-
 /** Internal room keys may be disambiguated; wire targets always retain server spelling. */
 val RoomEntity.ircTarget: String
     get() = if (type == BufferType.SERVER) name else displayName
@@ -242,6 +241,7 @@ data class RoomAliasEntity(
     tableName = "messages",
     indices = [
         Index(value = ["bufferId", "serverTime", "id"]),
+        Index(value = ["bufferId", "serverTime", "timelineOrder"]),
         Index(value = ["replyToEventId"]),
         Index(value = ["bufferId", "msgid"]),
         Index(value = ["bufferId", "replyToMsgid", "replyToEventId"]),
@@ -274,6 +274,15 @@ data class TimelineEventEntity(
     val eventPayload: String? = null,    // versioned, defensively decoded typed-event payload
     val inviteState: InviteState? = null,
     val serverTimeAuthoritative: Boolean = true,
+    /** Stable presentation tie-break independent of first local insertion id. */
+    val timelineOrder: Long = id,
+    /** Once a completed playback establishes relative order, later conflicts cannot oscillate it. */
+    val timelineOrderConfirmed: Boolean = false,
+    val timeProvenance: TimeProvenance = if (serverTimeAuthoritative) {
+        TimeProvenance.SERVER_TAG
+    } else {
+        TimeProvenance.LOCAL_CLOCK
+    },
     val notificationHandled: Boolean = false,
     /** Durable two-phase notification claim; reset on startup before database-backed recovery. */
     val notificationClaimed: Boolean = false,

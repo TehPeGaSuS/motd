@@ -72,7 +72,7 @@ class TypedDaoProjectionTest {
             ),
         )
 
-        assertEquals(MessageBoundaryRow("OpaqueCase", 100), db.messageDao().latestBoundary(channel))
+        assertEquals(MessageBoundaryRow("OpaqueCase", null), db.messageDao().latestBoundary(channel))
     }
 
     @Test

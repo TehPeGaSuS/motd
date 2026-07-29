@@ -139,7 +139,7 @@ internal fun messagePagingQuery(
 ): SimpleSQLiteQuery = SimpleSQLiteQuery(
     "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
         "AND ${MessageVisibilitySql(spec, identityRules).timeline()} " +
-        "ORDER BY m.serverTime DESC, m.id DESC",
+        "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC",
     arrayOf(bufferId),
 )
 
@@ -147,13 +147,15 @@ internal fun countTimelineNewerQuery(
     bufferId: Long,
     serverTime: Long,
     id: Long,
+    timelineOrder: Long,
     spec: MessageVisibilitySpec,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
 ): SimpleSQLiteQuery = SimpleSQLiteQuery(
     "SELECT COUNT(*) FROM messages m WHERE m.bufferId = ? " +
-        "AND (m.serverTime > ? OR (m.serverTime = ? AND m.id > ?)) " +
+        "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
+        "(m.timelineOrder = ? AND m.id > ?)))) " +
         "AND ${MessageVisibilitySql(spec, identityRules).timeline()}",
-    arrayOf(bufferId, serverTime, serverTime, id),
+    arrayOf(bufferId, serverTime, serverTime, timelineOrder, timelineOrder, id),
 )
 
 /**
@@ -174,9 +176,10 @@ internal fun countVisibleUnreadInTimelinePrefixQuery(
         "SELECT COUNT(*) FROM (" +
             "SELECT 1 FROM (" +
             "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
-            "AND ${visibility.timeline()} ORDER BY m.serverTime DESC, m.id DESC LIMIT ?" +
+            "AND ${visibility.timeline()} ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT ?" +
             ") AS viewport WHERE (viewport.serverTime > ? OR " +
-            "(viewport.serverTime = ? AND viewport.id > ?)) " +
+            "(viewport.serverTime = ? AND (viewport.timelineOrder > ? OR " +
+            "(viewport.timelineOrder = ? AND viewport.id > ?)))) " +
             "AND ${visibility.visibleUnread("viewport")} LIMIT ?" +
             ") AS capped",
         arrayOf<Any?>(
@@ -184,6 +187,8 @@ internal fun countVisibleUnreadInTimelinePrefixQuery(
             beforeIndex.coerceAtLeast(0),
             after.serverTime,
             after.serverTime,
+            after.timelineOrder,
+            after.timelineOrder,
             after.eventId,
             maxCount.coerceAtLeast(0),
         ),
@@ -197,10 +202,18 @@ internal fun firstVisibleUnreadQuery(
     identityRules: IrcIdentityRules = IrcIdentityRules(),
 ): SimpleSQLiteQuery = SimpleSQLiteQuery(
     "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
-        "AND (m.serverTime > ? OR (m.serverTime = ? AND m.id > ?)) " +
+        "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
+        "(m.timelineOrder = ? AND m.id > ?)))) " +
         "AND ${MessageVisibilitySql(spec, identityRules).visibleUnread()} " +
-        "ORDER BY m.serverTime ASC, m.id ASC LIMIT 1",
-    arrayOf(bufferId, after.serverTime, after.serverTime, after.eventId),
+        "ORDER BY m.serverTime ASC, m.timelineOrder ASC, m.id ASC LIMIT 1",
+    arrayOf(
+        bufferId,
+        after.serverTime,
+        after.serverTime,
+        after.timelineOrder,
+        after.timelineOrder,
+        after.eventId,
+    ),
 )
 
 /**
@@ -220,13 +233,22 @@ internal fun nearestUnreadMentionInPrefixQuery(
     return SimpleSQLiteQuery(
         "SELECT viewport.* FROM (" +
             "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
-            "AND ${visibility.timeline()} ORDER BY m.serverTime DESC, m.id DESC LIMIT ?" +
+            "AND ${visibility.timeline()} ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT ?" +
             ") AS viewport WHERE (viewport.serverTime > ? OR " +
-            "(viewport.serverTime = ? AND viewport.id > ?)) " +
+            "(viewport.serverTime = ? AND (viewport.timelineOrder > ? OR " +
+            "(viewport.timelineOrder = ? AND viewport.id > ?)))) " +
             "AND ${visibility.visibleUnread("viewport")} " +
             "AND viewport.hasMention = 1 " +
-            "ORDER BY viewport.serverTime ASC, viewport.id ASC LIMIT 1",
-        arrayOf<Any?>(bufferId, beforeIndex.coerceAtLeast(0), after.serverTime, after.serverTime, after.eventId),
+            "ORDER BY viewport.serverTime ASC, viewport.timelineOrder ASC, viewport.id ASC LIMIT 1",
+        arrayOf<Any?>(
+            bufferId,
+            beforeIndex.coerceAtLeast(0),
+            after.serverTime,
+            after.serverTime,
+            after.timelineOrder,
+            after.timelineOrder,
+            after.eventId,
+        ),
     )
 }
 

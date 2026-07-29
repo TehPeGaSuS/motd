@@ -879,7 +879,8 @@ class IrcClientTest {
         runCurrent()
         job.cancel()
 
-        val history = collected.filterIsInstance<IrcEvent.HistoryBatch>().single()
+        val history = collected.filterIsInstance<IrcEvent.PlaybackBatch>().single()
+        assertEquals(IrcEvent.PlaybackSource.CHATHISTORY, history.source)
         assertEquals("#chan", history.target)
         val message = history.events.single() as IrcEvent.ChatMessage
         assertEquals("retained message", message.text)

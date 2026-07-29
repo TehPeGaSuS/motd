@@ -451,10 +451,13 @@ class IrcClient(
         for (event in mapBatchTree(closed.tree)) emitEvent(event, criticalEvents)
     }
 
-    internal fun mapBatchTree(tree: BatchTree): List<IrcEvent> {
+    internal fun mapBatchTree(
+        tree: BatchTree,
+        historical: Boolean = tree.type == "chathistory" || tree.type == "znc.in/playback",
+    ): List<IrcEvent> {
         if (tree.type == MULTILINE_CAP) {
-            mapMultilineBatch(tree)?.let { return listOf(it) }
-            return mapMalformedMultiline(tree)
+            mapMultilineBatch(tree, historical)?.let { return listOf(it) }
+            return mapMalformedMultiline(tree, historical)
         }
 
         if (tree.type == "netsplit" || tree.type == "netjoin") {
@@ -462,7 +465,7 @@ class IrcClient(
             val expected = if (tree.type == "netsplit") "QUIT" else "JOIN"
             if (tree.params.size == 2 && leaves.isNotEmpty() && leaves.all { it.first.command == expected }) {
                 val events = leaves.mapNotNull { (message, batchRef) ->
-                    eventMapper.map(message, batchId = batchRef)
+                    eventMapper.map(message, batchId = batchRef, historical = historical)
                 }
                 if (events.size == leaves.size) {
                     return listOf(
@@ -483,33 +486,45 @@ class IrcClient(
 
         val flattened = tree.children.flatMap { child ->
             when (child) {
-                is BatchChild.Message -> listOfNotNull(eventMapper.map(child.message, batchId = tree.ref))
-                is BatchChild.Nested -> mapBatchTree(child.batch)
+                is BatchChild.Message -> listOfNotNull(
+                    eventMapper.map(child.message, batchId = tree.ref, historical = historical),
+                )
+                is BatchChild.Nested -> mapBatchTree(child.batch, historical)
             }
         }
         return if (tree.type == "chathistory") {
             val target = tree.params.firstOrNull().orEmpty()
             listOf(
-                IrcEvent.HistoryBatch(
-                    target,
-                    flattened.map { event ->
-                        if (event is IrcEvent.NetworkBatch && event.target == null) {
+                IrcEvent.PlaybackBatch(
+                    source = IrcEvent.PlaybackSource.CHATHISTORY,
+                    target = target,
+                    items = flattened.mapIndexed { ordinal, event ->
+                        val targeted = if (event is IrcEvent.NetworkBatch && event.target == null) {
                             event.copy(target = target)
                         } else {
                             event
                         }
+                        IrcEvent.PlaybackItem.from(targeted, ordinal)
                     },
                 ),
             )
         } else if (tree.type == "znc.in/playback") {
             val target = tree.params.firstOrNull().orEmpty()
-            listOf(IrcEvent.ReplayBatch(target, flattened))
+            listOf(
+                IrcEvent.PlaybackBatch(
+                    source = IrcEvent.PlaybackSource.ZNC_PLAYBACK,
+                    target = target,
+                    items = flattened.mapIndexed { ordinal, event ->
+                        IrcEvent.PlaybackItem.from(event, ordinal)
+                    },
+                ),
+            )
         } else {
             flattened
         }
     }
 
-    private fun mapMultilineBatch(tree: BatchTree): IrcEvent.ChatMessage? {
+    private fun mapMultilineBatch(tree: BatchTree, historical: Boolean = false): IrcEvent.ChatMessage? {
         val target = tree.params.firstOrNull() ?: return null
         val messages = tree.children.map {
             (it as? BatchChild.Message)?.message ?: return null
@@ -541,20 +556,29 @@ class IrcClient(
             command = command,
             params = listOf(target, combined.toString()),
         )
-        return eventMapper.map(synthetic, batchId = tree.opening.tags["batch"] ?: tree.ref) as? IrcEvent.ChatMessage
+        return eventMapper.map(
+            synthetic,
+            batchId = tree.opening.tags["batch"] ?: tree.ref,
+            historical = historical,
+        ) as? IrcEvent.ChatMessage
     }
 
-    private fun mapMalformedMultiline(tree: BatchTree): List<IrcEvent> = tree.children.flatMap { child ->
+    private fun mapMalformedMultiline(
+        tree: BatchTree,
+        historical: Boolean,
+    ): List<IrcEvent> = tree.children.flatMap { child ->
         when (child) {
             is BatchChild.Message -> {
                 val text = child.message.params.getOrNull(1).orEmpty()
                 if ((child.message.command == "PRIVMSG" || child.message.command == "NOTICE") && text.isEmpty()) {
                     emptyList()
                 } else {
-                    listOfNotNull(eventMapper.map(child.message, batchId = tree.ref))
+                    listOfNotNull(
+                        eventMapper.map(child.message, batchId = tree.ref, historical = historical),
+                    )
                 }
             }
-            is BatchChild.Nested -> mapBatchTree(child.batch)
+            is BatchChild.Nested -> mapBatchTree(child.batch, historical)
         }
     }
 
@@ -807,13 +831,14 @@ class IrcClient(
             val primaryMessages = mapped.filter { (message, _) ->
                 "draft/chathistory-context" !in message.tags
             }
-            val primaryReferences = primaryMessages.mapNotNull { (message, _) -> historyReference(message) }
+            val oldest = primaryMessages.firstOrNull()?.first?.let(::historyReference)
+            val newest = primaryMessages.lastOrNull()?.first?.let(::historyReference)
             ChatHistoryResponse.Messages(
                 events = mapped.map { it.second },
                 // Message IDs are opaque and may be the only exact selector. Keep the server's
                 // completed-batch order rather than attempting to sort or normalize references.
-                oldest = primaryReferences.firstOrNull(),
-                newest = primaryReferences.lastOrNull(),
+                oldest = oldest,
+                newest = newest,
                 endOfHistory = endOfHistory,
                 primaryMessageCount = primaryMessages.size,
             )
@@ -846,11 +871,19 @@ class IrcClient(
         tree.children.flatMap { child ->
             when (child) {
                 is BatchChild.Message -> listOfNotNull(
-                    eventMapper.map(child.message, batchId = child.message.tags["batch"] ?: tree.ref)
+                    eventMapper.map(
+                        child.message,
+                        batchId = child.message.tags["batch"] ?: tree.ref,
+                        historical = true,
+                    )
                         ?.let { child.message to it },
                 )
                 is BatchChild.Nested -> {
-                    val event = child.batch.takeIf { it.type == MULTILINE_CAP }?.let(::mapMultilineBatch)
+                    val event = when (child.batch.type) {
+                        MULTILINE_CAP -> mapMultilineBatch(child.batch, historical = true)
+                        "netsplit", "netjoin" -> mapBatchTree(child.batch, historical = true).singleOrNull()
+                        else -> null
+                    }
                     if (event != null) {
                         listOf(child.batch.opening to event)
                     } else {

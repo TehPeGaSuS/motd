@@ -302,9 +302,11 @@ internal suspend fun resolveCurrentReadTarget(
     val event = db.messageDao().byId(canonicalEventId) ?: return null
     val eventRoomId = db.bufferDao().canonicalId(event.bufferId) ?: return null
     if (eventRoomId != buffer.id || event.serverTime <= 0) return null
-    val current = TimelineAnchor(event.serverTime, event.id)
+    val current = TimelineAnchor(event.serverTime, event.id, event.timelineOrder)
     val stored = buffer.localReadAnchorTime?.let {
-        TimelineAnchor(it, buffer.localReadAnchorEventId ?: 0L)
+        val storedId = buffer.localReadAnchorEventId ?: 0L
+        val storedOrder = db.messageDao().byCanonicalId(storedId)?.timelineOrder ?: storedId
+        TimelineAnchor(it, storedId, storedOrder)
     }
     if (stored != null && current < stored) return null
     return CurrentReadTarget(

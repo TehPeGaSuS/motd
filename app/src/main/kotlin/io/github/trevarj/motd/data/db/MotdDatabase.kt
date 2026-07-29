@@ -32,7 +32,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 20,
+    version = 21,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -635,6 +635,28 @@ val MIGRATION_19_20 = object : Migration(19, 20) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_dcc_transfers_networkId_peerNick` ON `dcc_transfers` (`networkId`, `peerNick`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_dcc_transfers_timelineEventId` ON `dcc_transfers` (`timelineEventId`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_dcc_transfers_state_updatedAt` ON `dcc_transfers` (`state`, `updatedAt`)")
+    }
+}
+
+/**
+ * v20 -> v21 separates stable timeline ordering and temporal provenance from the local primary
+ * key. Existing rows retain their exact visible order; completed playback can subsequently
+ * reconcile provisional equal-time ordering without rewriting canonical event ids.
+ */
+val MIGRATION_20_21 = object : Migration(20, 21) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE messages ADD COLUMN timelineOrder INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE messages ADD COLUMN timelineOrderConfirmed INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE messages ADD COLUMN timeProvenance TEXT NOT NULL DEFAULT 'LOCAL_CLOCK'")
+        db.execSQL("UPDATE messages SET timelineOrder = id")
+        db.execSQL(
+            "UPDATE messages SET timeProvenance = CASE " +
+                "WHEN serverTimeAuthoritative = 1 THEN 'SERVER_TAG' ELSE 'LOCAL_CLOCK' END",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_messages_bufferId_serverTime_timelineOrder " +
+                "ON messages(bufferId, serverTime, timelineOrder)",
+        )
     }
 }
 

@@ -13,7 +13,7 @@ import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
  * Resolves a search/deep-jump target to a 0-based reverse-list index (plans/11 §C).
  *
  * The list is reverse-laid-out (index 0 == newest), matching the paging source
- * `ORDER BY serverTime DESC, id DESC`. [MessageRepository.countNewerThan] returns the strict
+ * `ORDER BY serverTime DESC, timelineOrder DESC, id DESC`. [MessageRepository.countNewerThan] returns the strict
  * complement count, i.e. how many rows are newer than a given `(serverTime, id)` — which is
  * exactly that row's index.
  *

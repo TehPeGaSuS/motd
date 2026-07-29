@@ -133,7 +133,10 @@ class ChatHistoryRemoteMediator(
             return MediatorResult.Success(endOfPaginationReached = false)
         }
         val response = fetchLatest(networkId, target, requestLimit, referenceTypes)
-        return MediatorResult.Success(endOfPaginationReached = response.isComplete)
+        return MediatorResult.Success(
+            endOfPaginationReached = response.isComplete ||
+                response.cannotSafelyPageBefore(referenceTypes, true, requestLimit),
+        )
     }
 
     private suspend fun append(
@@ -156,7 +159,10 @@ class ChatHistoryRemoteMediator(
             // REFRESH backfill never fires, so seed the newest page here via LATEST. If the server
             // has history the inserted rows re-run the PagingSource; a later APPEND then pages older.
             val response = fetchLatest(networkId, target, requestLimit, referenceTypes)
-            return MediatorResult.Success(endOfPaginationReached = response.isComplete)
+            return MediatorResult.Success(
+                endOfPaginationReached = response.isComplete ||
+                    response.cannotSafelyPageBefore(referenceTypes, true, requestLimit),
+            )
         }
         val selected = oldest.selector(referenceTypes, allowMsgid = true)
             ?: return MediatorResult.Error(
@@ -193,6 +199,19 @@ class ChatHistoryRemoteMediator(
         // while the user is entering or flinging through a channel.
         processor.persistHistoryPage(networkId, request, result, expectedRoomId = bufferId)
         if (result.isComplete) return MediatorResult.Success(endOfPaginationReached = true)
+        if (
+            result.cannotSafelyPageBefore(
+                referenceTypes,
+                responseMsgidAllowed,
+                requestLimit,
+                previous = selected,
+            )
+        ) {
+            // A non-advancing cursor would refetch forever. A saturated timestamp-only page is
+            // also ambiguous because BEFORE would skip any additional messages sharing its oldest
+            // timestamp. Preserve the page, leave historyComplete false, and stop this mediator.
+            return MediatorResult.Success(endOfPaginationReached = true)
+        }
         return MediatorResult.Success(endOfPaginationReached = false)
     }
 
@@ -227,6 +246,18 @@ class ChatHistoryRemoteMediator(
         referenceTypes: Set<HistoryReferenceType>,
         allowMsgid: Boolean,
     ): Boolean = oldest?.selector(referenceTypes, allowMsgid) != null
+
+    private fun ChatHistoryResponse.Messages.cannotSafelyPageBefore(
+        referenceTypes: Set<HistoryReferenceType>,
+        allowMsgid: Boolean,
+        requestLimit: Int,
+        previous: BoundarySelector? = null,
+    ): Boolean {
+        if (isComplete) return false
+        val next = oldest?.selector(referenceTypes, allowMsgid) ?: return true
+        return next.value == previous?.value ||
+            (next.type == HistoryReferenceType.TIMESTAMP && primaryMessageCount >= requestLimit)
+    }
 
     private fun ChatHistoryReference.selector(
         referenceTypes: Set<HistoryReferenceType>,

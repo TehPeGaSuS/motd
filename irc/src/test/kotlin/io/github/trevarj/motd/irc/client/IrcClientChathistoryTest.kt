@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.irc.client
 
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.event.ServerTimeSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -228,6 +229,35 @@ class IrcClientChathistoryTest {
         assertEquals(1, response.primaryMessageCount)
         assertNull(response.oldest)
         assertNull(response.newest)
+        val event = response.events.single() as IrcEvent.ChatMessage
+        assertEquals(0L, event.ctx.serverTime)
+        assertEquals(ServerTimeSource.UNKNOWN, event.ctx.serverTimeSource)
+    }
+
+    @Test
+    fun `missing first primary reference is not replaced by an interior message`() = runTest {
+        val transport = FakeTransport()
+        val client = registeredWithoutLabeledResponse(transport)
+        val request = async {
+            client.chathistory(
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#room", limit = 100),
+            )
+        }
+        runCurrent()
+
+        transport.feed("BATCH +history chathistory #room")
+        transport.feed("@batch=history :alice!user@example.test PRIVMSG #room :unbounded first")
+        transport.feed(
+            "@batch=history;msgid=second;time=2026-07-14T19:00:00.000Z " +
+                ":alice!user@example.test PRIVMSG #room :bounded second",
+        )
+        transport.feed("BATCH -history")
+        runCurrent()
+
+        val response = request.await() as ChatHistoryResponse.Messages
+        assertEquals(2, response.primaryMessageCount)
+        assertNull(response.oldest)
+        assertEquals(ChatHistoryReference("second", 1_784_055_600_000L), response.newest)
     }
 
     @Test

@@ -9,9 +9,12 @@ internal enum class EventOrigin(
 ) {
     LIVE(notifies = true, mutatesSessionState = true),
     HISTORY(notifies = false, mutatesSessionState = false),
-    REPLAY(notifies = false, mutatesSessionState = true),
+    REPLAY(notifies = false, mutatesSessionState = false),
     PUSH(notifies = true, mutatesSessionState = false),
     ;
+
+    val isHistorical: Boolean
+        get() = this == HISTORY || this == REPLAY
 
     /** Push delivery has a deliberately narrow persistence surface. */
     fun accepts(event: IrcEvent): Boolean = this != PUSH || when (event) {
