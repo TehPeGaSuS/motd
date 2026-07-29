@@ -90,7 +90,15 @@ class RequiredHeadlessE2eTest {
 
     @Test
     fun sendEchoPersistsVisibleRowAndReconnects() {
-        val (bootstrap, network) = launchBootstrapped(setOf("echo-message", "message-tags"))
+        val (bootstrap, network) = launchBootstrapped(
+            setOf(
+                "echo-message",
+                "draft/chathistory",
+                "batch",
+                "message-tags",
+                "server-time",
+            ),
+        )
         val bufferId = runBlocking { BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, bootstrap.args.channel) }
         ChatListRobot(compose).open(bufferId)
         val token = "required${bootstrap.args.runId.filter(Char::isLetterOrDigit).takeLast(16)}"
@@ -106,7 +114,16 @@ class RequiredHeadlessE2eTest {
         runBlocking {
             bootstrap.seams.connections().disconnect(network.childId)
             bootstrap.seams.connections().connect(network.childId)
-            ConnectionProbe(bootstrap.seams.connections(), milestones).awaitReady(network.childId, setOf("echo-message", "message-tags"))
+            ConnectionProbe(bootstrap.seams.connections(), milestones).awaitReady(
+                network.childId,
+                setOf(
+                    "echo-message",
+                    "draft/chathistory",
+                    "batch",
+                    "message-tags",
+                    "server-time",
+                ),
+            )
         }
         val after = runBlocking { probe.awaitCanonical(token, bufferId) }
         assertEquals(canonical.id, after.id)

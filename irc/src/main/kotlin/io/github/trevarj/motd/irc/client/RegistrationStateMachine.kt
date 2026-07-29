@@ -92,7 +92,7 @@ internal class RegistrationStateMachine(
             "LS" -> onCapLs(msg)
             "ACK" -> onCapAck(msg)
             "NAK" -> onCapNak(msg)
-            "DEL", "NEW" -> onCapChangedBeforeWelcome()
+            "DEL", "NEW" -> onCapChangedBeforeWelcome(msg)
             else -> emptyList()
         }
     }
@@ -110,14 +110,18 @@ internal class RegistrationStateMachine(
         val req = if (isBouncerChildRegistration()) {
             // soju mutates the capability set when a downstream selects a bouncer network.
             // Requesting the full feature set before network selection can leave Android's embedded
-            // transport stuck before welcome. Use the minimum caps needed to authenticate/select,
-            // then request ordinary feature caps after 001.
-            val preBind = setOf("sasl", "soju.im/bouncer-networks")
-                .filter { it in desired || it in advertised.keys }
-                .filter { it != "soju.im/bouncer-networks" || config.bouncerNetId != null }
-                .toSet()
+            // transport stuck before welcome. Keep ordinary features deferred, but negotiate the
+            // replay-safety barrier now so soju does not deliver its legacy backlog as live traffic.
+            val preBind = buildList {
+                add("sasl")
+                if (config.bouncerNetId != null) add("soju.im/bouncer-networks")
+                add("draft/chathistory")
+                add("batch")
+                add("message-tags")
+                addAll(SERVER_TIME_ALIASES)
+            }.filterTo(linkedSetOf()) { it in desired }
             postWelcomeCapReqs.clear()
-            postWelcomeCapReqs.addAll(desired - preBind - "cap-notify")
+            postWelcomeCapReqs.addAll(deferredFeatureCaps(desired - preBind))
             preBind
         } else {
             desired
@@ -257,8 +261,34 @@ internal class RegistrationStateMachine(
      * is sufficient proof that SASL and network selection succeeded; mark the child Ready so the
      * app can use the live socket. Ordinary IRC connections still require 001.
      */
-    private fun onCapChangedBeforeWelcome(): List<Action> {
+    private fun onCapChangedBeforeWelcome(msg: IrcMessage): List<Action> {
         if (phase != Phase.WELCOME || !isBouncerChildRegistration()) return emptyList()
+
+        val subcommand = msg.params.getOrNull(1)
+        val tokens = msg.params.lastOrNull()
+            ?.split(' ')
+            ?.filter { it.isNotEmpty() }
+            .orEmpty()
+        val names = tokens.mapTo(linkedSetOf()) {
+            it.removePrefix("-").removePrefix("=").removePrefix("~").substringBefore('=')
+        }
+        when (subcommand) {
+            "NEW" -> {
+                parseAdvertised(tokens.joinToString(" "))
+                val newlyDesired = CapNegotiator.runtimeRequestSet(
+                    names,
+                    acked,
+                    config.extraCaps,
+                )
+                postWelcomeCapReqs.addAll(deferredFeatureCaps(newlyDesired))
+            }
+            "DEL" -> {
+                names.forEach(advertised::remove)
+                acked.removeAll { it.substringBefore('=') in names }
+                postWelcomeCapReqs.removeAll { it in names }
+            }
+        }
+
         phase = Phase.DONE
         val actions = mutableListOf<Action>(
             Action.SetNick(nick),
@@ -271,7 +301,7 @@ internal class RegistrationStateMachine(
         )
         // Soju can remove capabilities while BOUNCER BIND selects the upstream network. Request
         // each deferred capability separately so one stale capability can be NAKed without also
-        // rejecting essential capabilities such as draft/chathistory.
+        // rejecting unrelated features such as draft/read-marker.
         for (cap in postWelcomeCapReqs.distinct().sorted()) {
             actions.add(Action.SendDeferred("CAP REQ :$cap", FALLBACK_FEATURE_CAP_DELAY_MS))
         }
@@ -312,6 +342,12 @@ internal class RegistrationStateMachine(
 
     private fun isBouncerChildRegistration(): Boolean =
         config.bouncerNetId != null || config.saslUser?.contains('/') == true
+
+    private fun deferredFeatureCaps(caps: Set<String>): Set<String> = caps - buildSet {
+        add("cap-notify")
+        // Slash-auth children are already bound by their SASL authcid and must not BOUNCER BIND.
+        if (config.bouncerNetId == null) add("soju.im/bouncer-networks")
+    }
 
     companion object {
         const val FALLBACK_FEATURE_CAP_DELAY_MS = 1_000L

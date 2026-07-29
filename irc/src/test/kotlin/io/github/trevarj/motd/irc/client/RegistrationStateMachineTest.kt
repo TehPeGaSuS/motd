@@ -84,7 +84,7 @@ class RegistrationStateMachineTest {
     }
 
     @Test
-    fun `bouncer bind fallback completes without racing post-welcome caps`() {
+    fun `bouncer bind negotiates replay safety before fallback ready`() {
         val machine = RegistrationStateMachine(
             IrcClientConfig(
                 host = "soju",
@@ -98,16 +98,26 @@ class RegistrationStateMachineTest {
         )
 
         machine.start()
-        val req = machine.onMessage(cap("LS", "sasl soju.im/bouncer-networks cap-notify draft/chathistory server-time"))
-        assertEquals(listOf("CAP REQ :sasl soju.im/bouncer-networks"), req.sentLines())
+        val req = machine.onMessage(
+            cap(
+                "LS",
+                "sasl soju.im/bouncer-networks cap-notify draft/chathistory batch " +
+                    "message-tags server-time echo-message extended-monitor",
+            ),
+        )
+        val replayBarrier =
+            "sasl soju.im/bouncer-networks draft/chathistory batch message-tags server-time"
+        assertEquals(listOf("CAP REQ :$replayBarrier"), req.sentLines())
 
-        val afterAck = machine.onMessage(cap("ACK", "sasl soju.im/bouncer-networks"))
+        val afterAck = machine.onMessage(cap("ACK", replayBarrier))
         assertEquals(listOf("BOUNCER BIND 2", "CAP END"), afterAck.sentLines())
 
-        val afterFirstBindCapChange = machine.onMessage(cap("DEL", "draft/message-redaction"))
+        val afterFirstBindCapChange = machine.onMessage(cap("DEL", "extended-monitor"))
         assertTrue(afterFirstBindCapChange.any { it is RegistrationStateMachine.Action.Complete })
         assertTrue(afterFirstBindCapChange.sentLines().isEmpty())
-        assertTrue(afterFirstBindCapChange.deferredLines().contains("CAP REQ :draft/chathistory"))
+        assertEquals(listOf("CAP REQ :echo-message"), afterFirstBindCapChange.deferredLines())
+        val ready = afterFirstBindCapChange.filterIsInstance<RegistrationStateMachine.Action.Complete>().single()
+        assertTrue(ready.caps.containsAll(replayBarrier.split(' ')))
         assertTrue(afterFirstBindCapChange.deferredLines().all { it.substringAfter("CAP REQ :").contains(' ').not() })
     }
 
@@ -206,7 +216,7 @@ class RegistrationStateMachineTest {
     }
 
     @Test
-    fun `account network authcid uses minimal pre-welcome caps`() {
+    fun `account network authcid negotiates replay safety before fallback ready`() {
         val machine = RegistrationStateMachine(
             IrcClientConfig(
                 host = "soju",
@@ -220,16 +230,84 @@ class RegistrationStateMachineTest {
         )
 
         machine.start()
-        val req = machine.onMessage(cap("LS", "cap-notify sasl soju.im/bouncer-networks draft/chathistory server-time"))
-        assertEquals(listOf("CAP REQ :sasl"), req.sentLines())
+        val req = machine.onMessage(
+            cap(
+                "LS",
+                "cap-notify sasl soju.im/bouncer-networks draft/chathistory batch message-tags " +
+                    "server-time znc.in/server-time-iso echo-message",
+            ),
+        )
+        val replayBarrier = "sasl draft/chathistory batch message-tags server-time"
+        assertEquals(listOf("CAP REQ :$replayBarrier"), req.sentLines())
 
-        val afterAck = machine.onMessage(cap("ACK", "sasl"))
+        val afterAck = machine.onMessage(cap("ACK", replayBarrier))
         assertEquals(listOf("CAP END"), afterAck.sentLines())
 
         val afterCapChange = machine.onMessage(cap("DEL", "extended-monitor"))
         assertTrue(afterCapChange.any { it is RegistrationStateMachine.Action.Complete })
         assertTrue(afterCapChange.sentLines().isEmpty())
-        assertTrue(afterCapChange.deferredLines().contains("CAP REQ :server-time"))
+        assertEquals(listOf("CAP REQ :echo-message"), afterCapChange.deferredLines())
+    }
+
+    @Test
+    fun `fallback CAP DEL updates ready snapshot and drops stale deferred caps`() {
+        val machine = RegistrationStateMachine(
+            IrcClientConfig(
+                host = "soju",
+                port = 6697,
+                tls = true,
+                nick = "motd",
+                username = "motd",
+                realname = "motd",
+                bouncerNetId = "2",
+            ),
+        )
+
+        machine.start()
+        val replayBarrier =
+            "sasl soju.im/bouncer-networks draft/chathistory batch message-tags server-time"
+        machine.onMessage(cap("LS", "$replayBarrier extended-monitor"))
+        machine.onMessage(cap("ACK", replayBarrier))
+
+        val actions = machine.onMessage(cap("DEL", "message-tags extended-monitor"))
+        val ready = actions.filterIsInstance<RegistrationStateMachine.Action.Complete>().single()
+
+        assertTrue("message-tags" !in ready.caps)
+        assertTrue("draft/chathistory" in ready.caps)
+        assertTrue(
+            actions.deferredLines().none {
+                it.endsWith("message-tags") || it.endsWith("extended-monitor")
+            },
+        )
+    }
+
+    @Test
+    fun `fallback CAP NEW adds newly advertised desired cap to deferred requests`() {
+        val machine = RegistrationStateMachine(
+            IrcClientConfig(
+                host = "soju",
+                port = 6697,
+                tls = true,
+                nick = "motd",
+                username = "motd",
+                realname = "motd",
+                bouncerNetId = "2",
+            ),
+        )
+
+        machine.start()
+        val replayBarrier =
+            "sasl soju.im/bouncer-networks draft/chathistory batch message-tags server-time"
+        machine.onMessage(cap("LS", replayBarrier))
+        machine.onMessage(cap("ACK", replayBarrier))
+
+        val actions = machine.onMessage(
+            cap("NEW", "draft/metadata-2=before-connect,max-keys=0,max-value-bytes=1"),
+        )
+
+        assertTrue(actions.deferredLines().contains("CAP REQ :draft/metadata-2"))
+        val ready = actions.filterIsInstance<RegistrationStateMachine.Action.Complete>().single()
+        assertTrue(ready.caps.none { it.startsWith("draft/metadata-2") })
     }
 
     private fun cap(subcommand: String, caps: String) =

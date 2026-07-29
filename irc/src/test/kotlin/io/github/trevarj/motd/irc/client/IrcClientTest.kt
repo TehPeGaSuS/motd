@@ -735,7 +735,8 @@ class IrcClientTest {
 
         ft.feed(":srv CAP * LS :$fullLs $metadata")
         runCurrent()
-        ft.feed(":srv CAP motd ACK :sasl soju.im/bouncer-networks")
+        val initialCaps = ft.sent.first { it.startsWith("CAP REQ :") }.substringAfter("CAP REQ :")
+        ft.feed(":srv CAP motd ACK :$initialCaps")
         runCurrent()
         ft.feed(":srv CAP motd NEW :$metadata")
         runCurrent()
@@ -755,7 +756,7 @@ class IrcClientTest {
     }
 
     @Test
-    fun `bouncer fallback restores message-tags after ready so typing works`() = runTest {
+    fun `bouncer fallback has message-tags before ready so typing works immediately`() = runTest {
         val ft = FakeTransport()
         val client = IrcClient(config(bouncerNetId = "42"), ft.factory(), clientScope())
         client.start()
@@ -767,19 +768,23 @@ class IrcClientTest {
         val initialReq = ft.sent.first { it.startsWith("CAP REQ") }
         assertTrue(initialReq.contains("sasl"))
         assertTrue(initialReq.contains("soju.im/bouncer-networks"))
-        assertTrue(!initialReq.contains("message-tags"))
+        assertTrue(initialReq.contains("draft/chathistory"))
+        assertTrue(initialReq.contains("batch"))
+        assertTrue(initialReq.contains("message-tags"))
+        assertTrue(initialReq.contains("server-time"))
 
-        ft.feed(":srv CAP motd ACK :sasl soju.im/bouncer-networks")
+        ft.feed(":srv CAP motd ACK :${initialReq.substringAfter("CAP REQ :")}")
         runCurrent()
         ft.feed(":srv CAP motd DEL :extended-monitor")
         runCurrent()
 
         assertTrue(client.state.value is IrcClientState.Ready)
-        assertTrue(!client.hasCap("message-tags"))
+        assertTrue(client.hasCap("message-tags"))
+        assertTrue(client.hasCap("draft/chathistory"))
 
         client.sendTyping("#chan", "active")
         runCurrent()
-        assertTrue(ft.sent.none { it.contains("TAGMSG #chan") })
+        assertTrue(ft.sent.any { it.startsWith("@+typing=active TAGMSG #chan") })
 
         advanceTimeBy(RegistrationStateMachine.FALLBACK_FEATURE_CAP_DELAY_MS)
         runCurrent()
@@ -787,8 +792,8 @@ class IrcClientTest {
         val deferredRequests = ft.sent
             .filter { it.startsWith("CAP REQ :") }
             .drop(1)
-        assertTrue(deferredRequests.contains("CAP REQ :message-tags"))
-        assertTrue(deferredRequests.contains("CAP REQ :draft/chathistory"))
+        assertTrue(deferredRequests.none { it == "CAP REQ :message-tags" })
+        assertTrue(deferredRequests.none { it == "CAP REQ :draft/chathistory" })
         assertTrue(deferredRequests.contains("CAP REQ :draft/read-marker"))
 
         for (request in deferredRequests) {
@@ -796,17 +801,12 @@ class IrcClientTest {
             runCurrent()
         }
 
-        assertTrue(client.hasCap("message-tags"))
         val ready = client.state.value as IrcClientState.Ready
         assertTrue(ready.caps.contains("message-tags"))
-
-        client.sendTyping("#chan", "active")
-        runCurrent()
-        assertTrue(ft.sent.any { it.startsWith("@+typing=active TAGMSG #chan") })
     }
 
     @Test
-    fun `bouncer fallback isolates rejected cap so chathistory still activates`() = runTest {
+    fun `bouncer fallback isolates rejected cap so other deferred features still activate`() = runTest {
         val ft = FakeTransport()
         val staleCap = "vendor/stale-after-bind"
         val client = IrcClient(
@@ -819,12 +819,13 @@ class IrcClientTest {
 
         ft.feed(":srv CAP * LS :$fullLs $staleCap")
         runCurrent()
-        ft.feed(":srv CAP motd ACK :sasl soju.im/bouncer-networks")
+        val initialCaps = ft.sent.first { it.startsWith("CAP REQ :") }.substringAfter("CAP REQ :")
+        ft.feed(":srv CAP motd ACK :$initialCaps")
         runCurrent()
 
-        // Soju changes its available capabilities after BOUNCER BIND. The first DEL also
+        // Soju changes its available capabilities after BOUNCER BIND. The first NEW also
         // completes the fallback registration path while the deferred feature requests wait.
-        ft.feed(":srv CAP motd DEL :$staleCap")
+        ft.feed(":srv CAP motd NEW :vendor/post-bind")
         runCurrent()
         assertTrue(client.state.value is IrcClientState.Ready)
 
@@ -834,7 +835,7 @@ class IrcClientTest {
         val deferredRequests = ft.sent
             .filter { it.startsWith("CAP REQ :") }
             .drop(1)
-        assertTrue(deferredRequests.any { it.contains("draft/chathistory") })
+        assertTrue(deferredRequests.any { it.contains("draft/read-marker") })
         for (request in deferredRequests) {
             val caps = request.substringAfter("CAP REQ :")
             val reply = if (caps.split(' ').contains(staleCap)) "NAK" else "ACK"
@@ -843,6 +844,49 @@ class IrcClientTest {
         }
 
         assertTrue(client.hasCap("draft/chathistory"))
+        assertTrue(client.hasCap("draft/read-marker"))
+    }
+
+    @Test
+    fun `bouncer fallback emits tagged soju backlog as one history batch`() = runTest {
+        val ft = FakeTransport()
+        val client = IrcClient(config(bouncerNetId = "42"), ft.factory(), clientScope())
+        val collected = mutableListOf<IrcEvent>()
+        val job = launch { client.broadcastEvents.toList(collected) }
+        client.start()
+        runCurrent()
+
+        ft.feed(":srv CAP * LS :$fullLs")
+        runCurrent()
+        val initialCaps = ft.sent.first { it.startsWith("CAP REQ :") }.substringAfter("CAP REQ :")
+        ft.feed(":srv CAP motd ACK :$initialCaps")
+        runCurrent()
+        ft.feed(":srv CAP motd NEW :vendor/post-bind")
+        runCurrent()
+
+        assertTrue(client.state.value is IrcClientState.Ready)
+        assertTrue(client.hasCap("draft/chathistory"))
+        assertTrue(client.hasCap("batch"))
+        assertTrue(client.hasCap("message-tags"))
+        assertTrue(client.hasCap("server-time"))
+
+        ft.feed("BATCH +history chathistory #chan")
+        ft.feed(
+            "@batch=history;msgid=history-1;time=2026-07-28T20:17:04.564Z " +
+                ":alice!u@h PRIVMSG #chan :retained message",
+        )
+        ft.feed("BATCH -history")
+        runCurrent()
+        job.cancel()
+
+        val history = collected.filterIsInstance<IrcEvent.HistoryBatch>().single()
+        assertEquals("#chan", history.target)
+        val message = history.events.single() as IrcEvent.ChatMessage
+        assertEquals("retained message", message.text)
+        assertEquals("history-1", message.ctx.msgid)
+        assertEquals(1_785_269_824_564L, message.ctx.serverTime)
+        assertEquals(ServerTimeSource.TAG, message.ctx.serverTimeSource)
+        assertTrue(collected.none { it is IrcEvent.ChatMessage })
     }
 
     @Test
