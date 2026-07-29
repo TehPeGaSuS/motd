@@ -1272,11 +1272,23 @@ class ConnectionManagerImpl @Inject constructor(
                             mapOf(
                                 "network_id" to networkId,
                                 "result" to result::class.simpleName,
+                                "retry_recommended" to shouldRetryIncompleteCatchUp(result),
                                 "error_fp" to diagnostics.fingerprint(result.reason),
                             )
                         }
-                        // The pass imported everything it could prove. Retry on the next connection
-                        // instead of looping forever against servers without end-of-history tags.
+                        if (shouldRetryIncompleteCatchUp(result)) {
+                            if (clientFor(networkId) !== client) return
+                            val retryMs = catchUpRetryDelayMs(attempt++)
+                            Log.w(
+                                TAG,
+                                "CHATHISTORY has not reached the latest message for network " +
+                                    "$networkId; retrying in ${retryMs}ms: ${result.reason}",
+                            )
+                            delay(retryMs)
+                            continue
+                        }
+                        // A server can omit end-of-history metadata even after its advertised
+                        // latest message is local. Do not loop merely to prove older completeness.
                         return
                     }
                     diagnostics.record("history", "catch_up_failed") {
@@ -1982,6 +1994,9 @@ internal fun wantedNetworkUsesEmbeddedReality(
 
 internal fun catchUpRetryDelayMs(attempt: Int): Long =
     (2_000L * (1L shl attempt.coerceIn(0, 4))).coerceAtMost(30_000L)
+
+internal fun shouldRetryIncompleteCatchUp(result: HistoryResyncState.Failed): Boolean =
+    result is HistoryResyncState.Incomplete && result.retryRecommended
 
 /** Wire requests needed to converge local markers with a read-marker-capable server. */
 internal fun readMarkerSyncRequests(markers: List<BufferReadMarker>): List<ReadMarkerSyncRequest> =

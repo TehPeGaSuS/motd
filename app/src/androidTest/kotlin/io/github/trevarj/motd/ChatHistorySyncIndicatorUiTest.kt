@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_SYNC_INDICATOR_TAG
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_SYNC_RETRY_TAG
+import io.github.trevarj.motd.ui.chat.EMPTY_HISTORY_LOADING_INDICATOR_DELAY_MS
 import io.github.trevarj.motd.ui.chat.HISTORY_SYNC_INDICATOR_DELAY_MS
 import io.github.trevarj.motd.ui.chat.TimelineHistorySyncIndicator
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -38,7 +39,9 @@ class ChatHistorySyncIndicatorUiTest {
         }
 
         compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertCountEquals(0)
-        compose.mainClock.advanceTimeBy(HISTORY_SYNC_INDICATOR_DELAY_MS)
+        compose.mainClock.advanceTimeBy(HISTORY_SYNC_INDICATOR_DELAY_MS - 1)
+        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertCountEquals(0)
+        compose.mainClock.advanceTimeBy(1)
         compose.mainClock.advanceTimeByFrame()
         compose.onNodeWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertIsDisplayed()
         compose.onNodeWithText("Syncing messages…").assertIsDisplayed()
@@ -58,18 +61,34 @@ class ChatHistorySyncIndicatorUiTest {
             }
         }
 
-        compose.mainClock.advanceTimeBy(HISTORY_SYNC_INDICATOR_DELAY_MS)
+        compose.mainClock.advanceTimeBy(EMPTY_HISTORY_LOADING_INDICATOR_DELAY_MS)
         compose.mainClock.advanceTimeByFrame()
         compose.onNodeWithText("Loading messages…").assertIsDisplayed()
     }
 
     @Test
-    fun partialStateIsImmediateAndRetryIsAccessible() {
-        var retries = 0
+    fun partialStateDoesNotCoverCachedMessages() {
         compose.setContent {
             MotdTheme {
                 TimelineHistorySyncIndicator(
                     status = HistorySyncStatus.Partial("fixture"),
+                    timelineEmpty = false,
+                    retryEnabled = true,
+                    onRetry = {},
+                )
+            }
+        }
+
+        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertCountEquals(0)
+    }
+
+    @Test
+    fun failedStateKeepsAccessibleManualRetry() {
+        var retries = 0
+        compose.setContent {
+            MotdTheme {
+                TimelineHistorySyncIndicator(
+                    status = HistorySyncStatus.Failed("fixture"),
                     timelineEmpty = false,
                     retryEnabled = true,
                     onRetry = { retries++ },
@@ -77,7 +96,7 @@ class ChatHistorySyncIndicatorUiTest {
             }
         }
 
-        compose.onNodeWithText("Some messages may be missing").assertIsDisplayed()
+        compose.onNodeWithText("Couldn't sync messages").assertIsDisplayed()
         compose.onNodeWithTag(CHAT_HISTORY_SYNC_RETRY_TAG)
             .assertHeightIsAtLeast(48.dp)
             .performClick()

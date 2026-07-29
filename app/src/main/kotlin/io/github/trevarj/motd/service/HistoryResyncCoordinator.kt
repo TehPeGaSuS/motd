@@ -74,11 +74,12 @@ sealed interface HistoryResyncState {
         val inserted: Int,
         override val reason: String,
         val awaitsTargetClassification: Boolean = false,
+        val retryRecommended: Boolean = false,
     ) : Failed(reason)
     data class Capped(val inserted: Int, val limit: Int, override val reason: String) : Failed(reason)
 }
 
-/** Persistent chat-timeline feedback for automatic and user-requested history work. */
+/** Per-buffer progress and actionable failure state for automatic and user-requested history work. */
 sealed interface HistorySyncStatus {
     data object Idle : HistorySyncStatus
     data object Checking : HistorySyncStatus
@@ -201,6 +202,7 @@ class HistoryResyncCoordinator @Inject constructor(
         val inserted: Int,
         val status: WorkStatus,
         val highWater: Long?,
+        val retryRecommended: Boolean,
     )
 
     private data class TargetDiscovery(
@@ -559,7 +561,7 @@ class HistoryResyncCoordinator @Inject constructor(
             if (status == WorkStatus.Complete && isCurrent() && highWater != null) {
                 syncPrefs.setLastSuccessfulSync(networkId, highWater)
             }
-            status.toState(inserted)
+            status.toState(inserted, retryRecommended = targetPass.retryRecommended)
         } catch (_: TimeoutCancellationException) {
             HistoryResyncState.Failed("History refresh timed out")
         } catch (cancelled: CancellationException) {
@@ -953,6 +955,7 @@ class HistoryResyncCoordinator @Inject constructor(
         var inserted = 0
         var status: WorkStatus = WorkStatus.Complete
         var highWater: Long? = null
+        var retryRecommended = false
         for (targetSpec in targets) {
             if (!isCurrent()) throw StaleConnectionException()
             val target = targetSpec.name
@@ -976,17 +979,42 @@ class HistoryResyncCoordinator @Inject constructor(
                 discoveredLatestMessageTime = targetSpec.latestMessageTime,
             )
             inserted += targetResult.inserted
-            status = status.merge(targetResult.status)
+            // TARGETS describes the newest server event, which may be a JOIN or an event that is
+            // intentionally filtered/rerouted during ingestion. Count either a durable local event
+            // or an event observed in this response as reaching it; relying on the chat cursor alone
+            // would retry forever for those valid cases.
+            val newestStoredTime = maxHighWater(
+                db.messageDao().latestBoundary(canonicalRoomId)?.serverTime,
+                db.historyCursorDao().byRoom(canonicalRoomId)?.newestServerTime,
+                targetResult.highWater,
+            )
+            val reachedAdvertisedLatest = targetSpec.latestMessageTime?.let { advertisedLatest ->
+                newestStoredTime?.let { it >= advertisedLatest } == true
+            }
+            val effectiveStatus = if (
+                reachedAdvertisedLatest == false && targetResult.status == WorkStatus.Complete
+            ) {
+                WorkStatus.Incomplete("CHATHISTORY did not reach the latest advertised message")
+            } else {
+                targetResult.status
+            }
+            val targetNeedsRetry = reachedAdvertisedLatest == false
+            retryRecommended = retryRecommended || targetNeedsRetry
+            status = status.merge(effectiveStatus)
             highWater = maxHighWater(highWater, targetResult.highWater)
             if (syncGeneration != null) {
                 finishSyncStatus(
                     canonicalRoomId,
                     syncGeneration,
-                    targetResult.status.toSyncStatus(),
+                    if (reachedAdvertisedLatest == true) {
+                        HistorySyncStatus.Idle
+                    } else {
+                        effectiveStatus.toSyncStatus()
+                    },
                 )
             }
         }
-        return TargetPass(inserted, status, highWater)
+        return TargetPass(inserted, status, highWater, retryRecommended)
     }
 
     /**
@@ -1653,13 +1681,17 @@ class HistoryResyncCoordinator @Inject constructor(
         }
     }
 
-    private fun WorkStatus.toState(inserted: Int): HistoryResyncState = when (this) {
+    private fun WorkStatus.toState(
+        inserted: Int,
+        retryRecommended: Boolean = false,
+    ): HistoryResyncState = when (this) {
         WorkStatus.Complete ->
             if (inserted > 0) HistoryResyncState.Updated(inserted) else HistoryResyncState.UpToDate
         is WorkStatus.Incomplete -> HistoryResyncState.Incomplete(
             inserted,
             reason,
             awaitsTargetClassification,
+            retryRecommended,
         )
         is WorkStatus.Capped -> HistoryResyncState.Capped(inserted, limit, reason)
     }

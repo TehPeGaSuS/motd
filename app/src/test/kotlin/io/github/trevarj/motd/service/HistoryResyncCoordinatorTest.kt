@@ -618,7 +618,7 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
-    fun automaticNetworkResyncStopsRepeatedCappedPageAsPersistentPartial() = runTest {
+    fun automaticNetworkResyncDoesNotRetryAfterReachingAdvertisedLatest() = runTest {
         coordinator.paginationRequestLimit = 1
         processor.process(networkId, message("seed", 100))
         val source = FakeSource(pageLimit = 1) { request ->
@@ -641,7 +641,41 @@ class HistoryResyncCoordinatorTest {
         )
 
         assertTrue(result is HistoryResyncState.Incomplete)
+        val incomplete = result as HistoryResyncState.Incomplete
+        assertEquals(false, incomplete.retryRecommended)
         assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.AFTER })
+        assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
+        assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
+        assertEquals(listOf("m101", "seed"), rows().mapNotNull { it.msgid })
+    }
+
+    @Test
+    fun automaticNetworkResyncRecommendsRetryWhileAdvertisedLatestIsMissing() = runTest {
+        coordinator.paginationRequestLimit = 1
+        processor.process(networkId, message("seed", 100))
+        val source = FakeSource(pageLimit = 1) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
+                    targets = listOf("#chan" to 102L),
+                    endOfHistory = true,
+                )
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(
+                    events = listOf(message("m101", 101)),
+                )
+                else -> error("unexpected ${request.subcommand}")
+            }
+        }
+
+        val result = coordinator.resyncNetwork(
+            networkId,
+            listOf(bufferId to "#chan"),
+            source,
+        )
+
+        assertTrue(result is HistoryResyncState.Incomplete)
+        val incomplete = result as HistoryResyncState.Incomplete
+        assertEquals(true, incomplete.retryRecommended)
+        assertTrue(shouldRetryIncompleteCatchUp(incomplete))
         assertTrue(coordinator.syncStatus(bufferId).first() is HistorySyncStatus.Partial)
         assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
         assertEquals(listOf("m101", "seed"), rows().mapNotNull { it.msgid })
@@ -1944,12 +1978,21 @@ class HistoryResyncCoordinatorTest {
                         )
                     }
                 }
-                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(endOfHistory = true)
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = listOf(
+                        directMessage(
+                            msgid = "latest-${request.target}",
+                            time = if (request.target.equals("New", ignoreCase = true)) 300L else 200L,
+                            peer = request.target,
+                        ),
+                    ),
+                    endOfHistory = true,
+                )
                 else -> FakeResponse(endOfHistory = true)
             }
         }
 
-        assertEquals(HistoryResyncState.UpToDate, coordinator.resyncNetwork(networkId, emptyList(), source))
+        assertEquals(HistoryResyncState.Updated(2), coordinator.resyncNetwork(networkId, emptyList(), source))
         assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
         assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
         assertEquals(300L, syncPrefs.lastSuccessfulSync(networkId))
@@ -2103,14 +2146,23 @@ class HistoryResyncCoordinatorTest {
                 } else {
                     FakeResponse(targets = listOf("bob" to 100L), endOfHistory = true)
                 }
-                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(endOfHistory = true)
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = listOf(
+                        directMessage(
+                            msgid = "latest-${request.target}",
+                            time = if (request.target == "alice") 200L else 100L,
+                            peer = request.target,
+                        ),
+                    ),
+                    endOfHistory = true,
+                )
                 else -> FakeResponse(endOfHistory = true)
             }
         }
 
         val result = coordinator.resyncNetwork(networkId, emptyList(), source)
 
-        assertEquals(HistoryResyncState.UpToDate, result)
+        assertEquals(HistoryResyncState.Updated(2), result)
         assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
         val latestTargets = source.requests
             .filter { it.subcommand == ChatHistoryRequest.Subcommand.LATEST }
@@ -2351,5 +2403,14 @@ class HistoryResyncCoordinatorTest {
         assertEquals(2_000L, catchUpRetryDelayMs(0))
         assertEquals(4_000L, catchUpRetryDelayMs(1))
         assertEquals(30_000L, catchUpRetryDelayMs(20))
+        assertEquals(
+            false,
+            shouldRetryIncompleteCatchUp(
+                HistoryResyncState.Incomplete(
+                    inserted = 1,
+                    reason = "latest already local",
+                ),
+            ),
+        )
     }
 }

@@ -426,8 +426,10 @@ class ChatViewModel @Inject constructor(
                     is HistoryResyncState.Updated -> ChatUiEvent.HistoryUpdated(result.inserted)
                     HistoryResyncState.UpToDate -> ChatUiEvent.HistoryUpToDate
                     HistoryResyncState.Unsupported -> ChatUiEvent.HistoryUnsupported
-                    // Failure and partial states remain in the timeline until retried or resolved.
-                    // A transient snackbar would duplicate that actionable status.
+                    is HistoryResyncState.Incomplete -> ChatUiEvent.HistoryIncomplete(result.inserted)
+                    is HistoryResyncState.Capped -> ChatUiEvent.HistoryCapped(result.inserted, result.limit)
+                    // Hard failures retain the timeline retry action. Incomplete manual refreshes
+                    // use the dismissible snackbar instead of covering cached messages.
                     is HistoryResyncState.Failed -> null
                     else -> null
                 }

@@ -199,7 +199,8 @@ private const val AUTOCOMPLETE_SHOW_DEBOUNCE_MS = 250L
 private const val REACTION_PREFETCH_ROWS = 12
 private const val MAX_VISIBLE_REACTION_MSGIDS = 80
 private const val MAX_UNREAD_BADGE_COUNT = 100
-internal const val HISTORY_SYNC_INDICATOR_DELAY_MS = 400L
+internal const val HISTORY_SYNC_INDICATOR_DELAY_MS = 5_000L
+internal const val EMPTY_HISTORY_LOADING_INDICATOR_DELAY_MS = 400L
 
 private data class PendingDccAccept(
     val transferId: Long,
@@ -2118,9 +2119,12 @@ internal fun TimelineHistorySyncIndicator(
 ) {
     val active = status.isActive
     var activeVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(active) {
+    LaunchedEffect(active, timelineEmpty) {
         if (active) {
-            kotlinx.coroutines.delay(HISTORY_SYNC_INDICATOR_DELAY_MS)
+            kotlinx.coroutines.delay(
+                if (timelineEmpty) EMPTY_HISTORY_LOADING_INDICATOR_DELAY_MS
+                else HISTORY_SYNC_INDICATOR_DELAY_MS,
+            )
             activeVisible = true
         } else {
             activeVisible = false
@@ -2129,7 +2133,7 @@ internal fun TimelineHistorySyncIndicator(
     val visible = if (active) {
         activeVisible
     } else {
-        status is HistorySyncStatus.Partial || status is HistorySyncStatus.Failed
+        status is HistorySyncStatus.Failed
     }
     AnimatedVisibility(
         visible = visible,
@@ -2159,20 +2163,12 @@ internal fun TimelineHistorySyncIndicator(
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
-                is HistorySyncStatus.Partial,
-                is HistorySyncStatus.Failed,
-                -> Column(
+                is HistorySyncStatus.Failed -> Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        text = stringResource(
-                            if (status is HistorySyncStatus.Partial) {
-                                R.string.chat_history_some_messages_missing
-                            } else {
-                                R.string.chat_history_sync_failed_inline
-                            },
-                        ),
+                        text = stringResource(R.string.chat_history_sync_failed_inline),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -2186,6 +2182,7 @@ internal fun TimelineHistorySyncIndicator(
                         Text(stringResource(R.string.chat_retry))
                     }
                 }
+                is HistorySyncStatus.Partial,
                 HistorySyncStatus.Idle -> Unit
             }
         }

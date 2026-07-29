@@ -535,6 +535,23 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `manual incomplete history uses dismissible notice instead of timeline overlay`() = runTest {
+        val history = FakeHistoryResyncController()
+        val vm = viewModel(channel, FakeConnectionManager(network.id), history)
+        runCurrent()
+
+        history.setState(
+            HistoryResyncState.Incomplete(
+                inserted = 3,
+                reason = "fixture",
+            ),
+        )
+        runCurrent()
+
+        assertEquals(ChatUiEvent.HistoryIncomplete(3), vm.uiEvents.value.single().value)
+    }
+
+    @Test
     fun `returning to a chat and a new ready transition each reconcile`() = runTest {
         val history = FakeHistoryResyncController()
         val client = testClient()
@@ -1166,6 +1183,7 @@ class ChatViewModelTest {
 
         override fun state(bufferId: Long): Flow<HistoryResyncState> = states
         override fun syncStatus(bufferId: Long): Flow<HistorySyncStatus> = syncStatuses
+        fun setState(state: HistoryResyncState) { states.value = state }
         fun setSyncStatus(status: HistorySyncStatus) { syncStatuses.value = status }
         override fun consumeState(bufferId: Long) { states.value = HistoryResyncState.Idle }
         override fun cancelBufferResync(bufferId: Long) = Unit
