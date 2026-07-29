@@ -174,6 +174,7 @@ fun ChatListScreen(
         onAudioRetry = audioViewModel::retry,
         onAudioDismiss = audioViewModel::dismiss,
         onAudioSeek = audioViewModel::seek,
+        onAudioSpeed = audioViewModel::setSpeed,
         onOpenAudioOrigin = onOpenAudioOrigin,
         onOpenBuffer = onOpenBuffer,
         onOpenSettings = onOpenSettings,
@@ -214,6 +215,7 @@ fun ChatListContent(
     onAudioRetry: () -> Unit = {},
     onAudioDismiss: () -> Unit = {},
     onAudioSeek: (Long) -> Unit = {},
+    onAudioSpeed: (Float) -> Unit = {},
     onOpenAudioOrigin: (AudioPlaybackOrigin) -> Unit = {},
     onOpenBuffer: (Long) -> Unit,
     onOpenSettings: () -> Unit,
@@ -470,6 +472,7 @@ fun ChatListContent(
                     onDismiss = onAudioDismiss,
                     onSeek = onAudioSeek,
                     onOpenOrigin = onOpenAudioOrigin,
+                    onSpeed = onAudioSpeed,
                     includeNetwork = state.networks.size > 1,
                     modifier = Modifier.align(Alignment.TopCenter),
                 )

@@ -34,6 +34,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -74,6 +75,7 @@ class AudioPlaybackControllerImpl @Inject constructor(
                                 override fun onPlaybackStateChanged(playbackState: Int) = updateState(connected)
                                 override fun onIsPlayingChanged(isPlaying: Boolean) = updateState(connected)
                                 override fun onPlayerError(error: PlaybackException) {
+                                    if (connected.currentMediaItem?.mediaId != _state.value.activeId) return
                                     _state.value = _state.value.copy(
                                         loading = false,
                                         loadingFraction = null,
@@ -101,6 +103,7 @@ class AudioPlaybackControllerImpl @Inject constructor(
                 withContext(Dispatchers.Main.immediate) {
                     if (_state.value.activeId != null) controller?.let(::updateState)
                 }
+                updateDownloadProgress()
                 delay(POSITION_POLL_MS)
             }
         }
@@ -396,16 +399,23 @@ class AudioPlaybackControllerImpl @Inject constructor(
     private fun updateState(mediaController: MediaController) {
         val current = _state.value
         if (current.activeId == null) return
+        val mediaId = mediaController.currentMediaItem?.mediaId ?: return
+        // A newly requested encrypted item can spend time downloading while the controller still
+        // references the previous item. Ignore those stale callbacks so they cannot clear the new
+        // request's download state or progress.
+        if (mediaId != current.activeId) return
         if (mediaController.playbackState == Player.STATE_ENDED) {
-            dismiss(current.activeId)
+            dismiss(mediaId)
             return
         }
         val duration = mediaController.duration.takeIf { it >= 0 }
-        val mediaId = mediaController.currentMediaItem?.mediaId
+        val loading = mediaController.playbackState == Player.STATE_BUFFERING
         _state.value = current.copy(
-            activeId = mediaId ?: current.activeId,
-            loading = mediaController.playbackState == Player.STATE_BUFFERING,
-            loadingFraction = null,
+            activeId = mediaId,
+            loading = loading,
+            // Byte progress is sampled from the cache separately. Preserve it across the
+            // frequent MediaController position updates while buffering.
+            loadingFraction = current.loadingFraction.takeIf { loading },
             playing = mediaController.isPlaying,
             positionMs = mediaController.currentPosition.coerceAtLeast(0L),
             durationMs = duration ?: current.attachment?.durationMs,
@@ -413,6 +423,23 @@ class AudioPlaybackControllerImpl @Inject constructor(
             speed = mediaController.playbackParameters.speed,
             error = null,
         )
+    }
+
+    private suspend fun updateDownloadProgress() {
+        val snapshot = _state.value
+        val attachment = snapshot.attachment ?: return
+        if (!snapshot.loading || attachment.encrypted ||
+            !attachment.url.startsWith("http", ignoreCase = true)
+        ) return
+
+        val fraction = mediaCache.downloadFraction(attachment.url) ?: return
+        _state.update { current ->
+            if (current.activeId == snapshot.activeId && current.loading) {
+                current.copy(loadingFraction = fraction)
+            } else {
+                current
+            }
+        }
     }
 
     private fun cleanupPlaintext() {

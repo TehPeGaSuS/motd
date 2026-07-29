@@ -83,6 +83,14 @@ class AudioMediaCache @Inject constructor(
         }
     }
 
+    /** Returns byte-accurate cache progress, or null until the response length is known. */
+    suspend fun downloadFraction(url: String): Float? = withContext(Dispatchers.IO) {
+        val key = url.substringBefore('#')
+        val length = ContentMetadata.getContentLength(cache.getContentMetadata(key))
+        val cachedBytes = cache.getCachedSpans(key).sumOf { span -> span.length }
+        audioDownloadFraction(cachedBytes, length)
+    }
+
     suspend fun clear() = withContext(Dispatchers.IO) {
         cache.keys.toList().forEach { key -> runCatching { cache.removeResource(key) } }
     }
@@ -117,3 +125,8 @@ class AudioMediaCache @Inject constructor(
         }
     }
 }
+
+internal fun audioDownloadFraction(cachedBytes: Long, totalBytes: Long): Float? =
+    totalBytes.takeIf { it > 0L }?.let { total ->
+        (cachedBytes.coerceAtLeast(0L).toDouble() / total.toDouble()).coerceIn(0.0, 1.0).toFloat()
+    }

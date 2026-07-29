@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.net.toUri
 import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -77,7 +76,6 @@ fun AudioAttachmentPlayers(
     isSelf: Boolean,
     onToggle: (AudioAttachment, Long?) -> Unit,
     onSeek: (AudioAttachment, Long) -> Unit,
-    onSpeed: (AudioAttachment, Float) -> Unit,
     modifier: Modifier = Modifier,
     origin: AudioPlaybackOrigin? = null,
     derivedWaveforms: Map<String, AudioWaveform> = emptyMap(),
@@ -121,7 +119,6 @@ fun AudioAttachmentPlayers(
                         onInspectCache = onInspectCache,
                         onToggle = onToggle,
                         onSeek = onSeek,
-                        onSpeed = onSpeed,
                         onLongPress = onLongPress,
                         modifier = Modifier
                             .fillMaxWidth(0.60f)
@@ -160,7 +157,6 @@ private fun AudioAttachmentPlayer(
     onInspectCache: (AudioAttachment) -> Unit,
     onToggle: (AudioAttachment, Long?) -> Unit,
     onSeek: (AudioAttachment, Long) -> Unit,
-    onSpeed: (AudioAttachment, Float) -> Unit,
     onLongPress: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
@@ -172,16 +168,16 @@ private fun AudioAttachmentPlayer(
     val needsDownload = !active && cacheStatus != AudioCacheStatus.CACHED
     val duration = (if (active) playbackState.durationMs else attachment.durationMs) ?: attachment.durationMs
     val position = if (active) playbackState.positionMs else 0L
-    val speed = if (active) playbackState.speed else 1f
     val bufferedFraction = if (active && duration != null && duration > 0) {
         playbackState.loadingFraction
             ?: (playbackState.bufferedMs.toFloat() / duration).coerceIn(0f, 1f)
     } else {
         0f
     }
-    val waveform = if (active) {
-        playbackState.waveform ?: attachment.waveform ?: derivedWaveform
-    } else {
+    // Do not replace the rendered peaks when playback starts or when analysis completes. The
+    // seeded fallback is deterministic, and a newly available waveform is picked up next time
+    // this message enters composition.
+    val waveform = remember(attachment.playbackId, attachment.waveform) {
         attachment.waveform ?: derivedWaveform
     }
     var showDetails by remember { mutableStateOf(false) }
@@ -279,28 +275,8 @@ private fun AudioAttachmentPlayer(
                         enabled = active && !loading && error == null && duration != null && duration > 0,
                         bufferedValue = bufferedFraction,
                         waveform = waveform,
-                        modifier = Modifier
-                            .padding(end = if (attachment.voice && active) 48.dp else 0.dp)
-                            .testTag("audio_player_scrubber"),
+                        modifier = Modifier.testTag("audio_player_scrubber"),
                     )
-                    if (attachment.voice && active) {
-                        Surface(
-                            modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .clickable { onSpeed(attachment, nextVoiceSpeed(speed)) }
-                                .testTag("audio_speed"),
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        ) {
-                            Text(
-                                "${speed.cleanSpeed()}x",
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -449,7 +425,7 @@ private fun DetailRow(label: String, value: String) {
     )
 }
 
-private fun Float.cleanSpeed(): String =
+internal fun Float.cleanSpeed(): String =
     if (this == toInt().toFloat()) toInt().toString() else toString()
 
 internal fun nextVoiceSpeed(speed: Float): Float = when {

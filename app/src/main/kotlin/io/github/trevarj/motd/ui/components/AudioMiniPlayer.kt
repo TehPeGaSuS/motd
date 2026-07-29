@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
@@ -61,6 +62,7 @@ fun AudioMiniPlayer(
     onSeek: (Long) -> Unit,
     onOpenOrigin: (AudioPlaybackOrigin) -> Unit,
     modifier: Modifier = Modifier,
+    onSpeed: (Float) -> Unit = {},
     includeNetwork: Boolean = false,
 ) {
     val attachment = state.attachment ?: return
@@ -158,6 +160,23 @@ fun AudioMiniPlayer(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (attachment.voice) {
+                Spacer(Modifier.width(4.dp))
+                Surface(
+                    onClick = { onSpeed(nextVoiceSpeed(state.speed)) },
+                    modifier = Modifier.testTag("audio_mini_speed"),
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ) {
+                    Text(
+                        "${state.speed.cleanSpeed()}x",
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
             IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp).testTag("audio_mini_close")) {
                 Icon(Icons.Filled.Close, "Close audio player", Modifier.size(18.dp))
             }

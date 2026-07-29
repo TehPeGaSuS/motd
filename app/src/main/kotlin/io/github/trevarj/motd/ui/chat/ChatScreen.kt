@@ -1513,7 +1513,6 @@ fun ChatContent(
                         onAudioToggle = onAudioToggle,
                         onAudioCacheInspect = onAudioCacheInspect,
                         onAudioSeek = onAudioSeek,
-                        onAudioSpeed = onAudioSpeed,
                         // Link-preview tap opens the URL in the system browser.
                         onOpenLink = { ctx.startActivity(Intent(Intent.ACTION_VIEW, it.toUri())) },
                         highlightMsgid = highlightMsgid,
@@ -1595,6 +1594,9 @@ fun ChatContent(
                                         audioPlaybackState.attachment?.let { onAudioSeek(it, positionMs) }
                                     },
                                     onOpenOrigin = onOpenAudioOrigin,
+                                    onSpeed = { speed ->
+                                        audioPlaybackState.attachment?.let { onAudioSpeed(it, speed) }
+                                    },
                                     includeNetwork =
                                         audioPlaybackState.origin?.networkId != state.buffer?.networkId,
                                 )

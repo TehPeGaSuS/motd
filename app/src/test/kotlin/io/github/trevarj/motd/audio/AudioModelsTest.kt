@@ -2,6 +2,7 @@ package io.github.trevarj.motd.audio
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -47,5 +48,12 @@ class AudioModelsTest {
 
         assertEquals(listOf("https://files.example/abc"), candidates)
         assertFalse(candidates.any { it.startsWith("http://") })
+    }
+
+    @Test fun downloadProgressUsesActualCachedBytes() {
+        assertEquals(0.25f, audioDownloadFraction(cachedBytes = 250, totalBytes = 1_000))
+        assertEquals(0f, audioDownloadFraction(cachedBytes = -1, totalBytes = 1_000))
+        assertEquals(1f, audioDownloadFraction(cachedBytes = 2_000, totalBytes = 1_000))
+        assertNull(audioDownloadFraction(cachedBytes = 250, totalBytes = -1))
     }
 }

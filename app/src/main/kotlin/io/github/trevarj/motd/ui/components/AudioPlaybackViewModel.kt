@@ -16,4 +16,5 @@ class AudioPlaybackViewModel @Inject constructor(
     fun retry() = controller.retryActive()
     fun dismiss() = state.value.activeId?.let(controller::dismiss)
     fun seek(positionMs: Long) = state.value.activeId?.let { controller.seekTo(it, positionMs) }
+    fun setSpeed(speed: Float) = state.value.activeId?.let { controller.setSpeed(it, speed) }
 }
