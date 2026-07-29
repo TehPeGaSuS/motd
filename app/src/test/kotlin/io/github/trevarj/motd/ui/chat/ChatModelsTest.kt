@@ -19,7 +19,6 @@ import io.github.trevarj.motd.irc.client.IrcDisconnectedException
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
-import io.github.trevarj.motd.service.HistoryResyncState
 import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -595,7 +594,7 @@ class ChatModelsTest {
         assertFalse(ChatUiEvent.ReplyJumpUnavailable(ReplyJumpRequest("id")).isHistoryRefreshNotice())
     }
 
-    @Test fun `history footer requires persisted completion and preserves partial outcomes`() {
+    @Test fun `history footer requires persisted completion`() {
         val ready = HistoryAvailability.Ready(setOf(HistoryReferenceType.MSGID), pageLimit = 50)
         val ended = LoadState.NotLoading(endOfPaginationReached = true)
 
@@ -607,7 +606,6 @@ class ChatModelsTest {
                 ready,
                 ended,
                 historyComplete = false,
-                resync = HistoryResyncState.Idle,
             ),
         )
         assertEquals(
@@ -618,29 +616,6 @@ class ChatModelsTest {
                 ready,
                 ended,
                 historyComplete = true,
-                resync = HistoryResyncState.Idle,
-            ),
-        )
-        assertEquals(
-            ChatHistoryUiState.Capped(inserted = 17, limit = 50),
-            chatHistoryUiState(
-                BufferType.CHANNEL,
-                IrcClientState.Ready("me", emptySet(), emptyMap()),
-                ready,
-                ended,
-                historyComplete = true,
-                resync = HistoryResyncState.Capped(17, 50, "partial"),
-            ),
-        )
-        assertEquals(
-            ChatHistoryUiState.Incomplete(inserted = 9),
-            chatHistoryUiState(
-                BufferType.CHANNEL,
-                IrcClientState.Ready("me", emptySet(), emptyMap()),
-                ready,
-                ended,
-                historyComplete = true,
-                resync = HistoryResyncState.Incomplete(9, "partial"),
             ),
         )
     }
@@ -655,14 +630,12 @@ class ChatModelsTest {
             availability: HistoryAvailability,
             append: LoadState = idle,
             bufferType: BufferType = BufferType.CHANNEL,
-            resync: HistoryResyncState = HistoryResyncState.Idle,
         ) = chatHistoryUiState(
             bufferType,
             connection,
             availability,
             append,
             historyComplete = false,
-            resync = resync,
         )
 
         assertEquals(
@@ -691,7 +664,6 @@ class ChatModelsTest {
                 IrcClientState.Ready("me", emptySet(), emptyMap()),
                 HistoryAvailability.Unsupported,
                 append = failed,
-                resync = HistoryResyncState.Failed("stale"),
             ),
         )
         assertEquals(
@@ -699,7 +671,7 @@ class ChatModelsTest {
             state(
                 IrcClientState.Ready("me", emptySet(), emptyMap()),
                 ready,
-                resync = HistoryResyncState.Failed("failed"),
+                append = failed,
             ),
         )
     }

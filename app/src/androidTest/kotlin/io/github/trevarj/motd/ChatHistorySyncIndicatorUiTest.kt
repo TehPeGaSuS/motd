@@ -1,0 +1,86 @@
+package io.github.trevarj.motd
+
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
+import io.github.trevarj.motd.service.HistorySyncStatus
+import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_SYNC_INDICATOR_TAG
+import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_SYNC_RETRY_TAG
+import io.github.trevarj.motd.ui.chat.HISTORY_SYNC_INDICATOR_DELAY_MS
+import io.github.trevarj.motd.ui.chat.TimelineHistorySyncIndicator
+import io.github.trevarj.motd.ui.theme.MotdTheme
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+
+class ChatHistorySyncIndicatorUiTest {
+    @get:Rule
+    val compose = createComposeRule()
+
+    @Test
+    fun activeSyncAppearsOnlyAfterDelay() {
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            MotdTheme {
+                TimelineHistorySyncIndicator(
+                    status = HistorySyncStatus.Syncing,
+                    timelineEmpty = false,
+                    retryEnabled = true,
+                    onRetry = {},
+                )
+            }
+        }
+
+        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertCountEquals(0)
+        compose.mainClock.advanceTimeBy(HISTORY_SYNC_INDICATOR_DELAY_MS)
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertIsDisplayed()
+        compose.onNodeWithText("Syncing messages…").assertIsDisplayed()
+    }
+
+    @Test
+    fun emptyTimelineUsesLoadingCopy() {
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            MotdTheme {
+                TimelineHistorySyncIndicator(
+                    status = HistorySyncStatus.Checking,
+                    timelineEmpty = true,
+                    retryEnabled = true,
+                    onRetry = {},
+                )
+            }
+        }
+
+        compose.mainClock.advanceTimeBy(HISTORY_SYNC_INDICATOR_DELAY_MS)
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("Loading messages…").assertIsDisplayed()
+    }
+
+    @Test
+    fun partialStateIsImmediateAndRetryIsAccessible() {
+        var retries = 0
+        compose.setContent {
+            MotdTheme {
+                TimelineHistorySyncIndicator(
+                    status = HistorySyncStatus.Partial("fixture"),
+                    timelineEmpty = false,
+                    retryEnabled = true,
+                    onRetry = { retries++ },
+                )
+            }
+        }
+
+        compose.onNodeWithText("Some messages may be missing").assertIsDisplayed()
+        compose.onNodeWithTag(CHAT_HISTORY_SYNC_RETRY_TAG)
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        assertEquals(1, retries)
+    }
+}

@@ -116,6 +116,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -170,6 +173,7 @@ import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.HistoryRefreshRange
+import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AutocompletePanel
@@ -195,6 +199,7 @@ private const val AUTOCOMPLETE_SHOW_DEBOUNCE_MS = 250L
 private const val REACTION_PREFETCH_ROWS = 12
 private const val MAX_VISIBLE_REACTION_MSGIDS = 80
 private const val MAX_UNREAD_BADGE_COUNT = 100
+internal const val HISTORY_SYNC_INDICATOR_DELAY_MS = 400L
 
 private data class PendingDccAccept(
     val transferId: Long,
@@ -359,6 +364,7 @@ fun ChatScreen(
     val nickSheet by viewModel.nickSheet.collectAsStateWithLifecycle()
     val uiEvents by viewModel.uiEvents.collectAsStateWithLifecycle()
     val historyResyncState by viewModel.historyResyncState.collectAsStateWithLifecycle()
+    val historySyncStatus by viewModel.historySyncStatus.collectAsStateWithLifecycle()
     val isServerBuffer = state.buffer?.type == BufferType.SERVER
     val titleTarget = chatTitleTarget(state.buffer?.type)
 
@@ -471,6 +477,7 @@ fun ChatScreen(
         onUiEventAcknowledged = viewModel::acknowledgeUiEvent,
         onRetryReplyJump = viewModel::retryReplyJump,
         historyResyncState = historyResyncState,
+        historySyncStatus = historySyncStatus,
         historyAvailability = historyAvailability,
         onRefreshHistory = viewModel::refreshHistory,
         onCancelHistoryRefresh = viewModel::cancelHistoryRefresh,
@@ -626,6 +633,7 @@ fun ChatContent(
     onUiEventAcknowledged: (Long) -> Unit = {},
     onRetryReplyJump: (ReplyJumpRequest) -> Unit = {},
     historyResyncState: HistoryResyncState = HistoryResyncState.Idle,
+    historySyncStatus: HistorySyncStatus = HistorySyncStatus.Idle,
     historyAvailability: HistoryAvailability = HistoryAvailability.NegotiatingOrOffline,
     onRefreshHistory: (HistoryRefreshRange) -> Unit = {},
     onCancelHistoryRefresh: () -> Unit = {},
@@ -661,7 +669,6 @@ fun ChatContent(
         availability = historyAvailability,
         append = items.loadState.append,
         historyComplete = state.buffer?.historyComplete == true,
-        resync = historyResyncState,
     )
     val readyRetryGate = remember(items) { HistoryReadyRetryGate() }
     LaunchedEffect(historyAvailability, items.loadState.append) {
@@ -1275,12 +1282,7 @@ fun ChatContent(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             AnimatedContent(
-                                targetState = chatSubtitleModel(
-                                    state,
-                                    ctx,
-                                    historyUiState,
-                                    historyResyncState,
-                                ),
+                                targetState = chatSubtitleModel(state, ctx),
                                 transitionSpec = {
                                     fadeIn(MotdMotion.microFadeIn) togetherWith
                                         fadeOut(MotdMotion.microFadeOut)
@@ -1296,29 +1298,6 @@ fun ChatContent(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
-                                    }
-                                    ChatSubtitleModel.HistoryLoading -> {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .testTag("chat_history_loading_subtitle"),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(12.dp),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                strokeWidth = 2.dp,
-                                            )
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(
-                                                text = stringResource(R.string.chat_history_loading_title),
-                                                modifier = Modifier.weight(1f),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
                                     }
                                     null -> Unit
                                 }
@@ -1574,7 +1553,8 @@ fun ChatContent(
                     // empty; otherwise the large placeholder flashes during every chat entry.
                     if (items.loadState.refresh is LoadState.NotLoading &&
                         initialPagingPage(items.itemCount, items.loadState.append) ==
-                        InitialPagingPage.TerminalEmpty
+                        InitialPagingPage.TerminalEmpty &&
+                        !historySyncStatus.isActive
                     ) {
                         io.github.trevarj.motd.ui.components.EmptyState(
                             icon = Icons.Outlined.Forum,
@@ -1582,6 +1562,16 @@ fun ChatContent(
                             message = stringResource(R.string.chat_empty_message),
                         )
                     }
+
+                    TimelineHistorySyncIndicator(
+                        status = historySyncStatus,
+                        timelineEmpty = items.itemCount == 0,
+                        retryEnabled = state.connState is IrcClientState.Ready,
+                        onRetry = { onRefreshHistory(HistoryRefreshRange.MISSING) },
+                        modifier = Modifier.align(
+                            if (items.itemCount == 0) Alignment.Center else Alignment.BottomCenter,
+                        ),
+                    )
 
                     // Keep the hot firstVisibleItemIndex read inside the FAB subtree. Reading it in
                     // ChatContent made every row boundary re-run the entire Scaffold/list/composer.
@@ -2111,26 +2101,131 @@ internal fun composerNeedsMemberNicks(value: TextFieldValue): Boolean {
     return token.text.length >= 2 || atPrefixed
 }
 
+const val CHAT_HISTORY_SYNC_INDICATOR_TAG = "chat_history_sync_indicator"
+const val CHAT_HISTORY_SYNC_RETRY_TAG = "chat_history_sync_retry"
+
+private val HistorySyncStatus.isActive: Boolean
+    get() = this == HistorySyncStatus.Checking || this == HistorySyncStatus.Syncing
+
+/** A stable overlay so timeline inserts cannot move history progress or its retry action. */
+@Composable
+internal fun TimelineHistorySyncIndicator(
+    status: HistorySyncStatus,
+    timelineEmpty: Boolean,
+    retryEnabled: Boolean,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val active = status.isActive
+    var activeVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(active) {
+        if (active) {
+            kotlinx.coroutines.delay(HISTORY_SYNC_INDICATOR_DELAY_MS)
+            activeVisible = true
+        } else {
+            activeVisible = false
+        }
+    }
+    val visible = if (active) {
+        activeVisible
+    } else {
+        status is HistorySyncStatus.Partial || status is HistorySyncStatus.Failed
+    }
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier
+            .padding(horizontal = 24.dp, vertical = 16.dp)
+            .testTag(CHAT_HISTORY_SYNC_INDICATOR_TAG),
+        enter = fadeIn(MotdMotion.microFadeIn) + scaleIn(MotdMotion.microFadeIn, initialScale = 0.96f),
+        exit = fadeOut(MotdMotion.microFadeOut) + scaleOut(MotdMotion.microFadeOut, targetScale = 0.96f),
+    ) {
+        val content: @Composable () -> Unit = {
+            when (status) {
+                HistorySyncStatus.Checking,
+                HistorySyncStatus.Syncing,
+                -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Text(
+                        text = stringResource(
+                            if (timelineEmpty) R.string.chat_history_loading_messages
+                            else R.string.chat_history_syncing_messages,
+                        ),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+                is HistorySyncStatus.Partial,
+                is HistorySyncStatus.Failed,
+                -> Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = stringResource(
+                            if (status is HistorySyncStatus.Partial) {
+                                R.string.chat_history_some_messages_missing
+                            } else {
+                                R.string.chat_history_sync_failed_inline
+                            },
+                        ),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Button(
+                        onClick = onRetry,
+                        enabled = retryEnabled,
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag(CHAT_HISTORY_SYNC_RETRY_TAG),
+                    ) {
+                        Text(stringResource(R.string.chat_retry))
+                    }
+                }
+                HistorySyncStatus.Idle -> Unit
+            }
+        }
+        if (timelineEmpty && active) {
+            Box(
+                modifier = Modifier
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+                contentAlignment = Alignment.Center,
+            ) {
+                content()
+            }
+        } else {
+            Surface(
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 6.dp,
+                shadowElevation = 3.dp,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            ) {
+                Box(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
 internal sealed interface ChatSubtitleModel {
     data class Text(val value: String) : ChatSubtitleModel
-    data object HistoryLoading : ChatSubtitleModel
 }
 
 internal fun chatSubtitle(state: ChatState, context: android.content.Context): String? =
-    (
-        chatSubtitleModel(
-            state,
-            context,
-            ChatHistoryUiState.Hidden,
-            HistoryResyncState.Idle,
-        ) as? ChatSubtitleModel.Text
-    )?.value
+    (chatSubtitleModel(state, context) as? ChatSubtitleModel.Text)?.value
 
 internal fun chatSubtitleModel(
     state: ChatState,
     context: android.content.Context,
-    historyUiState: ChatHistoryUiState,
-    historyResyncState: HistoryResyncState,
 ): ChatSubtitleModel? {
     when (val connection = state.connState) {
         null -> return null
@@ -2147,9 +2242,6 @@ internal fun chatSubtitleModel(
     if (state.typingNicks.isNotEmpty()) {
         return ChatSubtitleModel.Text(typingText(context, state.typingNicks))
     }
-    if (isChatHistoryLoading(historyUiState, historyResyncState)) {
-        return ChatSubtitleModel.HistoryLoading
-    }
     val buffer = state.buffer ?: return null
     return if (buffer.type == BufferType.CHANNEL && state.memberCount != null) {
         val n = state.memberCount
@@ -2158,13 +2250,6 @@ internal fun chatSubtitleModel(
         null
     }
 }
-
-internal fun isChatHistoryLoading(
-    historyUiState: ChatHistoryUiState,
-    historyResyncState: HistoryResyncState,
-): Boolean = historyUiState == ChatHistoryUiState.Loading ||
-    historyResyncState is HistoryResyncState.Running ||
-    historyResyncState == HistoryResyncState.WaitingForCapability
 
 @Composable
 internal fun ScrollToBottomFab(

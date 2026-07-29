@@ -64,6 +64,7 @@ import io.github.trevarj.motd.service.HistoryResyncCoordinator
 import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistoryRefreshRange
 import io.github.trevarj.motd.service.HistoryResyncState
+import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
@@ -81,6 +82,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
@@ -92,6 +94,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -513,6 +516,22 @@ class ChatViewModelTest {
 
         assertEquals(listOf(channel.id), history.reconciledBuffers)
         assertEquals(HistoryResyncState.Idle, vm.historyResyncState.value)
+    }
+
+    @Test
+    fun `timeline history status follows the current buffer`() = runTest {
+        val history = FakeHistoryResyncController()
+        val vm = viewModel(channel, FakeConnectionManager(network.id), history)
+        val collector = backgroundScope.launch(StandardTestDispatcher(testScheduler)) {
+            vm.historySyncStatus.collect()
+        }
+        runCurrent()
+
+        history.setSyncStatus(HistorySyncStatus.Partial("fixture"))
+        runCurrent()
+
+        assertEquals(HistorySyncStatus.Partial("fixture"), vm.historySyncStatus.value)
+        collector.cancel()
     }
 
     @Test
@@ -1141,10 +1160,13 @@ class ChatViewModelTest {
         private val onReconcile: suspend (Int) -> Unit = {},
     ) : HistoryResyncController {
         private val states = MutableStateFlow<HistoryResyncState>(HistoryResyncState.Idle)
+        private val syncStatuses = MutableStateFlow<HistorySyncStatus>(HistorySyncStatus.Idle)
         val reconciledBuffers = mutableListOf<Long>()
         val pendingReconciledBuffers = mutableListOf<Long>()
 
         override fun state(bufferId: Long): Flow<HistoryResyncState> = states
+        override fun syncStatus(bufferId: Long): Flow<HistorySyncStatus> = syncStatuses
+        fun setSyncStatus(status: HistorySyncStatus) { syncStatuses.value = status }
         override fun consumeState(bufferId: Long) { states.value = HistoryResyncState.Idle }
         override fun cancelBufferResync(bufferId: Long) = Unit
         override suspend fun resyncBuffer(

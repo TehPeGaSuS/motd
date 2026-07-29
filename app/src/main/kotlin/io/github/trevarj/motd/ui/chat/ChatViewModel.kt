@@ -57,6 +57,7 @@ import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistoryRefreshRange
 import io.github.trevarj.motd.service.HistoryResyncState
+import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.service.SendRejectionReason
@@ -413,6 +414,10 @@ class ChatViewModel @Inject constructor(
         .flatMapLatest(historyResyncCoordinator::state)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryResyncState.Idle)
 
+    val historySyncStatus: StateFlow<HistorySyncStatus> = operationalBufferId
+        .flatMapLatest(historyResyncCoordinator::syncStatus)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistorySyncStatus.Idle)
+
     init {
         viewModelScope.launch {
             var lastTerminal: HistoryResyncState? = null
@@ -421,9 +426,9 @@ class ChatViewModel @Inject constructor(
                     is HistoryResyncState.Updated -> ChatUiEvent.HistoryUpdated(result.inserted)
                     HistoryResyncState.UpToDate -> ChatUiEvent.HistoryUpToDate
                     HistoryResyncState.Unsupported -> ChatUiEvent.HistoryUnsupported
-                    is HistoryResyncState.Incomplete -> ChatUiEvent.HistoryIncomplete(result.inserted)
-                    is HistoryResyncState.Capped -> ChatUiEvent.HistoryCapped(result.inserted, result.limit)
-                    is HistoryResyncState.Failed -> ChatUiEvent.HistoryFailed
+                    // Failure and partial states remain in the timeline until retried or resolved.
+                    // A transient snackbar would duplicate that actionable status.
+                    is HistoryResyncState.Failed -> null
                     else -> null
                 }
                 if (event == null) {

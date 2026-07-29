@@ -12,7 +12,6 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
-import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.ui.components.ReactionChip
 import androidx.paging.LoadState
 import kotlinx.coroutines.flow.Flow
@@ -463,19 +462,8 @@ internal fun chatHistoryUiState(
     availability: HistoryAvailability,
     append: LoadState,
     historyComplete: Boolean,
-    resync: HistoryResyncState,
 ): ChatHistoryUiState {
     if (bufferType == null || bufferType == BufferType.SERVER) return ChatHistoryUiState.Hidden
-    when (resync) {
-        is HistoryResyncState.Incomplete -> return ChatHistoryUiState.Incomplete(resync.inserted)
-        is HistoryResyncState.Capped -> return ChatHistoryUiState.Capped(resync.inserted, resync.limit)
-        is HistoryResyncState.Failed -> return if (availability == HistoryAvailability.Unsupported) {
-            ChatHistoryUiState.Unsupported
-        } else {
-            ChatHistoryUiState.Error
-        }
-        else -> Unit
-    }
     // A final capability decision supersedes a stale mediator error/loading state.
     if (availability == HistoryAvailability.Unsupported) return ChatHistoryUiState.Unsupported
     if (append is LoadState.Loading) return ChatHistoryUiState.Loading

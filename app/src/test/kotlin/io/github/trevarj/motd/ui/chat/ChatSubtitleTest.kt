@@ -6,7 +6,6 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.irc.event.IrcClientState
-import io.github.trevarj.motd.service.HistoryResyncState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -49,62 +48,22 @@ class ChatSubtitleTest {
     }
 
     @Test
-    fun loadingHistoryReplacesMemberCount() {
+    fun historyActivityDoesNotReplaceMemberCount() {
         val state = channelState(memberCount = 42)
 
         assertEquals(
-            ChatSubtitleModel.HistoryLoading,
-            chatSubtitleModel(
-                state,
-                context,
-                ChatHistoryUiState.Loading,
-                HistoryResyncState.Idle,
-            ),
+            ChatSubtitleModel.Text("42 members"),
+            chatSubtitleModel(state, context),
         )
     }
 
     @Test
-    fun activeResyncReplacesMemberCount() {
-        val state = channelState(memberCount = 42)
-
-        assertEquals(
-            ChatSubtitleModel.HistoryLoading,
-            chatSubtitleModel(
-                state,
-                context,
-                ChatHistoryUiState.Hidden,
-                HistoryResyncState.Running(fetched = 10, limit = 50),
-            ),
-        )
-    }
-
-    @Test
-    fun capabilityWaitReplacesMemberCount() {
-        val state = channelState(memberCount = 42)
-
-        assertEquals(
-            ChatSubtitleModel.HistoryLoading,
-            chatSubtitleModel(
-                state,
-                context,
-                ChatHistoryUiState.Hidden,
-                HistoryResyncState.WaitingForCapability,
-            ),
-        )
-    }
-
-    @Test
-    fun typingStillReplacesLoadingHistory() {
+    fun typingStillReplacesMemberCount() {
         val state = channelState(memberCount = 42, typingNicks = listOf("alice"))
 
         assertEquals(
             ChatSubtitleModel.Text("alice is typing…"),
-            chatSubtitleModel(
-                state,
-                context,
-                ChatHistoryUiState.Loading,
-                HistoryResyncState.Running(),
-            ),
+            chatSubtitleModel(state, context),
         )
     }
 

@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.yield
 
 enum class HistoryRefreshRange {
     MISSING,
@@ -77,9 +78,32 @@ sealed interface HistoryResyncState {
     data class Capped(val inserted: Int, val limit: Int, override val reason: String) : Failed(reason)
 }
 
+/** Persistent chat-timeline feedback for automatic and user-requested history work. */
+sealed interface HistorySyncStatus {
+    data object Idle : HistorySyncStatus
+    data object Checking : HistorySyncStatus
+    data object Syncing : HistorySyncStatus
+    data class Partial(val reason: String) : HistorySyncStatus
+    data class Failed(val reason: String) : HistorySyncStatus
+}
+
+/** Prevent a cancelled or superseded sync from publishing its initial transient status late. */
+internal fun initialSyncStatusIfCurrent(
+    current: Map<Long, HistorySyncStatus>,
+    bufferId: Long,
+    generation: Long,
+    currentGeneration: Long?,
+    status: HistorySyncStatus,
+): Map<Long, HistorySyncStatus> = if (currentGeneration == generation) {
+    current + (bufferId to status)
+} else {
+    current
+}
+
 /** Chat-facing boundary for manual and lifecycle-driven history reconciliation. */
 interface HistoryResyncController {
     fun state(bufferId: Long): Flow<HistoryResyncState>
+    fun syncStatus(bufferId: Long): Flow<HistorySyncStatus>
     fun consumeState(bufferId: Long)
     fun cancelBufferResync(bufferId: Long)
 
@@ -170,6 +194,7 @@ class HistoryResyncCoordinator @Inject constructor(
         val highWater: Long? = null,
         val inserted: Int = 0,
         val boundaryRejected: Boolean = false,
+        val continuationBoundary: Boundary? = null,
     )
 
     private data class TargetPass(
@@ -195,12 +220,18 @@ class HistoryResyncCoordinator @Inject constructor(
     private val activeFlights = LinkedHashMap<RequestSpec, ActiveFlight>()
     private val manualCancellationGenerations = ConcurrentHashMap<Long, AtomicLong>()
     private val states = MutableStateFlow<Map<Long, HistoryResyncState>>(emptyMap())
+    private val syncStatuses = MutableStateFlow<Map<Long, HistorySyncStatus>>(emptyMap())
+    private val syncStatusGenerations = ConcurrentHashMap<Long, AtomicLong>()
     internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
     internal var paginationRequestLimit: Int = PAGINATION_REQUEST_LIMIT
     internal var targetsRequestLimit: Int = TARGETS_REQUEST_LIMIT
 
     override fun state(bufferId: Long): Flow<HistoryResyncState> = states
         .map { it[bufferId] ?: HistoryResyncState.Idle }
+        .distinctUntilChanged()
+
+    override fun syncStatus(bufferId: Long): Flow<HistorySyncStatus> = syncStatuses
+        .map { it[bufferId] ?: HistorySyncStatus.Idle }
         .distinctUntilChanged()
 
     override fun consumeState(bufferId: Long) {
@@ -381,15 +412,36 @@ class HistoryResyncCoordinator @Inject constructor(
                 cancellationGeneration = cancellationGeneration,
             ),
         ) {
-            syncBufferRange(
-                networkId = buffer.networkId,
-                bufferId = buffer.id,
-                target = buffer.displayName,
-                source = source,
-                isCurrent = isCurrent,
-                range = range,
-                healSparseGaps = healSparseGaps,
-            )
+            val syncGeneration = beginSyncStatus(buffer.id, HistorySyncStatus.Syncing)
+            try {
+                syncBufferRange(
+                    networkId = buffer.networkId,
+                    bufferId = buffer.id,
+                    target = buffer.displayName,
+                    source = source,
+                    isCurrent = isCurrent,
+                    range = range,
+                    healSparseGaps = healSparseGaps,
+                ).also { result ->
+                    finishSyncStatus(
+                        buffer.id,
+                        syncGeneration,
+                        if (isCurrent()) result.toSyncStatus() else HistorySyncStatus.Idle,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                finishSyncStatus(buffer.id, syncGeneration, HistorySyncStatus.Idle)
+                throw cancelled
+            } catch (error: Exception) {
+                finishSyncStatus(
+                    buffer.id,
+                    syncGeneration,
+                    HistorySyncStatus.Failed(
+                        error.message?.take(160) ?: "History refresh failed",
+                    ),
+                )
+                throw error
+            }
         }
         if (publishState) {
             publishManualState(buffer.id, checkNotNull(cancellationGeneration), result)
@@ -403,6 +455,7 @@ class HistoryResyncCoordinator @Inject constructor(
             .computeIfAbsent(bufferId) { AtomicLong() }
             .incrementAndGet()
         states.update { it - bufferId }
+        cancelSyncStatus(bufferId)
         synchronized(activeGuard) {
             activeFlights.values
                 .filter { flight ->
@@ -457,6 +510,9 @@ class HistoryResyncCoordinator @Inject constructor(
             HistoryAvailability.NegotiatingOrOffline -> return@coalesced historyUnavailable()
             is HistoryAvailability.Ready -> Unit
         }
+        val syncGenerations = openBuffers.associate { (bufferId, _) ->
+            bufferId to beginSyncStatus(bufferId, HistorySyncStatus.Checking)
+        }
         // A room row's newest message is not a reliable reconnect cursor: a newer push-delivered
         // message in one buffer can otherwise hide an older missed message in another. The wall
         // clock bounds discovery but is never persisted; only completed server response metadata
@@ -491,6 +547,7 @@ class HistoryResyncCoordinator @Inject constructor(
                 // A live self-JOIN may precede the first pass. Seed a fresh network with LATEST so
                 // that row cannot hide retained history.
                 includeRecentOverlap = previousSync == null,
+                syncGenerations = syncGenerations,
             )
             val inserted = targetPass.inserted
             val status = discovery.status.merge(targetPass.status)
@@ -506,6 +563,9 @@ class HistoryResyncCoordinator @Inject constructor(
         } catch (_: TimeoutCancellationException) {
             HistoryResyncState.Failed("History refresh timed out")
         } catch (cancelled: CancellationException) {
+            syncGenerations.forEach { (bufferId, generation) ->
+                finishSyncStatus(bufferId, generation, HistorySyncStatus.Idle)
+            }
             throw cancelled
         } catch (_: StaleConnectionException) {
             staleConnection()
@@ -519,6 +579,13 @@ class HistoryResyncCoordinator @Inject constructor(
                 "network_id" to networkId,
                 "targets" to openBuffers.size,
                 "result" to result::class.simpleName,
+            )
+        }
+        syncGenerations.forEach { (bufferId, generation) ->
+            finishUnresolvedSyncStatus(
+                bufferId,
+                generation,
+                if (isCurrent()) result else HistoryResyncState.Idle,
             )
         }
         result
@@ -540,8 +607,10 @@ class HistoryResyncCoordinator @Inject constructor(
         var pageUpper = upper
         var highWater: Long? = null
         var previousTie: Pair<Long, Set<String>>? = null
+        var requestsInChunk = 0
         var status: WorkStatus = WorkStatus.Complete
-        repeat(targetsRequestLimit.coerceAtLeast(1)) { requestIndex ->
+        val chunkLimit = targetsRequestLimit.coerceAtLeast(1)
+        while (true) {
             val response = requestTargets(
                 source,
                 ChatHistoryRequest(
@@ -552,6 +621,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     limit = limit,
                 ),
             )
+            requestsInChunk++
             val page = response.targets
             page.forEach { target ->
                 val key = source.normalizeTarget(target.name)
@@ -581,16 +651,13 @@ class HistoryResyncCoordinator @Inject constructor(
                             "CHATHISTORY TARGETS could not prove a timestamp tie was exhausted",
                         ),
                     )
-                    if (requestIndex + 1 >= targetsRequestLimit.coerceAtLeast(1)) {
-                        return TargetDiscovery(
-                            targets.values.toList(),
-                            status,
-                            highWater,
-                        )
-                    }
                     pageUpper = oldest
                     previousTie = null
-                    return@repeat
+                    if (requestsInChunk >= chunkLimit) {
+                        requestsInChunk = 0
+                        yield()
+                    }
+                    continue
                 }
                 return TargetDiscovery(
                     targets.values.toList(),
@@ -618,18 +685,14 @@ class HistoryResyncCoordinator @Inject constructor(
                 )
             }
             pageUpper = nextUpper
-            if (requestIndex + 1 >= targetsRequestLimit.coerceAtLeast(1)) {
-                return TargetDiscovery(
-                    targets.values.toList(),
-                    WorkStatus.Capped(
-                        "CHATHISTORY TARGETS reached its $targetsRequestLimit-request safety cap",
-                        targetsRequestLimit,
-                    ),
-                    highWater,
-                )
+            if (requestsInChunk >= chunkLimit) {
+                diagnostics.record("history", "targets_sync_continued") {
+                    mapOf("targets" to targets.size, "high_water" to highWater)
+                }
+                requestsInChunk = 0
+                yield()
             }
         }
-        error("unreachable")
     }
 
     private fun mergeSyncTargets(
@@ -879,6 +942,7 @@ class HistoryResyncCoordinator @Inject constructor(
         isCurrent: () -> Boolean,
         reconnectBoundary: Boundary?,
         includeRecentOverlap: Boolean,
+        syncGenerations: Map<Long, Long> = emptyMap(),
     ): TargetPass {
         when (source.availability()) {
             HistoryAvailability.Unsupported -> error("History support disappeared during reconciliation")
@@ -897,21 +961,98 @@ class HistoryResyncCoordinator @Inject constructor(
             } else {
                 processor.ensureHistoryQuery(networkId, target, source.normalizeTarget(target))
             }
-            val targetResult = syncTarget(
-                networkId,
-                canonicalRoomId,
-                target,
-                source,
-                isCurrent,
-                includeRecentOverlap,
-                reconnectBoundary,
+            val syncGeneration = syncGenerations[canonicalRoomId]
+            if (syncGeneration != null) {
+                publishSyncStatus(canonicalRoomId, syncGeneration, HistorySyncStatus.Syncing)
+            }
+            val targetResult = syncTargetUntilSettled(
+                networkId = networkId,
+                bufferId = canonicalRoomId,
+                target = target,
+                source = source,
+                isCurrent = isCurrent,
+                includeRecentOverlap = includeRecentOverlap,
+                reconnectBoundary = reconnectBoundary,
                 discoveredLatestMessageTime = targetSpec.latestMessageTime,
             )
             inserted += targetResult.inserted
             status = status.merge(targetResult.status)
             highWater = maxHighWater(highWater, targetResult.highWater)
+            if (syncGeneration != null) {
+                finishSyncStatus(
+                    canonicalRoomId,
+                    syncGeneration,
+                    targetResult.status.toSyncStatus(),
+                )
+            }
         }
         return TargetPass(inserted, status, highWater)
+    }
+
+    /**
+     * Automatic reconnect recovery uses a request cap only to yield cooperatively. Once a page
+     * chunk returns an advancing response boundary, resume from that boundary instead of the
+     * aggregate Room cursor, which may already be newer because of a live event. Repeated response
+     * boundaries remain partial so a broken server cannot create a busy loop.
+     */
+    private suspend fun syncTargetUntilSettled(
+        networkId: Long,
+        bufferId: Long,
+        target: String,
+        source: HistorySource,
+        isCurrent: () -> Boolean,
+        includeRecentOverlap: Boolean,
+        reconnectBoundary: Boundary?,
+        discoveredLatestMessageTime: Long?,
+    ): WorkResult {
+        var boundary = reconnectBoundary
+        var overlap = includeRecentOverlap
+        var inserted = 0
+        var highWater: Long? = null
+        val continuationBoundaries = HashSet<Boundary>()
+        while (true) {
+            val result = syncTarget(
+                networkId = networkId,
+                knownBufferId = bufferId,
+                target = target,
+                source = source,
+                isCurrent = isCurrent,
+                includeRecentOverlap = overlap,
+                reconnectBoundary = boundary,
+                discoveredLatestMessageTime = discoveredLatestMessageTime,
+            )
+            inserted += result.inserted
+            highWater = maxHighWater(highWater, result.highWater)
+            if (result.status !is WorkStatus.Capped) {
+                return result.copy(highWater = highWater, inserted = inserted)
+            }
+
+            val continuationBoundary = result.continuationBoundary
+            if (continuationBoundary == null) {
+                return result.copy(highWater = highWater, inserted = inserted)
+            }
+            if (!continuationBoundaries.add(continuationBoundary)) {
+                return result.copy(
+                    status = WorkStatus.Incomplete("CHATHISTORY pagination repeated a continuation boundary"),
+                    highWater = highWater,
+                    inserted = inserted,
+                    continuationBoundary = null,
+                )
+            }
+            diagnostics.record("history", "target_sync_continued") {
+                mapOf(
+                    "network_id" to networkId,
+                    "buffer_id" to bufferId,
+                    "inserted" to inserted,
+                )
+            }
+            // The first pass may intentionally replay from the whole-network watermark. Every
+            // continuation must start at the boundary proven by that response, not newer Room
+            // state that may still leave a hole before a live event.
+            boundary = continuationBoundary
+            overlap = false
+            yield()
+        }
     }
 
     private suspend fun syncTarget(
@@ -992,7 +1133,12 @@ class HistoryResyncCoordinator @Inject constructor(
                     status = after.status
                     forceLatest = true
                 } else {
-                    return WorkResult(after.status, highWater, inserted)
+                    return WorkResult(
+                        status = after.status,
+                        highWater = highWater,
+                        inserted = inserted,
+                        continuationBoundary = after.continuationBoundary,
+                    )
                 }
             }
         }
@@ -1220,6 +1366,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     ),
                     highWater,
                     inserted,
+                    continuationBoundary = next,
                 )
             }
             if (requestIndex + 1 >= requestCap) {
@@ -1230,6 +1377,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     ),
                     highWater,
                     inserted,
+                    continuationBoundary = next,
                 )
             }
             boundary = next
@@ -1440,6 +1588,59 @@ class HistoryResyncCoordinator @Inject constructor(
         }
     }
 
+    private fun beginSyncStatus(bufferId: Long, status: HistorySyncStatus): Long {
+        val generation = syncStatusGenerations
+            .computeIfAbsent(bufferId) { AtomicLong() }
+            .incrementAndGet()
+        syncStatuses.update { current ->
+            initialSyncStatusIfCurrent(
+                current = current,
+                bufferId = bufferId,
+                generation = generation,
+                currentGeneration = syncStatusGenerations[bufferId]?.get(),
+                status = status,
+            )
+        }
+        return generation
+    }
+
+    private fun publishSyncStatus(bufferId: Long, generation: Long, status: HistorySyncStatus) {
+        syncStatuses.update { current ->
+            if (syncStatusGenerations[bufferId]?.get() == generation) {
+                current + (bufferId to status)
+            } else {
+                current
+            }
+        }
+    }
+
+    private fun finishSyncStatus(bufferId: Long, generation: Long, status: HistorySyncStatus) {
+        syncStatuses.update { current ->
+            if (syncStatusGenerations[bufferId]?.get() != generation) {
+                current
+            } else if (status == HistorySyncStatus.Idle) {
+                current - bufferId
+            } else {
+                current + (bufferId to status)
+            }
+        }
+    }
+
+    private fun finishUnresolvedSyncStatus(
+        bufferId: Long,
+        generation: Long,
+        result: HistoryResyncState,
+    ) {
+        val current = syncStatuses.value[bufferId]
+        if (current != HistorySyncStatus.Checking && current != HistorySyncStatus.Syncing) return
+        finishSyncStatus(bufferId, generation, result.toSyncStatus())
+    }
+
+    private fun cancelSyncStatus(bufferId: Long) {
+        syncStatusGenerations.computeIfAbsent(bufferId) { AtomicLong() }.incrementAndGet()
+        syncStatuses.update { it - bufferId }
+    }
+
     private fun RequestSpec.manualCancellationRequested(): Boolean {
         if (intent != RequestIntent.MANUAL) return false
         val bufferId = key.bufferId ?: return false
@@ -1461,6 +1662,25 @@ class HistoryResyncCoordinator @Inject constructor(
             awaitsTargetClassification,
         )
         is WorkStatus.Capped -> HistoryResyncState.Capped(inserted, limit, reason)
+    }
+
+    private fun WorkStatus.toSyncStatus(): HistorySyncStatus = when (this) {
+        WorkStatus.Complete -> HistorySyncStatus.Idle
+        is WorkStatus.Incomplete -> HistorySyncStatus.Partial(reason)
+        is WorkStatus.Capped -> HistorySyncStatus.Partial(reason)
+    }
+
+    private fun HistoryResyncState.toSyncStatus(): HistorySyncStatus = when (this) {
+        HistoryResyncState.Idle,
+        is HistoryResyncState.Updated,
+        HistoryResyncState.UpToDate,
+        HistoryResyncState.Unsupported,
+        -> HistorySyncStatus.Idle
+        HistoryResyncState.WaitingForCapability -> HistorySyncStatus.Checking
+        is HistoryResyncState.Running -> HistorySyncStatus.Syncing
+        is HistoryResyncState.Incomplete -> HistorySyncStatus.Partial(reason)
+        is HistoryResyncState.Capped -> HistorySyncStatus.Partial(reason)
+        is HistoryResyncState.Failed -> HistorySyncStatus.Failed(reason)
     }
 
     private fun WorkStatus.merge(other: WorkStatus): WorkStatus = when {
