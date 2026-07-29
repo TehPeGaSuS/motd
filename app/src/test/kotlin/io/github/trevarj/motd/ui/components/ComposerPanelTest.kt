@@ -14,15 +14,65 @@ class ComposerPanelTest {
     fun `voice gesture locks on a dominant upward swipe`() {
         assertEquals(
             VoiceGestureTarget.LOCK,
-            voiceGestureTarget(deltaX = -30f, deltaY = -90f, cancelThreshold = 72f, lockThreshold = 72f),
+            voiceGestureTarget(
+                holdActivated = true,
+                pointerPressed = true,
+                deltaX = -30f,
+                deltaY = -90f,
+                cancelThreshold = 72f,
+                lockThreshold = 72f,
+            ),
         )
+    }
+
+    @Test
+    fun `voice gesture cannot lock before hold activates`() {
+        assertEquals(
+            VoiceGestureTarget.NONE,
+            voiceGestureTarget(
+                holdActivated = false,
+                pointerPressed = true,
+                deltaX = -30f,
+                deltaY = -90f,
+                cancelThreshold = 72f,
+                lockThreshold = 72f,
+            ),
+        )
+    }
+
+    @Test
+    fun `voice gesture cannot lock after the pointer is released`() {
+        assertEquals(
+            VoiceGestureTarget.NONE,
+            voiceGestureTarget(
+                holdActivated = true,
+                pointerPressed = false,
+                deltaX = -30f,
+                deltaY = -90f,
+                cancelThreshold = 72f,
+                lockThreshold = 72f,
+            ),
+        )
+    }
+
+    @Test
+    fun `voice recording requires at least half a second hold`() {
+        assertEquals(500L, voiceRecordHoldDelay(longPressTimeoutMillis = 300L))
+        assertEquals(700L, voiceRecordHoldDelay(longPressTimeoutMillis = 700L))
     }
 
     @Test
     fun `voice gesture cancels on a left swipe`() {
         assertEquals(
             VoiceGestureTarget.CANCEL,
-            voiceGestureTarget(deltaX = -90f, deltaY = -20f, cancelThreshold = 72f, lockThreshold = 72f),
+            voiceGestureTarget(
+                holdActivated = true,
+                pointerPressed = true,
+                deltaX = -90f,
+                deltaY = -20f,
+                cancelThreshold = 72f,
+                lockThreshold = 72f,
+            ),
         )
     }
 
@@ -30,7 +80,14 @@ class ComposerPanelTest {
     fun `voice gesture ignores movement below both thresholds`() {
         assertEquals(
             VoiceGestureTarget.NONE,
-            voiceGestureTarget(deltaX = -40f, deltaY = -40f, cancelThreshold = 72f, lockThreshold = 72f),
+            voiceGestureTarget(
+                holdActivated = true,
+                pointerPressed = true,
+                deltaX = -40f,
+                deltaY = -40f,
+                cancelThreshold = 72f,
+                lockThreshold = 72f,
+            ),
         )
     }
 

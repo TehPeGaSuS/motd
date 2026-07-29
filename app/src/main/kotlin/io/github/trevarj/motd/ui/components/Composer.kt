@@ -207,12 +207,21 @@ private val COMPACT_EMOJI_PICKER_HEIGHT = 250.dp
 
 internal enum class VoiceGestureTarget { NONE, CANCEL, LOCK }
 
+private const val VOICE_RECORD_HOLD_DELAY_MILLIS = 500L
+
+// Keep the accidental-touch guard even when a device configures a shorter long-press timeout.
+internal fun voiceRecordHoldDelay(longPressTimeoutMillis: Long): Long =
+    maxOf(VOICE_RECORD_HOLD_DELAY_MILLIS, longPressTimeoutMillis)
+
 internal fun voiceGestureTarget(
+    holdActivated: Boolean,
+    pointerPressed: Boolean,
     deltaX: Float,
     deltaY: Float,
     cancelThreshold: Float,
     lockThreshold: Float,
 ): VoiceGestureTarget = when {
+    !holdActivated || !pointerPressed -> VoiceGestureTarget.NONE
     deltaY <= -lockThreshold && -deltaY >= -deltaX -> VoiceGestureTarget.LOCK
     deltaX <= -cancelThreshold -> VoiceGestureTarget.CANCEL
     else -> VoiceGestureTarget.NONE
@@ -233,7 +242,6 @@ fun Composer(
     onAttachment: (() -> Unit)? = null,
     voiceEnabled: Boolean = false,
     voiceRecording: Boolean = false,
-    onVoiceTap: () -> Unit = {},
     onVoiceHoldStart: () -> Unit = {},
     onVoiceHoldStop: () -> Unit = {},
     onVoiceHoldCancel: () -> Unit = {},
@@ -489,10 +497,6 @@ fun Composer(
                     VoiceRecordButton(
                         enabled = enabled,
                         recording = voiceRecording,
-                        onTap = {
-                            dismissEmojiPicker()
-                            onVoiceTap()
-                        },
                         onHoldStart = {
                             dismissEmojiPicker()
                             onVoiceHoldStart()
@@ -518,7 +522,6 @@ fun Composer(
 private fun VoiceRecordButton(
     enabled: Boolean,
     recording: Boolean,
-    onTap: () -> Unit,
     onHoldStart: () -> Unit,
     onHoldStop: () -> Unit,
     onHoldCancel: () -> Unit,
@@ -530,7 +533,6 @@ private fun VoiceRecordButton(
     val cancelPx = with(density) { 72.dp.toPx() }
     val lockPx = with(density) { 72.dp.toPx() }
     val latestRecording by rememberUpdatedState(recording)
-    val latestTap by rememberUpdatedState(onTap)
     val latestHoldStart by rememberUpdatedState(onHoldStart)
     val latestHoldStop by rememberUpdatedState(onHoldStop)
     val latestHoldCancel by rememberUpdatedState(onHoldCancel)
@@ -555,7 +557,7 @@ private fun VoiceRecordButton(
                         var cancelled = false
                         var locked = false
                         val longPress = this@coroutineScope.launch {
-                            delay(viewConfiguration.longPressTimeoutMillis)
+                            delay(voiceRecordHoldDelay(viewConfiguration.longPressTimeoutMillis))
                             started = true
                             latestHoldStart()
                         }
@@ -563,8 +565,17 @@ private fun VoiceRecordButton(
                             val event = awaitPointerEvent()
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
                             val delta = change.position - down.position
-                            if (started && !locked) {
-                                when (voiceGestureTarget(delta.x, delta.y, cancelPx, lockPx)) {
+                            if (!locked) {
+                                when (
+                                    voiceGestureTarget(
+                                        started,
+                                        change.pressed,
+                                        delta.x,
+                                        delta.y,
+                                        cancelPx,
+                                        lockPx,
+                                    )
+                                ) {
                                     VoiceGestureTarget.LOCK -> {
                                         locked = true
                                         change.consume()
@@ -586,7 +597,7 @@ private fun VoiceRecordButton(
                         }
                         longPress.cancel()
                         when {
-                            !started -> latestTap()
+                            !started -> Unit // Voice recording is deliberately press-and-hold only.
                             cancelled -> Unit
                             locked -> Unit
                             else -> latestHoldStop()
