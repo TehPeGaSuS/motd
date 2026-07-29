@@ -20,6 +20,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -1564,16 +1565,6 @@ fun ChatContent(
                         )
                     }
 
-                    TimelineHistorySyncIndicator(
-                        status = historySyncStatus,
-                        timelineEmpty = items.itemCount == 0,
-                        retryEnabled = state.connState is IrcClientState.Ready,
-                        onRetry = { onRefreshHistory(HistoryRefreshRange.MISSING) },
-                        modifier = Modifier.align(
-                            if (items.itemCount == 0) Alignment.Center else Alignment.BottomCenter,
-                        ),
-                    )
-
                     // Keep the hot firstVisibleItemIndex read inside the FAB subtree. Reading it in
                     // ChatContent made every row boundary re-run the entire Scaffold/list/composer.
                     ViewportScrollToBottomFab(
@@ -1591,21 +1582,33 @@ fun ChatContent(
                     )
 
                     val stagedVoicePlaybackId = voiceState.staged?.let { "voice:${it.file.toURI()}" }
-                    if (audioPlaybackState.activeId != stagedVoicePlaybackId) {
-                        AudioMiniPlayer(
-                            state = audioPlaybackState,
-                            onToggle = onAudioToggleActive,
-                            onCancelLoading = onAudioCancelLoading,
-                            onRetry = onAudioRetry,
-                            onDismiss = onAudioDismiss,
-                            onSeek = { positionMs ->
-                                audioPlaybackState.attachment?.let { onAudioSeek(it, positionMs) }
-                            },
-                            onOpenOrigin = onOpenAudioOrigin,
-                            includeNetwork = audioPlaybackState.origin?.networkId != state.buffer?.networkId,
-                            modifier = Modifier.align(Alignment.TopCenter),
-                        )
-                    }
+                    TimelineTopOverlays(
+                        audioPlayer = {
+                            if (audioPlaybackState.activeId != stagedVoicePlaybackId) {
+                                AudioMiniPlayer(
+                                    state = audioPlaybackState,
+                                    onToggle = onAudioToggleActive,
+                                    onCancelLoading = onAudioCancelLoading,
+                                    onRetry = onAudioRetry,
+                                    onDismiss = onAudioDismiss,
+                                    onSeek = { positionMs ->
+                                        audioPlaybackState.attachment?.let { onAudioSeek(it, positionMs) }
+                                    },
+                                    onOpenOrigin = onOpenAudioOrigin,
+                                    includeNetwork =
+                                        audioPlaybackState.origin?.networkId != state.buffer?.networkId,
+                                )
+                            }
+                        },
+                        historyIndicator = {
+                            TimelineHistorySyncIndicator(
+                                status = historySyncStatus,
+                                timelineEmpty = items.itemCount == 0,
+                                retryEnabled = state.connState is IrcClientState.Ready,
+                                onRetry = { onRefreshHistory(HistoryRefreshRange.MISSING) },
+                            )
+                        },
+                    )
                 }
 
                 val completions = remember(composerText, memberNicks, recentSpeakers) {
@@ -2107,6 +2110,24 @@ const val CHAT_HISTORY_SYNC_RETRY_TAG = "chat_history_sync_retry"
 
 private val HistorySyncStatus.isActive: Boolean
     get() = this == HistorySyncStatus.Checking || this == HistorySyncStatus.Syncing
+
+/** Pins transient timeline chrome below the title bar without allowing the layers to overlap. */
+@Composable
+internal fun BoxScope.TimelineTopOverlays(
+    audioPlayer: @Composable () -> Unit,
+    historyIndicator: @Composable () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // Keep playback controls stationary when delayed history progress becomes visible.
+        audioPlayer()
+        historyIndicator()
+    }
+}
 
 /** A stable overlay so timeline inserts cannot move history progress or its retry action. */
 @Composable
