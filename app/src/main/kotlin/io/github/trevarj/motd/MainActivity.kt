@@ -7,23 +7,20 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.core.content.ContextCompat
-import androidx.core.view.WindowCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -99,6 +96,7 @@ class MainActivity : ComponentActivity() {
         // Swap the launch/splash theme for the app theme before drawing Compose content.
         setTheme(R.style.Theme_Motd)
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
 
         requestPostNotificationsIfNeeded()
         maybeStartForegroundService()
@@ -125,20 +123,6 @@ class MainActivity : ComponentActivity() {
                 avatarStyle = settings.avatarStyle,
                 uiFontScalePercent = appearance.uiFontScalePercent,
             ) {
-                val statusBarColor = MaterialTheme.colorScheme.surface
-                val navigationBarColor = MaterialTheme.colorScheme.background
-                SideEffect {
-                    // Android 15 deprecates opaque bar colors in favor of edge-to-edge, but this
-                    // activity deliberately remains non-edge-to-edge so adjustResize handles IME.
-                    @Suppress("DEPRECATION")
-                    window.statusBarColor = statusBarColor.toArgb()
-                    @Suppress("DEPRECATION")
-                    window.navigationBarColor = navigationBarColor.toArgb()
-                    WindowCompat.getInsetsController(window, window.decorView).apply {
-                        isAppearanceLightStatusBars = statusBarColor.luminance() > 0.5f
-                        isAppearanceLightNavigationBars = navigationBarColor.luminance() > 0.5f
-                    }
-                }
                 CompositionLocalProvider(
                     LocalRemoteAvatars provides RemoteAvatarState(
                         enabled = uiState.avatarConfig.showSharedAvatars && uiState.contentPreviews.showImages,

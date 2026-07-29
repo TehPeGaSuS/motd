@@ -157,21 +157,15 @@ class ComposerPanelTest {
     }
 
     @Test
-    fun `adjust resize window delta is the keyboard height`() {
-        assertEquals(885, keyboardResizeHeight(largestWindowHeightPx = 2203, currentWindowHeightPx = 1318))
-        assertEquals(0, keyboardResizeHeight(largestWindowHeightPx = 2203, currentWindowHeightPx = 2203))
-    }
+    fun `ime inset tracker follows explicit insets and remembers the largest visible height`() {
+        val tracker = ImeInsetTracker()
 
-    @Test
-    fun `keyboard resize tracker follows the same measure pass and remembers the ime height`() {
-        val tracker = KeyboardResizeTracker()
-
-        assertEquals(0, tracker.update(2_203))
-        assertEquals(400, tracker.update(1_803))
-        assertEquals(885, tracker.update(1_318))
-        assertEquals(885, tracker.lastVisibleKeyboardHeightPx)
-        assertEquals(400, tracker.update(1_803))
-        assertEquals(0, tracker.update(2_203))
-        assertEquals(885, tracker.lastVisibleKeyboardHeightPx)
+        assertEquals(0, tracker.update(0))
+        assertEquals(400, tracker.update(400))
+        assertEquals(885, tracker.update(885))
+        assertEquals(885, tracker.lastVisibleImeHeightPx)
+        assertEquals(400, tracker.update(400))
+        assertEquals(0, tracker.update(0))
+        assertEquals(885, tracker.lastVisibleImeHeightPx)
     }
 }

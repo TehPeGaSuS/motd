@@ -177,36 +177,27 @@ internal fun reopenEmojiPickerSession(session: EmojiPickerSession): EmojiPickerS
     session.copy(phase = EmojiPickerPhase.OPEN)
 
 /**
- * With adjustResize the window bottom rises by [currentImeHeightPx]. Keeping this complementary
- * space below the input row makes its screen position independent of the IME animation.
+ * As the consumed IME inset falls, this complementary height grows by the same amount, keeping the
+ * input row stable throughout the keyboard-to-picker handoff.
  */
 internal fun emojiPickerReplacementHeight(
     capturedImeHeightPx: Int,
     currentImeHeightPx: Int,
 ): Int = (capturedImeHeightPx.coerceAtLeast(0) - currentImeHeightPx.coerceAtLeast(0)).coerceAtLeast(0)
 
-internal fun keyboardResizeHeight(
-    largestWindowHeightPx: Int,
-    currentWindowHeightPx: Int,
-): Int = (largestWindowHeightPx.coerceAtLeast(0) - currentWindowHeightPx.coerceAtLeast(0)).coerceAtLeast(0)
-
-internal class KeyboardResizeTracker {
-    private var largestWindowHeightPx = 0
-
-    var currentKeyboardHeightPx: Int = 0
+internal class ImeInsetTracker {
+    var currentImeHeightPx: Int = 0
         private set
 
-    var lastVisibleKeyboardHeightPx: Int = 0
+    var lastVisibleImeHeightPx: Int = 0
         private set
 
-    fun update(currentWindowHeightPx: Int): Int {
-        if (currentWindowHeightPx <= 0) return currentKeyboardHeightPx
-        largestWindowHeightPx = maxOf(largestWindowHeightPx, currentWindowHeightPx)
-        currentKeyboardHeightPx = keyboardResizeHeight(largestWindowHeightPx, currentWindowHeightPx)
-        if (currentKeyboardHeightPx > 0) {
-            lastVisibleKeyboardHeightPx = maxOf(lastVisibleKeyboardHeightPx, currentKeyboardHeightPx)
+    fun update(currentHeightPx: Int): Int {
+        currentImeHeightPx = currentHeightPx.coerceAtLeast(0)
+        if (currentImeHeightPx > 0) {
+            lastVisibleImeHeightPx = maxOf(lastVisibleImeHeightPx, currentImeHeightPx)
         }
-        return currentKeyboardHeightPx
+        return currentImeHeightPx
     }
 }
 
@@ -247,7 +238,7 @@ fun Composer(
     onVoiceHoldStop: () -> Unit = {},
     onVoiceHoldCancel: () -> Unit = {},
     onVoiceLock: () -> Unit = {},
-    chatWindowHeightPx: Int = 0,
+    imeHeightPx: Int = 0,
     autocomplete: (@Composable () -> Unit)? = null,
 ) {
     var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
@@ -264,8 +255,8 @@ fun Composer(
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val density = LocalDensity.current
-    val keyboardResizeTracker = remember { KeyboardResizeTracker() }
-    val currentKeyboardHeightPx = keyboardResizeTracker.update(chatWindowHeightPx)
+    val imeInsetTracker = remember { ImeInsetTracker() }
+    val currentImeHeightPx = imeInsetTracker.update(imeHeightPx)
     val compactPickerHeightPx = with(density) { COMPACT_EMOJI_PICKER_HEIGHT.roundToPx() }
     var inputFocused by remember { mutableStateOf(false) }
     val latestInputFocused by rememberUpdatedState(inputFocused)
@@ -281,8 +272,8 @@ fun Composer(
 
     fun openEmojiPicker() {
         emojiPickerSession = openEmojiPickerSession(
-            imeHeightPx = currentKeyboardHeightPx,
-            lastVisibleImeHeightPx = keyboardResizeTracker.lastVisibleKeyboardHeightPx,
+            imeHeightPx = currentImeHeightPx,
+            lastVisibleImeHeightPx = imeInsetTracker.lastVisibleImeHeightPx,
             inputFocused = inputFocused,
             compactPickerHeightPx = compactPickerHeightPx,
         )
@@ -303,7 +294,7 @@ fun Composer(
             val restored = withTimeoutOrNull(EMOJI_IME_RESTORE_TIMEOUT_MILLIS) {
                 while (settledFrames < IME_SETTLED_FRAME_COUNT) {
                     withFrameNanos { }
-                    val heightPx = keyboardResizeTracker.currentKeyboardHeightPx
+                    val heightPx = imeInsetTracker.currentImeHeightPx
                     if (heightPx > 0 && heightPx == previousHeightPx) {
                         settledFrames++
                     } else {
@@ -515,7 +506,7 @@ fun Composer(
 
                 EmojiPickerReplacementSurface(
                     session = emojiPickerSession,
-                    currentKeyboardHeightPx = currentKeyboardHeightPx,
+                    currentImeHeightPx = currentImeHeightPx,
                     onPick = { emoji -> onValueChange(insertAtCursor(value, emoji)) },
                 )
             }
@@ -655,7 +646,7 @@ private fun AutocompleteOverlayLayout(
 @Composable
 private fun EmojiPickerReplacementSurface(
     session: EmojiPickerSession?,
-    currentKeyboardHeightPx: Int,
+    currentImeHeightPx: Int,
     onPick: (String) -> Unit,
 ) {
     session ?: return
@@ -674,7 +665,7 @@ private fun EmojiPickerReplacementSurface(
             .coerceAtMost(constraints.maxHeight)
         val visibleHeightPx = emojiPickerReplacementHeight(
             capturedImeHeightPx = fullHeightPx,
-            currentImeHeightPx = currentKeyboardHeightPx,
+            currentImeHeightPx = currentImeHeightPx,
         ).coerceAtMost(fullHeightPx)
         val placeable = measurables.single().measure(
             constraints.copy(minHeight = fullHeightPx, maxHeight = fullHeightPx),

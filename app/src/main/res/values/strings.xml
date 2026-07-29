@@ -955,4 +955,9 @@
         <item quantity="one">%1$d mention</item>
         <item quantity="other">%1$d mentions</item>
     </plurals>
+
+    <!-- Adaptive chat workspace -->
+    <string name="chat_workspace_resize">Resize conversation list</string>
+    <string name="chat_workspace_empty_title">Choose a conversation</string>
+    <string name="chat_workspace_empty_message">Messages will appear here without hiding your chat list.</string>
 </resources>

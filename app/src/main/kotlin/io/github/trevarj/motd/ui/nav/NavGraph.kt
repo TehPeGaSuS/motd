@@ -9,6 +9,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -75,14 +79,18 @@ fun MotdNavGraph(
         navController = navController,
         startDestination = ChatListRoute,
         enterTransition = {
-            if (isChatTarget()) {
+            if (isChatTarget() && isChatInitial()) {
+                EnterTransition.None
+            } else if (isChatTarget()) {
                 slideIntoContainer(SlideDirection.Start, MotdMotion.navigationDrawerSpatial)
             } else {
                 slideIntoContainer(SlideDirection.Start, tween(MotdMotion.NavigationDurationMs))
             }
         },
         exitTransition = {
-            if (isChatTarget()) {
+            if (isChatTarget() && isChatInitial()) {
+                ExitTransition.None
+            } else if (isChatTarget()) {
                 // Keep the current screen in place until the incoming chat finishes, mirroring
                 // ModalNavigationDrawer's single moving surface over stationary content.
                 ExitTransition.KeepUntilTransitionsFinished
@@ -107,44 +115,54 @@ fun MotdNavGraph(
         },
     ) {
         composable<ChatListRoute> {
-            ChatListScreen(
-                onOpenBuffer = { navController.navigate(ChatRoute(it)) },
-                onOpenAudioOrigin = { origin ->
-                    navController.navigate(
-                        ChatRoute(
-                            bufferId = origin.bufferId,
-                            jumpToMsgid = origin.msgid,
-                            jumpToTime = origin.serverTime,
-                            jumpToEventId = origin.eventId,
-                        ),
-                    ) { launchSingleTop = true }
+            var openedDefault by rememberSaveable { mutableStateOf(false) }
+            ChatWorkspace(
+                listPane = { compactHeader ->
+                    ChatListPane(
+                        navController = navController,
+                        compactHeader = compactHeader,
+                        onDefaultBufferAvailable = { bufferId ->
+                            if (compactHeader && !openedDefault) {
+                                openedDefault = true
+                                navController.openChat(ChatRoute(bufferId), replaceCurrentChat = false)
+                            }
+                        },
+                    )
                 },
-                onOpenSettings = { navController.navigate(SettingsRoute) },
-                onOpenSearch = { navController.navigate(SearchRoute()) },
-                onOpenOnboarding = { navController.navigate(OnboardingRoute) },
-                // Round 5: drawer network-management + browse entry points.
-                onOpenNetworkSettings = { navController.navigate(NetworkSettingsRoute(it)) },
-                onOpenAddNetwork = { navController.navigate(AddNetworkRoute) },
-                onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
             )
         }
         composable<ChatRoute> { entry ->
             val route = entry.toRoute<ChatRoute>()
-            ChatScreen(
-                bufferId = route.bufferId,
-                onBack = { navController.popBackStack() },
-                onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
-                onOpenSearch = { navController.navigate(SearchRoute(it)) },
-                onOpenImage = { navController.navigate(ImageViewerRoute(it)) },
-                // /msg and /query navigate to the resolved QUERY buffer.
-                onOpenBuffer = { navController.navigate(ChatRoute(it)) },
-                onOpenAudioOrigin = { origin ->
-                    navController.navigate(
-                        ChatRoute(origin.bufferId, origin.msgid, origin.serverTime, origin.eventId),
-                    ) { launchSingleTop = true }
+            ChatWorkspace(
+                listPane = { compactHeader ->
+                    ChatListPane(
+                        navController = navController,
+                        selectedBufferId = route.bufferId,
+                        compactHeader = compactHeader,
+                        replaceCurrentChat = true,
+                    )
                 },
-                // Round 5: /list opens the channel browser for the current network.
-                onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
+                detailPane = { showBack ->
+                    ChatScreen(
+                        bufferId = route.bufferId,
+                        onBack = { navController.popBackStack() },
+                        showBack = showBack,
+                        onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
+                        onOpenSearch = { navController.navigate(SearchRoute(it)) },
+                        onOpenImage = { navController.navigate(ImageViewerRoute(it)) },
+                        // /msg and /query replace the detail on wide layouts and push on phones.
+                        onOpenBuffer = {
+                            navController.openChat(ChatRoute(it), replaceCurrentChat = !showBack)
+                        },
+                        onOpenAudioOrigin = { origin ->
+                            navController.openChat(
+                                ChatRoute(origin.bufferId, origin.msgid, origin.serverTime, origin.eventId),
+                                replaceCurrentChat = !showBack,
+                            )
+                        },
+                        onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
+                    )
+                },
             )
         }
         composable<OnboardingRoute> {
@@ -285,6 +303,48 @@ fun MotdNavGraph(
                 onBack = { navController.popBackStack() },
             )
         }
+    }
+}
+
+@Composable
+private fun ChatListPane(
+    navController: NavHostController,
+    selectedBufferId: Long? = null,
+    compactHeader: Boolean = false,
+    replaceCurrentChat: Boolean = false,
+    onDefaultBufferAvailable: (Long) -> Unit = {},
+) {
+    ChatListScreen(
+        onOpenBuffer = {
+            navController.openChat(ChatRoute(it), replaceCurrentChat)
+        },
+        onOpenAudioOrigin = { origin ->
+            navController.openChat(
+                ChatRoute(
+                    bufferId = origin.bufferId,
+                    jumpToMsgid = origin.msgid,
+                    jumpToTime = origin.serverTime,
+                    jumpToEventId = origin.eventId,
+                ),
+                replaceCurrentChat,
+            )
+        },
+        onOpenSettings = { navController.navigate(SettingsRoute) },
+        onOpenSearch = { navController.navigate(SearchRoute()) },
+        onOpenOnboarding = { navController.navigate(OnboardingRoute) },
+        onOpenNetworkSettings = { navController.navigate(NetworkSettingsRoute(it)) },
+        onOpenAddNetwork = { navController.navigate(AddNetworkRoute) },
+        onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
+        selectedBufferId = selectedBufferId,
+        compactHeader = compactHeader,
+        onDefaultBufferAvailable = onDefaultBufferAvailable,
+    )
+}
+
+private fun NavHostController.openChat(route: ChatRoute, replaceCurrentChat: Boolean) {
+    navigate(route) {
+        if (replaceCurrentChat) popUpTo<ChatRoute> { inclusive = true }
+        launchSingleTop = true
     }
 }
 

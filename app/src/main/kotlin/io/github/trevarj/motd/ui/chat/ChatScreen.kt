@@ -20,10 +20,17 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -104,6 +111,7 @@ import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -243,6 +251,7 @@ internal fun dismissKeyboardBeforeNavigating(
 fun ChatScreen(
     bufferId: Long,
     onBack: () -> Unit = {},
+    showBack: Boolean = true,
     onOpenChannelInfo: (Long) -> Unit = {},
     onOpenSearch: (Long) -> Unit = {},
     onOpenImage: (String) -> Unit = {},
@@ -386,6 +395,7 @@ fun ChatScreen(
         countUnreadBelowViewport = viewModel::countUnreadBelowViewport,
         nearestUnreadMentionBelow = viewModel::nearestUnreadMentionBelow,
         onBack = onHeaderBack,
+        showBack = showBack,
         // Channel titles open Channel Info; query titles describe the other user. SERVER buffers
         // have neither channel nor peer details, so their title remains inert.
         onOpenChannelInfo = { id ->
@@ -511,6 +521,7 @@ fun ChatContent(
     items: LazyPagingItems<MessageEntity>,
     composerEnabled: Boolean,
     onBack: () -> Unit,
+    showBack: Boolean = true,
     onOpenChannelInfo: (Long) -> Unit,
     onOpenSearch: (Long) -> Unit,
     onOpenImage: (String) -> Unit,
@@ -1225,6 +1236,7 @@ fun ChatContent(
     }
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -1322,11 +1334,13 @@ fun ChatContent(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.chat_back),
-                        )
+                    if (showBack) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.chat_back),
+                            )
+                        }
                     }
                 },
                 actions = {
@@ -1437,17 +1451,21 @@ fun ChatContent(
             )
         },
     ) { padding ->
-        // The activity is NOT edge-to-edge (decor fits system windows) and the manifest sets
-        // windowSoftInputMode=adjustResize, so the window itself shrinks when the IME opens: the
-        // Scaffold content area gets smaller and the composer stays pinned at the new bottom while
-        // the reverse list stays anchored at index 0. An imePadding() here would double-count the
-        // IME inset (window already resized) and shove the whole column up above the keyboard.
-        BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // BoxWithConstraints subcomposes with the resized window constraints during Android's
-            // adjustResize measure pass. Passing this exact height to the composer lets its emoji
-            // replacement occupy the released IME space in the same frame instead of reacting to
-            // an OnLayoutChange callback one frame later.
-            val chatWindowHeightPx = constraints.maxHeight
+        // TopAppBar owns the status-bar inset. The chat surface draws edge-to-edge horizontally,
+        // while these consuming modifiers keep the composer above navigation and animated IME
+        // insets without double-padding their overlap.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .navigationBarsPadding()
+                .imePadding(),
+        ) {
+            val density = LocalDensity.current
+            val imeContentHeightPx = (
+                WindowInsets.ime.getBottom(density) -
+                    WindowInsets.navigationBars.getBottom(density)
+                ).coerceAtLeast(0)
             ConversationTypography(conversationFontScalePercent) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.weight(1f)) {
@@ -1681,7 +1699,7 @@ fun ChatContent(
                     onVoiceHoldStop = onVoiceHoldStop,
                     onVoiceHoldCancel = onVoiceHoldCancel,
                     onVoiceLock = onVoiceLock,
-                    chatWindowHeightPx = chatWindowHeightPx,
+                    imeHeightPx = imeContentHeightPx,
                     autocomplete = if (showAutocomplete && completions.isNotEmpty()) {
                         {
                             AutocompletePanel(

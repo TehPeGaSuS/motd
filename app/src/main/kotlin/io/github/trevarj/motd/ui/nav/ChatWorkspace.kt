@@ -1,0 +1,146 @@
+package io.github.trevarj.motd.ui.nav
+
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.components.EmptyState
+
+internal const val CHAT_WORKSPACE_BREAKPOINT_DP = 720f
+internal const val CHAT_WORKSPACE_RESIZABLE_DP = 840f
+internal const val CHAT_LIST_MIN_DP = 280f
+internal const val CHAT_LIST_INITIAL_DP = 320f
+internal const val CHAT_LIST_MAX_DP = 420f
+internal const val CHAT_DETAIL_MIN_DP = 420f
+internal const val CHAT_PANE_DIVIDER_DP = 12f
+
+internal enum class ChatWorkspaceMode { SINGLE, DUAL_FIXED, DUAL_RESIZABLE }
+
+internal data class ChatWorkspacePolicy(
+    val mode: ChatWorkspaceMode,
+    val listWidthDp: Float,
+)
+
+internal fun chatWorkspacePolicy(
+    availableWidthDp: Float,
+    requestedListWidthDp: Float = CHAT_LIST_INITIAL_DP,
+): ChatWorkspacePolicy {
+    if (availableWidthDp < CHAT_WORKSPACE_BREAKPOINT_DP) {
+        return ChatWorkspacePolicy(ChatWorkspaceMode.SINGLE, availableWidthDp.coerceAtLeast(0f))
+    }
+    if (availableWidthDp < CHAT_WORKSPACE_RESIZABLE_DP) {
+        return ChatWorkspacePolicy(ChatWorkspaceMode.DUAL_FIXED, CHAT_LIST_MIN_DP)
+    }
+    val maximumListWidth = minOf(
+        CHAT_LIST_MAX_DP,
+        availableWidthDp - CHAT_DETAIL_MIN_DP - CHAT_PANE_DIVIDER_DP,
+    ).coerceAtLeast(CHAT_LIST_MIN_DP)
+    return ChatWorkspacePolicy(
+        ChatWorkspaceMode.DUAL_RESIZABLE,
+        requestedListWidthDp.coerceIn(CHAT_LIST_MIN_DP, maximumListWidth),
+    )
+}
+
+/** List/detail shell whose fit decision is based on the pane's actual safe content width. */
+@Composable
+internal fun ChatWorkspace(
+    listPane: @Composable (compactHeader: Boolean) -> Unit,
+    detailPane: (@Composable (showBack: Boolean) -> Unit)? = null,
+) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+    ) {
+        val availableWidth = maxWidth
+        var requestedListWidthDp by rememberSaveable { mutableFloatStateOf(CHAT_LIST_INITIAL_DP) }
+        val policy = chatWorkspacePolicy(availableWidth.value, requestedListWidthDp)
+        LaunchedEffect(availableWidth, policy.mode) {
+            requestedListWidthDp = policy.listWidthDp
+        }
+        if (policy.mode == ChatWorkspaceMode.SINGLE) {
+            if (detailPane == null) listPane(false) else detailPane(true)
+            return@BoxWithConstraints
+        }
+
+        val layoutDirection = LocalLayoutDirection.current
+        val resizeDescription = stringResource(R.string.chat_workspace_resize)
+        Row(modifier = Modifier.fillMaxSize()) {
+            Surface(
+                modifier = Modifier.width(policy.listWidthDp.dp).fillMaxHeight(),
+                color = MaterialTheme.colorScheme.surface,
+            ) {
+                listPane(true)
+            }
+            Box(
+                modifier = Modifier
+                    .width(CHAT_PANE_DIVIDER_DP.dp)
+                    .fillMaxHeight()
+                    .then(
+                        if (policy.mode == ChatWorkspaceMode.DUAL_RESIZABLE) {
+                            Modifier
+                                .semantics { contentDescription = resizeDescription }
+                                .pointerInput(availableWidth, layoutDirection) {
+                                    detectDragGestures { change, dragAmount ->
+                                        change.consume()
+                                        val direction = if (layoutDirection == LayoutDirection.Ltr) 1f else -1f
+                                        requestedListWidthDp += dragAmount.x.toDp().value * direction
+                                    }
+                                }
+                        } else {
+                            Modifier
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                VerticalDivider(
+                    modifier = Modifier.fillMaxHeight(),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+            }
+            Surface(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                if (detailPane == null) {
+                    EmptyState(
+                        icon = Icons.Outlined.Forum,
+                        title = stringResource(R.string.chat_workspace_empty_title),
+                        message = stringResource(R.string.chat_workspace_empty_message),
+                    )
+                } else {
+                    detailPane(false)
+                }
+            }
+        }
+    }
+}

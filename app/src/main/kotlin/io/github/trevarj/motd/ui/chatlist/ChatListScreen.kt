@@ -152,6 +152,7 @@ fun ChatListScreen(
     onOpenChannelList: (Long) -> Unit = {},
     selectedBufferId: Long? = null,
     compactHeader: Boolean = false,
+    onDefaultBufferAvailable: (Long) -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
     audioViewModel: AudioPlaybackViewModel = hiltViewModel(),
 ) {
@@ -163,6 +164,9 @@ fun ChatListScreen(
         if (shouldOpenOnboarding(state)) {
             onOpenOnboarding()
         }
+    }
+    LaunchedEffect(state.loading, state.rows) {
+        if (!state.loading) defaultChatBufferId(state.rows)?.let(onDefaultBufferAvailable)
     }
 
     ChatListContent(
@@ -198,6 +202,11 @@ fun ChatListScreen(
         compactHeader = compactHeader,
     )
 }
+
+internal fun defaultChatBufferId(rows: List<ChatListRow>): Long? = rows.maxWithOrNull(
+    compareBy<ChatListRow> { it.lastMessageTime ?: Long.MIN_VALUE }
+        .thenBy(ChatListRow::bufferId),
+)?.bufferId
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
