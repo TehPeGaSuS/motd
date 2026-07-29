@@ -177,6 +177,7 @@ class IrcClient(
     private val unlabeledChatHistory = UnlabeledChatHistoryCorrelator()
     private val unlabeledChatHistoryLock = Mutex()
     private val unlabeledChannelListLock = Mutex()
+    private var unlabeledChannelListDrain: Job? = null
     private val outboundLock = Mutex()
     private val batches = BatchAssembler()
     private val typingOutbox = TypingOutbox()
@@ -1062,18 +1063,45 @@ class IrcClient(
         // Raw LIST numerics carry no request identity. Serialize requests and synchronously enter
         // collection before writing so a fast server cannot answer before the subscriber exists.
         return unlabeledChannelListLock.withLock {
+            awaitPreviousChannelListResponse()
+            val t = transport ?: throw IrcDisconnectedException("LIST", null)
             val out = BoundedChannelListings(cap)
             val collector = scope.launchUnlabeledChannelListCollector(broadcastEvents) { message ->
                 parseListMessage(message)?.let(out::add)
             }
+            var sent = false
             try {
-                transport?.let { sendSerialized(it, msg) }
-                withTimeoutOrNull(LIST_TIMEOUT_MS) { collector.join() }
+                sendSerialized(t, msg)
+                sent = true
+                val completed = withTimeoutOrNull(LIST_TIMEOUT_MS) {
+                    collector.join()
+                    true
+                } == true
+                if (!completed) {
+                    // Keep consuming this response through its 323 terminator. A later raw LIST
+                    // must not see the tail of this response as its own result.
+                    unlabeledChannelListDrain = collector
+                    throw IrcTimeoutException("channel list")
+                }
                 out.toList()
+            } catch (cancelled: CancellationException) {
+                if (sent && collector.isActive) unlabeledChannelListDrain = collector
+                throw cancelled
             } finally {
-                collector.cancelAndJoin()
+                if (unlabeledChannelListDrain !== collector) collector.cancelAndJoin()
             }
         }
+    }
+
+    /** Waits for a timed-out raw LIST's 323 before another uncorrelated LIST can be sent. */
+    private suspend fun awaitPreviousChannelListResponse() {
+        val previous = unlabeledChannelListDrain ?: return
+        val drained = withTimeoutOrNull(LIST_DRAIN_WAIT_MS) {
+            previous.join()
+            true
+        } == true
+        if (!drained) throw IrcTimeoutException("previous channel list")
+        if (unlabeledChannelListDrain === previous) unlabeledChannelListDrain = null
     }
 
     /** Parse an [IrcMessage] that is (or wraps) an RPL_LIST 322 into a [ChannelListing]. */
@@ -1278,6 +1306,7 @@ class IrcClient(
     private companion object {
         const val LABEL_TIMEOUT_MS = 30_000L
         const val LIST_TIMEOUT_MS = 15_000L
+        const val LIST_DRAIN_WAIT_MS = 15_000L
         const val WEBPUSH_TIMEOUT_MS = 30_000L
         const val WHOX_TIMEOUT_MS = 15_000L
         const val CRITICAL_EVENT_CAPACITY = 4096

@@ -11,8 +11,8 @@ class IrcCommandException(
     val text: String,
 ) : Exception("$ircCommand failed ($code): $text")
 
-/** Raised when a labeled command receives no completing response within the timeout. */
-class IrcTimeoutException(val label: String) : Exception("labeled response timed out: $label")
+/** Raised when an IRC request receives no completing response within the timeout. */
+class IrcTimeoutException(val label: String) : Exception("IRC response timed out: $label")
 
 /** Raised when a command awaiting an IRC response loses its connection. */
 class IrcDisconnectedException(val ircCommand: String, val reason: String?) :

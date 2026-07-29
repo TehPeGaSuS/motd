@@ -103,6 +103,32 @@ class ChannelListModelsTest {
     }
 
     @Test
+    fun `popular channel list requires ELIST user-count filtering`() {
+        assertEquals(
+            true,
+            supportsPopularChannelList(
+                IrcClientState.Ready("me", emptySet(), mapOf("ELIST" to "CMNTU")),
+            ),
+        )
+        assertEquals(
+            true,
+            supportsPopularChannelList(
+                IrcClientState.Ready("me", emptySet(), mapOf("ELIST" to "u")),
+            ),
+        )
+        assertEquals(
+            false,
+            supportsPopularChannelList(
+                IrcClientState.Ready("me", emptySet(), mapOf("ELIST" to "CMNT")),
+            ),
+        )
+        assertEquals(
+            false,
+            supportsPopularChannelList(IrcClientState.Ready("me", emptySet(), emptyMap())),
+        )
+    }
+
+    @Test
     fun `sortListings orders by userCount descending`() {
         val input = listOf(
             ChannelListing("#a", 10, ""),

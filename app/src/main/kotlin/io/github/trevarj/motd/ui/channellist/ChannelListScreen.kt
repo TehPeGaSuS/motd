@@ -53,9 +53,9 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 /**
  * Channel browser (plans/16 §5.7). LIST/ELIST-backed, scoped to [networkId].
  *
- * The busiest channels are auto-fetched on entry. ELIST 'U' is used when available; otherwise
- * the client retains a bounded top set from the LIST stream. Browsing is disabled for an unbound
- * soju BOUNCER_ROOT (its connection can't LIST). Join delegates to
+ * The busiest channels are auto-fetched on entry only when ELIST 'U' can bound the server reply.
+ * Other networks start with targeted search so opening the screen cannot stream a full LIST.
+ * Browsing is disabled for an unbound soju BOUNCER_ROOT (its connection can't LIST). Join delegates to
  * ConnectionManager.joinChannel and remains open; Room self-JOIN persistence is authoritative.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -79,13 +79,19 @@ fun ChannelListScreen(
 /** Stateless body — previewable without a ViewModel. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ChannelListContent(
+internal fun ChannelListContent(
     state: ChannelListUiState,
     onBack: () -> Unit,
     onQueryChange: (String) -> Unit,
-    onSearch: () -> Unit,
+    onSearch: (String) -> Unit,
     onJoin: (String) -> Unit,
 ) {
+    // The saved editing value can be restored before the ViewModel query. Submit this visible
+    // value directly so IME search, refresh, and retry cannot issue a stale or blank LIST.
+    var text by rememberSaveable(state.networkId, stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(state.query))
+    }
+    val canSubmitQuery = text.text.isNotBlank() || supportsPopularChannelList(state.connState)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -110,9 +116,12 @@ private fun ChannelListContent(
                     }
                 },
                 actions = {
-                    if (state.availability == ChannelBrowserAvailability.READY && !state.loading) {
+                    if (state.availability == ChannelBrowserAvailability.READY &&
+                        !state.loading &&
+                        canSubmitQuery
+                    ) {
                         IconButton(
-                            onClick = onSearch,
+                            onClick = { onSearch(text.text) },
                         ) {
                             Icon(
                                 Icons.Outlined.Refresh,
@@ -129,12 +138,6 @@ private fun ChannelListContent(
                 state.availability != ChannelBrowserAvailability.READY -> NotReadyState(state)
 
                 else -> {
-                    // Visible query lives in local IME state so keystrokes aren't dropped and the
-                    // cursor is preserved; the ViewModel query drives the fetch mask only. Seeded
-                    // once from the incoming state.
-                    var text by rememberSaveable(stateSaver = TextFieldValue.Saver) {
-                        mutableStateOf(TextFieldValue(state.query))
-                    }
                     // Search field: substring-mask fetch on the IME search action.
                     OutlinedTextField(
                         value = text,
@@ -143,8 +146,8 @@ private fun ChannelListContent(
                         placeholder = { Text(stringResource(R.string.channel_list_search_hint)) },
                         trailingIcon = {
                             IconButton(
-                                onClick = onSearch,
-                                enabled = !state.loading,
+                                onClick = { onSearch(text.text) },
+                                enabled = !state.loading && canSubmitQuery,
                             ) {
                                 Icon(
                                     Icons.Outlined.Search,
@@ -153,15 +156,22 @@ private fun ChannelListContent(
                             }
                         },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+                        keyboardActions = KeyboardActions(
+                            onSearch = { if (canSubmitQuery) onSearch(text.text) },
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .testTag("channel_list_search_field"),
                     )
                     if (state.loading) {
                         LinearProgressIndicator(Modifier.fillMaxWidth())
                     }
-                    ResultsBody(state = state, onSearch = onSearch, onJoin = onJoin)
+                    ResultsBody(
+                        state = state,
+                        onSearch = { onSearch(text.text) },
+                        onJoin = onJoin,
+                    )
                 }
             }
         }

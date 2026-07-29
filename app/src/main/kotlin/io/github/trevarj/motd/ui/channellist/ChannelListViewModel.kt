@@ -108,9 +108,13 @@ class ChannelListViewModel @Inject constructor(
                         rules,
                     ),
                 )
-                // Auto-fetch a bounded set of the busiest channels. ELIST 'U' applies the
-                // population floor server-side; other servers stream into the bounded collector.
-                if (conn is IrcClientState.Ready && !_state.value.loaded && !_state.value.isRoot) {
+                // A local result cap does not bound the server response. Only auto-fetch when
+                // ELIST U guarantees the broad request is filtered before transmission.
+                if (conn is IrcClientState.Ready &&
+                    supportsPopularChannelList(conn) &&
+                    !_state.value.loaded &&
+                    !_state.value.isRoot
+                ) {
                     fetch()
                 }
             }
@@ -162,10 +166,27 @@ class ChannelListViewModel @Inject constructor(
     }
 
     /** Fetch (or re-fetch) via LIST/ELIST, then sort by user count descending. */
-    fun fetch() {
-        val s = _state.value
+    fun fetch() = fetch(_state.value.query)
+
+    /** Fetch the query submitted by the visible field, synchronizing it before request queuing. */
+    fun fetch(requestedQuery: String) {
+        val current = _state.value
+        val s = if (current.query == requestedQuery) {
+            current
+        } else {
+            current.copy(query = requestedQuery).also { _state.value = it }
+        }
         if (s.isRoot || !s.isReady) return
-        val requestedQuery = s.query
+        if (requestedQuery.isBlank() && !supportsPopularChannelList(s.connState)) {
+            // Never turn a blank refresh into a full-network LIST on servers without ELIST U.
+            _state.value = s.copy(
+                listings = emptyList(),
+                loading = false,
+                loaded = false,
+                error = null,
+            )
+            return
+        }
         if (fetchJob?.isActive == true) {
             if (shouldQueueChannelListFetch(activeFetchQuery, requestedQuery)) {
                 queuedFetchQuery = requestedQuery

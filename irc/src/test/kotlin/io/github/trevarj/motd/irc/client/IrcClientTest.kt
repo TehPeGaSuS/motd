@@ -1117,6 +1117,35 @@ class IrcClientTest {
     }
 
     @Test
+    fun `timed out raw LIST drains its response before sending the queued search`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredNoCaps(ft)
+
+        val first = clientScope().async { runCatching { client.listChannels() } }
+        runCurrent()
+        assertEquals(1, ft.sent.count { it.startsWith("LIST") })
+
+        advanceTimeBy(15_000)
+        runCurrent()
+        assertTrue(first.await().exceptionOrNull() is IrcTimeoutException)
+
+        val search = clientScope().async { client.listChannels(mask = "*motd*") }
+        runCurrent()
+        assertEquals(1, ft.sent.count { it.startsWith("LIST") })
+
+        // Late completion of the first response must be drained, not mistaken for the search.
+        ft.feed(":srv 322 motd #old 500 :old response")
+        ft.feed(":srv 323 motd :End of /LIST")
+        runCurrent()
+        assertEquals(2, ft.sent.count { it.startsWith("LIST") })
+
+        ft.feed(":srv 322 motd #motd 42 :search response")
+        ft.feed(":srv 323 motd :End of /LIST")
+        runCurrent()
+        assertEquals(listOf("#motd"), search.await().map { it.name })
+    }
+
+    @Test
     fun `ELIST U gates the minUsers filter param`() = runTest {
         // ELIST advertises 'U' -> the ">n" filter is appended.
         val ftU = FakeTransport()
