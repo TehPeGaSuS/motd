@@ -74,7 +74,10 @@ fun ChatWallpaperBackground(
             foregrounds,
         )
     }
-    val maxAlpha = if (dark) .22f else .18f
+    val maxAlpha = wallpaperPatternMaxAlpha(
+        dark = dark,
+        trueBlack = base.toArgb() == AndroidColor.BLACK,
+    )
     val pattern = contrastSafeOverlay(
         base = base,
         overlay = scheme.onSurfaceVariant,
@@ -149,9 +152,15 @@ private fun gradientColors(
         ChatWallpaperPreset.PIXELS -> listOf(primary, tertiary, secondary)
         ChatWallpaperPreset.NONE -> listOf(base, base, base)
     }
-    return listOf(.10f, .07f, .09f, .05f).mapIndexed { index, alpha ->
+    return listOf(.06f, .04f, .05f, .03f).mapIndexed { index, alpha ->
         contrastSafeOverlay(base, accents[index % accents.size], alpha, foregrounds).compositeOver(base)
     }
+}
+
+internal fun wallpaperPatternMaxAlpha(dark: Boolean, trueBlack: Boolean): Float = when {
+    trueBlack -> 0.06f
+    dark -> 0.12f
+    else -> 0.10f
 }
 
 private data class PatternPath(

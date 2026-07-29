@@ -10,7 +10,8 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 /**
  * Density-scaled spacing tokens (plans/13 §2.1) provided through [LocalSpacing]. Components read
  * `LocalSpacing.current` inside the composable, so density needs no signature changes anywhere.
- * COMFORTABLE reproduces the current hardcoded literals exactly (pixel-identical to today).
+ * COMFORTABLE is the baseline expressive layout; the other modes preserve their distinct render
+ * paradigms while sharing the same shape and touch-target system.
  *
  * The density setting selects the *render style*, not the font size: COMPACT renders each message as
  * a classic single-line IRC row (`nick: text`), COMFORTABLE renders Telegram-style bubbles, and
@@ -31,10 +32,10 @@ data class MotdSpacing(
     val bubbleInnerHPad: Dp, // bubble Column inner horizontal padding
     // Telegram-style inter-bubble gaps (COMFORTABLE only). Burst = a same-sender group continues;
     // break = a new group opens (sender/direction/system-kind change, or >GROUP_WINDOW_MS). Both
-    // are 0 for COMPACT/TWO_LINE so their rendering stays pixel-identical to today.
+    // are 0 for COMPACT/TWO_LINE so those renderers remain deliberately dense.
     val bubbleBurstGap: Dp, // gap before a bubble continuing a same-sender group
     val bubbleBreakGap: Dp, // gap before a bubble opening a new group
-    val bubbleCorner: Dp, // base bubble corner radius (grouped inner corner stays 4.dp)
+    val bubbleCorner: Dp, // base bubble corner radius (grouped inner corner stays 6.dp)
     val bubbleAvatar: Dp, // in-bubble sender avatar size
     val bubbleAvatarColumn: Dp, // reserved avatar column width (= bubbleAvatar + 8.dp)
     val actionVPad: Dp, // ACTION line vertical padding
@@ -56,13 +57,13 @@ fun spacingFor(density: LayoutDensity): MotdSpacing = when (density) {
         bubbleInnerHPad = 8.dp,
         bubbleBurstGap = 0.dp,
         bubbleBreakGap = 0.dp,
-        bubbleCorner = 14.dp,
+        bubbleCorner = 12.dp,
         bubbleAvatar = 26.dp,
         bubbleAvatarColumn = 34.dp,
         actionVPad = 2.dp,
         systemPillVPad = 2.dp,
         chatListVPad = 6.dp,
-        chatListAvatar = 36.dp,
+        chatListAvatar = 40.dp,
         memberAvatar = 32.dp,
     )
     LayoutDensity.COMFORTABLE -> MotdSpacing(
@@ -75,13 +76,13 @@ fun spacingFor(density: LayoutDensity): MotdSpacing = when (density) {
         bubbleInnerHPad = 10.dp,
         bubbleBurstGap = 2.dp,
         bubbleBreakGap = 8.dp,
-        bubbleCorner = 18.dp,
+        bubbleCorner = 20.dp,
         bubbleAvatar = 32.dp,
         bubbleAvatarColumn = 40.dp,
         actionVPad = 3.dp,
         systemPillVPad = 4.dp,
         chatListVPad = 10.dp,
-        chatListAvatar = 44.dp,
+        chatListAvatar = 48.dp,
         memberAvatar = 36.dp,
     )
     // TWO_LINE = a compact two-line row: small avatar + nick + time header over the body. Not a
@@ -97,14 +98,14 @@ fun spacingFor(density: LayoutDensity): MotdSpacing = when (density) {
         bubbleInnerHPad = 12.dp,
         bubbleBurstGap = 0.dp,
         bubbleBreakGap = 0.dp,
-        bubbleCorner = 18.dp,
+        bubbleCorner = 20.dp,
         // Small header avatar (line 1) — smaller than the bubble avatar to keep the row compact.
         bubbleAvatar = 20.dp,
         bubbleAvatarColumn = 28.dp,
         actionVPad = 3.dp,
         systemPillVPad = 4.dp,
         chatListVPad = 10.dp,
-        chatListAvatar = 44.dp,
+        chatListAvatar = 48.dp,
         memberAvatar = 36.dp,
     )
 }

@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,11 +21,13 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Unread count pill (primary). Renders "99+" for large counts. */
@@ -43,14 +44,14 @@ fun UnreadBadge(count: Int, modifier: Modifier = Modifier) {
     )
 }
 
-/** Mention badge (tertiary, "@" glyph). */
+/** Mention badge (secondary, "@" glyph). */
 @Composable
 fun MentionBadge(count: Int, modifier: Modifier = Modifier) {
     val cd = pluralStringResource(R.plurals.badge_mention, count, count)
     CountBadge(
         text = if (count > 1) "@$count" else "@",
-        background = MaterialTheme.colorScheme.tertiary,
-        foreground = MaterialTheme.colorScheme.onTertiary,
+        background = MaterialTheme.colorScheme.secondary,
+        foreground = MaterialTheme.colorScheme.onSecondary,
         modifier = modifier,
         contentDescription = cd,
     )
@@ -77,29 +78,29 @@ fun NetworkChip(
     dimmed: Boolean = false,
     emphasized: Boolean = false,
 ) {
-    val containerAlpha = when {
-        !dimmed -> 1f
-        emphasized -> 0.14f
-        else -> 0.08f
+    val container = when {
+        !dimmed -> MaterialTheme.colorScheme.surfaceContainerHigh
+        emphasized -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerLow
     }
-    val labelAlpha = when {
-        !dimmed -> 1f
-        emphasized -> 0.90f
-        else -> 0.60f
+    val label = when {
+        !dimmed -> MaterialTheme.colorScheme.onSurface
+        emphasized -> MaterialTheme.colorScheme.onPrimaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     Box(
         modifier = modifier
             .widthIn(max = 92.dp)
             .background(
-                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = containerAlpha),
-                RoundedCornerShape(6.dp),
+                container,
+                MotdShapes.tag,
             )
             .padding(horizontal = 6.dp, vertical = 1.dp),
     ) {
         Text(
             text = name,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = labelAlpha),
-            style = MaterialTheme.typography.labelSmall,
+            color = label,
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

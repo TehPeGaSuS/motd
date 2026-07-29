@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -55,6 +56,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
@@ -63,6 +65,8 @@ import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
@@ -82,7 +86,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -147,6 +150,8 @@ fun ChatListScreen(
     onOpenNetworkSettings: (Long) -> Unit = {},
     onOpenAddNetwork: () -> Unit = {},
     onOpenChannelList: (Long) -> Unit = {},
+    selectedBufferId: Long? = null,
+    compactHeader: Boolean = false,
     viewModel: ChatListViewModel = hiltViewModel(),
     audioViewModel: AudioPlaybackViewModel = hiltViewModel(),
 ) {
@@ -189,6 +194,8 @@ fun ChatListScreen(
         onOpenAddNetwork = onOpenAddNetwork,
         onOpenChannelList = onOpenChannelList,
         onMarkAllRead = viewModel::markCurrentScopeRead,
+        selectedBufferId = selectedBufferId,
+        compactHeader = compactHeader,
     )
 }
 
@@ -223,6 +230,8 @@ fun ChatListContent(
     onOpenAddNetwork: () -> Unit = {},
     onOpenChannelList: (Long) -> Unit = {},
     onMarkAllRead: () -> Unit = {},
+    selectedBufferId: Long? = null,
+    compactHeader: Boolean = false,
 ) {
     var archiveMode by rememberSaveable { mutableStateOf(false) }
     var showSheet by remember { mutableStateOf(false) }
@@ -238,6 +247,8 @@ fun ChatListContent(
     val selectionActive = selectedRows.isNotEmpty()
     var confirmRemoval by remember { mutableStateOf(false) }
     var archiveRevealSignal by rememberSaveable(state.selectedNetworkId) { mutableStateOf(0) }
+    val topAppBarScrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val expandedTopBar = !compactHeader && !selectionActive && !archiveMode
 
     fun setArchivedWithReveal(ids: Collection<Long>, archived: Boolean) {
         onSetArchived(ids, archived)
@@ -299,9 +310,19 @@ fun ChatListContent(
         },
     ) {
         Scaffold(
-            modifier = Modifier.testTag("screen_chat_list"),
+            modifier = Modifier
+                .testTag("screen_chat_list")
+                .then(
+                    if (expandedTopBar) {
+                        Modifier.nestedScroll(topAppBarScrollBehavior.nestedScrollConnection)
+                    } else {
+                        Modifier
+                    },
+                ),
             topBar = {
-                TopAppBar(
+                ChatListTopBar(
+                    expanded = expandedTopBar,
+                    scrollBehavior = topAppBarScrollBehavior,
                     modifier = Modifier.testTag(if (selectionActive) "chatlist_selection_top_app_bar" else "chatlist_top_app_bar"),
                     title = {
                         val scopedName = state.selectedNetworkName
@@ -440,6 +461,7 @@ fun ChatListContent(
                             onSetMuted = onSetMuted,
                             onSetArchived = ::setArchivedWithReveal,
                             onDeleteBuffers = onDeleteBuffers,
+                            activeBufferId = selectedBufferId,
                             selectedIds = selectedIds.toSet(),
                             selectionActive = selectionActive,
                             onToggleSelection = { id -> selectedIds = toggleSelectedId(selectedIds, id) },
@@ -583,6 +605,7 @@ private fun ChatList(
     onSetMuted: (Collection<Long>, Boolean) -> Unit,
     onSetArchived: (Collection<Long>, Boolean) -> Unit,
     onDeleteBuffers: (Collection<ChatListRow>) -> Unit,
+    activeBufferId: Long?,
     selectedIds: Set<Long>,
     selectionActive: Boolean,
     onToggleSelection: (Long) -> Unit,
@@ -813,6 +836,7 @@ private fun ChatList(
                     onOpenBuffer,
                     archiveMode,
                     selected = row.bufferId in selectedIds,
+                    active = row.bufferId == activeBufferId,
                     selectionActive = selectionActive,
                     onToggleSelection = onToggleSelection,
                     onStartSelection = onStartSelection,
@@ -837,6 +861,7 @@ private fun ChatList(
                         onOpenBuffer,
                         archiveMode,
                         selected = row.bufferId in selectedIds,
+                        active = row.bufferId == activeBufferId,
                         selectionActive = selectionActive,
                         onToggleSelection = onToggleSelection,
                         onStartSelection = onStartSelection,
@@ -863,6 +888,7 @@ private fun ChatList(
                     onOpenBuffer,
                     archiveMode,
                     selected = row.bufferId in selectedIds,
+                    active = row.bufferId == activeBufferId,
                     selectionActive = selectionActive,
                     onToggleSelection = onToggleSelection,
                     onStartSelection = onStartSelection,
@@ -889,7 +915,6 @@ private fun ChatList(
                     items(sections.fools, key = { it.bufferId }) { row ->
                         Box(
                             modifier = Modifier
-                                .alpha(0.55f)
                                 .animateItem(
                                     fadeInSpec = ChatListItemMotion.fadeInSpec,
                                     fadeOutSpec = ChatListItemMotion.fadeOutSpec,
@@ -904,6 +929,7 @@ private fun ChatList(
                                 onOpenBuffer = onOpenBuffer,
                                 archiveMode = archiveMode,
                                 selected = row.bufferId in selectedIds,
+                                active = row.bufferId == activeBufferId,
                                 selectionActive = selectionActive,
                                 onToggleSelection = onToggleSelection,
                                 onStartSelection = onStartSelection,
@@ -1172,6 +1198,7 @@ private fun SelectableChatListRow(
     onOpenBuffer: (Long) -> Unit,
     archiveMode: Boolean,
     selected: Boolean,
+    active: Boolean,
     selectionActive: Boolean,
     onToggleSelection: (Long) -> Unit,
     onStartSelection: (Long) -> Unit,
@@ -1212,8 +1239,43 @@ private fun SelectableChatListRow(
                 isFriend = isFriend,
                 presence = presence,
                 selected = selected,
+                active = active,
             )
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatListTopBar(
+    expanded: Boolean,
+    scrollBehavior: TopAppBarScrollBehavior,
+    modifier: Modifier = Modifier,
+    title: @Composable () -> Unit,
+    navigationIcon: @Composable () -> Unit,
+    actions: @Composable RowScope.() -> Unit,
+) {
+    val colors = TopAppBarDefaults.topAppBarColors(
+        containerColor = MaterialTheme.colorScheme.surface,
+        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    )
+    if (expanded) {
+        LargeTopAppBar(
+            modifier = modifier,
+            title = title,
+            navigationIcon = navigationIcon,
+            actions = actions,
+            colors = colors,
+            scrollBehavior = scrollBehavior,
+        )
+    } else {
+        TopAppBar(
+            modifier = modifier,
+            title = title,
+            navigationIcon = navigationIcon,
+            actions = actions,
+            colors = colors,
+        )
     }
 }
 

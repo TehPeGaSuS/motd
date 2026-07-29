@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -102,6 +101,7 @@ import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
 import io.github.trevarj.motd.ui.chat.searchSystemEmojis
 import io.github.trevarj.motd.ui.chat.systemEmojiSearchEntries
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.coroutineScope
@@ -387,7 +387,7 @@ fun Composer(
                 ) {
                 Surface(
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(28.dp),
+                    shape = MotdShapes.composer,
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 ) {
                     Row(verticalAlignment = Alignment.Bottom) {
@@ -765,7 +765,7 @@ private fun EmojiAutocompletePanel(
     Surface(
         modifier = Modifier.fillMaxWidth().testTag("chat_composer_emoji_autocomplete"),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = RoundedCornerShape(18.dp),
+        shape = MotdShapes.card,
         tonalElevation = 3.dp,
     ) {
         LazyColumn(Modifier.heightIn(max = 240.dp)) {
@@ -799,7 +799,7 @@ private fun EmojiPickerPanel(
             .testTag("chat_composer_emoji_picker")
             .padding(start = 8.dp, end = 8.dp, top = 8.dp)
             .fillMaxSize(),
-        shape = RoundedCornerShape(20.dp),
+        shape = MotdShapes.bubble,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         AndroidView(
@@ -823,7 +823,7 @@ private fun ReplyBar(reply: ComposerReply, onCancel: () -> Unit) {
     val accent = LocalNickColors.current.nick(reply.sender, MaterialTheme.colorScheme.primary)
     Surface(
         modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 68.dp, top = 8.dp),
-        shape = RoundedCornerShape(16.dp),
+        shape = MotdShapes.card,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Row(

@@ -61,11 +61,11 @@ import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
 import io.github.trevarj.motd.ui.components.IrcChannelBadge
 import io.github.trevarj.motd.ui.components.IrcSpriteAvatar
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.MotdShapes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.foundation.shape.CircleShape
 import kotlin.math.roundToInt
 
 /** Appearance category: theme, dynamic color, layout density, avatar style, nick colors, wallpaper. */
@@ -356,21 +356,37 @@ private fun ThemeRadioRow(
                 val scheme = MaterialTheme.colorScheme
                 Surface(
                     color = scheme.background,
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                    shape = MotdShapes.tag,
                     border = BorderStroke(1.dp, scheme.outline),
                     modifier = Modifier
-                        .width(88.dp)
-                        .height(30.dp)
+                        .width(100.dp)
+                        .height(42.dp)
                         .testTag("settings_theme_preview_${mode.name.lowercase()}"),
                 ) {
                     Row(
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                     ) {
                         Text("Aa", color = scheme.onBackground, style = MaterialTheme.typography.labelSmall)
-                        listOf(scheme.primary, scheme.secondary, scheme.tertiary).forEach { color ->
-                            Box(Modifier.size(11.dp).background(color, CircleShape))
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Box(
+                                Modifier.fillMaxWidth(0.72f).height(7.dp)
+                                    .background(scheme.surfaceContainerHigh, MotdShapes.pill),
+                            )
+                            Box(
+                                Modifier.fillMaxWidth(0.86f).height(7.dp)
+                                    .background(scheme.primaryContainer, MotdShapes.pill),
+                            )
+                            Box(
+                                Modifier.fillMaxWidth().height(7.dp)
+                                    .background(scheme.secondaryContainer, MotdShapes.pill),
+                            )
                         }
+                        Box(Modifier.width(5.dp).height(24.dp).background(scheme.tertiary, MotdShapes.pill))
                     }
                 }
             }

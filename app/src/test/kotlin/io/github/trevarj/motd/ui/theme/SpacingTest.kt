@@ -18,13 +18,13 @@ class SpacingTest {
         // COMPACT keeps today's tight rows: no inter-bubble gap.
         assertEquals(0.dp, s.bubbleBurstGap)
         assertEquals(0.dp, s.bubbleBreakGap)
-        assertEquals(14.dp, s.bubbleCorner)
+        assertEquals(12.dp, s.bubbleCorner)
         assertEquals(26.dp, s.bubbleAvatar)
         assertEquals(34.dp, s.bubbleAvatarColumn)
         assertEquals(2.dp, s.actionVPad)
         assertEquals(2.dp, s.systemPillVPad)
         assertEquals(6.dp, s.chatListVPad)
-        assertEquals(36.dp, s.chatListAvatar)
+        assertEquals(40.dp, s.chatListAvatar)
         assertEquals(32.dp, s.memberAvatar)
         // COMPACT is the only mode that switches to the classic single-line IRC renderer.
         assertEquals(true, s.compact)
@@ -32,7 +32,7 @@ class SpacingTest {
     }
 
     @Test
-    fun comfortable_tokens_match_current_literals() {
+    fun comfortable_tokens_follow_expressive_scale() {
         val s = spacingFor(LayoutDensity.COMFORTABLE)
         assertEquals(12.dp, s.messageOuterHPad)
         assertEquals(1.dp, s.bubbleRowVPad)
@@ -41,13 +41,13 @@ class SpacingTest {
         // COMFORTABLE opens Telegram-style gaps: tight within a burst, larger across a break.
         assertEquals(2.dp, s.bubbleBurstGap)
         assertEquals(8.dp, s.bubbleBreakGap)
-        assertEquals(18.dp, s.bubbleCorner)
+        assertEquals(20.dp, s.bubbleCorner)
         assertEquals(32.dp, s.bubbleAvatar)
         assertEquals(40.dp, s.bubbleAvatarColumn)
         assertEquals(3.dp, s.actionVPad)
         assertEquals(4.dp, s.systemPillVPad)
         assertEquals(10.dp, s.chatListVPad)
-        assertEquals(44.dp, s.chatListAvatar)
+        assertEquals(48.dp, s.chatListAvatar)
         assertEquals(36.dp, s.memberAvatar)
         // COMFORTABLE keeps the bubble renderer.
         assertEquals(false, s.compact)
@@ -63,13 +63,13 @@ class SpacingTest {
         // TWO_LINE keeps its compact rows: no inter-bubble gap.
         assertEquals(0.dp, s.bubbleBurstGap)
         assertEquals(0.dp, s.bubbleBreakGap)
-        assertEquals(18.dp, s.bubbleCorner)
+        assertEquals(20.dp, s.bubbleCorner)
         assertEquals(20.dp, s.bubbleAvatar)
         assertEquals(28.dp, s.bubbleAvatarColumn)
         assertEquals(3.dp, s.actionVPad)
         assertEquals(4.dp, s.systemPillVPad)
         assertEquals(10.dp, s.chatListVPad)
-        assertEquals(44.dp, s.chatListAvatar)
+        assertEquals(48.dp, s.chatListAvatar)
         assertEquals(36.dp, s.memberAvatar)
         // TWO_LINE is the compact two-line renderer: not the single-line IRC row, not a bubble.
         assertEquals(false, s.compact)

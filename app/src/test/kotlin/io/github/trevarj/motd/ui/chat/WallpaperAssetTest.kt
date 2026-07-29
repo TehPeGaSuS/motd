@@ -41,6 +41,12 @@ class WallpaperAssetTest {
         }
     }
 
+    @Test fun wallpaperTextureStaysSubtleAcrossThemeModes() {
+        assertEquals(0.10f, wallpaperPatternMaxAlpha(dark = false, trueBlack = false))
+        assertEquals(0.12f, wallpaperPatternMaxAlpha(dark = true, trueBlack = false))
+        assertEquals(0.06f, wallpaperPatternMaxAlpha(dark = true, trueBlack = true))
+    }
+
     @Test fun rasterCoverageOnlyExpandsAcrossViewportChanges() {
         val initial = expandedRasterCoverage(IntSize.Zero, IntSize(1080, 1800))
         val keyboardOpen = expandedRasterCoverage(initial, IntSize(1080, 1100))

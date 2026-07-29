@@ -14,19 +14,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.selected
@@ -34,6 +38,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -55,6 +61,7 @@ import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
+import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 internal data class ChatListBadgeState(
@@ -62,6 +69,29 @@ internal data class ChatListBadgeState(
     val mentions: Int? = null,
     val unread: Int? = null,
 )
+
+internal enum class ChatListRowVisualState { DEFAULT, UNREAD, ACTIVE, SELECTED }
+
+internal fun chatListRowVisualState(
+    selected: Boolean,
+    active: Boolean,
+    unread: Boolean,
+): ChatListRowVisualState = when {
+    selected -> ChatListRowVisualState.SELECTED
+    active -> ChatListRowVisualState.ACTIVE
+    unread -> ChatListRowVisualState.UNREAD
+    else -> ChatListRowVisualState.DEFAULT
+}
+
+internal fun chatListRowContainer(
+    state: ChatListRowVisualState,
+    scheme: ColorScheme,
+): Color = when (state) {
+    ChatListRowVisualState.SELECTED -> scheme.secondaryContainer
+    ChatListRowVisualState.ACTIVE -> scheme.primaryContainer
+    ChatListRowVisualState.UNREAD -> lerp(scheme.surface, scheme.primaryContainer, 0.48f)
+    ChatListRowVisualState.DEFAULT -> Color.Transparent
+}
 
 internal fun chatListBadgeState(row: ChatListRow): ChatListBadgeState =
     if (row.muted) {
@@ -95,8 +125,7 @@ internal fun chatListMessagePreview(text: String?): ChatListMessagePreview {
  * "Pinned" section; pinning gives the row global list priority).
  *
  * Round 4 (plans/13 §3.5, Confirmed decision #4): a friend row gets a trailing [Icons.Filled.Star]
- * plus a subtle primary-tinted rounded background behind the display name (theme-aware, layered
- * under the nick color).
+ * plus a quiet raised-surface background behind the display name, layered under the nick color.
  */
 @Composable
 fun ChatListRowItem(
@@ -108,6 +137,7 @@ fun ChatListRowItem(
     isFriend: Boolean = false,
     presence: PresenceState? = null,
     selected: Boolean = false,
+    active: Boolean = false,
 ) {
     // Resolved per-nick color (also used to tint the friend star), matching sender coloring.
     val nickColor = LocalNickColors.current.nick(row.displayName, MaterialTheme.colorScheme.onSurfaceVariant)
@@ -115,6 +145,9 @@ fun ChatListRowItem(
     val queryPresence = presence.takeIf { row.type == BufferType.QUERY }
     val badges = chatListBadgeState(row)
     val isUnread = !row.muted && row.unreadCount > 0
+    val visualState = chatListRowVisualState(selected, active, isUnread)
+    val rowContainer = chatListRowContainer(visualState, MaterialTheme.colorScheme)
+    val activeIndicator = MaterialTheme.colorScheme.primary
     val presenceDescription = queryPresence?.let {
         stringResource(
             when (it) {
@@ -127,12 +160,24 @@ fun ChatListRowItem(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .then(
-                if (selected) Modifier.background(MaterialTheme.colorScheme.primaryContainer) else Modifier,
-            )
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .clip(MotdShapes.card)
+            .background(rowContainer)
+            .drawBehind {
+                if (active) {
+                    val width = 3.dp.toPx()
+                    val height = size.height * 0.58f
+                    drawRoundRect(
+                        color = activeIndicator,
+                        topLeft = Offset(0f, (size.height - height) / 2f),
+                        size = Size(width, height),
+                        cornerRadius = CornerRadius(width / 2f),
+                    )
+                }
+            }
             // Per-buffer handle so the harness selects a specific row (display names collide).
             .testTag("chatlist_row_${row.bufferId}")
-            .semantics { this.selected = selected }
+            .semantics { this.selected = selected || active }
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .defaultMinSize(minHeight = 48.dp)
             .then(
@@ -142,7 +187,7 @@ fun ChatListRowItem(
                     Modifier
                 },
             )
-            .padding(horizontal = 16.dp, vertical = spacing.chatListVPad),
+            .padding(horizontal = 12.dp, vertical = spacing.chatListVPad),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PresenceAvatar(
@@ -155,12 +200,12 @@ fun ChatListRowItem(
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Subtle theme-aware primary tint behind a non-muted friend's name.
+                // Quiet raised surface behind a non-muted friend's name.
                 val nameModifier = if (isFriend && !row.muted) {
                     Modifier
                         .weight(1f, fill = false)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                        .clip(MotdShapes.tag)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                         .padding(horizontal = 4.dp, vertical = 1.dp)
                 } else {
                     Modifier.weight(1f, fill = false)
@@ -290,6 +335,7 @@ fun ChatListRowItem(
                 Text(
                     text = relativeChatTime(time),
                     style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -399,7 +445,7 @@ private fun PresenceBadge(
  * Sender label chip for channel previews: nick-tinted rounded chip (mirrors
  * [NetworkChip] metrics), no colon so a nick mention in the text no longer reads
  * as a double `nick: nick:`. Dimmed to match the message-preview prominence:
- * the nick hue stays but text alpha and weight track the row's unread state, so
+ * the nick hue stays opaque while weight tracks the row's unread state, so
  * the label reads as part of the preview line rather than a louder element.
  */
 @Composable
@@ -409,16 +455,19 @@ private fun SenderLabel(
     unread: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val textAlpha = if (unread) 0.90f else 0.60f
-    val bgAlpha = if (unread) 0.14f else 0.08f
+    val container = if (unread) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
     Box(
         modifier = modifier
-            .background(color.copy(alpha = bgAlpha), RoundedCornerShape(6.dp))
+            .background(container, MotdShapes.tag)
             .padding(horizontal = 6.dp, vertical = 1.dp),
     ) {
         Text(
             text = sender,
-            color = color.copy(alpha = textAlpha),
+            color = color,
             fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
