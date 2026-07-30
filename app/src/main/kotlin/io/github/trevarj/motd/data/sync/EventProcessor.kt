@@ -63,6 +63,11 @@ data class ReplannedOutgoingPlan(
 
 internal data class PersistedHistoryPage(val roomId: RoomId, val inserted: Int)
 
+internal data class HistoryPageWrite(
+    val request: ChatHistoryRequest,
+    val response: ChatHistoryResponse.Messages,
+)
+
 /**
  * The sole IRC→Room writer (plans/04 mapping table). Implements [IrcEventSink]: every per-network
  * collector, the catch-up path, the RemoteMediator, the pending-send insert, and the push path
@@ -795,85 +800,14 @@ class EventProcessor @Inject constructor(
         response: ChatHistoryResponse.Messages,
         expectedRoomId: RoomId?,
     ): PersistedHistoryPage = sequencer.withNetwork(networkId) {
-        require(request.subcommand != ChatHistoryRequest.Subcommand.TARGETS) {
-            "TARGETS is not a message page"
-        }
         val persisted = db.withTransaction {
             val messageCountBefore = messageDao.countForNetwork(networkId)
-            val initialRoomId = expectedRoomId?.let { roomId ->
-                val room = bufferDao.observeById(roomId)
-                    ?: error("history target $roomId no longer exists")
-                check(room.networkId == networkId) { "history target $roomId belongs to another network" }
-                room.id
-            } ?: historicalTargetBuffer(networkId, request.target)
-                ?: error("missing history target ${request.target}")
-            val initialCanonicalId = bufferDao.canonicalId(initialRoomId) ?: initialRoomId
-            val before = db.historyCursorDao().byRoom(initialCanonicalId)
-
-            if (response.events.isNotEmpty()) {
-                activeProtocolPageCursorWrites += networkId
-                try {
-                    processEvent(
-                        networkId,
-                        IrcEvent.PlaybackBatch(
-                            source = IrcEvent.PlaybackSource.CHATHISTORY,
-                            target = request.target,
-                            items = response.events.mapIndexed { ordinal, event ->
-                                IrcEvent.PlaybackItem.from(event, ordinal)
-                            },
-                            placement = when (request.subcommand) {
-                                ChatHistoryRequest.Subcommand.BEFORE -> IrcEvent.PlaybackPlacement.BEFORE
-                                ChatHistoryRequest.Subcommand.AFTER -> IrcEvent.PlaybackPlacement.AFTER
-                                ChatHistoryRequest.Subcommand.AROUND -> IrcEvent.PlaybackPlacement.AUTOMATIC
-                                ChatHistoryRequest.Subcommand.BETWEEN -> IrcEvent.PlaybackPlacement.AFTER
-                                ChatHistoryRequest.Subcommand.LATEST -> IrcEvent.PlaybackPlacement.LATEST
-                                ChatHistoryRequest.Subcommand.TARGETS -> error("TARGETS is not a message page")
-                            },
-                        ),
-                        EventOrigin.LIVE,
-                        expectedHistoryRoomId = initialCanonicalId,
-                    )
-                } finally {
-                    activeProtocolPageCursorWrites -= networkId
-                }
-            }
-
-            val canonicalRoomId = bufferDao.canonicalId(initialCanonicalId) ?: initialCanonicalId
-            val after = db.historyCursorDao().byRoom(canonicalRoomId)
-            val base = after ?: before
-            val baseOldest = base?.let {
-                ChatHistoryReference(
-                    it.oldestMsgid,
-                    it.oldestServerTime,
-                )
-            }?.takeIf { it.msgid != null || it.serverTime != null }
-            val baseNewest = base?.let {
-                ChatHistoryReference(
-                    it.newestMsgid,
-                    it.newestServerTime,
-                )
-            }?.takeIf { it.msgid != null || it.serverTime != null }
-            // Union page metadata with the post-ingest cursor. The latter may now belong to a
-            // lower-id room winner and can contain extents that predate this request target.
-            val oldest = olderBoundary(baseOldest, response.oldest)
-            val newest = newerBoundary(baseNewest, response.newest)
-            val provesStart = request.subcommand == ChatHistoryRequest.Subcommand.BEFORE ||
-                (request.subcommand == ChatHistoryRequest.Subcommand.LATEST &&
-                    request.bound1 == null && request.bound2 == null)
-            val complete = provesStart &&
-                (response.endOfHistory || response.primaryMessageCount == 0)
-            db.historyCursorDao().upsert(
-                HistoryCursorEntity(
-                    roomId = canonicalRoomId,
-                    newestMsgid = newest?.msgid,
-                    newestServerTime = newest?.serverTime,
-                    oldestMsgid = oldest?.msgid,
-                    oldestServerTime = oldest?.serverTime,
-                    historyComplete = complete || base?.historyComplete == true,
-                ),
+            val canonicalRoomId = persistHistoryPageInTransaction(
+                networkId,
+                request,
+                response,
+                expectedRoomId,
             )
-            bufferDao.setOldestFetchedTime(canonicalRoomId, oldest?.serverTime)
-            if (complete) bufferDao.markHistoryComplete(canonicalRoomId)
             PersistedHistoryPage(
                 roomId = canonicalRoomId,
                 inserted = (messageDao.countForNetwork(networkId) - messageCountBefore)
@@ -882,6 +816,120 @@ class EventProcessor @Inject constructor(
         }
         bufferStore.drainCommittedRoomMerges()
         persisted
+    }
+
+    /** Publish a complete multi-page synchronization as one observable Room invalidation. */
+    internal suspend fun persistHistoryPagesResult(
+        networkId: Long,
+        pages: List<HistoryPageWrite>,
+        expectedRoomId: RoomId,
+    ): PersistedHistoryPage = sequencer.withNetwork(networkId) {
+        require(pages.isNotEmpty()) { "history page batch is empty" }
+        val persisted = db.withTransaction {
+            val messageCountBefore = messageDao.countForNetwork(networkId)
+            var canonicalRoomId = expectedRoomId
+            pages.forEach { page ->
+                canonicalRoomId = persistHistoryPageInTransaction(
+                    networkId,
+                    page.request,
+                    page.response,
+                    canonicalRoomId,
+                )
+            }
+            PersistedHistoryPage(
+                roomId = canonicalRoomId,
+                inserted = (messageDao.countForNetwork(networkId) - messageCountBefore)
+                    .coerceAtLeast(0),
+            )
+        }
+        bufferStore.drainCommittedRoomMerges()
+        persisted
+    }
+
+    private suspend fun persistHistoryPageInTransaction(
+        networkId: Long,
+        request: ChatHistoryRequest,
+        response: ChatHistoryResponse.Messages,
+        expectedRoomId: RoomId?,
+    ): RoomId {
+        require(request.subcommand != ChatHistoryRequest.Subcommand.TARGETS) {
+            "TARGETS is not a message page"
+        }
+        val initialRoomId = expectedRoomId?.let { roomId ->
+            val room = bufferDao.observeById(roomId)
+                ?: error("history target $roomId no longer exists")
+            check(room.networkId == networkId) { "history target $roomId belongs to another network" }
+            room.id
+        } ?: historicalTargetBuffer(networkId, request.target)
+            ?: error("missing history target ${request.target}")
+        val initialCanonicalId = bufferDao.canonicalId(initialRoomId) ?: initialRoomId
+        val before = db.historyCursorDao().byRoom(initialCanonicalId)
+
+        if (response.events.isNotEmpty()) {
+            activeProtocolPageCursorWrites += networkId
+            try {
+                processEvent(
+                    networkId,
+                    IrcEvent.PlaybackBatch(
+                        source = IrcEvent.PlaybackSource.CHATHISTORY,
+                        target = request.target,
+                        items = response.events.mapIndexed { ordinal, event ->
+                            IrcEvent.PlaybackItem.from(event, ordinal)
+                        },
+                        placement = when (request.subcommand) {
+                            ChatHistoryRequest.Subcommand.BEFORE -> IrcEvent.PlaybackPlacement.BEFORE
+                            ChatHistoryRequest.Subcommand.AFTER -> IrcEvent.PlaybackPlacement.AFTER
+                            ChatHistoryRequest.Subcommand.AROUND -> IrcEvent.PlaybackPlacement.AUTOMATIC
+                            ChatHistoryRequest.Subcommand.BETWEEN -> IrcEvent.PlaybackPlacement.AFTER
+                            ChatHistoryRequest.Subcommand.LATEST -> IrcEvent.PlaybackPlacement.LATEST
+                            ChatHistoryRequest.Subcommand.TARGETS -> error("TARGETS is not a message page")
+                        },
+                    ),
+                    EventOrigin.LIVE,
+                    expectedHistoryRoomId = initialCanonicalId,
+                )
+            } finally {
+                activeProtocolPageCursorWrites -= networkId
+            }
+        }
+
+        val canonicalRoomId = bufferDao.canonicalId(initialCanonicalId) ?: initialCanonicalId
+        val after = db.historyCursorDao().byRoom(canonicalRoomId)
+        val base = after ?: before
+        val baseOldest = base?.let {
+            ChatHistoryReference(
+                it.oldestMsgid,
+                it.oldestServerTime,
+            )
+        }?.takeIf { it.msgid != null || it.serverTime != null }
+        val baseNewest = base?.let {
+            ChatHistoryReference(
+                it.newestMsgid,
+                it.newestServerTime,
+            )
+        }?.takeIf { it.msgid != null || it.serverTime != null }
+        // Union page metadata with the post-ingest cursor. The latter may now belong to a
+        // lower-id room winner and can contain extents that predate this request target.
+        val oldest = olderBoundary(baseOldest, response.oldest)
+        val newest = newerBoundary(baseNewest, response.newest)
+        val provesStart = request.subcommand == ChatHistoryRequest.Subcommand.BEFORE ||
+            (request.subcommand == ChatHistoryRequest.Subcommand.LATEST &&
+                request.bound1 == null && request.bound2 == null)
+        val complete = provesStart &&
+            (response.endOfHistory || response.primaryMessageCount == 0)
+        db.historyCursorDao().upsert(
+            HistoryCursorEntity(
+                roomId = canonicalRoomId,
+                newestMsgid = newest?.msgid,
+                newestServerTime = newest?.serverTime,
+                oldestMsgid = oldest?.msgid,
+                oldestServerTime = oldest?.serverTime,
+                historyComplete = complete || base?.historyComplete == true,
+            ),
+        )
+        bufferDao.setOldestFetchedTime(canonicalRoomId, oldest?.serverTime)
+        if (complete) bufferDao.markHistoryComplete(canonicalRoomId)
+        return canonicalRoomId
     }
 
     private suspend fun canonicalBatchMultiplicities(

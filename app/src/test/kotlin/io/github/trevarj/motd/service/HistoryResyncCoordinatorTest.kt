@@ -1451,6 +1451,68 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun multiPageSyncPublishesTimelineOnlyAfterTraversalSettles() = runTest {
+        val secondPageRequested = CompletableDeferred<Unit>()
+        val releaseSecondPage = CompletableDeferred<Unit>()
+        var page = 0
+        val source = FakeSource(pageLimit = 2) { request ->
+            when (page++) {
+                0 -> {
+                    assertEquals(ChatHistoryRequest.Subcommand.LATEST, request.subcommand)
+                    FakeResponse(listOf(message("m3", 3), message("m2", 2)))
+                }
+                else -> {
+                    assertEquals(ChatHistoryRequest.Subcommand.BEFORE, request.subcommand)
+                    secondPageRequested.complete(Unit)
+                    releaseSecondPage.await()
+                    FakeResponse(listOf(message("m1", 1)), endOfHistory = true)
+                }
+            }
+        }
+
+        val sync = async {
+            coordinator.resyncBuffer(
+                networkId,
+                bufferId,
+                "#chan",
+                source,
+                range = HistoryRefreshRange.ALL_AVAILABLE,
+            )
+        }
+        secondPageRequested.await()
+
+        // The first page is valid but the traversal and final ordering are not settled yet.
+        assertTrue(rows().isEmpty())
+
+        releaseSecondPage.complete(Unit)
+        assertEquals(HistoryResyncState.Updated(3), sync.await())
+        assertEquals(listOf("m3", "m2", "m1"), rows().mapNotNull { it.msgid })
+    }
+
+    @Test
+    fun failedTraversalStillPublishesCompletedPagesAtomically() = runTest {
+        val source = FakeSource(pageLimit = 2) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.LATEST ->
+                    FakeResponse(listOf(message("m2", 2), message("m1", 1)))
+                ChatHistoryRequest.Subcommand.BEFORE -> throw IOException("second page failed")
+                else -> error("unexpected ${request.subcommand}")
+            }
+        }
+
+        val result = coordinator.resyncBuffer(
+            networkId,
+            bufferId,
+            "#chan",
+            source,
+            range = HistoryRefreshRange.ALL_AVAILABLE,
+        )
+
+        assertTrue(result is HistoryResyncState.Failed)
+        assertEquals(listOf("m2", "m1"), rows().mapNotNull { it.msgid })
+    }
+
+    @Test
     fun unsupportedAndTimeoutAreExplicitRetryableResults() = runTest {
         val unsupported = FakeSource(supported = false) { FakeResponse(emptyList(), emptyList()) }
         assertEquals(

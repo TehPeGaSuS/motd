@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.prefs.NoopHistorySyncPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.CanonicalHistorySingleFlight
+import io.github.trevarj.motd.data.sync.HistoryPageWrite
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -32,6 +33,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
@@ -45,6 +47,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 
 enum class HistoryRefreshRange {
@@ -793,35 +796,40 @@ class HistoryResyncCoordinator @Inject constructor(
         }
         if (!isCurrent()) return staleConnection()
         return try {
-            val work = when (range) {
-                HistoryRefreshRange.MISSING -> syncTarget(
-                    networkId,
-                    bufferId,
-                    target,
-                    source,
-                    isCurrent,
-                    includeRecentOverlap = true,
-                    healSparseGaps = healSparseGaps,
-                )
-                HistoryRefreshRange.HOURS_24,
-                HistoryRefreshRange.DAYS_7,
-                HistoryRefreshRange.DAYS_30,
-                -> syncSince(
-                    networkId = networkId,
-                    bufferId = bufferId,
-                    target = target,
-                    source = source,
-                    isCurrent = isCurrent,
-                    cutoff = range.cutoffMillis(Instant.now().toEpochMilli())!!,
-                    range = range,
-                )
-                HistoryRefreshRange.ALL_AVAILABLE -> syncAllAvailable(
-                    networkId,
-                    bufferId,
-                    target,
-                    source,
-                    isCurrent,
-                )
+            val work = publishHistoryAtomically(networkId, bufferId) { pages ->
+                when (range) {
+                    HistoryRefreshRange.MISSING -> syncTarget(
+                        networkId,
+                        bufferId,
+                        target,
+                        source,
+                        isCurrent,
+                        includeRecentOverlap = true,
+                        healSparseGaps = healSparseGaps,
+                        pages = pages,
+                    )
+                    HistoryRefreshRange.HOURS_24,
+                    HistoryRefreshRange.DAYS_7,
+                    HistoryRefreshRange.DAYS_30,
+                    -> syncSince(
+                        networkId = networkId,
+                        bufferId = bufferId,
+                        target = target,
+                        source = source,
+                        isCurrent = isCurrent,
+                        cutoff = range.cutoffMillis(Instant.now().toEpochMilli())!!,
+                        range = range,
+                        pages = pages,
+                    )
+                    HistoryRefreshRange.ALL_AVAILABLE -> syncAllAvailable(
+                        networkId,
+                        bufferId,
+                        target,
+                        source,
+                        isCurrent,
+                        pages,
+                    )
+                }
             }
             work.status.toState(work.inserted)
         } catch (_: TimeoutCancellationException) {
@@ -844,6 +852,7 @@ class HistoryResyncCoordinator @Inject constructor(
         isCurrent: () -> Boolean,
         cutoff: Long,
         range: HistoryRefreshRange,
+        pages: MutableList<HistoryPageWrite>,
     ): WorkResult = paginateMessages(
         networkId = networkId,
         expectedRoomId = bufferId,
@@ -853,6 +862,7 @@ class HistoryResyncCoordinator @Inject constructor(
         subcommand = ChatHistoryRequest.Subcommand.AFTER,
         initialBoundary = Boundary(msgid = null, serverTime = cutoff),
         maxRequests = paginationRequestLimit,
+        pages = pages,
         onFetched = { fetched ->
             states.update { it + (bufferId to HistoryResyncState.Running(fetched, range.messageLimit)) }
         },
@@ -865,6 +875,7 @@ class HistoryResyncCoordinator @Inject constructor(
         target: String,
         source: HistorySource,
         isCurrent: () -> Boolean,
+        pages: MutableList<HistoryPageWrite>,
     ): WorkResult {
         val pageLimit = source.pageLimit()
         if (!isCurrent()) throw StaleConnectionException()
@@ -875,7 +886,7 @@ class HistoryResyncCoordinator @Inject constructor(
         )
         val latest = request(source, latestRequest)
         if (!isCurrent()) throw StaleConnectionException()
-        val latestInserted = ingest(networkId, bufferId, latestRequest, latest)
+        val latestInserted = stageHistoryPage(pages, latestRequest, latest)
         val fetched = latest.primaryMessageCount
         var highWater = latest.highWater()
         states.update { it + (bufferId to HistoryResyncState.Running(fetched, ALL_HISTORY_LIMIT)) }
@@ -927,6 +938,7 @@ class HistoryResyncCoordinator @Inject constructor(
             initialBoundary = oldest,
             maxRequests = paginationRequestLimit - 1,
             maxEvents = ALL_HISTORY_LIMIT - fetched,
+            pages = pages,
             onFetched = { pageFetched ->
                 states.update {
                     it + (bufferId to HistoryResyncState.Running(fetched + pageFetched, ALL_HISTORY_LIMIT))
@@ -1032,6 +1044,30 @@ class HistoryResyncCoordinator @Inject constructor(
         includeRecentOverlap: Boolean,
         reconnectBoundary: Boundary?,
         discoveredLatestMessageTime: Long?,
+    ): WorkResult = publishHistoryAtomically(networkId, bufferId) { pages ->
+        syncTargetUntilSettled(
+            networkId = networkId,
+            bufferId = bufferId,
+            target = target,
+            source = source,
+            isCurrent = isCurrent,
+            includeRecentOverlap = includeRecentOverlap,
+            reconnectBoundary = reconnectBoundary,
+            discoveredLatestMessageTime = discoveredLatestMessageTime,
+            pages = pages,
+        )
+    }
+
+    private suspend fun syncTargetUntilSettled(
+        networkId: Long,
+        bufferId: Long,
+        target: String,
+        source: HistorySource,
+        isCurrent: () -> Boolean,
+        includeRecentOverlap: Boolean,
+        reconnectBoundary: Boundary?,
+        discoveredLatestMessageTime: Long?,
+        pages: MutableList<HistoryPageWrite>,
     ): WorkResult {
         var boundary = reconnectBoundary
         var overlap = includeRecentOverlap
@@ -1048,6 +1084,7 @@ class HistoryResyncCoordinator @Inject constructor(
                 includeRecentOverlap = overlap,
                 reconnectBoundary = boundary,
                 discoveredLatestMessageTime = discoveredLatestMessageTime,
+                pages = pages,
             )
             inserted += result.inserted
             highWater = maxHighWater(highWater, result.highWater)
@@ -1093,6 +1130,7 @@ class HistoryResyncCoordinator @Inject constructor(
         reconnectBoundary: Boundary? = null,
         healSparseGaps: Boolean = false,
         discoveredLatestMessageTime: Long? = null,
+        pages: MutableList<HistoryPageWrite>,
     ): WorkResult {
         val pageLimit = source.pageLimit()
         val bufferId = knownBufferId
@@ -1123,7 +1161,9 @@ class HistoryResyncCoordinator @Inject constructor(
         // imported. In particular, older releases marked a network sync complete after using that
         // row as an AFTER cursor, leaving an existing bouncer channel permanently empty. Bypass
         // AFTER for a target with no stored chat content and seed it from LATEST instead.
-        val lacksStoredChat = !hasStoredChat(bufferId) && discardedBoundary == null
+        val lacksStoredChat = !hasStoredChat(bufferId) &&
+            pages.none { it.response.primaryMessageCount > 0 } &&
+            discardedBoundary == null
         val knownOldestTime = when {
             lacksStoredChat -> null
             protocolCursor != null -> protocolCursor.oldestServerTime
@@ -1153,6 +1193,7 @@ class HistoryResyncCoordinator @Inject constructor(
                 subcommand = ChatHistoryRequest.Subcommand.AFTER,
                 initialBoundary = pagingBoundary,
                 maxRequests = paginationRequestLimit,
+                pages = pages,
             )
             inserted += after.inserted
             highWater = maxHighWater(highWater, after.highWater)
@@ -1201,7 +1242,7 @@ class HistoryResyncCoordinator @Inject constructor(
             val latest = boundedLatest?.response ?: request(source, latestRequest)
             latestPage = latest
             if (!isCurrent()) throw StaleConnectionException()
-            inserted += ingest(networkId, bufferId, latestRequest, latest)
+            inserted += stageHistoryPage(pages, latestRequest, latest)
             if (!isCurrent()) throw StaleConnectionException()
             highWater = maxHighWater(highWater, latest.highWater())
         }
@@ -1253,6 +1294,7 @@ class HistoryResyncCoordinator @Inject constructor(
             secondBoundary = lower,
             maxRequests = MISSING_BACKFILL_PAGE_LIMIT,
             maxEvents = MISSING_BACKFILL_MESSAGE_LIMIT,
+            pages = pages,
         )
         return WorkResult(
             status.merge(between.status),
@@ -1282,6 +1324,7 @@ class HistoryResyncCoordinator @Inject constructor(
         maxRequests: Int,
         maxEvents: Int? = null,
         onFetched: (Int) -> Unit = {},
+        pages: MutableList<HistoryPageWrite>,
     ): WorkResult {
         require(
             subcommand == ChatHistoryRequest.Subcommand.AFTER ||
@@ -1333,7 +1376,7 @@ class HistoryResyncCoordinator @Inject constructor(
             usedSelectors += requested.selector.value
             val page = requested.response
             if (!isCurrent()) throw StaleConnectionException()
-            inserted += ingest(networkId, expectedRoomId, requested.request, page)
+            inserted += stageHistoryPage(pages, requested.request, page)
             if (!isCurrent()) throw StaleConnectionException()
             fetched += page.primaryMessageCount
             onFetched(fetched)
@@ -1597,6 +1640,54 @@ class HistoryResyncCoordinator @Inject constructor(
             page,
             expectedRoomId = expectedRoomId,
         ).inserted
+    }
+
+    /**
+     * Fetching remains outside Room, while every page collected for one room is committed in one
+     * transaction after traversal settles. This keeps Paging from observing partially reconciled
+     * rows or intermediate ordering. Already-validated pages are retained on timeout/cancellation,
+     * matching the previous eager-persistence behavior without exposing its incremental redraws.
+     */
+    private suspend fun publishHistoryAtomically(
+        networkId: Long,
+        expectedRoomId: RoomId,
+        block: suspend (MutableList<HistoryPageWrite>) -> WorkResult,
+    ): WorkResult {
+        val pages = mutableListOf<HistoryPageWrite>()
+        val work = try {
+            block(pages)
+        } catch (error: Exception) {
+            try {
+                publishHistoryPages(networkId, expectedRoomId, pages)
+            } catch (publishError: Exception) {
+                error.addSuppressed(publishError)
+            }
+            throw error
+        }
+        return work.copy(
+            inserted = publishHistoryPages(networkId, expectedRoomId, pages),
+        )
+    }
+
+    private suspend fun publishHistoryPages(
+        networkId: Long,
+        expectedRoomId: RoomId,
+        pages: List<HistoryPageWrite>,
+    ): Int {
+        if (pages.isEmpty()) return 0
+        return withContext(NonCancellable) {
+            processor.persistHistoryPagesResult(networkId, pages, expectedRoomId).inserted
+        }
+    }
+
+    private fun stageHistoryPage(
+        pages: MutableList<HistoryPageWrite>,
+        request: ChatHistoryRequest,
+        page: ChatHistoryResponse.Messages,
+    ): Int {
+        pages += HistoryPageWrite(request, page)
+        // Durable insert count is known only after the atomic publication deduplicates all pages.
+        return 0
     }
 
     private fun manualCancellationGeneration(bufferId: Long): Long =
