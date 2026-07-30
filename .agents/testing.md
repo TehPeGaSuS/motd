@@ -72,10 +72,10 @@ version, seed, case, and fixture in that module's
 - Do not run the headless emulator suite during routine local development. It
   materially slows the maintainer's workstation. Local verification stops at
   the relevant unit/integration tests, lint, and builds in the matrix above.
-- `.github/workflows/ci.yml` calls reusable `headless-core.yml`, which runs exactly
-  four isolated `@FastHeadlessE2e` methods on API34 Pixel 6 AOSP as a required gate.
-  A parallel managed-device job runs all 47 hermetic component instrumentation cases while
-  excluding the real-stack annotation.
+- `.github/workflows/ci.yml` owns the complete required gate. Its `headless` job runs exactly
+  four isolated `@FastHeadlessE2e` methods on API34 Pixel 6 AOSP, while the parallel
+  `component-ui` job runs all 47 hermetic component instrumentation cases and excludes the
+  real-stack annotation.
   Push the candidate commit and require the complete CI gate to pass before
   tagging a release.
 - Use a physical device for hardware- or OS-integration evidence: input latency,
@@ -83,8 +83,8 @@ version, seed, case, and fixture in that module's
   notifications and UnifiedPush, system pickers, certificates outside the
   fixture trust flow, and a real release installation. Only do this when the
   maintainer explicitly asks for device validation.
-- The manually runnable `.github/workflows/smoke.yml` exercises the same suite
-  with Gradle's managed-device path.
+- Run `./test/e2e/headless.sh fast` for the same focused suite locally; CI remains the only
+  hosted entry point so there is no second workflow to drift out of sync.
 - `test/e2e/component-suite.sh` is the canonical managed-device launcher for the hermetic
   Compose/component instrumentation tier. It enforces the expected case count so new tests cannot
   silently disappear from CI.

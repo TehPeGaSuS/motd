@@ -18,7 +18,7 @@ setup and teardown deliberately clear application data.
 | Native local stack + USB device | Manual feature work, physical-device checks, quick iteration | `./test/e2e/local-stack.sh` |
 | Native ZNC + Ergo stack | Scheduled ZNC playback, reconnect, SASL, and capability degradation | `./test/e2e/znc-stack.sh` |
 | Host-driven runbook | Broad UI interaction and crash sweep on a device or emulator | `./test/e2e/runbook.sh` |
-| Managed-device fast suite | Alternate/manual CI execution of the fast journeys | `.github/workflows/smoke.yml` |
+| Required hosted suites | Fast real-stack and managed-device component journeys | `.github/workflows/ci.yml` |
 | Managed-device component suite | All hermetic Compose/component instrumentation tests | `./test/e2e/component-suite.sh` |
 | Hermetic emulator run | Scheduled/manual exhaustive CI diagnostics | `.github/workflows/e2e.yml` |
 
@@ -28,8 +28,8 @@ canonical echo/send/reconnect row, an 80-row second-client unread/history recove
 and bootstrapped navigation/settings/bouncer smoke. Host UIAutomator remains scheduled/manual;
 the exhaustive A-H/J/R/I workflow is diagnostics, not a required fast phase.
 Release CI still runs its own unit, lint, and FOSS release build checks.
-The required reusable workflow also runs the 44 fixture-free component tests on a separate managed
-device, keeping UI-state coverage continuous without coupling those cases to Soju.
+The required workflow also runs the 47 fixture-free component tests on a separate managed device,
+keeping UI-state coverage continuous without coupling those cases to Soju.
 
 ## Prerequisites
 
