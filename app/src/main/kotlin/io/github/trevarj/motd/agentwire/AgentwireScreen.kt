@@ -1,7 +1,9 @@
 package io.github.trevarj.motd.agentwire
 
 import android.annotation.SuppressLint
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +23,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
@@ -373,11 +377,128 @@ private fun AgentwireTimelineCard(item: AgentwireTimelineItem, actionStatus: Str
                 )
             }
             if (item.running) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
-            if (!collapsible || expanded) item.body?.let {
-                Text(it, modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
+            if (!collapsible || expanded) {
+                if (item.kind.startsWith("tool.")) {
+                    AgentwireToolBody(item)
+                } else {
+                    item.body?.let {
+                        Text(
+                            it,
+                            modifier = Modifier.padding(top = 8.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
             }
             if (collapsible && !expanded) {
                 Text("Tap to expand", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@SuppressLint("HardcodedText")
+@Composable
+private fun AgentwireToolBody(item: AgentwireTimelineItem) {
+    val command = item.data.string("input")
+    val output = item.data.string("output")
+    val diff = item.data.string("diff")
+    val status = listOfNotNull(
+        item.data.string("status"),
+        item.data.int("exitCode")?.let { "exit $it" },
+    ).joinToString(" · ").ifBlank { null }
+
+    Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        command?.let { ToolTextSection("Command", it) }
+        output?.let { ToolTextSection("Output", it) }
+        diff?.let { AgentwireGitDiff(item.id, it) }
+        status?.let {
+            Text(it, style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace)
+        }
+        if (command == null && output == null && diff == null && status == null) {
+            item.body?.let {
+                SelectionContainer {
+                    Text(it, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+    }
+}
+
+@SuppressLint("HardcodedText")
+@Composable
+private fun ToolTextSection(label: String, content: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+        SelectionContainer {
+            Text(content, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+        }
+    }
+}
+
+private enum class DiffLineKind { HEADER, HUNK, ADDED, REMOVED, META, CONTEXT }
+
+private fun diffLineKind(line: String): DiffLineKind = when {
+    line.startsWith("diff --git ") || line.startsWith("index ") -> DiffLineKind.HEADER
+    line.startsWith("@@") -> DiffLineKind.HUNK
+    line.startsWith("+++") -> DiffLineKind.ADDED
+    line.startsWith("---") -> DiffLineKind.REMOVED
+    line.startsWith('+') -> DiffLineKind.ADDED
+    line.startsWith('-') -> DiffLineKind.REMOVED
+    line.startsWith("\\ No newline") -> DiffLineKind.META
+    else -> DiffLineKind.CONTEXT
+}
+
+@SuppressLint("HardcodedText")
+@Composable
+private fun AgentwireGitDiff(itemId: String, diff: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text("Diff", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+        Surface(
+            modifier = Modifier.fillMaxWidth().testTag("agentwire_diff_$itemId"),
+            shape = MaterialTheme.shapes.small,
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ) {
+            SelectionContainer {
+                Column(
+                    Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(vertical = 6.dp),
+                ) {
+                    diff.lines().forEach { line ->
+                        val kind = diffLineKind(line)
+                        val background = when (kind) {
+                            DiffLineKind.ADDED -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f)
+                            DiffLineKind.REMOVED -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
+                            DiffLineKind.HUNK -> MaterialTheme.colorScheme.secondaryContainer
+                            DiffLineKind.HEADER -> MaterialTheme.colorScheme.surfaceVariant
+                            else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                        }
+                        val color = when (kind) {
+                            DiffLineKind.ADDED -> MaterialTheme.colorScheme.onTertiaryContainer
+                            DiffLineKind.REMOVED -> MaterialTheme.colorScheme.onErrorContainer
+                            DiffLineKind.HUNK -> MaterialTheme.colorScheme.onSecondaryContainer
+                            DiffLineKind.META -> MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> MaterialTheme.colorScheme.onSurface
+                        }
+                        Text(
+                            text = line.ifEmpty { " " },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(background)
+                                .padding(horizontal = 8.dp, vertical = 1.dp),
+                            color = color,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = if (kind == DiffLineKind.HEADER || kind == DiffLineKind.HUNK) {
+                                FontWeight.SemiBold
+                            } else {
+                                FontWeight.Normal
+                            },
+                            softWrap = false,
+                        )
+                    }
+                }
             }
         }
     }

@@ -143,6 +143,107 @@ class AgentwireReducerTest {
     }
 
     @Test
+    fun `binding switch clears old activity and restores recent session outputs`() {
+        val reducer = AgentwireReducer()
+        var state = AgentwireUiState(
+            activeSid = "old",
+            cwd = "/work/old",
+            busy = true,
+            currentTid = "old-turn",
+            timeline = listOf(
+                AgentwireTimelineItem(
+                    "old-output", "assistant.completed", 1, "old", "old-turn",
+                    "Assistant", "Old session output",
+                ),
+            ),
+            actionStatus = mapOf("old-output" to "succeeded"),
+            historyLoading = true,
+            historyPage = "old-page",
+            historyBeforeAt = 1,
+            olderHistoryAvailable = true,
+        )
+
+        state = reducer.reduce(
+            state,
+            event(
+                "binding.changed",
+                sid = "new",
+                data = buildJsonObject {
+                    put("previousSid", "old")
+                    put("session", buildJsonObject {
+                        put("sid", "new")
+                        put("cwd", "/work/new")
+                    })
+                },
+            ),
+        )
+
+        assertEquals("new", state.activeSid)
+        assertEquals("/work/new", state.cwd)
+        assertTrue(state.timeline.isEmpty())
+        assertTrue(state.actionStatus.isEmpty())
+        assertFalse(state.historyLoading)
+        assertFalse(state.olderHistoryAvailable)
+        assertEquals(null, state.historyBeforeAt)
+
+        state = reducer.reduce(
+            state,
+            event(
+                "session.snapshot",
+                sid = "new",
+                tid = "new-turn",
+                data = buildJsonObject {
+                    put("busy", true)
+                    put("status", "running")
+                    put("recentOutputs", JsonArray(listOf(
+                        buildJsonObject {
+                            put("iid", "recent-1")
+                            put("tid", "prior-turn")
+                            put("phase", "final")
+                            put("content", "First recovered output")
+                        },
+                        buildJsonObject {
+                            put("iid", "recent-2")
+                            put("tid", "new-turn")
+                            put("phase", "commentary")
+                            put("content", "Current recovered update")
+                        },
+                    )))
+                },
+            ),
+        )
+
+        assertTrue(state.busy)
+        assertEquals("new-turn", state.currentTid)
+        assertEquals(
+            listOf("First recovered output", "Current recovered update"),
+            state.timeline.map { it.body },
+        )
+        assertTrue(state.timeline.all(AgentwireTimelineItem::historical))
+    }
+
+    @Test
+    fun `empty restored session snapshot shows current status`() {
+        val reducer = AgentwireReducer()
+        val state = reducer.reduce(
+            AgentwireUiState(activeSid = "s1"),
+            event(
+                "session.snapshot",
+                sid = "s1",
+                data = buildJsonObject {
+                    put("busy", false)
+                    put("status", "ready")
+                    put("recentOutputs", JsonArray(emptyList()))
+                },
+            ),
+        )
+
+        assertEquals("Session", state.timeline.single().title)
+        assertEquals("Session is ready for a prompt.", state.timeline.single().body)
+        assertFalse(state.timeline.single().historical)
+    }
+
+    @Test
     fun `history populates the timeline without replacing live session state`() {
         val reducer = AgentwireReducer()
         var state = AgentwireUiState(
@@ -271,6 +372,111 @@ class AgentwireReducerTest {
 
         state = reducer.reduce(state, event("request.resolved", rid = "r1"))
         assertTrue(state.requests.isEmpty())
+    }
+
+    @Test
+    fun `tool lifecycle is one labeled card with a compact output preview`() {
+        val reducer = AgentwireReducer()
+        var state = reducer.reduce(
+            AgentwireUiState(),
+            event(
+                "tool.started",
+                tid = "t1",
+                iid = "i1",
+                data = buildJsonObject {
+                    put("id", "i1")
+                    put("kind", "shell")
+                    put("label", "$ git status --short")
+                    put("input", "git status --short")
+                },
+            ),
+        )
+        state = reducer.reduce(
+            state,
+            event(
+                "tool.completed",
+                tid = "t1",
+                iid = "i1",
+                data = buildJsonObject {
+                    put("id", "i1")
+                    put("kind", "shell")
+                    put("label", "$ git status --short")
+                    put("input", "git status --short")
+                    put("output", "M src/agentwire/bridge.py")
+                    put("status", "completed")
+                    put("exitCode", 0)
+                    put("success", true)
+                },
+            ),
+        )
+
+        val tool = state.timeline.single()
+        assertEquals("tool.completed", tool.kind)
+        assertEquals("$ git status --short", tool.title)
+        assertTrue(tool.body.orEmpty().contains("Command\ngit status --short"))
+        assertTrue(tool.body.orEmpty().contains("Output\nM src/agentwire/bridge.py"))
+        assertTrue(tool.body.orEmpty().contains("Status: completed · exit 0"))
+    }
+
+    @Test
+    fun `plan updates replace the card and stop animating when complete`() {
+        val reducer = AgentwireReducer()
+        var state = reducer.reduce(
+            AgentwireUiState(),
+            event(
+                "plan.updated",
+                tid = "t1",
+                data = buildJsonObject {
+                    put("summary", "Implement the reducer")
+                    put("running", true)
+                    put("status", "inProgress")
+                    put("completedSteps", 1)
+                    put("totalSteps", 2)
+                },
+            ),
+        )
+
+        assertTrue(state.timeline.single().running)
+        assertEquals("Implement the reducer\n\n1 of 2 steps complete", state.timeline.single().body)
+
+        state = reducer.reduce(
+            state,
+            event(
+                "plan.updated",
+                tid = "t1",
+                data = buildJsonObject {
+                    put("summary", "Plan completed")
+                    put("running", false)
+                    put("status", "completed")
+                    put("completedSteps", 2)
+                    put("totalSteps", 2)
+                },
+            ),
+        )
+
+        assertEquals(1, state.timeline.size)
+        assertFalse(state.timeline.single().running)
+        assertEquals("Plan completed\n\n2 of 2 steps complete", state.timeline.single().body)
+    }
+
+    @Test
+    fun `turn completion stops a plan when the backend omits its final update`() {
+        val reducer = AgentwireReducer()
+        var state = reducer.reduce(
+            AgentwireUiState(),
+            event(
+                "plan.updated",
+                tid = "t1",
+                data = buildJsonObject {
+                    put("summary", "Run validation")
+                    put("running", true)
+                },
+            ),
+        )
+
+        state = reducer.reduce(state, event("turn.completed", tid = "t1"))
+
+        assertFalse(state.timeline.single { it.kind == "plan.updated" }.running)
     }
 
     @Test
