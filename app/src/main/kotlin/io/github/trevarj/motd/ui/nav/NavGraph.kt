@@ -19,6 +19,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import io.github.trevarj.motd.agentwire.AgentwireGateScreen
 import io.github.trevarj.motd.ui.about.AboutScreen
 import io.github.trevarj.motd.ui.channelinfo.ChannelInfoScreen
 import io.github.trevarj.motd.ui.channellist.ChannelListScreen
@@ -143,25 +144,30 @@ fun MotdNavGraph(
                     )
                 },
                 detailPane = { showBack ->
-                    ChatScreen(
-                        bufferId = route.bufferId,
+                    AgentwireGateScreen(
                         onBack = { navController.popBackStack() },
                         showBack = showBack,
-                        onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
-                        onOpenSearch = { navController.navigate(SearchRoute(it)) },
-                        onOpenImage = { navController.navigate(ImageViewerRoute(it)) },
-                        // /msg and /query replace the detail on wide layouts and push on phones.
-                        onOpenBuffer = {
-                            navController.openChat(ChatRoute(it), replaceCurrentChat = !showBack)
-                        },
-                        onOpenAudioOrigin = { origin ->
-                            navController.openChat(
-                                ChatRoute(origin.bufferId, origin.msgid, origin.serverTime, origin.eventId),
-                                replaceCurrentChat = !showBack,
-                            )
-                        },
-                        onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
-                    )
+                    ) {
+                        ChatScreen(
+                            bufferId = route.bufferId,
+                            onBack = { navController.popBackStack() },
+                            showBack = showBack,
+                            onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
+                            onOpenSearch = { navController.navigate(SearchRoute(it)) },
+                            onOpenImage = { navController.navigate(ImageViewerRoute(it)) },
+                            // /msg and /query replace the detail on wide layouts and push on phones.
+                            onOpenBuffer = {
+                                navController.openChat(ChatRoute(it), replaceCurrentChat = !showBack)
+                            },
+                            onOpenAudioOrigin = { origin ->
+                                navController.openChat(
+                                    ChatRoute(origin.bufferId, origin.msgid, origin.serverTime, origin.eventId),
+                                    replaceCurrentChat = !showBack,
+                                )
+                            },
+                            onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
+                        )
+                    }
                 },
             )
         }

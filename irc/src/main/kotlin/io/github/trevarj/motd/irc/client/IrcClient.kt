@@ -726,6 +726,16 @@ class IrcClient(
         return true
     }
 
+    /** Send a logical protocol message without allowing another coroutine to interleave lines. */
+    suspend fun sendAtomicallyIfConnected(messages: List<IrcMessage>): Boolean {
+        if (messages.isEmpty()) return false
+        val t = transport ?: return false
+        outboundLock.withLock {
+            messages.forEach { t.send(it.serialize()) }
+        }
+        return true
+    }
+
     /** Attach a label tag, suspend until the labeled response/ack batch completes. */
     suspend fun sendLabeled(msg: IrcMessage): List<IrcMessage> {
         return sendLabeledResponse(msg).messages

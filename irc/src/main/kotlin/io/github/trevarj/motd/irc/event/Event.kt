@@ -26,6 +26,8 @@ data class MessageContext(
     val label: String?,       // labeled-response echo correlation
     val serverTimeSource: ServerTimeSource = ServerTimeSource.TAG,
     val isHistoryContext: Boolean = false,
+    /** Client-only IRCv3 tags, retained for feature-local protocol consumers. */
+    val clientTags: Map<String, String> = emptyMap(),
 )
 
 sealed interface IrcEvent {

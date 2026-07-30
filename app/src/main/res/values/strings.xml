@@ -330,6 +330,11 @@
     <string name="about_legal_notice">Free software with no warranty. You may share and modify it under the GNU GPL v3 or later.</string>
     <string name="about_diagnostic_logging">Diagnostic logging</string>
     <string name="about_diagnostic_logging_summary">Records bounded technical traces for connections, sync, push, and message handling. Message contents, credentials, and personal identifiers are excluded. Turning it on starts a fresh log.</string>
+    <string name="about_labs">Labs</string>
+    <string name="about_agentwire">Agentwire harness</string>
+    <string name="about_agentwire_summary">Show the experimental agent harness in channels activated by an Agentwire v1 topic. Off by default.</string>
+    <string name="about_agentwire_repo">Repo</string>
+    <string name="about_agentwire_url" translatable="false">https://github.com/trevarj/agentwire</string>
     <string name="about_export_diagnostics">Export diagnostic log</string>
     <string name="about_export_diagnostics_summary">Save the captured trace as a text file to share when reporting a problem.</string>
     <string name="about_export_diagnostics_success">Diagnostic log saved.</string>
