@@ -2519,7 +2519,7 @@ private fun ChatContentLargeTextPreview() {
 }
 
 @Composable
-private fun VoiceComposerPanel(
+internal fun VoiceComposerPanel(
     state: VoiceMessageUiState,
     playbackState: AudioPlaybackState,
     onDelete: () -> Unit,
@@ -2566,7 +2566,10 @@ private fun VoiceComposerPanel(
                     }
                 } else {
                     Column(
-                        modifier = Modifier.testTag("voice_lock_hint"),
+                        // Match IconButton's 48 dp slot so locking swaps controls without
+                        // changing the recording snackbar's height.
+                        modifier = Modifier.size(48.dp).testTag("voice_lock_hint"),
+                        verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Icon(Icons.Outlined.Lock, null, modifier = Modifier.size(20.dp))
