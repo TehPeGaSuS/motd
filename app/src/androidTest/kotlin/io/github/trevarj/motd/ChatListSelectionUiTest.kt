@@ -21,10 +21,12 @@ import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
+import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
 import io.github.trevarj.motd.ui.chatlist.ChatListState
+import io.github.trevarj.motd.ui.chatlist.ChatListInvitation
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
 import io.github.trevarj.motd.ui.chatlist.ArchiveAccessibilityAnnouncement
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -44,6 +46,59 @@ class ChatListSelectionUiTest {
 
         compose.onNodeWithTag("chatlist_row_1")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
+    }
+
+    @Test fun invitation_folder_handles_join_and_ignore_then_retains_dimmed_resolutions() {
+        val first = invitation(11, "#one")
+        val second = invitation(12, "#two")
+        val state = mutableStateOf(
+            ChatListState(
+                rows = listOf(row()),
+                invitations = listOf(first, second),
+                networks = listOf(network()),
+                loading = false,
+            ),
+        )
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatListContent(
+                    state = state.value,
+                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
+                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
+                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                    onAcceptInvitation = { id ->
+                        state.value = state.value.copy(
+                            invitations = state.value.invitations.map {
+                                if (it.messageId == id) it.copy(state = InviteState.JOINED) else it
+                            },
+                        )
+                    },
+                    onIgnoreInvitation = { id ->
+                        state.value = state.value.copy(
+                            invitations = state.value.invitations.map {
+                                if (it.messageId == id) it.copy(state = InviteState.DISMISSED) else it
+                            },
+                        )
+                    },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chatlist_invitations_folder").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Invitations").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_invitation_join_11").performClick()
+        compose.onNodeWithTag("chatlist_invitation_ignore_12").performClick()
+
+        compose.onNodeWithTag("chatlist_invitation_11")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Joined"))
+        compose.onNodeWithTag("chatlist_invitation_12")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Ignored"))
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_invitation_join_11").fetchSemanticsNodes().size)
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_invitation_ignore_12").fetchSemanticsNodes().size)
+
+        compose.onNodeWithTag("chatlist_selection_close").performClick()
+        compose.onNodeWithTag("chatlist_invitations_folder").assertIsDisplayed()
+        compose.onNodeWithText("All invitations handled").assertIsDisplayed()
     }
 
     @Test fun collapsing_fools_clears_their_selection_and_contextual_actions() {
@@ -257,6 +312,18 @@ class ChatListSelectionUiTest {
         bufferId = 1, networkId = 1, networkName = "network", displayName = "alice",
         type = BufferType.QUERY, pinned = false, muted = false, lastMessageText = "hello",
         lastMessageSender = "alice", lastMessageTime = 1, unreadCount = 0, mentionCount = 0,
+    )
+
+    private fun invitation(id: Long, channel: String) = ChatListInvitation(
+        messageId = id,
+        bufferId = id + 100,
+        networkId = 1,
+        networkName = "network",
+        inviter = "alice",
+        channel = channel,
+        text = "alice invited you to $channel",
+        state = InviteState.PENDING,
+        serverTime = id,
     )
 
     private fun network() = NetworkEntity(

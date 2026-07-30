@@ -6,7 +6,7 @@ compact required real-stack gate, and a broad nightly choreography sweep.
 | Behavior and state class | Continuous evidence | Broad or specialized evidence |
 | --- | --- | --- |
 | protocol parsing, playback mapping, canonical storage, ordering, and dedup | seeded JVM tests in `:irc:test` and `:app:testFossDebugUnitTest` | larger nightly generated-test shards |
-| message bubbles, actions, audio, replies, placeholders, sync/error states | 46 fixture-free cases via `component-suite.sh`, including full-list variants and Paging replacement | phases C, G, and conditional H |
+| message bubbles, actions, audio, replies, placeholders, sync/error states | 47 fixture-free cases via `component-suite.sh`, including full-list variants and Paging replacement | phases C, G, and conditional H |
 | chat-list badges, presence, selection, archive, drawer, and empty states | component suite | phases B and I |
 | onboarding, TLS trust, Soju import, child readiness | required real-stack onboarding journey | phase A |
 | send/echo persistence, reconnect identity, and audio upload rendering | required real-stack canonical-send journey | phases C and R |
@@ -14,6 +14,7 @@ compact required real-stack gate, and a broad nightly choreography sweep.
 | composer, autocomplete, actions, reactions, replies, search, and scroll FAB | component/unit tests | phase C |
 | channel info, membership, friends/fools, pin/mute, and part confirmation | unit tests | phase D |
 | channel browse, search, join, and empty/loading/error states | component/unit tests | phase E against a registered browser-only fixture channel |
+| invitation discovery without notifications, accept/ignore actions, and retained resolved state | component/DAO tests | phase V through a direct Ergo sender and Soju downstream |
 | settings, theme, palette, density, backup controls, and process-stable theme content | component/unit tests plus required navigation smoke | phases F and G |
 | Soju child/control-center routing and authorization-dependent panels | required navigation smoke plus unit tests | phase J and socket control probe |
 | ZNC SASL, two-client routing, detached gaps, native playback, and CHATHISTORY degradation | protocol/client unit tests | scheduled `znc-stack.sh probe` job |

@@ -4,6 +4,7 @@ import androidx.paging.PagingData
 import androidx.paging.RemoteMediator
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.ChatListRow
+import io.github.trevarj.motd.data.db.InvitationEventRow
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.NetworkBufferToolRow
@@ -50,6 +51,8 @@ object NoopNetworkIgnoreRepository : NetworkIgnoreRepository {
 
 interface BufferRepository {
     fun observeChatList(): Flow<List<ChatListRow>>
+    /** Canonical live invitation events, including resolved rows retained for user context. */
+    fun observeInvitations(): Flow<List<InvitationEventRow>> = flowOf(emptyList())
     /** Normalized CHANNEL names confirmed by EventProcessor self-JOIN persistence. */
     fun observeJoinedChannelNames(networkId: Long): Flow<Set<String>> = flowOf(emptySet())
     fun observeBuffer(id: Long): Flow<BufferEntity?>

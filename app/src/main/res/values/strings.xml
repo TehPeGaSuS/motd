@@ -888,6 +888,27 @@
     <string name="chatlist_archived_reveal_action">Reveal archived chats</string>
     <string name="chatlist_archived_revealed_announcement">Archived chats revealed</string>
     <string name="chatlist_archived_hidden_announcement">Archived chats hidden</string>
+    <string name="chatlist_invitations">Invitations</string>
+    <string name="chatlist_invitations_empty">No invitations</string>
+    <string name="chatlist_invitations_handled">All invitations handled</string>
+    <plurals name="chatlist_invitations_count">
+        <item quantity="one">Invitations (%1$d)</item>
+        <item quantity="other">Invitations (%1$d)</item>
+    </plurals>
+    <plurals name="chatlist_invitations_pending_count">
+        <item quantity="one">%1$d awaiting response</item>
+        <item quantity="other">%1$d awaiting response</item>
+    </plurals>
+    <string name="chatlist_invitation_title">Invitation to %1$s</string>
+    <string name="chatlist_invitation_from">Invited by %1$s on %2$s</string>
+    <string name="chatlist_invitation_join">Join</string>
+    <string name="chatlist_invitation_ignore">Ignore</string>
+    <string name="chatlist_invitation_pending">Awaiting response</string>
+    <string name="chatlist_invitation_joining">Joining…</string>
+    <string name="chatlist_invitation_joined">Joined</string>
+    <string name="chatlist_invitation_ignored">Ignored</string>
+    <string name="chatlist_invitation_failed">Join failed</string>
+    <string name="chatlist_invitation_failed_hint">Could not join. You can retry or ignore this invitation.</string>
     <string name="bouncer_network_preset">Network preset</string>
     <string name="channel_list_joining">Joining</string>
     <string name="channel_list_joined">Joined</string>

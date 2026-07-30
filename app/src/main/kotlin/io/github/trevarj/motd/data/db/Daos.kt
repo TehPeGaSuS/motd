@@ -569,6 +569,18 @@ data class ChatListRow(
     val archived: Boolean = false,
 )
 
+/** Canonical invitation projection for the chat-list inbox. Payload decoding stays above Room. */
+data class InvitationEventRow(
+    val messageId: Long,
+    val bufferId: Long,
+    val networkId: Long,
+    val networkName: String,
+    val text: String,
+    val eventPayload: String,
+    val inviteState: InviteState,
+    val serverTime: Long,
+)
+
 data class BufferTargetRow(val id: Long, val name: String)
 
 data class NetworkBufferToolRow(
@@ -625,6 +637,25 @@ interface MessageDao {
            ) LIMIT 1""",
     )
     suspend fun byCanonicalId(id: Long): MessageEntity?
+
+    @Query(
+        """SELECT m.id AS messageId, m.bufferId AS bufferId, b.networkId AS networkId,
+                  n.name AS networkName, m.text AS text, m.eventPayload AS eventPayload,
+                  m.inviteState AS inviteState, m.serverTime AS serverTime
+           FROM messages m
+           JOIN buffers b ON b.id = m.bufferId
+           JOIN networks n ON n.id = b.networkId
+           LEFT JOIN event_redirects redirect ON redirect.losingEventId = m.id
+           WHERE m.kind = 'INVITE' AND m.eventPayload IS NOT NULL
+             AND m.inviteState IN ('PENDING', 'JOINING', 'FAILED', 'JOINED', 'DISMISSED')
+             AND redirect.losingEventId IS NULL
+             AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL
+           ORDER BY CASE m.inviteState
+                      WHEN 'PENDING' THEN 0 WHEN 'JOINING' THEN 0 WHEN 'FAILED' THEN 0 ELSE 1
+                    END,
+                    m.serverTime DESC, m.timelineOrder DESC, m.id DESC""",
+    )
+    fun observeInvitations(): Flow<List<InvitationEventRow>>
 
     @Query(
         """SELECT * FROM messages

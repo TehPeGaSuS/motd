@@ -1130,6 +1130,60 @@ phase_j() {
 }
 
 # ==========================================================================
+# Phase V — persisted invitation inbox
+# ==========================================================================
+phase_v() {
+  echo ""
+  echo "${_C_CYA}########## Phase V: invitation inbox ##########${_C_RST}"
+  # Soju keeps upstream channel membership across app reinstalls. Give every journey fresh targets
+  # so rerunning against a retained local stack cannot turn an INVITE into ERR_USERONCHANNEL.
+  local invite_token="$$-$(date +%s)"
+  local ignored_channel="##motd-invite-ignore-$invite_token"
+  local joined_channel="##motd-invite-join-$invite_token"
+
+  step "Receive an invitation without opening its notification"
+  reset_to_chatlist || return 1
+  reconnect_stack invite-check "$ignored_channel"
+  wait_for_text "Invitations (1)" 15 || true
+  assert_text "Invitations (1)"
+  assert_tag_present chatlist_invitations_folder
+  assert_no_crash
+
+  step "Ignore from the chat-list invitation inbox"
+  tap_tag chatlist_invitations_folder
+  wait_for_text "Invitation to $ignored_channel" 10 || true
+  assert_text "Invitation to $ignored_channel"
+  tap_tag_prefix chatlist_invitation_ignore_
+  wait_for_text "Ignored" 10 || true
+  assert_text "Ignored"
+  assert_tag_prefix_count chatlist_invitation_ 1
+  assert_no_crash
+
+  step "Receive and join a second invitation from the inbox"
+  adb_shell input keyevent 4
+  wait_for_desc "New conversation" 8 || return 1
+  reconnect_stack invite-check "$joined_channel"
+  wait_for_text "Invitations (2)" 15 || true
+  assert_text "Invitations (2)"
+  tap_tag chatlist_invitations_folder
+  wait_for_text "Invitation to $joined_channel" 10 || true
+  assert_text "Invitation to $joined_channel"
+  tap_tag_prefix chatlist_invitation_join_
+  wait_for_text "Joined" 15 || true
+  assert_text "Joined"
+  assert_text "Ignored"
+  assert_no_crash
+
+  step "Keep resolved invitations dimmed and retain the joined channel"
+  adb_shell input keyevent 4
+  wait_for_desc "New conversation" 8 || return 1
+  assert_text "All invitations handled"
+  assert_text "$joined_channel"
+  assert_tag_present chatlist_invitations_folder
+  assert_no_crash
+}
+
+# ==========================================================================
 # Phase K — opt-in physical-device UnifiedPush verification
 # ==========================================================================
 phase_k() {
@@ -1558,12 +1612,12 @@ main() {
   # leaves durable device state (networks, joined channel). Every later phase begins from the
   # chat-list anchor via reset_to_chatlist, so a subset run — e.g. E2E_PHASES="c" — picks up
   # where a prior full run left off without repeating onboarding (rapid dev cycle).
-  # J and R depend on the connected state from A and must precede I, which clears app data.
-  local phases="${E2E_PHASES:-a b c d e f g h j r i}"
+  # J, V, and R depend on the connected state from A and must precede I, which clears app data.
+  local phases="${E2E_PHASES:-a b c d e f g h j v r i}"
   local p phase_class phase_rc failures_before findings
   for p in $phases; do
     case "$p" in
-      a|b|c|d|e|f|g|i|j|r|s) phase_class=required ;;
+      a|b|c|d|e|f|g|i|j|r|s|v) phase_class=required ;;
       h|k) phase_class=conditional ;;
       *) fail "unknown phase '$p'"; continue ;;
     esac
@@ -1596,6 +1650,7 @@ main() {
       h) phase_h ;;
       i) phase_i ;;
       j) phase_j ;;
+      v) phase_v ;;
       k) phase_k ;;
       r) phase_r ;;
       s) phase_s ;;

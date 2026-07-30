@@ -74,7 +74,7 @@ version, seed, case, and fixture in that module's
   the relevant unit/integration tests, lint, and builds in the matrix above.
 - `.github/workflows/ci.yml` calls reusable `headless-core.yml`, which runs exactly
   four isolated `@FastHeadlessE2e` methods on API34 Pixel 6 AOSP as a required gate.
-  A parallel managed-device job runs all 44 hermetic component instrumentation cases while
+  A parallel managed-device job runs all 47 hermetic component instrumentation cases while
   excluding the real-stack annotation.
   Push the candidate commit and require the complete CI gate to pass before
   tagging a release.
@@ -93,7 +93,7 @@ version, seed, case, and fixture in that module's
   managed-device smoke workflow. Do not duplicate its annotation or fixture
   arguments in workflow YAML.
 - Use `test/e2e/runbook.sh` for multi-screen interaction and crash sweeps. The
-  local headless `full` command runs A-H/J/R before teardown phase I on the isolated emulator;
+  local headless `full` command runs A-H/J/V/R before teardown phase I on the isolated emulator;
   the hermetic Docker stack is used by the scheduled/manual CI workflow.
 - Use `:app:assembleFossE2e` only for x86_64 emulator testing. It deliberately
   excludes the arm64-only embedded libbox core and is not representative of

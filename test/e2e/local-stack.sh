@@ -31,7 +31,7 @@
 #   ./test/e2e/local-stack.sh tls-fingerprint # lowercase SHA-256 of fixture certificate
 #   ./test/e2e/local-stack.sh control-check # BouncerServ admin/non-admin and mutation proof
 #   ./test/e2e/local-stack.sh read-marker-check # two-client marker broadcast/reconnect proof
-#   ./test/e2e/local-stack.sh invite-check # direct sender -> soju downstream INVITE proof
+#   ./test/e2e/local-stack.sh invite-check [CHANNEL] # direct sender -> soju downstream INVITE proof
 #   ./test/e2e/local-stack.sh ready-up   # start scripted IRCv3 Ready fixture + soju network
 #   ./test/e2e/local-stack.sh ready-check # direct and soju wire proofs for Ready features
 #   ./test/e2e/local-stack.sh ready-down # remove scripted fixture network + process
@@ -453,11 +453,13 @@ soju_read_marker_check() {
 }
 
 invite_check() {
+  local channel="${1:-##motdinvite}"
   [ -S "$ADMIN_SOCK" ] || die "soju admin socket not found; run '$0 up' first"
   log "running direct Ergo sender -> soju downstream invitation proof"
   python3 "$REPO/test/e2e/fixtures/invite-delivery-probe.py" \
     --ergo-port "$ERGO_PORT" --soju-port "$SOJU_PORT" \
-    --username "$SOJU_USER/$NETWORK_NAME" --password "$SOJU_PASS" --target "$APP_NICK"
+    --username "$SOJU_USER/$NETWORK_NAME" --password "$SOJU_PASS" --target "$APP_NICK" \
+    --channel "$channel"
 }
 
 ready_up() {
@@ -940,7 +942,7 @@ case "$CMD" in
   tls-fingerprint) tls_fingerprint ;;
   read-marker-check) read_marker_check ;;
   soju-read-marker-check) soju_read_marker_check ;;
-  invite-check) invite_check ;;
+  invite-check) invite_check "${2:-}" ;;
   ready-up) ready_up ;;
   ready-check) ready_check ;;
   ready-down) ready_down ;;
