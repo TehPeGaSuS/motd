@@ -228,6 +228,7 @@ android {
                     device = "Pixel 6"
                     apiLevel = 34
                     systemImageSource = "aosp"
+                    testedAbi = "x86_64"
                 }
             }
         }
@@ -333,6 +334,7 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.compose.ui.test.junit4)
+    add("e2eImplementation", libs.compose.ui.test.manifest)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.androidx.test.junit)

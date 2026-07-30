@@ -2,6 +2,7 @@ package io.github.trevarj.motd
 
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -197,6 +198,10 @@ class ChatListSelectionUiTest {
             }
         }
 
+        val revealAction = compose.onNodeWithTag("chatlist_archive_pull_target")
+            .fetchSemanticsNode().config[SemanticsActions.CustomActions]
+            .single { it.label == "Reveal archived chats" }
+        compose.runOnIdle { assertEquals(true, revealAction.action()) }
         compose.onNodeWithText("Archived Chats (1)").performTouchInput { click() }
         compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeLeft() }
 
