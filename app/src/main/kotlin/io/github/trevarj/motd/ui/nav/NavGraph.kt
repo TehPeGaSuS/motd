@@ -20,6 +20,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.trevarj.motd.agentwire.AgentwireGateScreen
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.ui.about.AboutScreen
 import io.github.trevarj.motd.ui.channelinfo.ChannelInfoScreen
 import io.github.trevarj.motd.ui.channellist.ChannelListScreen
@@ -53,6 +54,7 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 // Compose trees while the first Room and Paging emissions arrive.
 @Composable
 fun MotdNavGraph(
+    appearance: AppearanceConfig,
     navController: NavHostController = rememberNavController(),
     // Notification-tap deep-link: open the buffer and jump to the message. Null when absent.
     notificationTarget: NotificationTarget? = null,
@@ -150,6 +152,7 @@ fun MotdNavGraph(
                     ) {
                         ChatScreen(
                             bufferId = route.bufferId,
+                            appearance = appearance,
                             onBack = { navController.popBackStack() },
                             showBack = showBack,
                             onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },

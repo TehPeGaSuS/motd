@@ -46,6 +46,7 @@ import io.github.trevarj.motd.ui.components.CertPromptViewModel
 import io.github.trevarj.motd.ui.components.CertTrustDialog
 import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
+import io.github.trevarj.motd.ui.chat.PreloadChatWallpaperTile
 import io.github.trevarj.motd.ui.nav.MotdNavGraph
 import io.github.trevarj.motd.ui.nav.NotificationTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -138,7 +139,9 @@ class MainActivity : ComponentActivity() {
                             .semantics { testTagsAsResourceId = true },
                         color = MaterialTheme.colorScheme.background,
                     ) {
+                        PreloadChatWallpaperTile(appearance.wallpaper)
                         MotdNavGraph(
+                            appearance = appearance,
                             navController = navController,
                             notificationTarget = notificationTarget,
                             onNotificationTargetHandled = ::consumeNotificationTarget,

@@ -34,7 +34,6 @@ import io.github.trevarj.motd.data.repo.NoopNetworkIgnoreRepository
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.SettingsRepository
-import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.ReplyConfig
@@ -197,9 +196,7 @@ class ChatViewModel @Inject constructor(
     private val userDao: UserDao,
     private val networkIgnoreRepository: NetworkIgnoreRepository = NoopNetworkIgnoreRepository,
     contentPreviewPrefs: ContentPreviewPrefs,
-    appearancePrefs: AppearancePrefs,
 ) : ViewModel() {
-    val appearance = appearancePrefs.config
     val contentPreviews: StateFlow<ContentPreviewConfig> = contentPreviewPrefs.config
         // Start closed until DataStore emits, so a persisted opt-out cannot race initial composition.
         .stateIn(

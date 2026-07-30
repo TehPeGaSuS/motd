@@ -164,6 +164,7 @@ import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
@@ -259,6 +260,7 @@ internal fun dismissKeyboardBeforeNavigating(
 @Composable
 fun ChatScreen(
     bufferId: Long,
+    appearance: AppearanceConfig,
     onBack: () -> Unit = {},
     showBack: Boolean = true,
     onOpenChannelInfo: (Long) -> Unit = {},
@@ -354,9 +356,6 @@ fun ChatScreen(
     // Timeline behavioral settings collected separately from ChatState (plans/13 §2.5).
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val hiddenFoolsRevealed by viewModel.hiddenFoolsRevealed.collectAsStateWithLifecycle()
-    val appearance by viewModel.appearance.collectAsStateWithLifecycle(
-        initialValue = io.github.trevarj.motd.data.prefs.AppearanceConfig(),
-    )
     val contentPreviews by viewModel.contentPreviews.collectAsStateWithLifecycle()
     val audioPlaybackState by viewModel.audioPlaybackState.collectAsStateWithLifecycle()
     val audioWaveforms by viewModel.audioWaveforms.collectAsStateWithLifecycle()

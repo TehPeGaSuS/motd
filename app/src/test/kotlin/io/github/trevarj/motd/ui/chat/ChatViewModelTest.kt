@@ -20,11 +20,8 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.UserEntity
-import io.github.trevarj.motd.data.prefs.AppearanceConfig
-import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
-import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.FoolsMode
@@ -1054,7 +1051,6 @@ class ChatViewModelTest {
             historyResyncCoordinator = history,
             userDao = db.userDao(),
             contentPreviewPrefs = FakeContentPreviewPrefs(),
-            appearancePrefs = FakeAppearancePrefs(),
             audioMetadataRepository = FakeAudioMetadataRepository(),
             audioPlaybackController = FakeAudioPlaybackController(),
         )
@@ -1337,16 +1333,6 @@ class ChatViewModelTest {
         override val config = MutableStateFlow(ContentPreviewConfig())
         override suspend fun setShowImages(show: Boolean) = Unit
         override suspend fun setShowLinkPreviews(show: Boolean) = Unit
-    }
-
-    private class FakeAppearancePrefs : AppearancePrefs {
-        override val config = MutableStateFlow(AppearanceConfig())
-        override suspend fun setTheme(theme: ColorThemePreset) = Unit
-        override suspend fun setTrueBlack(enabled: Boolean) = Unit
-        override suspend fun setFollowSystem(enabled: Boolean) = Unit
-        override suspend fun setWallpaper(selection: io.github.trevarj.motd.data.prefs.WallpaperSelection) = Unit
-        override suspend fun setUiFontScale(percent: Int) = Unit
-        override suspend fun setConversationFontScale(percent: Int) = Unit
     }
 
     private class FakeAudioMetadataRepository : AudioMetadataRepository {
