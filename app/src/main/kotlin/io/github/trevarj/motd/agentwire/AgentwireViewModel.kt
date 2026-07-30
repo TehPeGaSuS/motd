@@ -174,6 +174,7 @@ class AgentwireViewModel @Inject constructor(
             )
         }
         listWorkspaces()
+        listSessions()
     }
     fun expandWorkspace(path: String, hasChildren: Boolean = true) {
         if (hasChildren) listWorkspaces(path)

@@ -101,6 +101,32 @@ class AgentwireReducerTest {
     }
 
     @Test
+    fun `session runtime status is distinct from the attached binding`() {
+        val running = AgentwireListItem(
+            id = "running",
+            title = "Running",
+            raw = buildJsonObject { put("busy", true) },
+        )
+        val waiting = AgentwireListItem(
+            id = "waiting",
+            title = "Waiting",
+            raw = buildJsonObject {
+                put("busy", true)
+                put("flags", JsonArray(listOf(JsonPrimitive("waitingOnApproval"))))
+            },
+        )
+        val idle = AgentwireListItem(
+            id = "idle",
+            title = "Idle",
+            raw = buildJsonObject { put("busy", false) },
+        )
+
+        assertEquals("Running", agentwireSessionRuntimeStatus(running))
+        assertEquals("Waiting", agentwireSessionRuntimeStatus(waiting))
+        assertEquals(null, agentwireSessionRuntimeStatus(idle))
+    }
+
+    @Test
     fun `continued session pages append within the same directory`() {
         val reducer = AgentwireReducer()
         var state = reducer.reduce(AgentwireUiState(), event("session.page", data = buildJsonObject {
@@ -234,6 +260,19 @@ class AgentwireReducerTest {
                             put("content", "Current recovered update")
                         },
                     )))
+                    put("recentActivity", JsonArray(listOf(
+                        buildJsonObject {
+                            put("kind", "tool.started")
+                            put("iid", "tool-1")
+                            put("tid", "new-turn")
+                            put("data", buildJsonObject {
+                                put("id", "tool-1")
+                                put("kind", "shell")
+                                put("label", "\$ git status --short")
+                                put("input", "git status --short")
+                            })
+                        },
+                    )))
                 },
             ),
         )
@@ -241,9 +280,11 @@ class AgentwireReducerTest {
         assertTrue(state.busy)
         assertEquals("new-turn", state.currentTid)
         assertEquals(
-            listOf("First recovered output", "Current recovered update"),
+            listOf("First recovered output", "Current recovered update", "Command\ngit status --short"),
             state.timeline.map { it.body },
         )
+        assertEquals(listOf("assistant.completed", "assistant.completed", "tool.started"), state.timeline.map { it.kind })
+        assertTrue(state.timeline.last().running)
         assertTrue(state.timeline.all(AgentwireTimelineItem::historical))
     }
 

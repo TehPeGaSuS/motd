@@ -415,7 +415,8 @@ private fun restoredSessionTimeline(
     data: JsonObject,
 ): List<AgentwireTimelineItem> {
     val outputs = data.array("recentOutputs").orEmpty().mapNotNull { it as? JsonObject }
-    if (outputs.isEmpty()) {
+    val activity = data.array("recentActivity").orEmpty().mapNotNull { it as? JsonObject }
+    if (outputs.isEmpty() && activity.isEmpty()) {
         val status = when (data.string("status")) {
             "waiting" -> "Waiting for your input."
             "running" -> "Codex is currently working."
@@ -436,7 +437,7 @@ private fun restoredSessionTimeline(
             ),
         )
     }
-    return outputs.mapIndexed { index, output ->
+    val restoredOutputs = outputs.mapIndexed { index, output ->
         AgentwireTimelineItem(
             id = "restored:${envelope.sid}:${output.string("iid") ?: index}",
             kind = "assistant.completed",
@@ -449,6 +450,24 @@ private fun restoredSessionTimeline(
             data = output,
         )
     }
+    val restoredActivity = activity.mapIndexed { index, item ->
+        val kind = item.string("kind") ?: "tool.started"
+        val itemData = item.obj("data") ?: JsonObject(emptyMap())
+        AgentwireTimelineItem(
+            id = "restored:${envelope.sid}:${item.string("iid") ?: index}",
+            kind = kind,
+            at = envelope.at + outputs.size + index,
+            sid = envelope.sid,
+            tid = item.string("tid"),
+            title = itemData.string("label") ?: itemData.string("kind") ?: "Tool",
+            body = toolPreview(itemData),
+            running = kind != "tool.completed",
+            success = itemData.bool("success"),
+            historical = true,
+            data = itemData,
+        )
+    }
+    return restoredOutputs + restoredActivity
 }
 
 private fun List<AgentwireTimelineItem>.upsert(item: AgentwireTimelineItem): List<AgentwireTimelineItem> {

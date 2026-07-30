@@ -98,6 +98,15 @@ private data class AgentwireWorkspaceRow(
     val treeKey: String,
 )
 
+internal fun agentwireSessionRuntimeStatus(session: AgentwireListItem): String? {
+    if (session.raw.bool("busy") != true) return null
+    return if (session.raw.stringList("flags").any { it.startsWith("waiting", ignoreCase = true) }) {
+        "Waiting"
+    } else {
+        "Running"
+    }
+}
+
 private fun workspaceRows(
     children: Map<String, List<AgentwireListItem>>,
     expanded: Map<String, Boolean>,
@@ -922,6 +931,8 @@ private fun AgentwireSessionRow(
     var expanded by remember(session.id) { mutableStateOf(false) }
     var title by remember(session.id, session.title) { mutableStateOf(session.title) }
     val archived = "archived" in session.raw.stringList("flags")
+    val runtimeStatus = agentwireSessionRuntimeStatus(session)
+    val tuiAttached = session.raw.bool("tuiAttached") == true
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
         colors = CardDefaults.cardColors(
@@ -939,8 +950,15 @@ private fun AgentwireSessionRow(
                     Text(session.id.take(12), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall)
                 }
                 if (active) {
-                    Text("Active", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp))
-                } else {
+                    Text("Attached", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 8.dp))
+                }
+                if (tuiAttached) {
+                    Text("TUI", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 8.dp))
+                }
+                if (runtimeStatus != null) {
+                    Text(runtimeStatus, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 8.dp))
+                }
+                if (!active) {
                     TextButton(onClick = { viewModel.attachSession(session.id, session.subtitle); onAttached() }) { Text("Attach") }
                 }
             }
