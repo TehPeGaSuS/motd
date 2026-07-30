@@ -16,7 +16,7 @@ compact required real-stack gate, and a broad nightly choreography sweep.
 | channel browse, search, join, and empty/loading states | component/unit tests | phase E |
 | settings, theme, palette, density, backup controls, and process-stable theme content | component/unit tests plus required navigation smoke | phases F and G |
 | Soju child/control-center routing and authorization-dependent panels | required navigation smoke plus unit tests | phase J and socket control probe |
-| process restoration, saved viewport, deep links, notification routing, and read anchors | deterministic ViewModel/repository tests | phase R for reconnect restoration; physical phase K for delivery-only behavior |
+| process restoration, saved viewport, deep links, notification routing, and read anchors | deterministic ViewModel/repository tests plus warm notification/recreation in the unread-history journey | phase R for reconnect restoration; physical phase K for delivery-only behavior |
 
 Physical-only behavior remains outside headless claims: OEM notifications, Doze, system pickers,
 real certificates, GPU/rendering performance, and release install upgrades.
@@ -33,7 +33,7 @@ remains scheduled/manual.
 | join, send, search, completion, command, `/me` | one canonical UI send in `sendEchoPersistsVisibleRowAndReconnects`; composer/parser/ViewModel/EventProcessor tests |
 | replies, reactions, drafts | deterministic delivery, preview, mutation, canonical, and draft tests; choreography remains manual |
 | reconnect duplicate/new second send | one canonical row before/after reconnect plus deterministic echo/canonical/resync tests |
-| first-unread viewport and long offline gap | `unreadHistoryEntersAtMarkerAndRemainsCanonical` seeds 80 incoming rows through a second Ergo client, then proves marker placement, canonical order, exactly-once recovery, deliberate advancement, and stable reopen behavior |
+| first-unread viewport and long offline gap | `unreadHistoryEntersAtMarkerAndRemainsCanonical` seeds 80 incoming rows through a second Ergo client, then proves marker placement, canonical order, exactly-once recovery, deliberate advancement, notification deep-jump, Activity recreation, and stable reopen behavior |
 | channel/member/friend/fool sheets | ViewModel/presentation/repository tests; scheduled UIAutomator |
 | settings and bouncer panels | `bootstrappedNavigationSettingsAndBouncerSmoke` plus preferences/catalog/model/ViewModel tests |
 | verified BouncerServ account/channel/console capability discovery | navigation/bouncer smoke after root readiness; BouncerServ command/session/model tests retain protocol and authorization detail |

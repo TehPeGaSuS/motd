@@ -141,7 +141,7 @@ class MainActivity : ComponentActivity() {
                         MotdNavGraph(
                             navController = navController,
                             notificationTarget = notificationTarget,
-                            onNotificationTargetHandled = { notificationTarget = null },
+                            onNotificationTargetHandled = ::consumeNotificationTarget,
                         )
                         // Global TOFU cert-trust dialog host, above the whole navigation graph.
                         CertTrustDialogHost()
@@ -157,6 +157,16 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         parseNotificationTarget(intent)?.let { notificationTarget = it }
         acceptInvitationFrom(intent)
+    }
+
+    /** Prevent recreation from replaying a notification whose navigation was already consumed. */
+    private fun consumeNotificationTarget() {
+        notificationTarget = null
+        if (intent.action == MotdNotifications.ACTION_OPEN_BUFFER ||
+            intent.action == MotdNotifications.ACTION_ACCEPT_INVITE
+        ) {
+            setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
+        }
     }
 
     private fun acceptInvitationFrom(intent: Intent?) {

@@ -63,16 +63,18 @@ fun MotdNavGraph(
     // target after navigating lets a subsequent identical tap re-trigger (null → value transition).
     LaunchedEffect(notificationTarget) {
         val target = notificationTarget ?: return@LaunchedEffect
-        navController.navigate(
+        // Replace an existing chat entry so a warm notification tap for the already-open buffer
+        // receives a fresh route-scoped ViewModel and resolves the requested message. A
+        // single-top navigation would retain the old ViewModel and silently ignore new jump args.
+        navController.openChat(
             ChatRoute(
                 target.bufferId,
                 target.jumpToMsgid,
                 target.jumpToTime,
                 target.jumpToEventId,
             ),
-        ) {
-            launchSingleTop = true
-        }
+            replaceCurrentChat = true,
+        )
         onNotificationTargetHandled()
     }
     NavHost(

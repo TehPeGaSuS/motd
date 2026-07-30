@@ -1,6 +1,7 @@
 package io.github.trevarj.motd
 
 import android.Manifest
+import android.content.Intent
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -29,6 +30,7 @@ import io.github.trevarj.motd.e2e.robots.SettingsRobot
 import io.github.trevarj.motd.e2e.robots.ThemeSheetRobot
 import io.github.trevarj.motd.e2e.robots.TimelineRobot
 import io.github.trevarj.motd.e2e.robots.NetworksRobot
+import io.github.trevarj.motd.service.MotdNotifications
 import java.io.File
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
@@ -228,8 +230,23 @@ class RequiredHeadlessE2eTest {
         ChatListRobot(compose).apply { awaitTag("chatlist_row_$bufferId"); open(bufferId) }
         timeline.assertNoUnreadDivider()
         timeline.assertMessage("$token row080")
+
+        scenario.scenario?.onActivity { activity ->
+            InstrumentationRegistry.getInstrumentation().callActivityOnNewIntent(
+                activity,
+                Intent(activity, MainActivity::class.java)
+                    .setAction(MotdNotifications.ACTION_OPEN_BUFFER)
+                    .putExtra(MotdNotifications.EXTRA_BUFFER_ID, bufferId)
+                    .putExtra(MotdNotifications.EXTRA_JUMP_MSGID, firstUnread.msgid)
+                    .putExtra(MotdNotifications.EXTRA_JUMP_TIME, firstUnread.serverTime)
+                    .putExtra(MotdNotifications.EXTRA_EVENT_ID, firstUnread.id),
+            )
+        }
+        timeline.assertMessageVisible(firstUnread.tag())
+        scenario.scenario?.onActivity { it.recreate() }
+        timeline.assertMessageVisible(firstUnread.tag())
         runBlocking { runProbe.awaitRun(token, bufferId, 81) }
-        milestones.record("unread_entry_stable", "buffer=$bufferId count=81")
+        milestones.record("notification_restore_stable", "buffer=$bufferId event=${firstUnread.id}")
     }
 
     @Test

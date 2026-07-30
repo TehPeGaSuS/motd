@@ -78,4 +78,11 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
     fun assertNoUnreadDivider() {
         rule.onAllNodesWithTag("chat_read_marker_divider", useUnmergedTree = true).assertCountEquals(0)
     }
+
+    fun assertMessageVisible(tag: String) {
+        rule.waitUntil(10_000) {
+            runCatching { rule.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed() }.isSuccess
+        }
+        rule.onAllNodesWithTag(tag, useUnmergedTree = true).assertCountEquals(1)
+    }
 }
