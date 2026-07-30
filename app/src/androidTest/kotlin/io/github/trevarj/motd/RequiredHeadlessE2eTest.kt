@@ -19,6 +19,7 @@ import io.github.trevarj.motd.e2e.E2eBootstrap
 import io.github.trevarj.motd.e2e.E2eFailureArtifactRule
 import io.github.trevarj.motd.e2e.E2eMilestoneRecorder
 import io.github.trevarj.motd.e2e.FixtureIrcClient
+import io.github.trevarj.motd.e2e.HistorySyncProbe
 import io.github.trevarj.motd.e2e.MessageLifecycleProbe
 import io.github.trevarj.motd.e2e.MessageRunProbe
 import io.github.trevarj.motd.e2e.ScenarioHolder
@@ -196,11 +197,17 @@ class RequiredHeadlessE2eTest {
             fixture.flushThroughServer("${token}gap")
         }
         runBlocking {
-            bootstrap.seams.connections().connect(network.childId)
-            connectionProbe.awaitReady(
-                network.childId,
-                setOf("draft/chathistory", "draft/read-marker", "batch", "message-tags", "server-time"),
-            )
+            coroutineScope {
+                val historySettled = async(start = CoroutineStart.UNDISPATCHED) {
+                    HistorySyncProbe(bootstrap.seams.history(), milestones).awaitCycle(bufferId)
+                }
+                bootstrap.seams.connections().connect(network.childId)
+                connectionProbe.awaitReady(
+                    network.childId,
+                    setOf("draft/chathistory", "draft/read-marker", "batch", "message-tags", "server-time"),
+                )
+                historySettled.await()
+            }
         }
         val recovered = runBlocking { runProbe.awaitRun(token, bufferId, 81) }
         val firstUnread = recovered.single { it.text == "$token row001" }

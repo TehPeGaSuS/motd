@@ -7,10 +7,34 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.SearchRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.HistoryResyncController
+import io.github.trevarj.motd.service.HistorySyncStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
+
+class HistorySyncProbe(
+    private val history: HistoryResyncController,
+    private val milestones: E2eMilestoneRecorder,
+) {
+    suspend fun awaitCycle(bufferId: Long, timeoutMs: Long = 45_000) {
+        try {
+            withTimeout(timeoutMs) {
+                var active = false
+                history.syncStatus(bufferId).first { status ->
+                    val isActive = status == HistorySyncStatus.Checking || status == HistorySyncStatus.Syncing
+                    if (isActive) active = true
+                    active && !isActive
+                }
+            }
+            milestones.record("history_sync_settled", "buffer=$bufferId")
+        } catch (timeout: TimeoutCancellationException) {
+            milestones.record("history_sync_timeout", "buffer=$bufferId")
+            throw AssertionError("history sync readiness timed out for buffer=$bufferId", timeout)
+        }
+    }
+}
 
 class ConnectionProbe(private val connections: ConnectionManager, private val milestones: E2eMilestoneRecorder) {
     suspend fun awaitReady(id: Long, requiredCaps: Set<String>, timeoutMs: Long = 30_000): IrcClientState.Ready =
