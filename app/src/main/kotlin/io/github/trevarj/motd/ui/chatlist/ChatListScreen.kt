@@ -429,7 +429,7 @@ fun ChatListContent(
                         )
                     }
 
-                    val hasInvitationRoute = !archiveMode && state.invitations.isNotEmpty()
+                    val hasInvitationRoute = !archiveMode && state.invitations.any(ChatListInvitation::actionable)
                     if (!invitationMode && !shouldRenderChatList(archiveMode, state.rows, state.archivedRows) && !hasInvitationRoute && !state.loading) {
                         val noNetworks = !archiveMode && state.networks.isEmpty()
                         EmptyState(
@@ -646,7 +646,8 @@ private fun ChatList(
     var foolsExpanded by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val hasActiveRows = rows.isNotEmpty() || invitations.isNotEmpty()
+    val actionableInvitationCount = invitations.count(ChatListInvitation::actionable)
+    val hasActiveRows = rows.isNotEmpty() || actionableInvitationCount > 0
     val hasArchivedRows = archivedRows.isNotEmpty()
     val archiveFolderHeight = 56.dp
     val archiveFolderGeometry = ArchiveFolderPullGeometry(with(LocalDensity.current) { archiveFolderHeight.toPx() })
@@ -878,11 +879,11 @@ private fun ChatList(
                     }
                 }
             } else {
-                if (invitations.isNotEmpty()) {
+                if (actionableInvitationCount > 0) {
                     item(key = "invitations-folder") {
                         InvitationsFolder(
                             count = invitations.size,
-                            actionableCount = invitations.count(ChatListInvitation::actionable),
+                            actionableCount = actionableInvitationCount,
                             onOpen = onOpenInvitations,
                         )
                     }
@@ -1035,15 +1036,11 @@ private fun InvitationsFolder(
     actionableCount: Int,
     onOpen: () -> Unit,
 ) {
-    val detail = if (actionableCount > 0) {
-        pluralStringResource(
-            R.plurals.chatlist_invitations_pending_count,
-            actionableCount,
-            actionableCount,
-        )
-    } else {
-        stringResource(R.string.chatlist_invitations_handled)
-    }
+    val detail = pluralStringResource(
+        R.plurals.chatlist_invitations_pending_count,
+        actionableCount,
+        actionableCount,
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()

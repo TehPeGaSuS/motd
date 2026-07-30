@@ -895,7 +895,6 @@
     <string name="chatlist_archived_hidden_announcement">Archived chats hidden</string>
     <string name="chatlist_invitations">Invitations</string>
     <string name="chatlist_invitations_empty">No invitations</string>
-    <string name="chatlist_invitations_handled">All invitations handled</string>
     <plurals name="chatlist_invitations_count">
         <item quantity="one">Invitations (%1$d)</item>
         <item quantity="other">Invitations (%1$d)</item>

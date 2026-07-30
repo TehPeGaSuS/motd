@@ -48,7 +48,7 @@ class ChatListSelectionUiTest {
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
     }
 
-    @Test fun invitation_folder_handles_join_and_ignore_then_retains_dimmed_resolutions() {
+    @Test fun invitation_folder_hides_after_all_are_handled_until_another_arrives() {
         val first = invitation(11, "#one")
         val second = invitation(12, "#two")
         val state = mutableStateOf(
@@ -97,8 +97,14 @@ class ChatListSelectionUiTest {
         assertEquals(0, compose.onAllNodesWithTag("chatlist_invitation_ignore_12").fetchSemanticsNodes().size)
 
         compose.onNodeWithTag("chatlist_selection_close").performClick()
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_invitations_folder").fetchSemanticsNodes().size)
+
+        compose.runOnIdle {
+            state.value = state.value.copy(
+                invitations = state.value.invitations + invitation(13, "#three"),
+            )
+        }
         compose.onNodeWithTag("chatlist_invitations_folder").assertIsDisplayed()
-        compose.onNodeWithText("All invitations handled").assertIsDisplayed()
     }
 
     @Test fun collapsing_fools_clears_their_selection_and_contextual_actions() {
