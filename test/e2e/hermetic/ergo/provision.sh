@@ -56,6 +56,7 @@ UP_ACCOUNT="${UP_ACCOUNT:-motd}"
 UP_PASS="${UP_PASS:-motdupstream}"
 SEED_NICK="${SEED_NICK:-motdadb2}"
 SEED_PASS="${SEED_PASS:-motdadb2pass}"
+RECONNECT_NICK="${RECONNECT_NICK:-motdhistory}"
 
 log() { printf '[ergo-provision:%s] %s\n' "$MODE" "$*" >&2; }
 
@@ -311,9 +312,8 @@ do_reconnect_gap() {
   token="$1"
   log "posting recovered reconnect gap tagged $token"
   {
-    printf 'NICK %s\r\n' "$SEED_NICK"
-    printf 'USER %s 0 * :motd reconnect gap fixture\r\n' "$SEED_NICK"
-    printf 'NICKSERV IDENTIFY %s %s\r\n' "$SEED_NICK" "$SEED_PASS"
+    printf 'NICK %s\r\n' "$RECONNECT_NICK"
+    printf 'USER %s 0 * :motd reconnect gap fixture\r\n' "$RECONNECT_NICK"
     sleep 2
     printf 'JOIN %s\r\n' "$TEST_CHANNEL"
     sleep 1
@@ -332,9 +332,8 @@ do_reconnect_current() {
   token="$1"
   log "posting current reconnect rows tagged $token"
   {
-    printf 'NICK %s\r\n' "$SEED_NICK"
-    printf 'USER %s 0 * :motd reconnect current fixture\r\n' "$SEED_NICK"
-    printf 'NICKSERV IDENTIFY %s %s\r\n' "$SEED_NICK" "$SEED_PASS"
+    printf 'NICK %s\r\n' "$RECONNECT_NICK"
+    printf 'USER %s 0 * :motd reconnect current fixture\r\n' "$RECONNECT_NICK"
     sleep 2
     printf 'JOIN %s\r\n' "$TEST_CHANNEL"
     sleep 1

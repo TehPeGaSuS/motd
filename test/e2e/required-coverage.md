@@ -16,6 +16,7 @@ compact required real-stack gate, and a broad nightly choreography sweep.
 | channel browse, search, join, and empty/loading states | component/unit tests | phase E |
 | settings, theme, palette, density, backup controls, and process-stable theme content | component/unit tests plus required navigation smoke | phases F and G |
 | Soju child/control-center routing and authorization-dependent panels | required navigation smoke plus unit tests | phase J and socket control probe |
+| ZNC SASL, two-client routing, detached gaps, native playback, and CHATHISTORY degradation | protocol/client unit tests | scheduled `znc-stack.sh probe` job |
 | process restoration, saved viewport, deep links, notification routing, and read anchors | deterministic ViewModel/repository tests plus warm notification/recreation in the unread-history journey | phase R for reconnect restoration; physical phase K for delivery-only behavior |
 
 Physical-only behavior remains outside headless claims: OEM notifications, Doze, system pickers,

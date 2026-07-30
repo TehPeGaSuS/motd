@@ -16,7 +16,7 @@ setup and teardown deliberately clear application data.
 | Full headless emulator | Local A-H, J, R, then teardown shell-runbook sweep | `./test/e2e/headless.sh full` |
 | Public screenshot showcase | Deterministic chat list, conversation, and attachment-sheet captures | `./test/e2e/headless.sh showcase` |
 | Native local stack + USB device | Manual feature work, physical-device checks, quick iteration | `./test/e2e/local-stack.sh` |
-| Native ZNC + Ergo stack | ZNC playback, reconnect, SASL, and capability degradation | `./test/e2e/znc-stack.sh` |
+| Native ZNC + Ergo stack | Scheduled ZNC playback, reconnect, SASL, and capability degradation | `./test/e2e/znc-stack.sh` |
 | Host-driven runbook | Broad UI interaction and crash sweep on a device or emulator | `./test/e2e/runbook.sh` |
 | Managed-device fast suite | Alternate/manual CI execution of the fast journeys | `.github/workflows/smoke.yml` |
 | Managed-device component suite | All hermetic Compose/component instrumentation tests | `./test/e2e/component-suite.sh` |
@@ -382,10 +382,10 @@ failure log.
 | A | Clean install, onboarding, TLS trust, bouncer import | Required |
 | B | Chat list, server drawer, connection state and scoping | Required |
 | C | Join, send, history, autocomplete, actions, reactions, reply, search | Required |
-| D | Channel info, topic, mute/pin, members, leave dialog | Diagnostic; live member state varies |
-| E | Channel browser and LIST search | Diagnostic |
-| F | Settings, themes, message presentation, delivery, networks, about | Diagnostic |
-| G | Compact and comfortable rendering | Diagnostic |
+| D | Channel info, topic, mute/pin, members, leave dialog | Required with the long-lived member fixture |
+| E | Channel browser and LIST search | Required |
+| F | Settings, themes, message presentation, delivery, networks, about | Required |
+| G | Compact and comfortable rendering | Required |
 | H | Inline image viewer | Conditional; skipped without a reachable seeded image |
 | I | Delete-chat cancellation, final crash sweep, clean reset | Required |
 | J | Soju control-center panels, admin discovery, safe console command | Required with the local admin fixture |

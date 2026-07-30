@@ -25,6 +25,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  znc-playback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      MOTD_SKIP_ADB_REVERSE: "1"
+      MOTD_ZNC_STACK_DIR: ${{ runner.temp }}/motd-znc-stack
+      MOTD_STACK_DIR: ${{ runner.temp }}/motd-znc-base
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Nix tooling
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+      - name: Prove ZNC native playback and reconnect behavior
+        run: |
+          ./test/e2e/znc-stack.sh up
+          ./test/e2e/znc-stack.sh probe
+      - name: Upload ZNC diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: znc-playback-diagnostics
+          path: |
+            ${{ runner.temp }}/motd-znc-stack/**/*.log
+            ${{ runner.temp }}/motd-znc-base/**/*.log
+          if-no-files-found: ignore
+      - name: Tear down ZNC stack
+        if: always()
+        run: ./test/e2e/znc-stack.sh down || true
+
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 90

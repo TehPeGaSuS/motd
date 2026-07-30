@@ -213,6 +213,8 @@ showcase() {
     MOTD_SOJU_USER=motd MOTD_SOJU_PASS=motdtest \
     MOTD_NICK=motdadb MOTD_TEST_CHANNEL='#guix' MOTD_SECOND_NICK=motdadb2 \
     MOTD_STACK_PROFILE=showcase E2E_SCREENSHOT_DIR="$screenshot_dir" \
+    MOTD_RECONNECT_STACK_KIND=native MOTD_STACK_DIR="$STACK_DIR" \
+    MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_HTTP_PORT="$SOJU_HTTP_PORT" \
     E2E_OUT_DIR="$STATE_DIR/showcase-artifacts" \
     E2E_PHASES="${E2E_PHASES:-a s}" \
     nix develop "$REPO" -c "$E2E_DIR/runbook.sh"

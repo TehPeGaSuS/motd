@@ -749,8 +749,8 @@ phase_f() {
   # 44. Bouncer networks (root).
   step "Bouncer networks (root)"
   tap_tag network_settings_bouncer_networks
-  wait_for_text "Soju control center" 10 || true
-  assert_text "Soju control center"
+  wait_for_text "Soju Control Center" 10 || true
+  assert_text "Soju Control Center"
   if [ -n "$(bounds_of_tag bouncer_add_network)" ]; then
     tap_tag bouncer_add_network
     wait_for_text "Server address" 5 || true
@@ -783,15 +783,13 @@ phase_f() {
   wait_for_text "Appearance" 6 || true
   assert_tag_present settings_theme_picker
   tap_tag settings_theme_picker
-  # ModalBottomSheet is a separate Compose window. UIAutomator renders its visible text but does
-  # not consistently export testTags as resource ids (the same boundary as AlertDialog buttons),
-  # so use the sheet's exact localized labels here rather than leaving it open and cascading every
-  # later Settings check onto the wrong window.
+  # The exact visible label remains inside the search field as well as the filtered result. Theme
+  # sheet tags are not exported through UIAutomator, so target the last matching text node.
   wait_for_text "Search themes" 6 || true
   assert_text "Search themes"
   input_by_text_label "Search themes" "Ayu Dark"
   wait_for_text "Ayu Dark" 6 || true
-  tap_text "Ayu Dark"
+  tap_text_last "Ayu Dark"
   # Theme selection is intentionally non-dismissing so users can compare palettes in place.
   adb_shell input keyevent 4
   wait_for_text "Appearance" 6 || true
@@ -1087,8 +1085,8 @@ phase_j() {
   done
   assert_text "Bouncer networks"
   tap_text "Bouncer networks"
-  wait_for_text "Soju control center" 15 || true
-  assert_text "Soju control center"
+  wait_for_text "Soju Control Center" 15 || true
+  assert_text "Soju Control Center"
   assert_no_crash
 
   step "Wait for server-verified BouncerServ capabilities"
@@ -1360,16 +1358,18 @@ phase_r() {
   wait_for_desc "New conversation" 10 || return 1
   tap_desc "Open navigation drawer"
   dump || return 1
-  if [ -z "$(bounds_of_tag drawer_mark_all_read)" ]; then
-    fail "current-scope read action was absent after the baseline"
-    return 1
+  if [ -n "$(bounds_of_tag drawer_mark_all_read)" ]; then
+    tap_tag drawer_mark_all_read
+    wait_for_text "Mark all chats as read?" 8 || return 1
+    tap_text "Mark as read"
+    wait_for_desc "Open navigation drawer" 8 || return 1
+    tap_desc "Open navigation drawer"
+    dump || return 1
+  else
+    # A self-authored baseline does not necessarily create unread state. In that valid case the
+    # drawer deliberately omits the bulk action and is already in the state needed below.
+    ok "current scope was already read after the self-authored baseline"
   fi
-  tap_tag drawer_mark_all_read
-  wait_for_text "Mark all chats as read?" 8 || return 1
-  tap_text "Mark as read"
-  wait_for_desc "Open navigation drawer" 8 || return 1
-  tap_desc "Open navigation drawer"
-  dump || return 1
   if [ -z "$(bounds_of_tag_prefix_containing_text drawer_network_row_ "$MOTD_NICK")" ]; then
     fail "imported drawer network did not show ready nick '$MOTD_NICK' before listener shutdown"
     return 1
@@ -1427,22 +1427,35 @@ phase_r() {
 
   step "Seed three current rows and require the newest list preview"
   reconnect_stack reconnect-current "$MOTD_RECONNECT_TOKEN"
-  wait_for_text "${MOTD_SECOND_NICK}: $current_last" 20 || true
-  assert_text "${MOTD_SECOND_NICK}: $current_last"
+  # The modern chat-list row renders the sender chip and preview as separate semantics nodes.
+  wait_for_text "$current_last" 20 || true
+  assert_text "$current_last"
 
-  step "Open newest window without materializing the recovered oldest row"
+  step "Open within the recovered unread gap before the newest row"
   tap_tag_prefix_containing_text chatlist_row_ "$MOTD_TEST_CHANNEL"
+  wait_for_desc "Scroll to bottom" 12 || true
+  assert_desc_present "Scroll to bottom"
+  dump || return 1
+  local visible_gap=false gap_number gap_text
+  for gap_number in $(seq 1 40); do
+    gap_text="${MOTD_RECONNECT_TOKEN} g$(printf '%02d' "$gap_number")"
+    if [ -n "$(bounds_of_text "$gap_text")" ]; then
+      visible_gap=true
+      ok "entered within the recovered unread gap at $gap_text"
+      break
+    fi
+  done
+  if [ "$visible_gap" != true ]; then
+    fail "no recovered unread-gap row was visible on entry"
+  fi
+  assert_no_text "$current_last"
+  assert_no_crash
+
+  step "Jump to the newest row and retain exact-once ordering"
+  tap_desc "Scroll to bottom"
   wait_for_text "$current_last" 12 || true
   assert_text_exactly_once "$current_last"
   assert_no_text "$gap_first"
-  assert_no_crash
-
-  step "Scroll older history and find the recovered oldest row exactly once"
-  if scroll_to_text "$gap_first" 14; then
-    assert_text_exactly_once "$gap_first"
-  else
-    fail "recovered oldest row '$gap_first' never materialized while scrolling"
-  fi
   assert_no_crash
 }
 
@@ -1547,8 +1560,7 @@ main() {
   local p phase_class phase_rc failures_before findings
   for p in $phases; do
     case "$p" in
-      a|b|c|i|j|r|s) phase_class=required ;;
-      d|e|f|g) phase_class=diagnostic ;;
+      a|b|c|d|e|f|g|i|j|r|s) phase_class=required ;;
       h|k) phase_class=conditional ;;
       *) fail "unknown phase '$p'"; continue ;;
     esac
