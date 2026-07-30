@@ -18,6 +18,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -963,6 +964,27 @@ fun ChatContent(
                 val rowsFit = listState.layoutInfo.visibleItemsInfo.size
                 if (rowsFit >= 1) {
                     listState.scrollToItem(firstUnreadTopAnchorIndex(target.index, rowsFit))
+                    // Row counts only estimate materialization. Message heights vary with sender
+                    // headers, previews, attachments, and the unread divider, so finish from the
+                    // measured target row itself.
+                    val layout = listState.layoutInfo
+                    val item = layout.visibleItemsInfo.firstOrNull { it.index == target.index }
+                    if (item != null) {
+                        val correction = reverseItemStartCorrection(
+                            itemOffset = item.offset,
+                            itemSize = item.size,
+                            viewportStartOffset = layout.viewportStartOffset,
+                            viewportEndOffset = layout.viewportEndOffset,
+                        )
+                        AutoFollowTrace.record("initial_position_align", traceBufferId, traceSessionId) {
+                            "target_index=${target.index} item_offset=${item.offset} item_size=${item.size} " +
+                                "viewport_start=${layout.viewportStartOffset} viewport_end=${layout.viewportEndOffset} " +
+                                "correction=$correction"
+                        }
+                        if (kotlin.math.abs(correction) > TOP_ALIGNMENT_TOLERANCE_PX) {
+                            listState.scrollBy(correction.toFloat())
+                        }
+                    }
                 }
             }
             row
@@ -1870,6 +1892,17 @@ fun ChatContent(
             onDismiss = { conversationLayoutSheetOpen = false },
         )
     }
+}
+
+/** Pixel delta that top-aligns an item whose logical offset is mirrored by `reverseLayout`. */
+internal fun reverseItemStartCorrection(
+    itemOffset: Int,
+    itemSize: Int,
+    viewportStartOffset: Int,
+    viewportEndOffset: Int,
+): Int {
+    val desiredLogicalOffset = viewportEndOffset - itemSize - viewportStartOffset
+    return itemOffset - desiredLogicalOffset
 }
 
 internal enum class ChatTitleTarget { CHANNEL_INFO, NICK_DETAILS, NONE }

@@ -2,12 +2,14 @@ package io.github.trevarj.motd.e2e
 
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.SearchRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 
 class ConnectionProbe(private val connections: ConnectionManager, private val milestones: E2eMilestoneRecorder) {
@@ -33,15 +35,32 @@ class ConnectionProbe(private val connections: ConnectionManager, private val mi
             }
             connections.connectionStates.value[id] as IrcClientState.Ready
         }
+
+    suspend fun awaitDisconnected(id: Long, timeoutMs: Long = 15_000) {
+        withTimeout(timeoutMs) {
+            connections.connectionStates.first { states ->
+                when (states[id]) {
+                    null, IrcClientState.Disconnected -> true
+                    else -> false
+                }
+            }
+        }
+        milestones.record("connection_disconnected", "network=$id")
+    }
 }
 
 class BufferProbe(private val buffers: BufferRepository, private val milestones: E2eMilestoneRecorder) {
     suspend fun awaitJoinedChannel(networkId: Long, channel: String, timeoutMs: Long = 20_000): Long =
-        withTimeout(timeoutMs) {
-            buffers.observeChatList().first { rows ->
-                rows.any { row -> row.networkId == networkId && row.type == BufferType.CHANNEL && row.displayName.equals(channel, true) }
-            }.first { it.networkId == networkId && it.type == BufferType.CHANNEL && it.displayName.equals(channel, true) }
-                .bufferId.also { milestones.record("buffer_joined", "network=$networkId buffer=$it") }
+        try {
+            withTimeout(timeoutMs) {
+                buffers.observeChatList().first { rows ->
+                    rows.any { row -> row.networkId == networkId && row.type == BufferType.CHANNEL && row.displayName.equals(channel, true) }
+                }.first { it.networkId == networkId && it.type == BufferType.CHANNEL && it.displayName.equals(channel, true) }
+                    .bufferId.also { milestones.record("buffer_joined", "network=$networkId buffer=$it") }
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            milestones.record("buffer_timeout", "network=$networkId")
+            throw AssertionError("joined channel readiness timed out for network=$networkId", timeout)
         }
 }
 
@@ -51,37 +70,77 @@ class MessageLifecycleProbe(
     private val milestones: E2eMilestoneRecorder,
 ) {
     suspend fun awaitCanonical(token: String, bufferId: Long, timeoutMs: Long = 20_000): MessageEntity =
-        awaitCanonicalMatch(token, bufferId, timeoutMs) { it.text == token }
+        awaitCanonicalMatch(token, bufferId, timeoutMs, requireSelf = true) { it.text == token }
+
+    suspend fun awaitCanonicalFromAnySender(
+        token: String,
+        bufferId: Long,
+        timeoutMs: Long = 20_000,
+    ): MessageEntity = awaitCanonicalMatch(token, bufferId, timeoutMs, requireSelf = false) { it.text == token }
 
     suspend fun awaitCanonicalContaining(
         query: String,
         expectedSubstring: String,
         bufferId: Long,
         timeoutMs: Long = 20_000,
-    ): MessageEntity = awaitCanonicalMatch(query, bufferId, timeoutMs) { it.text.contains(expectedSubstring) }
+    ): MessageEntity = awaitCanonicalMatch(query, bufferId, timeoutMs, requireSelf = true) {
+        it.text.contains(expectedSubstring)
+    }
 
     private suspend fun awaitCanonicalMatch(
         query: String,
         bufferId: Long,
         timeoutMs: Long,
+        requireSelf: Boolean,
         matches: (MessageEntity) -> Boolean,
     ): MessageEntity =
         try {
             withTimeout(timeoutMs) {
                 search.search(query, bufferId).first { hits ->
                     hits.count { hit ->
-                        hit.message.isSelf && matches(hit.message) && hit.message.msgid != null &&
+                        (!requireSelf || hit.message.isSelf) && matches(hit.message) && hit.message.msgid != null &&
                             hit.message.pendingLabel == null && !hit.message.failed
                     } == 1
                 }.single { hit ->
-                    hit.message.isSelf && matches(hit.message) && hit.message.msgid != null &&
+                    (!requireSelf || hit.message.isSelf) && matches(hit.message) && hit.message.msgid != null &&
                         hit.message.pendingLabel == null && !hit.message.failed
                 }.message.also { milestones.record("canonical_message", "buffer=$bufferId event=${it.id}") }
             }
+        } catch (timeout: TimeoutCancellationException) {
+            milestones.record("canonical_timeout", "buffer=$bufferId")
+            throw AssertionError("canonical message readiness timed out for buffer=$bufferId", timeout)
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (failure: Throwable) {
-            milestones.record("canonical_timeout", "buffer=$bufferId")
-            throw AssertionError("canonical message readiness timed out for buffer=$bufferId", failure)
         }
+}
+
+/** Observes a complete, prefix-tagged fixture run through the same search surface as the UI. */
+class MessageRunProbe(
+    private val search: SearchRepository,
+    private val milestones: E2eMilestoneRecorder,
+) {
+    suspend fun awaitRun(token: String, bufferId: Long, count: Int, timeoutMs: Long = 45_000): List<MessageEntity> =
+        try {
+            withTimeout(timeoutMs) {
+                search.search(token, bufferId).first { hits ->
+                    hits.count { it.message.text.startsWith("$token ") } == count
+                }.map { it.message }
+                    .filter { it.text.startsWith("$token ") }
+                    .also { rows ->
+                        check(rows.map { it.id }.distinct().size == count) { "fixture run contains duplicate event ids" }
+                        check(rows.map { it.msgid }.distinct().size == count) { "fixture run contains duplicate msgids" }
+                        check(rows.map { it.text }.distinct().size == count) { "fixture run contains duplicate bodies" }
+                        val ordered = rows.sortedBy { it.text.substringAfter("$token ") }
+                        check(ordered.zipWithNext().all { (older, newer) -> older.anchor() < newer.anchor() }) {
+                            "fixture run is not in canonical chronological order"
+                        }
+                        milestones.record("history_run_canonical", "buffer=$bufferId count=$count")
+                    }
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            milestones.record("history_run_timeout", "buffer=$bufferId count=$count")
+            throw AssertionError("canonical history run timed out for buffer=$bufferId count=$count", timeout)
+        }
+
+    private fun MessageEntity.anchor(): TimelineAnchor = TimelineAnchor(serverTime, id, timelineOrder)
 }

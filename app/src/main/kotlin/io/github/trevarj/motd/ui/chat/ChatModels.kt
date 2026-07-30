@@ -84,6 +84,7 @@ fun lagTone(lagMs: Long): LagTone = when {
 const val AUTOSCROLL_BOTTOM_TOLERANCE_PX: Int = 64
 internal const val MAX_PLACEHOLDER_PROBES: Int = 500
 internal const val TARGET_MATERIALIZATION_TIMEOUT_MS = 30_000L
+internal const val TOP_ALIGNMENT_TOLERANCE_PX = 1
 
 /**
  * Decide whether an incoming message should pin the reverse list to the newest row (index 0). Only

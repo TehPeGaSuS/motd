@@ -1,7 +1,7 @@
 package io.github.trevarj.motd
 
 import android.Manifest
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -10,13 +10,16 @@ import androidx.test.rule.GrantPermissionRule
 import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.VoiceSendRequest
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.e2e.BootstrappedNetwork
 import io.github.trevarj.motd.e2e.BufferProbe
 import io.github.trevarj.motd.e2e.ConnectionProbe
 import io.github.trevarj.motd.e2e.E2eBootstrap
 import io.github.trevarj.motd.e2e.E2eFailureArtifactRule
 import io.github.trevarj.motd.e2e.E2eMilestoneRecorder
+import io.github.trevarj.motd.e2e.FixtureIrcClient
 import io.github.trevarj.motd.e2e.MessageLifecycleProbe
+import io.github.trevarj.motd.e2e.MessageRunProbe
 import io.github.trevarj.motd.e2e.ScenarioHolder
 import io.github.trevarj.motd.e2e.robots.BouncerRobot
 import io.github.trevarj.motd.e2e.robots.ChatListRobot
@@ -33,6 +36,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -56,8 +60,8 @@ class RequiredHeadlessE2eTest {
     @get:Rule
     val rules: RuleChain = RuleChain
         .outerRule(GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS))
-        .around(compose)
         .around(artifacts)
+        .around(compose)
 
     private fun launchBootstrapped(requiredCaps: Set<String> = emptySet()): Pair<E2eBootstrap, BootstrappedNetwork> {
         val bootstrap = E2eBootstrap.fromApplication(InstrumentationRegistry.getInstrumentation().targetContext)
@@ -149,12 +153,83 @@ class RequiredHeadlessE2eTest {
                     ),
                 ).filterIsInstance<VoiceSendProgress.Complete>().first()
             }
-            runBlocking { probe.awaitCanonicalContaining("voice", upload.url, bufferId) }
-            TimelineRobot(compose).assertCompactAudioPlayer()
+            val voice = runBlocking { probe.awaitCanonicalContaining("voice", upload.url, bufferId) }
+            TimelineRobot(compose).assertCompactAudioPlayer(voice.tag())
             milestones.record("filehost_audio_rendered", "buffer=$bufferId")
         } finally {
             fixture.delete()
         }
+    }
+
+    @Test
+    fun unreadHistoryEntersAtMarkerAndRemainsCanonical() {
+        val (bootstrap, network) = launchBootstrapped(
+            setOf("draft/chathistory", "draft/read-marker", "batch", "message-tags", "server-time"),
+        )
+        val connectionProbe = ConnectionProbe(bootstrap.seams.connections(), milestones)
+        val bufferId = runBlocking {
+            BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, bootstrap.args.channel)
+        }
+        val token = "unread${bootstrap.args.runId.filter(Char::isLetterOrDigit).takeLast(14)}"
+        val lifecycle = MessageLifecycleProbe(bootstrap.seams.search(), milestones)
+        val runProbe = MessageRunProbe(bootstrap.seams.search(), milestones)
+
+        val marker = FixtureIrcClient.connect(bootstrap.args).use { fixture ->
+            fixture.sendMessage(bootstrap.args.channel, "$token marker")
+            fixture.flushThroughServer("${token}marker")
+            runBlocking { lifecycle.awaitCanonicalFromAnySender("$token marker", bufferId) }
+        }
+        val markerAnchor = TimelineAnchor(marker.serverTime, marker.id, marker.timelineOrder)
+        runBlocking {
+            bootstrap.seams.connections().markRead(bufferId, markerAnchor)
+            awaitMarkerAtLeast(bootstrap, bufferId, markerAnchor, requireRemote = true)
+            bootstrap.seams.connections().disconnect(network.childId)
+            connectionProbe.awaitDisconnected(network.childId)
+        }
+
+        FixtureIrcClient.connect(bootstrap.args).use { fixture ->
+            (1..80).forEach { ordinal ->
+                fixture.sendMessage(bootstrap.args.channel, "$token row${ordinal.toString().padStart(3, '0')}")
+            }
+            fixture.flushThroughServer("${token}gap")
+        }
+        runBlocking {
+            bootstrap.seams.connections().connect(network.childId)
+            connectionProbe.awaitReady(
+                network.childId,
+                setOf("draft/chathistory", "draft/read-marker", "batch", "message-tags", "server-time"),
+            )
+        }
+        val recovered = runBlocking { runProbe.awaitRun(token, bufferId, 81) }
+        val firstUnread = recovered.single { it.text == "$token row001" }
+        val secondUnread = recovered.single { it.text == "$token row002" }
+        val newest = recovered.single { it.text == "$token row080" }
+        assertTrue(markerAnchor < firstUnread.anchor())
+        assertTrue(firstUnread.anchor() < newest.anchor())
+        assertMarkerAtLeast(bootstrap, bufferId, marker)
+
+        ChatListRobot(compose).open(bufferId)
+        val timeline = TimelineRobot(compose)
+        timeline.assertUnreadEntry(firstUnread.tag(), secondUnread.tag())
+        compose.waitForIdle()
+        assertMarkerAtLeast(bootstrap, bufferId, marker)
+
+        // Reopening before marking read must reproduce the same frozen divider and viewport.
+        scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        ChatListRobot(compose).apply { awaitTag("chatlist_row_$bufferId"); open(bufferId) }
+        timeline.assertUnreadEntry(firstUnread.tag(), secondUnread.tag())
+        assertMarkerAtLeast(bootstrap, bufferId, marker)
+
+        timeline.scrollToBottom()
+        runBlocking {
+            awaitMarkerAtLeast(bootstrap, bufferId, newest.anchor())
+        }
+        scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        ChatListRobot(compose).apply { awaitTag("chatlist_row_$bufferId"); open(bufferId) }
+        timeline.assertNoUnreadDivider()
+        timeline.assertMessage("$token row080")
+        runBlocking { runProbe.awaitRun(token, bufferId, 81) }
+        milestones.record("unread_entry_stable", "buffer=$bufferId count=81")
     }
 
     @Test
@@ -179,4 +254,36 @@ class RequiredHeadlessE2eTest {
         BouncerRobot(compose).assertPanels()
         milestones.record("settings_bouncer_smoke", "root=${network.rootId}")
     }
+
+    private suspend fun awaitMarkerAtLeast(
+        bootstrap: E2eBootstrap,
+        bufferId: Long,
+        expected: TimelineAnchor,
+        requireRemote: Boolean = false,
+    ) {
+        withTimeout(20_000) {
+            bootstrap.seams.buffers().observeBuffer(bufferId).first { room ->
+                room != null && markerAtLeast(room.localReadAnchorTime, room.localReadAnchorEventId, expected) &&
+                    (!requireRemote || (room.readMarkerTime ?: Long.MIN_VALUE) >= expected.serverTime)
+            }
+        }
+    }
+
+    private fun assertMarkerAtLeast(
+        bootstrap: E2eBootstrap,
+        bufferId: Long,
+        marker: io.github.trevarj.motd.data.db.MessageEntity,
+    ) {
+        val room = runBlocking { bootstrap.seams.buffers().observeBuffer(bufferId).first { it != null } }
+        assertTrue(markerAtLeast(room?.localReadAnchorTime, room?.localReadAnchorEventId, marker.anchor()))
+    }
+
+    private fun markerAtLeast(time: Long?, eventId: Long?, expected: TimelineAnchor): Boolean =
+        time != null && eventId != null &&
+            (time > expected.serverTime || (time == expected.serverTime && eventId >= expected.eventId))
+
+    private fun io.github.trevarj.motd.data.db.MessageEntity.anchor(): TimelineAnchor =
+        TimelineAnchor(serverTime, id, timelineOrder)
+
+    private fun io.github.trevarj.motd.data.db.MessageEntity.tag(): String = "chat_message_${msgid ?: id}"
 }

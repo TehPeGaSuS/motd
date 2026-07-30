@@ -803,7 +803,7 @@ private fun SystemEventRun(
 
     val summary = if (run.size == 1) newest.text else summarizeSystemRun(run)
 
-    // Divider below the run when the run's newest crosses the marker and its older neighbor doesn't.
+    // Divider before the run when the run's newest crosses the marker and its older neighbor doesn't.
     val showNewDivider = readMarkerTime != null &&
         newest.timelineAnchor() > readMarkerTime &&
         (olderThanRun == null || olderThanRun.timelineAnchor() <= readMarkerTime)
@@ -814,6 +814,12 @@ private fun SystemEventRun(
     // Column so the pill and any dividers stack vertically. A bare item slot stacks siblings on top
     // of each other (its MeasurePolicy behaves like a Box), which would overlap the divider text.
     Column(modifier = Modifier.fillMaxWidth()) {
+        if (showNewDivider) {
+            NewMessagesDivider(
+                label = stringResource(R.string.chat_new_messages),
+                modifier = Modifier.testTag("chat_read_marker_divider"),
+            )
+        }
         SystemEventPill(
             summary = summary,
             lineCount = run.size,
@@ -821,12 +827,6 @@ private fun SystemEventRun(
             contentKey = SystemRunContentKey(newest.id, oldest.id, run.size),
             modifier = Modifier.testTag("chat_system_pill"),
         )
-        if (showNewDivider) {
-            NewMessagesDivider(
-                label = stringResource(R.string.chat_new_messages),
-                modifier = Modifier.testTag("chat_read_marker_divider"),
-            )
-        }
         if (showDay) DaySeparator(timeMs = oldest.serverTime)
     }
 }
@@ -911,8 +911,8 @@ private fun MessageRow(
     // Non-null for an expanded fool row: renders a "hide" chip above the bubble that re-collapses it.
     onCollapseFool: (() -> Unit)? = null,
 ) {
-    // Read-marker divider sits below the first message newer than the marker (drawn after the
-    // bubble because the list is reversed => "above" the newer message visually).
+    // The lazy list reverses item order, not a row's children. Render the divider before the first
+    // unread bubble so the boundary is visually above that message.
     val showNewDivider = readMarkerTime != null &&
         msg.timelineAnchor() > readMarkerTime &&
         (older == null || older.timelineAnchor() <= readMarkerTime)
@@ -928,6 +928,13 @@ private fun MessageRow(
     val spacing = LocalSpacing.current
     val showSender = showsSender(msg, older)
     val gap = bubbleGap(showSender, older != null, spacing)
+
+    if (showNewDivider) {
+        NewMessagesDivider(
+            label = stringResource(R.string.chat_new_messages),
+            modifier = Modifier.testTag("chat_read_marker_divider"),
+        )
+    }
 
     // A row asks Room for its reply target only while it is composed. This avoids timeline-wide
     // loaded-window scans during fast traversal; collection is lifecycle-cancelled off-screen.
@@ -1182,12 +1189,6 @@ private fun MessageRow(
         )
     }
 
-    if (showNewDivider) {
-        NewMessagesDivider(
-            label = stringResource(R.string.chat_new_messages),
-            modifier = Modifier.testTag("chat_read_marker_divider"),
-        )
-    }
     if (showDay) DaySeparator(timeMs = msg.serverTime)
 }
 
@@ -1214,6 +1215,12 @@ private fun FoolPlaceholderRow(
     // Column so the placeholder row and any dividers stack vertically rather than overlapping (a bare
     // item slot stacks its children like a Box).
     Column(modifier = Modifier.fillMaxWidth()) {
+        if (showNewDivider) {
+            NewMessagesDivider(
+                label = stringResource(R.string.chat_new_messages),
+                modifier = Modifier.testTag("chat_read_marker_divider"),
+            )
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1238,12 +1245,6 @@ private fun FoolPlaceholderRow(
             )
         }
 
-        if (showNewDivider) {
-            NewMessagesDivider(
-                label = stringResource(R.string.chat_new_messages),
-                modifier = Modifier.testTag("chat_read_marker_divider"),
-            )
-        }
         if (showDay) DaySeparator(timeMs = msg.serverTime)
     }
 }

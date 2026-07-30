@@ -37,6 +37,10 @@ services:
     volumes:
       - ./ergo/ircd.yaml:/ircd/ircd.yaml:ro
       - ergo-data:/ircd
+    ports:
+      # Test-only upstream endpoint used by the second-client unread journey. The app still reaches
+      # IRC exclusively through Soju; only the instrumentation fixture connects here.
+      - "16667:6667"
     # ergo's default entrypoint runs `ergo run --conf /ircd/ircd.yaml`.
     healthcheck:
       # The ergo image is alpine-based, so busybox `nc` is available. Probe the

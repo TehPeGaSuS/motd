@@ -117,6 +117,7 @@ configure_emulator() {
 ensure_stack() {
   if stack_alive; then
     log "native soju/ergo stack already running"
+    adb_e reverse "tcp:$ERGO_PORT" "tcp:$ERGO_PORT" >/dev/null
     adb_e reverse "tcp:$SOJU_PORT" "tcp:$SOJU_PORT" >/dev/null
     adb_e reverse "tcp:$SOJU_HTTP_PORT" "tcp:$SOJU_HTTP_PORT" >/dev/null
     return
@@ -126,6 +127,8 @@ ensure_stack() {
     MOTD_STACK_PROFILE="${MOTD_STACK_PROFILE:-default}" \
     MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" MOTD_SOJU_HTTP_PORT="$SOJU_HTTP_PORT" \
     "$E2E_DIR/local-stack.sh" up
+  # The instrumentation fixture client talks directly to Ergo to create a deterministic gap.
+  adb_e reverse "tcp:$ERGO_PORT" "tcp:$ERGO_PORT" >/dev/null
 }
 
 ensure_seed_member() {
@@ -165,7 +168,7 @@ fast() {
     FAST_E2E_SOJU_HOST=127.0.0.1 FAST_E2E_SOJU_PORT="$SOJU_PORT" \
     FAST_E2E_SOJU_TLS_SHA256="$tls_sha256" \
     FAST_E2E_STACK_KIND=native FAST_E2E_NATIVE_STACK_DIR="$STACK_DIR" \
-    FAST_E2E_NATIVE_ERGO_PORT="$ERGO_PORT" \
+    FAST_E2E_NATIVE_ERGO_PORT="$ERGO_PORT" FAST_E2E_ERGO_PORT="$ERGO_PORT" \
     nix develop "$REPO" -c "$E2E_DIR/fast-suite.sh" direct; then
     :
   else

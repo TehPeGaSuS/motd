@@ -22,9 +22,9 @@ setup and teardown deliberately clear application data.
 | Hermetic emulator run | Scheduled/manual exhaustive CI diagnostics | `.github/workflows/e2e.yml` |
 
 The fast headless suite is a required pull-request and main-branch CI gate. It
-runs exactly three isolated Kotlin journeys: TLS onboarding/import, one
-canonical echo/send/reconnect row, and bootstrapped navigation/settings/bouncer
-smoke. Host UIAutomator and the reconnect-window gap remain scheduled/manual;
+runs exactly four isolated Kotlin journeys: TLS onboarding/import, one
+canonical echo/send/reconnect row, an 80-row second-client unread/history recovery,
+and bootstrapped navigation/settings/bouncer smoke. Host UIAutomator remains scheduled/manual;
 the exhaustive A-I workflow is diagnostics, not a required fast phase.
 Release CI still runs its own unit, lint, and FOSS release build checks.
 
@@ -61,14 +61,16 @@ The lifecycle wrapper owns a dedicated AVD, emulator serial, native soju/ergo
 stack, adb reverse, and temporary state. Every adb command includes that serial,
 so an attached phone is never installed to, cleared, reversed, or reconfigured.
 Each method gets a fresh instrumentation process and cleared debug-app data;
-the direct launcher discovers exactly three annotated `Class#method` cases from
+the direct launcher discovers exactly four annotated `Class#method` cases from
 the installed test package, clears the target package before each one, and does
 not retain raw instrumentation output. CI and managed-device runs use the same
 fixture configuration and enforce isolation with Android Test Orchestrator.
-The three journeys cover:
+The four journeys cover:
 
 - onboarding, self-signed fixture trust, soju login, and network import;
 - one real UI send whose canonical Room event remains visible after reconnect; and
+- a second-client offline gap crossing a Paging window, first-unread viewport placement,
+  frozen read state, canonical ordering, exactly-once recovery, and deliberate read advancement; and
 - navigation, settings, themes, and Soju control-center panels.
 
 The production Activity, Room database, services, TLS transport, and bouncer

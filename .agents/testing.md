@@ -73,7 +73,7 @@ version, seed, case, and fixture in that module's
   materially slows the maintainer's workstation. Local verification stops at
   the relevant unit/integration tests, lint, and builds in the matrix above.
 - `.github/workflows/ci.yml` calls reusable `headless-core.yml`, which runs exactly
-  three isolated `@FastHeadlessE2e` methods on API34 Pixel 6 AOSP as a required gate.
+  four isolated `@FastHeadlessE2e` methods on API34 Pixel 6 AOSP as a required gate.
   Push the candidate commit and require the complete CI gate to pass before
   tagging a release.
 - Use a physical device for hardware- or OS-integration evidence: input latency,

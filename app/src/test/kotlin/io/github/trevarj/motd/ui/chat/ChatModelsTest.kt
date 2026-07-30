@@ -456,6 +456,27 @@ class ChatModelsTest {
         assertEquals(0, firstUnreadTopAnchorIndex(firstUnreadIndex = 1, rowsFit = 2))
     }
 
+    @Test fun `measured row correction aligns variable-height unread target`() {
+        assertEquals(
+            248,
+            reverseItemStartCorrection(
+                itemOffset = 1_776,
+                itemSize = 291,
+                viewportStartOffset = -21,
+                viewportEndOffset = 1_798,
+            ),
+        )
+        assertEquals(
+            0,
+            reverseItemStartCorrection(
+                itemOffset = 1_528,
+                itemSize = 291,
+                viewportStartOffset = -21,
+                viewportEndOffset = 1_798,
+            ),
+        )
+    }
+
     @Test fun `composer does not need member nicks for blank text or command hints`() {
         assertFalse(composerNeedsMemberNicks(TextFieldValue("")))
         assertFalse(composerNeedsMemberNicks(TextFieldValue("/jo", TextRange(3))))
