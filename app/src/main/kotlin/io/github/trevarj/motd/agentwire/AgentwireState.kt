@@ -97,6 +97,7 @@ data class AgentwireUiState(
     val actionStatus: Map<String, String> = emptyMap(),
     val historyLoading: Boolean = false,
     val historyPage: String? = null,
+    val historyBeforeAt: Long? = null,
     val olderHistoryAvailable: Boolean = true,
     val error: String? = null,
     val transcriptOverride: Boolean = false,
@@ -114,6 +115,12 @@ class AgentwireReducer {
 
     fun reduce(state: AgentwireUiState, envelope: AgentwireEnvelope): AgentwireUiState {
         if (!seen.add(envelope.id)) return state
+        if (envelope.history == true) {
+            val anchored = state.copy(
+                historyBeforeAt = state.historyBeforeAt?.let { minOf(it, envelope.at) } ?: envelope.at,
+            )
+            return reduceHistorical(anchored, envelope)
+        }
         val entityKey = listOfNotNull(envelope.kind.substringBeforeLast('.'), envelope.sid, envelope.iid, envelope.rid)
             .joinToString(":")
         envelope.rev?.let { rev ->
@@ -187,7 +194,9 @@ class AgentwireReducer {
             "history.end" -> state.copy(
                 historyLoading = false,
                 historyPage = data.string("page") ?: state.historyPage,
-                olderHistoryAvailable = (data.int("count") ?: 0) >= 200,
+                // A byte-capped page can contain fewer than the requested event limit. Keep
+                // pagination available until the bridge returns an empty page.
+                olderHistoryAvailable = (data.int("count") ?: 0) > 0,
             )
             "action.accepted", "action.succeeded", "action.failed", "action.uncertain" -> {
                 val status = envelope.kind.substringAfter("action.")
@@ -237,6 +246,39 @@ class AgentwireReducer {
             )
             else -> state
         }
+    }
+
+    /** History rebuilds the transcript but must never replace the current channel binding or state. */
+    private fun reduceHistorical(
+        state: AgentwireUiState,
+        envelope: AgentwireEnvelope,
+    ): AgentwireUiState = when (envelope.kind) {
+        "request.opened", "request.resolved" -> state.copy(
+            timeline = state.timeline.upsert(envelope.timelineItem()),
+        )
+        "turn.started" -> state.copy(
+            timeline = state.timeline.upsert(envelope.timelineItem(running = true)),
+        )
+        "turn.completed", "turn.failed" -> state.copy(
+            timeline = state.timeline.upsert(
+                envelope.timelineItem(success = envelope.kind == "turn.completed"),
+            ),
+        )
+        "assistant.delta" -> state.copy(timeline = state.timeline.appendDelta(envelope))
+        "assistant.completed", "plan.updated", "tool.started", "tool.updated", "tool.completed",
+        "usage.updated", "approval.review.started", "approval.review.completed" -> state.copy(
+            timeline = state.timeline.upsert(
+                envelope.timelineItem(
+                    running = envelope.kind.endsWith("started") || envelope.kind.endsWith("updated"),
+                    success = if (envelope.kind == "tool.completed") {
+                        envelope.data?.bool("success")
+                    } else {
+                        null
+                    },
+                ),
+            ),
+        )
+        else -> state
     }
 
     private fun pageItems(data: JsonObject, identity: String): List<AgentwireListItem> {

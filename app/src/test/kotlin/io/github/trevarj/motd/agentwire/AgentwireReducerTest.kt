@@ -142,6 +142,87 @@ class AgentwireReducerTest {
     }
 
     @Test
+    fun `history populates the timeline without replacing live session state`() {
+        val reducer = AgentwireReducer()
+        var state = AgentwireUiState(
+            activeSid = "live",
+            cwd = "/work/live",
+            busy = false,
+            settings = mapOf("model" to "current"),
+        )
+        state = reducer.reduce(
+            state,
+            event(
+                "binding.changed",
+                sid = "old",
+                history = true,
+                data = buildJsonObject { put("cwd", "/work/old") },
+            ),
+        )
+        state = reducer.reduce(
+            state,
+            event(
+                "session.status",
+                sid = "old",
+                history = true,
+                data = buildJsonObject {
+                    put("cwd", "/work/old")
+                    put("busy", true)
+                    put("settings", buildJsonObject { put("model", "old") })
+                },
+            ),
+        )
+        state = reducer.reduce(state, event("turn.started", sid = "old", tid = "t1", history = true))
+        state = reducer.reduce(
+            state,
+            event(
+                "assistant.completed",
+                sid = "old",
+                tid = "t1",
+                history = true,
+                data = buildJsonObject { put("content", "Earlier answer") },
+            ),
+        )
+
+        assertEquals("live", state.activeSid)
+        assertEquals("/work/live", state.cwd)
+        assertFalse(state.busy)
+        assertEquals(mapOf("model" to "current"), state.settings)
+        assertEquals(listOf("turn.started", "assistant.completed"), state.timeline.map { it.kind })
+        assertTrue(state.timeline.all(AgentwireTimelineItem::historical))
+        assertEquals(1L, state.historyBeforeAt)
+    }
+
+    @Test
+    fun `a short nonempty history page remains pageable until an empty page`() {
+        val reducer = AgentwireReducer()
+        var state = reducer.reduce(
+            AgentwireUiState(historyLoading = true),
+            event("history.end", data = buildJsonObject { put("count", 1) }),
+        )
+
+        assertFalse(state.historyLoading)
+        assertTrue(state.olderHistoryAvailable)
+
+        state = reducer.reduce(
+            state.copy(historyLoading = true),
+            event("history.end", data = buildJsonObject { put("count", 0) }),
+        )
+        assertFalse(state.historyLoading)
+        assertFalse(state.olderHistoryAvailable)
+    }
+
+    @Test
+    fun `historical envelopes may retain an old epoch but stale live events may not`() {
+        val oldHistory = event("assistant.completed", epoch = "old", history = true)
+        val staleLive = event("assistant.completed", epoch = "old")
+
+        assertTrue(acceptsAgentwireEpoch(oldHistory, "current"))
+        assertFalse(acceptsAgentwireEpoch(staleLive, "current"))
+        assertTrue(acceptsAgentwireEpoch(staleLive, null))
+    }
+
+    @Test
     fun `turn assistant plan tool usage and request families reduce into harness state`() {
         val reducer = AgentwireReducer()
         var state = AgentwireUiState(activeSid = "s1")
@@ -196,10 +277,11 @@ class AgentwireReducerTest {
         rid: String? = null,
         rev: Long? = null,
         reply: String? = null,
+        history: Boolean? = null,
         epoch: String = "epoch",
         data: kotlinx.serialization.json.JsonObject? = null,
     ) = AgentwireEnvelope(
         kind, "event", UUID.randomUUID().toString(), 1, "bridge", epoch, sid = sid,
-        tid = tid, iid = iid, rid = rid, rev = rev, reply = reply, data = data,
+        tid = tid, iid = iid, rid = rid, rev = rev, reply = reply, history = history, data = data,
     )
 }

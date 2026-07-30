@@ -8,10 +8,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.lazy.LazyColumn
@@ -139,6 +144,7 @@ private fun AgentwireScreen(
         mutableStateOf(TextFieldValue(""))
     }
     Scaffold(
+        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
         topBar = {
             Column {
                 TopAppBar(
@@ -174,68 +180,78 @@ private fun AgentwireScreen(
                 AgentwireStatusStrip(state) { sheet = AgentwireSheet.STATUS }
             }
         },
-        bottomBar = {
-            if (state.gate == AgentwireGate.ACTIVE) {
-                AgentwireComposer(
-                    value = composer,
-                    state = state,
-                    onValueChange = { composer = it },
-                    onSend = { viewModel.submit(composer.text); composer = TextFieldValue("") },
-                    onCancel = viewModel::cancelTurn,
-                )
-            }
-        },
     ) { padding ->
-        if (state.gate == AgentwireGate.BLOCKED) {
-            AgentwireBlocked(state, Modifier.padding(padding))
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding).testTag("agentwire_timeline"),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (state.syncing) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-                if (!state.connected && state.timeline.isEmpty()) item {
-                    Card(Modifier.fillMaxWidth().padding(16.dp)) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text("Agentwire is offline", style = MaterialTheme.typography.titleMedium)
-                            Text("Structured state will be rebuilt after reconnecting.")
-                            TextButton(onClick = viewModel::viewTranscript) { Text("View IRC transcript") }
-                        }
-                    }
-                }
-                if (state.error != null) item {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(state.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                        TextButton(onClick = viewModel::clearError) { Text("Dismiss") }
-                    }
-                }
-                if (state.olderHistoryAvailable) item {
-                    TextButton(onClick = viewModel::loadOlderHistory, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (state.historyLoading) "Loading history…" else "Load older history")
-                    }
-                }
-                items(state.timeline, key = AgentwireTimelineItem::id) { item ->
-                    AgentwireTimelineCard(item, state.actionStatus[item.id])
-                }
-                items(state.requests, key = AgentwireRequest::rid) { request ->
-                    AgentwireRequestCard(request, request.sid == null || request.sid == state.activeSid, viewModel) {
-                        questionRequestId = request.rid
-                        sheet = AgentwireSheet.QUESTION
-                    }
-                }
-                if (state.queue.isNotEmpty()) item {
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier.fillMaxWidth().clickable { sheet = AgentwireSheet.QUEUE },
+        // Match the regular chat layout: consume overlapping navigation and animated IME
+        // insets around the whole content column so the composer remains above the keyboard.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .navigationBarsPadding()
+                .imePadding(),
+        ) {
+            if (state.gate == AgentwireGate.BLOCKED) {
+                AgentwireBlocked(state)
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().weight(1f).testTag("agentwire_timeline"),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(
-                            "${state.queue.size} queued  •  tap to edit",
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                            style = MaterialTheme.typography.labelLarge,
+                        if (state.syncing) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                        if (!state.connected && state.timeline.isEmpty()) item {
+                            Card(Modifier.fillMaxWidth().padding(16.dp)) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Text("Agentwire is offline", style = MaterialTheme.typography.titleMedium)
+                                    Text("Structured state will be rebuilt after reconnecting.")
+                                    TextButton(onClick = viewModel::viewTranscript) { Text("View IRC transcript") }
+                                }
+                            }
+                        }
+                        if (state.error != null) item {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(state.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                                TextButton(onClick = viewModel::clearError) { Text("Dismiss") }
+                            }
+                        }
+                        if (state.olderHistoryAvailable) item {
+                            TextButton(onClick = viewModel::loadOlderHistory, modifier = Modifier.fillMaxWidth()) {
+                                Text(if (state.historyLoading) "Loading history…" else "Load older history")
+                            }
+                        }
+                        items(state.timeline, key = AgentwireTimelineItem::id) { item ->
+                            AgentwireTimelineCard(item, state.actionStatus[item.id])
+                        }
+                        items(state.requests, key = AgentwireRequest::rid) { request ->
+                            AgentwireRequestCard(request, request.sid == null || request.sid == state.activeSid, viewModel) {
+                                questionRequestId = request.rid
+                                sheet = AgentwireSheet.QUESTION
+                            }
+                        }
+                        if (state.queue.isNotEmpty()) item {
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                modifier = Modifier.fillMaxWidth().clickable { sheet = AgentwireSheet.QUEUE },
+                            ) {
+                                Text(
+                                    "${state.queue.size} queued  •  tap to edit",
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
+                        }
+                        item { Spacer(Modifier.height(8.dp)) }
+                    }
+                    if (state.gate == AgentwireGate.ACTIVE) {
+                        AgentwireComposer(
+                            value = composer,
+                            state = state,
+                            onValueChange = { composer = it },
+                            onSend = { viewModel.submit(composer.text); composer = TextFieldValue("") },
+                            onCancel = viewModel::cancelTurn,
                         )
                     }
                 }
-                item { Spacer(Modifier.height(8.dp)) }
             }
         }
     }

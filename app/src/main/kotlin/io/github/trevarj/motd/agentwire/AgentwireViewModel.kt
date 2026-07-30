@@ -41,6 +41,12 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
+private const val AGENTWIRE_HISTORY_PAGE_SIZE = 50
+
+internal fun acceptsAgentwireEpoch(envelope: AgentwireEnvelope, currentEpoch: String?): Boolean =
+    envelope.kind == "agent.hello" || envelope.history == true || currentEpoch == null ||
+        envelope.epoch == currentEpoch
+
 @HiltViewModel
 class AgentwireViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -188,10 +194,9 @@ class AgentwireViewModel @Inject constructor(
     )
     fun skipRequest(rid: String) = sendAction("request.skip", sid = _state.value.activeSid, rid = rid)
     fun loadOlderHistory() {
-        val beforeAt = _state.value.timeline.filterNot { it.kind == "user.prompt" }.minOfOrNull { it.at }
         sendAction("history.request", buildJsonObject {
-            beforeAt?.let { put("beforeAt", it) }
-            put("limit", 200)
+            _state.value.historyBeforeAt?.let { put("beforeAt", it) }
+            put("limit", AGENTWIRE_HISTORY_PAGE_SIZE)
         })
     }
 
@@ -222,6 +227,7 @@ class AgentwireViewModel @Inject constructor(
                 queue = emptyList(),
                 requests = emptyList(),
                 timeline = it.timeline.filter { item -> item.kind == "user.prompt" },
+                historyBeforeAt = null,
                 autoReviewConfirmed = false,
             )
         }
@@ -276,7 +282,7 @@ class AgentwireViewModel @Inject constructor(
             _state.update { it.copy(botAccount = account) }
         } else if (!account.equals(pinned, ignoreCase = true)) return
         val epoch = _state.value.epoch
-        if (envelope.kind != "agent.hello" && epoch != null && envelope.epoch != epoch) return
+        if (!acceptsAgentwireEpoch(envelope, epoch)) return
         _state.update { reducer.reduce(it, envelope) }
         if (envelope.kind == "session.page") {
             val next = envelope.data?.string("next")
@@ -290,7 +296,10 @@ class AgentwireViewModel @Inject constructor(
         if (envelope.reply == syncId && envelope.kind == "channel.snapshot") syncSnapshot = true
         if (syncHello && syncSnapshot && !historyRequested) {
             historyRequested = true
-            sendActionInternal("history.request", buildJsonObject { put("limit", 200) })
+            sendActionInternal(
+                "history.request",
+                buildJsonObject { put("limit", AGENTWIRE_HISTORY_PAGE_SIZE) },
+            )
         }
     }
 
