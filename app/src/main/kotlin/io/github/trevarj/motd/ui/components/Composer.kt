@@ -559,6 +559,9 @@ private fun VoiceRecordButton(
                         val longPress = this@coroutineScope.launch {
                             delay(voiceRecordHoldDelay(viewConfiguration.longPressTimeoutMillis))
                             started = true
+                            // Confirm the hold threshold itself, when microphone capture begins.
+                            // Quick taps stay silent because they never activate recording.
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             latestHoldStart()
                         }
                         while (true) {
@@ -587,6 +590,9 @@ private fun VoiceRecordButton(
                                     VoiceGestureTarget.CANCEL -> {
                                         cancelled = true
                                         change.consume()
+                                        // Use rejection feedback when the destructive slide target
+                                        // commits so cancellation is unambiguous without looking.
+                                        haptics.performHapticFeedback(HapticFeedbackType.Reject)
                                         latestHoldCancel()
                                         break
                                     }
