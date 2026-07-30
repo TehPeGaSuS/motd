@@ -368,13 +368,28 @@ private fun AgentwireTimelineCard(item: AgentwireTimelineItem, actionStatus: Str
     ) {
         Column(Modifier.fillMaxWidth().clickable(enabled = collapsible) { expanded = !expanded }.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(item.title, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.weight(1f))
                 Text(
-                    listOfNotNull(actionStatus, item.tid?.take(8), if (item.historical) "history" else null).joinToString(" • "),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
+                    item.title,
+                    modifier = Modifier.weight(1f),
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                val metadata = listOfNotNull(
+                    actionStatus,
+                    item.tid?.take(8),
+                    if (item.historical) "history" else null,
+                ).joinToString(" • ")
+                if (metadata.isNotEmpty()) {
+                    Text(
+                        metadata,
+                        modifier = Modifier.padding(start = 8.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
             }
             if (item.running) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
             if (!collapsible || expanded) {
@@ -438,6 +453,32 @@ private fun ToolTextSection(label: String, content: String) {
 
 private enum class DiffLineKind { HEADER, HUNK, ADDED, REMOVED, META, CONTEXT }
 
+private val legacyDiffHeader = Regex("""^\{'type': '(add|delete|update)'(?:, .*)?\}\s+(.+)$""")
+
+internal fun normalizeAgentwireDiff(diff: String): String {
+    val normalized = diff.replace("\r\n", "\n").replace('\r', '\n').trim('\n')
+    if (normalized.startsWith("diff --git ")) return normalized
+    val lines = normalized.lines()
+    val match = legacyDiffHeader.matchEntire(lines.firstOrNull().orEmpty()) ?: return normalized
+    val kind = match.groupValues[1]
+    val path = match.groupValues[2]
+    val displayPath = path.removePrefix("/")
+    val content = lines.drop(1).joinToString("\n")
+    val oldPath = if (kind == "add") "/dev/null" else "a/$displayPath"
+    val newPath = if (kind == "delete") "/dev/null" else "b/$displayPath"
+    val headers = "diff --git a/$displayPath b/$displayPath\n--- $oldPath\n+++ $newPath"
+    if (content.isEmpty()) return headers
+    if (kind == "update") return "$headers\n$content"
+    val contentLines = content.lines()
+    val hunk = if (kind == "add") {
+        "@@ -0,0 +1,${contentLines.size} @@"
+    } else {
+        "@@ -1,${contentLines.size} +0,0 @@"
+    }
+    val prefix = if (kind == "add") "+" else "-"
+    return "$headers\n$hunk\n${contentLines.joinToString("\n") { "$prefix$it" }}"
+}
+
 private fun diffLineKind(line: String): DiffLineKind = when {
     line.startsWith("diff --git ") || line.startsWith("index ") -> DiffLineKind.HEADER
     line.startsWith("@@") -> DiffLineKind.HUNK
@@ -452,6 +493,7 @@ private fun diffLineKind(line: String): DiffLineKind = when {
 @SuppressLint("HardcodedText")
 @Composable
 private fun AgentwireGitDiff(itemId: String, diff: String) {
+    val normalizedDiff = normalizeAgentwireDiff(diff)
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text("Diff", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
         Surface(
@@ -465,7 +507,7 @@ private fun AgentwireGitDiff(itemId: String, diff: String) {
                         .horizontalScroll(rememberScrollState())
                         .padding(vertical = 6.dp),
                 ) {
-                    diff.lines().forEach { line ->
+                    normalizedDiff.lines().forEach { line ->
                         val kind = diffLineKind(line)
                         val background = when (kind) {
                             DiffLineKind.ADDED -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f)

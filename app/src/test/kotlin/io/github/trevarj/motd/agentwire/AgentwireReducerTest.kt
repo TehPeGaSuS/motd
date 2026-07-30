@@ -14,6 +14,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AgentwireReducerTest {
+
+    @Test
+    fun `legacy added file payload is normalized as a unified diff`() {
+        val diff = normalizeAgentwireDiff(
+            "{'type': 'add'} /tmp/hello-world.sh\n#!/bin/sh\n\necho \"hello world\"",
+        )
+
+        assertEquals(
+            "diff --git a/tmp/hello-world.sh b/tmp/hello-world.sh\n" +
+                "--- /dev/null\n" +
+                "+++ b/tmp/hello-world.sh\n" +
+                "@@ -0,0 +1,3 @@\n" +
+                "+#!/bin/sh\n" +
+                "+\n" +
+                "+echo \"hello world\"",
+            diff,
+        )
+    }
+
+    @Test
+    fun `canonical unified diff remains unchanged`() {
+        val diff = "diff --git a/file b/file\n--- a/file\n+++ b/file\n@@ -1 +1 @@\n-old\n+new"
+
+        assertEquals(diff, normalizeAgentwireDiff(diff))
+    }
     @Test
     fun `bootstrap snapshots establish binding settings queue and advertised actions`() {
         val reducer = AgentwireReducer()
