@@ -393,6 +393,9 @@ failure log.
 | R | Force-stop, retained 40-row reconnect gap, soju stop/start, newest-window and older-scroll proof | Required in the scheduled/manual hermetic sweep |
 | S | Deterministic public screenshot showcase | Required when selected by `headless.sh showcase` |
 
+Phase E searches for the registered `#motd-browser` fixture through the IME, joins it, waits for
+the authoritative self-JOIN, and verifies that the new buffer reaches the chat list.
+
 Phase K is intentionally excluded from the default headless sweep because it needs an installed
 UnifiedPush distributor and network access to its HTTPS relay. With the native stack already up,
 run a clean debug-only proof using:

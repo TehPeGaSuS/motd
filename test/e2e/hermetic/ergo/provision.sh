@@ -8,8 +8,8 @@
 #             auto-join ##motdtest):
 #               1. account motd/motdupstream    (soju identifies to this)
 #               2. account motdadb2/motdadb2pass (the seed identity)
-#               3. as motdadb2: identify, join ##motdtest, register the channel,
-#                  set a topic.
+#               3. as motdadb2: identify and register ##motdtest plus the
+#                  browser-only #motd-browser fixture, then set their topics.
 #
 #   seed      Post the deterministic seed messages into ##motdtest. Runs AFTER
 #             soju is connected and joined, so soju OBSERVES the messages live
@@ -46,6 +46,7 @@ MODE="${1:-all}"
 ERGO_HOST="${ERGO_HOST:-ergo}"
 ERGO_PORT="${ERGO_PORT:-6667}"
 TEST_CHANNEL="${TEST_CHANNEL:-##motdtest}"
+BROWSER_CHANNEL="${BROWSER_CHANNEL:-#motd-browser}"
 APP_NICK="${APP_NICK:-motdadb}"
 SEED_HOLD_SECONDS="${SEED_HOLD_SECONDS:-1}"
 PUSH_TOKEN="${PUSH_TOKEN:-motd-unifiedpush}"
@@ -64,7 +65,7 @@ fixture_channels() {
   if [ "$STACK_PROFILE" = showcase ]; then
     printf '%s\n' $SHOWCASE_CHANNELS
   else
-    printf '%s\n' "$TEST_CHANNEL"
+    printf '%s\n' "$TEST_CHANNEL" "$BROWSER_CHANNEL"
   fi
 }
 

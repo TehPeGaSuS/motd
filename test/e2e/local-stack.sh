@@ -75,6 +75,7 @@ else
   export MOTD_SHOWCASE_CHANNELS=''
   export TEST_CHANNEL="${MOTD_STACK_CHANNEL:-##motdtest}"
 fi
+export BROWSER_CHANNEL="${MOTD_BROWSER_CHANNEL:-#motd-browser}"
 export APP_NICK=motdadb
 export UP_ACCOUNT=motd
 export UP_PASS=motdupstream

@@ -25,7 +25,7 @@ E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _explicit_config=()
 for _name in \
   MOTD_PKG MOTD_APK MOTD_SOJU_HOST MOTD_SOJU_PORT MOTD_SOJU_USER MOTD_SOJU_PASS \
-  MOTD_NICK MOTD_TEST_CHANNEL MOTD_SECOND_NICK MOTD_RECONNECT_TOKEN MOTD_RECONNECT_STACK_KIND \
+  MOTD_NICK MOTD_TEST_CHANNEL MOTD_BROWSER_CHANNEL MOTD_SECOND_NICK MOTD_RECONNECT_TOKEN MOTD_RECONNECT_STACK_KIND \
   SERIAL E2E_OUT_DIR E2E_PHASES; do
   if [[ -v "$_name" ]]; then
     _explicit_config+=("$(declare -p "$_name")")
@@ -61,6 +61,7 @@ MOTD_ACTIVITY="${MOTD_PKG}/io.github.trevarj.motd.MainActivity"
 : "${MOTD_SOJU_PASS:=}"
 : "${MOTD_NICK:=motdadb}"
 : "${MOTD_TEST_CHANNEL:=##motdtest}"
+: "${MOTD_BROWSER_CHANNEL:=#motd-browser}"
 
 # Optional second identity (drives DM/mention/typing). When unset, those steps
 # are skipped without failing.
@@ -682,37 +683,39 @@ phase_e() {
   reset_to_chatlist >/dev/null 2>&1 || true
   wait_for_text "motd" 6 || true
   tap_desc "New conversation"
-  if wait_for_text "Browse channels…" 5; then
-    tap_text "Browse channels…"
-    wait_for_text "Browse channels" 8 || true
-    # The browser can legitimately show a "Connect to browse channels" empty state, so assert the
-    # screen title (always present) rather than the conditionally-shown search field.
-    assert_text "Browse channels"
-  else
-    note "Browse channels… entry not found"
-  fi
+  wait_for_text "Browse channels…" 5 || true
+  assert_text "Browse channels…"
+  tap_text "Browse channels…"
+  wait_for_text "Browse channels" 8 || true
+  assert_text "Browse channels"
+  assert_tag_present channel_list_search_field
   assert_no_crash
 
-  # 39. Search channels.
-  step "Search channels"
-  if [ -n "$(bounds_of_text "Search channels")" ]; then
-    input_by_text_label "Search channels" "motd"
-    redump
-    if [ -n "$(bounds_of_text "No channels found")" ]; then
-      note "no channels found for mask"
-    else
-      note "channel list rendered (or loading)"
-    fi
-  fi
+  # 39. Search the registered browser-only fixture through the IME action. This is intentionally
+  # not joined by the app's upstream account, so it proves LIST results rather than recycling the
+  # already-open seed channel.
+  step "Search channels through IME"
+  tap_tag channel_list_search_field
+  adb_shell input keyevent 123
+  adb_shell input keyevent 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67
+  _e2e_send_text "${MOTD_BROWSER_CHANNEL#\#}"
+  adb_shell input keyevent 66
+  wait_for_text "$MOTD_BROWSER_CHANNEL" 15 || true
+  assert_text "$MOTD_BROWSER_CHANNEL"
   assert_no_crash
 
-  # 40. Join from browser (if a result exists).
-  step "Join from browser (best-effort)"
-  note "join-from-browser depends on live LIST results; skipping tap to avoid state churn"
+  # 40. Join the unique result and wait for authoritative Room self-JOIN confirmation.
+  step "Join from browser"
+  tap_tag "channel_list_join_${MOTD_BROWSER_CHANNEL#\#}"
+  wait_for_text "Joined" 15 || true
+  assert_text "Joined"
+  assert_no_crash
 
-  # 41. Back.
+  # 41. Back and prove the joined buffer is routed into the chat list.
   step "Back from browser"
   adb_shell input keyevent 4
+  wait_for_text "$MOTD_BROWSER_CHANNEL" 10 || true
+  assert_text "$MOTD_BROWSER_CHANNEL"
   assert_no_crash
 }
 
