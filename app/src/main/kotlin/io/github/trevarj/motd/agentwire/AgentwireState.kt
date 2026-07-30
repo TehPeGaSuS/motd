@@ -3,6 +3,7 @@ package io.github.trevarj.motd.agentwire
 import io.github.trevarj.motd.irc.agentwire.AgentwireEnvelope
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -16,6 +17,14 @@ data class AgentwireListItem(
     val title: String,
     val subtitle: String? = null,
     val raw: JsonObject = JsonObject(emptyMap()),
+)
+
+data class AgentwireModelOption(
+    val value: String,
+    val label: String,
+    val efforts: List<String>,
+    val defaultEffort: String? = null,
+    val default: Boolean = false,
 )
 
 data class AgentwireQueueItem(
@@ -76,9 +85,12 @@ data class AgentwireUiState(
     val busy: Boolean = false,
     val currentTid: String? = null,
     val actions: Set<String> = emptySet(),
+    val supportedSettings: Set<String> = emptySet(),
     val settings: Map<String, String> = emptyMap(),
-    val workspaces: List<AgentwireListItem> = emptyList(),
+    val modelOptions: List<AgentwireModelOption> = emptyList(),
+    val workspaceChildren: Map<String, List<AgentwireListItem>> = emptyMap(),
     val sessions: List<AgentwireListItem> = emptyList(),
+    val loadedSessionDirectories: Set<String> = emptySet(),
     val queue: List<AgentwireQueueItem> = emptyList(),
     val requests: List<AgentwireRequest> = emptyList(),
     val timeline: List<AgentwireTimelineItem> = emptyList(),
@@ -116,7 +128,8 @@ class AgentwireReducer {
                 epoch = envelope.epoch ?: data.string("epoch"),
                 backend = data.string("backend") ?: state.backend,
                 actions = data.stringList("actions").toSet(),
-                settings = data.objectStrings("settings"),
+                supportedSettings = data.stringList("settings").toSet(),
+                modelOptions = modelOptions(data),
                 error = null,
             )
             "channel.snapshot" -> state.copy(
@@ -128,10 +141,16 @@ class AgentwireReducer {
                 settings = data.objectStrings("settings").ifEmpty { state.settings },
                 queue = data.array("queue")?.mapNotNull(::queueItem).orEmpty(),
             )
-            "binding.changed" -> state.copy(
-                activeSid = envelope.sid ?: data.string("sid") ?: data.obj("session")?.string("sid"),
-                cwd = data.string("cwd") ?: data.obj("session")?.string("cwd"),
-            )
+            "binding.changed" -> {
+                val detached = data.containsKey("sid") && data["sid"] is JsonNull
+                state.copy(
+                    activeSid = if (detached) null else envelope.sid ?: data.string("sid")
+                        ?: data.obj("session")?.string("sid"),
+                    cwd = if (detached) null else data.string("cwd") ?: data.obj("session")?.string("cwd"),
+                    busy = if (detached) false else state.busy,
+                    currentTid = if (detached) null else state.currentTid,
+                )
+            }
             "session.snapshot", "session.status" -> state.copy(
                 activeSid = envelope.sid ?: state.activeSid,
                 cwd = data.string("cwd") ?: state.cwd,
@@ -139,8 +158,31 @@ class AgentwireReducer {
                 currentTid = envelope.tid ?: data.string("tid") ?: state.currentTid,
                 settings = data.objectStrings("settings").ifEmpty { state.settings },
             )
-            "workspace.page" -> state.copy(workspaces = workspaceItems(data))
-            "session.page" -> state.copy(sessions = pageItems(data, "sid"))
+            "workspace.page" -> {
+                val parent = data.string("parent").orEmpty()
+                val page = workspaceItems(data)
+                state.copy(
+                    workspaceChildren = state.workspaceChildren + (parent to page),
+                )
+            }
+            "session.page" -> {
+                val page = pageItems(data, "sid")
+                val cwd = data.string("cwd")
+                val continuing = data.string("cursor") != null
+                state.copy(
+                    sessions = if (cwd != null) {
+                        if (continuing) {
+                            state.sessions.filterNot { old -> page.any { it.id == old.id } } + page
+                        } else {
+                            state.sessions.filterNot { it.subtitle == cwd } + page
+                        }
+                    } else {
+                        state.sessions.filterNot { old -> page.any { it.id == old.id } } + page
+                    },
+                    loadedSessionDirectories = cwd?.let { state.loadedSessionDirectories + it }
+                        ?: state.loadedSessionDirectories,
+                )
+            }
             "history.begin" -> state.copy(historyLoading = true, historyPage = data.string("page"))
             "history.end" -> state.copy(
                 historyLoading = false,
@@ -151,7 +193,11 @@ class AgentwireReducer {
                 val status = envelope.kind.substringAfter("action.")
                 state.copy(
                     actionStatus = envelope.reply?.let { state.actionStatus + (it to status) } ?: state.actionStatus,
-                    error = if (envelope.kind == "action.failed") data.string("message") ?: "Action failed" else state.error,
+                    error = when (envelope.kind) {
+                        "action.failed" -> data.string("message") ?: "Action failed"
+                        "action.uncertain" -> data.string("message") ?: "Action outcome is unknown"
+                        else -> state.error
+                    },
                 )
             }
             "queue.snapshot" -> state.copy(queue = data.array("items")?.mapNotNull(::queueItem).orEmpty())
@@ -207,6 +253,18 @@ class AgentwireReducer {
         val path = item.string("path") ?: return@mapNotNull null
         AgentwireListItem(path, item.string("name") ?: path, path, item)
     }
+
+    private fun modelOptions(data: JsonObject): List<AgentwireModelOption> =
+        data.obj("settingOptions")?.array("model").orEmpty().mapNotNull { element ->
+            val option = element as? JsonObject ?: return@mapNotNull null
+            AgentwireModelOption(
+                value = option.string("value") ?: return@mapNotNull null,
+                label = option.string("label") ?: option.string("value").orEmpty(),
+                efforts = option.stringList("efforts"),
+                defaultEffort = option.string("defaultEffort"),
+                default = option.bool("default") ?: false,
+            )
+        }
 }
 
 private fun queueItem(element: JsonElement): AgentwireQueueItem? {

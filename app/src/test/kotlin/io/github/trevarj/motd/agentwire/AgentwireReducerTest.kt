@@ -3,6 +3,7 @@ package io.github.trevarj.motd.agentwire
 import io.github.trevarj.motd.irc.agentwire.AgentwireEnvelope
 import java.util.UUID
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -20,7 +21,16 @@ class AgentwireReducerTest {
             put("epoch", "epoch-1")
             put("backend", "codex")
             put("actions", JsonArray(listOf(JsonPrimitive("turn.prompt"), JsonPrimitive("history.request"))))
-            put("settings", buildJsonObject { put("delivery", "queue") })
+            put("settings", JsonArray(listOf(JsonPrimitive("delivery"), JsonPrimitive("model"))))
+            put("settingOptions", buildJsonObject {
+                put("model", JsonArray(listOf(buildJsonObject {
+                    put("value", "gpt-test")
+                    put("label", "GPT Test")
+                    put("efforts", JsonArray(listOf(JsonPrimitive("low"), JsonPrimitive("high"))))
+                    put("defaultEffort", "high")
+                    put("default", true)
+                })))
+            })
         }))
         state = reducer.reduce(state, event("channel.snapshot", sid = "s1", data = buildJsonObject {
             put("binding", buildJsonObject { put("sid", "s1"); put("cwd", "/work") })
@@ -37,7 +47,70 @@ class AgentwireReducerTest {
         assertTrue(state.busy)
         assertEquals("later", state.queue.single().content)
         assertTrue("turn.prompt" in state.actions)
+        assertEquals(setOf("delivery", "model"), state.supportedSettings)
+        assertEquals("gpt-test", state.modelOptions.single().value)
+        assertEquals(listOf("low", "high"), state.modelOptions.single().efforts)
+        assertTrue(state.modelOptions.single().default)
         assertFalse(state.syncing)
+    }
+
+    @Test
+    fun `session pages merge for a workspace hierarchy`() {
+        val reducer = AgentwireReducer()
+        var state = reducer.reduce(AgentwireUiState(), event("session.page", data = buildJsonObject {
+            put("cwd", "/work/one")
+            put("items", JsonArray(listOf(buildJsonObject {
+                put("sid", "s1"); put("cwd", "/work/one"); put("title", "One")
+            })))
+        }))
+        state = reducer.reduce(state, event("session.page", data = buildJsonObject {
+            put("cwd", "/work/two")
+            put("items", JsonArray(listOf(buildJsonObject {
+                put("sid", "s2"); put("cwd", "/work/two"); put("title", "Two")
+            })))
+        }))
+
+        assertEquals(listOf("s1", "s2"), state.sessions.map(AgentwireListItem::id))
+        assertEquals(setOf("/work/one", "/work/two"), state.loadedSessionDirectories)
+    }
+
+    @Test
+    fun `continued session pages append within the same directory`() {
+        val reducer = AgentwireReducer()
+        var state = reducer.reduce(AgentwireUiState(), event("session.page", data = buildJsonObject {
+            put("cwd", "/work")
+            put("items", JsonArray(listOf(buildJsonObject {
+                put("sid", "s1"); put("cwd", "/work"); put("title", "One")
+            })))
+        }))
+        state = reducer.reduce(state, event("session.page", data = buildJsonObject {
+            put("cwd", "/work")
+            put("cursor", "100")
+            put("items", JsonArray(listOf(buildJsonObject {
+                put("sid", "s2"); put("cwd", "/work"); put("title", "Two")
+            })))
+        }))
+
+        assertEquals(listOf("s1", "s2"), state.sessions.map(AgentwireListItem::id))
+    }
+
+    @Test
+    fun `workspace pages retain lazy directory hierarchy`() {
+        val reducer = AgentwireReducer()
+        var state = reducer.reduce(AgentwireUiState(), event("workspace.page", data = buildJsonObject {
+            put("items", JsonArray(listOf(buildJsonObject {
+                put("path", "/work"); put("name", "work"); put("hasChildren", true)
+            })))
+        }))
+        state = reducer.reduce(state, event("workspace.page", data = buildJsonObject {
+            put("parent", "/work")
+            put("items", JsonArray(listOf(buildJsonObject {
+                put("path", "/work/project"); put("name", "project"); put("hasChildren", false)
+            })))
+        }))
+
+        assertEquals("/work", state.workspaceChildren.getValue("").single().id)
+        assertEquals("/work/project", state.workspaceChildren.getValue("/work").single().id)
     }
 
     @Test
@@ -52,6 +125,20 @@ class AgentwireReducerTest {
             put("items", JsonArray(listOf(queue("q2", "snapshot", 0))))
         }))
         assertEquals(listOf("q2"), state.queue.map(AgentwireQueueItem::iid))
+    }
+
+    @Test
+    fun `binding detach clears the active session`() {
+        val reducer = AgentwireReducer()
+        val state = reducer.reduce(
+            AgentwireUiState(activeSid = "s1", cwd = "/work", busy = true, currentTid = "t1"),
+            event("binding.changed", data = buildJsonObject { put("sid", JsonNull) }),
+        )
+
+        assertEquals(null, state.activeSid)
+        assertEquals(null, state.cwd)
+        assertFalse(state.busy)
+        assertEquals(null, state.currentTid)
     }
 
     @Test

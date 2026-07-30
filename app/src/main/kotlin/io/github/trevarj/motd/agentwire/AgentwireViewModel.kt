@@ -107,6 +107,7 @@ class AgentwireViewModel @Inject constructor(
 
     fun viewTranscript() = _state.update { it.copy(transcriptOverride = true) }
     fun returnToHarness() = _state.update { it.copy(transcriptOverride = false) }
+    fun clearError() = _state.update { it.copy(error = null) }
 
     fun submit(content: String) {
         if (content.isBlank()) return
@@ -131,10 +132,29 @@ class AgentwireViewModel @Inject constructor(
         "queue.move", data = buildJsonObject { put("position", position) }, sid = _state.value.activeSid, iid = iid,
     )
     fun deleteQueue(iid: String) = sendAction("queue.delete", sid = _state.value.activeSid, iid = iid)
-    fun listWorkspaces() = sendAction("workspace.list.request")
-    fun listSessions(cwd: String? = null) = sendAction(
-        "session.list.request", data = cwd?.let { buildJsonObject { put("cwd", it) } },
+    fun listWorkspaces(parent: String? = null) = sendAction(
+        "workspace.list.request", data = parent?.let { buildJsonObject { put("parent", it) } },
     )
+    fun listSessions(cwd: String? = null, cursor: String? = null) = sendAction(
+        "session.list.request", data = buildJsonObject {
+            cwd?.let { put("cwd", it) }
+            cursor?.let { put("cursor", it) }
+        }.takeIf { it.isNotEmpty() },
+    )
+    fun refreshSessionBrowser() {
+        _state.update {
+            it.copy(
+                workspaceChildren = emptyMap(),
+                sessions = emptyList(),
+                loadedSessionDirectories = emptySet(),
+            )
+        }
+        listWorkspaces()
+    }
+    fun expandWorkspace(path: String, hasChildren: Boolean = true) {
+        if (hasChildren) listWorkspaces(path)
+        listSessions(path)
+    }
     fun createSession(cwd: String) = sendAction("session.create", buildJsonObject { put("cwd", cwd) })
     fun attachSession(sid: String, cwd: String? = null) = sendAction(
         "session.attach", cwd?.let { buildJsonObject { put("cwd", it) } }, sid = sid,
@@ -154,6 +174,11 @@ class AgentwireViewModel @Inject constructor(
         _state.value.activeSid?.let(autoReviewConfirmedSessions::add)
         _state.update { it.copy(autoReviewConfirmed = true) }
         updateSettings(mapOf("approvalReviewer" to "auto_review"))
+    }
+    fun disableAutoReview() {
+        _state.value.activeSid?.let(autoReviewConfirmedSessions::remove)
+        _state.update { it.copy(autoReviewConfirmed = false) }
+        updateSettings(mapOf("approvalReviewer" to "manual"))
     }
     fun respondApproval(rid: String, allow: Boolean) = sendAction(
         "request.respond", buildJsonObject { put("allow", allow) }, sid = _state.value.activeSid, rid = rid,
@@ -189,8 +214,11 @@ class AgentwireViewModel @Inject constructor(
                 busy = false,
                 currentTid = null,
                 actions = emptySet(),
-                workspaces = emptyList(),
+                supportedSettings = emptySet(),
+                modelOptions = emptyList(),
+                workspaceChildren = emptyMap(),
                 sessions = emptyList(),
+                loadedSessionDirectories = emptySet(),
                 queue = emptyList(),
                 requests = emptyList(),
                 timeline = it.timeline.filter { item -> item.kind == "user.prompt" },
@@ -250,6 +278,10 @@ class AgentwireViewModel @Inject constructor(
         val epoch = _state.value.epoch
         if (envelope.kind != "agent.hello" && epoch != null && envelope.epoch != epoch) return
         _state.update { reducer.reduce(it, envelope) }
+        if (envelope.kind == "session.page") {
+            val next = envelope.data?.string("next")
+            if (next != null) listSessions(envelope.data?.string("cwd"), next)
+        }
         val activeSid = _state.value.activeSid
         _state.update {
             it.copy(autoReviewConfirmed = activeSid != null && activeSid in autoReviewConfirmedSessions)

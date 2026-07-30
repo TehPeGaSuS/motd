@@ -7,16 +7,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -26,8 +27,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -35,26 +35,32 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.trevarj.motd.ui.components.Composer
 import kotlinx.serialization.json.JsonPrimitive
 
 @Composable
@@ -75,6 +81,47 @@ fun AgentwireGateScreen(
 }
 
 private enum class AgentwireSheet { STATUS, QUEUE, QUESTION }
+private enum class AgentwireStatusTab { BROWSE, SETTINGS }
+
+private data class AgentwireWorkspaceRow(
+    val item: AgentwireListItem,
+    val depth: Int,
+    val treeKey: String,
+)
+
+private fun workspaceRows(
+    children: Map<String, List<AgentwireListItem>>,
+    expanded: Map<String, Boolean>,
+    sessions: List<AgentwireListItem>,
+    query: String,
+): List<AgentwireWorkspaceRow> {
+    val roots = children[""].orEmpty().mapTo(HashSet(), AgentwireListItem::id)
+    fun visit(
+        parent: String,
+        depth: Int,
+        ancestors: Set<String>,
+        branch: String,
+    ): List<AgentwireWorkspaceRow> = buildList {
+        children[parent].orEmpty().forEach { directory ->
+            val treeKey = "$branch>${directory.id}"
+            val isExpanded = query.isNotBlank() || (expanded[directory.id] ?: (directory.id in roots))
+            val descendants = if (isExpanded && directory.id !in ancestors) {
+                visit(directory.id, depth + 1, ancestors + directory.id, treeKey)
+            } else {
+                emptyList()
+            }
+            val directMatch = directory.title.contains(query, true) || directory.id.contains(query, true)
+            val sessionMatch = sessions.any { session ->
+                session.subtitle == directory.id && (session.title.contains(query, true) || session.id.contains(query, true))
+            }
+            if (query.isBlank() || directMatch || sessionMatch || descendants.isNotEmpty()) {
+                add(AgentwireWorkspaceRow(directory, depth, treeKey))
+                addAll(descendants)
+            }
+        }
+    }
+    return visit("", 0, emptySet(), "root")
+}
 
 @SuppressLint("HardcodedText")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -88,7 +135,9 @@ private fun AgentwireScreen(
     var sheet by remember { mutableStateOf<AgentwireSheet?>(null) }
     var questionRequestId by remember { mutableStateOf<String?>(null) }
     var overflow by remember { mutableStateOf(false) }
-    var composer by remember { mutableStateOf("") }
+    var composer by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(""))
+    }
     Scaffold(
         topBar = {
             Column {
@@ -97,7 +146,7 @@ private fun AgentwireScreen(
                         Column {
                             Text(state.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
-                                "${state.backend.orEmpty()}  ${state.activeSid ?: "detached"}",
+                                "${state.backend.orEmpty()}  ${state.activeSid?.take(12) ?: "detached"}",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -131,7 +180,7 @@ private fun AgentwireScreen(
                     value = composer,
                     state = state,
                     onValueChange = { composer = it },
-                    onSend = { viewModel.submit(composer); composer = "" },
+                    onSend = { viewModel.submit(composer.text); composer = TextFieldValue("") },
                     onCancel = viewModel::cancelTurn,
                 )
             }
@@ -155,11 +204,10 @@ private fun AgentwireScreen(
                     }
                 }
                 if (state.error != null) item {
-                    Text(
-                        state.error,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(state.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                        TextButton(onClick = viewModel::clearError) { Text("Dismiss") }
+                    }
                 }
                 if (state.olderHistoryAvailable) item {
                     TextButton(onClick = viewModel::loadOlderHistory, modifier = Modifier.fillMaxWidth()) {
@@ -243,35 +291,41 @@ private fun AgentwireBlocked(state: AgentwireUiState, modifier: Modifier = Modif
 @SuppressLint("HardcodedText")
 @Composable
 private fun AgentwireComposer(
-    value: String,
+    value: TextFieldValue,
     state: AgentwireUiState,
-    onValueChange: (String) -> Unit,
+    onValueChange: (TextFieldValue) -> Unit,
     onSend: () -> Unit,
     onCancel: () -> Unit,
 ) {
+    val density = LocalDensity.current
     Surface(shadowElevation = 4.dp) {
-        Column(Modifier.fillMaxWidth().padding(8.dp)) {
+        Column(Modifier.fillMaxWidth()) {
             if (state.busy) {
-                val mode = state.settings["delivery"] ?: "queue"
-                AssistChip(onClick = {}, label = { Text(mode.replaceFirstChar(Char::uppercase)) })
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    modifier = Modifier.weight(1f).testTag("agentwire_composer"),
-                    placeholder = { Text(if (state.busy) "Queue or steer the running turn" else "Message the agent") },
-                    maxLines = 6,
-                    enabled = state.connected && state.activeSid != null,
-                )
-                Spacer(Modifier.width(8.dp))
-                if (state.busy && "turn.cancel" in state.actions) {
-                    IconButton(onClick = onCancel) { Icon(Icons.Default.Close, contentDescription = "Cancel turn") }
-                }
-                Button(onClick = onSend, enabled = value.isNotBlank() && state.connected && state.activeSid != null) {
-                    Text(if (state.busy) "Send" else "Run")
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val mode = state.settings["delivery"] ?: "queue"
+                    AssistChip(onClick = {}, label = { Text(mode.replaceFirstChar(Char::uppercase)) })
+                    Spacer(Modifier.weight(1f))
+                    if ("turn.cancel" in state.actions) {
+                        TextButton(onClick = onCancel) { Text("Cancel turn") }
+                    }
                 }
             }
+            Composer(
+                value = value,
+                onValueChange = onValueChange,
+                onSend = onSend,
+                enabled = state.connected && state.activeSid != null,
+                modifier = Modifier.testTag("agentwire_composer"),
+                placeholder = if (state.busy) "Queue or steer the running turn" else "Message the agent",
+                showEmojiButton = true,
+                // Voice and attachments stay on the shared composer boundary. They can be enabled
+                // when Agentwire defines safe attachment payloads instead of inventing a wire form.
+                voiceEnabled = false,
+                imeHeightPx = WindowInsets.ime.getBottom(density),
+            )
         }
     }
 }
@@ -382,14 +436,19 @@ private fun AgentwireQuestionSheet(request: AgentwireRequest, viewModel: Agentwi
                 Text(question.header ?: question.prompt, fontWeight = FontWeight.SemiBold)
                 if (question.header != null) Text(question.prompt)
                 question.options.forEach { option ->
-                    AssistChip(onClick = {
-                        val selected = answers[question.id].orEmpty()
-                        answers[question.id] = if (question.multiple) {
-                            if (option in selected) selected - option else selected + option
-                        } else {
-                            setOf(option)
-                        }
-                    }, label = { Text(option) })
+                    val selected = option in answers[question.id].orEmpty()
+                    FilterChip(
+                        selected = selected,
+                        onClick = {
+                            val current = answers[question.id].orEmpty()
+                            answers[question.id] = if (question.multiple) {
+                                if (option in current) current - option else current + option
+                            } else {
+                                setOf(option)
+                            }
+                        },
+                        label = { Text(option) },
+                    )
                 }
                 if (question.custom || question.options.isEmpty()) {
                     OutlinedTextField(
@@ -418,58 +477,242 @@ private fun AgentwireQuestionSheet(request: AgentwireRequest, viewModel: Agentwi
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireViewModel, dismiss: () -> Unit) {
-    var cwd by remember { mutableStateOf(state.cwd.orEmpty()) }
-    var model by remember { mutableStateOf(state.settings["model"].orEmpty()) }
-    var effort by remember { mutableStateOf(state.settings["effort"].orEmpty()) }
+    var tab by remember { mutableStateOf(AgentwireStatusTab.BROWSE) }
+    var search by remember { mutableStateOf("") }
+    val expandedDirectories = remember { mutableStateMapOf<String, Boolean>() }
+    val initialModel = state.settings["model"]?.takeIf(String::isNotBlank)
+        ?: state.modelOptions.firstOrNull { it.default }?.value
+        ?: state.modelOptions.firstOrNull()?.value.orEmpty()
+    var model by remember(state.settings["model"], state.modelOptions) { mutableStateOf(initialModel) }
+    val initialOption = state.modelOptions.firstOrNull { it.value == model }
+    var effort by remember(state.settings["effort"], initialOption) {
+        mutableStateOf(
+            state.settings["effort"]?.takeIf { it in initialOption?.efforts.orEmpty() }
+                ?: initialOption?.defaultEffort?.takeIf { it in initialOption.efforts }
+                ?: initialOption?.efforts?.firstOrNull().orEmpty(),
+        )
+    }
+    var delivery by remember(state.settings["delivery"]) {
+        mutableStateOf(state.settings["delivery"] ?: "queue")
+    }
+    var collaboration by remember(state.settings["collaboration"]) {
+        mutableStateOf(state.settings["collaboration"] ?: "default")
+    }
+    var modelMenu by remember { mutableStateOf(false) }
     var confirmAutoReview by remember { mutableStateOf(false) }
+    val canBrowse = "workspace.list.request" in state.actions
+    LaunchedEffect(canBrowse) {
+        if (canBrowse) viewModel.refreshSessionBrowser()
+    }
+    val roots = state.workspaceChildren[""].orEmpty()
+    LaunchedEffect(roots) {
+        roots.forEach { root ->
+            expandedDirectories[root.id] = true
+            if (root.id !in state.workspaceChildren) {
+                viewModel.expandWorkspace(root.id, root.raw.bool("hasChildren") ?: true)
+            }
+        }
+    }
+    val rows = workspaceRows(state.workspaceChildren, expandedDirectories, state.sessions, search)
     ModalBottomSheet(onDismissRequest = dismiss) {
         LazyColumn(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { Text("Agent session", style = MaterialTheme.typography.titleLarge) }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilledTonalButton(onClick = viewModel::listWorkspaces) { Text("Workspaces") }
-                    FilledTonalButton(onClick = { viewModel.listSessions(cwd.ifBlank { null }) }) { Text("Sessions") }
-                    if (state.activeSid != null) OutlinedButton(onClick = viewModel::detachSession) { Text("Detach") }
-                }
-            }
-            items(state.workspaces, key = AgentwireListItem::id) { workspace ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text(workspace.title); workspace.subtitle?.let { Text(it, fontFamily = FontFamily.Monospace) } }
-                    TextButton(onClick = { cwd = workspace.id; viewModel.listSessions(workspace.id) }) { Text("Open") }
-                    TextButton(onClick = { viewModel.createSession(workspace.id) }, enabled = "session.create" in state.actions) { Text("Create") }
-                }
-            }
-            items(state.sessions, key = AgentwireListItem::id) { session ->
-                AgentwireSessionRow(session, state.actions, viewModel)
-            }
-            item { HorizontalDivider(); Text("Safe settings", style = MaterialTheme.typography.titleMedium) }
-            item { OutlinedTextField(model, { model = it }, label = { Text("Model") }, modifier = Modifier.fillMaxWidth()) }
-            item { OutlinedTextField(effort, { effort = it }, label = { Text("Effort") }, modifier = Modifier.fillMaxWidth()) }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("queue", "steer").forEach { delivery ->
-                        AssistChip(onClick = { viewModel.updateSettings(mapOf("delivery" to delivery)) }, label = { Text(delivery) })
-                    }
-                }
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AssistChip(onClick = { viewModel.updateSettings(mapOf("collaboration" to "default")) }, label = { Text("Default") })
-                    AssistChip(
-                        onClick = { if (model.isNotBlank()) viewModel.updateSettings(mapOf("collaboration" to "plan", "model" to model)) },
-                        label = { Text("Plan") },
+                    FilterChip(
+                        selected = tab == AgentwireStatusTab.BROWSE,
+                        onClick = { tab = AgentwireStatusTab.BROWSE },
+                        label = { Text("Browse") },
+                    )
+                    FilterChip(
+                        selected = tab == AgentwireStatusTab.SETTINGS,
+                        onClick = { tab = AgentwireStatusTab.SETTINGS },
+                        label = { Text("Settings") },
                     )
                 }
             }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { viewModel.updateSettings(buildMap {
-                        if (model.isNotBlank()) put("model", model)
-                        if (effort.isNotBlank()) put("effort", effort)
-                    }) }) { Text("Apply") }
-                    OutlinedButton(onClick = {
-                        if (state.autoReviewConfirmed) viewModel.enableAutoReview() else confirmAutoReview = true
-                    }) { Text("Enable auto-review") }
+            if (tab == AgentwireStatusTab.BROWSE) {
+                item {
+                    OutlinedTextField(
+                        value = search,
+                        onValueChange = { search = it },
+                        label = { Text("Find a project or session") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("agentwire_session_search"),
+                    )
+                }
+                item {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(state.cwd ?: "No workspace selected", modifier = Modifier.weight(1f), fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        TextButton(onClick = viewModel::refreshSessionBrowser) { Text("Refresh") }
+                        if (state.activeSid != null) TextButton(onClick = viewModel::detachSession) { Text("Detach") }
+                    }
+                }
+                if (rows.isEmpty()) item {
+                    Text(
+                        if (search.isBlank()) "No directories advertised by the bridge" else "No matching projects or sessions",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                rows.forEach { row ->
+                    val directory = row.item
+                    val expanded = expandedDirectories[directory.id] == true
+                    item(key = "directory:${row.treeKey}") {
+                        Surface(
+                            color = if (directory.id == state.cwd) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                            modifier = Modifier.fillMaxWidth().padding(start = (row.depth * 14).dp).clickable {
+                                expandedDirectories[directory.id] = !expanded
+                                if (!expanded && (
+                                        directory.id !in state.workspaceChildren ||
+                                            directory.id !in state.loadedSessionDirectories
+                                    )
+                                ) {
+                                    viewModel.expandWorkspace(
+                                        directory.id,
+                                        directory.raw.bool("hasChildren") ?: true,
+                                    )
+                                }
+                            },
+                        ) {
+                            Row(Modifier.padding(start = 10.dp, end = 4.dp, top = 7.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(if (expanded) "▾" else "▸", fontFamily = FontFamily.Monospace)
+                                Spacer(Modifier.width(8.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(directory.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(directory.id, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                TextButton(
+                                    onClick = { viewModel.createSession(directory.id); dismiss() },
+                                    enabled = "session.create" in state.actions,
+                                ) { Text("Start") }
+                            }
+                        }
+                    }
+                    if (expanded) {
+                        val matchingSessions = state.sessions.filter { session ->
+                            session.subtitle == directory.id && (search.isBlank() || session.title.contains(search, true) || session.id.contains(search, true))
+                        }
+                        items(matchingSessions, key = { "session:${row.treeKey}:${it.id}" }) { session ->
+                            Box(Modifier.padding(start = ((row.depth + 1) * 14).dp)) {
+                                AgentwireSessionRow(
+                                    session = session,
+                                    active = session.id == state.activeSid,
+                                    actions = state.actions,
+                                    viewModel = viewModel,
+                                    onAttached = dismiss,
+                                )
+                            }
+                        }
+                        if (matchingSessions.isEmpty()) {
+                            item(key = "session-state:${row.treeKey}") {
+                                val sessionsLoaded = directory.id in state.loadedSessionDirectories
+                                Text(
+                                    if (sessionsLoaded) "No sessions in this directory" else "Loading sessions…",
+                                    modifier = Modifier.padding(start = ((row.depth + 1) * 14).dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                item { Text("Safe settings", style = MaterialTheme.typography.titleMedium) }
+                val supportsModels = "model" in state.supportedSettings || state.backend == "codex"
+                if (supportsModels && state.modelOptions.isEmpty()) {
+                    item {
+                        OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth().testTag("agentwire_model_picker")) {
+                            Text("Waiting for bridge model catalog", modifier = Modifier.weight(1f))
+                            Text("▾", fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                    item { Text("This backend did not advertise selectable models or efforts.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                } else if (supportsModels) {
+                    item {
+                        Box(Modifier.fillMaxWidth()) {
+                            OutlinedButton(onClick = { modelMenu = true }, modifier = Modifier.fillMaxWidth().testTag("agentwire_model_picker")) {
+                                val option = state.modelOptions.firstOrNull { it.value == model }
+                                Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
+                                    Text(option?.label ?: model)
+                                    if (option?.label != option?.value) Text(model, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+                                }
+                                Text("▾", fontFamily = FontFamily.Monospace)
+                            }
+                            DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
+                                state.modelOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Column { Text(option.label); if (option.label != option.value) Text(option.value, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace) } },
+                                        onClick = {
+                                            model = option.value
+                                            effort = option.defaultEffort?.takeIf { it in option.efforts } ?: option.efforts.firstOrNull().orEmpty()
+                                            modelMenu = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    val selectedOption = state.modelOptions.firstOrNull { it.value == model }
+                    item { Text("Reasoning effort", fontWeight = FontWeight.SemiBold) }
+                    selectedOption?.efforts.orEmpty().forEach { optionEffort ->
+                        item(key = "effort:$model:$optionEffort") {
+                            Row(Modifier.fillMaxWidth().clickable { effort = optionEffort }, verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = effort == optionEffort, onClick = { effort = optionEffort }, modifier = Modifier.testTag("agentwire_effort_$optionEffort"))
+                                Text(optionEffort.replaceFirstChar(Char::uppercase))
+                            }
+                        }
+                    }
+                }
+                if ("delivery" in state.supportedSettings) {
+                    item { Text("Delivery while running", fontWeight = FontWeight.SemiBold) }
+                    listOf("queue", "steer").forEach { option ->
+                        item(key = "delivery:$option") {
+                            Row(Modifier.fillMaxWidth().clickable { delivery = option }, verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = delivery == option, onClick = { delivery = option })
+                                Column {
+                                    Text(option.replaceFirstChar(Char::uppercase))
+                                    Text(
+                                        if (option == "queue") "Run after the current turn" else "Guide the current turn",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                if ("collaboration" in state.supportedSettings) {
+                    item { Text("Collaboration mode", fontWeight = FontWeight.SemiBold) }
+                    listOf("default", "plan").forEach { option ->
+                        item(key = "collaboration:$option") {
+                            Row(Modifier.fillMaxWidth().clickable { collaboration = option }, verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = collaboration == option, onClick = { collaboration = option })
+                                Text(option.replaceFirstChar(Char::uppercase))
+                            }
+                        }
+                    }
+                }
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { viewModel.updateSettings(buildMap {
+                            if (supportsModels && model.isNotBlank()) put("model", model)
+                            if (supportsModels && effort.isNotBlank()) put("effort", effort)
+                            if ("delivery" in state.supportedSettings) put("delivery", delivery)
+                            if ("collaboration" in state.supportedSettings && model.isNotBlank()) put("collaboration", collaboration)
+                        }) }, enabled = state.activeSid != null) { Text("Apply settings") }
+                        if ("approvalReviewer" in state.supportedSettings) {
+                            if (state.settings["approvalReviewer"] == "auto_review") {
+                                OutlinedButton(onClick = viewModel::disableAutoReview, enabled = state.activeSid != null) {
+                                    Text("Disable auto-review")
+                                }
+                            } else {
+                                OutlinedButton(onClick = {
+                                    if (state.autoReviewConfirmed) viewModel.enableAutoReview()
+                                    else confirmAutoReview = true
+                                }, enabled = state.activeSid != null) { Text("Enable auto-review") }
+                            }
+                        }
+                    }
                 }
             }
             item { Spacer(Modifier.height(24.dp)) }
@@ -488,31 +731,50 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
 @Composable
 private fun AgentwireSessionRow(
     session: AgentwireListItem,
+    active: Boolean,
     actions: Set<String>,
     viewModel: AgentwireViewModel,
+    onAttached: () -> Unit,
 ) {
+    var expanded by remember(session.id) { mutableStateOf(false) }
     var title by remember(session.id, session.title) { mutableStateOf(session.title) }
     val archived = "archived" in session.raw.stringList("flags")
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(10.dp)) {
-            if ("session.rename" in actions) {
-                OutlinedTextField(title, { title = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Session title") })
-            } else {
-                Text(session.title, fontWeight = FontWeight.SemiBold)
-            }
-            session.subtitle?.let { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall) }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { viewModel.attachSession(session.id, session.subtitle) }) { Text("Attach") }
-                if ("session.rename" in actions) {
-                    TextButton(onClick = { viewModel.renameSession(session.id, title) }, enabled = title.isNotBlank() && title != session.title) { Text("Rename") }
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (active) MaterialTheme.colorScheme.secondaryContainer
+            else MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column {
+            Row(
+                Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(session.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(session.id.take(12), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall)
+                }
+                if (active) {
+                    Text("Active", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp))
+                } else {
+                    TextButton(onClick = { viewModel.attachSession(session.id, session.subtitle); onAttached() }) { Text("Attach") }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if ("session.fork" in actions) TextButton(onClick = { viewModel.forkSession(session.id) }) { Text("Fork") }
-                if (archived && "session.unarchive" in actions) {
-                    TextButton(onClick = { viewModel.archiveSession(session.id, false) }) { Text("Unarchive") }
-                } else if (!archived && "session.archive" in actions) {
-                    TextButton(onClick = { viewModel.archiveSession(session.id, true) }) { Text("Archive") }
+            if (expanded) Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                if ("session.rename" in actions) {
+                    OutlinedTextField(title, { title = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Session title") })
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if ("session.rename" in actions) {
+                        TextButton(onClick = { viewModel.renameSession(session.id, title) }, enabled = title.isNotBlank() && title != session.title) { Text("Rename") }
+                    }
+                    if ("session.fork" in actions) TextButton(onClick = { viewModel.forkSession(session.id) }) { Text("Fork") }
+                    if (archived && "session.unarchive" in actions) {
+                        TextButton(onClick = { viewModel.archiveSession(session.id, false) }) { Text("Unarchive") }
+                    } else if (!archived && "session.archive" in actions) {
+                        TextButton(onClick = { viewModel.archiveSession(session.id, true) }) { Text("Archive") }
+                    }
                 }
             }
         }
