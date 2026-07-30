@@ -74,7 +74,7 @@ version, seed, case, and fixture in that module's
   the relevant unit/integration tests, lint, and builds in the matrix above.
 - `.github/workflows/ci.yml` calls reusable `headless-core.yml`, which runs exactly
   four isolated `@FastHeadlessE2e` methods on API34 Pixel 6 AOSP as a required gate.
-  A parallel managed-device job runs all 41 hermetic component instrumentation cases while
+  A parallel managed-device job runs all 44 hermetic component instrumentation cases while
   excluding the real-stack annotation.
   Push the candidate commit and require the complete CI gate to pass before
   tagging a release.
