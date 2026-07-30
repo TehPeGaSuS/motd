@@ -119,8 +119,18 @@ import kotlinx.coroutines.withContext
 /** Limit collapsed system-event work per composed row during high-velocity history traversal. */
 internal const val MAX_COLLAPSED_SYSTEM_EVENTS = 24
 
-/** Stable identity for remembered expanded pill state; changes when Paging extends a tail chunk. */
+/** Refresh identity for expanded line content; changes when Paging extends a tail chunk. */
 internal data class SystemRunContentKey(val newestId: Long, val oldestId: Long, val count: Int)
+
+/** An expanded run stays expanded when synchronization reshapes its bounded Paging chunk. */
+internal fun systemRunExpanded(runIds: Collection<Long>, expandedEventIds: Set<Long>): Boolean =
+    runIds.any(expandedEventIds::contains)
+
+internal fun updateExpandedSystemEvents(
+    current: Set<Long>,
+    runIds: Collection<Long>,
+    expanded: Boolean,
+): Set<Long> = if (expanded) current + runIds else current - runIds.toSet()
 
 /** Reuse lazy compositions only across rows with the same structural layout. */
 internal enum class MessageContentType {
@@ -274,6 +284,9 @@ fun MessageList(
     onDismissInvite: (Long) -> Unit = {},
 ) {
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
+    // Keep the user's expanded JOIN/PART runs above the volatile Paging rows. A history sync may
+    // briefly replace or rechunk those rows, but overlapping event identities remain stable.
+    var expandedSystemEventIds by remember(bufferId) { mutableStateOf(emptySet<Long>()) }
     // Scrolling postpones only cache misses. Parsed URLs and resolved previews remain renderable so
     // a recycled row does not lose rich content halfway through a fling.
     val canStartNewRichContentWork = richContentReady && !scrolling
@@ -350,6 +363,14 @@ fun MessageList(
                         index = index,
                         newest = msg,
                         readMarkerTime = readMarkerTime,
+                        expandedEventIds = expandedSystemEventIds,
+                        onExpandedChange = { runIds, expanded ->
+                            expandedSystemEventIds = updateExpandedSystemEvents(
+                                expandedSystemEventIds,
+                                runIds,
+                                expanded,
+                            )
+                        },
                     )
                 }
                 return@items
@@ -786,6 +807,8 @@ private fun SystemEventRun(
     index: Int,
     newest: MessageEntity,
     readMarkerTime: TimelineAnchor?,
+    expandedEventIds: Set<Long>,
+    onExpandedChange: (Collection<Long>, Boolean) -> Unit,
 ) {
     // Gather at most one chunk: newest first (index), then older neighbors while still system events.
     val run = ArrayList<MessageEntity>()
@@ -799,6 +822,7 @@ private fun SystemEventRun(
         i++
     }
     val oldest = run.last()
+    val runIds = run.map { it.id }
     val olderThanRun = if (index + run.size < items.itemCount) items.peek(index + run.size) else null
 
     val summary = if (run.size == 1) newest.text else summarizeSystemRun(run)
@@ -825,6 +849,8 @@ private fun SystemEventRun(
             lineCount = run.size,
             loadLines = { run.map { it.text } },
             contentKey = SystemRunContentKey(newest.id, oldest.id, run.size),
+            expanded = systemRunExpanded(runIds, expandedEventIds),
+            onExpandedChange = { expanded -> onExpandedChange(runIds, expanded) },
             modifier = Modifier.testTag("chat_system_pill"),
         )
         if (showDay) DaySeparator(timeMs = oldest.serverTime)

@@ -8,6 +8,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.paging.PagingData
@@ -110,15 +111,28 @@ class MessageTimelineUiTest {
 
     @Test
     fun pagingReplacementKeepsTheVisibleMessageAnchorStable() {
-        val original = (70L downTo 1L).map { id ->
+        val systemRun = listOf(
+            message(1_002, 72_000, MessageKind.JOIN, "alice joined"),
+            message(1_001, 71_000, MessageKind.PART, "bob left"),
+        )
+        val messages = (70L downTo 1L).map { id ->
             message(id, id * 1_000, MessageKind.PRIVMSG, "row $id")
         }
+        val original = systemRun + messages
         val pages = MutableStateFlow(PagingData.from(original))
         render(pages)
+        scrollTo("chat_system_pill")
+        compose.onNodeWithTag("chat_system_pill", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("alice joined", useUnmergedTree = true).assertIsDisplayed()
         scrollTo(messageTag(25))
         val before = bounds(messageTag(25))
 
-        pages.value = PagingData.from(listOf(message(71, 71_000, MessageKind.PRIVMSG, "row 71")) + original)
+        pages.value = PagingData.from(
+            listOf(message(1_003, 73_000, MessageKind.PRIVMSG, "row 71")) +
+                systemRun +
+                message(1_000, 70_500, MessageKind.QUIT, "carol quit") +
+                messages,
+        )
         compose.waitUntil(10_000) {
             runCatching { compose.onNodeWithTag(messageTag(25), useUnmergedTree = true).assertIsDisplayed() }.isSuccess
         }
@@ -127,6 +141,11 @@ class MessageTimelineUiTest {
         compose.onAllNodesWithTag(messageTag(25), useUnmergedTree = true).assertCountEquals(1)
         assertTrue(bounds(messageTag(26)).top > after.top)
         assertTrue(bounds(messageTag(24)).top < after.top)
+
+        scrollTo("chat_system_pill")
+        compose.onNodeWithText("alice joined", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("bob left", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("carol quit", useUnmergedTree = true).assertIsDisplayed()
     }
 
     private fun render(

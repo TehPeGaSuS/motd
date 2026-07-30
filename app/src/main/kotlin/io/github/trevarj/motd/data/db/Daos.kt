@@ -1375,7 +1375,9 @@ interface CanonicalTimelineDao {
                timelineOrderConfirmed = CASE
                    WHEN :confirmed THEN 1 ELSE timelineOrderConfirmed
                END
-           WHERE id = :eventId""",
+           WHERE id = :eventId
+             AND (timelineOrder != :timelineOrder
+                  OR (:confirmed = 1 AND timelineOrderConfirmed = 0))""",
     )
     suspend fun updateTimelineOrder(
         eventId: TimelineEventId,

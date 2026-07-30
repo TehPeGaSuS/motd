@@ -3256,9 +3256,15 @@ class EventProcessorTest {
             IrcEvent.ChatMessage(ctx(msgid = "h2"), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"), "#chan", "two", false, null),
         ))
         processor.process(networkId, batch)
-        processor.process(networkId, batch) // replay overlap → IGNORE
         val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        val pagingSource = db.messageDao().pagingSource(buffer.id)
+        pagingSource.load(
+            androidx.paging.PagingSource.LoadParams.Refresh(null, 100, true),
+        )
+        processor.process(networkId, batch) // replay overlap → IGNORE
         assertEquals(2, pagingList(buffer.id).size)
+        // A no-op replay must not replace the visible Paging generation with placeholders.
+        assertFalse(pagingSource.invalid)
     }
 
     @Test
