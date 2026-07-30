@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       phases:
-        description: 'Phases to run (space-separated, e.g. "a b c" or "a b c d e f g h i")'
+        description: 'Phases to run (space-separated, e.g. "a b c" or "a b c d e f g h j r i")'
         required: false
-        default: 'a b c d e f g h i'
+        default: 'a b c d e f g h j r i'
   schedule:
     # Nightly at 04:17 UTC (odd minute to avoid the top-of-hour stampede).
     - cron: '17 4 * * *'
@@ -27,7 +27,7 @@ concurrency:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -61,7 +61,7 @@ jobs:
       # --- CI env for the runbook (runbook.sh sources test/e2e/.env) --------
       - name: Install CI env
         env:
-          E2E_PHASES_INPUT: ${{ github.event.inputs.phases || 'a b c d e f g h i' }}
+          E2E_PHASES_INPUT: ${{ github.event.inputs.phases || 'a b c d e f g h j r i' }}
         run: |
           cp test/e2e/.env.ci test/e2e/.env
           # Allow the workflow input to widen/narrow phase coverage.

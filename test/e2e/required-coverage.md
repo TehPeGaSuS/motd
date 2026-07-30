@@ -1,4 +1,25 @@
-# Required headless coverage map
+# Headless journey coverage map
+
+The tiers deliberately separate deterministic state logic, fixture-free rendered components, a
+compact required real-stack gate, and a broad nightly choreography sweep.
+
+| Behavior and state class | Continuous evidence | Broad or specialized evidence |
+| --- | --- | --- |
+| protocol parsing, playback mapping, canonical storage, ordering, and dedup | seeded JVM tests in `:irc:test` and `:app:testFossDebugUnitTest` | larger nightly generated-test shards |
+| message bubbles, actions, audio, replies, placeholders, sync/error states | 41 fixture-free cases via `component-suite.sh` | phases C, G, and conditional H |
+| chat-list badges, presence, selection, archive, drawer, and empty states | component suite | phases B and I |
+| onboarding, TLS trust, Soju import, child readiness | required real-stack onboarding journey | phase A |
+| send/echo persistence, reconnect identity, and audio upload rendering | required real-stack canonical-send journey | phases C and R |
+| unread entry, divider, Paging-window placement, marker timing, ordering, and exactly-once recovery | required real-stack unread-history journey | phase R |
+| composer, autocomplete, actions, reactions, replies, search, and scroll FAB | component/unit tests | phase C |
+| channel info, membership, friends/fools, pin/mute, and part confirmation | unit tests | phase D |
+| channel browse, search, join, and empty/loading states | component/unit tests | phase E |
+| settings, theme, palette, density, backup controls, and process-stable theme content | component/unit tests plus required navigation smoke | phases F and G |
+| Soju child/control-center routing and authorization-dependent panels | required navigation smoke plus unit tests | phase J and socket control probe |
+| process restoration, saved viewport, deep links, notification routing, and read anchors | deterministic ViewModel/repository tests | phase R for reconnect restoration; physical phase K for delivery-only behavior |
+
+Physical-only behavior remains outside headless claims: OEM notifications, Doze, system pickers,
+real certificates, GPU/rendering performance, and release install upgrades.
 
 The required API34 gate discovers exactly the four methods in
 `RequiredHeadlessE2eTest`. It is intentionally narrow; the exhaustive host UIAutomator runbook

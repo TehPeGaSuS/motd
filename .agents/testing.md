@@ -93,7 +93,7 @@ version, seed, case, and fixture in that module's
   managed-device smoke workflow. Do not duplicate its annotation or fixture
   arguments in workflow YAML.
 - Use `test/e2e/runbook.sh` for multi-screen interaction and crash sweeps. The
-  local headless `full` command runs its A-I phases on the isolated emulator;
+  local headless `full` command runs A-H/J/R before teardown phase I on the isolated emulator;
   the hermetic Docker stack is used by the scheduled/manual CI workflow.
 - Use `:app:assembleFossE2e` only for x86_64 emulator testing. It deliberately
   excludes the arm64-only embedded libbox core and is not representative of

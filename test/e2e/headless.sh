@@ -189,7 +189,7 @@ full() {
     MOTD_SOJU_HOST=127.0.0.1 MOTD_SOJU_PORT="$SOJU_PORT" \
     MOTD_SOJU_USER=motd MOTD_SOJU_PASS=motdtest \
     MOTD_NICK=motdadb MOTD_TEST_CHANNEL='##motdtest' MOTD_SECOND_NICK=motdadb2 \
-    E2E_PHASES="${E2E_PHASES:-a b c d e f g h i}" \
+    E2E_PHASES="${E2E_PHASES:-a b c d e f g h j r i}" \
     nix develop "$REPO" -c "$E2E_DIR/runbook.sh"
 }
 

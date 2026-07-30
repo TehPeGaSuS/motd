@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test/e2e/runbook.sh — device-driven E2E acceptance run for motd.
 #
-# Implements the A–I traversal documented in test/e2e/README.md against a
+# Implements the tiered traversal documented in test/e2e/README.md against a
 # physical device or emulator and a real soju test bouncer. Drives the app via
 # adb + uiautomator using the helpers in lib.sh.
 #
@@ -1542,7 +1542,8 @@ main() {
   # leaves durable device state (networks, joined channel). Every later phase begins from the
   # chat-list anchor via reset_to_chatlist, so a subset run — e.g. E2E_PHASES="c" — picks up
   # where a prior full run left off without repeating onboarding (rapid dev cycle).
-  local phases="${E2E_PHASES:-a b c d e f g h i}"
+  # J and R depend on the connected state from A and must precede I, which clears app data.
+  local phases="${E2E_PHASES:-a b c d e f g h j r i}"
   local p phase_class phase_rc failures_before findings
   for p in $phases; do
     case "$p" in

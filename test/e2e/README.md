@@ -13,11 +13,11 @@ setup and teardown deliberately clear application data.
 | Mode | Best for | Entry point |
 | --- | --- | --- |
 | Fast headless emulator | Default local feature validation; onboarding, chat, channel, settings, and bouncer journeys | `./test/e2e/headless.sh fast` |
-| Full headless emulator | Local A-I shell-runbook sweep | `./test/e2e/headless.sh full` |
+| Full headless emulator | Local A-H, J, R, then teardown shell-runbook sweep | `./test/e2e/headless.sh full` |
 | Public screenshot showcase | Deterministic chat list, conversation, and attachment-sheet captures | `./test/e2e/headless.sh showcase` |
 | Native local stack + USB device | Manual feature work, physical-device checks, quick iteration | `./test/e2e/local-stack.sh` |
 | Native ZNC + Ergo stack | ZNC playback, reconnect, SASL, and capability degradation | `./test/e2e/znc-stack.sh` |
-| Host-driven A–I runbook | Broad UI interaction and crash sweep on a device or emulator | `./test/e2e/runbook.sh` |
+| Host-driven runbook | Broad UI interaction and crash sweep on a device or emulator | `./test/e2e/runbook.sh` |
 | Managed-device fast suite | Alternate/manual CI execution of the fast journeys | `.github/workflows/smoke.yml` |
 | Managed-device component suite | All hermetic Compose/component instrumentation tests | `./test/e2e/component-suite.sh` |
 | Hermetic emulator run | Scheduled/manual exhaustive CI diagnostics | `.github/workflows/e2e.yml` |
@@ -26,7 +26,7 @@ The fast headless suite is a required pull-request and main-branch CI gate. It
 runs exactly four isolated Kotlin journeys: TLS onboarding/import, one
 canonical echo/send/reconnect row, an 80-row second-client unread/history recovery,
 and bootstrapped navigation/settings/bouncer smoke. Host UIAutomator remains scheduled/manual;
-the exhaustive A-I workflow is diagnostics, not a required fast phase.
+the exhaustive A-H/J/R/I workflow is diagnostics, not a required fast phase.
 Release CI still runs its own unit, lint, and FOSS release build checks.
 The required reusable workflow also runs the 41 fixture-free component tests on a separate managed
 device, keeping UI-state coverage continuous without coupling those cases to Soju.
@@ -94,7 +94,8 @@ fast. Manage their lifecycle explicitly:
 ./test/e2e/headless.sh reset
 ```
 
-`full` runs the existing A-I uiautomator sweep on the same isolated emulator.
+`full` runs A-H, the safe Soju-control and retained-history phases J/R, then teardown phase I on
+the same isolated emulator. J/R intentionally precede I because teardown clears app state.
 `down` preserves the AVD; `reset` deletes only the wrapper's isolated AVD,
 stack, and state directories. Failures save a JSON summary and privacy-safe
 required-E2E structure under `test/e2e/artifacts/fast-suite/`; the fast gate
@@ -389,10 +390,10 @@ failure log.
 | I | Delete-chat cancellation, final crash sweep, clean reset | Required |
 | J | Soju control-center panels, admin discovery, safe console command | Required with the local admin fixture |
 | K | ntfy discovery, soju WebPush ACK, background/cold/Doze delivery, exactly-once notifications and visible rows | Conditional; skipped without F-Droid ntfy |
-| R | Force-stop, retained 40-row reconnect gap, soju stop/start, newest-window and older-scroll proof | Required when selected by fast connected/direct runs |
+| R | Force-stop, retained 40-row reconnect gap, soju stop/start, newest-window and older-scroll proof | Required in the scheduled/manual hermetic sweep |
 | S | Deterministic public screenshot showcase | Required when selected by `headless.sh showcase` |
 
-Phase K is intentionally excluded from the default A–I sweep because it needs an installed
+Phase K is intentionally excluded from the default headless sweep because it needs an installed
 UnifiedPush distributor and network access to its HTTPS relay. With the native stack already up,
 run a clean debug-only proof using:
 
@@ -409,8 +410,8 @@ The runbook also snapshots all three global Android animation scales before disa
 and restores the exact original values on every normal exit, failure, or interruption. If the
 snapshot cannot be completed, it leaves the device's animation settings unchanged.
 
-The hermetic default is A–C. The scheduled/manual workflow may widen this to
-A–I. DM, mention, typing, member, and moderation checks need a live second
+The minimal committed environment is A–C. The scheduled/manual workflow widens this to
+A–H/J/R/I. DM, mention, typing, member, and moderation checks need a live second
 identity; missing optional fixture state is reported as a skip rather than a
 false failure.
 
