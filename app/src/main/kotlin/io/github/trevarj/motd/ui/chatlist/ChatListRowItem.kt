@@ -117,6 +117,15 @@ internal fun chatListMessagePreview(text: String?): ChatListMessagePreview {
         ?: ChatListMessagePreview.Text(value)
 }
 
+internal fun chatListPreviewSender(
+    type: BufferType,
+    messageText: String?,
+    sender: String?,
+): String? = sender?.takeIf {
+    // System events use an empty sender, which must not leave an empty label chip.
+    type == BufferType.CHANNEL && messageText != null && it.isNotBlank()
+}
+
 /**
  * One chat-list row: avatar, display name, supporting network/last-message line, relative time, and
  * unread/mention badges. Muted rows use subdued semantic colors with a bell-off glyph.
@@ -275,8 +284,7 @@ fun ChatListRowItem(
                 // with nick mentions in the message text); queries read cleaner without it.
                 val lastMessage = row.lastMessageText
                 val preview = chatListMessagePreview(lastMessage)
-                val sender = row.lastMessageSender
-                    ?.takeIf { row.type == BufferType.CHANNEL && lastMessage != null }
+                val sender = chatListPreviewSender(row.type, lastMessage, row.lastMessageSender)
                 if (sender != null) {
                     SenderLabel(
                         sender = sender,
