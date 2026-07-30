@@ -108,12 +108,13 @@ class ChannelListViewModel @Inject constructor(
                         rules,
                     ),
                 )
-                // A local result cap does not bound the server response. Only auto-fetch when
-                // ELIST U guarantees the broad request is filtered before transmission.
-                if (conn is IrcClientState.Ready &&
-                    supportsPopularChannelList(conn) &&
-                    !_state.value.loaded &&
-                    !_state.value.isRoot
+                // Auto-fetch a bounded set of the busiest channels. ELIST 'U' applies the
+                // population floor server-side; other servers stream into the bounded collector.
+                if (shouldAutoFetchPopularChannels(
+                        connection = conn,
+                        loaded = _state.value.loaded,
+                        isRoot = _state.value.isRoot,
+                    )
                 ) {
                     fetch()
                 }
@@ -177,16 +178,6 @@ class ChannelListViewModel @Inject constructor(
             current.copy(query = requestedQuery).also { _state.value = it }
         }
         if (s.isRoot || !s.isReady) return
-        if (requestedQuery.isBlank() && !supportsPopularChannelList(s.connState)) {
-            // Never turn a blank refresh into a full-network LIST on servers without ELIST U.
-            _state.value = s.copy(
-                listings = emptyList(),
-                loading = false,
-                loaded = false,
-                error = null,
-            )
-            return
-        }
         if (fetchJob?.isActive == true) {
             if (shouldQueueChannelListFetch(activeFetchQuery, requestedQuery)) {
                 queuedFetchQuery = requestedQuery

@@ -103,28 +103,38 @@ class ChannelListModelsTest {
     }
 
     @Test
-    fun `popular channel list requires ELIST user-count filtering`() {
+    fun `ready server without ELIST still auto-fetches locally bounded popular channels`() {
         assertEquals(
             true,
-            supportsPopularChannelList(
-                IrcClientState.Ready("me", emptySet(), mapOf("ELIST" to "CMNTU")),
-            ),
-        )
-        assertEquals(
-            true,
-            supportsPopularChannelList(
-                IrcClientState.Ready("me", emptySet(), mapOf("ELIST" to "u")),
+            shouldAutoFetchPopularChannels(
+                connection = IrcClientState.Ready("me", emptySet(), emptyMap()),
+                loaded = false,
+                isRoot = false,
             ),
         )
         assertEquals(
             false,
-            supportsPopularChannelList(
-                IrcClientState.Ready("me", emptySet(), mapOf("ELIST" to "CMNT")),
+            shouldAutoFetchPopularChannels(
+                connection = IrcClientState.Disconnected,
+                loaded = false,
+                isRoot = false,
             ),
         )
         assertEquals(
             false,
-            supportsPopularChannelList(IrcClientState.Ready("me", emptySet(), emptyMap())),
+            shouldAutoFetchPopularChannels(
+                connection = IrcClientState.Ready("me", emptySet(), emptyMap()),
+                loaded = true,
+                isRoot = false,
+            ),
+        )
+        assertEquals(
+            false,
+            shouldAutoFetchPopularChannels(
+                connection = IrcClientState.Ready("me", emptySet(), emptyMap()),
+                loaded = false,
+                isRoot = true,
+            ),
         )
     }
 

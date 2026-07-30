@@ -49,19 +49,23 @@ fun channelBrowserAvailability(
     else -> ChannelBrowserAvailability.OFFLINE
 }
 
-/** Whether a blank LIST can be bounded server-side instead of streaming the entire network. */
-fun supportsPopularChannelList(connection: IrcClientState): Boolean =
-    (connection as? IrcClientState.Ready)
-        ?.isupport
-        ?.get("ELIST")
-        ?.contains('U', ignoreCase = true) == true
+/** Whether entering the browser should request the locally bounded popular-channel set. */
+fun shouldAutoFetchPopularChannels(
+    connection: IrcClientState,
+    loaded: Boolean,
+    isRoot: Boolean,
+): Boolean =
+    connection is IrcClientState.Ready &&
+        !loaded &&
+        !isRoot
 
 /**
  * Resolve the LIST arguments for a fetch (plans/16 §5.7).
  *
  * A non-blank [query] fetches with a `*query*` substring mask and no min-users floor. A blank
- * query fetches the busiest channels ([DEFAULT_MIN_USERS] floor). Callers must first require
- * [supportsPopularChannelList] so this never degrades into an unbounded network-wide LIST.
+ * query fetches the busiest channels ([DEFAULT_MIN_USERS] floor, applied server-side only when
+ * ELIST 'U' is present). Without ELIST 'U', the IRC client streams the response through its
+ * memory-bounded top-[POPULAR_CHANNEL_LIMIT] accumulator.
  */
 data class ListArgs(val mask: String?, val minUsers: Int?)
 

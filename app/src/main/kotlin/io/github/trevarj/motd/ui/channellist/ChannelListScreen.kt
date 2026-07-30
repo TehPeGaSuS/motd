@@ -53,9 +53,9 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 /**
  * Channel browser (plans/16 §5.7). LIST/ELIST-backed, scoped to [networkId].
  *
- * The busiest channels are auto-fetched on entry only when ELIST 'U' can bound the server reply.
- * Other networks start with targeted search so opening the screen cannot stream a full LIST.
- * Browsing is disabled for an unbound soju BOUNCER_ROOT (its connection can't LIST). Join delegates to
+ * The busiest channels are auto-fetched on entry. ELIST 'U' is used when available; otherwise
+ * the client retains a bounded top set from the LIST stream. Browsing is disabled for an unbound
+ * soju BOUNCER_ROOT (its connection can't LIST). Join delegates to
  * ConnectionManager.joinChannel and remains open; Room self-JOIN persistence is authoritative.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -91,7 +91,6 @@ internal fun ChannelListContent(
     var text by rememberSaveable(state.networkId, stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(state.query))
     }
-    val canSubmitQuery = text.text.isNotBlank() || supportsPopularChannelList(state.connState)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -117,8 +116,7 @@ internal fun ChannelListContent(
                 },
                 actions = {
                     if (state.availability == ChannelBrowserAvailability.READY &&
-                        !state.loading &&
-                        canSubmitQuery
+                        !state.loading
                     ) {
                         IconButton(
                             onClick = { onSearch(text.text) },
@@ -147,7 +145,7 @@ internal fun ChannelListContent(
                         trailingIcon = {
                             IconButton(
                                 onClick = { onSearch(text.text) },
-                                enabled = !state.loading && canSubmitQuery,
+                                enabled = !state.loading,
                             ) {
                                 Icon(
                                     Icons.Outlined.Search,
@@ -157,7 +155,7 @@ internal fun ChannelListContent(
                         },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(
-                            onSearch = { if (canSubmitQuery) onSearch(text.text) },
+                            onSearch = { onSearch(text.text) },
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
