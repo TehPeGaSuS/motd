@@ -98,7 +98,7 @@ data class AgentwireUiState(
     val historyLoading: Boolean = false,
     val historyPage: String? = null,
     val historyBeforeAt: Long? = null,
-    val olderHistoryAvailable: Boolean = true,
+    val olderHistoryAvailable: Boolean = false,
     val error: String? = null,
     val transcriptOverride: Boolean = false,
     val autoReviewConfirmed: Boolean = false,

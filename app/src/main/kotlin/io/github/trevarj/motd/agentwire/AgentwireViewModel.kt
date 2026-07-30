@@ -41,11 +41,29 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
+private const val AGENTWIRE_INITIAL_HISTORY_SIZE = 20
 private const val AGENTWIRE_HISTORY_PAGE_SIZE = 50
+private const val AGENTWIRE_SYNC_RETRY_INITIAL_MS = 1_000L
+private const val AGENTWIRE_SYNC_RETRY_MAX_MS = 10_000L
 
 internal fun acceptsAgentwireEpoch(envelope: AgentwireEnvelope, currentEpoch: String?): Boolean =
     envelope.kind == "agent.hello" || envelope.history == true || currentEpoch == null ||
         envelope.epoch == currentEpoch
+
+internal suspend fun retryAgentwireSync(
+    isReady: () -> Boolean,
+    issue: suspend (String) -> Unit,
+    nextId: () -> String = { UUID.randomUUID().toString() },
+    pause: suspend (Long) -> Unit = { delay(it) },
+) {
+    var retryDelay = AGENTWIRE_SYNC_RETRY_INITIAL_MS
+    while (!isReady()) {
+        issue(nextId())
+        if (isReady()) return
+        pause(retryDelay)
+        retryDelay = (retryDelay * 2).coerceAtMost(AGENTWIRE_SYNC_RETRY_MAX_MS)
+    }
+}
 
 @HiltViewModel
 class AgentwireViewModel @Inject constructor(
@@ -235,7 +253,14 @@ class AgentwireViewModel @Inject constructor(
             launch { next.broadcastEvents.collect(::ingest) }
             // Let the hot-flow collector attach before sync.request is emitted.
             delay(1)
-            syncId = sendActionInternal("sync.request")
+            retryAgentwireSync(
+                isReady = { syncHello && syncSnapshot },
+                issue = { id ->
+                    // Set the correlation ID before sending so a fast reply cannot race past it.
+                    syncId = id
+                    sendActionInternal("sync.request", id = id)
+                },
+            )
         }
     }
 
@@ -298,7 +323,7 @@ class AgentwireViewModel @Inject constructor(
             historyRequested = true
             sendActionInternal(
                 "history.request",
-                buildJsonObject { put("limit", AGENTWIRE_HISTORY_PAGE_SIZE) },
+                buildJsonObject { put("limit", AGENTWIRE_INITIAL_HISTORY_SIZE) },
             )
         }
     }
@@ -338,7 +363,9 @@ class AgentwireViewModel @Inject constructor(
             _state.update { state -> state.copy(error = it.message ?: "Unable to send Agentwire action") }
             false
         }
-        if (sent) _state.update { it.copy(actionStatus = it.actionStatus + (id to "sent")) }
+        if (sent && kind != "sync.request") {
+            _state.update { it.copy(actionStatus = it.actionStatus + (id to "sent")) }
+        }
         return id.takeIf { sent }
     }
 }

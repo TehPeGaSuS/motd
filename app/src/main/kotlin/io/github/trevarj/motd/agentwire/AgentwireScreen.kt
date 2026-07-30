@@ -214,8 +214,12 @@ private fun AgentwireScreen(
                                 TextButton(onClick = viewModel::clearError) { Text("Dismiss") }
                             }
                         }
-                        if (state.olderHistoryAvailable) item {
-                            TextButton(onClick = viewModel::loadOlderHistory, modifier = Modifier.fillMaxWidth()) {
+                        if (state.historyLoading || state.olderHistoryAvailable) item {
+                            TextButton(
+                                onClick = viewModel::loadOlderHistory,
+                                enabled = !state.historyLoading,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
                                 Text(if (state.historyLoading) "Loading history…" else "Load older history")
                             }
                         }

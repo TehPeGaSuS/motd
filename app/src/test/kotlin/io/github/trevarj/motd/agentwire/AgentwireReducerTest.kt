@@ -2,6 +2,7 @@ package io.github.trevarj.motd.agentwire
 
 import io.github.trevarj.motd.irc.agentwire.AgentwireEnvelope
 import java.util.UUID
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
@@ -220,6 +221,26 @@ class AgentwireReducerTest {
         assertTrue(acceptsAgentwireEpoch(oldHistory, "current"))
         assertFalse(acceptsAgentwireEpoch(staleLive, "current"))
         assertTrue(acceptsAgentwireEpoch(staleLive, null))
+    }
+
+    @Test
+    fun `sync retries with fresh ids and a bounded backoff until correlated state is ready`() = runTest {
+        var ready = false
+        val sent = mutableListOf<String>()
+        val waits = mutableListOf<Long>()
+
+        retryAgentwireSync(
+            isReady = { ready },
+            issue = { sent += it },
+            nextId = { "sync-${sent.size + 1}" },
+            pause = { duration ->
+                waits += duration
+                if (sent.size == 6) ready = true
+            },
+        )
+
+        assertEquals((1..6).map { "sync-$it" }, sent)
+        assertEquals(listOf(1_000L, 2_000L, 4_000L, 8_000L, 10_000L, 10_000L), waits)
     }
 
     @Test
