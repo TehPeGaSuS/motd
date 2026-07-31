@@ -132,11 +132,18 @@ private class BoundedChannelListings(private val capacity: Int) {
 
 data class WhoxResult(val rows: List<IrcEvent.WhoxRow>, val completed: Boolean)
 
+/**
+ * An event observed through a bounded fan-out stream. Consumers must treat a non-contiguous
+ * [sequence] as lost state and recover from their own authoritative source.
+ */
+data class SequencedIrcEvent(val sequence: Long, val event: IrcEvent)
+
 /** One instance per physical socket. Restartable: start() after stop() reconnects fresh. */
 class IrcClient(
     val config: IrcClientConfig,
     private val factory: TransportFactory,
     private val scope: CoroutineScope,
+    private val observerBufferCapacity: Int = OBSERVER_EVENT_CAPACITY,
 ) {
     private val _state = MutableStateFlow<IrcClientState>(IrcClientState.Disconnected)
     val state: StateFlow<IrcClientState> = _state.asStateFlow()
@@ -146,11 +153,23 @@ class IrcClient(
 
     private val _events = MutableSharedFlow<IrcEvent>(
         replay = 0,
-        extraBufferCapacity = 4096,
+        extraBufferCapacity = observerBufferCapacity,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     /** Best-effort fan-out for transient request correlation and UI-adjacent observers. */
     val broadcastEvents: SharedFlow<IrcEvent> = _events.asSharedFlow()
+
+    private val _sequencedEvents = MutableSharedFlow<SequencedIrcEvent>(
+        replay = 0,
+        extraBufferCapacity = observerBufferCapacity,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    /**
+     * Bounded, ordered fan-out for stateful observers. It intentionally does not consume
+     * [criticalEvents]; a slow observer is never allowed to stall the IRC reader.
+     */
+    val sequencedEvents: SharedFlow<SequencedIrcEvent> = _sequencedEvents.asSharedFlow()
+    private var nextObserverSequence = 0L
 
     private var criticalEventChannel = Channel<IrcEvent>(CRITICAL_EVENT_CAPACITY)
 
@@ -208,8 +227,10 @@ class IrcClient(
 
     fun start() {
         stop()
+        require(observerBufferCapacity > 0) { "observer buffer capacity must be positive" }
         val criticalEvents = Channel<IrcEvent>(CRITICAL_EVENT_CAPACITY)
         criticalEventChannel = criticalEvents
+        nextObserverSequence = 0L
         registered = false
         _targetClassificationReady.value = false
         _bouncerNetworks.value = emptyMap()   // drop any stale networks from a prior connection
@@ -703,7 +724,9 @@ class IrcClient(
         event: IrcEvent,
     ) {
         criticalEvents.send(event)
+        val sequenced = SequencedIrcEvent(++nextObserverSequence, event)
         _events.emit(event)
+        _sequencedEvents.emit(sequenced)
     }
 
     private suspend fun sendSerialized(t: IrcTransport, msg: IrcMessage) =
@@ -1320,6 +1343,7 @@ class IrcClient(
         const val WEBPUSH_TIMEOUT_MS = 30_000L
         const val WHOX_TIMEOUT_MS = 15_000L
         const val CRITICAL_EVENT_CAPACITY = 4096
+        const val OBSERVER_EVENT_CAPACITY = 4096
         const val DEFAULT_HISTORY_PAGE_LIMIT = 100
     }
 }

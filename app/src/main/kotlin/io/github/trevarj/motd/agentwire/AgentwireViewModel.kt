@@ -14,9 +14,9 @@ import io.github.trevarj.motd.irc.agentwire.parseAgentwireTopic
 import io.github.trevarj.motd.irc.agentwire.readablePreview
 import io.github.trevarj.motd.irc.agentwire.sendAgentwire
 import io.github.trevarj.motd.irc.client.IrcClient
+import io.github.trevarj.motd.irc.client.SequencedIrcEvent
 import io.github.trevarj.motd.irc.client.canSendClientTag
 import io.github.trevarj.motd.irc.event.IrcClientState
-import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import java.util.UUID
@@ -70,14 +70,12 @@ class AgentwireViewModel @Inject constructor(
 ) : ViewModel() {
     private val route = savedStateHandle.toRoute<ChatRoute>()
     private val instance = UUID.randomUUID().toString()
-    private val ingestor = AgentwireEventIngestor()
+    private val session = AgentwireSessionOrchestrator()
     private val _state = MutableStateFlow(AgentwireUiState())
     val state: StateFlow<AgentwireUiState> = _state.asStateFlow()
     private var sessionJob: Job? = null
+    private var syncJob: Job? = null
     private var client: IrcClient? = null
-    private var syncId: String? = null
-    private var syncHello = false
-    private var syncSnapshot = false
     private val autoReviewConfirmedSessions = HashSet<String>()
 
     init {
@@ -224,51 +222,22 @@ class AgentwireViewModel @Inject constructor(
     private fun startSession(next: IrcClient) {
         stopSession(disconnected = client != null)
         client = next
-        ingestor.reset()
-        syncHello = false
-        syncSnapshot = false
-        _state.update {
-            it.copy(
-                syncing = true,
-                epoch = null,
-                botAccount = null,
-                error = null,
-                activeSid = null,
-                cwd = null,
-                busy = false,
-                currentTid = null,
-                actions = emptySet(),
-                supportedSettings = emptySet(),
-                modelOptions = emptyList(),
-                workspaceChildren = emptyMap(),
-                liveSessions = emptyList(),
-                workspaceSessions = emptyMap(),
-                loadedSessionDirectories = emptySet(),
-                queue = emptyList(),
-                requests = emptyList(),
-                timeline = emptyList(),
-                historyLoading = false,
-                historyPage = null,
-                historyRequestId = null,
-                historySid = null,
-                historyCursor = null,
-                historyStaged = emptyList(),
-                historyBeforeAt = null,
-                olderHistoryAvailable = false,
-                autoReviewConfirmed = false,
-            )
-        }
+        session.reset()
+        _state.value = session.beginSync(_state.value)
         sessionJob = viewModelScope.launch {
-            launch { next.broadcastEvents.collect(::ingest) }
+            launch { next.sequencedEvents.collect(::ingest) }
             // Let the hot-flow collector attach before sync.request is emitted.
             delay(1)
-            retryAgentwireSync(
-                isReady = { syncHello && syncSnapshot },
-                issue = { id ->
-                    // Set the correlation ID before sending so a fast reply cannot race past it.
-                    syncId = id
-                    sendActionInternal("sync.request", id = id)
-                },
+            startSyncRetry()
+        }
+    }
+
+    private fun startSyncRetry() {
+        syncJob?.cancel()
+        syncJob = viewModelScope.launch {
+            session.retryUntilReady(
+                state = { _state.value },
+                issue = { id -> sendActionInternal("sync.request", id = id) },
             )
         }
     }
@@ -276,8 +245,10 @@ class AgentwireViewModel @Inject constructor(
     private fun stopSession(disconnected: Boolean) {
         sessionJob?.cancel()
         sessionJob = null
+        syncJob?.cancel()
+        syncJob = null
         client = null
-        ingestor.reset()
+        session.reset()
         if (disconnected) {
             val uncertain = _state.value.actionStatus.mapValues { (_, status) ->
                 if (status == "sent" || status == "accepted") "outcome unknown" else status
@@ -286,13 +257,18 @@ class AgentwireViewModel @Inject constructor(
         }
     }
 
-    private suspend fun ingest(event: IrcEvent) {
-        val result = ingestor.ingest(_state.value, event, syncId)
-        if (result is AgentwireEventIngestor.Result.Rejected) {
+    private suspend fun ingest(event: SequencedIrcEvent) {
+        val result = session.ingest(_state.value, event)
+        if (result is AgentwireDeliveryCoordinator.Result.Rejected) {
             _state.value = result.state
             return
         }
-        if (result !is AgentwireEventIngestor.Result.Applied) return
+        if (result is AgentwireDeliveryCoordinator.Result.ResyncRequired) {
+            _state.value = result.state
+            startSyncRetry()
+            return
+        }
+        if (result !is AgentwireDeliveryCoordinator.Result.Updated) return
         val envelope = result.envelope
         val previousSid = _state.value.activeSid
         _state.value = result.state
@@ -308,12 +284,10 @@ class AgentwireViewModel @Inject constructor(
         _state.update {
             it.copy(autoReviewConfirmed = activeSid != null && activeSid in autoReviewConfirmedSessions)
         }
-        if (envelope.reply == syncId && envelope.kind == "agent.hello") syncHello = true
-        if (envelope.reply == syncId && envelope.kind == "channel.snapshot") syncSnapshot = true
         val current = _state.value
         if (
             current.activeSid != null &&
-            (current.activeSid != previousSid || (syncHello && syncSnapshot && current.historySid == null))
+            (current.activeSid != previousSid || (result.syncCompleted && current.historySid == null))
         ) {
             requestHistory(initial = true)
         }

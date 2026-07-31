@@ -3,6 +3,7 @@ package io.github.trevarj.motd.irc.client
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.ServerTimeSource
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -221,6 +222,38 @@ class IrcClientTest {
         assertTrue(chat.isSelf)
         assertEquals(label, chat.ctx.label)
         assertEquals("abc", chat.ctx.msgid)
+    }
+
+    @Test
+    fun `sequenced observer exposes a gap when a slow subscriber overflows`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft, observerBufferCapacity = 1)
+        val observed = mutableListOf<SequencedIrcEvent>()
+        val firstDelivered = CompletableDeferred<Unit>()
+        val releaseCollector = CompletableDeferred<Unit>()
+        val collector = launch {
+            client.sequencedEvents.collect { event ->
+                observed += event
+                if (observed.size == 1) {
+                    firstDelivered.complete(Unit)
+                    releaseCollector.await()
+                }
+            }
+        }
+        runCurrent()
+
+        ft.feed(":alice!u@h PRIVMSG #chan :first")
+        runCurrent()
+        firstDelivered.await()
+        ft.feed(":alice!u@h PRIVMSG #chan :dropped")
+        ft.feed(":alice!u@h PRIVMSG #chan :last")
+        runCurrent()
+        releaseCollector.complete(Unit)
+        runCurrent()
+        collector.cancelAndJoin()
+
+        assertEquals(listOf("first", "last"), observed.map { (it.event as IrcEvent.ChatMessage).text })
+        assertEquals(observed[0].sequence + 2, observed[1].sequence)
     }
 
     @Test
@@ -1278,8 +1311,9 @@ class IrcClientTest {
     private suspend fun kotlinx.coroutines.test.TestScope.registered(
         ft: FakeTransport,
         caps: String = fullLs,
+        observerBufferCapacity: Int = 4096,
     ): IrcClient {
-        val client = IrcClient(config(), ft.factory(), clientScope())
+        val client = IrcClient(config(), ft.factory(), clientScope(), observerBufferCapacity)
         client.start()
         runCurrent()
         ft.feed(":srv CAP * LS :$caps")

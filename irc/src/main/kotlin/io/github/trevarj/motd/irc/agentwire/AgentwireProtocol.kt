@@ -306,9 +306,10 @@ class AgentwireReassembler(private val now: () -> Long = System::currentTimeMill
         envelope
     }
 
-    private fun expire() {
+    /** Returns true when incomplete envelopes were discarded after their bounded assembly window. */
+    fun expire(): Boolean {
         val cutoff = now() - FRAGMENT_TIMEOUT_MS
-        assemblies.entries.removeAll { it.value.firstAt < cutoff }
+        return assemblies.entries.removeAll { it.value.firstAt < cutoff }
     }
 }
 
