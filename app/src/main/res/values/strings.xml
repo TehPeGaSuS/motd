@@ -102,6 +102,13 @@
     <string name="onboarding_connect_retry">Retry</string>
     <string name="onboarding_connect_networks_title">Bouncer networks</string>
     <string name="onboarding_connect_import_hint">Toggle networks to import.</string>
+    <string name="onboarding_bouncer_discovery_loading">Discovering bouncer networks…</string>
+    <string name="onboarding_bouncer_discovery_retry">Retry discovery</string>
+    <string name="onboarding_bouncer_discovery_refresh">Refresh networks</string>
+    <string name="onboarding_bouncer_connection_lost">The bouncer connection was lost. Retry when it is connected.</string>
+    <string name="onboarding_bouncer_server_rejected">The bouncer rejected this request: %1$s</string>
+    <string name="onboarding_bouncer_server_rejected_generic">The bouncer rejected this request.</string>
+    <string name="onboarding_bouncer_request_failed">The bouncer request failed. Please retry.</string>
     <string name="onboarding_connect_add_network">Add network</string>
     <string name="onboarding_connect_add_name">Network name</string>
     <string name="onboarding_connect_add_host">Host</string>

@@ -17,6 +17,7 @@ import io.github.trevarj.motd.ui.settings.buildNetworkEntity
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.settings.addnetwork.networkPreset
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,6 +39,7 @@ class OnboardingViewModel @Inject constructor(
     private val connectionManager: ConnectionManager,
     private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
     private val onboardingPrefs: OnboardingPrefs,
+    private val bouncerOperations: OnboardingBouncerOperations,
     private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
 ) : ViewModel() {
 
@@ -87,6 +89,7 @@ class OnboardingViewModel @Inject constructor(
     fun editSojuLogin(login: SojuLoginForm) = dispatch(OnboardingAction.EditSojuLogin(login))
     fun editZncLogin(login: ZncLoginForm) = dispatch(OnboardingAction.EditZncLogin(login))
     fun toggleBouncerNetwork(netId: String) = dispatch(OnboardingAction.ToggleBouncerNetwork(netId))
+    fun editBouncerAddDraft(draft: BouncerAddDraft) = dispatch(OnboardingAction.EditBouncerAddDraft(draft))
 
     fun confirmPlaintext() {
         dispatch(OnboardingAction.ConfirmPlaintext)
@@ -109,13 +112,21 @@ class OnboardingViewModel @Inject constructor(
     // client's live snapshot after the initial request: the reply can legitimately arrive after
     // bouncerListNetworks() has returned its short empty snapshot.
     private var bouncerNetworksJob: Job? = null
+    private var nextBouncerSessionGeneration = 0L
+    private var nextBouncerListAttempt = 0L
 
     private fun runConnectTest() {
         // Drop any network + collector from a prior attempt first, so reconnecting after a settings
         // change (e.g. TLS) rebuilds cleanly rather than piling up stale actors.
         connectTestJob?.cancel()
         stopBouncerNetworkSync()
-        _state.value = _state.value.copy(bouncerNetworks = emptyList(), bouncerListLoaded = false)
+        _state.value = _state.value.copy(
+            bouncerDiscovery = null,
+            bouncerSessionGeneration = 0L,
+            bouncerListAttempt = 0L,
+            bouncerAdd = BouncerAddState.Idle,
+            bouncerAddDraft = BouncerAddDraft(),
+        )
         val prior = _state.value.networkId
         connectTestJob = viewModelScope.launch {
             if (prior != null) networkRepository.deleteNetwork(prior)
@@ -156,7 +167,7 @@ class OnboardingViewModel @Inject constructor(
                 val cs = states[networkId] ?: return@collect
                 if (cs != _state.value.connState) {
                     dispatch(OnboardingAction.ConnStateChanged(cs))
-                    if (cs is IrcClientState.Ready && s.isSoju && !_state.value.bouncerListLoaded) {
+                    if (cs is IrcClientState.Ready && s.isSoju && _state.value.bouncerDiscovery == null) {
                         loadBouncerNetworks(networkId)
                     }
                 }
@@ -174,8 +185,11 @@ class OnboardingViewModel @Inject constructor(
             networkId = null,
             connState = null,
             stateLog = emptyList(),
-            bouncerNetworks = emptyList(),
-            bouncerListLoaded = false,
+            bouncerDiscovery = null,
+            bouncerSessionGeneration = 0L,
+            bouncerListAttempt = 0L,
+            bouncerAdd = BouncerAddState.Idle,
+            bouncerAddDraft = BouncerAddDraft(),
         )
     }
 
@@ -187,38 +201,75 @@ class OnboardingViewModel @Inject constructor(
 
     private fun loadBouncerNetworks(networkId: Long) {
         stopBouncerNetworkSync()
+        val current = _state.value
+        val sessionGeneration = if (current.networkId == networkId && current.bouncerDiscovery != null) {
+            current.bouncerSessionGeneration
+        } else {
+            ++nextBouncerSessionGeneration
+        }
+        val attempt = ++nextBouncerListAttempt
+        dispatch(OnboardingAction.BouncerListLoading(networkId, sessionGeneration, attempt))
         bouncerNetworksJob = viewModelScope.launch {
-            val client = awaitCurrentOnboardingResource(
+            val snapshots = awaitCurrentOnboardingResource(
                 expectedNetworkId = networkId,
                 currentNetworkId = { _state.value.networkId },
-                lookup = connectionManager::clientFor,
+                lookup = bouncerOperations::snapshots,
                 maxAttempts = BOUNCER_CLIENT_WAIT_ATTEMPTS,
                 delayMs = BOUNCER_CLIENT_WAIT_DELAY_MS,
-            ) ?: return@launch
+            ) ?: run {
+                dispatch(
+                    OnboardingAction.BouncerListFailed(
+                        networkId,
+                        sessionGeneration,
+                        attempt,
+                        BouncerOperationError.ConnectionLost,
+                    ),
+                )
+                return@launch
+            }
             launch {
-                client.bouncerNetworks.collect { networks ->
+                snapshots.collect { networks ->
                     // A retry can replace the root while a late notification from the old
                     // connection is in flight. Do not let that stale snapshot mutate the wizard.
-                    if (_state.value.networkId == networkId) {
-                        dispatch(
-                            OnboardingAction.BouncerListed(
-                                networks.map { (netId, attrs) ->
-                                    BouncerNetworkRow(
-                                        netId = netId,
-                                        name = attrs["name"] ?: attrs["host"] ?: netId,
-                                        selected = false,
-                                    )
-                                },
-                            ),
-                        )
-                    }
+                    dispatch(
+                        OnboardingAction.BouncerSnapshot(
+                            networkId,
+                            sessionGeneration,
+                            networks.toBouncerRows(),
+                        ),
+                    )
                 }
             }
             // This sends LISTNETWORKS for bouncers that do not push an initial state. The
             // collector above remains active after its short snapshot wait, so delayed ordinary
             // BOUNCER NETWORK replies still populate the import list.
-            runCatching { client.bouncerListNetworks() }
+            try {
+                dispatch(
+                    OnboardingAction.BouncerListed(
+                        networkId,
+                        sessionGeneration,
+                        attempt,
+                        bouncerOperations.list(networkId).toBouncerRows(),
+                    ),
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                dispatch(
+                    OnboardingAction.BouncerListFailed(
+                        networkId,
+                        sessionGeneration,
+                        attempt,
+                        bouncerOperationError(error),
+                    ),
+                )
+            }
         }
+    }
+
+    /** Explicit refresh after a failed or stale LISTNETWORKS request. */
+    fun retryBouncerDiscovery() {
+        _state.value.networkId?.let(::loadBouncerNetworks)
     }
 
     private fun stopBouncerNetworkSync() {
@@ -226,13 +277,30 @@ class OnboardingViewModel @Inject constructor(
         bouncerNetworksJob = null
     }
 
-    /** Add a bouncer network via `bouncerAddNetwork`, then append it to the import list. */
-    fun addBouncerNetwork(name: String, host: String) = viewModelScope.launch {
-        val networkId = _state.value.networkId ?: return@launch
-        val client = connectionManager.clientFor(networkId) ?: return@launch
-        val attrs = mapOf("name" to name, "host" to host)
-        val netId = runCatching { client.bouncerAddNetwork(attrs) }.getOrNull() ?: return@launch
-        dispatch(OnboardingAction.BouncerAdded(BouncerNetworkRow(netId, name, selected = true)))
+    /** Add a bouncer network only once per pending request; the reducer owns the input draft. */
+    fun addBouncerNetwork() {
+        val state = _state.value
+        if (state.bouncerAdd is BouncerAddState.Submitting || !state.bouncerAddDraft.isValid) return
+        val networkId = state.networkId ?: return
+        val sessionGeneration = state.bouncerSessionGeneration
+        val draft = state.bouncerAddDraft
+        dispatch(OnboardingAction.BouncerAddSubmitting(networkId, sessionGeneration))
+        viewModelScope.launch {
+            try {
+                val netId = bouncerOperations.add(networkId, draft.name, draft.host)
+                dispatch(
+                    OnboardingAction.BouncerAdded(
+                        networkId,
+                        sessionGeneration,
+                        BouncerNetworkRow(netId, draft.name, selected = true),
+                    ),
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                dispatch(OnboardingAction.BouncerAddFailed(networkId, sessionGeneration, bouncerOperationError(error)))
+            }
+        }
     }
 
     /**
@@ -275,6 +343,17 @@ class OnboardingViewModel @Inject constructor(
             bouncerNetId = row.netId,
         )
 }
+
+private fun Map<String, Map<String, String>>.toBouncerRows(): List<BouncerNetworkRow> = map { (netId, attrs) ->
+    BouncerNetworkRow(
+        netId = netId,
+        name = attrs["name"] ?: attrs["host"] ?: netId,
+        selected = false,
+    )
+}
+
+private fun List<io.github.trevarj.motd.irc.client.BouncerNetwork>.toBouncerRows(): List<BouncerNetworkRow> =
+    associate { it.netId to it.attrs }.toBouncerRows()
 
 internal suspend fun <T> awaitCurrentOnboardingResource(
     expectedNetworkId: Long,

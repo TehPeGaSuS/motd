@@ -1044,13 +1044,17 @@ class IrcClient(
     // -- soju bouncer-networks --
 
     suspend fun bouncerListNetworks(): List<BouncerNetwork> {
-        val t = transport ?: return snapshotBouncerNetworks()
+        val t = transport ?: throw IrcDisconnectedException("BOUNCER LISTNETWORKS", null)
         // soju advertises no labeled-response, so sendLabeled would return empty. It instead
         // pushes BOUNCER NETWORK notifications (soju.im/bouncer-networks-notify) that we already
         // accumulate in _bouncerNetworks. Send an explicit LISTNETWORKS to force a refresh for
         // servers that do not push, then return the snapshot once it settles (notifications
         // usually arrive by the time the caller reaches Ready).
-        runCatching { sendSerialized(t, BouncerCommands.listNetworks()) }
+        // A failed write is materially different from an empty bouncer account. Do not swallow it
+        // into the snapshot: callers need to offer a retryable discovery error. soju does not
+        // negotiate labeled-response, so an unlabelled server-side LIST rejection cannot be
+        // correlated; an accepted request that produces no NETWORK notifications is Loaded(empty).
+        sendSerialized(t, BouncerCommands.listNetworks())
         if (_bouncerNetworks.value.isEmpty()) {
             withTimeoutOrNull(2000) { while (_bouncerNetworks.value.isEmpty()) delay(50) }
         }
@@ -1062,7 +1066,12 @@ class IrcClient(
 
     suspend fun bouncerAddNetwork(attrs: Map<String, String>): String {
         val response = sendLabeled(BouncerCommands.addNetwork(attrs))
-        return response.firstNotNullOfOrNull { BouncerCommands.parseAddReply(it) } ?: ""
+        return response.firstNotNullOfOrNull { BouncerCommands.parseAddReply(it) }
+            ?: throw IrcCommandException(
+                "BOUNCER ADDNETWORK",
+                "NO_RESPONSE",
+                "The bouncer did not confirm adding the network.",
+            )
     }
 
     suspend fun bouncerDeleteNetwork(netId: String) {

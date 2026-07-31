@@ -79,6 +79,45 @@ class IrcClientTest {
     }
 
     @Test
+    fun `bouncer list reports a disconnected or failed transport`() = runTest {
+        val disconnected = IrcClient(config(), FakeTransport().factory(), clientScope())
+        try {
+            disconnected.bouncerListNetworks()
+            fail("disconnected LISTNETWORKS must not look like an empty snapshot")
+        } catch (_: IrcDisconnectedException) {
+            // Expected: discovery can render a retryable connection failure.
+        }
+
+        val transport = FakeTransport()
+        val connected = IrcClient(config(), transport.factory(), clientScope())
+        connected.start()
+        runCurrent()
+        transport.sendFailure = IOException("socket closed")
+        try {
+            connected.bouncerListNetworks()
+            fail("failed LISTNETWORKS write must propagate")
+        } catch (error: IOException) {
+            assertEquals("socket closed", error.message)
+        }
+    }
+
+    @Test
+    fun `unconfirmed bouncer add is a server rejection`() = runTest {
+        val transport = FakeTransport()
+        val client = IrcClient(config(), transport.factory(), clientScope())
+        client.start()
+        runCurrent()
+
+        try {
+            client.bouncerAddNetwork(mapOf("name" to "New", "host" to "irc.new.example"))
+            fail("missing ADDNETWORK confirmation must not report success")
+        } catch (error: IrcCommandException) {
+            assertEquals("BOUNCER ADDNETWORK", error.ircCommand)
+            assertEquals("NO_RESPONSE", error.code)
+        }
+    }
+
+    @Test
     fun `registration happy path with SASL PLAIN reaches Ready`() = runTest {
         val ft = FakeTransport()
         val client = IrcClient(config(SaslMechanism.PLAIN, "alice", "s3cret"), ft.factory(), clientScope())

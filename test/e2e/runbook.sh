@@ -330,14 +330,44 @@ phase_a() {
     note "cert dialog did not appear (already trusted or fast connect); continuing"
   fi
   # Wait for either the ready indicator or the bouncer section.
-  if wait_for_any_text 30 "Connected as " "Bouncer networks" >/dev/null; then
+  if wait_for_any_text 30 "Connected as $MOTD_NICK" "Bouncer networks" >/dev/null; then
     ok "connect settled (ready or bouncer section shown)"
   else
     fail "connect did not reach Ready / Bouncer networks within timeout"
   fi
   assert_no_crash
 
-  # 9. Bouncer import.
+  # 9. Discovery failure/retry. This is the real-stack authority for onboarding recovery: stop
+  # only the ephemeral soju fixture after its initial empty-or-populated LIST has settled, force
+  # a refresh, and require the retained-row retry UI before restarting it. No remote network or
+  # local child is created until the existing libera fixture is selected below.
+  step "Surface failed bouncer discovery and retry after soju restart"
+  wait_for_tag onboarding_bouncer_discovery_refresh 20 || true
+  assert_tag_present onboarding_bouncer_discovery_refresh
+  if reconnect_stack stop-soju; then
+    _reconnect_restore_armed=true
+    sleep 2
+    tap_tag onboarding_bouncer_discovery_refresh
+    wait_for_tag onboarding_bouncer_discovery_error 20 || true
+    assert_tag_present onboarding_bouncer_discovery_error
+    if reconnect_stack start-soju; then
+      _reconnect_restore_armed=false
+      if wait_for_text "Connected as $MOTD_NICK" 30; then
+        tap_tag onboarding_bouncer_discovery_retry
+        wait_for_tag onboarding_bouncer_discovery_refresh 25 || true
+        assert_tag_present onboarding_bouncer_discovery_refresh
+      else
+        fail "bouncer did not reconnect before discovery retry"
+      fi
+    else
+      fail "could not restart soju after discovery-failure exercise"
+    fi
+  else
+    fail "could not stop soju for discovery-failure exercise"
+  fi
+  assert_no_crash
+
+  # 10. Bouncer import.
   step "Import bouncer network 'libera'"
   wait_for_text "Bouncer networks" 20 || true
   assert_text "Bouncer networks"
@@ -353,7 +383,7 @@ phase_a() {
   note "selected libera for import"
   assert_no_crash
 
-  # 10. Finish.
+  # 11. Finish.
   step "Finish onboarding -> ChatList"
   # The forward button label varies (Next/Finish) and "Finish" also appears as the FINISH page
   # heading, so drive it by its stable testTag rather than by text.

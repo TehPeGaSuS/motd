@@ -87,6 +87,8 @@ import io.github.trevarj.motd.avatar.AvatarStore
 import io.github.trevarj.motd.avatar.AvatarStoreImpl
 import io.github.trevarj.motd.bouncer.BouncerServClient
 import io.github.trevarj.motd.bouncer.BouncerServClientImpl
+import io.github.trevarj.motd.ui.onboarding.ConnectionManagerOnboardingBouncerOperations
+import io.github.trevarj.motd.ui.onboarding.OnboardingBouncerOperations
 import io.github.trevarj.motd.bouncer.BouncerServSessionProvider
 import io.github.trevarj.motd.bouncer.ConnectionBouncerServSessionProvider
 import io.github.trevarj.motd.data.backup.ConfigurationBackupRepository
@@ -200,6 +202,11 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun bouncerServClient(impl: BouncerServClientImpl): BouncerServClient
+
+    @Binds @Singleton
+    abstract fun onboardingBouncerOperations(
+        impl: ConnectionManagerOnboardingBouncerOperations,
+    ): OnboardingBouncerOperations
 
     @Binds @Singleton
     abstract fun bouncerServSessionProvider(

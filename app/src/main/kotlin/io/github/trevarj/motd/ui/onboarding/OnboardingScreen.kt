@@ -45,9 +45,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.Modifier
@@ -94,7 +91,9 @@ fun OnboardingScreen(
         onSojuLoginChange = viewModel::editSojuLogin,
         onZncLoginChange = viewModel::editZncLogin,
         onRetry = viewModel::retryConnect,
+        onRetryBouncerDiscovery = viewModel::retryBouncerDiscovery,
         onToggleBouncer = viewModel::toggleBouncerNetwork,
+        onBouncerAddDraftChange = viewModel::editBouncerAddDraft,
         onAddBouncer = viewModel::addBouncerNetwork,
         onFinish = { viewModel.finish(onDone) },
         onConfirmPlaintext = viewModel::confirmPlaintext,
@@ -116,8 +115,10 @@ fun OnboardingContent(
     onSojuLoginChange: (SojuLoginForm) -> Unit,
     onZncLoginChange: (ZncLoginForm) -> Unit,
     onRetry: () -> Unit,
+    onRetryBouncerDiscovery: () -> Unit,
     onToggleBouncer: (String) -> Unit,
-    onAddBouncer: (String, String) -> Unit,
+    onBouncerAddDraftChange: (BouncerAddDraft) -> Unit,
+    onAddBouncer: () -> Unit,
     onFinish: () -> Unit,
     onConfirmPlaintext: () -> Unit,
     onDismissPlaintext: () -> Unit,
@@ -148,7 +149,14 @@ fun OnboardingContent(
                         // Direct path AUTH step: mechanism picker only (server fields live on step 3).
                         ServerPage(state, onServerChange, onAuthChange, authOnly = true)
                     }
-                OnboardingStep.CONNECT -> ConnectPage(state, onRetry, onToggleBouncer, onAddBouncer)
+                OnboardingStep.CONNECT -> ConnectPage(
+                    state,
+                    onRetry,
+                    onRetryBouncerDiscovery,
+                    onToggleBouncer,
+                    onBouncerAddDraftChange,
+                    onAddBouncer,
+                )
                 OnboardingStep.FINISH -> FinishPage()
             }
         }
@@ -413,8 +421,10 @@ private fun BouncerAuthPage(
 private fun ConnectPage(
     state: OnboardingState,
     onRetry: () -> Unit,
+    onRetryBouncerDiscovery: () -> Unit,
     onToggleBouncer: (String) -> Unit,
-    onAddBouncer: (String, String) -> Unit,
+    onBouncerAddDraftChange: (BouncerAddDraft) -> Unit,
+    onAddBouncer: () -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -455,8 +465,16 @@ private fun ConnectPage(
             OutlinedButton(onClick = onRetry) { Text(stringResource(R.string.onboarding_connect_retry)) }
         }
 
-        if (state.isReady && state.isSoju && state.bouncerListLoaded) {
-            BouncerNetworksSection(state, onToggleBouncer, onAddBouncer)
+        // Retain discovery/add recovery controls after the root loses its connection. A failed
+        // refresh is actionable only if its retry affordance stays visible while reconnecting.
+        if (state.isSoju && state.bouncerDiscovery != null) {
+            BouncerNetworksSection(
+                state,
+                onRetryBouncerDiscovery,
+                onToggleBouncer,
+                onBouncerAddDraftChange,
+                onAddBouncer,
+            )
         }
     }
 }
@@ -498,8 +516,10 @@ private fun StateIndicator(connState: IrcClientState?) {
 @Composable
 private fun BouncerNetworksSection(
     state: OnboardingState,
+    onRetryDiscovery: () -> Unit,
     onToggleBouncer: (String) -> Unit,
-    onAddBouncer: (String, String) -> Unit,
+    onDraftChange: (BouncerAddDraft) -> Unit,
+    onAddBouncer: () -> Unit,
 ) {
     Text(
         stringResource(R.string.onboarding_connect_networks_title),
@@ -512,6 +532,36 @@ private fun BouncerNetworksSection(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    when (val discovery = state.bouncerDiscovery) {
+        is BouncerDiscoveryState.Loading -> Row(
+            modifier = Modifier.testTag("onboarding_bouncer_discovery_loading"),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp).testTag("onboarding_bouncer_discovery_progress"),
+                strokeWidth = 2.dp,
+            )
+            Text(stringResource(R.string.onboarding_bouncer_discovery_loading), style = MaterialTheme.typography.bodySmall)
+        }
+        is BouncerDiscoveryState.Failed -> {
+            Text(
+                bouncerErrorMessage(discovery.error),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.testTag("onboarding_bouncer_discovery_error"),
+            )
+            OutlinedButton(
+                onClick = onRetryDiscovery,
+                modifier = Modifier.testTag("onboarding_bouncer_discovery_retry"),
+            ) { Text(stringResource(R.string.onboarding_bouncer_discovery_retry)) }
+        }
+        is BouncerDiscoveryState.Loaded -> OutlinedButton(
+            onClick = onRetryDiscovery,
+            modifier = Modifier.testTag("onboarding_bouncer_discovery_refresh"),
+        ) { Text(stringResource(R.string.onboarding_bouncer_discovery_refresh)) }
+        null -> Unit
+    }
     Column(Modifier.selectableGroup()) {
         state.bouncerNetworks.forEach { row ->
             Row(
@@ -531,31 +581,60 @@ private fun BouncerNetworksSection(
         }
     }
 
-    var addName by remember { mutableStateOf("") }
-    var addHost by remember { mutableStateOf("") }
     Text(
         stringResource(R.string.onboarding_connect_add_network),
         style = MaterialTheme.typography.titleSmall,
         modifier = Modifier.padding(top = 12.dp),
     )
     OutlinedTextField(
-        value = addName,
-        onValueChange = { addName = it },
+        value = state.bouncerAddDraft.name,
+        onValueChange = { onDraftChange(state.bouncerAddDraft.copy(name = it)) },
         label = { Text(stringResource(R.string.onboarding_connect_add_name)) },
         singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag("onboarding_bouncer_add_name"),
     )
     OutlinedTextField(
-        value = addHost,
-        onValueChange = { addHost = it },
+        value = state.bouncerAddDraft.host,
+        onValueChange = { onDraftChange(state.bouncerAddDraft.copy(host = it)) },
         label = { Text(stringResource(R.string.onboarding_connect_add_host)) },
         singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag("onboarding_bouncer_add_host"),
     )
+    val adding = state.bouncerAdd is BouncerAddState.Submitting
+    if (state.bouncerAdd is BouncerAddState.Failed) {
+        Text(
+            bouncerErrorMessage(state.bouncerAdd.error),
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.testTag("onboarding_bouncer_add_error"),
+        )
+    }
     OutlinedButton(
-        onClick = { onAddBouncer(addName, addHost); addName = ""; addHost = "" },
-        enabled = addName.isNotBlank() && addHost.isNotBlank(),
-    ) { Text(stringResource(R.string.onboarding_connect_add_network)) }
+        onClick = onAddBouncer,
+        enabled = state.bouncerAddDraft.isValid && !adding,
+        modifier = Modifier.testTag("onboarding_bouncer_add_submit"),
+    ) {
+        if (adding) CircularProgressIndicator(
+            modifier = Modifier.size(18.dp).testTag("onboarding_bouncer_add_progress"),
+            strokeWidth = 2.dp,
+        )
+        else Text(stringResource(R.string.onboarding_connect_add_network))
+    }
+}
+
+@Composable
+private fun bouncerErrorMessage(error: BouncerOperationError): String = when (error) {
+    BouncerOperationError.ConnectionLost -> stringResource(R.string.onboarding_bouncer_connection_lost)
+    is BouncerOperationError.ServerRejected -> if (error.detail.isBlank()) {
+        stringResource(R.string.onboarding_bouncer_server_rejected_generic)
+    } else {
+        stringResource(R.string.onboarding_bouncer_server_rejected, error.detail)
+    }
+    is BouncerOperationError.Unexpected -> if (error.detail.isBlank()) {
+        stringResource(R.string.onboarding_bouncer_request_failed)
+    } else {
+        error.detail
+    }
 }
 
 @Composable
@@ -595,7 +674,7 @@ private fun OnboardingChoicePreview() {
                 state = OnboardingState(step = OnboardingStep.CHOICE, choice = ConnectionChoice.NETWORK),
                 onNext = {}, onBack = {}, onSkip = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
                 onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
-                onToggleBouncer = {}, onAddBouncer = { _, _ -> }, onFinish = {},
+                onRetryBouncerDiscovery = {}, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onFinish = {},
                 onConfirmPlaintext = {}, onDismissPlaintext = {},
             )
         }
@@ -613,15 +692,16 @@ private fun OnboardingConnectPreview() {
                     choice = ConnectionChoice.BOUNCER,
                     connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
                     stateLog = listOf(IrcClientState.Connecting, IrcClientState.Registering),
-                    bouncerListLoaded = true,
-                    bouncerNetworks = listOf(
-                        BouncerNetworkRow("1", "Libera", selected = true),
-                        BouncerNetworkRow("2", "OFTC", selected = false),
+                    bouncerDiscovery = BouncerDiscoveryState.Loaded(
+                        listOf(
+                            BouncerNetworkRow("1", "Libera", selected = true),
+                            BouncerNetworkRow("2", "OFTC", selected = false),
+                        ),
                     ),
                 ),
                 onNext = {}, onBack = {}, onSkip = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
                 onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
-                onToggleBouncer = {}, onAddBouncer = { _, _ -> }, onFinish = {},
+                onRetryBouncerDiscovery = {}, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onFinish = {},
                 onConfirmPlaintext = {}, onDismissPlaintext = {},
             )
         }

@@ -545,6 +545,18 @@ wait_for_text() {
 }
 
 # wait_for_tag "<testTag>" <timeout_s> — poll until a tagged Compose node is exported.
+wait_for_tag() {
+  local tag="$1" timeout="${2:-20}" waited=0
+  while [ "$waited" -lt "$timeout" ]; do
+    if dump && [ -n "$(bounds_of_tag "$tag")" ]; then
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
 wait_for_tag_prefix_count() {
   local prefix="$1" expected="$2" timeout="${3:-20}" waited=0 count
   while [ "$waited" -lt "$timeout" ]; do
