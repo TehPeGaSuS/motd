@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.CloudUpload
@@ -119,6 +120,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.scale
@@ -292,23 +294,24 @@ fun ChatScreen(
     val knownNicks by viewModel.knownNicks.collectAsStateWithLifecycle()
     val voiceState by voiceViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var pendingVoiceStart by remember { mutableStateOf<Boolean?>(null) }
+    val voicePermissionGate = remember(context, voiceViewModel) {
+        VoiceRecordingPermissionGate(
+            permissionGranted = {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                    PackageManager.PERMISSION_GRANTED
+            },
+            onStart = voiceViewModel::startRecording,
+            onDenied = voiceViewModel::clearError,
+        )
+    }
     val microphonePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        val locked = pendingVoiceStart
-        pendingVoiceStart = null
-        if (granted && locked != null) voiceViewModel.startRecording(locked)
-        else voiceViewModel.clearError()
+        voicePermissionGate.onPermissionResult(granted)
     }
 
     fun startVoiceRecording(locked: Boolean) {
-        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-            PackageManager.PERMISSION_GRANTED
-        if (granted) {
-            voiceViewModel.startRecording(locked)
-        } else {
-            pendingVoiceStart = locked
+        if (voicePermissionGate.start(locked)) {
             microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
@@ -451,6 +454,7 @@ fun ChatScreen(
         voiceState = voiceState,
         voiceEnabled = !isServerBuffer && (!state.parted),
         onVoiceHoldStart = { startVoiceRecording(locked = false) },
+        onVoiceAccessibilityStart = { startVoiceRecording(locked = true) },
         onVoiceHoldStop = voiceViewModel::stopRecording,
         onVoiceHoldCancel = voiceViewModel::cancelRecording,
         onVoiceLock = voiceViewModel::lockRecording,
@@ -567,6 +571,7 @@ fun ChatContent(
     voiceState: VoiceMessageUiState = VoiceMessageUiState(),
     voiceEnabled: Boolean = true,
     onVoiceHoldStart: () -> Unit = {},
+    onVoiceAccessibilityStart: () -> Unit = {},
     onVoiceHoldStop: () -> Unit = {},
     onVoiceHoldCancel: () -> Unit = {},
     onVoiceLock: () -> Unit = {},
@@ -1669,6 +1674,7 @@ fun ChatContent(
                     playbackState = audioPlaybackState,
                     onDelete = onVoiceDelete,
                     onCancelRecording = onVoiceHoldCancel,
+                    onStopRecording = onVoiceHoldStop,
                     onSend = onVoiceSend,
                     onPreview = { attachment -> onAudioToggle(AudioPlaybackRequest(attachment, null)) },
                     onPreviewSeek = { attachment, positionMs -> onAudioSeek(attachment, positionMs) },
@@ -1722,6 +1728,7 @@ fun ChatContent(
                     voiceEnabled = voiceEnabled && voiceState.staged == null && composerText.text.isBlank(),
                     voiceRecording = voiceState.recording != null,
                     onVoiceHoldStart = onVoiceHoldStart,
+                    onVoiceAccessibilityStart = onVoiceAccessibilityStart,
                     onVoiceHoldStop = onVoiceHoldStop,
                     onVoiceHoldCancel = onVoiceHoldCancel,
                     onVoiceLock = onVoiceLock,
@@ -2534,6 +2541,7 @@ internal fun VoiceComposerPanel(
     playbackState: AudioPlaybackState,
     onDelete: () -> Unit,
     onCancelRecording: () -> Unit,
+    onStopRecording: () -> Unit,
     onSend: () -> Unit,
     onPreview: (AudioAttachment) -> Unit,
     onPreviewSeek: (AudioAttachment, Long) -> Unit,
@@ -2545,7 +2553,17 @@ internal fun VoiceComposerPanel(
     var destinationSheet by remember { mutableStateOf(false) }
     state.recording?.let { recording ->
         Surface(
-            modifier = modifier.fillMaxWidth().testTag("voice_recording_panel"),
+            modifier = modifier
+                .fillMaxWidth()
+                .testTag("voice_recording_panel")
+                .semantics {
+                    liveRegion = LiveRegionMode.Polite
+                    contentDescription = if (recording.locked) {
+                        "Recording locked. Cancel recording or stop and review."
+                    } else {
+                        "Recording. Slide left to cancel or swipe up to lock."
+                    }
+                },
             color = MaterialTheme.colorScheme.errorContainer,
             contentColor = MaterialTheme.colorScheme.onErrorContainer,
         ) {
@@ -2573,6 +2591,9 @@ internal fun VoiceComposerPanel(
                 if (recording.locked) {
                     IconButton(onClick = onCancelRecording, modifier = Modifier.testTag("voice_cancel_locked")) {
                         Icon(Icons.Filled.Delete, "Cancel recording")
+                    }
+                    IconButton(onClick = onStopRecording, modifier = Modifier.testTag("voice_stop_locked")) {
+                        Icon(Icons.Filled.Stop, "Stop and review recording")
                     }
                 } else {
                     Column(
