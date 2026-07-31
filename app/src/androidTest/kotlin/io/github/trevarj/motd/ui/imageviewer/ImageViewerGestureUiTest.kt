@@ -7,11 +7,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.test.platform.app.InstrumentationRegistry
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -31,7 +35,7 @@ class ImageViewerGestureUiTest {
                         imageIdentity = "wide-fixture",
                         onBack = {},
                         onShare = {},
-                        onSave = {},
+                        onSave = { ImageSaveFeedback.SAVED },
                     )
                 }
             }
@@ -66,5 +70,40 @@ class ImageViewerGestureUiTest {
             assertEquals(expected, transform)
             assertEquals("wide content remains vertically centered until it covers the viewport", 0f, transform.offsetY, 0.001f)
         }
+    }
+
+    @Test fun save_feedback_waits_for_completion_and_allows_retry() {
+        val firstResult = CompletableDeferred<ImageSaveFeedback>()
+        var saveCalls = 0
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                Box(Modifier.size(200.dp, 400.dp)) {
+                    ImageViewerContent(
+                        painter = BitmapPainter(ImageBitmap(200, 200)),
+                        imageReady = true,
+                        imageState = null,
+                        imageIdentity = "save-fixture",
+                        onBack = {},
+                        onShare = {},
+                        onSave = {
+                            saveCalls += 1
+                            if (saveCalls == 1) firstResult.await() else ImageSaveFeedback.SAVED
+                        },
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithTag(IMAGE_VIEWER_SAVE_BUTTON_TAG).performClick()
+        compose.onNodeWithTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG).assertDoesNotExist()
+        compose.runOnIdle { firstResult.complete(ImageSaveFeedback.FAILED) }
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        compose.onNodeWithTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG)
+            .assertTextEquals(context.getString(io.github.trevarj.motd.R.string.image_viewer_save_failed))
+
+        compose.onNodeWithTag(IMAGE_VIEWER_SAVE_BUTTON_TAG).performClick()
+        compose.onNodeWithTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG)
+            .assertTextEquals(context.getString(io.github.trevarj.motd.R.string.image_viewer_saved))
+        assertEquals(2, saveCalls)
     }
 }

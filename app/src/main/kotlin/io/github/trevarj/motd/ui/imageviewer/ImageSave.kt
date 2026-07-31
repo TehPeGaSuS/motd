@@ -171,6 +171,12 @@ private val imageMimeExtensions = mapOf(
     "image/png" to "png",
     "image/gif" to "gif",
     "image/webp" to "webp",
+    "image/bmp" to "bmp",
+    "image/x-ms-bmp" to "bmp",
+    "image/heic" to "heic",
+    "image/heic-sequence" to "heic",
+    "image/heif" to "heif",
+    "image/heif-sequence" to "heif",
 )
 
 internal class UrlConnectionImageSaveConnectionFactory : ImageSaveConnectionFactory {

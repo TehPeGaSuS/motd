@@ -3,7 +3,6 @@ package io.github.trevarj.motd.ui.imageviewer
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
 import androidx.compose.foundation.Image
@@ -12,6 +11,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
@@ -44,14 +44,18 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.SemanticsPropertyReceiver
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -60,6 +64,8 @@ import kotlinx.coroutines.withContext
 
 private const val DOUBLE_TAP_SCALE = 2.5f
 internal const val IMAGE_VIEWER_IMAGE_TAG = "image_viewer_image"
+internal const val IMAGE_VIEWER_SAVE_BUTTON_TAG = "image_viewer_save_button"
+internal const val IMAGE_VIEWER_SAVE_FEEDBACK_TAG = "image_viewer_save_feedback"
 internal val ImageViewerTransformKey = SemanticsPropertyKey<ImageTransform>("ImageViewerTransform")
 private var SemanticsPropertyReceiver.imageViewerTransform by ImageViewerTransformKey
 
@@ -102,13 +108,15 @@ internal fun ImageViewerContent(
     imageIdentity: Any,
     onBack: () -> Unit,
     onShare: () -> Unit,
-    onSave: suspend () -> Unit,
+    onSave: suspend () -> ImageSaveFeedback,
 ) {
     val scope = rememberCoroutineScope()
     var chromeVisible by remember { mutableStateOf(true) }
     var transform by remember { mutableStateOf(ImageTransform()) }
     var transformAnimationJob by remember { mutableStateOf<Job?>(null) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+    var saveFeedback by remember { mutableStateOf<ImageSaveFeedback?>(null) }
+    var saveInProgress by remember { mutableStateOf(false) }
     val bounds = if (imageReady) imageTransformBounds(painter.intrinsicSize, viewportSize) else null
 
     fun applyTransform(candidate: ImageTransform) {
@@ -268,7 +276,25 @@ internal fun ImageViewerContent(
                     // MediaStore RELATIVE_PATH is API 29+; pre-29 would need WRITE_EXTERNAL_STORAGE,
                     // so hide Save there rather than request a legacy permission (plans/15 #26).
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        IconButton(onClick = { scope.launch { onSave() } }) {
+                        IconButton(
+                            enabled = !saveInProgress,
+                            onClick = {
+                                saveFeedback = null
+                                saveInProgress = true
+                                scope.launch {
+                                    try {
+                                        saveFeedback = onSave()
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        saveFeedback = ImageSaveFeedback.FAILED
+                                    } finally {
+                                        saveInProgress = false
+                                    }
+                                }
+                            },
+                            modifier = Modifier.testTag(IMAGE_VIEWER_SAVE_BUTTON_TAG),
+                        ) {
                             Icon(
                                 Icons.Filled.Download,
                                 contentDescription = stringResource(R.string.image_viewer_save),
@@ -278,6 +304,24 @@ internal fun ImageViewerContent(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+            )
+        }
+
+        saveFeedback?.let { feedback ->
+            Text(
+                text = stringResource(
+                    if (feedback == ImageSaveFeedback.SAVED) R.string.image_viewer_saved
+                    else R.string.image_viewer_save_failed,
+                ),
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(24.dp)
+                    .background(Color.Black.copy(alpha = 0.72f), MaterialTheme.shapes.small)
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .semantics { liveRegion = LiveRegionMode.Polite }
+                    .testTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG),
             )
         }
     }
@@ -299,21 +343,14 @@ private fun shareImage(context: Context, url: String) {
  * Only called on API 29+ (the caller hides Save below Q).
  */
 @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
-private suspend fun saveImage(context: Context, url: String) {
+private suspend fun saveImage(context: Context, url: String): ImageSaveFeedback {
     val result = withContext(Dispatchers.IO) {
         ImageSaveOperation(
             connectionFactory = UrlConnectionImageSaveConnectionFactory(),
             store = MediaStoreImageSaveStore(context.contentResolver),
         ).save(url)
     }
-    withContext(Dispatchers.Main) {
-        Toast.makeText(
-            context,
-            if (result.feedback() == ImageSaveFeedback.SAVED) context.getString(R.string.image_viewer_saved)
-            else context.getString(R.string.image_viewer_save_failed),
-            Toast.LENGTH_SHORT,
-        ).show()
-    }
+    return result.feedback()
 }
 
 @Preview

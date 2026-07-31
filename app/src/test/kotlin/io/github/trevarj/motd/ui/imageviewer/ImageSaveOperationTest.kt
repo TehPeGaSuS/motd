@@ -187,6 +187,23 @@ class ImageSaveOperationTest {
         assertEquals(ImageSaveFeedback.SAVED, ImageSaveResult.Saved.feedback())
     }
 
+    @Test fun `viewer supported bmp and heif responses keep their real media types`() = runTest {
+        listOf(
+            "image/bmp" to ImageSaveMetadata("motd-image.bmp", "image/bmp"),
+            "image/heic" to ImageSaveMetadata("motd-image.heic", "image/heic"),
+            "image/heif" to ImageSaveMetadata("motd-image.heif", "image/heif"),
+        ).forEach { (contentType, expected) ->
+            val store = FakeStore()
+
+            assertEquals(
+                ImageSaveResult.Saved,
+                operation(FakeConnection(contentType = contentType, input = ByteArrayInputStream(byteArrayOf(1))), store)
+                    .save("https://example.test/image"),
+            )
+            assertEquals(expected, store.metadata)
+        }
+    }
+
     private fun operation(
         connection: FakeConnection,
         store: FakeStore,
