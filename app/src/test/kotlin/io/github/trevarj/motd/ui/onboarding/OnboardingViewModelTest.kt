@@ -56,6 +56,7 @@ class OnboardingViewModelTest {
     private class FakeConnectionManager : ConnectionManager {
         override val connectionStates = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
         override fun clientFor(networkId: Long): IrcClient? = null
+        fun connecting(id: Long) { connectionStates.value += id to IrcClientState.Connecting }
         fun ready(id: Long) { connectionStates.value += id to IrcClientState.Ready("motd", emptySet(), emptyMap()) }
         override suspend fun startAll() = Unit
         override suspend fun stopAll() = Unit
@@ -228,6 +229,36 @@ class OnboardingViewModelTest {
         assertEquals(newRoot, vm.state.value.networkId)
         assertTrue(vm.state.value.bouncerNetworks.isEmpty())
         assertTrue(vm.state.value.bouncerAdd is BouncerAddState.Idle)
+    }
+
+    @Test
+    fun `same root reconnect rebinds discovery to the replacement client`() = runTest {
+        val operations = FakeBouncerOperations()
+        operations.snapshots.value = mapOf("old" to mapOf("name" to "Old"))
+        operations.listResponse.complete(listOf(BouncerNetwork("old", mapOf("name" to "Old"))))
+        val connections = FakeConnectionManager()
+        val vm = readyBouncer(operations, connections = connections)
+        val root = vm.state.value.networkId!!
+        runCurrent()
+        assertEquals("old", vm.state.value.bouncerNetworks.single().netId)
+
+        val replacementSnapshots = MutableStateFlow(
+            mapOf("new" to mapOf("name" to "New")),
+        )
+        operations.snapshotsByRoot[root] = replacementSnapshots
+        operations.listResponses[root] = CompletableDeferred<List<BouncerNetwork>>().also {
+            it.complete(listOf(BouncerNetwork("new", mapOf("name" to "New"))))
+        }
+        connections.connecting(root)
+        runCurrent()
+        connections.ready(root)
+        runCurrent()
+
+        assertEquals(2, operations.listCalls)
+        assertEquals("new", vm.state.value.bouncerNetworks.single().netId)
+        operations.snapshots.value = mapOf("stale" to mapOf("name" to "Stale"))
+        runCurrent()
+        assertEquals("new", vm.state.value.bouncerNetworks.single().netId)
     }
 
     @Test

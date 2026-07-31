@@ -167,7 +167,10 @@ class OnboardingViewModel @Inject constructor(
                 val cs = states[networkId] ?: return@collect
                 if (cs != _state.value.connState) {
                     dispatch(OnboardingAction.ConnStateChanged(cs))
-                    if (cs is IrcClientState.Ready && s.isSoju && _state.value.bouncerDiscovery == null) {
+                    if (cs is IrcClientState.Ready && s.isSoju) {
+                        // A reconnect swaps the physical client while retaining the root row. Rebind
+                        // discovery on every Ready transition so an old client's StateFlow cannot
+                        // keep the import list stale after the socket has recovered.
                         loadBouncerNetworks(networkId)
                     }
                 }
