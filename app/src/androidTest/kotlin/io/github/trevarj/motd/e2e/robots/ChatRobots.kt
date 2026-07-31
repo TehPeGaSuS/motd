@@ -44,11 +44,13 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         rule.onNodeWithText("Link", useUnmergedTree = true).assertIsDisplayed()
     }
 
-    fun assertUnreadEntry(firstTag: String, secondTag: String) {
+    fun assertUnreadEntry(firstTag: String, secondTag: String, timeoutMs: Long = 30_000) {
         rule.waitForIdle()
-        awaitTag("chat_read_marker_divider")
-        awaitTag(firstTag)
-        awaitTag(secondTag)
+        // Atomic history publication can leave Paging materializing the 80-row entry window for
+        // longer than the generic component timeout on a cold hosted emulator.
+        awaitTag("chat_read_marker_divider", timeoutMs)
+        awaitTag(firstTag, timeoutMs)
+        awaitTag(secondTag, timeoutMs)
         val timeline = rule.onNodeWithTag("chat_timeline", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val first = rule.onNodeWithTag(firstTag, useUnmergedTree = true)
             .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
