@@ -645,12 +645,12 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Mark read up to [time] (the newest visible/loaded server time). Called on resume with the
-     * newest loaded message and whenever a new message lands while the list is at the bottom
-     * (plans/07). [time] <= 0 is treated as "nothing to mark" and skipped.
+     * Mark read up to [anchor] while this chat destination is resumed. Navigation can retain or
+     * precompose the screen while another portrait destination is visible, so viewport callbacks
+     * outside the visible session must not advance local or remote read state.
      */
     fun markRead(anchor: TimelineAnchor) {
-        if (anchor.serverTime <= 0 || anchor.eventId <= 0) return
+        if (visibleSession.value == null || anchor.serverTime <= 0 || anchor.eventId <= 0) return
         val roomId = operationalBufferId.value
         AutoFollowTrace.record("markread_request", roomId) {
             "marker=${anchor.serverTime}:${anchor.eventId}"

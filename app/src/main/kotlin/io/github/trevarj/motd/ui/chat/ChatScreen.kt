@@ -313,13 +313,18 @@ fun ChatScreen(
         }
     }
 
-    // Composition survives Home/recents, so use the actual resumed lifecycle instead of treating
-    // "still composed" as foreground. This gates notifications and chat sounds correctly.
+    // Composition survives Home/recents and navigation transitions, so use the destination's
+    // resumed lifecycle instead of treating "still composed" as visible.
     val lifecycleOwner = LocalLifecycleOwner.current
+    var destinationResumed by remember(lifecycleOwner) { mutableStateOf(false) }
     DisposableEffect(lifecycleOwner, viewModel, voiceViewModel) {
         val gate = ChatForegroundLifecycleGate(
-            onResume = viewModel::onResume,
+            onResume = {
+                destinationResumed = true
+                viewModel.onResume()
+            },
             onPause = {
+                destinationResumed = false
                 viewModel.onPause()
                 voiceViewModel.stopForBackground()
             },
@@ -401,6 +406,7 @@ fun ChatScreen(
         readMarkerLive = localReadAnchor,
         rawNewestAnchor = rawNewestAnchor,
         onMarkRead = viewModel::markRead,
+        viewportReadEnabled = destinationResumed,
         countUnreadBelowViewport = viewModel::countUnreadBelowViewport,
         nearestUnreadMentionBelow = viewModel::nearestUnreadMentionBelow,
         onBack = onHeaderBack,
@@ -602,6 +608,7 @@ fun ChatContent(
     readMarkerLive: io.github.trevarj.motd.data.db.TimelineAnchor? = null,
     rawNewestAnchor: io.github.trevarj.motd.data.db.TimelineAnchor? = null,
     onMarkRead: (io.github.trevarj.motd.data.db.TimelineAnchor) -> Unit = {},
+    viewportReadEnabled: Boolean = true,
     onDelete: (MessageEntity) -> Unit = {},
     onAcceptInvite: (Long) -> Unit = {},
     onDismissInvite: (Long) -> Unit = {},
@@ -1245,9 +1252,9 @@ fun ChatContent(
     }
     // Mark read on new-message-while-at-bottom only (plans/07/15 #2): syncing while scrolled up
     // reading history would clear unread on other clients and destroy the local unread UX.
-    LaunchedEffect(rawNewestAnchor, atBottom, initialPositionSettled) {
+    LaunchedEffect(rawNewestAnchor, atBottom, initialPositionSettled, viewportReadEnabled) {
         val newest = rawNewestAnchor ?: return@LaunchedEffect
-        if (initialPositionSettled && atBottom && newest.serverTime > 0) {
+        if (viewportReadEnabled && initialPositionSettled && atBottom && newest.serverTime > 0) {
             AutoFollowTrace.record("viewport_markread", traceBufferId, traceSessionId) {
                 "marker=${newest.serverTime}:${newest.eventId} item_count=${items.itemCount}"
             }

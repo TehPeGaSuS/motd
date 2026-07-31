@@ -19,6 +19,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.UserEntity
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
@@ -513,6 +514,25 @@ class ChatViewModelTest {
 
         assertEquals(listOf(channel.id), history.reconciledBuffers)
         assertEquals(HistoryResyncState.Idle, vm.historyResyncState.value)
+    }
+
+    @Test
+    fun `viewport read marker advances only while chat destination is resumed`() = runTest {
+        val manager = FakeConnectionManager(network.id)
+        val vm = viewModel(channel, manager)
+        vm.state.first { it.buffer != null }
+        val anchor = TimelineAnchor(serverTime = 500, eventId = 5)
+
+        vm.markRead(anchor)
+        advanceUntilIdle()
+        vm.onResume()
+        vm.markRead(anchor)
+        advanceUntilIdle()
+        vm.onPause()
+        vm.markRead(TimelineAnchor(serverTime = 600, eventId = 6))
+        advanceUntilIdle()
+
+        assertEquals(listOf(channel.id to anchor), manager.readMarkers)
     }
 
     @Test
@@ -1115,6 +1135,7 @@ class ChatViewModelTest {
         val reactions = mutableListOf<SentReaction>()
         val typing = mutableListOf<Pair<Long, String>>()
         val sentLines = mutableListOf<String>()
+        val readMarkers = mutableListOf<Pair<Long, TimelineAnchor>>()
         val messageStarted = CompletableDeferred<Unit>()
         val typingSent = CompletableDeferred<Unit>()
 
@@ -1160,7 +1181,9 @@ class ChatViewModelTest {
         override suspend fun partChannel(bufferId: Long, reason: String?) = Unit
         override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 2L
         override suspend fun ensureServerBuffer(networkId: Long): Long = 3L
-        override suspend fun markRead(bufferId: Long, anchor: io.github.trevarj.motd.data.db.TimelineAnchor) = Unit
+        override suspend fun markRead(bufferId: Long, anchor: TimelineAnchor) {
+            readMarkers += bufferId to anchor
+        }
         override suspend fun evaluatePushMode() = Unit
         override suspend fun trustCert(prompt: CertPrompt) = Unit
         override fun dismissCertPrompt(prompt: CertPrompt) = Unit
