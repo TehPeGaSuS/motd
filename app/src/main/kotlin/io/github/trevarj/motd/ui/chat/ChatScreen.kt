@@ -954,46 +954,50 @@ fun ChatContent(
         val targetRow = if (terminalEmpty) {
             null
         } else if (target.placeAtTop) {
-            // Open-at-first-unread: load the first-unread row OFF-SCREEN (the viewport stays at
-            // newest, so no read history flashes), then snap the viewport so the first unread tops
-            // the window with the remaining unread continuing below it. The snap runs before
-            // initialPositionSettled is set, so the scroll-state collector (gated on settlement)
-            // cannot misclassify it as a user drag.
+            // Open-at-first-unread: scroll to the target placeholder so Paging receives a viewport
+            // load hint even from an empty cold generation, then snap it to the top with the
+            // remaining unread below. This all runs before settlement, so it cannot advance read
+            // state or be misclassified as a user drag.
             val row = try {
-                materializeTarget(target, scroll = false)
+                materializeTarget(target, scroll = true)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: RuntimeException) {
                 null
             }
             if (row != null) {
-                val rowsFit = listState.layoutInfo.visibleItemsInfo.size
-                if (rowsFit >= 1) {
-                    listState.scrollToItem(firstUnreadTopAnchorIndex(target.index, rowsFit))
-                    // Row counts only estimate materialization. Message heights vary with sender
-                    // headers, previews, attachments, and the unread divider, so finish from the
-                    // measured target row itself.
-                    val layout = listState.layoutInfo
-                    val item = layout.visibleItemsInfo.firstOrNull { it.index == target.index }
-                    if (item != null) {
-                        val correction = reverseItemStartCorrection(
-                            itemOffset = item.offset,
-                            itemSize = item.size,
-                            viewportStartOffset = layout.viewportStartOffset,
-                            viewportEndOffset = layout.viewportEndOffset,
-                        )
-                        AutoFollowTrace.record("initial_position_align", traceBufferId, traceSessionId) {
-                            "target_index=${target.index} item_offset=${item.offset} item_size=${item.size} " +
-                                "viewport_start=${layout.viewportStartOffset} viewport_end=${layout.viewportEndOffset} " +
-                                "correction=$correction"
-                        }
-                        if (kotlin.math.abs(correction) > TOP_ALIGNMENT_TOLERANCE_PX) {
-                            listState.scrollBy(correction.toFloat())
-                        }
-                    }
+                // The materialization scroll places the target at the reversed viewport start
+                // (visually the bottom). Align that measured row directly instead of estimating a
+                // second index from placeholder row counts: cold Paging swaps those placeholders
+                // for variable-height messages and can otherwise move the target outside layout.
+                val item = withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+                    snapshotFlow {
+                        listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == target.index }
+                    }.first { it != null }
                 }
+                if (item != null) {
+                    val layout = listState.layoutInfo
+                    val correction = reverseItemStartCorrection(
+                        itemOffset = item.offset,
+                        itemSize = item.size,
+                        viewportStartOffset = layout.viewportStartOffset,
+                        viewportEndOffset = layout.viewportEndOffset,
+                    )
+                    AutoFollowTrace.record("initial_position_align", traceBufferId, traceSessionId) {
+                        "target_index=${target.index} item_offset=${item.offset} item_size=${item.size} " +
+                            "viewport_start=${layout.viewportStartOffset} viewport_end=${layout.viewportEndOffset} " +
+                            "correction=$correction"
+                    }
+                    if (kotlin.math.abs(correction) > TOP_ALIGNMENT_TOLERANCE_PX) {
+                        listState.scrollBy(correction.toFloat())
+                    }
+                    row
+                } else {
+                    null
+                }
+            } else {
+                null
             }
-            row
         } else {
             try {
                 materializeTarget(

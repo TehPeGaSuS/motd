@@ -36,6 +36,7 @@ import java.io.File
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.runBlocking
@@ -188,6 +189,7 @@ class RequiredHeadlessE2eTest {
             awaitMarkerAtLeast(bootstrap, bufferId, markerAnchor, requireRemote = true)
             bootstrap.seams.connections().disconnect(network.childId)
             connectionProbe.awaitDisconnected(network.childId)
+            awaitWallClockAfter(markerAnchor.serverTime)
         }
 
         FixtureIrcClient.connect(bootstrap.args).use { fixture ->
@@ -213,9 +215,23 @@ class RequiredHeadlessE2eTest {
         val firstUnread = recovered.single { it.text == "$token row001" }
         val secondUnread = recovered.single { it.text == "$token row002" }
         val newest = recovered.single { it.text == "$token row080" }
+        assertTrue(markerAnchor.serverTime < firstUnread.serverTime)
         assertTrue(markerAnchor < firstUnread.anchor())
         assertTrue(firstUnread.anchor() < newest.anchor())
         assertMarkerAtLeast(bootstrap, bufferId, marker)
+        val roomBeforeEntry = runBlocking {
+            bootstrap.seams.buffers().observeBuffer(bufferId).first { it != null }
+        }
+        assertEquals(markerAnchor.serverTime, roomBeforeEntry?.localReadAnchorTime)
+        assertEquals(Long.MAX_VALUE, roomBeforeEntry?.localReadAnchorEventId)
+        val listBeforeEntry = runBlocking {
+            withTimeout(10_000) {
+                bootstrap.seams.buffers().observeChatList().first { rows ->
+                    rows.singleOrNull { it.bufferId == bufferId }?.unreadCount == 80
+                }
+            }
+        }
+        assertEquals(80, listBeforeEntry.single { it.bufferId == bufferId }.unreadCount)
 
         ChatListRobot(compose).open(bufferId)
         val timeline = TimelineRobot(compose)
@@ -305,6 +321,14 @@ class RequiredHeadlessE2eTest {
     private fun markerAtLeast(time: Long?, eventId: Long?, expected: TimelineAnchor): Boolean =
         time != null && eventId != null &&
             (time > expected.serverTime || (time == expected.serverTime && eventId >= expected.eventId))
+
+    private suspend fun awaitWallClockAfter(serverTime: Long) {
+        // IRC read markers are timestamp-only and therefore include every message in the same
+        // millisecond. Keep the fixture's unread burst outside that intentionally inclusive tie.
+        withTimeout(5_000) {
+            while (System.currentTimeMillis() <= serverTime) delay(1)
+        }
+    }
 
     private fun io.github.trevarj.motd.data.db.MessageEntity.anchor(): TimelineAnchor =
         TimelineAnchor(serverTime, id, timelineOrder)
