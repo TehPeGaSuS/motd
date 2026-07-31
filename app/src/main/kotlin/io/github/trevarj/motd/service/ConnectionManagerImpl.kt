@@ -362,6 +362,33 @@ internal fun identityRulesFallback(
 ): IrcIdentityRules = live.takeIf { liveReady } ?: persisted?.identityRules ?: IrcIdentityRules()
 
 /**
+ * Narrow transport boundary for a TOPIC write. The caller deliberately does not mirror the draft
+ * into Room: only the server's TOPIC echo is IRC-derived state and is persisted by EventProcessor.
+ */
+internal suspend fun writeChannelTopicIfReady(
+    buffer: BufferEntity?,
+    topic: String,
+    client: IrcClient?,
+): Boolean {
+    val readyClient = client?.takeIf { it.state.value is IrcClientState.Ready } ?: return false
+    return attemptChannelTopicWrite(buffer, topic) { message -> readyClient.sendIfConnected(message) }
+}
+
+internal suspend fun attemptChannelTopicWrite(
+    buffer: BufferEntity?,
+    topic: String,
+    send: suspend (io.github.trevarj.motd.irc.proto.IrcMessage) -> Boolean,
+): Boolean {
+    if (buffer == null) return false
+    return send(
+        io.github.trevarj.motd.irc.proto.IrcMessage(
+            command = "TOPIC",
+            params = listOf(buffer.ircTarget, topic),
+        ),
+    )
+}
+
+/**
  * Hilt @Singleton connection subsystem (plans/05). Outlives the foreground service — the service
  * is merely its keeper. Spawns one [ConnectionActor] per connectable network row (BOUNCER_ROOT
  * gets the root actor; each BOUNCER_CHILD a bound actor copying the root host/SASL with its
@@ -1823,6 +1850,14 @@ class ConnectionManagerImpl @Inject constructor(
         false
     }
 
+    override suspend fun setChannelTopic(bufferId: Long, topic: String): Boolean = try {
+        sendTopic(bufferId, topic)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        false
+    }
+
     private suspend fun sendPart(bufferId: Long, reason: String?): Boolean {
         val buffer = bufferDao.observeById(bufferId) ?: return false
         // A close request is retried from the durable coordinator; never treat a disconnected
@@ -1838,6 +1873,11 @@ class ConnectionManagerImpl @Inject constructor(
         return client.sendIfConnected(
             io.github.trevarj.motd.irc.proto.IrcMessage(command = "PART", params = params),
         )
+    }
+
+    private suspend fun sendTopic(bufferId: Long, topic: String): Boolean {
+        val buffer = bufferDao.observeById(bufferId) ?: return false
+        return writeChannelTopicIfReady(buffer, topic, clientFor(buffer.networkId))
     }
 
     override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long {

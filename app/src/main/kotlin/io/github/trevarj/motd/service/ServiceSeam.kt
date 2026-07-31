@@ -170,6 +170,14 @@ interface ConnectionManager {
         false
     }
 
+    /**
+     * Write a channel TOPIC command. True means the live transport accepted the write; it does
+     * not mean the server authorized or echoed the change. Room is updated only by the IRC echo.
+     * The default is deliberately conservative so lightweight fakes remain disconnected unless
+     * they opt into an accepted write.
+     */
+    suspend fun setChannelTopic(bufferId: Long, topic: String): Boolean = false
+
     /** Find-or-create a QUERY buffer for a DM (name Isupport-normalized); returns bufferId. */
     suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long
 

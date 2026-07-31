@@ -60,6 +60,14 @@ data class ChannelInfoUiState(
     val connected: Boolean = false,
 )
 
+/** Local write acceptance, distinct from a later server echo or numeric rejection. */
+sealed interface TopicMutationState {
+    data object Idle : TopicMutationState
+    data object Submitting : TopicMutationState
+    data object Accepted : TopicMutationState
+    data object Failed : TopicMutationState
+}
+
 internal data class RosterPresentation(val memberCount: Int?, val hasStaleMembers: Boolean)
 
 internal fun rosterPresentation(cachedCount: Int, state: RosterLoadState): RosterPresentation =
@@ -81,6 +89,8 @@ class ChannelInfoViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val bufferIdFlow = MutableStateFlow<Long?>(null)
+    private val _topicMutation = MutableStateFlow<TopicMutationState>(TopicMutationState.Idle)
+    val topicMutation: StateFlow<TopicMutationState> = _topicMutation
 
     fun init(bufferId: Long) {
         bufferIdFlow.value = bufferId
@@ -362,14 +372,37 @@ class ChannelInfoViewModel @Inject constructor(
         connectionManager.clientFor(buffer.networkId)?.send(IrcMessage(command = "MODE", params = params))
     }
 
+    /** Reset a previous local result before opening the editor again. */
+    fun beginTopicEdit() {
+        _topicMutation.value = TopicMutationState.Idle
+    }
+
     /**
-     * Set the channel topic (plans/16 §5.8). Always offered (op requirements vary per channel); a
-     * 482 error lands in the server buffer. The TopicChanged echo updates Room reactively.
+     * Set the channel topic. Acceptance only means a Ready client wrote TOPIC to its live
+     * transport; a later TopicChanged echo owns the Room update and numeric 482 stays separate.
      */
-    fun setTopic(topic: String) = viewModelScope.launch {
-        val buffer = state.value.buffer ?: return@launch
-        connectionManager.clientFor(buffer.networkId)
-            ?.send(IrcMessage(command = "TOPIC", params = listOf(buffer.ircTarget, topic)))
+    fun setTopic(topic: String) {
+        if (_topicMutation.value is TopicMutationState.Submitting) return
+        val bufferId = bufferIdFlow.value
+        if (bufferId == null) {
+            _topicMutation.value = TopicMutationState.Failed
+            return
+        }
+        _topicMutation.value = TopicMutationState.Submitting
+        viewModelScope.launch {
+            val accepted = try {
+                connectionManager.setChannelTopic(bufferId, topic)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
+            }
+            _topicMutation.value = if (accepted) {
+                TopicMutationState.Accepted
+            } else {
+                TopicMutationState.Failed
+            }
+        }
     }
 
     /**

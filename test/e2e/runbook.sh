@@ -93,6 +93,64 @@ require_env() {
 
 require_env MOTD_SOJU_HOST MOTD_SOJU_USER MOTD_SOJU_PASS
 
+# Topic editing has a multiline draft and can exceed the generic short-form clear budget in
+# lib.sh. Keep this journey-specific helper on the stable field tag, and accept an empty original
+# topic so Phase D can restore either seeded or manually configured channels.
+input_topic_draft() {
+  local text="$1" bounds xy i
+  dump || { fail "dump failed locating topic draft"; return 1; }
+  bounds="$(bounds_of_tag channelinfo_topic_edit_text)"
+  if [ -z "$bounds" ]; then
+    fail "topic draft field not found"
+    return 1
+  fi
+  xy="$(_e2e_center "$bounds")"
+  # shellcheck disable=SC2086 # _e2e_center intentionally returns x y
+  adb_shell input tap $xy
+  sleep 1
+  adb_shell input keyevent 123
+  local deletes=()
+  for ((i = 0; i < 160; i++)); do deletes+=(67); done
+  adb_shell input keyevent "${deletes[@]}"
+  _e2e_send_text "$text"
+  adb_shell input keyevent 4
+  ok "input topic draft <= \"${text}\""
+}
+
+topic_text_from_dump() {
+  local line text
+  # uiautomator often emits the entire hierarchy on one physical line. Isolate one node before
+  # extracting text, otherwise a greedy attribute match could read an unrelated trailing node.
+  line="$(grep -oE '<node[^>]* resource-id="[^"]*channelinfo_topic"[^>]*>' "$_E2E_DUMP" | head -n1 || true)"
+  [ -n "$line" ] || return 1
+  text="$(printf '%s\n' "$line" | sed -E 's/.* text="([^"]*)".*/\1/')"
+  printf '%s' "$text" | sed \
+    -e 's/&quot;/"/g' -e 's/&apos;/'"'"'/g' -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g'
+}
+
+capture_topic_from_dump() {
+  if [ -n "$(bounds_of_tag channelinfo_topic)" ]; then
+    topic_text_from_dump
+  else
+    printf ''
+  fi
+}
+
+# A draft field also exposes its text to uiautomator, so visible-text polling would falsely turn
+# a failed write into an apparent echo. Require both a closed editor and the Room-backed header.
+wait_for_topic_echo() {
+  local expected="$1" timeout="${2:-12}" waited=0 actual
+  while [ "$waited" -lt "$timeout" ]; do
+    if dump && [ -z "$(bounds_of_tag channelinfo_topic_edit_dialog)" ]; then
+      actual="$(capture_topic_from_dump || true)"
+      [ "$actual" = "$expected" ] && return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
 # --- teardown / summary trap ----------------------------------------------
 
 _device_idle_forced=false
@@ -598,13 +656,59 @@ phase_d() {
   fi
   assert_no_crash
 
-  # 31. Topic edit dialog.
-  step "Topic edit dialog (cancel)"
+  # 31. Topic edit dialog. A successful local write is not server authorization; this checks the
+  # later echoed Room/UI update, then restores the exact prior topic for the remaining phases.
+  step "Topic edit accepted write and echoed update (restore original)"
   if [ -n "$(bounds_of_desc "Edit topic")" ]; then
+    local topic_restore_needed=false
+    if ! dump; then
+      fail "could not capture the original topic; refusing topic mutation"
+      assert_no_crash
+      return
+    fi
+    local original_topic=""
+    original_topic="$(capture_topic_from_dump)"
+    local topic_probe="motd-topic-${MOTD_RECONNECT_TOKEN//[^[:alnum:]]/}"
+    [ -n "$topic_probe" ] || topic_probe="motd-topic-e2e"
     tap_desc "Edit topic"
     wait_for_text "Edit topic" 5 || true
     assert_text "Channel topic"
-    tap_text "Cancel"
+    if input_topic_draft "$topic_probe"; then
+      redump || true
+      # Once this is attempted, restoration is mandatory even if the subsequent selector or echo
+      # check fails: a tap may have reached the transport before the harness observed it.
+      topic_restore_needed=true
+      if tap_tag channelinfo_topic_edit_save && wait_for_topic_echo "$topic_probe" 12; then
+        ok "topic echo updated Room/UI after accepted write"
+      else
+        fail "accepted topic write did not echo into the Channel Info Room/UI header"
+      fi
+    else
+      fail "could not enter the topic probe draft"
+    fi
+
+    # Restore even after a failed echo assertion so this destructive mutation does not leak into
+    # later journeys or a maintainer's shared fixture channel.
+    redump || true
+    if [ "$topic_restore_needed" = true ] && [ -n "$(bounds_of_desc "Edit topic")" ]; then
+      if tap_desc "Edit topic"; then
+        wait_for_text "Edit topic" 5 || true
+        if input_topic_draft "$original_topic"; then
+          redump || true
+          if tap_tag channelinfo_topic_edit_save && wait_for_topic_echo "$original_topic" 12; then
+            ok "original topic restored after echoed update"
+          else
+            fail "original topic did not return after restoration write"
+          fi
+        else
+          fail "could not enter the original topic for restoration"
+        fi
+      else
+        fail "could not reopen the topic editor for restoration"
+      fi
+    elif [ "$topic_restore_needed" = true ]; then
+      fail "topic editor unavailable for restoring the original topic"
+    fi
   else
     note "Edit topic control not present"
   fi
