@@ -55,6 +55,8 @@ val AGENTWIRE_EVENT_KINDS = setOf(
 
 data class AgentwireTopic(
     val account: String,
+    /** Account allowed to publish authoritative backend events. */
+    val agentAccount: String,
     val backend: String,
     val options: Map<String, String>,
     val title: String?,
@@ -76,8 +78,11 @@ fun parseAgentwireTopic(topic: String): AgentwireTopic? {
         fields[key] = value
     }
     val account = fields["account"]?.takeIf(String::isNotEmpty) ?: return null
+    val agentAccount = fields["agent"]?.takeIf(String::isNotEmpty) ?: return null
     val backend = fields["backend"]?.takeIf(String::isNotEmpty) ?: return null
-    return AgentwireTopic(account, backend, fields, title)
+    // The controller is authorized to issue actions, while this separate identity publishes
+    // backend state. Keep both fields even when a deployment intentionally uses one account.
+    return AgentwireTopic(account, agentAccount, backend, fields, title)
 }
 
 private fun percentDecode(value: String): String? = runCatching {

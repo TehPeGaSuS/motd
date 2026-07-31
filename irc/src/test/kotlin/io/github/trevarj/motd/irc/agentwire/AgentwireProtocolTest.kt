@@ -12,18 +12,22 @@ import org.junit.Test
 
 class AgentwireProtocolTest {
     @Test
-    fun `canonical topic fixture activates and preserves unknown options`() {
-        val fixture = resource("agentwire/fixtures/topic.txt").trimEnd()
+    fun `trusted agent topic activates and preserves unknown options`() {
+        val fixture = resource("agentwire/fixtures/trusted-topic.txt").trimEnd()
         val topic = parseAgentwireTopic(fixture.replace(" | ", ";ignored=value | "))
 
         assertEquals("trev", topic?.account)
+        assertEquals("agentwire", topic?.agentAccount)
         assertEquals("codex", topic?.backend)
         assertEquals("value", topic?.options?.get("ignored"))
-        assertEquals("trev+mobile", parseAgentwireTopic("agentwire:v1;account=trev%2Bmobile;backend=codex")?.account)
-        assertNull(parseAgentwireTopic("Welcome agentwire:v1;account=trev;backend=codex"))
+        assertEquals("trev+mobile", parseAgentwireTopic("agentwire:v1;account=trev%2Bmobile;agent=agentwire;backend=codex")?.account)
+        assertNull(parseAgentwireTopic("Welcome agentwire:v1;account=trev;agent=agentwire;backend=codex"))
         assertNull(parseAgentwireTopic("agentwire:v1;account=trev"))
-        assertNull(parseAgentwireTopic("agentwire:v1;account=%ZZ;backend=codex"))
-        assertNull(parseAgentwireTopic("agentwire:v1;account=%ff;backend=codex"))
+        assertNull(parseAgentwireTopic(resource("agentwire/fixtures/topic.txt").trimEnd()))
+        assertNull(parseAgentwireTopic("agentwire:v1;account=trev;backend=codex"))
+        assertEquals("trev", parseAgentwireTopic("agentwire:v1;account=trev;agent=trev;backend=codex")?.agentAccount)
+        assertNull(parseAgentwireTopic("agentwire:v1;account=%ZZ;agent=agentwire;backend=codex"))
+        assertNull(parseAgentwireTopic("agentwire:v1;account=%ff;agent=agentwire;backend=codex"))
     }
 
     @Test

@@ -9,10 +9,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.irc.agentwire.AGENTWIRE_TAG
 import io.github.trevarj.motd.irc.agentwire.AgentwireEnvelope
-import io.github.trevarj.motd.irc.agentwire.AgentwireReassembler
-import io.github.trevarj.motd.irc.agentwire.AgentwireValue
 import io.github.trevarj.motd.irc.agentwire.agentwireMissingCaps
-import io.github.trevarj.motd.irc.agentwire.decodeAgentwireValue
 import io.github.trevarj.motd.irc.agentwire.parseAgentwireTopic
 import io.github.trevarj.motd.irc.agentwire.readablePreview
 import io.github.trevarj.motd.irc.agentwire.sendAgentwire
@@ -20,7 +17,6 @@ import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.canSendClientTag
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
-import io.github.trevarj.motd.irc.event.messageContextOrNull
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import java.util.UUID
@@ -74,8 +70,7 @@ class AgentwireViewModel @Inject constructor(
 ) : ViewModel() {
     private val route = savedStateHandle.toRoute<ChatRoute>()
     private val instance = UUID.randomUUID().toString()
-    private val reducer = AgentwireReducer()
-    private val reassembler = AgentwireReassembler()
+    private val ingestor = AgentwireEventIngestor()
     private val _state = MutableStateFlow(AgentwireUiState())
     val state: StateFlow<AgentwireUiState> = _state.asStateFlow()
     private var sessionJob: Job? = null
@@ -107,19 +102,23 @@ class AgentwireViewModel @Inject constructor(
                         ready != null && missing.isNotEmpty() -> AgentwireGate.BLOCKED
                         else -> AgentwireGate.ACTIVE
                     }
+                    val identityChanged = _state.value.channel != buffer?.displayName.orEmpty() ||
+                        _state.value.controllerAccount != topic?.account ||
+                        _state.value.backendAccount != topic?.agentAccount
                     _state.update {
                         it.copy(
                             gate = gate,
                             channel = buffer?.displayName.orEmpty(),
                             title = topic?.title ?: buffer?.displayName ?: "Agentwire",
                             controllerAccount = topic?.account,
+                            backendAccount = topic?.agentAccount,
                             backend = topic?.backend,
                             missingCaps = missing,
                             connected = ready != null,
                         )
                     }
                     val nextClient = buffer?.let { connections.clientFor(it.networkId) }
-                    if (gate == AgentwireGate.ACTIVE && ready != null && nextClient != null && nextClient !== client) {
+                    if (gate == AgentwireGate.ACTIVE && ready != null && nextClient != null && (nextClient !== client || identityChanged)) {
                         startSession(nextClient)
                     } else if (gate != AgentwireGate.ACTIVE || ready == null) {
                         stopSession(disconnected = client != null)
@@ -225,8 +224,7 @@ class AgentwireViewModel @Inject constructor(
     private fun startSession(next: IrcClient) {
         stopSession(disconnected = client != null)
         client = next
-        reducer.reset()
-        reassembler.clear()
+        ingestor.reset()
         syncHello = false
         syncSnapshot = false
         _state.update {
@@ -279,7 +277,7 @@ class AgentwireViewModel @Inject constructor(
         sessionJob?.cancel()
         sessionJob = null
         client = null
-        reassembler.clear()
+        ingestor.reset()
         if (disconnected) {
             val uncertain = _state.value.actionStatus.mapValues { (_, status) ->
                 if (status == "sent" || status == "accepted") "outcome unknown" else status
@@ -289,38 +287,15 @@ class AgentwireViewModel @Inject constructor(
     }
 
     private suspend fun ingest(event: IrcEvent) {
-        if (event is IrcEvent.PlaybackBatch || event is IrcEvent.HistoryBatch || event is IrcEvent.ReplayBatch) return
-        val context = event.messageContextOrNull() ?: return
-        val raw = context.clientTags[AGENTWIRE_TAG] ?: return
-        val target = when (event) {
-            is IrcEvent.ChatMessage -> event.target
-            is IrcEvent.TagMessage -> event.target
-            else -> return
-        }
-        if (!target.equals(_state.value.channel, ignoreCase = true)) return
-        val account = context.account?.takeUnless { it == "*" } ?: return
-        if (account.equals(_state.value.controllerAccount, ignoreCase = true)) return
-        val decoded = decodeAgentwireValue(raw).getOrElse {
-            _state.update { state -> state.copy(error = "Invalid Agentwire message: ${it.message}") }
+        val result = ingestor.ingest(_state.value, event, syncId)
+        if (result is AgentwireEventIngestor.Result.Rejected) {
+            _state.value = result.state
             return
         }
-        val envelope = when (decoded) {
-            is AgentwireValue.Envelope -> decoded.value
-            is AgentwireValue.Fragment -> reassembler.accept(decoded.value).getOrElse {
-                _state.update { state -> state.copy(error = "Invalid Agentwire fragments: ${it.message}") }
-                return
-            } ?: return
-        }
-        if (envelope.type != "event") return
-        val pinned = _state.value.botAccount
-        if (pinned == null) {
-            if (envelope.kind != "agent.hello" || envelope.reply != syncId) return
-            _state.update { it.copy(botAccount = account) }
-        } else if (!account.equals(pinned, ignoreCase = true)) return
-        val epoch = _state.value.epoch
-        if (!acceptsAgentwireEpoch(envelope, epoch)) return
+        if (result !is AgentwireEventIngestor.Result.Applied) return
+        val envelope = result.envelope
         val previousSid = _state.value.activeSid
-        _state.update { reducer.reduce(it, envelope) }
+        _state.value = result.state
         if (envelope.kind == "session.page") {
             val next = envelope.data?.string("next")
             if (next != null) {

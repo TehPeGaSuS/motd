@@ -82,6 +82,7 @@ data class AgentwireUiState(
     val channel: String = "",
     val title: String = "Agentwire",
     val controllerAccount: String? = null,
+    val backendAccount: String? = null,
     val backend: String? = null,
     val missingCaps: Set<String> = emptySet(),
     val connected: Boolean = false,
