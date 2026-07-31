@@ -86,13 +86,22 @@ fun ChannelInfoScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val nickSheet by viewModel.nickSheet.collectAsStateWithLifecycle()
     val topicMutation by viewModel.topicMutation.collectAsStateWithLifecycle()
+    val leaveMutation by viewModel.leaveMutation.collectAsStateWithLifecycle()
+
+    LaunchedEffect(viewModel, onBack) {
+        viewModel.operationEvents.collect { event ->
+            if (event is ChannelInfoOperationEvent.LeaveAccepted) onBack()
+        }
+    }
 
     ChannelInfoContent(
         state = state,
         onBack = onBack,
         onSetPinned = viewModel::setPinned,
         onSetMuted = viewModel::setMuted,
-        onLeave = { viewModel.part(onBack) },
+        onLeave = viewModel::part,
+        leaveMutation = leaveMutation,
+        onBeginLeave = viewModel::beginLeave,
         onMemberClick = viewModel::openNickSheet,
         onSetTopic = viewModel::setTopic,
         topicMutation = topicMutation,
@@ -137,6 +146,8 @@ fun ChannelInfoContent(
     onSetPinned: (Boolean) -> Unit,
     onSetMuted: (Boolean) -> Unit,
     onLeave: () -> Unit,
+    leaveMutation: LeaveMutationState = LeaveMutationState.Idle,
+    onBeginLeave: () -> Unit = {},
     onMemberClick: (String) -> Unit = {},
     onSetTopic: (String) -> Unit = {},
     topicMutation: TopicMutationState = TopicMutationState.Idle,
@@ -191,7 +202,10 @@ fun ChannelInfoContent(
                     buffer = buffer,
                     onSetPinned = onSetPinned,
                     onSetMuted = onSetMuted,
-                    onLeave = { showLeaveConfirm = true },
+                    onLeave = {
+                        onBeginLeave()
+                        showLeaveConfirm = true
+                    },
                 )
             }
             if (state.canModerate && buffer?.type == BufferType.CHANNEL) {
@@ -306,16 +320,40 @@ fun ChannelInfoContent(
 
     if (showLeaveConfirm) {
         AlertDialog(
-            onDismissRequest = { showLeaveConfirm = false },
+            onDismissRequest = {
+                if (leaveMutation !is LeaveMutationState.Submitting) showLeaveConfirm = false
+            },
+            modifier = Modifier.testTag("channelinfo_leave_dialog"),
             title = { Text(stringResource(R.string.channelinfo_leave_confirm_title)) },
-            text = { Text(stringResource(R.string.channelinfo_leave_confirm_message)) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.channelinfo_leave_confirm_message))
+                    if (leaveMutation is LeaveMutationState.Failed) {
+                        Text(
+                            text = stringResource(R.string.channelinfo_leave_failed),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier
+                                .padding(top = 8.dp)
+                                .testTag("channelinfo_leave_error"),
+                        )
+                    }
+                }
+            },
             confirmButton = {
-                TextButton(onClick = { showLeaveConfirm = false; onLeave() }) {
+                TextButton(
+                    onClick = onLeave,
+                    enabled = leaveMutation !is LeaveMutationState.Submitting,
+                    modifier = Modifier.testTag("channelinfo_leave_confirm"),
+                ) {
                     Text(stringResource(R.string.channelinfo_leave))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showLeaveConfirm = false }) {
+                TextButton(
+                    onClick = { showLeaveConfirm = false },
+                    enabled = leaveMutation !is LeaveMutationState.Submitting,
+                ) {
                     Text(stringResource(R.string.action_cancel))
                 }
             },

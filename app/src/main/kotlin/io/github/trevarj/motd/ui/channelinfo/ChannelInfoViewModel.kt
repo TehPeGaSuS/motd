@@ -26,8 +26,11 @@ import io.github.trevarj.motd.ui.chat.WhoisInfo
 import io.github.trevarj.motd.ui.chat.parseWhois
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -68,6 +71,18 @@ sealed interface TopicMutationState {
     data object Failed : TopicMutationState
 }
 
+/** Local PART write acceptance, distinct from a later self-PART echo or server rejection. */
+sealed interface LeaveMutationState {
+    data object Idle : LeaveMutationState
+    data object Submitting : LeaveMutationState
+    data object Failed : LeaveMutationState
+}
+
+/** One-shot screen effects emitted only after a local operation is accepted. */
+sealed interface ChannelInfoOperationEvent {
+    data object LeaveAccepted : ChannelInfoOperationEvent
+}
+
 internal data class RosterPresentation(val memberCount: Int?, val hasStaleMembers: Boolean)
 
 internal fun rosterPresentation(cachedCount: Int, state: RosterLoadState): RosterPresentation =
@@ -91,6 +106,10 @@ class ChannelInfoViewModel @Inject constructor(
     private val bufferIdFlow = MutableStateFlow<Long?>(null)
     private val _topicMutation = MutableStateFlow<TopicMutationState>(TopicMutationState.Idle)
     val topicMutation: StateFlow<TopicMutationState> = _topicMutation
+    private val _leaveMutation = MutableStateFlow<LeaveMutationState>(LeaveMutationState.Idle)
+    val leaveMutation: StateFlow<LeaveMutationState> = _leaveMutation
+    private val _operationEvents = MutableSharedFlow<ChannelInfoOperationEvent>(extraBufferCapacity = 1)
+    val operationEvents: SharedFlow<ChannelInfoOperationEvent> = _operationEvents.asSharedFlow()
 
     fun init(bufferId: Long) {
         bufferIdFlow.value = bufferId
@@ -228,9 +247,38 @@ class ChannelInfoViewModel @Inject constructor(
         state.value.buffer?.let { bufferRepository.setMuted(it.id, muted) }
     }
 
-    fun part(onDone: () -> Unit) = viewModelScope.launch {
-        state.value.buffer?.let { connectionManager.partChannel(it.id) }
-        onDone()
+    /** Reset a previous local PART failure before showing the leave confirmation. */
+    fun beginLeave() {
+        _leaveMutation.value = LeaveMutationState.Idle
+    }
+
+    /**
+     * Leave only after the live transport accepts PART. This is deliberately not durable: a
+     * later server rejection still needs labeled-response correlation (or the self-PART echo).
+     */
+    fun part() {
+        if (_leaveMutation.value is LeaveMutationState.Submitting) return
+        val bufferId = bufferIdFlow.value
+        if (bufferId == null) {
+            _leaveMutation.value = LeaveMutationState.Failed
+            return
+        }
+        _leaveMutation.value = LeaveMutationState.Submitting
+        viewModelScope.launch {
+            val accepted = try {
+                connectionManager.partChannelForClose(bufferId)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
+            }
+            if (accepted) {
+                _leaveMutation.value = LeaveMutationState.Idle
+                _operationEvents.emit(ChannelInfoOperationEvent.LeaveAccepted)
+            } else {
+                _leaveMutation.value = LeaveMutationState.Failed
+            }
+        }
     }
 
     /** Open (or create) a DM with [nick], then hand the buffer id to [onOpen]. */

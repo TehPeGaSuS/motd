@@ -8,8 +8,10 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
@@ -71,6 +73,36 @@ class ChannelInfoTopicEditUiTest {
 
         compose.waitForIdle()
         compose.onAllNodesWithTag("channelinfo_topic_edit_dialog").assertCountEquals(0)
+    }
+
+    @Test
+    fun confirmedOfflineLeave_keepsChannelInfoConfirmationOpenWithRetryFeedback() {
+        var mutation by mutableStateOf<LeaveMutationState>(LeaveMutationState.Idle)
+        var leaveCalls = 0
+        compose.setContent {
+            MotdTheme {
+                ChannelInfoContent(
+                    state = ChannelInfoUiState(
+                        buffer = BufferEntity(1, 1, "#internal-alias", "#room", BufferType.CHANNEL),
+                    ),
+                    onBack = {},
+                    onSetPinned = {},
+                    onSetMuted = {},
+                    onLeave = {
+                        leaveCalls += 1
+                        mutation = LeaveMutationState.Failed
+                    },
+                    leaveMutation = mutation,
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription("Leave").performClick()
+        compose.onNodeWithTag("channelinfo_leave_confirm").performClick()
+
+        compose.onAllNodesWithText("Leave channel?").assertCountEquals(1)
+        compose.onAllNodesWithTag("channelinfo_leave_error").assertCountEquals(1)
+        compose.runOnIdle { assertEquals(1, leaveCalls) }
     }
 
     private fun openEditorAndEnter(text: String) {

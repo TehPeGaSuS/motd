@@ -389,6 +389,30 @@ internal suspend fun attemptChannelTopicWrite(
 }
 
 /**
+ * Narrow transport boundary for a PART write. Acceptance means only that a Ready client wrote to
+ * its live transport; EventProcessor still waits for self-PART, while server rejection needs a
+ * labeled response (when available) or the server error path.
+ */
+internal suspend fun writeChannelPartIfReady(
+    buffer: BufferEntity?,
+    reason: String?,
+    client: IrcClient?,
+): Boolean {
+    val readyClient = client?.takeIf { it.state.value is IrcClientState.Ready } ?: return false
+    return attemptChannelPartWrite(buffer, reason) { message -> readyClient.sendIfConnected(message) }
+}
+
+internal suspend fun attemptChannelPartWrite(
+    buffer: BufferEntity?,
+    reason: String?,
+    send: suspend (io.github.trevarj.motd.irc.proto.IrcMessage) -> Boolean,
+): Boolean {
+    if (buffer == null) return false
+    val params = if (reason.isNullOrBlank()) listOf(buffer.ircTarget) else listOf(buffer.ircTarget, reason)
+    return send(io.github.trevarj.motd.irc.proto.IrcMessage(command = "PART", params = params))
+}
+
+/**
  * Hilt @Singleton connection subsystem (plans/05). Outlives the foreground service — the service
  * is merely its keeper. Spawns one [ConnectionActor] per connectable network row (BOUNCER_ROOT
  * gets the root actor; each BOUNCER_CHILD a bound actor copying the root host/SASL with its
@@ -1860,19 +1884,7 @@ class ConnectionManagerImpl @Inject constructor(
 
     private suspend fun sendPart(bufferId: Long, reason: String?): Boolean {
         val buffer = bufferDao.observeById(bufferId) ?: return false
-        // A close request is retried from the durable coordinator; never treat a disconnected
-        // client (or one still registering) as a successful PART write.
-        val client = clientFor(buffer.networkId) ?: return false
-        if (client.state.value !is IrcClientState.Ready) return false
-        // Append the reason as the PART trailing param when the user supplied one (/part <reason>).
-        val params = if (reason.isNullOrBlank()) {
-            listOf(buffer.ircTarget)
-        } else {
-            listOf(buffer.ircTarget, reason)
-        }
-        return client.sendIfConnected(
-            io.github.trevarj.motd.irc.proto.IrcMessage(command = "PART", params = params),
-        )
+        return writeChannelPartIfReady(buffer, reason, clientFor(buffer.networkId))
     }
 
     private suspend fun sendTopic(bufferId: Long, topic: String): Boolean {

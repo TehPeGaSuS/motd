@@ -755,15 +755,37 @@ phase_d() {
   fi
   assert_no_crash
 
-  # 36. Leave dialog (cancel).
-  step "Leave dialog (cancel)"
+  # 36. Stop the fixture before confirming Leave. A refused local write must keep the
+  # confirmation open with retry feedback; it must not imply that the channel was parted.
+  step "Confirmed offline Leave keeps Channel Info open with retry feedback"
   if [ -n "$(bounds_of_text "Leave")" ]; then
-    tap_text "Leave"
-    wait_for_text "Leave channel?" 5 || true
-    assert_text "Leave channel?"
-    tap_text "Cancel"
+    _reconnect_restore_armed=true
+    if reconnect_stack stop-soju; then
+      # The listener close is asynchronous at the app boundary. The required assertion below is
+      # the transport rejection itself: a stale socket that still accepts PART is not offline.
+      sleep 2
+      tap_text "Leave"
+      wait_for_text "Leave channel?" 5 || true
+      assert_text "Leave channel?"
+      if tap_tag channelinfo_leave_confirm && wait_for_tag channelinfo_leave_error 12; then
+        assert_tag_present channelinfo_leave_dialog
+        ok "offline Leave retained its confirmation with retryable feedback"
+      else
+        fail "offline Leave navigated away or did not show retryable feedback"
+      fi
+      if reconnect_stack start-soju; then
+        _reconnect_restore_armed=false
+      else
+        fail "could not restore soju after offline Leave check"
+      fi
+      # The failed confirmation never auto-retries after reconnection; leave the channel joined
+      # for the later runbook phases and dismiss it explicitly.
+      tap_text "Cancel"
+    else
+      fail "could not stop soju for offline Leave check"
+    fi
   else
-    note "Leave control not present"
+    fail "Leave control not present for required offline Leave check"
   fi
   assert_no_crash
 

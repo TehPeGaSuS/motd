@@ -26,11 +26,15 @@ import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -120,6 +124,76 @@ class ChannelInfoTopicMutationTest {
         assertEquals(TopicMutationState.Accepted, viewModel.topicMutation.value)
     }
 
+    @Test
+    fun `missing buffer does not emit leave navigation`() = runTest {
+        val viewModel = viewModel(FakeConnectionManager(partAccepted = true))
+        val events = mutableListOf<ChannelInfoOperationEvent>()
+        val collector = backgroundScope.launch { viewModel.operationEvents.collect(events::add) }
+        runCurrent()
+
+        viewModel.part()
+        advanceUntilIdle()
+
+        assertEquals(LeaveMutationState.Failed, viewModel.leaveMutation.value)
+        assertTrue(events.isEmpty())
+        collector.cancelAndJoin()
+    }
+
+    @Test
+    fun `missing client does not emit leave navigation`() = runTest {
+        assertRejectedLeaveDoesNotNavigate(FakeConnectionManager(partAccepted = false))
+    }
+
+    @Test
+    fun `non ready client does not emit leave navigation`() = runTest {
+        assertRejectedLeaveDoesNotNavigate(FakeConnectionManager(partAccepted = false))
+    }
+
+    @Test
+    fun `rejected PART write does not emit leave navigation`() = runTest {
+        assertRejectedLeaveDoesNotNavigate(FakeConnectionManager(partAccepted = false))
+    }
+
+    @Test
+    fun `throwing PART write does not emit leave navigation`() = runTest {
+        assertRejectedLeaveDoesNotNavigate(FakeConnectionManager(partFailure = IllegalStateException("socket closed")))
+    }
+
+    @Test
+    fun `accepted PART emits navigation exactly once`() = runTest {
+        val manager = FakeConnectionManager(partAccepted = true)
+        val viewModel = viewModel(manager)
+        viewModel.init(BUFFER_ID)
+        val events = mutableListOf<ChannelInfoOperationEvent>()
+        val collector = backgroundScope.launch { viewModel.operationEvents.collect(events::add) }
+        runCurrent()
+
+        viewModel.part()
+        viewModel.part()
+        advanceUntilIdle()
+
+        assertEquals(listOf(BUFFER_ID), manager.partAttempts)
+        assertEquals(listOf(ChannelInfoOperationEvent.LeaveAccepted), events)
+        assertEquals(LeaveMutationState.Idle, viewModel.leaveMutation.value)
+        collector.cancelAndJoin()
+    }
+
+    private suspend fun TestScope.assertRejectedLeaveDoesNotNavigate(manager: FakeConnectionManager) {
+        val viewModel = viewModel(manager)
+        viewModel.init(BUFFER_ID)
+        val events = mutableListOf<ChannelInfoOperationEvent>()
+        val collector = backgroundScope.launch { viewModel.operationEvents.collect(events::add) }
+        runCurrent()
+
+        viewModel.part()
+        advanceUntilIdle()
+
+        assertEquals(listOf(BUFFER_ID), manager.partAttempts)
+        assertEquals(LeaveMutationState.Failed, viewModel.leaveMutation.value)
+        assertTrue(events.isEmpty())
+        collector.cancelAndJoin()
+    }
+
     private fun viewModel(manager: ConnectionManager) = ChannelInfoViewModel(
         bufferRepository = FakeBufferRepository(),
         connectionManager = manager,
@@ -145,6 +219,8 @@ class ChannelInfoTopicMutationTest {
         private val accepted: Boolean = false,
         private val failure: Throwable? = null,
         private val gate: CompletableDeferred<Boolean>? = null,
+        private val partAccepted: Boolean = false,
+        private val partFailure: Throwable? = null,
     ) : ConnectionManager {
         override val connectionStates: StateFlow<Map<Long, IrcClientState>> = MutableStateFlow(emptyMap())
         override val certPrompts = MutableStateFlow<List<CertPrompt>>(emptyList())
@@ -162,6 +238,12 @@ class ChannelInfoTopicMutationTest {
         override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) = Unit
         override suspend fun joinChannel(networkId: Long, channel: String) = Unit
         override suspend fun partChannel(bufferId: Long, reason: String?) = Unit
+        val partAttempts = mutableListOf<Long>()
+        override suspend fun partChannelForClose(bufferId: Long, reason: String?): Boolean {
+            partAttempts += bufferId
+            partFailure?.let { throw it }
+            return partAccepted
+        }
         override suspend fun setChannelTopic(bufferId: Long, topic: String): Boolean {
             attempts += bufferId to topic
             failure?.let { throw it }
