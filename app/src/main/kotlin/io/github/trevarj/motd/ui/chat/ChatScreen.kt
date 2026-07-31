@@ -301,7 +301,7 @@ fun ChatScreen(
                     PackageManager.PERMISSION_GRANTED
             },
             onStart = voiceViewModel::startRecording,
-            onDenied = voiceViewModel::clearError,
+            onDenied = voiceViewModel::recordingPermissionDenied,
         )
     }
     val microphonePermission = rememberLauncherForActivityResult(
