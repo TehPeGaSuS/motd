@@ -78,6 +78,7 @@ services:
       dockerfile: Dockerfile
       args:
         SOJU_VERSION: v0.10.1
+        SOJU_COMMIT: ca81b9905e24aadd6a346a5ae72ae7e9d14db568
     depends_on:
       ergo:
         condition: service_healthy
