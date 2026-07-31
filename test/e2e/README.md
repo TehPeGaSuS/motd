@@ -28,7 +28,7 @@ canonical echo/send/reconnect row, an 80-row second-client unread/history recove
 and bootstrapped navigation/settings/bouncer smoke. Host UIAutomator remains scheduled/manual;
 the exhaustive A-H/J/R/I workflow is diagnostics, not a required fast phase.
 Release CI still runs its own unit, lint, and FOSS release build checks.
-The required workflow also runs the 60 fixture-free component tests on a separate managed device,
+The required workflow also runs the 61 fixture-free component tests on a separate managed device,
 keeping UI-state coverage continuous without coupling those cases to Soju.
 
 ## Prerequisites
