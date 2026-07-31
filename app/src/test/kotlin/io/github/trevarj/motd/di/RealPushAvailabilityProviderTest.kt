@@ -140,4 +140,34 @@ class RealPushAvailabilityProviderTest {
             assertEquals(PushSetupStatus.WAITING_FOR_SERVER, awaitItem().setupStatus)
         }
     }
+
+    @Test
+    fun notification_permission_flow_recomputes_without_other_delivery_emissions() = runTest {
+        val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to readyWithCap))
+        val notificationPermission = MutableStateFlow(true)
+        val provider = RealPushAvailabilityProvider(
+            connectionManager = FakeConnectionManager(states),
+            hasDistributor = { true },
+            notificationPermission = notificationPermission,
+        )
+
+        provider.availability().test {
+            assertTrue(awaitItem().notificationsGranted)
+            notificationPermission.value = false
+            assertFalse(awaitItem().notificationsGranted)
+        }
+    }
+
+    @Test fun permission_refresh_delegates_to_the_status_controller() {
+        var refreshes = 0
+        val provider = RealPushAvailabilityProvider(
+            connectionManager = FakeConnectionManager(MutableStateFlow(emptyMap())),
+            hasDistributor = { false },
+            refreshNotificationPermission = { refreshes++ },
+        )
+
+        provider.refreshNotificationPermission()
+
+        assertEquals(1, refreshes)
+    }
 }

@@ -282,12 +282,14 @@ internal abstract class AppModule {
             db: io.github.trevarj.motd.data.db.MotdDatabase,
             healthStore: PushHealthStore,
             unifiedPush: UnifiedPushApi,
+            notificationPermission: NotificationPermissionStatus,
         ): PushAvailabilityProvider = RealPushAvailabilityProvider(
             context,
             connectionManager,
             db.networkDao(),
             healthStore,
             unifiedPush,
+            notificationPermission,
         )
     }
 }

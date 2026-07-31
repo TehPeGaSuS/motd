@@ -1,8 +1,6 @@
 package io.github.trevarj.motd.di
 
 import android.content.Context
-import android.content.pm.PackageManager
-import androidx.core.content.ContextCompat
 import io.github.trevarj.motd.BuildConfig
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkEntity
@@ -22,6 +20,8 @@ import io.github.trevarj.motd.ui.settings.PushSetupStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 
 class RealPushAvailabilityProvider(
@@ -31,8 +31,13 @@ class RealPushAvailabilityProvider(
     private val health: Flow<Map<Long, NetworkPushHealth>> = flowOf(emptyMap()),
     private val distributors: () -> List<PushDistributor> = { emptyList() },
     private val selectedDistributor: () -> String? = { null },
-    private val notificationsGranted: () -> Boolean = { true },
+    private val notificationPermission: StateFlow<Boolean> = MutableStateFlow(true),
+    private val refreshNotificationPermission: () -> Unit = {},
 ) : PushAvailabilityProvider() {
+
+    override fun refreshNotificationPermission() {
+        refreshNotificationPermission.invoke()
+    }
 
     /** Retained for focused unit tests and callers that only need live-cap availability. */
     constructor(
@@ -51,6 +56,7 @@ class RealPushAvailabilityProvider(
         networkDao: NetworkDao,
         healthStore: PushHealthStore,
         unifiedPush: UnifiedPushApi,
+        notificationPermission: NotificationPermissionStatus,
     ) : this(
         connectionManager = connectionManager,
         hasDistributor = { unifiedPush.getDistributors().isNotEmpty() },
@@ -62,18 +68,16 @@ class RealPushAvailabilityProvider(
             }
         },
         selectedDistributor = unifiedPush::getAckDistributor,
-        notificationsGranted = {
-            android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
-                ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) ==
-                PackageManager.PERMISSION_GRANTED
-        },
+        notificationPermission = notificationPermission.granted,
+        refreshNotificationPermission = notificationPermission::refresh,
     )
 
     override fun availability(): Flow<PushAvailability> = combine(
         connectionManager.connectionStates,
         networks,
         health,
-    ) { states, networkRows, healthByNetwork ->
+        notificationPermission,
+    ) { states, networkRows, healthByNetwork, notificationsGranted ->
         buildAvailability(
             states = states,
             networks = networkRows,
@@ -81,7 +85,7 @@ class RealPushAvailabilityProvider(
             installed = distributors(),
             selected = selectedDistributor(),
             hasDistributor = hasDistributor(),
-            notificationsGranted = notificationsGranted(),
+            notificationsGranted = notificationsGranted,
         )
     }.distinctUntilChanged()
 

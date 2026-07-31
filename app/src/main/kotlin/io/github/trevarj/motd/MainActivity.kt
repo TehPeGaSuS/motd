@@ -2,7 +2,6 @@ package io.github.trevarj.motd
 
 import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -27,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.AndroidEntryPoint
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.di.NotificationPermissionStatus
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
@@ -67,10 +67,13 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var contentPreviewPrefs: ContentPreviewPrefs
     @Inject lateinit var db: MotdDatabase
     @Inject lateinit var connectionManager: ConnectionManager
+    @Inject lateinit var notificationPermission: NotificationPermissionStatus
 
-    // POST_NOTIFICATIONS runtime permission (API 33+); result is advisory, no action needed.
+    // POST_NOTIFICATIONS is a delivery concern: report its result immediately to Settings state.
     private val requestNotifications =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* advisory */ }
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            notificationPermission.onPermissionResult(it)
+        }
 
     // Latest notification-tap deep-link target. Seeded from the launch intent (cold start) and
     // updated by onNewIntent (warm start); the nav graph consumes it and clears it after routing.
@@ -162,6 +165,11 @@ class MainActivity : ComponentActivity() {
         acceptInvitationFrom(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        notificationPermission.refresh()
+    }
+
     /** Prevent recreation from replaying a notification whose navigation was already consumed. */
     private fun consumeNotificationTarget() {
         notificationTarget = null
@@ -198,12 +206,14 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    /** Ask for POST_NOTIFICATIONS at first launch on API 33+ (needed for message/status notifs). */
+    /** Make at most one automatic POST_NOTIFICATIONS request; later denial routes to Settings. */
     private fun requestPostNotificationsIfNeeded() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
-        if (!granted) requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        val rationaleAvailable = shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+        if (notificationPermission.shouldRequestAutomatically(rationaleAvailable)) {
+            notificationPermission.markRequestLaunched()
+            requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     /**
