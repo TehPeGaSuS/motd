@@ -83,7 +83,6 @@ class AgentwireViewModel @Inject constructor(
     private var syncId: String? = null
     private var syncHello = false
     private var syncSnapshot = false
-    private var historyRequested = false
     private val autoReviewConfirmedSessions = HashSet<String>()
 
     init {
@@ -142,6 +141,7 @@ class AgentwireViewModel @Inject constructor(
             state.copy(timeline = state.timeline + AgentwireTimelineItem(
                 localId, "user.prompt", System.currentTimeMillis(), state.activeSid, state.currentTid,
                 if (kind == "turn.steer") "Steer" else "You", content,
+                backendItemId = localId,
             ))
         }
         sendAction(kind, data = data, sid = _state.value.activeSid, id = localId)
@@ -159,26 +159,32 @@ class AgentwireViewModel @Inject constructor(
     fun listWorkspaces(parent: String? = null) = sendAction(
         "workspace.list.request", data = parent?.let { buildJsonObject { put("parent", it) } },
     )
-    fun listSessions(cwd: String? = null, cursor: String? = null) = sendAction(
+    fun listSessions(
+        cwd: String? = null,
+        cursor: String? = null,
+        live: Boolean = cwd == null,
+    ) = sendAction(
         "session.list.request", data = buildJsonObject {
+            put("scope", if (live) "live" else "workspace")
             cwd?.let { put("cwd", it) }
             cursor?.let { put("cursor", it) }
-        }.takeIf { it.isNotEmpty() },
+        },
     )
     fun refreshSessionBrowser() {
         _state.update {
             it.copy(
                 workspaceChildren = emptyMap(),
-                sessions = emptyList(),
+                liveSessions = emptyList(),
+                workspaceSessions = emptyMap(),
                 loadedSessionDirectories = emptySet(),
             )
         }
         listWorkspaces()
-        listSessions()
+        listSessions(live = true)
     }
     fun expandWorkspace(path: String, hasChildren: Boolean = true) {
         if (hasChildren) listWorkspaces(path)
-        listSessions(path)
+        listSessions(path, live = false)
     }
     fun createSession(cwd: String) = sendAction("session.create", buildJsonObject { put("cwd", cwd) })
     fun attachSession(sid: String, cwd: String? = null) = sendAction(
@@ -213,10 +219,7 @@ class AgentwireViewModel @Inject constructor(
     )
     fun skipRequest(rid: String) = sendAction("request.skip", sid = _state.value.activeSid, rid = rid)
     fun loadOlderHistory() {
-        sendAction("history.request", buildJsonObject {
-            _state.value.historyBeforeAt?.let { put("beforeAt", it) }
-            put("limit", AGENTWIRE_HISTORY_PAGE_SIZE)
-        })
+        viewModelScope.launch { requestHistory(initial = false) }
     }
 
     private fun startSession(next: IrcClient) {
@@ -226,7 +229,6 @@ class AgentwireViewModel @Inject constructor(
         reassembler.clear()
         syncHello = false
         syncSnapshot = false
-        historyRequested = false
         _state.update {
             it.copy(
                 syncing = true,
@@ -241,12 +243,20 @@ class AgentwireViewModel @Inject constructor(
                 supportedSettings = emptySet(),
                 modelOptions = emptyList(),
                 workspaceChildren = emptyMap(),
-                sessions = emptyList(),
+                liveSessions = emptyList(),
+                workspaceSessions = emptyMap(),
                 loadedSessionDirectories = emptySet(),
                 queue = emptyList(),
                 requests = emptyList(),
-                timeline = it.timeline.filter { item -> item.kind == "user.prompt" },
+                timeline = emptyList(),
+                historyLoading = false,
+                historyPage = null,
+                historyRequestId = null,
+                historySid = null,
+                historyCursor = null,
+                historyStaged = emptyList(),
                 historyBeforeAt = null,
+                olderHistoryAvailable = false,
                 autoReviewConfirmed = false,
             )
         }
@@ -309,10 +319,15 @@ class AgentwireViewModel @Inject constructor(
         } else if (!account.equals(pinned, ignoreCase = true)) return
         val epoch = _state.value.epoch
         if (!acceptsAgentwireEpoch(envelope, epoch)) return
+        val previousSid = _state.value.activeSid
         _state.update { reducer.reduce(it, envelope) }
         if (envelope.kind == "session.page") {
             val next = envelope.data?.string("next")
-            if (next != null) listSessions(envelope.data?.string("cwd"), next)
+            if (next != null) {
+                val cwd = envelope.data?.string("cwd")
+                val live = envelope.data?.string("scope") == "live" || cwd == null
+                listSessions(cwd, next, live)
+            }
         }
         val activeSid = _state.value.activeSid
         _state.update {
@@ -320,12 +335,58 @@ class AgentwireViewModel @Inject constructor(
         }
         if (envelope.reply == syncId && envelope.kind == "agent.hello") syncHello = true
         if (envelope.reply == syncId && envelope.kind == "channel.snapshot") syncSnapshot = true
-        if (syncHello && syncSnapshot && !historyRequested) {
-            historyRequested = true
-            sendActionInternal(
-                "history.request",
-                buildJsonObject { put("limit", AGENTWIRE_INITIAL_HISTORY_SIZE) },
-            )
+        val current = _state.value
+        if (
+            current.activeSid != null &&
+            (current.activeSid != previousSid || (syncHello && syncSnapshot && current.historySid == null))
+        ) {
+            requestHistory(initial = true)
+        }
+    }
+
+    private suspend fun requestHistory(initial: Boolean) {
+        val current = _state.value
+        val sid = current.activeSid ?: return
+        if (current.historyRequestId != null || current.historyLoading) return
+        if (!initial && !current.olderHistoryAvailable) return
+        val requestId = UUID.randomUUID().toString()
+        _state.update { state ->
+            if (state.activeSid != sid) {
+                state
+            } else {
+                state.copy(
+                    historyLoading = true,
+                    historyRequestId = requestId,
+                    historySid = sid,
+                    historyStaged = emptyList(),
+                )
+            }
+        }
+        val data = buildJsonObject {
+            if (!initial) {
+                current.historyCursor?.let { put("cursor", it) }
+                current.historyBeforeAt?.let { put("beforeAt", it) }
+            }
+            put("limit", if (initial) AGENTWIRE_INITIAL_HISTORY_SIZE else AGENTWIRE_HISTORY_PAGE_SIZE)
+        }
+        val sent = sendActionInternal(
+            "history.request",
+            data,
+            sid = sid,
+            id = requestId,
+        )
+        if (sent == null) {
+            _state.update { state ->
+                if (state.historyRequestId == requestId) {
+                    state.copy(
+                        historyLoading = false,
+                        historyRequestId = null,
+                        historyStaged = emptyList(),
+                    )
+                } else {
+                    state
+                }
+            }
         }
     }
 

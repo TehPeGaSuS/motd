@@ -96,7 +96,8 @@ class AgentwireReducerTest {
             })))
         }))
 
-        assertEquals(listOf("s1", "s2"), state.sessions.map(AgentwireListItem::id))
+        assertEquals(listOf("s1"), state.workspaceSessions.getValue("/work/one").map(AgentwireListItem::id))
+        assertEquals(listOf("s2"), state.workspaceSessions.getValue("/work/two").map(AgentwireListItem::id))
         assertEquals(setOf("/work/one", "/work/two"), state.loadedSessionDirectories)
     }
 
@@ -143,7 +144,40 @@ class AgentwireReducerTest {
             })))
         }))
 
-        assertEquals(listOf("s1", "s2"), state.sessions.map(AgentwireListItem::id))
+        assertEquals(
+            listOf("s1", "s2"),
+            state.workspaceSessions.getValue("/work").map(AgentwireListItem::id),
+        )
+    }
+
+    @Test
+    fun `live session pages stay separate from workspace pages`() {
+        val reducer = AgentwireReducer()
+        var state = reducer.reduce(
+            AgentwireUiState(),
+            event("session.page", data = buildJsonObject {
+                put("scope", "live")
+                put("items", JsonArray(listOf(buildJsonObject {
+                    put("sid", "live"); put("cwd", "/work"); put("title", "Desktop TUI")
+                })))
+            }),
+        )
+        state = reducer.reduce(
+            state,
+            event("session.page", data = buildJsonObject {
+                put("scope", "workspace")
+                put("cwd", "/work")
+                put("items", JsonArray(listOf(buildJsonObject {
+                    put("sid", "stored"); put("cwd", "/work"); put("title", "Stored")
+                })))
+            }),
+        )
+
+        assertEquals(listOf("live"), state.liveSessions.map(AgentwireListItem::id))
+        assertEquals(
+            listOf("stored"),
+            state.workspaceSessions.getValue("/work").map(AgentwireListItem::id),
+        )
     }
 
     @Test
@@ -310,45 +344,45 @@ class AgentwireReducerTest {
     }
 
     @Test
-    fun `history populates the timeline without replacing live session state`() {
+    fun `history for another session is rejected without poisoning later replay`() {
         val reducer = AgentwireReducer()
+        val requestId = UUID.randomUUID().toString()
         var state = AgentwireUiState(
             activeSid = "live",
             cwd = "/work/live",
             busy = false,
             settings = mapOf("model" to "current"),
+            historyLoading = true,
+            historyRequestId = requestId,
+            historySid = "live",
         )
+        val replayId = UUID.randomUUID().toString()
+        val old = event(
+            "assistant.completed",
+            sid = "old",
+            tid = "t1",
+            iid = "answer",
+            reply = requestId,
+            history = true,
+            data = buildJsonObject { put("content", "Wrong session") },
+        ).copy(id = replayId)
+        state = reducer.reduce(state, old)
+
+        assertTrue(state.timeline.isEmpty())
+        assertTrue(state.historyStaged.isEmpty())
+
+        val current = old.copy(
+            sid = "live",
+            data = buildJsonObject { put("content", "Correct session") },
+        )
+        state = reducer.reduce(state, current)
         state = reducer.reduce(
             state,
             event(
-                "binding.changed",
-                sid = "old",
-                history = true,
-                data = buildJsonObject { put("cwd", "/work/old") },
-            ),
-        )
-        state = reducer.reduce(
-            state,
-            event(
-                "session.status",
-                sid = "old",
-                history = true,
-                data = buildJsonObject {
-                    put("cwd", "/work/old")
-                    put("busy", true)
-                    put("settings", buildJsonObject { put("model", "old") })
-                },
-            ),
-        )
-        state = reducer.reduce(state, event("turn.started", sid = "old", tid = "t1", history = true))
-        state = reducer.reduce(
-            state,
-            event(
-                "assistant.completed",
-                sid = "old",
-                tid = "t1",
-                history = true,
-                data = buildJsonObject { put("content", "Earlier answer") },
+                "history.end",
+                sid = "live",
+                reply = requestId,
+                data = buildJsonObject { put("count", 1) },
             ),
         )
 
@@ -356,28 +390,147 @@ class AgentwireReducerTest {
         assertEquals("/work/live", state.cwd)
         assertFalse(state.busy)
         assertEquals(mapOf("model" to "current"), state.settings)
-        assertEquals(listOf("turn.started", "assistant.completed"), state.timeline.map { it.kind })
-        assertTrue(state.timeline.all(AgentwireTimelineItem::historical))
+        assertEquals(listOf("Correct session"), state.timeline.map { it.body })
         assertEquals(1L, state.historyBeforeAt)
     }
 
     @Test
     fun `a short nonempty history page remains pageable until an empty page`() {
         val reducer = AgentwireReducer()
+        val firstRequest = UUID.randomUUID().toString()
         var state = reducer.reduce(
-            AgentwireUiState(historyLoading = true),
-            event("history.end", data = buildJsonObject { put("count", 1) }),
+            AgentwireUiState(
+                activeSid = "s1",
+                historyLoading = true,
+                historyRequestId = firstRequest,
+                historySid = "s1",
+            ),
+            event(
+                "history.end",
+                sid = "s1",
+                reply = firstRequest,
+                data = buildJsonObject { put("count", 1) },
+            ),
         )
 
         assertFalse(state.historyLoading)
         assertTrue(state.olderHistoryAvailable)
 
+        val secondRequest = UUID.randomUUID().toString()
         state = reducer.reduce(
-            state.copy(historyLoading = true),
-            event("history.end", data = buildJsonObject { put("count", 0) }),
+            state.copy(historyLoading = true, historyRequestId = secondRequest),
+            event(
+                "history.end",
+                sid = "s1",
+                reply = secondRequest,
+                data = buildJsonObject { put("count", 0) },
+            ),
         )
         assertFalse(state.historyLoading)
         assertFalse(state.olderHistoryAvailable)
+    }
+
+    @Test
+    fun `late history reply after a binding switch is ignored`() {
+        val reducer = AgentwireReducer()
+        val requestId = UUID.randomUUID().toString()
+        var state = AgentwireUiState(
+            activeSid = "old",
+            historyRequestId = requestId,
+            historySid = "old",
+            historyLoading = true,
+        )
+        state = reducer.reduce(state, event("binding.changed", sid = "new"))
+        state = reducer.reduce(
+            state,
+            event(
+                "assistant.completed",
+                sid = "old",
+                tid = "t1",
+                reply = requestId,
+                history = true,
+                data = buildJsonObject { put("content", "Late") },
+            ),
+        )
+
+        assertEquals("new", state.activeSid)
+        assertTrue(state.timeline.isEmpty())
+        assertTrue(state.historyStaged.isEmpty())
+    }
+
+    @Test
+    fun `history preserves multiple assistant items in one turn and deduplicates snapshot`() {
+        val reducer = AgentwireReducer()
+        val requestId = UUID.randomUUID().toString()
+        var state = AgentwireUiState(
+            activeSid = "s1",
+            timeline = listOf(
+                AgentwireTimelineItem(
+                    "restored", "assistant.completed", 10, "s1", "t1", "Assistant", "Second",
+                    historical = true, backendItemId = "a2",
+                ),
+            ),
+            historyLoading = true,
+            historyRequestId = requestId,
+            historySid = "s1",
+        )
+        listOf("a1" to "First", "a2" to "Second").forEach { (iid, content) ->
+            state = reducer.reduce(
+                state,
+                event(
+                    "assistant.completed",
+                    sid = "s1",
+                    tid = "t1",
+                    iid = iid,
+                    reply = requestId,
+                    history = true,
+                    data = buildJsonObject { put("content", content) },
+                ),
+            )
+        }
+        state = reducer.reduce(
+            state,
+            event(
+                "history.end",
+                sid = "s1",
+                reply = requestId,
+                data = buildJsonObject { put("count", 2); put("next", "older") },
+            ),
+        )
+
+        assertEquals(listOf("First", "Second"), state.timeline.map { it.body })
+        assertEquals("older", state.historyCursor)
+        assertTrue(state.olderHistoryAvailable)
+    }
+
+    @Test
+    fun `echoed user prompt replaces its optimistic local row`() {
+        val reducer = AgentwireReducer()
+        val actionId = UUID.randomUUID().toString()
+        val local = AgentwireTimelineItem(
+            actionId,
+            "user.prompt",
+            1,
+            "s1",
+            null,
+            "You",
+            "hello",
+            backendItemId = actionId,
+        )
+
+        val state = reducer.reduce(
+            AgentwireUiState(activeSid = "s1", timeline = listOf(local)),
+            event(
+                "user.prompt",
+                sid = "s1",
+                tid = "t1",
+                iid = actionId,
+                data = buildJsonObject { put("content", "hello") },
+            ),
+        )
+
+        assertEquals(1, state.timeline.size)
+        assertEquals("t1", state.timeline.single().tid)
     }
 
     @Test

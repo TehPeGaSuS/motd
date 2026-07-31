@@ -705,7 +705,8 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
             }
         }
     }
-    val rows = workspaceRows(state.workspaceChildren, expandedDirectories, state.sessions, search)
+    val workspaceSessions = state.workspaceSessions.values.flatten()
+    val rows = workspaceRows(state.workspaceChildren, expandedDirectories, workspaceSessions, search)
     ModalBottomSheet(onDismissRequest = dismiss) {
         LazyColumn(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { Text("Agent session", style = MaterialTheme.typography.titleLarge) }
@@ -740,9 +741,29 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
                         if (state.activeSid != null) TextButton(onClick = viewModel::detachSession) { Text("Detach") }
                     }
                 }
+                item {
+                    AgentwireLiveSessions(
+                        sessions = state.liveSessions.filter { session ->
+                            search.isBlank() ||
+                                session.title.contains(search, true) ||
+                                session.id.contains(search, true) ||
+                                session.subtitle?.contains(search, true) == true
+                        },
+                        activeSid = state.activeSid,
+                        actions = state.actions,
+                        onAttach = { sid, cwd ->
+                            viewModel.attachSession(sid, cwd)
+                            dismiss()
+                        },
+                        onRename = viewModel::renameSession,
+                        onFork = viewModel::forkSession,
+                        onArchive = viewModel::archiveSession,
+                    )
+                }
                 if (rows.isEmpty()) item {
                     Text(
-                        if (search.isBlank()) "No directories advertised by the bridge" else "No matching projects or sessions",
+                        if (search.isBlank()) "No project directories advertised by the bridge"
+                        else "No matching projects",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -781,8 +802,8 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
                         }
                     }
                     if (expanded) {
-                        val matchingSessions = state.sessions.filter { session ->
-                            session.subtitle == directory.id && (search.isBlank() || session.title.contains(search, true) || session.id.contains(search, true))
+                        val matchingSessions = state.workspaceSessions[directory.id].orEmpty().filter { session ->
+                            search.isBlank() || session.title.contains(search, true) || session.id.contains(search, true)
                         }
                         items(matchingSessions, key = { "session:${row.treeKey}:${it.id}" }) { session ->
                             Box(Modifier.padding(start = ((row.depth + 1) * 14).dp)) {
@@ -790,8 +811,13 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
                                     session = session,
                                     active = session.id == state.activeSid,
                                     actions = state.actions,
-                                    viewModel = viewModel,
-                                    onAttached = dismiss,
+                                    onAttach = { sid, cwd ->
+                                        viewModel.attachSession(sid, cwd)
+                                        dismiss()
+                                    },
+                                    onRename = viewModel::renameSession,
+                                    onFork = viewModel::forkSession,
+                                    onArchive = viewModel::archiveSession,
                                 )
                             }
                         }
@@ -921,12 +947,51 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
 
 @SuppressLint("HardcodedText")
 @Composable
+internal fun AgentwireLiveSessions(
+    sessions: List<AgentwireListItem>,
+    activeSid: String?,
+    actions: Set<String>,
+    onAttach: (String, String?) -> Unit,
+    onRename: (String, String) -> Unit = { _, _ -> },
+    onFork: (String) -> Unit = {},
+    onArchive: (String, Boolean) -> Unit = { _, _ -> },
+) {
+    Column(
+        Modifier.fillMaxWidth().testTag("agentwire_live_sessions"),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text("Live sessions", style = MaterialTheme.typography.titleMedium)
+        if (sessions.isEmpty()) {
+            Text(
+                "No desktop sessions detected",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            sessions.forEach { session ->
+                AgentwireSessionRow(
+                    session = session,
+                    active = session.id == activeSid,
+                    actions = actions,
+                    onAttach = onAttach,
+                    onRename = onRename,
+                    onFork = onFork,
+                    onArchive = onArchive,
+                )
+            }
+        }
+    }
+}
+
+@SuppressLint("HardcodedText")
+@Composable
 private fun AgentwireSessionRow(
     session: AgentwireListItem,
     active: Boolean,
     actions: Set<String>,
-    viewModel: AgentwireViewModel,
-    onAttached: () -> Unit,
+    onAttach: (String, String?) -> Unit,
+    onRename: (String, String) -> Unit,
+    onFork: (String) -> Unit,
+    onArchive: (String, Boolean) -> Unit,
 ) {
     var expanded by remember(session.id) { mutableStateOf(false) }
     var title by remember(session.id, session.title) { mutableStateOf(session.title) }
@@ -934,7 +999,10 @@ private fun AgentwireSessionRow(
     val runtimeStatus = agentwireSessionRuntimeStatus(session)
     val tuiAttached = session.raw.bool("tuiAttached") == true
     Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+            .testTag("agentwire_session_${session.id}"),
         colors = CardDefaults.cardColors(
             containerColor = if (active) MaterialTheme.colorScheme.secondaryContainer
             else MaterialTheme.colorScheme.surfaceContainerLow,
@@ -959,7 +1027,7 @@ private fun AgentwireSessionRow(
                     Text(runtimeStatus, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 8.dp))
                 }
                 if (!active) {
-                    TextButton(onClick = { viewModel.attachSession(session.id, session.subtitle); onAttached() }) { Text("Attach") }
+                    TextButton(onClick = { onAttach(session.id, session.subtitle) }) { Text("Attach") }
                 }
             }
             if (expanded) Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
@@ -968,13 +1036,13 @@ private fun AgentwireSessionRow(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if ("session.rename" in actions) {
-                        TextButton(onClick = { viewModel.renameSession(session.id, title) }, enabled = title.isNotBlank() && title != session.title) { Text("Rename") }
+                        TextButton(onClick = { onRename(session.id, title) }, enabled = title.isNotBlank() && title != session.title) { Text("Rename") }
                     }
-                    if ("session.fork" in actions) TextButton(onClick = { viewModel.forkSession(session.id) }) { Text("Fork") }
+                    if ("session.fork" in actions) TextButton(onClick = { onFork(session.id) }) { Text("Fork") }
                     if (archived && "session.unarchive" in actions) {
-                        TextButton(onClick = { viewModel.archiveSession(session.id, false) }) { Text("Unarchive") }
+                        TextButton(onClick = { onArchive(session.id, false) }) { Text("Unarchive") }
                     } else if (!archived && "session.archive" in actions) {
-                        TextButton(onClick = { viewModel.archiveSession(session.id, true) }) { Text("Archive") }
+                        TextButton(onClick = { onArchive(session.id, true) }) { Text("Archive") }
                     }
                 }
             }
