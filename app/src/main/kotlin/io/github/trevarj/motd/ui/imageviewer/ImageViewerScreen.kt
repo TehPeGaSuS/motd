@@ -1,10 +1,8 @@
 package io.github.trevarj.motd.ui.imageviewer
 
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.provider.MediaStore
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
@@ -54,11 +52,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.net.URL
 
 private const val MAX_SCALE = 5f
 private const val DOUBLE_TAP_SCALE = 2.5f
-private const val SAVE_TIMEOUT_MS = 15_000
 
 /**
  * Full-screen image viewer (plans/07): black background, Coil image, hand-rolled pinch-zoom/pan via
@@ -261,45 +257,25 @@ private fun shareImage(context: Context, url: String) {
 }
 
 /**
- * Download the image bytes and insert them into the shared Pictures collection via MediaStore.
- * Only called on API 29+ (the caller hides Save below Q). A read timeout bounds a stalled fetch.
+ * Stream the image into a pending MediaStore row. The result is shown only after finalization.
+ * Only called on API 29+ (the caller hides Save below Q).
  */
 @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
 private suspend fun saveImage(context: Context, url: String) {
-    val ok = withContext(Dispatchers.IO) {
-        runCatching {
-            val bytes = URL(url).openConnection().apply {
-                connectTimeout = SAVE_TIMEOUT_MS
-                readTimeout = SAVE_TIMEOUT_MS
-            }.getInputStream().use { it.readBytes() }
-            val name = url.substringAfterLast('/').substringBefore('?').ifEmpty { "image" }
-            val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                put(MediaStore.Images.Media.MIME_TYPE, mimeFor(name))
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/motd")
-            }
-            val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                ?: return@runCatching false
-            resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return@runCatching false
-            true
-        }.getOrDefault(false)
+    val result = withContext(Dispatchers.IO) {
+        ImageSaveOperation(
+            connectionFactory = UrlConnectionImageSaveConnectionFactory(),
+            store = MediaStoreImageSaveStore(context.contentResolver),
+        ).save(url)
     }
     withContext(Dispatchers.Main) {
         Toast.makeText(
             context,
-            if (ok) context.getString(R.string.image_viewer_saved)
+            if (result.feedback() == ImageSaveFeedback.SAVED) context.getString(R.string.image_viewer_saved)
             else context.getString(R.string.image_viewer_save_failed),
             Toast.LENGTH_SHORT,
         ).show()
     }
-}
-
-private fun mimeFor(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
-    "png" -> "image/png"
-    "gif" -> "image/gif"
-    "webp" -> "image/webp"
-    else -> "image/jpeg"
 }
 
 @Preview
