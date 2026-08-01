@@ -295,10 +295,10 @@ internal fun firstVisibleUnreadQuery(
         after.eventId,
     )
     lower?.let {
-        args += listOf(it.serverTime, it.serverTime, it.timelineOrder, it.timelineOrder, it.eventId)
+        args.addAll(listOf(it.serverTime, it.serverTime, it.timelineOrder, it.timelineOrder, it.eventId))
     }
     upper?.let {
-        args += listOf(it.serverTime, it.serverTime, it.timelineOrder, it.timelineOrder, it.eventId)
+        args.addAll(listOf(it.serverTime, it.serverTime, it.timelineOrder, it.timelineOrder, it.eventId))
     }
     return SimpleSQLiteQuery(
         "SELECT m.* FROM messages m WHERE m.bufferId = ? " +

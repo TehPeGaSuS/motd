@@ -754,7 +754,7 @@ class IrcClientTest {
     @Test
     fun `CAP NEW mid session requests and emits CapsChanged`() = runTest {
         val ft = FakeTransport()
-        val client = registered(ft)
+        val client = registered(ft, caps = fullLs.replace(" draft/chathistory", ""))
 
         val collected = mutableListOf<IrcEvent>()
         val job = launch { client.broadcastEvents.toList(collected) }
