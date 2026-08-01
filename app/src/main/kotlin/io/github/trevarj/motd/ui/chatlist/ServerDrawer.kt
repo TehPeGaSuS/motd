@@ -71,6 +71,8 @@ fun ServerDrawerContent(
     selectedNetworkId: Long?,
     allUnread: Int,
     allMentions: Int,
+    allUnreadIncomplete: Boolean = false,
+    allMentionsIncomplete: Boolean = false,
     scopedUnreadCount: Int,
     allOffline: Boolean,
     onSelectNetwork: (Long?) -> Unit,
@@ -107,6 +109,8 @@ fun ServerDrawerContent(
             NetworksHeader(
                 totalUnread = allUnread,
                 totalMentions = allMentions,
+                unreadIncomplete = allUnreadIncomplete,
+                mentionsIncomplete = allMentionsIncomplete,
                 scoped = selectedNetworkId != null,
                 onClearFilter = { onSelectNetwork(null) },
             )
@@ -184,6 +188,8 @@ fun ServerDrawerContent(
 private fun NetworksHeader(
     totalUnread: Int,
     totalMentions: Int,
+    unreadIncomplete: Boolean,
+    mentionsIncomplete: Boolean,
     scoped: Boolean,
     onClearFilter: () -> Unit,
 ) {
@@ -211,8 +217,8 @@ private fun NetworksHeader(
         } else {
             // Unscoped: surface the aggregate unread/mention rollup where "All chats" used to.
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (totalMentions > 0) MentionBadge(totalMentions)
-                if (totalUnread > 0) UnreadBadge(totalUnread)
+                if (totalMentions > 0) MentionBadge(totalMentions, lowerBound = mentionsIncomplete)
+                if (totalUnread > 0) UnreadBadge(totalUnread, lowerBound = unreadIncomplete)
             }
         }
     }
@@ -290,8 +296,8 @@ private fun DrawerNetworkItem(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (row.mentions > 0) MentionBadge(row.mentions)
-            if (row.unread > 0) UnreadBadge(row.unread)
+            if (row.mentions > 0) MentionBadge(row.mentions, lowerBound = row.mentionsIncomplete)
+            if (row.unread > 0) UnreadBadge(row.unread, lowerBound = row.unreadIncomplete)
         }
 
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {

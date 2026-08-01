@@ -467,6 +467,40 @@ data class HistoryCursorEntity(
     val historyComplete: Boolean = false,
 )
 
+/**
+ * An interval of retained server history that is not present locally. Both boundaries are known
+ * messages surrounding the missing interval; msgid is preferred for protocol paging while time is
+ * always retained for local ordering and timestamp-only servers.
+ */
+@Entity(
+    tableName = "history_gaps",
+    indices = [
+        Index(value = ["roomId", "olderServerTime"]),
+        Index(value = ["roomId", "newerServerTime"]),
+    ],
+    foreignKeys = [ForeignKey(
+        entity = RoomEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["roomId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+)
+data class HistoryGapEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val roomId: RoomId,
+    val olderMsgid: String?,
+    val olderServerTime: Long,
+    val newerMsgid: String?,
+    val newerServerTime: Long,
+    /** False when the server proved this missing interval is no longer page-recoverable. */
+    @ColumnInfo(defaultValue = "1") val recoverable: Boolean = true,
+    /** Exact local tuple for msgid-less/equal-time boundaries, when that row is still retained. */
+    val olderEventId: Long? = null,
+    val olderTimelineOrder: Long? = null,
+    val newerEventId: Long? = null,
+    val newerTimelineOrder: Long? = null,
+)
+
 /** Whole-network discovery watermark, colocated with the canonical room/history graph. */
 @Entity(
     tableName = "network_history_cursors",

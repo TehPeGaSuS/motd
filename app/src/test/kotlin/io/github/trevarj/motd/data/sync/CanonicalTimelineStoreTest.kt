@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
@@ -185,6 +186,96 @@ class CanonicalTimelineStoreTest {
         assertEquals("server-final", row.text)
         assertEquals("echo-1", row.msgid)
         assertNull(row.pendingLabel)
+        setup.db.close()
+    }
+
+    @Test
+    fun coalescenceRepointsDurableGapBoundaryToTheEnrichedWinner() = runTest {
+        val setup = openSetup("canonical-gap-coalesce.db")
+        val pending = setup.store.ingest(
+            TimelineObservation(
+                networkId = setup.networkId,
+                event = event(setup.roomId, null, 30_000, "draft").copy(
+                    isSelf = true,
+                    pendingLabel = "gap-label",
+                ),
+                origin = ObservationOrigin.LOCAL_SEND,
+                connectionGeneration = 1,
+                label = "gap-label",
+                batchId = null,
+                timeProvenance = TimeProvenance.LOCAL_CLOCK,
+            ),
+        )
+        val server = setup.store.ingest(
+            tagged(setup.networkId, setup.roomId, "gap-msgid", 31_000, "server-final"),
+        )
+        assertNotEquals(pending.event.id, server.event.id)
+        setup.db.historyGapDao().insert(
+            HistoryGapEntity(
+                roomId = setup.roomId,
+                olderMsgid = "old",
+                olderServerTime = 1_000,
+                newerMsgid = "gap-msgid",
+                newerServerTime = server.event.serverTime,
+                olderEventId = null,
+                olderTimelineOrder = null,
+                newerEventId = server.event.id,
+                newerTimelineOrder = server.event.timelineOrder,
+            ),
+        )
+
+        val echo = setup.store.ingest(
+            TimelineObservation(
+                networkId = setup.networkId,
+                event = event(setup.roomId, "gap-msgid", 31_000, "server-final").copy(isSelf = true),
+                origin = ObservationOrigin.LIVE,
+                connectionGeneration = 1,
+                label = "gap-label",
+                batchId = null,
+                timeProvenance = TimeProvenance.SERVER_TAG,
+            ),
+        )
+
+        assertEquals(pending.event.id, echo.event.id)
+        val gap = setup.db.historyGapDao().forRoom(setup.roomId).single()
+        assertEquals(echo.event.id, gap.newerEventId)
+        assertEquals(echo.event.serverTime, gap.newerServerTime)
+        assertEquals(echo.event.timelineOrder, gap.newerTimelineOrder)
+        setup.db.close()
+    }
+
+    @Test
+    fun playbackReorderingRepairsTheExactGapBoundaryOrder() = runTest {
+        val setup = openSetup("canonical-gap-order.db")
+        val first = setup.store.ingest(
+            tagged(setup.networkId, setup.roomId, "order-one", 40_000, "one"),
+        ).event
+        val second = setup.store.ingest(
+            tagged(setup.networkId, setup.roomId, "order-two", 40_000, "two"),
+        ).event
+        setup.db.historyGapDao().insert(
+            HistoryGapEntity(
+                roomId = setup.roomId,
+                olderMsgid = "older",
+                olderServerTime = 1_000,
+                newerMsgid = second.msgid,
+                newerServerTime = second.serverTime,
+                olderEventId = null,
+                olderTimelineOrder = null,
+                newerEventId = second.id,
+                newerTimelineOrder = second.timelineOrder,
+            ),
+        )
+
+        setup.store.reconcilePlaybackOrder(
+            orderedEventIds = listOf(second.id, first.id),
+            insertedEventIds = emptySet(),
+            prependUnanchored = false,
+        )
+
+        val gap = setup.db.historyGapDao().forRoom(setup.roomId).single()
+        assertEquals(second.id, gap.newerEventId)
+        assertEquals(0L, gap.newerTimelineOrder)
         setup.db.close()
     }
 

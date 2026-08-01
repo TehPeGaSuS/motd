@@ -505,6 +505,7 @@ class IrcClient(
                     eventMapper.map(message, batchId = batchRef, historical = historical)
                 }
                 if (events.size == leaves.size) {
+                    val historyReference = historyReference(tree.opening)
                     return listOf(
                         IrcEvent.NetworkBatch(
                             kind = if (tree.type == "netsplit") {
@@ -515,6 +516,11 @@ class IrcClient(
                             serverA = tree.params[0],
                             serverB = tree.params[1],
                             events = events,
+                            historyMetadata = HistoryEventMetadata(
+                                isContext = "draft/chathistory-context" in tree.opening.tags,
+                                msgid = historyReference?.msgid,
+                                serverTime = historyReference?.serverTime,
+                            ),
                         ),
                     )
                 }
@@ -934,7 +940,15 @@ class IrcClient(
                         else -> null
                     }
                     if (event != null) {
-                        listOf(child.batch.opening to event)
+                        val reference = historyReference(child.batch.opening)
+                        val enriched = (event as? IrcEvent.NetworkBatch)?.copy(
+                            historyMetadata = HistoryEventMetadata(
+                                isContext = "draft/chathistory-context" in child.batch.opening.tags,
+                                msgid = reference?.msgid,
+                                serverTime = reference?.serverTime,
+                            ),
+                        ) ?: event
+                        listOf(child.batch.opening to enriched)
                     } else {
                         mapCorrelatedHistoryChildren(child.batch)
                     }

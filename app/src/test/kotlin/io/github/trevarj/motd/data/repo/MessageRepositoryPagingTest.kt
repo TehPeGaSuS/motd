@@ -3,6 +3,7 @@ package io.github.trevarj.motd.data.repo
 import androidx.paging.PagingSource
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
@@ -47,6 +48,30 @@ class MessageRepositoryPagingTest {
         assertTrue(MESSAGE_PAGING_CONFIG.enablePlaceholders)
         assertEquals(500, MESSAGE_PAGING_CONFIG.maxSize)
         assertEquals(250, MESSAGE_PAGING_CONFIG.jumpThreshold)
+    }
+
+    @Test
+    fun sameTimestampBoundaryKeepsOnlyTheSelectedRecentIsland() = runTest {
+        val olderId = db.messageDao().insertAll(
+            listOf(message(bufferId, "older", "alice", 100, "older", msgid = "older")),
+        ).single()
+        val newerId = db.messageDao().insertAll(
+            listOf(message(bufferId, "newer", "alice", 100, "newer", msgid = "newer")),
+        ).single()
+        val newer = checkNotNull(db.messageDao().byCanonicalId(newerId))
+
+        val page = db.messageDao().pagingSource(
+            messagePagingQuery(
+                bufferId,
+                MessageVisibilitySpec(),
+                lowerBoundary = TimelineAnchor(100, newer.id, newer.timelineOrder),
+            ),
+        ).load(
+            PagingSource.LoadParams.Refresh(null, 50, false),
+        ).requirePage()
+
+        assertEquals(listOf(newerId), page.data.map { it.id })
+        assertFalse(page.data.any { it.id == olderId })
     }
 
     @Test

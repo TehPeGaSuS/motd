@@ -18,9 +18,11 @@ import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.ObservationOrigin
 import io.github.trevarj.motd.data.db.EventAliasNamespace
 import io.github.trevarj.motd.data.db.HistoryCursorEntity
+import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.data.db.TimeProvenance
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.TimelineEventId
 import io.github.trevarj.motd.data.db.UserEntity
 import io.github.trevarj.motd.data.db.identityRules
@@ -35,6 +37,7 @@ import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.event.ServerTimeSource
+import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.replyReference
@@ -66,6 +69,7 @@ internal data class PersistedHistoryPage(val roomId: RoomId, val inserted: Int)
 internal data class HistoryPageWrite(
     val request: ChatHistoryRequest,
     val response: ChatHistoryResponse.Messages,
+    val historyGapId: Long? = null,
 )
 
 /**
@@ -641,7 +645,7 @@ class EventProcessor @Inject constructor(
         origin: EventOrigin,
         expectedRoomId: RoomId? = null,
         placement: IrcEvent.PlaybackPlacement,
-    ) {
+    ): List<TimelineEventId> {
         // All events for one target are applied in a single Room transaction (idempotent by
         // dedupKey). They are historical replay, never live arrivals: persist them without posting
         // notifications even when a previously-missing row is a DM or mention.
@@ -667,6 +671,7 @@ class EventProcessor @Inject constructor(
                 room.name,
             )
         }
+        var committedOrder = emptyList<TimelineEventId>()
         try {
             db.withTransaction {
                 activeHistoryChatRoutes[networkId] = ArrayDeque()
@@ -708,8 +713,9 @@ class EventProcessor @Inject constructor(
                 activeHistoryCanonicalOrder[networkId] = mutableListOf()
                 activeHistoryInsertedIds[networkId] = mutableSetOf()
                 for (ev in events) processEvent(networkId, ev, origin, target)
+                committedOrder = activeHistoryCanonicalOrder[networkId].orEmpty().toList()
                 canonicalTimeline.reconcilePlaybackOrder(
-                    orderedEventIds = activeHistoryCanonicalOrder[networkId].orEmpty(),
+                    orderedEventIds = committedOrder,
                     insertedEventIds = activeHistoryInsertedIds[networkId].orEmpty(),
                     prependUnanchored = placement == IrcEvent.PlaybackPlacement.BEFORE ||
                         placement == IrcEvent.PlaybackPlacement.AUTOMATIC,
@@ -731,6 +737,7 @@ class EventProcessor @Inject constructor(
                 "source" to origin.name,
             )
         }
+        return committedOrder
     }
 
     /**
@@ -799,6 +806,7 @@ class EventProcessor @Inject constructor(
         request: ChatHistoryRequest,
         response: ChatHistoryResponse.Messages,
         expectedRoomId: RoomId?,
+        historyGapId: Long? = null,
     ): PersistedHistoryPage = sequencer.withNetwork(networkId) {
         val persisted = db.withTransaction {
             val messageCountBefore = messageDao.countForNetwork(networkId)
@@ -807,6 +815,7 @@ class EventProcessor @Inject constructor(
                 request,
                 response,
                 expectedRoomId,
+                historyGapId,
             )
             PersistedHistoryPage(
                 roomId = canonicalRoomId,
@@ -834,6 +843,7 @@ class EventProcessor @Inject constructor(
                     page.request,
                     page.response,
                     canonicalRoomId,
+                    page.historyGapId,
                 )
             }
             PersistedHistoryPage(
@@ -851,6 +861,7 @@ class EventProcessor @Inject constructor(
         request: ChatHistoryRequest,
         response: ChatHistoryResponse.Messages,
         expectedRoomId: RoomId?,
+        historyGapId: Long?,
     ): RoomId {
         require(request.subcommand != ChatHistoryRequest.Subcommand.TARGETS) {
             "TARGETS is not a message page"
@@ -864,11 +875,20 @@ class EventProcessor @Inject constructor(
             ?: error("missing history target ${request.target}")
         val initialCanonicalId = bufferDao.canonicalId(initialRoomId) ?: initialRoomId
         val before = db.historyCursorDao().byRoom(initialCanonicalId)
+        val previousNewest = before?.let {
+            ChatHistoryReference(it.newestMsgid, it.newestServerTime)
+        }?.takeIf { it.msgid != null || it.serverTime != null }
+            ?: messageDao.latestBoundary(initialCanonicalId)?.let {
+                ChatHistoryReference(it.msgid, it.serverTime)
+            }
+        val previousNewestAnchor = previousNewest?.let {
+            resolveStoredBoundary(initialCanonicalId, it, newest = true)
+        }
 
-        if (response.events.isNotEmpty()) {
+        val pageEventIds = if (response.events.isNotEmpty()) {
             activeProtocolPageCursorWrites += networkId
             try {
-                processEvent(
+                onPlaybackBatch(
                     networkId,
                     IrcEvent.PlaybackBatch(
                         source = IrcEvent.PlaybackSource.CHATHISTORY,
@@ -885,12 +905,13 @@ class EventProcessor @Inject constructor(
                             ChatHistoryRequest.Subcommand.TARGETS -> error("TARGETS is not a message page")
                         },
                     ),
-                    EventOrigin.LIVE,
-                    expectedHistoryRoomId = initialCanonicalId,
+                    expectedRoomId = initialCanonicalId,
                 )
             } finally {
                 activeProtocolPageCursorWrites -= networkId
             }
+        } else {
+            emptyList()
         }
 
         val canonicalRoomId = bufferDao.canonicalId(initialCanonicalId) ?: initialCanonicalId
@@ -927,9 +948,392 @@ class EventProcessor @Inject constructor(
                 historyComplete = complete || base?.historyComplete == true,
             ),
         )
+        reconcileHistoryGaps(
+            roomId = canonicalRoomId,
+            request = request,
+            response = response,
+            previousNewest = previousNewest,
+            previousNewestAnchor = previousNewestAnchor,
+            pageRows = pageEventIds.mapNotNull { messageDao.byCanonicalId(it) }
+                .filter { it.bufferId == canonicalRoomId },
+            historyGapId = historyGapId,
+        )
         bufferDao.setOldestFetchedTime(canonicalRoomId, oldest?.serverTime)
         if (complete) bufferDao.markHistoryComplete(canonicalRoomId)
         return canonicalRoomId
+    }
+
+    /**
+     * Reconcile one fetched protocol interval with durable missing intervals. Pages may arrive from
+     * either side of a gap or from a deep-link request in its middle, so overlap can close, shrink,
+     * or split a gap. LATEST creates a new gap only when it proves a newer retained island without
+     * reaching the previously known newest boundary.
+     */
+    private suspend fun reconcileHistoryGaps(
+        roomId: RoomId,
+        request: ChatHistoryRequest,
+        response: ChatHistoryResponse.Messages,
+        previousNewest: ChatHistoryReference?,
+        previousNewestAnchor: TimelineAnchor?,
+        pageRows: List<MessageEntity>,
+        historyGapId: Long?,
+    ) {
+        val roomGaps = db.historyGapDao().forRoom(roomId)
+        val directionalGap = historyGapId?.let { id -> roomGaps.firstOrNull { it.id == id } }
+            ?: when (request.subcommand) {
+            ChatHistoryRequest.Subcommand.AFTER -> roomGaps.matchingDirectionalGap(request.bound1) {
+                it.olderMsgid to it.olderServerTime
+            }
+            ChatHistoryRequest.Subcommand.BEFORE -> roomGaps.matchingDirectionalGap(request.bound1) {
+                it.newerMsgid to it.newerServerTime
+            }
+            else -> null
+        }
+        val terminal = response.endOfHistory || response.primaryMessageCount == 0
+        if (response.primaryMessageCount == 0) {
+            directionalGap?.let { db.historyGapDao().update(it.copy(recoverable = false)) }
+            return
+        }
+
+        val pageOldest = response.oldest?.takeIf { it.serverTime != null } ?: return
+        val pageNewest = response.newest?.takeIf { it.serverTime != null } ?: return
+        val pageOldestTime = checkNotNull(pageOldest.serverTime)
+        val pageNewestTime = checkNotNull(pageNewest.serverTime)
+        if (pageOldestTime > pageNewestTime) return
+        val pageOldestAnchor = resolvePageBoundary(pageOldest, pageRows, oldest = true)
+        val pageNewestAnchor = resolvePageBoundary(pageNewest, pageRows, oldest = false)
+
+        val gaps = db.historyGapDao().forRoom(roomId)
+        gaps.forEach { gap ->
+            val gapOlderAnchor = historyGapAnchor(roomId, gap, older = true)
+            val gapNewerAnchor = historyGapAnchor(roomId, gap, older = false)
+            if (directionalGap?.id == gap.id) {
+                if (request.subcommand == ChatHistoryRequest.Subcommand.AFTER) {
+                    val reachedNewerBoundary = pageNewestTime > gap.newerServerTime ||
+                        (pageNewestTime == gap.newerServerTime && pageNewest.matchesBoundary(
+                            pageNewestAnchor,
+                            gap.newerMsgid,
+                            gapNewerAnchor,
+                        ))
+                    val unsafeNextBoundary = !terminal && pageNewest.msgid == null &&
+                        response.primaryMessageCount >= request.limit
+                    if (terminal && reachedNewerBoundary) {
+                        db.historyGapDao().delete(gap.id)
+                    } else {
+                        updateOrDeleteGap(
+                            gap.copy(
+                                olderMsgid = pageNewest.msgid,
+                                olderServerTime = pageNewestTime,
+                                olderEventId = pageNewestAnchor?.eventId,
+                                olderTimelineOrder = pageNewestAnchor?.timelineOrder,
+                                recoverable = !terminal && !unsafeNextBoundary,
+                            ),
+                        )
+                    }
+                } else {
+                    val reachedOlderBoundary = pageOldestTime < gap.olderServerTime ||
+                        (pageOldestTime == gap.olderServerTime && pageOldest.matchesBoundary(
+                            pageOldestAnchor,
+                            gap.olderMsgid,
+                            gapOlderAnchor,
+                        ))
+                    val unsafeNextBoundary = !terminal && pageOldest.msgid == null &&
+                        response.primaryMessageCount >= request.limit
+                    if (terminal && reachedOlderBoundary) {
+                        db.historyGapDao().delete(gap.id)
+                    } else {
+                        updateOrDeleteGap(
+                            gap.copy(
+                                newerMsgid = pageOldest.msgid,
+                                newerServerTime = pageOldestTime,
+                                newerEventId = pageOldestAnchor?.eventId,
+                                newerTimelineOrder = pageOldestAnchor?.timelineOrder,
+                                recoverable = !terminal && !unsafeNextBoundary,
+                            ),
+                        )
+                    }
+                }
+                return@forEach
+            }
+            if (pageOldestAnchor == null || pageNewestAnchor == null) return@forEach
+            val overlaps = (
+                pageNewestTime > gap.olderServerTime &&
+                    pageOldestTime < gap.newerServerTime
+                ) || (
+                pageNewestTime == gap.olderServerTime && pageNewest.matchesBoundary(
+                    pageNewestAnchor,
+                    gap.olderMsgid,
+                    gapOlderAnchor,
+                )
+                ) || (
+                pageOldestTime == gap.newerServerTime && pageOldest.matchesBoundary(
+                    pageOldestAnchor,
+                    gap.newerMsgid,
+                    gapNewerAnchor,
+                )
+                )
+            if (!overlaps) {
+                return@forEach
+            }
+            // Timeline order is assigned locally and cannot prove that a distinct equal-time
+            // server event crossed an existing protocol boundary. At equal timestamps only the
+            // exact persisted boundary proves coverage; otherwise retain the uncovered prefix or
+            // suffix and let directional paging resolve it.
+            val coversOlder = pageOldestTime < gap.olderServerTime ||
+                (pageOldestTime == gap.olderServerTime && pageOldest.matchesBoundary(
+                    pageOldestAnchor,
+                    gap.olderMsgid,
+                    gapOlderAnchor,
+                ))
+            val coversNewer = pageNewestTime > gap.newerServerTime ||
+                (pageNewestTime == gap.newerServerTime && pageNewest.matchesBoundary(
+                    pageNewestAnchor,
+                    gap.newerMsgid,
+                    gapNewerAnchor,
+                ))
+            when {
+                coversOlder && coversNewer ->
+                    db.historyGapDao().delete(gap.id)
+                coversOlder ->
+                    updateOrDeleteGap(
+                        gap.copy(
+                            olderMsgid = pageNewest.msgid,
+                            olderServerTime = pageNewestTime,
+                            olderEventId = pageNewestAnchor.eventId,
+                            olderTimelineOrder = pageNewestAnchor.timelineOrder,
+                        ),
+                    )
+                coversNewer ->
+                    updateOrDeleteGap(
+                        gap.copy(
+                            newerMsgid = pageOldest.msgid,
+                            newerServerTime = pageOldestTime,
+                            newerEventId = pageOldestAnchor.eventId,
+                            newerTimelineOrder = pageOldestAnchor.timelineOrder,
+                        ),
+                    )
+                else -> {
+                    db.historyGapDao().update(
+                        gap.copy(
+                            newerMsgid = pageOldest.msgid,
+                            newerServerTime = pageOldestTime,
+                            newerEventId = pageOldestAnchor.eventId,
+                            newerTimelineOrder = pageOldestAnchor.timelineOrder,
+                        ),
+                    )
+                    db.historyGapDao().insert(
+                        HistoryGapEntity(
+                            roomId = roomId,
+                            olderMsgid = pageNewest.msgid,
+                            olderServerTime = pageNewestTime,
+                            olderEventId = pageNewestAnchor.eventId,
+                            olderTimelineOrder = pageNewestAnchor.timelineOrder,
+                            newerMsgid = gap.newerMsgid,
+                            newerServerTime = gap.newerServerTime,
+                            newerEventId = gap.newerEventId,
+                            newerTimelineOrder = gap.newerTimelineOrder,
+                        ),
+                    )
+                }
+            }
+        }
+
+        val saturatedBoundary = when (request.subcommand) {
+            ChatHistoryRequest.Subcommand.LATEST,
+            ChatHistoryRequest.Subcommand.BEFORE,
+            -> pageOldest to pageOldestAnchor
+            ChatHistoryRequest.Subcommand.AFTER -> pageNewest to pageNewestAnchor
+            else -> null
+        }?.takeIf { (reference, _) ->
+            !terminal && reference.msgid == null &&
+                response.primaryMessageCount >= request.limit &&
+                directionalGap == null &&
+                (request.subcommand != ChatHistoryRequest.Subcommand.LATEST || previousNewest == null)
+        }
+        saturatedBoundary?.let { (reference, anchor) ->
+            val time = checkNotNull(reference.serverTime)
+            val alreadyRecorded = db.historyGapDao().forRoom(roomId).any { gap ->
+                !gap.recoverable &&
+                    gap.olderServerTime == time && gap.newerServerTime == time &&
+                    gap.olderEventId == anchor?.eventId && gap.newerEventId == anchor?.eventId
+            }
+            if (!alreadyRecorded) {
+                db.historyGapDao().insert(
+                    HistoryGapEntity(
+                        roomId = roomId,
+                        olderMsgid = reference.msgid,
+                        olderServerTime = time,
+                        newerMsgid = reference.msgid,
+                        newerServerTime = time,
+                        recoverable = false,
+                        olderEventId = anchor?.eventId,
+                        olderTimelineOrder = anchor?.timelineOrder,
+                        newerEventId = anchor?.eventId,
+                        newerTimelineOrder = anchor?.timelineOrder,
+                    ),
+                )
+            }
+        }
+
+        if (
+            request.subcommand == ChatHistoryRequest.Subcommand.LATEST &&
+            !response.endOfHistory &&
+            response.primaryMessageCount > 0
+        ) {
+            val prior = previousNewest?.takeIf { it.serverTime != null } ?: return
+            val priorTime = checkNotNull(prior.serverTime)
+            val priorAnchor = previousNewestAnchor
+            if (
+                priorTime < pageOldestTime ||
+                (priorTime == pageOldestTime && !pageOldest.matchesBoundary(
+                    pageOldestAnchor,
+                    prior.msgid,
+                    priorAnchor,
+                ))
+            ) {
+                var covered = false
+                if (priorAnchor != null && pageOldestAnchor != null) {
+                    for (gap in db.historyGapDao().forRoom(roomId)) {
+                        val gapOlderAnchor = historyGapAnchor(roomId, gap, older = true)
+                        val gapNewerAnchor = historyGapAnchor(roomId, gap, older = false)
+                        val coversPrior = gap.olderServerTime < priorTime ||
+                            (gap.olderServerTime == priorTime && prior.matchesBoundary(
+                                priorAnchor,
+                                gap.olderMsgid,
+                                gapOlderAnchor,
+                            ))
+                        val coversPage = gap.newerServerTime > pageOldestTime ||
+                            (gap.newerServerTime == pageOldestTime && pageOldest.matchesBoundary(
+                                pageOldestAnchor,
+                                gap.newerMsgid,
+                                gapNewerAnchor,
+                            ))
+                        if (coversPrior && coversPage) {
+                            covered = true
+                            break
+                        }
+                    }
+                }
+                if (!covered) {
+                    db.historyGapDao().insert(
+                        HistoryGapEntity(
+                            roomId = roomId,
+                            olderMsgid = prior.msgid,
+                            olderServerTime = priorTime,
+                            olderEventId = priorAnchor?.eventId,
+                            olderTimelineOrder = priorAnchor?.timelineOrder,
+                            newerMsgid = pageOldest.msgid,
+                            newerServerTime = pageOldestTime,
+                            newerEventId = pageOldestAnchor?.eventId,
+                            newerTimelineOrder = pageOldestAnchor?.timelineOrder,
+                            recoverable = pageOldest.msgid != null ||
+                                response.primaryMessageCount < request.limit,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun updateOrDeleteGap(gap: HistoryGapEntity) {
+        val olderAnchor = historyGapAnchor(gap.roomId, gap, older = true)
+        val newerAnchor = historyGapAnchor(gap.roomId, gap, older = false)
+        val sameBoundary = when {
+            gap.olderMsgid != null && gap.newerMsgid != null ->
+                gap.olderMsgid == gap.newerMsgid
+            else -> olderAnchor == newerAnchor
+        }
+        // Equal server timestamps do not establish ordering between distinct IRC events. Keep
+        // that interval until an exact boundary proves it empty.
+        val invalid = gap.olderServerTime > gap.newerServerTime ||
+            (gap.olderServerTime == gap.newerServerTime && sameBoundary)
+        if (invalid) {
+            db.historyGapDao().delete(gap.id)
+        } else {
+            db.historyGapDao().update(gap)
+        }
+    }
+
+    private suspend fun resolveStoredBoundary(
+        roomId: RoomId,
+        reference: ChatHistoryReference,
+        newest: Boolean,
+    ): TimelineAnchor? {
+        reference.msgid?.let { msgid ->
+            messageDao.byMsgid(roomId, msgid)?.let {
+                return TimelineAnchor(it.serverTime, it.id, it.timelineOrder)
+            }
+        }
+        val row = if (newest) messageDao.newestMessage(roomId) else {
+            val boundary = messageDao.oldestBoundary(roomId) ?: return null
+            boundary.msgid?.let { messageDao.byMsgid(roomId, it) }
+        }
+        return row?.takeIf { it.serverTime == reference.serverTime }
+            ?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
+    }
+
+    private fun resolvePageBoundary(
+        reference: ChatHistoryReference,
+        pageRows: List<MessageEntity>,
+        oldest: Boolean,
+    ): TimelineAnchor? {
+        val candidates = pageRows.filter { row ->
+            when {
+                reference.msgid != null -> row.msgid == reference.msgid
+                reference.serverTime != null -> row.serverTime == reference.serverTime
+                else -> false
+            }
+        }
+        val row = if (oldest) candidates.firstOrNull() else candidates.lastOrNull()
+        return row?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
+    }
+
+    private suspend fun historyGapAnchor(
+        roomId: RoomId,
+        gap: HistoryGapEntity,
+        older: Boolean,
+    ): TimelineAnchor {
+        val msgid = if (older) gap.olderMsgid else gap.newerMsgid
+        val serverTime = if (older) gap.olderServerTime else gap.newerServerTime
+        val eventId = if (older) gap.olderEventId else gap.newerEventId
+        val timelineOrder = if (older) gap.olderTimelineOrder else gap.newerTimelineOrder
+        msgid?.let { messageDao.byMsgid(roomId, it) }?.let {
+            return TimelineAnchor(it.serverTime, it.id, it.timelineOrder)
+        }
+        eventId?.let { messageDao.byCanonicalId(it) }?.takeIf { it.bufferId == roomId }?.let {
+            return TimelineAnchor(it.serverTime, it.id, it.timelineOrder)
+        }
+        eventId?.let { return TimelineAnchor(serverTime, it, timelineOrder ?: it) }
+        val fallback = if (older) Long.MIN_VALUE else Long.MAX_VALUE
+        return TimelineAnchor(serverTime, fallback, fallback)
+    }
+
+    private fun String?.matches(msgid: String?, serverTime: Long): Boolean = when (this) {
+        msgid?.let(ChatHistorySelectors::msgid) -> true
+        ChatHistorySelectors.timestamp(serverTime) -> true
+        else -> false
+    }
+
+    private fun List<HistoryGapEntity>.matchingDirectionalGap(
+        selector: String?,
+        boundary: (HistoryGapEntity) -> Pair<String?, Long>,
+    ): HistoryGapEntity? {
+        val matches = filter { gap ->
+            val (msgid, serverTime) = boundary(gap)
+            selector.matches(msgid, serverTime)
+        }
+        // Msgids are exact. Timestamp selectors cannot safely choose among opaque equal-time gaps.
+        return if (selector?.startsWith("msgid=") == true) matches.firstOrNull() else matches.singleOrNull()
+    }
+
+    private fun ChatHistoryReference.matchesBoundary(
+        anchor: TimelineAnchor?,
+        storedMsgid: String?,
+        storedAnchor: TimelineAnchor?,
+    ): Boolean = when {
+        msgid != null && storedMsgid != null -> msgid == storedMsgid
+        anchor != null && storedAnchor != null -> anchor == storedAnchor
+        else -> false
     }
 
     private suspend fun canonicalBatchMultiplicities(

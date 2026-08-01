@@ -122,6 +122,12 @@ class CanonicalTimelineStore @Inject constructor(
             if (existing.size <= 1) {
                 incoming.forEachIndexed { index, event ->
                     dao.updateTimelineOrder(event.id, index.toLong(), confirmed = true)
+                    db.historyGapDao().repointEventBoundary(
+                        event.id,
+                        event.id,
+                        event.serverTime,
+                        index.toLong(),
+                    )
                 }
                 return@forEach
             }
@@ -169,6 +175,14 @@ class CanonicalTimelineStore @Inject constructor(
                     timelineOrder = index.toLong(),
                     confirmed = id in incomingSet,
                 )
+                dao.eventById(id)?.let { event ->
+                    db.historyGapDao().repointEventBoundary(
+                        id,
+                        id,
+                        event.serverTime,
+                        index.toLong(),
+                    )
+                }
             }
         }
     }
@@ -483,6 +497,12 @@ class CanonicalTimelineStore @Inject constructor(
         if (enriched != canonical) {
             dao.updateEvent(enriched)
             db.bufferDao().retimeLocalReadAnchor(enriched.id, enriched.serverTime)
+            db.historyGapDao().repointEventBoundary(
+                enriched.id,
+                enriched.id,
+                enriched.serverTime,
+                enriched.timelineOrder,
+            )
             canonical = enriched
         }
 
@@ -609,6 +629,18 @@ class CanonicalTimelineStore @Inject constructor(
         if (compatible(winner, loser) == null) return first
         val merged = enrich(enrich(winner, loser, provenanceOf(loser)), incoming, provenanceOf(incoming))
         if (merged != winner) dao.updateEvent(merged)
+        db.historyGapDao().repointEventBoundary(
+            loser.id,
+            winner.id,
+            merged.serverTime,
+            merged.timelineOrder,
+        )
+        db.historyGapDao().repointEventBoundary(
+            winner.id,
+            winner.id,
+            merged.serverTime,
+            merged.timelineOrder,
+        )
         db.bufferDao().repointLocalReadAnchors(loser.id, winner.id, merged.serverTime)
         dao.repointAliases(loser.id, winner.id)
         dao.repointObservations(loser.id, winner.id)

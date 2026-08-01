@@ -49,6 +49,10 @@ data class ChatListState(
     val allUnread: Int = 0, // "All chats" unread rollup (non-muted)
     val allMentions: Int = 0, // "All chats" mention rollup
 ) {
+    val allUnreadIncomplete: Boolean
+        get() = rows.any { !it.muted && it.unreadCountIncomplete }
+    val allMentionsIncomplete: Boolean
+        get() = rows.any { !it.muted && it.mentionCountIncomplete }
     /** Effective unread count for the current drawer scope; muted activity stays row-local. */
     val scopedUnreadCount: Int
         get() = rows.filterNot { it.type == BufferType.SERVER || it.muted }.sumOf { it.unreadCount }

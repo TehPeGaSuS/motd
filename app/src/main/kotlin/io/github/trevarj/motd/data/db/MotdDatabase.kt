@@ -24,6 +24,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         EventRedirectEntity::class,
         EventObservationEntity::class,
         HistoryCursorEntity::class,
+        HistoryGapEntity::class,
         NetworkHistoryCursorEntity::class,
         ConnectionGenerationEntity::class,
         AppStateEntity::class,
@@ -32,7 +33,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 21,
+    version = 22,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -50,6 +51,7 @@ abstract class MotdDatabase : RoomDatabase() {
     abstract fun canonicalTimelineDao(): CanonicalTimelineDao
     abstract fun roomAliasDao(): RoomAliasDao
     abstract fun historyCursorDao(): HistoryCursorDao
+    abstract fun historyGapDao(): HistoryGapDao
     abstract fun connectionGenerationDao(): ConnectionGenerationDao
     abstract fun appStateDao(): AppStateDao
 }
@@ -656,6 +658,39 @@ val MIGRATION_20_21 = object : Migration(20, 21) {
         db.execSQL(
             "CREATE INDEX IF NOT EXISTS index_messages_bufferId_serverTime_timelineOrder " +
                 "ON messages(bufferId, serverTime, timelineOrder)",
+        )
+    }
+}
+
+/**
+ * v21 -> v22 records unresolved intervals between independently fetched history windows. Existing
+ * v21 timelines were published as complete extents, so migration creates no speculative gaps.
+ */
+val MIGRATION_21_22 = object : Migration(21, 22) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `history_gaps` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `roomId` INTEGER NOT NULL,
+                `olderMsgid` TEXT,
+                `olderServerTime` INTEGER NOT NULL,
+                `newerMsgid` TEXT,
+                `newerServerTime` INTEGER NOT NULL,
+                `recoverable` INTEGER NOT NULL DEFAULT 1,
+                `olderEventId` INTEGER,
+                `olderTimelineOrder` INTEGER,
+                `newerEventId` INTEGER,
+                `newerTimelineOrder` INTEGER,
+                FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_history_gaps_roomId_olderServerTime` " +
+                "ON `history_gaps` (`roomId`, `olderServerTime`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_history_gaps_roomId_newerServerTime` " +
+                "ON `history_gaps` (`roomId`, `newerServerTime`)",
         )
     }
 }

@@ -375,6 +375,8 @@ fun ChatScreen(
     val uiEvents by viewModel.uiEvents.collectAsStateWithLifecycle()
     val historyResyncState by viewModel.historyResyncState.collectAsStateWithLifecycle()
     val historySyncStatus by viewModel.historySyncStatus.collectAsStateWithLifecycle()
+    val activeHistoryWindow by viewModel.activeHistoryWindow.collectAsStateWithLifecycle()
+    val hasNewerHistoryIsland by viewModel.hasNewerHistoryIsland.collectAsStateWithLifecycle()
     val isServerBuffer = state.buffer?.type == BufferType.SERVER
     val titleTarget = chatTitleTarget(state.buffer?.type)
 
@@ -472,8 +474,12 @@ fun ChatScreen(
         initialTarget = initialTarget,
         entryPositionInitiallySettled = entryPositionSettled,
         entryMessageUnavailable = entryMessageUnavailable,
+        activeHistoryWindow = activeHistoryWindow,
+        hasNewerHistoryIsland = hasNewerHistoryIsland,
         onJumpHandled = viewModel::onJumpHandled,
         onInitialPositionHandled = viewModel::onInitialPositionHandled,
+        onFocusRecentHistory = viewModel::focusRecentHistory,
+        onFocusRecentMention = viewModel::focusRecentMention,
         onInitialPositionUnresolved = viewModel::onInitialPositionUnresolved,
         onScrollPositionChanged = viewModel::saveScrollPosition,
         onClearScrollPosition = viewModel::clearScrollPosition,
@@ -628,8 +634,12 @@ fun ChatContent(
     initialTarget: ChatPositionTarget? = null,
     entryPositionInitiallySettled: Boolean = false,
     entryMessageUnavailable: Boolean = false,
+    activeHistoryWindow: ActiveHistoryWindow = ActiveHistoryWindow(),
+    hasNewerHistoryIsland: Boolean = false,
     onJumpHandled: (Long) -> Unit = {},
     onInitialPositionHandled: () -> Unit = {},
+    onFocusRecentHistory: () -> Unit = {},
+    onFocusRecentMention: (ChatPositionTarget) -> Unit = {},
     onInitialPositionUnresolved: () -> Unit = {},
     onScrollPositionChanged: (ChatScrollPosition) -> Unit = {},
     onClearScrollPosition: () -> Unit = {},
@@ -651,7 +661,7 @@ fun ChatContent(
     onCancelHistoryRefresh: () -> Unit = {},
     onHistoryResyncShown: () -> Unit = {},
     countUnreadBelowViewport: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int = { _, _ -> 0 },
-    nearestUnreadMentionBelow: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int? = { _, _ -> null },
+    nearestUnreadMentionBelow: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> ChatPositionTarget? = { _, _ -> null },
     conversationLayout: ConversationLayoutState = ConversationLayoutState(),
     onConversationLayoutSelected: (io.github.trevarj.motd.data.prefs.LayoutDensity?) -> Unit = {},
 ) {
@@ -682,6 +692,14 @@ fun ChatContent(
         append = items.loadState.append,
         historyComplete = state.buffer?.historyComplete == true,
     )
+    val newerHistoryLoad = items.loadState.prepend
+    val timelineHistoryStatus = when (newerHistoryLoad) {
+        LoadState.Loading -> HistorySyncStatus.Syncing
+        is LoadState.Error -> HistorySyncStatus.Failed(
+            newerHistoryLoad.error.message ?: "Unable to load newer history",
+        )
+        is LoadState.NotLoading -> historySyncStatus
+    }
     val readyRetryGate = remember(items) { HistoryReadyRetryGate() }
     LaunchedEffect(historyAvailability, items.loadState.append) {
         if (readyRetryGate.update(historyAvailability, items.loadState.append)) {
@@ -866,7 +884,7 @@ fun ChatContent(
         )
     }
 
-    suspend fun materializeTarget(target: ChatPositionTarget, scroll: Boolean): MessageEntity? {
+    suspend fun materializeTarget(target: ChatPositionTarget, scroll: Boolean): MaterializedChatTarget? {
         // itemCount is used only to establish that the position is addressable. A non-null peek is
         // the sole proof that the target placeholder has materialized.
         val pageReady = withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
@@ -877,9 +895,13 @@ fun ChatContent(
                 }
         } != null
         if (!pageReady) return null
-        if (target.index !in 0 until items.itemCount) return null
-        return requestAndAwaitTarget(
-            index = target.index,
+        val materializedIndex = materializableTargetIndex(
+            requestedIndex = target.index,
+            itemCount = items.itemCount,
+            hasExactIdentity = target.expectedEventId != null || target.expectedMsgid != null,
+        ) ?: return null
+        val row = requestAndAwaitTarget(
+            index = materializedIndex,
             request = { index ->
                 val count = items.itemCount
                 if (index !in 0 until count) {
@@ -897,9 +919,10 @@ fun ChatContent(
                 }
             },
             snapshots = snapshotFlow {
-                targetMaterialization(items, target.index)
+                targetMaterialization(items, materializedIndex)
             },
         )
+        return row?.let { MaterializedChatTarget(it, materializedIndex) }
     }
 
     // Deep jumps request one resolved placeholder, then validate both of its exact identities.
@@ -909,7 +932,7 @@ fun ChatContent(
             "target_index=${j.index} item_count=${items.itemCount}"
         }
         val targetRow = try {
-            materializeTarget(j, scroll = true)
+            materializeTarget(j, scroll = true)?.row
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (_: RuntimeException) {
@@ -963,33 +986,38 @@ fun ChatContent(
             // load hint even from an empty cold generation, then snap it to the top with the
             // remaining unread below. This all runs before settlement, so it cannot advance read
             // state or be misclassified as a user drag.
-            val row = try {
+            val materialized = try {
                 materializeTarget(target, scroll = true)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: RuntimeException) {
                 null
             }
-            if (row != null) {
+            if (materialized != null) {
+                val row = materialized.row
                 // The materialization scroll places the target at the reversed viewport start
                 // (visually the bottom). Align that measured row directly instead of estimating a
                 // second index from placeholder row counts: cold Paging swaps those placeholders
                 // for variable-height messages and can otherwise move the target outside layout.
                 val item = withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
                     snapshotFlow {
-                        listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == target.index }
+                        val visible = listState.layoutInfo.visibleItemsInfo
+                        val currentIndex = materializedTargetVisibleIndex(
+                            visible.map { it.key to it.index },
+                            row.id,
+                        )
+                        visible.firstOrNull { it.index == currentIndex }
                     }.first { it != null }
                 }
                 if (item != null) {
+                    val alignedIndex = item.index
                     val layout = listState.layoutInfo
                     val correction = reverseItemStartCorrection(
                         itemOffset = item.offset,
-                        itemSize = item.size,
                         viewportStartOffset = layout.viewportStartOffset,
-                        viewportEndOffset = layout.viewportEndOffset,
                     )
                     AutoFollowTrace.record("initial_position_align", traceBufferId, traceSessionId) {
-                        "target_index=${target.index} item_offset=${item.offset} item_size=${item.size} " +
+                        "target_index=$alignedIndex item_offset=${item.offset} item_size=${item.size} " +
                             "viewport_start=${layout.viewportStartOffset} viewport_end=${layout.viewportEndOffset} " +
                             "correction=$correction"
                     }
@@ -1008,7 +1036,7 @@ fun ChatContent(
                 materializeTarget(
                     target,
                     scroll = shouldScrollToInitialTarget(target, currentlyAtBottom),
-                )
+                )?.row
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: RuntimeException) {
@@ -1605,13 +1633,15 @@ fun ChatContent(
                         listState = listState,
                         readMarker = readMarkerLive,
                         visibilityPolicy = visibilityPolicy,
+                        activeHistoryWindow = activeHistoryWindow,
                         countUnreadBelowViewport = countUnreadBelowViewport,
                         nearestUnreadMentionBelow = nearestUnreadMentionBelow,
-                        visible = initialPositionSettled && !atBottom && !autoScrolling,
-                        onJumpMention = { index ->
-                            scope.launch { scrollToIndex(index, animate = true, reason = "jump_mention_fab") }
+                        visible = shouldShowNewestFab(atBottom, hasNewerHistoryIsland, autoScrolling),
+                        onJumpMention = onFocusRecentMention,
+                        onJumpNewest = {
+                            onFocusRecentHistory()
+                            scope.launch { scrollToNewest(animate = true, reason = "jump_fab") }
                         },
-                        onJumpNewest = { scope.launch { scrollToNewest(animate = true, reason = "jump_fab") } },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                     )
 
@@ -1639,10 +1669,16 @@ fun ChatContent(
                         },
                         historyIndicator = {
                             TimelineHistorySyncIndicator(
-                                status = historySyncStatus,
+                                status = timelineHistoryStatus,
                                 timelineEmpty = items.itemCount == 0,
                                 retryEnabled = state.connState is IrcClientState.Ready,
-                                onRetry = { onRefreshHistory(HistoryRefreshRange.MISSING) },
+                                onRetry = {
+                                    if (newerHistoryLoad is LoadState.Error) {
+                                        items.retry()
+                                    } else {
+                                        onRefreshHistory(HistoryRefreshRange.MISSING)
+                                    }
+                                },
                             )
                         },
                     )
@@ -1914,15 +1950,15 @@ fun ChatContent(
 /** Pixel delta that top-aligns an item whose logical offset is mirrored by `reverseLayout`. */
 internal fun reverseItemStartCorrection(
     itemOffset: Int,
-    itemSize: Int,
     viewportStartOffset: Int,
-    viewportEndOffset: Int,
 ): Int {
-    val desiredLogicalOffset = viewportEndOffset - itemSize - viewportStartOffset
-    return itemOffset - desiredLogicalOffset
+    // LazyListItemInfo.offset is physical even in reverse layout; top alignment is viewport start.
+    return itemOffset - viewportStartOffset
 }
 
 internal enum class ChatTitleTarget { CHANNEL_INFO, NICK_DETAILS, NONE }
+
+internal data class MaterializedChatTarget(val row: MessageEntity, val index: Int)
 
 /** The title bar destination is a property of the buffer, not its display-name prefix. */
 internal fun chatTitleTarget(type: BufferType?): ChatTitleTarget = when (type) {
@@ -2476,10 +2512,11 @@ private fun ViewportScrollToBottomFab(
     listState: androidx.compose.foundation.lazy.LazyListState,
     readMarker: io.github.trevarj.motd.data.db.TimelineAnchor?,
     visibilityPolicy: MessageVisibilityPolicy,
+    activeHistoryWindow: ActiveHistoryWindow,
     countUnreadBelowViewport: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int,
-    nearestUnreadMentionBelow: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int?,
+    nearestUnreadMentionBelow: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> ChatPositionTarget?,
     visible: Boolean,
-    onJumpMention: (Int) -> Unit,
+    onJumpMention: (ChatPositionTarget) -> Unit,
     onJumpNewest: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -2488,9 +2525,11 @@ private fun ViewportScrollToBottomFab(
     }
     val latestCounter by rememberUpdatedState(countUnreadBelowViewport)
     val latestMentionJump by rememberUpdatedState(nearestUnreadMentionBelow)
-    var unread by remember(readMarker, visibilityPolicy) { mutableIntStateOf(0) }
-    var mentionTarget by remember(readMarker, visibilityPolicy) { mutableStateOf<Int?>(null) }
-    LaunchedEffect(firstVisible, readMarker, visibilityPolicy) {
+    var unread by remember(readMarker, visibilityPolicy, activeHistoryWindow) { mutableIntStateOf(0) }
+    var mentionTarget by remember(readMarker, visibilityPolicy, activeHistoryWindow) {
+        mutableStateOf<ChatPositionTarget?>(null)
+    }
+    LaunchedEffect(firstVisible, readMarker, visibilityPolicy, activeHistoryWindow) {
         if (readMarker == null || firstVisible <= 0) {
             unread = 0
             mentionTarget = null
@@ -2505,7 +2544,7 @@ private fun ViewportScrollToBottomFab(
     // unit-testable without composition.
     val dispatch: (Boolean) -> Unit = { longPress ->
         when (val jump = scrollToBottomFabJump(longPress, pending)) {
-            is ScrollToBottomFabJump.Mention -> onJumpMention(jump.index)
+            is ScrollToBottomFabJump.Mention -> onJumpMention(jump.target)
             ScrollToBottomFabJump.Newest -> onJumpNewest()
         }
     }

@@ -54,6 +54,28 @@ class ConnectionRegistryTest {
     )
 
     @Test
+    fun connectionActivityPublishesLifecycleStateAndProgressAtomically() = runTest {
+        val registry = ConnectionRegistry(
+            backgroundScope,
+            actorFactory = { _, _ -> FakeActor() },
+            isConfigurationFailure = { false },
+        )
+
+        registry.beginStart()
+        assertFalse(registry.connectionActivity.value.initializationComplete)
+        registry.reconcile(listOf(network() to "fp"), setOf(1), emptySet())
+        val generation = registry.snapshot.value.actors.getValue(1).generation
+        registry.actorState(1, generation, "fp", IrcClientState.Connecting)
+        runCurrent()
+
+        val activity = registry.connectionActivity.value
+        assertTrue(activity.initializationComplete)
+        assertTrue(activity.progressing.getValue(1))
+        assertEquals(IrcClientState.Connecting, activity.states.getValue(1))
+        assertEquals(registry.connectionStates.value, activity.states)
+    }
+
+    @Test
     fun concurrentStartupAndReconcile_createOneObserverSetAndActor() = runTest {
         val created = mutableListOf<FakeActor>()
         val registry = ConnectionRegistry(

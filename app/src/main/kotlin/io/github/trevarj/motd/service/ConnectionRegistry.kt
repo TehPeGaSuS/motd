@@ -107,11 +107,16 @@ internal class ConnectionRegistry(
     private val callbackTokens = AtomicLong()
     private val probeReadyPending = AtomicBoolean(false)
     private var started = false
+    private var initialReconcileComplete = false
 
     private val _snapshot = MutableStateFlow(ConnectionRegistrySnapshot())
     val snapshot: StateFlow<ConnectionRegistrySnapshot> = _snapshot.asStateFlow()
     private val _states = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
     val connectionStates: StateFlow<Map<Long, IrcClientState>> = _states.asStateFlow()
+    private val _connectionActivity = MutableStateFlow(
+        ConnectionActivitySnapshot(initializationComplete = false),
+    )
+    val connectionActivity: StateFlow<ConnectionActivitySnapshot> = _connectionActivity.asStateFlow()
 
     init {
         scope.launch {
@@ -184,6 +189,7 @@ internal class ConnectionRegistry(
                 val changed = !started
                 if (changed) {
                     started = true
+                    initialReconcileComplete = false
                     publish()
                 }
                 command.result.complete(changed)
@@ -199,6 +205,7 @@ internal class ConnectionRegistry(
             }
             is Command.Stop -> {
                 started = false
+                initialReconcileComplete = true
                 probeReadyPending.set(false)
                 val cleanupJobs = observerJobs.toList() + pendingEchoJobs.values.map { it.second }
                 cleanupJobs.forEach(Job::cancel)
@@ -227,6 +234,7 @@ internal class ConnectionRegistry(
                     val (row, fingerprint) = rowsById[id] ?: return@forEach
                     ensureActor(row, fingerprint, command.awaitingCertTrust)
                 }
+                initialReconcileComplete = true
                 publish()
                 command.result.complete(Unit)
             }
@@ -403,6 +411,11 @@ internal class ConnectionRegistry(
             fingerprintCount = actors.size,
             terminalFingerprintCount = terminalFingerprints.size,
             callbackCount = callbackJobs.size,
+        )
+        _connectionActivity.value = ConnectionActivitySnapshot(
+            states = immutableStates,
+            progressing = actors.mapValues { (_, actor) -> actor.isAlive },
+            initializationComplete = initialReconcileComplete,
         )
         _states.value = immutableStates
     }

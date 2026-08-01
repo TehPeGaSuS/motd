@@ -10,10 +10,12 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
@@ -23,14 +25,18 @@ import io.github.trevarj.motd.irc.client.IrcCommandException
 import io.github.trevarj.motd.irc.client.IrcDisconnectedException
 import io.github.trevarj.motd.irc.client.IrcTimeoutException
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.event.HistoryEventMetadata
 import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.proto.Prefix
+import io.github.trevarj.motd.irc.proto.IrcMessage
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.CancellationException
 import java.io.IOException
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -135,7 +141,11 @@ class ChatHistoryRemoteMediatorTest {
         }
     }
 
-    private fun mediator(history: FakeHistory, pageSize: Int = 50) =
+    private fun mediator(
+        history: FakeHistory,
+        pageSize: Int = 50,
+        focus: HistoryWindowFocus = HistoryWindowFocus.Recent,
+    ) =
         ChatHistoryRemoteMediator(
             bufferId,
             db.bufferDao(),
@@ -144,6 +154,8 @@ class ChatHistoryRemoteMediatorTest {
             history,
             pageSize,
             db.historyCursorDao(),
+            db.historyGapDao(),
+            focus,
         )
 
     private fun emptyState() = PagingState<Int, MessageEntity>(
@@ -170,6 +182,128 @@ class ChatHistoryRemoteMediatorTest {
         assertFalse((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
         assertEquals(listOf(ChatHistoryRequest.Subcommand.LATEST), history.calls)
         assertEquals(2, rowCount())
+    }
+
+    @Test
+    fun oversizedTerminalLatestKeepsTheDiscardedOlderIntervalPageable() = runTest {
+        val history = FakeHistory(
+            latest = (1..1_000).map { chatMsg("m$it", it.toLong()) },
+            before = ArrayDeque(listOf(listOf(chatMsg("m950", 950)))),
+            latestEndOfHistory = true,
+        )
+
+        val first = load(mediator(history, pageSize = 50), LoadType.APPEND)
+        val reopened = load(mediator(history, pageSize = 50), LoadType.APPEND)
+
+        assertFalse((first as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertFalse((reopened as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(51, rowCount())
+        assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+        assertFalse(db.historyCursorDao().byRoom(bufferId)!!.historyComplete)
+        assertEquals(
+            listOf(ChatHistoryRequest.Subcommand.LATEST, ChatHistoryRequest.Subcommand.BEFORE),
+            history.calls,
+        )
+        assertEquals("msgid=m951", history.requests.last().bound1)
+    }
+
+    @Test
+    fun malformedTimestampOnlyOverdeliveryIsRejectedInsteadOfInventingEpochBoundary() {
+        val malformed = listOf(1L, 2L).map { time ->
+            chatMsg("m$time", time).let { event ->
+                event.copy(
+                    ctx = event.ctx.copy(
+                        msgid = null,
+                        serverTime = 0,
+                        serverTimeSource = ServerTimeSource.UNKNOWN,
+                    ),
+                )
+            }
+        }
+        val page = messages(malformed, endOfHistory = true)
+        val request = ChatHistoryRequest(
+            ChatHistoryRequest.Subcommand.LATEST,
+            "#chan",
+            limit = 1,
+        )
+
+        val failure = runCatching { page.boundedToRequest(request) }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("usable retained boundary"))
+    }
+
+    @Test
+    fun validTaggedTimestampOnlyOverdeliveryRetainsAdvertisedTime() {
+        val events = listOf(100L, 200L).map { time ->
+            chatMsg("m$time", time).let { event -> event.copy(ctx = event.ctx.copy(msgid = null)) }
+        }
+        val request = ChatHistoryRequest(
+            ChatHistoryRequest.Subcommand.LATEST,
+            "#chan",
+            limit = 1,
+        )
+
+        val bounded = messages(events, endOfHistory = true).boundedToRequest(request)
+
+        assertNull(bounded.oldest?.msgid)
+        assertEquals(200L, bounded.oldest?.serverTime)
+        assertFalse(bounded.endOfHistory)
+    }
+
+    @Test
+    fun rawHistoryContextSurvivesPrimaryOverdeliveryBounding() {
+        val rawContext = IrcEvent.Raw(
+            IrcMessage(
+                tags = mapOf(
+                    "draft/chathistory-context" to "",
+                    "time" to "1970-01-01T00:00:00.150Z",
+                ),
+                command = "TAGMSG",
+                params = listOf("#chan"),
+            ),
+        )
+        val page = messages(
+            listOf(chatMsg("m1", 100), rawContext, chatMsg("m2", 200)),
+            endOfHistory = true,
+        ).copy(primaryMessageCount = 2)
+
+        val bounded = page.boundedToRequest(
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#chan", limit = 1),
+        )
+
+        assertEquals(1, bounded.primaryMessageCount)
+        assertTrue(rawContext in bounded.events)
+        assertEquals("m2", bounded.newest?.msgid)
+    }
+
+    @Test
+    fun typedNetworkBatchSuppliesItsOpeningBoundaryDuringOverdeliveryBounding() {
+        val networkBatch = IrcEvent.NetworkBatch(
+            kind = IrcEvent.NetworkBatchKind.NETSPLIT,
+            serverA = "a.example",
+            serverB = "b.example",
+            events = emptyList(),
+            target = "#chan",
+            historyMetadata = HistoryEventMetadata(
+                isContext = false,
+                msgid = "split-event",
+                serverTime = 150,
+            ),
+        )
+        val page = messages(
+            listOf(chatMsg("m1", 100), networkBatch, chatMsg("m2", 200)),
+            endOfHistory = true,
+        ).copy(primaryMessageCount = 3)
+
+        val bounded = page.boundedToRequest(
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#chan", limit = 2),
+        )
+
+        assertEquals(2, bounded.primaryMessageCount)
+        assertEquals(listOf(networkBatch, chatMsg("m2", 200)), bounded.events)
+        assertEquals("split-event", bounded.oldest?.msgid)
+        assertEquals(150L, bounded.oldest?.serverTime)
     }
 
     @Test
@@ -206,6 +340,124 @@ class ChatHistoryRemoteMediatorTest {
         assertEquals(listOf(ChatHistoryRequest.Subcommand.BEFORE), history.calls)
         assertEquals("msgid=seed", history.requests.single().bound1)
         assertEquals(2, rowCount())
+    }
+
+    @Test
+    fun unreadFocusedPrependPagesAfterAndShrinksOnlyTheNewerGap() = runTest {
+        processor.process(networkId, chatMsg("old", 100))
+        processor.process(networkId, chatMsg("recent", 900))
+        db.historyGapDao().insert(
+            HistoryGapEntity(
+                roomId = bufferId,
+                olderMsgid = "old",
+                olderServerTime = 100,
+                newerMsgid = "recent",
+                newerServerTime = 900,
+            ),
+        )
+        val history = FakeHistory(
+            responseFor = { request ->
+                if (request.subcommand == ChatHistoryRequest.Subcommand.AFTER) {
+                    messages(listOf(chatMsg("next-1", 101), chatMsg("next-50", 150)))
+                } else {
+                    null
+                }
+            },
+        )
+
+        val result = load(
+            mediator(history, focus = HistoryWindowFocus.Around(100)),
+            LoadType.PREPEND,
+        )
+
+        assertFalse((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(listOf(ChatHistoryRequest.Subcommand.AFTER), history.calls)
+        assertEquals("msgid=old", history.requests.single().bound1)
+        val gap = db.historyGapDao().forRoom(bufferId).single()
+        assertEquals(150L, gap.olderServerTime)
+        assertEquals(900L, gap.newerServerTime)
+    }
+
+    @Test
+    fun unreadFocusedTerminalAfterStopsAndRetainsAnIncompleteExhaustedGap() = runTest {
+        processor.process(networkId, chatMsg("old", 100))
+        processor.process(networkId, chatMsg("recent", 900))
+        db.historyGapDao().insert(
+            HistoryGapEntity(0, bufferId, "old", 100, "recent", 900),
+        )
+        val history = FakeHistory(
+            responseFor = { request ->
+                messages(emptyList(), endOfHistory = true)
+                    .takeIf { request.subcommand == ChatHistoryRequest.Subcommand.AFTER }
+            },
+        )
+
+        val result = load(
+            mediator(history, focus = HistoryWindowFocus.Around(100)),
+            LoadType.PREPEND,
+        )
+
+        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertFalse(db.historyGapDao().forRoom(bufferId).single().recoverable)
+
+        val reopened = load(
+            mediator(history, focus = HistoryWindowFocus.Around(100)),
+            LoadType.PREPEND,
+        )
+        assertTrue((reopened as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(1, history.requests.size)
+    }
+
+    @Test
+    fun unreadFocusedNonAdvancingAfterStopsWithoutLooping() = runTest {
+        processor.process(networkId, chatMsg("old", 100))
+        processor.process(networkId, chatMsg("recent", 900))
+        db.historyGapDao().insert(
+            HistoryGapEntity(0, bufferId, "old", 100, "recent", 900),
+        )
+        val history = FakeHistory(
+            responseFor = { request ->
+                messages(listOf(chatMsg("old", 100)))
+                    .takeIf { request.subcommand == ChatHistoryRequest.Subcommand.AFTER }
+            },
+        )
+
+        val result = load(
+            mediator(history, focus = HistoryWindowFocus.Around(100)),
+            LoadType.PREPEND,
+        )
+
+        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(1, history.requests.size)
+        assertEquals("old", db.historyGapDao().forRoom(bufferId).single().olderMsgid)
+    }
+
+    @Test
+    fun recentAppendPagesBeforeTheRecentIslandInsteadOfTheGlobalOldestCursor() = runTest {
+        processor.process(networkId, chatMsg("old", 100))
+        processor.process(networkId, chatMsg("recent-boundary", 851))
+        db.historyGapDao().insert(
+            HistoryGapEntity(
+                roomId = bufferId,
+                olderMsgid = "old",
+                olderServerTime = 100,
+                newerMsgid = "recent-boundary",
+                newerServerTime = 851,
+            ),
+        )
+        val history = FakeHistory(
+            before = ArrayDeque(
+                listOf(listOf(chatMsg("older-page", 801), chatMsg("newer-page", 850))),
+            ),
+        )
+
+        val result = load(mediator(history), LoadType.APPEND)
+
+        assertFalse((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals("msgid=recent-boundary", history.requests.single().bound1)
+        val gap = db.historyGapDao().forRoom(bufferId).single()
+        assertEquals(100L, gap.olderServerTime)
+        assertEquals(801L, gap.newerServerTime)
     }
 
     @Test
@@ -274,7 +526,39 @@ class ChatHistoryRemoteMediatorTest {
             listOf("msgid=OpaqueCase", "timestamp=1970-01-01T00:00:00.500Z"),
             history.requests.map { it.bound1 },
         )
-        assertEquals("older", db.historyCursorDao().byRoom(bufferId)?.oldestMsgid)
+        assertNull(db.historyCursorDao().byRoom(bufferId)?.oldestMsgid)
+        assertEquals(100L, db.historyCursorDao().byRoom(bufferId)?.oldestServerTime)
+    }
+
+    @Test
+    fun timestampFallbackMarksOnlyTheExactSelectedEqualTimeGapExhausted() = runTest {
+        val firstId = db.historyGapDao().insert(
+            HistoryGapEntity(0, bufferId, "a", 100, "b", 500),
+        )
+        val secondId = db.historyGapDao().insert(
+            HistoryGapEntity(0, bufferId, "c", 200, "d", 500),
+        )
+        val history = FakeHistory(
+            failureFor = { request ->
+                IrcCommandException("CHATHISTORY", "INVALID_MSGREFTYPE", "try timestamp")
+                    .takeIf { request.bound1?.startsWith("msgid=") == true }
+            },
+            responseFor = { request ->
+                messages(emptyList(), endOfHistory = true)
+                    .takeIf { request.bound1?.startsWith("timestamp=") == true }
+            },
+        )
+
+        val result = load(mediator(history), LoadType.APPEND)
+
+        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        val selectedMsgid = history.requests.first().bound1?.removePrefix("msgid=")
+        val gaps = db.historyGapDao().forRoom(bufferId).associateBy { it.id }
+        val selectedId = if (selectedMsgid == "b") firstId else secondId
+        val untouchedId = if (selectedId == firstId) secondId else firstId
+        assertFalse(checkNotNull(gaps[selectedId]).recoverable)
+        assertTrue(checkNotNull(gaps[untouchedId]).recoverable)
+        assertEquals("timestamp=1970-01-01T00:00:00.500Z", history.requests.last().bound1)
     }
 
     @Test
@@ -343,6 +627,10 @@ class ChatHistoryRemoteMediatorTest {
         assertEquals(2, rowCount())
         assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
         assertFalse(db.historyCursorDao().byRoom(bufferId)!!.historyComplete)
+
+        val reopened = load(mediator(history, pageSize = 2), LoadType.APPEND)
+        assertTrue((reopened as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(1, history.requests.size)
     }
 
     @Test
@@ -360,6 +648,10 @@ class ChatHistoryRemoteMediatorTest {
         assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
         assertEquals(3, rowCount())
         assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+
+        val reopened = load(mediator(history, pageSize = 2), LoadType.APPEND)
+        assertTrue((reopened as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(1, history.requests.size)
     }
 
     @Test

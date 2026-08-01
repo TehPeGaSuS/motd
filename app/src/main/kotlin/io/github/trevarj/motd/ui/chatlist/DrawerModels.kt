@@ -20,21 +20,32 @@ data class DrawerRow(
     val nick: String?, // (state as? Ready)?.nick
     val unread: Int, // sum of unreadCount over the network's non-muted rows
     val mentions: Int, // sum of mentionCount over the network's non-muted rows
+    val unreadIncomplete: Boolean = false,
+    val mentionsIncomplete: Boolean = false,
 )
 
 /** Rollup of unread + mention counts for a single set of non-muted rows. */
-private data class Rollup(val unread: Int, val mentions: Int)
+private data class Rollup(
+    val unread: Int,
+    val mentions: Int,
+    val unreadIncomplete: Boolean = false,
+    val mentionsIncomplete: Boolean = false,
+)
 
 private fun rollupFor(rows: List<ChatListRow>, networkId: Long): Rollup {
     var unread = 0
     var mentions = 0
+    var unreadIncomplete = false
+    var mentionsIncomplete = false
     for (row in rows) {
         if (row.networkId != networkId) continue
         if (row.muted) continue
         unread += row.unreadCount
         mentions += row.mentionCount
+        unreadIncomplete = unreadIncomplete || row.unreadCountIncomplete
+        mentionsIncomplete = mentionsIncomplete || row.mentionCountIncomplete
     }
-    return Rollup(unread, mentions)
+    return Rollup(unread, mentions, unreadIncomplete, mentionsIncomplete)
 }
 
 private fun stateFor(states: Map<Long, IrcClientState>, id: Long): IrcClientState =
@@ -66,6 +77,8 @@ fun buildDrawerRows(
             nick = (state as? IrcClientState.Ready)?.nick,
             unread = own.unread + extra.unread,
             mentions = own.mentions + extra.mentions,
+            unreadIncomplete = own.unreadIncomplete || extra.unreadIncomplete,
+            mentionsIncomplete = own.mentionsIncomplete || extra.mentionsIncomplete,
         )
     }
 
@@ -78,7 +91,12 @@ fun buildDrawerRows(
                 // Aggregate children's counts into the root's own row.
                 val childTotals = kids.fold(Rollup(0, 0)) { acc, kid ->
                     val r = rollupFor(rows, kid.id)
-                    Rollup(acc.unread + r.unread, acc.mentions + r.mentions)
+                    Rollup(
+                        acc.unread + r.unread,
+                        acc.mentions + r.mentions,
+                        acc.unreadIncomplete || r.unreadIncomplete,
+                        acc.mentionsIncomplete || r.mentionsIncomplete,
+                    )
                 }
                 out.add(rowFor(net, depth = 0, extra = childTotals))
                 for (kid in kids) out.add(rowFor(kid, depth = 1))

@@ -182,7 +182,41 @@ interface BufferDao {
                 )
                 AND m.isSelf = 0
                 AND m.hasMention = 1
-                AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')) AS mentionCount
+                AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')) AS mentionCount,
+            EXISTS(SELECT 1 FROM history_gaps g WHERE g.roomId = b.id
+                AND (g.newerServerTime > MAX(COALESCE(b.localReadAnchorTime, 0),
+                    COALESCE(b.localUnreadFloorTime, 0)) OR
+                    (g.newerServerTime = MAX(COALESCE(b.localReadAnchorTime, 0),
+                        COALESCE(b.localUnreadFloorTime, 0)) AND
+                     COALESCE(b.localUnreadFloorTime, -9223372036854775808) <
+                         COALESCE(b.localReadAnchorTime, 0) AND
+                     (g.recoverable = 0 AND g.olderServerTime = g.newerServerTime OR
+                      g.newerEventId IS NULL OR g.newerTimelineOrder IS NULL OR
+                      g.newerTimelineOrder > COALESCE((SELECT timelineOrder FROM messages
+                          WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0)) OR
+                      (g.newerTimelineOrder = COALESCE((SELECT timelineOrder FROM messages
+                          WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0)) AND
+                       g.newerEventId > COALESCE(b.localReadAnchorEventId, 0)))))) OR
+            (b.historyComplete = 0 AND b.oldestFetchedTime >
+                MAX(COALESCE(b.localReadAnchorTime, 0),
+                    COALESCE(b.localUnreadFloorTime, 0))) AS unreadCountIncomplete,
+            EXISTS(SELECT 1 FROM history_gaps g WHERE g.roomId = b.id
+                AND (g.newerServerTime > MAX(COALESCE(b.localReadAnchorTime, 0),
+                    COALESCE(b.localUnreadFloorTime, 0)) OR
+                    (g.newerServerTime = MAX(COALESCE(b.localReadAnchorTime, 0),
+                        COALESCE(b.localUnreadFloorTime, 0)) AND
+                     COALESCE(b.localUnreadFloorTime, -9223372036854775808) <
+                         COALESCE(b.localReadAnchorTime, 0) AND
+                     (g.recoverable = 0 AND g.olderServerTime = g.newerServerTime OR
+                      g.newerEventId IS NULL OR g.newerTimelineOrder IS NULL OR
+                      g.newerTimelineOrder > COALESCE((SELECT timelineOrder FROM messages
+                          WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0)) OR
+                      (g.newerTimelineOrder = COALESCE((SELECT timelineOrder FROM messages
+                          WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0)) AND
+                       g.newerEventId > COALESCE(b.localReadAnchorEventId, 0)))))) OR
+            (b.historyComplete = 0 AND b.oldestFetchedTime >
+                MAX(COALESCE(b.localReadAnchorTime, 0),
+                    COALESCE(b.localUnreadFloorTime, 0))) AS mentionCountIncomplete
         FROM buffers b
         JOIN networks n ON n.id = b.networkId
         LEFT JOIN network_identity ni ON ni.networkId = b.networkId
@@ -547,6 +581,7 @@ interface BufferDao {
         deleteDraftForBuffer(room.id)
         rememberDiscardedMessageIds(room.id)
         deleteMessagesForBuffer(room.id)
+        deleteHistoryGapsForBuffer(room.id)
         upsertHistoryCursor(
             HistoryCursorEntity(
                 roomId = room.id,
@@ -555,6 +590,9 @@ interface BufferDao {
             ),
         )
     }
+
+    @Query("DELETE FROM history_gaps WHERE roomId = :bufferId")
+    suspend fun deleteHistoryGapsForBuffer(bufferId: RoomId)
 }
 
 /** Projection for the chat list screen. */
@@ -567,6 +605,8 @@ data class ChatListRow(
     val caseMapping: String? = null,
     val chanTypes: String? = null,
     val archived: Boolean = false,
+    val unreadCountIncomplete: Boolean = false,
+    val mentionCountIncomplete: Boolean = false,
 )
 
 /** Canonical invitation projection for the chat-list inbox. Payload decoding stays above Room. */
@@ -604,6 +644,9 @@ data class LastSpokeRow(val nick: String, val lastSpokeAt: Long)
 interface MessageDao {
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId ORDER BY serverTime DESC, timelineOrder DESC, id DESC")
     fun pagingSource(bufferId: Long): PagingSource<Int, MessageEntity>
+
+    @Query("SELECT * FROM messages WHERE bufferId = :bufferId ORDER BY serverTime, timelineOrder, id")
+    suspend fun historyRowsForMerge(bufferId: Long): List<MessageEntity>
 
     /** Dynamic visibility predicates must run inside Room so placeholder counts match page rows. */
     @RawQuery(observedEntities = [MessageEntity::class])
@@ -1688,6 +1731,48 @@ interface HistoryCursorDao {
 
     @Query("DELETE FROM history_cursors WHERE roomId = :roomId")
     suspend fun deleteRoom(roomId: RoomId)
+}
+
+@Dao
+interface HistoryGapDao {
+    @Query("SELECT * FROM history_gaps WHERE roomId = :roomId ORDER BY olderServerTime")
+    suspend fun forRoom(roomId: RoomId): List<HistoryGapEntity>
+
+    @Query("SELECT * FROM history_gaps WHERE roomId = :roomId ORDER BY olderServerTime")
+    fun observeForRoom(roomId: RoomId): Flow<List<HistoryGapEntity>>
+
+    @Insert
+    suspend fun insert(gap: HistoryGapEntity): Long
+
+    @Update
+    suspend fun update(gap: HistoryGapEntity)
+
+    @Query("DELETE FROM history_gaps WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("DELETE FROM history_gaps WHERE roomId = :roomId")
+    suspend fun deleteForRoom(roomId: RoomId)
+
+    @Query("UPDATE history_gaps SET roomId = :winnerId WHERE roomId = :loserId")
+    suspend fun moveToRoom(loserId: RoomId, winnerId: RoomId)
+
+    /** Keep exact gap endpoints canonical when an event is coalesced, retimed, or reordered. */
+    @Query(
+        """UPDATE history_gaps SET
+               olderEventId = CASE WHEN olderEventId = :fromEventId THEN :toEventId ELSE olderEventId END,
+               olderServerTime = CASE WHEN olderEventId = :fromEventId THEN :serverTime ELSE olderServerTime END,
+               olderTimelineOrder = CASE WHEN olderEventId = :fromEventId THEN :timelineOrder ELSE olderTimelineOrder END,
+               newerEventId = CASE WHEN newerEventId = :fromEventId THEN :toEventId ELSE newerEventId END,
+               newerServerTime = CASE WHEN newerEventId = :fromEventId THEN :serverTime ELSE newerServerTime END,
+               newerTimelineOrder = CASE WHEN newerEventId = :fromEventId THEN :timelineOrder ELSE newerTimelineOrder END
+           WHERE olderEventId = :fromEventId OR newerEventId = :fromEventId""",
+    )
+    suspend fun repointEventBoundary(
+        fromEventId: TimelineEventId,
+        toEventId: TimelineEventId,
+        serverTime: Long,
+        timelineOrder: Long,
+    )
 }
 
 @Dao

@@ -193,7 +193,7 @@ class RequiredHeadlessE2eTest {
         }
 
         FixtureIrcClient.connect(bootstrap.args).use { fixture ->
-            (1..80).forEach { ordinal ->
+            (1..260).forEach { ordinal ->
                 fixture.sendMessage(bootstrap.args.channel, "$token row${ordinal.toString().padStart(3, '0')}")
             }
             fixture.flushThroughServer("${token}gap")
@@ -211,13 +211,9 @@ class RequiredHeadlessE2eTest {
                 historySettled.await()
             }
         }
-        val recovered = runBlocking { runProbe.awaitRun(token, bufferId, 81) }
-        val firstUnread = recovered.single { it.text == "$token row001" }
-        val secondUnread = recovered.single { it.text == "$token row002" }
-        val newest = recovered.single { it.text == "$token row080" }
-        assertTrue(markerAnchor.serverTime < firstUnread.serverTime)
-        assertTrue(markerAnchor < firstUnread.anchor())
-        assertTrue(firstUnread.anchor() < newest.anchor())
+        val recentWindow = runBlocking { runProbe.awaitRun(token, bufferId, 151) }
+        val newest = recentWindow.single { it.text == "$token row260" }
+        assertTrue(recentWindow.none { it.text == "$token row001" })
         assertMarkerAtLeast(bootstrap, bufferId, marker)
         val roomBeforeEntry = runBlocking {
             bootstrap.seams.buffers().observeBuffer(bufferId).first { it != null }
@@ -227,13 +223,26 @@ class RequiredHeadlessE2eTest {
         val listBeforeEntry = runBlocking {
             withTimeout(10_000) {
                 bootstrap.seams.buffers().observeChatList().first { rows ->
-                    rows.singleOrNull { it.bufferId == bufferId }?.unreadCount == 80
+                    rows.singleOrNull { it.bufferId == bufferId }?.let { row ->
+                        row.unreadCount == 150 && row.unreadCountIncomplete
+                    } == true
                 }
             }
         }
-        assertEquals(80, listBeforeEntry.single { it.bufferId == bufferId }.unreadCount)
+        val boundedRow = listBeforeEntry.single { it.bufferId == bufferId }
+        assertEquals(150, boundedRow.unreadCount)
+        assertTrue(boundedRow.unreadCountIncomplete)
 
         ChatListRobot(compose).open(bufferId)
+        val firstUnread = runBlocking {
+            lifecycle.awaitCanonicalFromAnySender("$token row001", bufferId)
+        }
+        val secondUnread = runBlocking {
+            lifecycle.awaitCanonicalFromAnySender("$token row002", bufferId)
+        }
+        assertTrue(markerAnchor.serverTime < firstUnread.serverTime)
+        assertTrue(markerAnchor < firstUnread.anchor())
+        assertTrue(firstUnread.anchor() < newest.anchor())
         val timeline = TimelineRobot(compose)
         timeline.assertUnreadEntry(firstUnread.tag(), secondUnread.tag())
         compose.waitForIdle()
@@ -252,7 +261,7 @@ class RequiredHeadlessE2eTest {
         scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         ChatListRobot(compose).apply { awaitTag("chatlist_row_$bufferId"); open(bufferId) }
         timeline.assertNoUnreadDivider()
-        timeline.assertMessage("$token row080")
+        timeline.assertMessage("$token row260")
 
         scenario.scenario?.onActivity { activity ->
             InstrumentationRegistry.getInstrumentation().callActivityOnNewIntent(
@@ -268,7 +277,7 @@ class RequiredHeadlessE2eTest {
         timeline.assertMessageVisible(firstUnread.tag())
         scenario.scenario?.onActivity { it.recreate() }
         timeline.assertMessageVisible(firstUnread.tag())
-        runBlocking { runProbe.awaitRun(token, bufferId, 81) }
+        runBlocking { runProbe.awaitRun(token, bufferId, 201) }
         milestones.record("notification_restore_stable", "buffer=$bufferId event=${firstUnread.id}")
     }
 

@@ -168,7 +168,11 @@ class ChatModelsTest {
     }
 
     @Test fun `FAB tap with a pending mention follows the mention walk`() {
-        assertEquals(ScrollToBottomFabJump.Mention(7), scrollToBottomFabJump(longPress = false, mentionTarget = 7))
+        val target = ChatPositionTarget(index = 7, expectedEventId = 70)
+        assertEquals(
+            ScrollToBottomFabJump.Mention(target),
+            scrollToBottomFabJump(longPress = false, mentionTarget = target),
+        )
     }
 
     @Test fun `FAB tap with no pending mention falls through to newest`() {
@@ -176,7 +180,10 @@ class ChatModelsTest {
     }
 
     @Test fun `FAB long-press skips the mention walk and goes to newest`() {
-        assertEquals(ScrollToBottomFabJump.Newest, scrollToBottomFabJump(longPress = true, mentionTarget = 7))
+        assertEquals(
+            ScrollToBottomFabJump.Newest,
+            scrollToBottomFabJump(longPress = true, mentionTarget = ChatPositionTarget(index = 7)),
+        )
     }
 
     @Test fun `FAB long-press with no pending mention also goes to newest`() {
@@ -458,21 +465,17 @@ class ChatModelsTest {
 
     @Test fun `measured row correction aligns variable-height unread target`() {
         assertEquals(
-            248,
+            1_797,
             reverseItemStartCorrection(
                 itemOffset = 1_776,
-                itemSize = 291,
                 viewportStartOffset = -21,
-                viewportEndOffset = 1_798,
             ),
         )
         assertEquals(
-            0,
+            1_549,
             reverseItemStartCorrection(
                 itemOffset = 1_528,
-                itemSize = 291,
                 viewportStartOffset = -21,
-                viewportEndOffset = 1_798,
             ),
         )
     }
@@ -711,6 +714,49 @@ class ChatModelsTest {
         assertFalse(gate.update(HistoryAvailability.NegotiatingOrOffline, nextGeneration))
         assertTrue(gate.update(ready, nextGeneration))
         assertFalse(gate.update(ready, nextGeneration))
+    }
+
+    @Test
+    fun `identity-free insertion point at snapshot end settles on the last row`() {
+        assertEquals(0, materializableTargetIndex(1, itemCount = 1, hasExactIdentity = false))
+        assertEquals(4, materializableTargetIndex(5, itemCount = 5, hasExactIdentity = false))
+        assertEquals(null, materializableTargetIndex(1, itemCount = 1, hasExactIdentity = true))
+        assertEquals(null, materializableTargetIndex(0, itemCount = 0, hasExactIdentity = false))
+    }
+
+    @Test
+    fun `materialized target follows its stable key when an insertion shifts the index`() {
+        val row = MessageEntity(
+            id = 7,
+            bufferId = 1,
+            serverTime = 100,
+            sender = "alice",
+            kind = MessageKind.PRIVMSG,
+            text = "row",
+            dedupKey = "row",
+        )
+        val materialized = MaterializedChatTarget(row, index = 4)
+        val shiftedVisibleItems = listOf(
+            99L to 4,
+            row.id to 5,
+        )
+
+        assertEquals(4, materialized.index)
+        assertEquals(7L, materialized.row.id)
+        assertEquals(5, materializedTargetVisibleIndex(shiftedVisibleItems, row.id))
+    }
+
+    @Test
+    fun `focused one-row island shows newest escape even at its local bottom`() {
+        assertTrue(
+            shouldShowNewestFab(
+                atBottom = true,
+                hasNewerHistoryIsland = true,
+                autoScrolling = false,
+            ),
+        )
+        assertFalse(shouldShowNewestFab(true, false, false))
+        assertFalse(shouldShowNewestFab(true, true, true))
     }
 
     @Test

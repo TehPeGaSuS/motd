@@ -434,6 +434,58 @@ class MessageVisibilityReaderTest {
         assertNull(reader.nearestUnreadMentionBelowIndex(bufferId, beforeIndex = 0, after = marker, spec = spec))
     }
 
+    @Test
+    fun viewportQueriesUseTheFocusedHistoryIslandBounds() = runTest {
+        val ids = db.messageDao().insertAll(
+            listOf(
+                message(bufferId, "old plain", sender = "bob", serverTime = 200, dedupKey = "old-plain"),
+                message(
+                    bufferId,
+                    "old mention",
+                    sender = "bob",
+                    serverTime = 300,
+                    dedupKey = "old-mention",
+                    hasMention = true,
+                ),
+                message(bufferId, "recent plain", sender = "bob", serverTime = 900, dedupKey = "recent-plain"),
+                message(
+                    bufferId,
+                    "recent mention",
+                    sender = "bob",
+                    serverTime = 1_000,
+                    dedupKey = "recent-mention",
+                    hasMention = true,
+                ),
+            ),
+        )
+        val marker = io.github.trevarj.motd.data.db.TimelineAnchor(50, 0)
+        val bounds = MessageWindowBounds(
+            upperBoundary = io.github.trevarj.motd.data.db.TimelineAnchor(300, ids[1]),
+        )
+
+        assertEquals(
+            2,
+            reader.countVisibleUnreadInTimelinePrefix(
+                bufferId,
+                beforeIndex = 2,
+                after = marker,
+                maxCount = 100,
+                spec = MessageVisibilitySpec(),
+                bounds = bounds,
+            ),
+        )
+        assertEquals(
+            ids[1],
+            reader.nearestUnreadMentionBelow(
+                bufferId,
+                beforeIndex = 2,
+                after = marker,
+                spec = MessageVisibilitySpec(),
+                bounds = bounds,
+            )?.id,
+        )
+    }
+
     private fun spec(mode: FoolsMode, showJoinPartQuit: Boolean = true) = MessageVisibilitySpec(
         showJoinPartQuit = showJoinPartQuit,
         fools = setOf("alice"),

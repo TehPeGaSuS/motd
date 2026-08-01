@@ -8,7 +8,9 @@ import io.github.trevarj.motd.data.visibility.JOIN_PART_QUIT_KINDS
 import io.github.trevarj.motd.data.visibility.CONVERSATION_KINDS
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.data.visibility.MessageWindowBounds
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -30,6 +32,12 @@ val JPQ_KINDS: Set<MessageKind> = JOIN_PART_QUIT_KINDS
  * Behavioral filter spec derived from observed Settings and passed into each repository Pager.
  */
 typealias MessageFilterSpec = MessageVisibilitySpec
+
+/** Identity of the active paging island; bounds changes invalidate viewport-derived state. */
+data class ActiveHistoryWindow(
+    val focus: HistoryWindowFocus = HistoryWindowFocus.Recent,
+    val bounds: MessageWindowBounds = MessageWindowBounds(),
+)
 
 /** Match a stored actor using its persisted account/casemapped identity, never display spelling. */
 fun MessageEntity.matchesConfiguredActor(
@@ -100,7 +108,7 @@ fun shouldAutoscrollToNewest(atBottom: Boolean, oldCount: Int, newCount: Int): B
 /** Which jump the scroll-to-bottom FAB performs. */
 sealed interface ScrollToBottomFabJump {
     /** Jump to the nearest unread @mention below the viewport (the FAB's mention walk). */
-    data class Mention(val index: Int) : ScrollToBottomFabJump
+    data class Mention(val target: ChatPositionTarget) : ScrollToBottomFabJump
     /** Jump straight to the newest row. */
     object Newest : ScrollToBottomFabJump
 }
@@ -110,7 +118,10 @@ sealed interface ScrollToBottomFabJump {
  * newest; a tap follows the nearest unread [mentionTarget] when one is pending below the viewport,
  * otherwise it also goes to newest. Pure so the routing is unit-testable without composition.
  */
-fun scrollToBottomFabJump(longPress: Boolean, mentionTarget: Int?): ScrollToBottomFabJump =
+fun scrollToBottomFabJump(
+    longPress: Boolean,
+    mentionTarget: ChatPositionTarget?,
+): ScrollToBottomFabJump =
     if (longPress || mentionTarget == null) ScrollToBottomFabJump.Newest
     else ScrollToBottomFabJump.Mention(mentionTarget)
 
@@ -292,6 +303,29 @@ data class ChatPositionTarget(
     /** Opaque ViewModel request identity; stale UI completions must not consume a newer jump. */
     val requestToken: Long = 0,
 )
+
+/** Identity-free targets describe an insertion point, which may sit just past the last row. */
+internal fun materializableTargetIndex(
+    requestedIndex: Int,
+    itemCount: Int,
+    hasExactIdentity: Boolean,
+): Int? = when {
+    requestedIndex in 0 until itemCount -> requestedIndex
+    !hasExactIdentity && requestedIndex == itemCount && itemCount > 0 -> itemCount - 1
+    else -> null
+}
+
+/** Find a materialized row by the stable LazyColumn key, never by its pre-layout index. */
+internal fun materializedTargetVisibleIndex(
+    visibleItems: List<Pair<Any, Int>>,
+    eventId: Long,
+): Int? = visibleItems.firstOrNull { (key, _) -> key == eventId }?.second
+
+internal fun shouldShowNewestFab(
+    atBottom: Boolean,
+    hasNewerHistoryIsland: Boolean,
+    autoScrolling: Boolean,
+): Boolean = (!atBottom || hasNewerHistoryIsland) && !autoScrolling
 
 data class ChatScrollPosition(
     val index: Int,

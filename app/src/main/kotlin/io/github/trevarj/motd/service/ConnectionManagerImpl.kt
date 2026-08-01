@@ -464,6 +464,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val userIntents = java.util.concurrent.ConcurrentHashMap<Long, Boolean>()
 
     override val connectionStates: StateFlow<Map<Long, IrcClientState>> = registry.connectionStates
+    override val connectionActivity: StateFlow<ConnectionActivitySnapshot> = registry.connectionActivity
 
     private val _channelJoinOutcomes = MutableSharedFlow<ChannelJoinOutcome>(extraBufferCapacity = 16)
     override val channelJoinOutcomes: SharedFlow<ChannelJoinOutcome> = _channelJoinOutcomes.asSharedFlow()

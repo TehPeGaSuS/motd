@@ -438,7 +438,7 @@
     <string name="chat_history_error">Couldn\'t load older messages</string>
     <string name="chat_history_incomplete">Older history may be incomplete</string>
     <string name="chat_history_loading_messages">Loading messages…</string>
-    <string name="chat_history_syncing_messages">Syncing messages…</string>
+    <string name="chat_history_syncing_messages">Finding first unread…</string>
     <string name="chat_history_sync_failed_inline">Couldn\'t sync messages</string>
     <plurals name="chat_history_capped">
         <item quantity="one">Stopped after %1$d message; older history may remain</item>
@@ -998,6 +998,14 @@
     <plurals name="badge_mention">
         <item quantity="one">%1$d mention</item>
         <item quantity="other">%1$d mentions</item>
+    </plurals>
+    <plurals name="badge_unread_at_least">
+        <item quantity="one">At least %1$d unread</item>
+        <item quantity="other">At least %1$d unread</item>
+    </plurals>
+    <plurals name="badge_mention_at_least">
+        <item quantity="one">At least %1$d mention</item>
+        <item quantity="other">At least %1$d mentions</item>
     </plurals>
 
     <!-- Adaptive chat workspace -->

@@ -97,6 +97,7 @@ class MessageVisibilityReader @Inject constructor(
         after: TimelineAnchor,
         maxCount: Int,
         spec: MessageVisibilitySpec,
+        bounds: MessageWindowBounds = MessageWindowBounds(),
     ): Int {
         if (beforeIndex <= 0 || maxCount <= 0) return 0
         val context = visibilityContext(bufferId)
@@ -108,6 +109,7 @@ class MessageVisibilityReader @Inject constructor(
                 maxCount,
                 spec,
                 context.identityRules,
+                bounds,
             ),
         )
     }
@@ -137,11 +139,34 @@ class MessageVisibilityReader @Inject constructor(
         spec: MessageVisibilitySpec,
     ): Int? {
         if (beforeIndex <= 0) return null
-        val context = visibilityContext(bufferId)
-        val target = db.messageDao().rawMessage(
-            nearestUnreadMentionInPrefixQuery(context.roomId, beforeIndex, after, spec, context.identityRules),
+        val target = nearestUnreadMentionBelow(
+            bufferId,
+            beforeIndex,
+            after,
+            spec,
         ) ?: return null
         return countTimelineNewer(bufferId, target.serverTime, target.id, spec)
+    }
+
+    suspend fun nearestUnreadMentionBelow(
+        bufferId: Long,
+        beforeIndex: Int,
+        after: TimelineAnchor,
+        spec: MessageVisibilitySpec,
+        bounds: MessageWindowBounds = MessageWindowBounds(),
+    ): VisibleMessageAnchor? {
+        if (beforeIndex <= 0) return null
+        val context = visibilityContext(bufferId)
+        return db.messageDao().rawMessage(
+            nearestUnreadMentionInPrefixQuery(
+                context.roomId,
+                beforeIndex,
+                after,
+                spec,
+                context.identityRules,
+                bounds,
+            ),
+        )?.let { VisibleMessageAnchor(it.id, it.msgid, it.serverTime, it.timelineOrder) }
     }
 
     suspend fun resolveSavedAnchor(

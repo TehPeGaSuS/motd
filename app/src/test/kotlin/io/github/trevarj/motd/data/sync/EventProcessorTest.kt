@@ -8,6 +8,8 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.HistoryCursorEntity
+import io.github.trevarj.motd.data.db.HistoryGapEntity
+import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.TimelineEventEntity
@@ -3816,6 +3818,292 @@ class EventProcessorTest {
             assertTrue(db.bufferDao().observeById(roomId)!!.historyComplete)
             assertTrue(db.historyCursorDao().byRoom(roomId)!!.historyComplete)
         }
+    }
+
+    @Test
+    fun terminalDirectionalPageMarksUnreachedRemainderUnrecoverable() = runTest {
+        val room = BufferStore(db).getOrCreate(networkId, "#gap", "#gap", BufferType.CHANNEL)
+        db.historyGapDao().insert(
+            HistoryGapEntity(0, room.id, "m100", 100, "m900", 900),
+        )
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.AFTER,
+                "#gap",
+                bound1 = "msgid=m100",
+                limit = 50,
+            ),
+            ChatHistoryResponse.Messages(
+                events = emptyList(),
+                oldest = null,
+                newest = null,
+                endOfHistory = true,
+                primaryMessageCount = 0,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        assertFalse(db.historyGapDao().forRoom(room.id).single().recoverable)
+
+        db.historyGapDao().deleteForRoom(room.id)
+        db.historyGapDao().insert(
+            HistoryGapEntity(0, room.id, "m100", 100, "m900", 900),
+        )
+        val terminal = IrcEvent.ChatMessage(
+            ctx("m150", 150), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"),
+            "#gap", "terminal", false, null,
+        )
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.AFTER,
+                "#gap",
+                bound1 = "msgid=m100",
+                limit = 50,
+            ),
+            ChatHistoryResponse.Messages(
+                events = listOf(terminal),
+                oldest = ChatHistoryReference("m150", 150),
+                newest = ChatHistoryReference("m150", 150),
+                endOfHistory = true,
+                primaryMessageCount = 1,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        val remainder = db.historyGapDao().forRoom(room.id).single()
+        assertEquals("m150", remainder.olderMsgid)
+        assertEquals(150L, remainder.olderServerTime)
+        assertFalse(remainder.recoverable)
+    }
+
+    @Test
+    fun exactGapIdentityDisambiguatesEqualTimeTimestampFallback() = runTest {
+        val room = BufferStore(db).getOrCreate(networkId, "#ambiguous-gap", "#ambiguous-gap", BufferType.CHANNEL)
+        val firstId = db.historyGapDao().insert(
+            HistoryGapEntity(0, room.id, "a", 100, "b", 500),
+        )
+        val secondId = db.historyGapDao().insert(
+            HistoryGapEntity(0, room.id, "c", 100, "d", 900),
+        )
+
+        processor.persistHistoryPageResult(
+            networkId = networkId,
+            request = ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.AFTER,
+                "#ambiguous-gap",
+                bound1 = "timestamp=1970-01-01T00:00:00.100Z",
+                limit = 50,
+            ),
+            response = ChatHistoryResponse.Messages(emptyList(), null, null, true, 0),
+            expectedRoomId = room.id,
+            historyGapId = secondId,
+        )
+
+        val gaps = db.historyGapDao().forRoom(room.id).associateBy { it.id }
+        assertTrue(checkNotNull(gaps[firstId]).recoverable)
+        assertFalse(checkNotNull(gaps[secondId]).recoverable)
+    }
+
+    @Test
+    fun terminalDirectionalPageClosesGapAfterReachingOppositeBoundary() = runTest {
+        val room = BufferStore(db).getOrCreate(networkId, "#closed-gap", "#closed-gap", BufferType.CHANNEL)
+        db.historyGapDao().insert(
+            HistoryGapEntity(0, room.id, "m100", 100, "m900", 900),
+        )
+        val terminal = IrcEvent.ChatMessage(
+            ctx("m900", 900), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"),
+            "#closed-gap", "terminal", false, null,
+        )
+
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.AFTER,
+                "#closed-gap",
+                bound1 = "msgid=m100",
+                limit = 50,
+            ),
+            ChatHistoryResponse.Messages(
+                events = listOf(terminal),
+                oldest = ChatHistoryReference("m900", 900),
+                newest = ChatHistoryReference("m900", 900),
+                endOfHistory = true,
+                primaryMessageCount = 1,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        assertTrue(db.historyGapDao().forRoom(room.id).isEmpty())
+    }
+
+    @Test
+    fun latestRetainsGapWhenOpaqueBoundariesShareATimestamp() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx("old-boundary", 100), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"),
+                "#same-time", "old", false, null,
+            ),
+        )
+        val room = checkNotNull(db.bufferDao().byName(networkId, "#same-time"))
+        val newest = IrcEvent.ChatMessage(
+            ctx("new-boundary", 100), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"),
+            "#same-time", "new", false, null,
+        )
+
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#same-time", limit = 50),
+            ChatHistoryResponse.Messages(
+                events = listOf(newest),
+                oldest = ChatHistoryReference("new-boundary", 100),
+                newest = ChatHistoryReference("new-boundary", 100),
+                endOfHistory = false,
+                primaryMessageCount = 1,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        val gap = db.historyGapDao().forRoom(room.id).single()
+        assertEquals("old-boundary", gap.olderMsgid)
+        assertEquals("new-boundary", gap.newerMsgid)
+        assertEquals(100L, gap.olderServerTime)
+        assertEquals(100L, gap.newerServerTime)
+    }
+
+    @Test
+    fun latestKeepsDistinctSameTimestampGapsSeparate() = runTest {
+        val room = BufferStore(db).getOrCreate(networkId, "#same-time-gaps", "#same-time-gaps", BufferType.CHANNEL)
+        val ids = db.messageDao().insertAll(
+            listOf("a", "b", "c").map { msgid ->
+                MessageEntity(
+                    bufferId = room.id,
+                    msgid = msgid,
+                    serverTime = 100,
+                    sender = "alice",
+                    kind = MessageKind.PRIVMSG,
+                    text = msgid,
+                    dedupKey = msgid,
+                )
+            },
+        )
+        db.historyGapDao().insert(
+            HistoryGapEntity(
+                roomId = room.id,
+                olderMsgid = "a",
+                olderServerTime = 100,
+                newerMsgid = "b",
+                newerServerTime = 100,
+                olderEventId = ids[0],
+                olderTimelineOrder = ids[0],
+                newerEventId = ids[1],
+                newerTimelineOrder = ids[1],
+            ),
+        )
+        db.historyCursorDao().upsert(
+            HistoryCursorEntity(room.id, "c", 100, "a", 100, false),
+        )
+        val newest = IrcEvent.ChatMessage(
+            ctx("d", 100), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"),
+            "#same-time-gaps", "d", false, null,
+        )
+
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#same-time-gaps", limit = 50),
+            ChatHistoryResponse.Messages(
+                listOf(newest),
+                ChatHistoryReference("d", 100),
+                ChatHistoryReference("d", 100),
+                false,
+                1,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        assertEquals(
+            setOf("a" to "b", "c" to "d"),
+            db.historyGapDao().forRoom(room.id).map { it.olderMsgid to it.newerMsgid }.toSet(),
+        )
+    }
+
+    @Test
+    fun overlappingPageAtEqualOlderTimestampRetainsTheUncoveredPrefix() = runTest {
+        val room = BufferStore(db).getOrCreate(networkId, "#equal-edge", "#equal-edge", BufferType.CHANNEL)
+        val boundaries = db.messageDao().insertAll(
+            listOf(
+                MessageEntity(bufferId = room.id, msgid = "a", serverTime = 100, sender = "alice", kind = MessageKind.PRIVMSG, text = "a", dedupKey = "a"),
+                MessageEntity(bufferId = room.id, msgid = "z", serverTime = 200, sender = "alice", kind = MessageKind.PRIVMSG, text = "z", dedupKey = "z"),
+            ),
+        )
+        db.historyGapDao().insert(
+            HistoryGapEntity(
+                roomId = room.id,
+                olderMsgid = "a",
+                olderServerTime = 100,
+                newerMsgid = "z",
+                newerServerTime = 200,
+                olderEventId = boundaries[0],
+                olderTimelineOrder = boundaries[0],
+                newerEventId = boundaries[1],
+                newerTimelineOrder = boundaries[1],
+            ),
+        )
+        val page = listOf(
+            IrcEvent.ChatMessage(ctx("b", 100), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"), "#equal-edge", "b", false, null),
+            IrcEvent.ChatMessage(ctx("z", 200), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"), "#equal-edge", "z", false, null),
+        )
+
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.AROUND, "#equal-edge", bound1 = "msgid=b", limit = 50),
+            ChatHistoryResponse.Messages(
+                page,
+                ChatHistoryReference("b", 100),
+                ChatHistoryReference("z", 200),
+                false,
+                2,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        val gaps = db.historyGapDao().forRoom(room.id)
+        assertEquals(gaps.toString(), 1, gaps.size)
+        val remaining = gaps.single()
+        assertEquals("a", remaining.olderMsgid)
+        assertEquals("b", remaining.newerMsgid)
+    }
+
+    @Test
+    fun msgidlessSameTimestampLatestGapStoresExactTupleBoundary() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(ctx("old", 100), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"), "#tuple", "old", false, null),
+        )
+        val room = checkNotNull(db.bufferDao().byName(networkId, "#tuple"))
+        val newest = IrcEvent.ChatMessage(
+            ctx(null, 100), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"), "#tuple", "new", false, null,
+        )
+
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#tuple", limit = 50),
+            ChatHistoryResponse.Messages(
+                listOf(newest),
+                ChatHistoryReference(null, 100),
+                ChatHistoryReference(null, 100),
+                false,
+                1,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        val gap = db.historyGapDao().forRoom(room.id).single()
+        val newRow = db.messageDao().newestMessage(room.id)!!
+        assertEquals(newRow.id, gap.newerEventId)
+        assertEquals(newRow.timelineOrder, gap.newerTimelineOrder)
     }
 
     @Test

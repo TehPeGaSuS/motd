@@ -52,6 +52,8 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         awaitTag(firstTag, timeoutMs)
         awaitTag(secondTag, timeoutMs)
         val timeline = rule.onNodeWithTag("chat_timeline", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val divider = rule.onNodeWithTag("chat_read_marker_divider", useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val first = rule.onNodeWithTag(firstTag, useUnmergedTree = true)
             .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val second = rule.onNodeWithTag(secondTag, useUnmergedTree = true)
@@ -63,6 +65,11 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
             first.top <= timeline.top + 96f * density,
         )
         assertTrue("second unread did not follow the first", second.top > first.top)
+        assertTrue("unread divider was not attached to the first unread row", divider.bottom <= first.top)
+        assertTrue(
+            "unread divider was attached to a different row: divider=${divider.bottom}, row=${first.top}",
+            first.top - divider.bottom <= 24f * density,
+        )
         rule.onAllNodesWithTag(firstTag, useUnmergedTree = true).assertCountEquals(1)
         rule.onAllNodesWithTag(secondTag, useUnmergedTree = true).assertCountEquals(1)
     }

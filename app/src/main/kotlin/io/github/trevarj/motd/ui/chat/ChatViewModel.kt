@@ -29,6 +29,7 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
+import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
 import io.github.trevarj.motd.data.repo.NoopNetworkIgnoreRepository
 import io.github.trevarj.motd.data.prefs.Settings
@@ -224,13 +225,25 @@ class ChatViewModel @Inject constructor(
     private val filterSpec = filterSpecs
         .stateIn(viewModelScope, SharingStarted.Eagerly, MessageVisibilitySpec())
 
+    private val historyWindowFocus = MutableStateFlow<HistoryWindowFocus>(HistoryWindowFocus.Recent)
+
+    val activeHistoryWindow: StateFlow<ActiveHistoryWindow> = historyWindowFocus.flatMapLatest { focus ->
+        messageRepository.observeHistoryWindowBounds(bufferId, focus).map { bounds ->
+            ActiveHistoryWindow(focus, bounds)
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, ActiveHistoryWindow())
+
+    /** A focused older island keeps an explicit escape to the independently loaded recent island. */
+    val hasNewerHistoryIsland: StateFlow<Boolean> = activeHistoryWindow.map { window ->
+        window.focus is HistoryWindowFocus.Around && window.bounds.upperBoundary != null
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     /** Every visibility change cancels the old generation and creates a positionally exact Pager. */
-    val messages: Flow<PagingData<MessageEntity>> =
-        repositoryMessagePages(
-            source = { visibility -> messageRepository.messages(bufferId, visibility) },
-            specs = filterSpecs,
-        )
-            .cachedIn(viewModelScope)
+    val messages: Flow<PagingData<MessageEntity>> = combine(filterSpecs, historyWindowFocus) { spec, focus ->
+        spec to focus
+    }.flatMapLatest { (spec, focus) ->
+        messageRepository.messages(bufferId, spec, focus)
+    }.cachedIn(viewModelScope)
 
     /** Newest stored wire row, including ignored tails; effective bottom may acknowledge it. */
     val rawNewestAnchor: StateFlow<TimelineAnchor?> = visibilityReader.observeLatestRawAnchor(bufferId)
@@ -293,10 +306,10 @@ class ChatViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, bufferId)
 
     private val connState: StateFlow<IrcClientState?> = buffer
-        .combine(connectionManager.connectionStates) { buffer, states ->
-            buffer?.let { states[it.networkId] ?: IrcClientState.Disconnected }
+        .combine(connectionManager.connectionActivity) { buffer, activity ->
+            buffer?.let { activity.states[it.networkId] ?: IrcClientState.Disconnected }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val persistedIdentity = buffer
         .flatMapLatest { current ->
@@ -364,6 +377,8 @@ class ChatViewModel @Inject constructor(
 
     private var nextVisibleSession = 0L
     private val visibleSession = MutableStateFlow<Long?>(null)
+    private val entryReadMarker = CompletableDeferred<TimelineAnchor?>()
+    private val entryHistoryPrepared = CompletableDeferred<Unit>()
 
     private data class AutomaticHistoryTrigger(
         val visibleSession: Long,
@@ -371,33 +386,91 @@ class ChatViewModel @Inject constructor(
         val client: IrcClient,
     )
 
+    private data class AutomaticHistoryState(
+        val visibleSession: Long?,
+        val connection: IrcClientState?,
+        val connectionProgressing: Boolean,
+        val initializationComplete: Boolean,
+        val trigger: AutomaticHistoryTrigger?,
+    )
+
     init {
         viewModelScope.launch { runDraftWriter() }
         viewModelScope.launch {
-            combine(buffer, connState, visibleSession) { currentBuffer, connection, session ->
+            combine(
+                buffer,
+                visibleSession,
+                connectionManager.connectionActivity,
+            ) { currentBuffer, session, activity ->
+                val connection = currentBuffer?.let {
+                    activity.states[it.networkId] ?: IrcClientState.Disconnected
+                }
                 val eligible = currentBuffer?.takeIf { it.type != BufferType.SERVER }
                 val client = eligible?.let { connectionManager.clientFor(it.networkId) }
-                if (session != null && eligible != null && connection is IrcClientState.Ready && client != null) {
-                    AutomaticHistoryTrigger(session, eligible, client)
-                } else {
-                    null
-                }
+                AutomaticHistoryState(
+                    visibleSession = session,
+                    connection = connection,
+                    connectionProgressing = currentBuffer?.let {
+                        activity.progressing[it.networkId] == true
+                    } == true,
+                    initializationComplete = activity.initializationComplete,
+                    trigger = if (
+                        session != null && eligible != null &&
+                        connection is IrcClientState.Ready && client != null
+                    ) {
+                        AutomaticHistoryTrigger(session, eligible, client)
+                    } else null,
+                )
             }
                 // Keep the null transition: it rearms the same client after a real disconnect.
                 .distinctUntilChanged { old, new ->
-                    old?.visibleSession == new?.visibleSession &&
-                        old?.buffer?.id == new?.buffer?.id &&
-                        old?.client === new?.client
+                    old.visibleSession == new.visibleSession && old.connection == new.connection &&
+                        old.connectionProgressing == new.connectionProgressing &&
+                        old.initializationComplete == new.initializationComplete &&
+                        old.trigger?.buffer?.id == new.trigger?.buffer?.id &&
+                        old.trigger?.client === new.trigger?.client
                 }
-                .filterNotNull()
-                .collectLatest { trigger ->
+                .collectLatest { (session, connection, progressing, initialized, trigger) ->
+                    if (trigger == null) {
+                        val currentBuffer = buffer.value
+                        if (
+                            session != null &&
+                            (
+                                currentBuffer?.type == BufferType.SERVER ||
+                                    connection is IrcClientState.Failed && connection.fatal ||
+                                    initialized && !progressing
+                                )
+                        ) {
+                            entryHistoryPrepared.complete(Unit)
+                        }
+                        return@collectLatest
+                    }
+                    val current = {
+                        connectionManager.clientFor(trigger.buffer.networkId) === trigger.client
+                    }
                     historyResyncCoordinator.reconcileBuffer(
                         buffer = trigger.buffer,
                         client = trigger.client,
-                        isCurrent = {
-                            connectionManager.clientFor(trigger.buffer.networkId) === trigger.client
-                        },
+                        isCurrent = current,
                     )
+                    entryReadMarker.await().takeIf { !_entryPositionSettled.value }?.let { marker ->
+                        historyResyncCoordinator.prepareUnreadWindow(
+                            buffer = trigger.buffer,
+                            marker = marker,
+                            client = trigger.client,
+                            isCurrent = current,
+                        )
+                    }
+                    // collectLatest cancellation on a recoverable disconnect must leave entry
+                    // unresolved for the replacement Ready generation. Complete only while this
+                    // exact visible session/client is still the active ready generation.
+                    if (
+                        visibleSession.value == trigger.visibleSession &&
+                        connState.value is IrcClientState.Ready &&
+                        current()
+                    ) {
+                        entryHistoryPrepared.complete(Unit)
+                    }
                 }
         }
         viewModelScope.launch {
@@ -613,22 +686,44 @@ class ChatViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     suspend fun countUnreadBelowViewport(firstVisibleIndex: Int, marker: TimelineAnchor): Int =
-        visibilityReader.countVisibleUnreadInTimelinePrefix(
-            bufferId = bufferId,
-            beforeIndex = firstVisibleIndex,
-            after = marker,
-            maxCount = 100,
-            spec = filterSpec.value,
-        )
+        messageRepository.historyWindowBounds(bufferId, historyWindowFocus.value).let { bounds ->
+            visibilityReader.countVisibleUnreadInTimelinePrefix(
+                bufferId = bufferId,
+                beforeIndex = firstVisibleIndex,
+                after = marker,
+                maxCount = 100,
+                spec = filterSpec.value,
+                bounds = bounds,
+            )
+        }
 
-    /** Lazy-list index of the nearest unread nick mention below the viewport, for the FAB jump. */
-    suspend fun nearestUnreadMentionBelow(firstVisibleIndex: Int, marker: TimelineAnchor): Int? =
-        visibilityReader.nearestUnreadMentionBelowIndex(
+    /** Exact nearest unread mention below the viewport; its index is valid in the current island. */
+    suspend fun nearestUnreadMentionBelow(
+        firstVisibleIndex: Int,
+        marker: TimelineAnchor,
+    ): ChatPositionTarget? {
+        val focus = historyWindowFocus.value
+        val bounds = messageRepository.historyWindowBounds(bufferId, focus)
+        val target = visibilityReader.nearestUnreadMentionBelow(
             bufferId = bufferId,
             beforeIndex = firstVisibleIndex,
             after = marker,
             spec = filterSpec.value,
+            bounds = bounds,
+        ) ?: return null
+        return ChatPositionTarget(
+            index = messageRepository.countNewerThan(
+                bufferId,
+                target.serverTime,
+                target.id,
+                filterSpec.value,
+                focus,
+            ),
+            expectedEventId = target.id,
+            expectedMsgid = target.msgid,
+            serverTime = target.serverTime,
         )
+    }
 
     // --- lifecycle: foreground tracker + mark-read (plans/07) ---
 
@@ -1286,6 +1381,7 @@ class ChatViewModel @Inject constructor(
                 serverTime,
                 id,
                 filterSpecs.first(),
+                historyWindowFocus.value,
             )
         },
     )
@@ -1323,6 +1419,12 @@ class ChatViewModel @Inject constructor(
 
     init {
         val hasDeepJump = jumpTime > 0 || jumpEventId != null || jumpMsgid != null
+        if (hasDeepJump && jumpTime > 0) {
+            historyWindowFocus.value = HistoryWindowFocus.Around(
+                jumpTime,
+                eventId = jumpEventId ?: Long.MIN_VALUE,
+            )
+        }
         // `jump_consumed` only prevents duplicate work after a completed jump. If Android kills
         // the process while the first resolve/scroll is in flight, the restored handle has it set
         // but neither terminal entry-position state; re-publish the target/failure for the new UI.
@@ -1344,8 +1446,28 @@ class ChatViewModel @Inject constructor(
         // you just sent. Null (no real marker, or nothing unread from others) hides both.
         viewModelScope.launch {
             val entrySpec = MessageVisibilitySpec.from(settingsRepository.settings.first())
-            val realMarker = bufferRepository.observeBuffer(bufferId).firstOrNull()?.let {
-                visibilityReader.effectiveLocalReadAnchor(it)
+            val entryBuffer = bufferRepository.observeBuffer(bufferId).firstOrNull()
+            val realMarker: TimelineAnchor? = if (entryBuffer != null) {
+                visibilityReader.effectiveLocalReadAnchor(entryBuffer)
+            } else {
+                null
+            }
+            entryReadMarker.complete(realMarker)
+            if (
+                !hasDeepJump && entryBuffer?.type != BufferType.SERVER && realMarker != null &&
+                (
+                    messageRepository.hasHistoryGapAfter(bufferId, realMarker) ||
+                        entryBuffer?.let { connectionManager.clientFor(it.networkId) } != null ||
+                        !connectionManager.connectionActivity.value.initializationComplete ||
+                        entryBuffer?.let {
+                            connectionManager.connectionActivity.value.progressing[it.networkId] == true
+                        } == true
+                    )
+            ) {
+                // Keep painting the recent island while reconnecting. The user can abandon this
+                // positioning with the newest FAB, but a slow valid history request must not freeze
+                // a stale first-unread target before it completes.
+                entryHistoryPrepared.await()
             }
             // Oldest unread row past the marker (first message from someone else you have not seen),
             // computed once and shared by the frozen divider and the entry target.
@@ -1361,8 +1483,20 @@ class ChatViewModel @Inject constructor(
             // available, otherwise stay at the newest row. The frozen unread marker above still
             // drives the divider and badge, but never repositions the window.
             if (!hasDeepJump && !_entryPositionSettled.value) {
+                val entryAnchor = firstUnread ?: realMarker
+                entryAnchor?.let {
+                    historyWindowFocus.value = HistoryWindowFocus.Around(
+                        it.serverTime,
+                        it.eventId,
+                        it.timelineOrder,
+                    )
+                }
                 _initialTarget.value = when {
-                    realMarker != null -> readMarkerEntryTarget(firstUnread ?: realMarker, entrySpec)
+                    entryAnchor != null -> readMarkerEntryTarget(
+                        entryAnchor,
+                        entrySpec,
+                        requireExactIdentity = firstUnread != null,
+                    )
                     else -> restoredScrollPosition(entrySpec) ?: ChatPositionTarget(index = 0)
                 }
             }
@@ -1382,13 +1516,28 @@ class ChatViewModel @Inject constructor(
     private suspend fun readMarkerEntryTarget(
         anchor: TimelineAnchor,
         spec: MessageVisibilitySpec,
+        requireExactIdentity: Boolean,
     ): ChatPositionTarget {
-        val index = visibilityReader.countTimelineNewer(bufferId, anchor, spec)
+        val index = messageRepository.countNewerThan(
+            bufferId,
+            anchor.serverTime,
+            anchor.eventId,
+            spec,
+            historyWindowFocus.value,
+        )
         // forceScrollOnEntry: retained list state sits at the newest row on entry, so the gate must
         // still scroll to the (typically non-zero) anchor index instead of treating it as a no-op.
         // placeAtTop: ChatScreen realizes the top placement (off-screen load + measured snap) so the
         // first unread tops the viewport rather than sitting at the bottom edge under read history.
-        return ChatPositionTarget(index = index, forceScrollOnEntry = true, placeAtTop = true)
+        val row = if (requireExactIdentity) messageRepository.byId(anchor.eventId) else null
+        return ChatPositionTarget(
+            index = index,
+            expectedEventId = row?.id,
+            expectedMsgid = row?.msgid,
+            serverTime = anchor.serverTime,
+            forceScrollOnEntry = true,
+            placeAtTop = true,
+        )
     }
 
     private suspend fun restoredScrollPosition(spec: MessageVisibilitySpec): ChatPositionTarget? {
@@ -1485,10 +1634,33 @@ class ChatViewModel @Inject constructor(
         )) {
             is ChatJumpResolver.Result.Resolved -> {
                 if (activeJumpRequest?.token != request.token) return
+                var target = r.target
+                target.serverTime.takeIf { it > 0 }?.let { serverTime ->
+                    val resolvedRow = target.expectedEventId?.let { messageRepository.byId(it) }
+                    val focus = HistoryWindowFocus.Around(
+                        serverTime,
+                        eventId = resolvedRow?.id ?: target.expectedEventId ?: Long.MIN_VALUE,
+                        timelineOrder = resolvedRow?.timelineOrder
+                            ?: target.expectedEventId
+                            ?: Long.MIN_VALUE,
+                    )
+                    historyWindowFocus.value = focus
+                    target.expectedEventId?.let { eventId ->
+                        target = target.copy(
+                            index = messageRepository.countNewerThan(
+                                bufferId,
+                                serverTime,
+                                eventId,
+                                filterSpecs.first(),
+                                focus,
+                            ),
+                        )
+                    }
+                }
                 // Force a distinct emission so the screen's LaunchedEffect(jumpTarget) always
                 // re-runs, even when the re-resolved index equals the previous one (plans/15 #12).
                 _jumpTarget.value = null
-                _jumpTarget.value = r.target.copy(requestToken = request.token)
+                _jumpTarget.value = target.copy(requestToken = request.token)
             }
             ChatJumpResolver.Result.NotFound -> {
                 if (activeJumpRequest?.token != request.token) return
@@ -1513,6 +1685,53 @@ class ChatViewModel @Inject constructor(
     fun onInitialPositionHandled() {
         _initialTarget.value = null
         markEntryPositionSettled()
+    }
+
+    /** The newest FAB is an explicit request to abandon an older focused island immediately. */
+    fun focusRecentHistory() {
+        jumpResolveJob?.cancel()
+        jumpResolveJob = null
+        activeJumpRequest = null
+        _jumpTarget.value = null
+        _initialTarget.value = null
+        entryHistoryPrepared.complete(Unit)
+        historyWindowFocus.value = HistoryWindowFocus.Recent
+        markEntryPositionSettled()
+    }
+
+    /** Re-resolve an exact mention inside the island where its viewport index was computed. */
+    fun focusRecentMention(target: ChatPositionTarget) {
+        jumpResolveJob?.cancel()
+        _jumpTarget.value = null
+        activeJumpRequest = null
+        val focus = historyWindowFocus.value
+        val eventId = target.expectedEventId ?: return
+        val request = JumpRequest(
+            token = ++nextJumpToken,
+            msgid = target.expectedMsgid,
+            time = target.serverTime,
+            eventId = eventId,
+            settlesEntryPosition = false,
+        )
+        activeJumpRequest = request
+        jumpResolveJob = viewModelScope.launch {
+            val row = messageRepository.byId(eventId) ?: return@launch failActiveJump(request)
+            val index = messageRepository.countNewerThan(
+                bufferId,
+                row.serverTime,
+                row.id,
+                filterSpecs.first(),
+                focus,
+            )
+            if (activeJumpRequest?.token != request.token) return@launch
+            _jumpTarget.value = target.copy(
+                index = index,
+                expectedEventId = row.id,
+                expectedMsgid = row.msgid,
+                serverTime = row.serverTime,
+                requestToken = request.token,
+            )
+        }
     }
 
     fun saveScrollPosition(position: ChatScrollPosition) {
@@ -1628,6 +1847,8 @@ class ChatViewModel @Inject constructor(
                     offset = target.offset,
                     highlightMsgid = null,
                     fromSavedPosition = target.fromSavedPosition,
+                    forceScrollOnEntry = target.forceScrollOnEntry,
+                    placeAtTop = target.placeAtTop,
                 )
             }
             ChatJumpResolver.Result.NotFound -> onInitialPositionUnresolved()
