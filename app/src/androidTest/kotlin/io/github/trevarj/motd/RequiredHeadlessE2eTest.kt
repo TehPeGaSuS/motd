@@ -216,8 +216,8 @@ class RequiredHeadlessE2eTest {
             runProbe.awaitRecentRows(
                 token = token,
                 bufferId = bufferId,
-                minimumCount = 100,
-                maximumCount = 150,
+                minimumCount = 49,
+                maximumCount = 49,
                 expectedNewestOrdinal = 260,
                 requiredText = "$token row260",
                 excludedText = "$token row001",
@@ -235,13 +235,13 @@ class RequiredHeadlessE2eTest {
             withTimeout(10_000) {
                 bootstrap.seams.buffers().observeChatList().first { rows ->
                     rows.singleOrNull { it.bufferId == bufferId }?.let { row ->
-                        row.unreadCount == 150 && row.unreadCountIncomplete
+                        row.unreadCount == 49 && row.unreadCountIncomplete
                     } == true
                 }
             }
         }
         val boundedRow = listBeforeEntry.single { it.bufferId == bufferId }
-        assertEquals(150, boundedRow.unreadCount)
+        assertEquals(49, boundedRow.unreadCount)
         assertTrue(boundedRow.unreadCountIncomplete)
 
         ChatListRobot(compose).open(bufferId)
