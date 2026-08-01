@@ -448,12 +448,32 @@ class ChatViewModel @Inject constructor(
                     val current = {
                         connectionManager.clientFor(trigger.buffer.networkId) === trigger.client
                     }
+                    val marker = entryReadMarker.await().takeIf { !_entryPositionSettled.value }
+                    // A retained marker gap is the entry-critical request. Let it acquire history
+                    // single-flight before the redundant newest overlap so a slow LATEST cannot
+                    // hold first-unread positioning behind its full protocol timeout.
+                    val initialPreparation = marker?.let {
+                        historyResyncCoordinator.prepareUnreadWindow(
+                            buffer = trigger.buffer,
+                            marker = it,
+                            client = trigger.client,
+                            isCurrent = current,
+                        )
+                    }
+                    if (
+                        initialPreparation is HistoryResyncState.Updated &&
+                        visibleSession.value == trigger.visibleSession &&
+                        connState.value is IrcClientState.Ready &&
+                        current()
+                    ) {
+                        entryHistoryPrepared.complete(Unit)
+                    }
                     historyResyncCoordinator.reconcileBuffer(
                         buffer = trigger.buffer,
                         client = trigger.client,
                         isCurrent = current,
                     )
-                    entryReadMarker.await().takeIf { !_entryPositionSettled.value }?.let { marker ->
+                    if (marker != null && initialPreparation !is HistoryResyncState.Updated) {
                         historyResyncCoordinator.prepareUnreadWindow(
                             buffer = trigger.buffer,
                             marker = marker,

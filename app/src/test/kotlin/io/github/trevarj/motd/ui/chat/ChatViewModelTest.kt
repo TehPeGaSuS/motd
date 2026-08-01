@@ -1047,6 +1047,54 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `entry prioritizes a retained first unread before newest reconciliation`() = runTest {
+        val markerId = db.messageDao().insertAll(
+            listOf(
+                message(channel.id, "marker", "marker", "alice").copy(
+                    serverTime = 100,
+                    dedupKey = "marker",
+                ),
+            ),
+        ).single()
+        val messages = FakeMessageRepository(newerCount = 49)
+        val reconcileStarted = CompletableDeferred<Unit>()
+        val releaseReconcile = CompletableDeferred<Unit>()
+        val history = FakeHistoryResyncController(
+            onPrepare = {
+                val id = db.messageDao().insertAll(
+                    listOf(
+                        message(channel.id, "first unread", "m101", "alice").copy(
+                            serverTime = 101,
+                            dedupKey = "m101",
+                        ),
+                    ),
+                ).single()
+                messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(id))
+                HistoryResyncState.Updated(1)
+            },
+            onReconcile = {
+                reconcileStarted.complete(Unit)
+                releaseReconcile.await()
+            },
+        )
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
+            FakeConnectionManager(network.id, client = testClient()),
+            history,
+            messages,
+        )
+        vm.state.first { it.buffer != null }
+
+        vm.onResume()
+        reconcileStarted.await()
+
+        val target = checkNotNull(vm.initialTarget.first { it != null })
+        assertEquals("m101", target.expectedMsgid)
+        assertEquals(listOf(channel.id), history.preparedBuffers)
+        releaseReconcile.complete(Unit)
+    }
+
+    @Test
     fun `entry stays unresolved while reconnecting then freezes recovered first unread`() = runTest {
         val markerId = db.messageDao().insertAll(
             listOf(
@@ -1786,11 +1834,13 @@ class ChatViewModelTest {
     }
 
     private class FakeHistoryResyncController(
+        private val onPrepare: suspend (Int) -> HistoryResyncState = { HistoryResyncState.UpToDate },
         private val onReconcile: suspend (Int) -> Unit = {},
     ) : HistoryResyncController {
         private val states = MutableStateFlow<HistoryResyncState>(HistoryResyncState.Idle)
         private val syncStatuses = MutableStateFlow<HistorySyncStatus>(HistorySyncStatus.Idle)
         val reconciledBuffers = mutableListOf<Long>()
+        val preparedBuffers = mutableListOf<Long>()
         val pendingReconciledBuffers = mutableListOf<Long>()
 
         override fun state(bufferId: Long): Flow<HistoryResyncState> = states
@@ -1815,6 +1865,17 @@ class ChatViewModelTest {
             reconciledBuffers += buffer.id
             onReconcile(reconciledBuffers.size)
             return HistoryResyncState.UpToDate
+        }
+
+        override suspend fun prepareUnreadWindow(
+            buffer: BufferEntity,
+            marker: TimelineAnchor,
+            client: IrcClient,
+            isCurrent: () -> Boolean,
+        ): HistoryResyncState {
+            check(isCurrent())
+            preparedBuffers += buffer.id
+            return onPrepare(preparedBuffers.size)
         }
 
         override suspend fun reconcilePendingMessage(
