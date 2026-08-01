@@ -328,9 +328,27 @@ class HistoryResyncCoordinator @Inject constructor(
                 var gap = findHistoryGapContaining(roomId, marker)
                 val startsAfterMarker = gap == null
                 if (gap == null) gap = findFirstHistoryGapAfter(roomId, marker)
+                var directMarkerBoundary = if (gap == null) {
+                    db.bufferDao().observeById(roomId)?.takeIf { room ->
+                        !room.historyComplete && room.oldestFetchedTime?.let { it > marker.serverTime } == true
+                    }?.let {
+                        val markerMsgid = db.messageDao().byCanonicalId(marker.eventId)
+                            ?.takeIf { message -> message.bufferId == roomId }
+                            ?.msgid
+                        Boundary(
+                            msgid = markerMsgid,
+                            serverTime = marker.serverTime.minus(HISTORY_TIE_OVERLAP_MS)
+                                .coerceAtLeast(Instant.EPOCH.toEpochMilli()),
+                        )
+                    }
+                } else {
+                    null
+                }
                 while (true) {
-                    val currentGap = gap ?: break
-                    val boundary = Boundary(currentGap.olderMsgid, currentGap.olderServerTime)
+                    val currentGap = gap
+                    val boundary = directMarkerBoundary
+                        ?: currentGap?.let { Boundary(it.olderMsgid, it.olderServerTime) }
+                        ?: break
                     if (boundary == previousBoundary) {
                         return@withNetworkLock HistoryResyncState.Incomplete(
                             inserted,
@@ -358,7 +376,7 @@ class HistoryResyncCoordinator @Inject constructor(
                         roomId,
                         requested.request,
                         page,
-                        historyGapId = currentGap.id,
+                        historyGapId = currentGap?.id,
                     )
                     inserted += persisted.inserted
                     roomId = persisted.roomId
@@ -375,6 +393,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     // missing interval starts after rather than around the marker. One bounded page
                     // exposes the first unread chat row; older traversal remains scroll-driven.
                     if (startsAfterMarker) break
+                    directMarkerBoundary = null
                     gap = findHistoryGapContaining(roomId, marker)
                 }
                 if (inserted > 0) HistoryResyncState.Updated(inserted) else HistoryResyncState.UpToDate

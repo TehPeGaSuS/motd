@@ -1756,6 +1756,34 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun unreadPreparationUsesTheMarkerWhenIncompleteRecentHistoryHasNoTrackedGap() = runTest {
+        processor.process(networkId, message("marker", 100))
+        val room = checkNotNull(db.bufferDao().observeById(bufferId))
+        db.bufferDao().update(
+            room.copy(
+                oldestFetchedTime = 900,
+                historyComplete = false,
+            ),
+        )
+        val source = FakeSource(msgidRefs = false) {
+            FakeResponse(events = listOf(message("first-unread", 120)))
+        }
+
+        val result = coordinator.prepareUnreadWindow(
+            networkId,
+            bufferId,
+            "#chan",
+            TimelineAnchor(100, Long.MAX_VALUE, Long.MAX_VALUE),
+            source,
+        )
+
+        assertEquals(HistoryResyncState.Updated(1), result)
+        assertEquals(1, source.requests.size)
+        assertEquals(ChatHistorySelectors.timestamp(99), source.requests.single().bound1)
+        assertEquals("first-unread", db.messageDao().byMsgid(bufferId, "first-unread")?.text)
+    }
+
+    @Test
     fun unreadPreparationPagesUntilItReachesAMarkerInsideTheGap() = runTest {
         processor.process(networkId, message("old", 100))
         processor.process(networkId, message("recent", 900))
