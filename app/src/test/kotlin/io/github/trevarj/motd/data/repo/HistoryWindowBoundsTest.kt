@@ -41,9 +41,9 @@ class HistoryWindowBoundsTest {
     }
 
     @Test
-    fun remotePagingRequiresUserAuthorizationOrAnExplicitAnchor() {
+    fun onlyExplicitAnchorUsesPresentationDrivenRemotePaging() {
         assertFalse(HistoryWindowFocus.Recent.allowsRemotePaging())
-        assertTrue(HistoryWindowFocus.RecentPaging(1).allowsRemotePaging())
+        assertFalse(HistoryWindowFocus.RecentPaging(1).allowsRemotePaging())
         assertTrue(HistoryWindowFocus.Around(600).allowsRemotePaging())
     }
 

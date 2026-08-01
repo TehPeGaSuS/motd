@@ -1,13 +1,10 @@
 package io.github.trevarj.motd.data.repo
 
-import androidx.paging.AsyncPagingDataDiffer
 import androidx.paging.ExperimentalPagingApi
 import androidx.paging.LoadType
 import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.paging.RemoteMediator
-import androidx.recyclerview.widget.DiffUtil
-import androidx.recyclerview.widget.ListUpdateCallback
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -25,8 +22,9 @@ import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -68,77 +66,88 @@ class MessageRepositoryPagingTest {
 
     @OptIn(ExperimentalPagingApi::class, ExperimentalCoroutinesApi::class)
     @Test
-    fun authorizedRecentRequestAttachesMediatorOnlyToItsFirstWindowGeneration() = runTest(timeout = 15.seconds) {
+    fun authorizedRecentCommandSurvivesPagingContextReplacement() = runTest(timeout = 15.seconds) {
         var mediatorCount = 0
         var mediatorLoadCount = 0
-        val firstMediatorLoad = CompletableDeferred<Unit>()
+        var mediatorFocus: HistoryWindowFocus? = null
+        val mediatorLoadStarted = CompletableDeferred<Unit>()
+        val releaseMediatorLoad = CompletableDeferred<Unit>()
+        val firstGeneration = CompletableDeferred<Unit>()
         val secondGeneration = CompletableDeferred<Unit>()
         val repository = MessageRepositoryImpl(
             db.bufferDao(),
             db.networkIdentityDao(),
             db.messageDao(),
             db.reactionDao(),
-            ChatHistoryMediatorFactory { _ ->
-                mediatorCount++
-                object : RemoteMediator<Int, MessageEntity>() {
-                    override suspend fun initialize() = InitializeAction.LAUNCH_INITIAL_REFRESH
+            object : ChatHistoryMediatorFactory {
+                override fun create(bufferId: Long) = error("focus-aware factory required")
 
-                    override suspend fun load(
-                        loadType: LoadType,
-                        state: PagingState<Int, MessageEntity>,
-                    ): MediatorResult {
-                        mediatorLoadCount++
-                        firstMediatorLoad.complete(Unit)
-                        return MediatorResult.Success(endOfPaginationReached = true)
+                override fun create(bufferId: Long, focus: HistoryWindowFocus): RemoteMediator<Int, MessageEntity> {
+                    mediatorCount++
+                    mediatorFocus = focus
+                    return object : RemoteMediator<Int, MessageEntity>() {
+                        override suspend fun load(
+                            loadType: LoadType,
+                            state: PagingState<Int, MessageEntity>,
+                        ): MediatorResult {
+                            assertEquals(LoadType.REFRESH, loadType)
+                            mediatorLoadCount++
+                            mediatorLoadStarted.complete(Unit)
+                            releaseMediatorLoad.await()
+                            db.messageDao().insertAll(
+                                listOf(
+                                    message(
+                                        bufferId,
+                                        "persisted older row",
+                                        "alice",
+                                        100,
+                                        "older-page",
+                                        msgid = "older-page",
+                                    ),
+                                ),
+                            )
+                            return MediatorResult.Success(endOfPaginationReached = true)
+                        }
                     }
                 }
             },
             db.historyGapDao(),
         )
-        val dispatcher = UnconfinedTestDispatcher(testScheduler)
-        val differ = AsyncPagingDataDiffer(
-            diffCallback = object : DiffUtil.ItemCallback<MessageEntity>() {
-                override fun areItemsTheSame(oldItem: MessageEntity, newItem: MessageEntity) =
-                    oldItem.id == newItem.id
-
-                override fun areContentsTheSame(oldItem: MessageEntity, newItem: MessageEntity) =
-                    oldItem == newItem
-            },
-            updateCallback = object : ListUpdateCallback {
-                override fun onInserted(position: Int, count: Int) = Unit
-                override fun onRemoved(position: Int, count: Int) = Unit
-                override fun onMoved(fromPosition: Int, toPosition: Int) = Unit
-                override fun onChanged(position: Int, count: Int, payload: Any?) = Unit
-            },
-            mainDispatcher = dispatcher,
-            workerDispatcher = dispatcher,
-        )
         var generationCount = 0
-        val collected = launch(dispatcher) {
+        val collected = launch(UnconfinedTestDispatcher(testScheduler)) {
             repository.messages(
                 bufferId,
                 MessageVisibilitySpec(),
                 HistoryWindowFocus.RecentPaging(1),
             ).onEach {
                 generationCount++
+                if (generationCount == 1) firstGeneration.complete(Unit)
                 if (generationCount == 2) secondGeneration.complete(Unit)
-            }.collectLatest(differ::submitData)
+            }.collect()
         }
         try {
-            firstMediatorLoad.await()
+            firstGeneration.await()
+            assertEquals(0, mediatorCount)
+            val command = async { repository.loadOlderPage(bufferId, requestId = 7) }
+            mediatorLoadStarted.await()
             assertEquals(1, mediatorCount)
             assertEquals(1, mediatorLoadCount)
+            assertEquals(HistoryWindowFocus.RecentPaging(7), mediatorFocus)
 
             db.historyGapDao().insert(
                 HistoryGapEntity(0, bufferId, "older", 100, "newer", 500),
             )
             secondGeneration.await()
 
-            // The factory runs before each PagingData emission, so this assertion cannot race a
-            // mistakenly attached second mediator even though that generation needs no remote load.
+            // Replacing the live local Pager cannot cancel or consume the explicit command.
             assertEquals(2, generationCount)
             assertEquals(1, mediatorCount)
             assertEquals(1, mediatorLoadCount)
+            assertFalse(command.isCompleted)
+
+            releaseMediatorLoad.complete(Unit)
+            assertTrue(command.await().isSuccess)
+            assertEquals("persisted older row", db.messageDao().byMsgid(bufferId, "older-page")?.text)
         } finally {
             collected.cancelAndJoin()
         }

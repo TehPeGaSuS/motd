@@ -1,9 +1,12 @@
 package io.github.trevarj.motd.data.repo
 
 import androidx.paging.ExperimentalPagingApi
+import androidx.paging.LoadType
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
+import androidx.paging.PagingState
+import androidx.paging.RemoteMediator
 import io.github.trevarj.motd.data.db.BufferDao
 import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -20,13 +23,12 @@ import io.github.trevarj.motd.data.visibility.countTimelineNewerQuery
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
@@ -52,20 +54,13 @@ class MessageRepositoryImpl @Inject constructor(
         bufferId: Long,
         visibility: MessageVisibilitySpec,
         focus: HistoryWindowFocus,
-    ): Flow<PagingData<MessageEntity>> = flow {
-        // A fetched gap boundary can replace the local Pager so its expanded island is visible.
-        // Do not let that replacement spend the same interaction's remote-page authorization.
-        var recentPagePending = focus is HistoryWindowFocus.RecentPaging
-        emitAll(
-            pagingContextFlow(bufferId, focus).flatMapLatest { context ->
-                val attachMediator = focus.allowsRemotePaging() &&
-                    (focus !is HistoryWindowFocus.RecentPaging || recentPagePending)
-                recentPagePending = false
+    ): Flow<PagingData<MessageEntity>> =
+        pagingContextFlow(bufferId, focus).flatMapLatest { context ->
                 Pager(
                     config = MESSAGE_PAGING_CONFIG,
-                    // Normal entry must never turn a visible boundary into network work. A deliberate
-                    // older-history gesture changes the focus to RecentPaging; deep links use Around.
-                    remoteMediator = if (attachMediator) {
+                    // Normal/recent paging is local-only. A user gesture runs an explicit one-page
+                    // command below; only deep-link islands retain presentation-driven mediation.
+                    remoteMediator = if (focus is HistoryWindowFocus.Around) {
                         mediatorFactory.create(context.roomId, focus)
                     } else null,
                     pagingSourceFactory = {
@@ -80,8 +75,30 @@ class MessageRepositoryImpl @Inject constructor(
                         )
                     },
                 ).flow
-            },
+            }
+
+    @OptIn(ExperimentalPagingApi::class)
+    override suspend fun loadOlderPage(bufferId: Long, requestId: Long): Result<Unit> = try {
+        val result = mediatorFactory.create(
+            resolveRoomId(bufferId),
+            HistoryWindowFocus.RecentPaging(requestId),
+        ).load(
+            LoadType.REFRESH,
+            PagingState(
+                pages = emptyList(),
+                anchorPosition = null,
+                config = MESSAGE_PAGING_CONFIG,
+                leadingPlaceholderCount = 0,
+            ),
         )
+        when (result) {
+            is RemoteMediator.MediatorResult.Error -> Result.failure(result.throwable)
+            is RemoteMediator.MediatorResult.Success -> Result.success(Unit)
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        Result.failure(error)
     }
 
     // Kept for the frozen contract; scopes to a small, fixed msgid set (safe under 999 vars).
@@ -252,7 +269,7 @@ internal data class ResolvedHistoryGap(
 
 internal typealias HistoryWindowBounds = MessageWindowBounds
 
-internal fun HistoryWindowFocus.allowsRemotePaging(): Boolean = this != HistoryWindowFocus.Recent
+internal fun HistoryWindowFocus.allowsRemotePaging(): Boolean = this is HistoryWindowFocus.Around
 
 internal fun historyWindowBounds(
     focus: HistoryWindowFocus,

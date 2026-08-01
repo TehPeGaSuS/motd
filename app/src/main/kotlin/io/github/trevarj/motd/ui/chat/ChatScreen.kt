@@ -376,6 +376,7 @@ fun ChatScreen(
     val uiEvents by viewModel.uiEvents.collectAsStateWithLifecycle()
     val historyResyncState by viewModel.historyResyncState.collectAsStateWithLifecycle()
     val historySyncStatus by viewModel.historySyncStatus.collectAsStateWithLifecycle()
+    val olderHistoryPageState by viewModel.olderHistoryPageState.collectAsStateWithLifecycle()
     val activeHistoryWindow by viewModel.activeHistoryWindow.collectAsStateWithLifecycle()
     val hasNewerHistoryIsland by viewModel.hasNewerHistoryIsland.collectAsStateWithLifecycle()
     val isServerBuffer = state.buffer?.type == BufferType.SERVER
@@ -497,6 +498,7 @@ fun ChatScreen(
         onRetryReplyJump = viewModel::retryReplyJump,
         historyResyncState = historyResyncState,
         historySyncStatus = historySyncStatus,
+        olderHistoryPageState = olderHistoryPageState,
         historyAvailability = historyAvailability,
         onRefreshHistory = viewModel::refreshHistory,
         onCancelHistoryRefresh = viewModel::cancelHistoryRefresh,
@@ -659,6 +661,7 @@ fun ChatContent(
     onRetryReplyJump: (ReplyJumpRequest) -> Unit = {},
     historyResyncState: HistoryResyncState = HistoryResyncState.Idle,
     historySyncStatus: HistorySyncStatus = HistorySyncStatus.Idle,
+    olderHistoryPageState: OlderHistoryPageState = OlderHistoryPageState.Idle,
     historyAvailability: HistoryAvailability = HistoryAvailability.NegotiatingOrOffline,
     onRefreshHistory: (HistoryRefreshRange) -> Unit = {},
     onCancelHistoryRefresh: () -> Unit = {},
@@ -688,11 +691,12 @@ fun ChatContent(
             identityRules,
         )
     }
-    val onePagePaging = activeHistoryWindow.focus is HistoryWindowFocus.RecentPaging
-    val olderHistoryLoad = if (onePagePaging) {
-        items.loadState.mediator?.refresh ?: items.loadState.append
-    } else {
-        items.loadState.append
+    val onePagePaging = olderHistoryPageState !is OlderHistoryPageState.Idle ||
+        activeHistoryWindow.focus is HistoryWindowFocus.RecentPaging
+    val olderHistoryLoad = when (olderHistoryPageState) {
+        OlderHistoryPageState.Loading -> LoadState.Loading
+        is OlderHistoryPageState.Failed -> LoadState.Error(olderHistoryPageState.error)
+        OlderHistoryPageState.Idle -> items.loadState.append
     }
     val historyUiState = chatHistoryUiState(
         bufferType = state.buffer?.type,
@@ -721,7 +725,11 @@ fun ChatContent(
     val readyRetryGate = remember(items) { HistoryReadyRetryGate() }
     LaunchedEffect(historyAvailability, olderHistoryLoad) {
         if (readyRetryGate.update(historyAvailability, olderHistoryLoad)) {
-            items.retry()
+            if (olderHistoryPageState.usesExplicitRetry()) {
+                onRequestOlderHistory()
+            } else {
+                items.retry()
+            }
         }
     }
     val traceBufferId = state.buffer?.id
@@ -1606,6 +1614,10 @@ fun ChatContent(
                         identityRules = identityRules,
                         historyUiState = historyUiState,
                         onHistoryRetry = {
+                            if (olderHistoryPageState.usesExplicitRetry()) {
+                                onRequestOlderHistory()
+                                return@MessageList
+                            }
                             val retryResync = historyResyncState is HistoryResyncState.Failed ||
                                 historyResyncState is HistoryResyncState.Incomplete ||
                                 historyResyncState is HistoryResyncState.Capped

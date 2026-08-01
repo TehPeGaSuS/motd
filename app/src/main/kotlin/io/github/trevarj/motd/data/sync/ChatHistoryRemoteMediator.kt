@@ -49,8 +49,8 @@ object CanonicalHistorySingleFlight {
  *           confirmed start-of-history state through EventProcessor.
  *
  * Normal entry uses SKIP_INITIAL_REFRESH so the cached DB paints without network I/O. A deliberate
- * recent-boundary request creates a one-shot Pager generation whose initial REFRESH runs exactly
- * one older append operation, including LATEST seeding when the local store is empty.
+ * recent-boundary command invokes REFRESH explicitly and runs exactly one older append operation,
+ * including LATEST seeding when the local store is empty.
  */
 @OptIn(ExperimentalPagingApi::class)
 class ChatHistoryRemoteMediator(
@@ -408,7 +408,7 @@ class ChatHistoryRemoteMediator(
             ?.first
     }
 
-    /** A user-authorized recent Pager owns one request; the next gesture creates the next Pager. */
+    /** A user-authorized recent command owns one request; the next gesture creates another token. */
     private fun MediatorResult.stopAfterAuthorizedPage(): MediatorResult = when (this) {
         is MediatorResult.Error -> this
         is MediatorResult.Success -> MediatorResult.Success(endOfPaginationReached = true)

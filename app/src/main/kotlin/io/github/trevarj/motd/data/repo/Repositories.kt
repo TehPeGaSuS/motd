@@ -118,6 +118,9 @@ interface MessageRepository {
         bufferId: Long,
         focus: HistoryWindowFocus,
     ): Flow<MessageWindowBounds> = flowOf(MessageWindowBounds())
+    /** Execute exactly one user-authorized older-history request independently of Paging collection. */
+    suspend fun loadOlderPage(bufferId: Long, requestId: Long): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Older history is unavailable"))
     /** Delete a locally-stored failed row by id, repairing any exact local read anchor. */
     suspend fun deleteMessage(id: Long)
 }
@@ -127,7 +130,7 @@ sealed interface HistoryWindowFocus {
     /** Paint the newest contiguous local island without allowing boundary-triggered network I/O. */
     data object Recent : HistoryWindowFocus
 
-    /** One deliberate older-boundary interaction; each id owns exactly one remote page. */
+    /** One deliberate older-boundary interaction while its explicit page command is in flight. */
     data class RecentPaging(val requestId: Long) : HistoryWindowFocus
 
     data class Around(

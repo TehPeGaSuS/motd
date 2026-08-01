@@ -500,6 +500,15 @@ sealed interface ChatHistoryUiState {
     data object ConfirmedStart : ChatHistoryUiState
 }
 
+/** State of the explicit, user-authorized one-page history command. */
+sealed interface OlderHistoryPageState {
+    data object Idle : OlderHistoryPageState
+    data object Loading : OlderHistoryPageState
+    data class Failed(val error: Throwable) : OlderHistoryPageState
+}
+
+internal fun OlderHistoryPageState.usesExplicitRetry(): Boolean = this is OlderHistoryPageState.Failed
+
 internal fun chatHistoryUiState(
     bufferType: BufferType?,
     connectionState: IrcClientState?,

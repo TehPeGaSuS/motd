@@ -773,7 +773,12 @@ class ChatModelsTest {
     @Test fun `offline failure retries once when Ready is first observed with the error`() {
         val gate = HistoryReadyRetryGate()
         val ready = HistoryAvailability.Ready(setOf(HistoryReferenceType.MSGID), pageLimit = 50)
-        val offline = LoadState.Error(IrcDisconnectedException("CHATHISTORY", "offline"))
+        val disconnected = IrcDisconnectedException("CHATHISTORY", "offline")
+        val explicitFailure = OlderHistoryPageState.Failed(disconnected)
+        val offline = LoadState.Error(explicitFailure.error)
+
+        assertTrue(explicitFailure.usesExplicitRetry())
+        assertFalse(OlderHistoryPageState.Idle.usesExplicitRetry())
 
         assertTrue(gate.update(ready, offline))
         assertFalse(gate.update(ready, offline))
