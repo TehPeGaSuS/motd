@@ -245,11 +245,11 @@ class RequiredHeadlessE2eTest {
         assertTrue(boundedRow.unreadCountIncomplete)
 
         ChatListRobot(compose).open(bufferId)
-        val firstUnread = runBlocking {
-            lifecycle.awaitCanonicalFromAnySender("$token row001", bufferId)
-        }
-        val secondUnread = runBlocking {
-            lifecycle.awaitCanonicalFromAnySender("$token row002", bufferId)
+        val (firstUnread, secondUnread) = runBlocking {
+            withTimeout(45_000) {
+                val first = lifecycle.awaitCanonicalFromAnySender("$token row001", bufferId, timeoutMs = 45_000)
+                first to lifecycle.awaitCanonicalFromAnySender("$token row002", bufferId, timeoutMs = 45_000)
+            }
         }
         assertTrue(markerAnchor.serverTime < firstUnread.serverTime)
         assertTrue(markerAnchor < firstUnread.anchor())
