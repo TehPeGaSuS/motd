@@ -211,7 +211,15 @@ class RequiredHeadlessE2eTest {
                 historySettled.await()
             }
         }
-        val recentWindow = runBlocking { runProbe.awaitRows(token, bufferId, 150) }
+        // The 150-event reconnect cap includes the fixture client's non-searchable QUIT.
+        val recentWindow = runBlocking {
+            runProbe.awaitRows(
+                token = token,
+                bufferId = bufferId,
+                count = 149,
+                expectedExtras = setOf("$token marker"),
+            )
+        }
         val newest = recentWindow.single { it.text == "$token row260" }
         assertTrue(recentWindow.none { it.text == "$token row001" })
         assertMarkerAtLeast(bootstrap, bufferId, marker)
@@ -277,7 +285,15 @@ class RequiredHeadlessE2eTest {
         timeline.assertMessageVisible(firstUnread.tag())
         scenario.scenario?.onActivity { it.recreate() }
         timeline.assertMessageVisible(firstUnread.tag())
-        runBlocking { runProbe.awaitRows(token, bufferId, 200) }
+        // Directional paging restores older rows; search then exposes its exact newest-200 cap.
+        runBlocking {
+            runProbe.awaitRows(
+                token = token,
+                bufferId = bufferId,
+                count = 200,
+                expectedExtras = emptySet(),
+            )
+        }
         milestones.record("notification_restore_stable", "buffer=$bufferId event=${firstUnread.id}")
     }
 

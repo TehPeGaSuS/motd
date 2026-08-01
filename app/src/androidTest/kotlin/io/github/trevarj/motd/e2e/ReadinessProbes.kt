@@ -138,19 +138,36 @@ class MessageLifecycleProbe(
         }
 }
 
-/** Observes an exact row-only fixture window through the same bounded search surface as the UI. */
+/** Observes an exact row-and-sentinel fixture window through the same bounded search surface as the UI. */
 class MessageRunProbe(
     private val search: SearchRepository,
     private val milestones: E2eMilestoneRecorder,
 ) {
-    suspend fun awaitRows(token: String, bufferId: Long, count: Int, timeoutMs: Long = 45_000): List<MessageEntity> =
+    suspend fun awaitRows(
+        token: String,
+        bufferId: Long,
+        count: Int,
+        expectedExtras: Set<String>,
+        timeoutMs: Long = 45_000,
+    ): List<MessageEntity> =
         try {
             withTimeout(timeoutMs) {
                 search.search(token, bufferId).first { hits ->
-                    hits.count { it.message.text.startsWith("$token row") } == count
-                }.map { it.message }
-                    .filter { it.text.startsWith("$token row") }
-                    .also { rows ->
+                    val messages = hits.map { it.message }
+                    val rows = messages.filter { it.text.startsWith("$token row") }
+                    val extras = messages
+                        .filterNot { it.text.startsWith("$token row") }
+                        .map { it.text }
+                    rows.size == count && extras.size == expectedExtras.size && extras.toSet() == expectedExtras
+                }.map { it.message }.let { messages ->
+                    val rows = messages.filter { it.text.startsWith("$token row") }
+                    val extras = messages
+                        .filterNot { it.text.startsWith("$token row") }
+                        .map { it.text }
+                    check(extras.size == expectedExtras.size && extras.toSet() == expectedExtras) {
+                        "fixture window contains unexpected non-row messages"
+                    }
+                    rows.also {
                         check(rows.map { it.id }.distinct().size == count) { "fixture run contains duplicate event ids" }
                         check(rows.map { it.msgid }.distinct().size == count) { "fixture run contains duplicate msgids" }
                         check(rows.map { it.text }.distinct().size == count) { "fixture run contains duplicate bodies" }
@@ -160,6 +177,7 @@ class MessageRunProbe(
                         }
                         milestones.record("history_run_canonical", "buffer=$bufferId count=$count")
                     }
+                }
             }
         } catch (timeout: TimeoutCancellationException) {
             milestones.record("history_run_timeout", "buffer=$bufferId count=$count")

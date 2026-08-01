@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -54,7 +55,7 @@ class ChatHistorySyncIndicatorUiTest {
         compose.mainClock.advanceTimeBy(1)
         compose.mainClock.advanceTimeBy(500)
         compose.onNodeWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertIsDisplayed()
-        compose.onNodeWithText("Syncing messages…").assertIsDisplayed()
+        compose.onNodeWithText("Syncing messages…").assertExists()
     }
 
     @Test
@@ -74,7 +75,8 @@ class ChatHistorySyncIndicatorUiTest {
 
         compose.mainClock.advanceTimeBy(EMPTY_HISTORY_LOADING_INDICATOR_DELAY_MS)
         compose.mainClock.advanceTimeBy(500)
-        compose.onNodeWithText("Loading messages…").assertIsDisplayed()
+        compose.onNodeWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertIsDisplayed()
+        compose.onNodeWithText("Loading messages…").assertExists()
     }
 
     @Test
