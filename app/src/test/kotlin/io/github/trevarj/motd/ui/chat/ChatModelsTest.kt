@@ -564,11 +564,46 @@ class ChatModelsTest {
     @Test fun `older history drag authorizes only one page until the gesture ends`() {
         val latch = OlderHistoryGestureLatch()
 
-        assertTrue(latch.requestIfEligible(12f, userInput = true, 50, 49))
-        assertFalse(latch.requestIfEligible(8f, userInput = true, 50, 49))
+        // The final child-consumed delta can be the first one that reveals the oldest loaded row.
+        assertFalse(
+            latch.requestAfterScrollIfEligible(
+                consumedY = 12f,
+                availableY = 0f,
+                userInput = true,
+                itemCount = 50,
+                lastVisibleIndex = 48,
+            ),
+        )
+        assertTrue(
+            latch.requestAfterScrollIfEligible(
+                consumedY = 12f,
+                availableY = 0f,
+                userInput = true,
+                itemCount = 50,
+                lastVisibleIndex = 49,
+            ),
+        )
+        assertFalse(
+            latch.requestAfterScrollIfEligible(
+                consumedY = 0f,
+                availableY = 8f,
+                userInput = true,
+                itemCount = 50,
+                lastVisibleIndex = 49,
+            ),
+        )
 
         latch.reset()
-        assertTrue(latch.requestIfEligible(6f, userInput = true, 100, 99))
+        // A later drag that overscrolls the boundary owns a new request.
+        assertTrue(
+            latch.requestAfterScrollIfEligible(
+                consumedY = 0f,
+                availableY = 6f,
+                userInput = true,
+                itemCount = 100,
+                lastVisibleIndex = 99,
+            ),
+        )
     }
 
     @Test fun `bubble gap tracks grouping and density`() {

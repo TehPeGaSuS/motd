@@ -1,11 +1,13 @@
 package io.github.trevarj.motd.data.repo
 
+import androidx.paging.AsyncPagingDataDiffer
 import androidx.paging.ExperimentalPagingApi
 import androidx.paging.LoadType
-import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.paging.RemoteMediator
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListUpdateCallback
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -20,11 +22,14 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.async
-import kotlinx.coroutines.flow.take
-import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -63,8 +68,11 @@ class MessageRepositoryPagingTest {
 
     @OptIn(ExperimentalPagingApi::class, ExperimentalCoroutinesApi::class)
     @Test
-    fun authorizedRecentRequestAttachesMediatorOnlyToItsFirstWindowGeneration() = runTest {
+    fun authorizedRecentRequestAttachesMediatorOnlyToItsFirstWindowGeneration() = runTest(timeout = 15.seconds) {
         var mediatorCount = 0
+        var mediatorLoadCount = 0
+        val firstMediatorLoad = CompletableDeferred<Unit>()
+        val secondGeneration = CompletableDeferred<Unit>()
         val repository = MessageRepositoryImpl(
             db.bufferDao(),
             db.networkIdentityDao(),
@@ -73,32 +81,67 @@ class MessageRepositoryPagingTest {
             ChatHistoryMediatorFactory { _ ->
                 mediatorCount++
                 object : RemoteMediator<Int, MessageEntity>() {
+                    override suspend fun initialize() = InitializeAction.LAUNCH_INITIAL_REFRESH
+
                     override suspend fun load(
                         loadType: LoadType,
                         state: PagingState<Int, MessageEntity>,
-                    ) = MediatorResult.Success(endOfPaginationReached = true)
+                    ): MediatorResult {
+                        mediatorLoadCount++
+                        firstMediatorLoad.complete(Unit)
+                        return MediatorResult.Success(endOfPaginationReached = true)
+                    }
                 }
             },
             db.historyGapDao(),
         )
-        val emissions = mutableListOf<PagingData<MessageEntity>>()
-        val collected = async {
+        val dispatcher = UnconfinedTestDispatcher(testScheduler)
+        val differ = AsyncPagingDataDiffer(
+            diffCallback = object : DiffUtil.ItemCallback<MessageEntity>() {
+                override fun areItemsTheSame(oldItem: MessageEntity, newItem: MessageEntity) =
+                    oldItem.id == newItem.id
+
+                override fun areContentsTheSame(oldItem: MessageEntity, newItem: MessageEntity) =
+                    oldItem == newItem
+            },
+            updateCallback = object : ListUpdateCallback {
+                override fun onInserted(position: Int, count: Int) = Unit
+                override fun onRemoved(position: Int, count: Int) = Unit
+                override fun onMoved(fromPosition: Int, toPosition: Int) = Unit
+                override fun onChanged(position: Int, count: Int, payload: Any?) = Unit
+            },
+            mainDispatcher = dispatcher,
+            workerDispatcher = dispatcher,
+        )
+        var generationCount = 0
+        val collected = launch(dispatcher) {
             repository.messages(
                 bufferId,
                 MessageVisibilitySpec(),
                 HistoryWindowFocus.RecentPaging(1),
-            ).take(2).toList(emissions)
+            ).onEach {
+                generationCount++
+                if (generationCount == 2) secondGeneration.complete(Unit)
+            }.collectLatest(differ::submitData)
         }
-        runCurrent()
-        assertEquals(1, mediatorCount)
+        try {
+            firstMediatorLoad.await()
+            assertEquals(1, mediatorCount)
+            assertEquals(1, mediatorLoadCount)
 
-        db.historyGapDao().insert(
-            HistoryGapEntity(0, bufferId, "older", 100, "newer", 500),
-        )
-        collected.await()
+            db.historyGapDao().insert(
+                HistoryGapEntity(0, bufferId, "older", 100, "newer", 500),
+            )
+            secondGeneration.await()
 
-        assertEquals(2, emissions.size)
-        assertEquals(1, mediatorCount)
+            // The factory runs before each PagingData emission, so this assertion cannot race a
+            // mistakenly attached second mediator even though that generation needs no remote load.
+            assertEquals(2, generationCount)
+            assertEquals(1, mediatorCount)
+            assertEquals(1, mediatorLoadCount)
+        } finally {
+            collected.cancelAndJoin()
+        }
     }
 
     @Test

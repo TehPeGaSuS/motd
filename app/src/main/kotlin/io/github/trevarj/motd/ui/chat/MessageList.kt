@@ -9,6 +9,9 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
@@ -56,6 +59,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
@@ -66,7 +70,6 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTag as semanticsTestTag
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.paging.compose.LazyPagingItems
@@ -223,24 +226,28 @@ fun bubbleGap(showSender: Boolean, hasOlder: Boolean, spacing: MotdSpacing): Dp 
 
 /** A downward finger drag at the visual top of a reversed timeline asks for older history. */
 internal fun shouldRequestOlderHistory(
-    availableY: Float,
+    dragY: Float,
     userInput: Boolean,
     itemCount: Int,
     lastVisibleIndex: Int?,
-): Boolean = userInput && availableY > 0f && itemCount > 0 &&
+): Boolean = userInput && dragY > 0f && itemCount > 0 &&
     lastVisibleIndex != null && lastVisibleIndex >= itemCount - 1
 
 /** Collapses the many nested-scroll deltas in one physical drag into one paging request. */
 internal class OlderHistoryGestureLatch {
     private var requested = false
 
-    fun requestIfEligible(
+    fun requestAfterScrollIfEligible(
+        consumedY: Float,
         availableY: Float,
         userInput: Boolean,
         itemCount: Int,
         lastVisibleIndex: Int?,
     ): Boolean {
-        if (requested || !shouldRequestOlderHistory(availableY, userInput, itemCount, lastVisibleIndex)) {
+        // The child may consume the final delta that first reveals the loaded boundary. Include
+        // both portions so an exact-boundary drag and an overscroll are detected in post-scroll.
+        val dragY = consumedY + availableY
+        if (requested || !shouldRequestOlderHistory(dragY, userInput, itemCount, lastVisibleIndex)) {
             return false
         }
         requested = true
@@ -333,10 +340,11 @@ fun MessageList(
     val olderHistoryGestureLatch = remember(listState) { OlderHistoryGestureLatch() }
     val olderHistoryConnection = remember(listState, items) {
         object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
                 val lastVisible = listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index }
                 if (
-                    olderHistoryGestureLatch.requestIfEligible(
+                    olderHistoryGestureLatch.requestAfterScrollIfEligible(
+                        consumedY = consumed.y,
                         availableY = available.y,
                         userInput = source == NestedScrollSource.UserInput,
                         itemCount = items.itemCount,
@@ -346,11 +354,6 @@ fun MessageList(
                     latestOlderHistoryRequest()
                 }
                 return Offset.Zero
-            }
-
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                olderHistoryGestureLatch.reset()
-                return Velocity.Zero
             }
         }
     }
@@ -362,6 +365,15 @@ fun MessageList(
         // instead of confusing an off-screen row with a missing one.
         modifier = modifier
             .fillMaxSize()
+            .pointerInput(olderHistoryGestureLatch) {
+                awaitEachGesture {
+                    // Reset on every physical down. onPreFling is not guaranteed for a drag that
+                    // ends below the fling threshold, so it cannot define the gesture boundary.
+                    awaitFirstDown(requireUnconsumed = false)
+                    olderHistoryGestureLatch.reset()
+                    waitForUpOrCancellation()
+                }
+            }
             .nestedScroll(olderHistoryConnection)
             .testTag("chat_timeline"),
         contentPadding = PaddingValues(vertical = 8.dp),
