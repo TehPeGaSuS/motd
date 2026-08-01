@@ -504,7 +504,7 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `visible ready chat reconciles once despite duplicate resume callbacks`() = runTest {
+    fun `visible ready chat does not launch redundant history reconciliation`() = runTest {
         val history = FakeHistoryResyncController()
         val manager = FakeConnectionManager(network.id, client = testClient())
         val vm = viewModel(channel, manager, history)
@@ -514,8 +514,36 @@ class ChatViewModelTest {
         vm.onResume()
         advanceUntilIdle()
 
-        assertEquals(listOf(channel.id), history.reconciledBuffers)
+        assertTrue(history.reconciledBuffers.isEmpty())
         assertEquals(HistoryResyncState.Idle, vm.historyResyncState.value)
+    }
+
+    @Test
+    fun `entry readiness distinguishes active catchup from settled or offline startup`() {
+        val ready = io.github.trevarj.motd.service.ConnectionActivitySnapshot(
+            states = mapOf(network.id to IrcClientState.Ready("me", emptySet(), emptyMap())),
+        )
+        val catchingUp = ready.copy(historyCatchUpPending = setOf(network.id))
+        val connecting = io.github.trevarj.motd.service.ConnectionActivitySnapshot(
+            states = mapOf(network.id to IrcClientState.Connecting),
+        )
+        val retrying = io.github.trevarj.motd.service.ConnectionActivitySnapshot(
+            states = mapOf(network.id to IrcClientState.Failed("retry", fatal = false)),
+            progressing = mapOf(network.id to true),
+        )
+        val terminal = io.github.trevarj.motd.service.ConnectionActivitySnapshot(
+            states = mapOf(network.id to IrcClientState.Failed("fatal", fatal = true)),
+        )
+        val offline = io.github.trevarj.motd.service.ConnectionActivitySnapshot(
+            initializationComplete = true,
+        )
+
+        assertFalse(entryHistoryReady(catchingUp, network.id))
+        assertTrue(entryHistoryReady(ready, network.id))
+        assertFalse(entryHistoryReady(connecting, network.id))
+        assertFalse(entryHistoryReady(retrying, network.id))
+        assertTrue(entryHistoryReady(terminal, network.id))
+        assertTrue(entryHistoryReady(offline, network.id))
     }
 
     @Test
@@ -568,27 +596,6 @@ class ChatViewModelTest {
         runCurrent()
 
         assertEquals(ChatUiEvent.HistoryIncomplete(3), vm.uiEvents.value.single().value)
-    }
-
-    @Test
-    fun `returning to a chat and a new ready transition each reconcile`() = runTest {
-        val history = FakeHistoryResyncController()
-        val client = testClient()
-        val manager = FakeConnectionManager(network.id, client = client)
-        val vm = viewModel(query, manager, history)
-        vm.state.first { it.buffer != null }
-
-        vm.onResume()
-        advanceUntilIdle()
-        vm.onPause()
-        vm.onResume()
-        advanceUntilIdle()
-        manager.publishState(network.id, IrcClientState.Disconnected, progressing = true)
-        advanceUntilIdle()
-        manager.publishState(network.id, IrcClientState.Ready("me", emptySet(), emptyMap()))
-        advanceUntilIdle()
-
-        assertEquals(listOf(query.id, query.id, query.id), history.reconciledBuffers)
     }
 
     @Test
@@ -972,11 +979,11 @@ class ChatViewModelTest {
         )
 
         vm.state.first { it.buffer != null }
-        val divider = vm.readMarkerSnapshot.first { it != null }
+        val divider = vm.unreadEntrySnapshot.first { it != null }
         val target = checkNotNull(vm.initialTarget.first { it != null })
 
-        assertEquals(101L, divider?.serverTime)
-        assertEquals(historyIds.first() - 1L, divider?.eventId)
+        assertEquals(101L, divider?.marker?.serverTime)
+        assertEquals(historyIds.first() - 1L, divider?.marker?.eventId)
         // Entry lands on the oldest unread row (history-1, with 515 rows newer than it): the first
         // unseen message tops the viewport and the rest of the unread continues below it.
         assertEquals(515, target.index)
@@ -990,431 +997,81 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `entry waits for catchup before freezing the actual first unread`() = runTest {
+    fun `normal entry stays in bounded recent island until older scroll is requested`() = runTest {
         val markerId = db.messageDao().insertAll(
-            listOf(
-                message(channel.id, "marker", "marker", "alice").copy(
-                    serverTime = 100,
-                    dedupKey = "marker",
-                ),
-            ),
+            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
         ).single()
         db.messageDao().insertAll(
-            (111..260).map { ordinal ->
-                message(channel.id, "row$ordinal", "m$ordinal", "alice").copy(
-                    serverTime = ordinal.toLong(),
-                    dedupKey = "m$ordinal",
-                )
-            },
+            listOf(message(channel.id, "older unread", "m101", "alice").copy(serverTime = 101)),
         )
-        val fetched = CompletableDeferred<Long>()
-        val messages = FakeMessageRepository(newerCount = 199)
-        val history = FakeHistoryResyncController {
-            val id = db.messageDao().insertAll(
-                (101..110).map { ordinal ->
-                    message(channel.id, "row$ordinal", "m$ordinal", "alice").copy(
-                        serverTime = ordinal.toLong(),
-                        dedupKey = "m$ordinal",
-                    )
-                },
-            ).first()
-            messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(id))
-            fetched.complete(id)
-        }
-        val manager = FakeConnectionManager(network.id, client = testClient())
-        val vm = viewModel(
-            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
-            manager,
-            history,
-            messages = messages,
-        )
-        vm.state.first { it.buffer != null }
-        runCurrent()
-        assertNull(vm.initialTarget.value)
-
-        vm.onResume()
-        val firstFetchedId = fetched.await()
-
-        assertTrue(history.reconciledBuffers.isNotEmpty())
-        val divider = vm.readMarkerSnapshot.first { it != null }
-        val target = vm.initialTarget.first { it != null }
-        assertEquals(101L, divider?.serverTime)
-        assertEquals(firstFetchedId - 1L, divider?.eventId)
-        assertEquals(199, target?.index)
-        assertEquals(firstFetchedId, target?.expectedEventId)
-        assertEquals("m101", target?.expectedMsgid)
-        assertTrue(target?.placeAtTop == true)
-    }
-
-    @Test
-    fun `entry prioritizes a retained first unread before newest reconciliation`() = runTest {
-        val markerId = db.messageDao().insertAll(
-            listOf(
-                message(channel.id, "marker", "marker", "alice").copy(
-                    serverTime = 100,
-                    dedupKey = "marker",
-                ),
-            ),
+        val recentId = db.messageDao().insertAll(
+            listOf(message(channel.id, "recent unread", "m900", "alice").copy(serverTime = 900)),
         ).single()
-        val messages = FakeMessageRepository(newerCount = 49)
-        val reconcileStarted = CompletableDeferred<Unit>()
-        val releaseReconcile = CompletableDeferred<Unit>()
-        val history = FakeHistoryResyncController(
-            onPrepare = {
-                val id = db.messageDao().insertAll(
-                    listOf(
-                        message(channel.id, "first unread", "m101", "alice").copy(
-                            serverTime = 101,
-                            dedupKey = "m101",
-                        ),
-                    ),
-                ).single()
-                messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(id))
-                HistoryResyncState.Updated(1)
-            },
-            onReconcile = {
-                reconcileStarted.complete(Unit)
-                releaseReconcile.await()
-            },
+        val recent = checkNotNull(db.messageDao().byCanonicalId(recentId))
+        val bounds = io.github.trevarj.motd.data.visibility.MessageWindowBounds(
+            lowerBoundary = TimelineAnchor(recent.serverTime, recent.id, recent.timelineOrder),
+        )
+        val messages = FakeMessageRepository(
+            events = listOf(recent),
+            windowBounds = bounds,
         )
         val vm = viewModel(
             channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
-            FakeConnectionManager(network.id, client = testClient()),
-            history,
-            messages,
-        )
-        vm.state.first { it.buffer != null }
-
-        vm.onResume()
-        reconcileStarted.await()
-
-        val target = checkNotNull(vm.initialTarget.first { it != null })
-        assertEquals("m101", target.expectedMsgid)
-        assertEquals(listOf(channel.id), history.preparedBuffers)
-        releaseReconcile.complete(Unit)
-    }
-
-    @Test
-    fun `entry stays unresolved while reconnecting then freezes recovered first unread`() = runTest {
-        val markerId = db.messageDao().insertAll(
-            listOf(
-                message(channel.id, "marker", "marker", "alice").copy(
-                    serverTime = 100,
-                    dedupKey = "marker",
-                ),
-            ),
-        ).single()
-        val history = FakeHistoryResyncController {
-            db.messageDao().insertAll(
-                listOf(
-                    message(channel.id, "recovered", "m101", "alice").copy(
-                        serverTime = 101,
-                        dedupKey = "m101",
-                    ),
-                ),
-            )
-        }
-        val manager = FakeConnectionManager(
-            network.id,
-            state = IrcClientState.Connecting,
-            client = testClient(),
-        )
-        val vm = viewModel(
-            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
-            manager,
-            history,
-        )
-        vm.state.first { it.buffer != null }
-
-        vm.onResume()
-        runCurrent()
-        assertNull(vm.initialTarget.value)
-        assertNull(vm.readMarkerSnapshot.value)
-
-        manager.publishState(network.id, IrcClientState.Ready("me", emptySet(), emptyMap()))
-
-        val divider = vm.readMarkerSnapshot.first { it != null }
-        val target = vm.initialTarget.first { it != null }
-        assertEquals(101L, divider?.serverTime)
-        assertEquals(0, target?.index)
-        assertTrue(target?.placeAtTop == true)
-    }
-
-    @Test
-    fun `entry does not freeze before a slow valid history preparation completes`() = runTest {
-        val markerId = db.messageDao().insertAll(
-            listOf(
-                message(channel.id, "marker", "marker", "alice").copy(
-                    serverTime = 100,
-                    dedupKey = "marker",
-                ),
-            ),
-        ).single()
-        val history = FakeHistoryResyncController {
-            delay(20_000)
-            db.messageDao().insertAll(
-                listOf(
-                    message(channel.id, "recovered", "m101", "alice").copy(
-                        serverTime = 101,
-                        dedupKey = "m101",
-                    ),
-                ),
-            )
-        }
-        val vm = viewModel(
-            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
-            FakeConnectionManager(network.id, client = testClient()),
-            history,
-        )
-        vm.state.first { it.buffer != null }
-        vm.onResume()
-        runCurrent()
-
-        advanceTimeBy(15_001)
-        runCurrent()
-        assertNull(vm.initialTarget.value)
-        assertNull(vm.readMarkerSnapshot.value)
-
-        advanceTimeBy(4_999)
-        val target = checkNotNull(vm.initialTarget.first { it != null })
-        assertNull(target.expectedMsgid)
-        assertEquals(101L, vm.readMarkerSnapshot.value?.serverTime)
-    }
-
-    @Test
-    fun `recoverable disconnect keeps entry unresolved until the replacement generation prepares`() = runTest {
-        val markerId = db.messageDao().insertAll(
-            listOf(
-                message(channel.id, "marker", "marker", "alice").copy(
-                    serverTime = 100,
-                    dedupKey = "marker",
-                ),
-            ),
-        ).single()
-        val firstStarted = CompletableDeferred<Unit>()
-        val messages = FakeMessageRepository()
-        val history = FakeHistoryResyncController { attempt ->
-            if (attempt == 1) {
-                firstStarted.complete(Unit)
-                awaitCancellation()
-            } else {
-                val id = db.messageDao().insertAll(
-                    listOf(
-                        message(channel.id, "recovered", "m101", "alice").copy(
-                            serverTime = 101,
-                            dedupKey = "m101",
-                        ),
-                    ),
-                ).single()
-                messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(id))
-            }
-        }
-        val manager = FakeConnectionManager(network.id, client = testClient())
-        val vm = viewModel(
-            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
-            manager,
-            history,
-            messages,
-        )
-        vm.state.first { it.buffer != null }
-        vm.onResume()
-        firstStarted.await()
-
-        manager.publishState(network.id, IrcClientState.Disconnected, progressing = true)
-        runCurrent()
-        assertNull(vm.initialTarget.value)
-
-        manager.replaceClient(null)
-        manager.publishState(network.id, IrcClientState.Connecting, progressing = true)
-        runCurrent()
-        assertNull(vm.initialTarget.value)
-
-        manager.replaceClient(testClient())
-        manager.publishState(network.id, IrcClientState.Ready("me", emptySet(), emptyMap()))
-        val target = checkNotNull(vm.initialTarget.first { it != null })
-        assertEquals("m101", target.expectedMsgid)
-        assertEquals(2, history.reconciledBuffers.size)
-    }
-
-    @Test
-    fun `entry opened during recoverable disconnect waits for replacement ready history`() = runTest {
-        val markerId = db.messageDao().insertAll(
-            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
-        ).single()
-        val messages = FakeMessageRepository()
-        val history = FakeHistoryResyncController {
-            val id = db.messageDao().insertAll(
-                listOf(message(channel.id, "recovered", "m101", "alice").copy(serverTime = 101)),
-            ).single()
-            messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(id))
-        }
-        val manager = FakeConnectionManager(
-            network.id,
-            state = IrcClientState.Disconnected,
-            client = testClient(),
-        )
-        val vm = viewModel(
-            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
-            manager,
-            history,
-            messages,
-        )
-        vm.state.first { it.buffer != null }
-        vm.onResume()
-        runCurrent()
-        assertNull(vm.initialTarget.value)
-
-        manager.replaceClient(null)
-        manager.publishState(network.id, IrcClientState.Connecting, progressing = true)
-        runCurrent()
-        assertNull(vm.initialTarget.value)
-
-        manager.replaceClient(testClient())
-        manager.publishState(network.id, IrcClientState.Ready("me", emptySet(), emptyMap()))
-
-        assertEquals("m101", checkNotNull(vm.initialTarget.first { it != null }).expectedMsgid)
-    }
-
-    @Test
-    fun `cold startup waits for initial actor reconcile before positioning`() = runTest {
-        val markerId = db.messageDao().insertAll(
-            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
-        ).single()
-        val messages = FakeMessageRepository()
-        val history = FakeHistoryResyncController {
-            val id = db.messageDao().insertAll(
-                listOf(message(channel.id, "started", "m101", "alice").copy(serverTime = 101)),
-            ).single()
-            messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(id))
-        }
-        val manager = FakeConnectionManager(
-            network.id,
-            state = IrcClientState.Disconnected,
-            client = null,
-        ).apply {
-            connectionActivity.value = io.github.trevarj.motd.service.ConnectionActivitySnapshot(
-                states = mapOf(network.id to IrcClientState.Disconnected),
-                initializationComplete = false,
-            )
-        }
-        val vm = viewModel(
-            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
-            manager,
-            history,
-            messages,
-        )
-        vm.state.first { it.buffer != null }
-        vm.onResume()
-        runCurrent()
-        assertNull(vm.initialTarget.value)
-
-        manager.replaceClient(testClient())
-        manager.publishState(
-            network.id,
-            IrcClientState.Ready("me", emptySet(), emptyMap()),
-            progressing = true,
-        )
-
-        assertEquals("m101", checkNotNull(vm.initialTarget.first { it != null }).expectedMsgid)
-    }
-
-    @Test
-    fun `terminal disconnect after ready releases entry history wait`() = runTest {
-        val markerId = db.messageDao().insertAll(
-            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
-        ).single()
-        val started = CompletableDeferred<Unit>()
-        val history = FakeHistoryResyncController {
-            started.complete(Unit)
-            awaitCancellation()
-        }
-        val manager = FakeConnectionManager(network.id, client = testClient())
-        val vm = viewModel(
-            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
-            manager,
-            history,
-        )
-        vm.state.first { it.buffer != null }
-        vm.onResume()
-        started.await()
-
-        manager.replaceClient(null)
-        manager.publishState(network.id, IrcClientState.Disconnected, progressing = false)
-
-        assertEquals(100L, checkNotNull(vm.initialTarget.first { it != null }).serverTime)
-    }
-
-    @Test
-    fun `certificate parked failure releases entry history wait`() = runTest {
-        val markerId = db.messageDao().insertAll(
-            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
-        ).single()
-        val started = CompletableDeferred<Unit>()
-        val manager = FakeConnectionManager(network.id, client = testClient())
-        val vm = viewModel(
-            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
-            manager,
-            FakeHistoryResyncController {
-                started.complete(Unit)
-                awaitCancellation()
-            },
-        )
-        vm.state.first { it.buffer != null }
-        vm.onResume()
-        started.await()
-
-        manager.replaceClient(null)
-        manager.publishState(
-            network.id,
-            IrcClientState.Failed("certificate not trusted", fatal = false),
-            progressing = false,
-        )
-
-        assertEquals(100L, checkNotNull(vm.initialTarget.first { it != null }).serverTime)
-    }
-
-    @Test
-    fun `entry focuses the island containing the selected first unread`() = runTest {
-        val ids = db.messageDao().insertAll(
-            listOf(
-                message(channel.id, "marker", "marker", "alice").copy(
-                    serverTime = 100,
-                    dedupKey = "marker",
-                ),
-                message(channel.id, "recent", "recent", "alice").copy(
-                    serverTime = 900,
-                    dedupKey = "recent",
-                ),
-            ),
-        )
-        db.historyGapDao().insert(
-            io.github.trevarj.motd.data.db.HistoryGapEntity(
-                roomId = channel.id,
-                olderMsgid = "marker",
-                olderServerTime = 100,
-                newerMsgid = "recent",
-                newerServerTime = 900,
-                recoverable = false,
-                olderEventId = ids[0],
-                newerEventId = ids[1],
-            ),
-        )
-        val recent = checkNotNull(db.messageDao().byCanonicalId(ids[1]))
-        val messages = FakeMessageRepository(events = listOf(recent))
-        val vm = viewModel(
-            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = ids[0]),
             FakeConnectionManager(network.id),
             messages = messages,
         )
+
         vm.state.first { it.buffer != null }
-        vm.onResume()
+        val target = checkNotNull(vm.initialTarget.first { it != null })
+        val snapshot = checkNotNull(vm.unreadEntrySnapshot.first { it != null })
+        assertEquals(recentId, target.expectedEventId)
+        assertTrue(snapshot.lowerBound)
+        assertEquals(HistoryWindowFocus.Recent, messages.countedFocuses.last())
+
+        vm.requestOlderHistory()
+        runCurrent()
+        assertEquals(HistoryWindowFocus.RecentPaging, vm.activeHistoryWindow.value.focus)
+        vm.requestOlderHistory()
+        assertEquals(HistoryWindowFocus.RecentPaging, vm.activeHistoryWindow.value.focus)
+    }
+
+    @Test
+    fun `cold ready entry anchors after connection catchup publishes the recent island`() = runTest {
+        val markerId = db.messageDao().insertAll(
+            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
+        ).single()
+        db.messageDao().insertAll(
+            listOf(message(channel.id, "stale unread", "m101", "alice").copy(serverTime = 101)),
+        )
+        val manager = FakeConnectionManager(
+            networkId = network.id,
+            state = IrcClientState.Ready("me", emptySet(), emptyMap()),
+            client = testClient(),
+            historyPending = setOf(network.id),
+        )
+        val messages = FakeMessageRepository()
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
+            manager,
+            messages = messages,
+        )
+        vm.state.first { it.buffer != null }
+        runCurrent()
+
+        assertNull(vm.initialTarget.value)
+
+        val recentId = db.messageDao().insertAll(
+            listOf(message(channel.id, "recent unread", "m900", "alice").copy(serverTime = 900)),
+        ).single()
+        messages.observedBounds.value = io.github.trevarj.motd.data.visibility.MessageWindowBounds(
+            lowerBoundary = TimelineAnchor(900, recentId),
+        )
+        messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(recentId))
+        manager.finishHistoryCatchUp(network.id)
 
         val target = checkNotNull(vm.initialTarget.first { it != null })
-        assertEquals(recent.id, target.expectedEventId)
-        assertEquals(
-            HistoryWindowFocus.Around(recent.serverTime, recent.id, recent.timelineOrder),
-            messages.countedFocuses.last(),
-        )
+        assertEquals(recentId, target.expectedEventId)
+        assertEquals(900L, target.serverTime)
     }
 
     @Test
@@ -1741,6 +1398,7 @@ class ChatViewModelTest {
         private val reactionError: Boolean = false,
         private val sendRejection: io.github.trevarj.motd.service.SendRejectionReason? = null,
         private val retryRejection: io.github.trevarj.motd.service.SendRejectionReason? = null,
+        historyPending: Set<Long> = emptySet(),
     ) : ConnectionManager {
         private var currentClient: IrcClient? = client
         override val connectionStates = MutableStateFlow(mapOf(networkId to state))
@@ -1748,6 +1406,7 @@ class ChatViewModelTest {
             io.github.trevarj.motd.service.ConnectionActivitySnapshot(
                 states = mapOf(networkId to state),
                 progressing = if (client != null) mapOf(networkId to true) else emptyMap(),
+                historyCatchUpPending = historyPending,
             ),
         )
         override val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> =
@@ -1764,6 +1423,12 @@ class ChatViewModelTest {
 
         fun replaceClient(client: IrcClient?) {
             currentClient = client
+        }
+
+        fun finishHistoryCatchUp(networkId: Long) {
+            connectionActivity.value = connectionActivity.value.copy(
+                historyCatchUpPending = connectionActivity.value.historyCatchUpPending - networkId,
+            )
         }
 
         fun publishState(
@@ -1834,13 +1499,11 @@ class ChatViewModelTest {
     }
 
     private class FakeHistoryResyncController(
-        private val onPrepare: suspend (Int) -> HistoryResyncState = { HistoryResyncState.UpToDate },
         private val onReconcile: suspend (Int) -> Unit = {},
     ) : HistoryResyncController {
         private val states = MutableStateFlow<HistoryResyncState>(HistoryResyncState.Idle)
         private val syncStatuses = MutableStateFlow<HistorySyncStatus>(HistorySyncStatus.Idle)
         val reconciledBuffers = mutableListOf<Long>()
-        val preparedBuffers = mutableListOf<Long>()
         val pendingReconciledBuffers = mutableListOf<Long>()
 
         override fun state(bufferId: Long): Flow<HistoryResyncState> = states
@@ -1865,17 +1528,6 @@ class ChatViewModelTest {
             reconciledBuffers += buffer.id
             onReconcile(reconciledBuffers.size)
             return HistoryResyncState.UpToDate
-        }
-
-        override suspend fun prepareUnreadWindow(
-            buffer: BufferEntity,
-            marker: TimelineAnchor,
-            client: IrcClient,
-            isCurrent: () -> Boolean,
-        ): HistoryResyncState {
-            check(isCurrent())
-            preparedBuffers += buffer.id
-            return onPrepare(preparedBuffers.size)
         }
 
         override suspend fun reconcilePendingMessage(
@@ -1916,6 +1568,8 @@ class ChatViewModelTest {
         private val events: List<MessageEntity> = emptyList(),
         private val newerCount: Int = 0,
         private val recentNewerCount: Int = newerCount,
+        private val windowBounds: io.github.trevarj.motd.data.visibility.MessageWindowBounds =
+            io.github.trevarj.motd.data.visibility.MessageWindowBounds(),
     ) : MessageRepository {
         val msgid = MutableStateFlow<String?>(null)
         val deletedIds = mutableListOf<Long>()
@@ -1924,7 +1578,7 @@ class ChatViewModelTest {
         var resolvedById: MessageEntity? = null
         val countedFocuses = mutableListOf<HistoryWindowFocus>()
         var reactionRows: List<ReactionEntity> = emptyList()
-        val observedBounds = MutableStateFlow(io.github.trevarj.motd.data.visibility.MessageWindowBounds())
+        val observedBounds = MutableStateFlow(windowBounds)
         var blockedMsgid: String? = null
         val blockedResolutionStarted = CompletableDeferred<Unit>()
         private val blockedResolutionRelease = CompletableDeferred<Unit>()
@@ -1962,8 +1616,12 @@ class ChatViewModelTest {
             focus: HistoryWindowFocus,
         ): Int {
             countedFocuses += focus
-            return if (focus == HistoryWindowFocus.Recent) recentNewerCount else newerCount
+            return if (focus is HistoryWindowFocus.Around) newerCount else recentNewerCount
         }
+        override suspend fun historyWindowBounds(
+            bufferId: Long,
+            focus: HistoryWindowFocus,
+        ) = observedBounds.value
         override suspend fun deleteMessage(id: Long) { deletedIds += id }
         override fun observeHistoryWindowBounds(
             bufferId: Long,

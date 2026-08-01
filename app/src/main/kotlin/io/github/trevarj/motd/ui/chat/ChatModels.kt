@@ -4,6 +4,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.visibility.JOIN_PART_QUIT_KINDS
 import io.github.trevarj.motd.data.visibility.CONVERSATION_KINDS
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
@@ -37,6 +38,13 @@ typealias MessageFilterSpec = MessageVisibilitySpec
 data class ActiveHistoryWindow(
     val focus: HistoryWindowFocus = HistoryWindowFocus.Recent,
     val bounds: MessageWindowBounds = MessageWindowBounds(),
+)
+
+/** Frozen normal-entry boundary; [lowerBound] means older unread rows are not loaded yet. */
+data class UnreadEntrySnapshot(
+    val marker: TimelineAnchor,
+    val loadedCount: Int,
+    val lowerBound: Boolean,
 )
 
 /** Match a stored actor using its persisted account/casemapped identity, never display spelling. */
@@ -482,6 +490,7 @@ internal fun handleChatUiEventResult(
 sealed interface ChatHistoryUiState {
     data object Hidden : ChatHistoryUiState
     data object Loading : ChatHistoryUiState
+    data object OlderAvailable : ChatHistoryUiState
     data object Offline : ChatHistoryUiState
     data object Negotiating : ChatHistoryUiState
     data object Unsupported : ChatHistoryUiState
@@ -497,6 +506,7 @@ internal fun chatHistoryUiState(
     availability: HistoryAvailability,
     append: LoadState,
     historyComplete: Boolean,
+    olderPagingAuthorized: Boolean = true,
 ): ChatHistoryUiState {
     if (bufferType == null || bufferType == BufferType.SERVER) return ChatHistoryUiState.Hidden
     // A final capability decision supersedes a stale mediator error/loading state.
@@ -515,7 +525,11 @@ internal fun chatHistoryUiState(
         HistoryAvailability.Unsupported -> ChatHistoryUiState.Unsupported
         HistoryAvailability.NegotiatingOrOffline -> historyUnavailableState(connectionState)
         is HistoryAvailability.Ready -> if (append.endOfPaginationReached) {
-            ChatHistoryUiState.Incomplete()
+            if (olderPagingAuthorized) {
+                ChatHistoryUiState.Incomplete()
+            } else {
+                ChatHistoryUiState.OlderAvailable
+            }
         } else {
             ChatHistoryUiState.Hidden
         }

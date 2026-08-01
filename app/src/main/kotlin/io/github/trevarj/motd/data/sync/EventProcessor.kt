@@ -2391,9 +2391,13 @@ class EventProcessor @Inject constructor(
         val ts = e.timestamp ?: return
         val st = stateFor(networkId)
         val bufferId = existingRoom(networkId, e.target, st)?.id ?: return
-        bufferDao.advanceReadMarker(bufferId, ts)
         val localAnchor = io.github.trevarj.motd.data.db.TimelineAnchor(ts, Long.MAX_VALUE)
-        bufferDao.advanceLocalReadAnchor(bufferId, localAnchor.serverTime, localAnchor.eventId)
+        // Publish the server marker and its effective local anchor atomically. Entry gating must
+        // never observe the wire marker advanced while the unread-query anchor is still stale.
+        db.withTransaction {
+            bufferDao.advanceReadMarker(bufferId, ts)
+            bufferDao.advanceLocalReadAnchor(bufferId, localAnchor.serverTime, localAnchor.eventId)
+        }
         notifier.onRead(bufferId, localAnchor)
         AutoFollowTrace.record("wire_markread_in", bufferId) { "marker=$ts" }
     }

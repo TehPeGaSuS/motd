@@ -174,6 +174,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.client.HistoryAvailability
+import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistoryResyncState
@@ -356,7 +357,7 @@ fun ChatScreen(
     val entryPositionSettled by viewModel.entryPositionSettled.collectAsStateWithLifecycle()
     val entryMessageUnavailable by viewModel.entryMessageUnavailable.collectAsStateWithLifecycle()
     // Read marker frozen on entry so the "New messages" divider doesn't flash away (plans/15 #2).
-    val readMarkerSnapshot by viewModel.readMarkerSnapshot.collectAsStateWithLifecycle()
+    val unreadEntrySnapshot by viewModel.unreadEntrySnapshot.collectAsStateWithLifecycle()
     // Live read marker drives the FAB unread badge so it clears as messages are read (not on exit).
     val localReadAnchor by viewModel.localReadAnchor.collectAsStateWithLifecycle()
     val rawNewestAnchor by viewModel.rawNewestAnchor.collectAsStateWithLifecycle()
@@ -407,7 +408,7 @@ fun ChatScreen(
         memberNicks = memberNicks,
         knownNicks = knownNicks,
         identityRules = identityRules,
-        readMarkerSnapshot = readMarkerSnapshot,
+        unreadEntrySnapshot = unreadEntrySnapshot,
         readMarkerLive = localReadAnchor,
         rawNewestAnchor = rawNewestAnchor,
         onMarkRead = viewModel::markRead,
@@ -479,6 +480,7 @@ fun ChatScreen(
         onJumpHandled = viewModel::onJumpHandled,
         onInitialPositionHandled = viewModel::onInitialPositionHandled,
         onFocusRecentHistory = viewModel::focusRecentHistory,
+        onRequestOlderHistory = viewModel::requestOlderHistory,
         onFocusRecentMention = viewModel::focusRecentMention,
         onInitialPositionUnresolved = viewModel::onInitialPositionUnresolved,
         onScrollPositionChanged = viewModel::saveScrollPosition,
@@ -614,7 +616,7 @@ fun ChatContent(
     visibleReplyPrefix: Boolean = false,
     showImages: Boolean = true,
     showLinkPreviews: Boolean = true,
-    readMarkerSnapshot: io.github.trevarj.motd.data.db.TimelineAnchor? = null,
+    unreadEntrySnapshot: UnreadEntrySnapshot? = null,
     // Live buffer read marker (advances with markRead); drives the FAB unread badge count.
     readMarkerLive: io.github.trevarj.motd.data.db.TimelineAnchor? = null,
     rawNewestAnchor: io.github.trevarj.motd.data.db.TimelineAnchor? = null,
@@ -639,6 +641,7 @@ fun ChatContent(
     onJumpHandled: (Long) -> Unit = {},
     onInitialPositionHandled: () -> Unit = {},
     onFocusRecentHistory: () -> Unit = {},
+    onRequestOlderHistory: () -> Unit = {},
     onFocusRecentMention: (ChatPositionTarget) -> Unit = {},
     onInitialPositionUnresolved: () -> Unit = {},
     onScrollPositionChanged: (ChatScrollPosition) -> Unit = {},
@@ -691,7 +694,15 @@ fun ChatContent(
         availability = historyAvailability,
         append = items.loadState.append,
         historyComplete = state.buffer?.historyComplete == true,
+        olderPagingAuthorized = activeHistoryWindow.focus != HistoryWindowFocus.Recent,
     )
+    val unreadEntryLabel = unreadEntrySnapshot?.let { snapshot ->
+        pluralStringResource(
+            R.plurals.chat_new_messages_count,
+            snapshot.loadedCount,
+            if (snapshot.lowerBound) "${snapshot.loadedCount}+" else snapshot.loadedCount.toString(),
+        )
+    }
     val newerHistoryLoad = items.loadState.prepend
     val timelineHistoryStatus = when (newerHistoryLoad) {
         LoadState.Loading -> HistorySyncStatus.Syncing
@@ -1539,7 +1550,9 @@ fun ChatContent(
                         conversationName = state.buffer?.displayName,
                         directMessage = state.buffer?.type == BufferType.QUERY,
                         // Frozen read-marker so the "New messages" divider stays put (plans/15 #2).
-                        readMarkerTime = readMarkerSnapshot,
+                        readMarkerTime = unreadEntrySnapshot?.marker,
+                        readMarkerLabel = unreadEntryLabel,
+                        onOlderHistoryRequested = onRequestOlderHistory,
                         reactionChips = reactionChips,
                         replyPreview = replyPreview,
                         onReplyPreviewClick = onReplyPreviewClick,

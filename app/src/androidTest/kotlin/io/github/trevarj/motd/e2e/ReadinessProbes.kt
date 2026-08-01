@@ -10,8 +10,12 @@ import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistorySyncStatus
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeout
 
 class HistorySyncProbe(
@@ -173,6 +177,46 @@ class MessageRunProbe(
         milestones.record("history_run_timeout", "buffer=$bufferId count=$minimumCount..$maximumCount")
         throw AssertionError(
             "bounded recent history rows timed out for buffer=$bufferId count=$minimumCount..$maximumCount",
+            timeout,
+        )
+    }
+
+    /** Waits for the bounded fixture window to stop growing before validating its size. */
+    @OptIn(FlowPreview::class)
+    suspend fun awaitStableRecentRows(
+        token: String,
+        bufferId: Long,
+        minimumCount: Int,
+        maximumCount: Int,
+        expectedNewestOrdinal: Int,
+        requiredText: String,
+        excludedText: String,
+        stableMs: Long = 1_500,
+        timeoutMs: Long = 45_000,
+    ): List<MessageEntity> = try {
+        withTimeout(timeoutMs) {
+            search.search(token, bufferId)
+                .map { hits ->
+                    hits.map { it.message }.filter { it.text.startsWith("$token row") }
+                }
+                .distinctUntilChangedBy { rows -> rows.map { it.id } }
+                .debounce(stableMs)
+                .first { rows -> rows.any { it.text == requiredText } }
+                .also { rows ->
+                    check(rows.size in minimumCount..maximumCount) {
+                        "settled recent history count ${rows.size} is outside $minimumCount..$maximumCount"
+                    }
+                    check(rows.none { it.text == excludedText }) {
+                        "settled recent history unexpectedly contains $excludedText"
+                    }
+                    validateRows(token, bufferId, rows, expectedNewestOrdinal)
+                    milestones.record("history_run_stable", "buffer=$bufferId count=${rows.size}")
+                }
+        }
+    } catch (timeout: TimeoutCancellationException) {
+        milestones.record("history_run_stable_timeout", "buffer=$bufferId count=$minimumCount..$maximumCount")
+        throw AssertionError(
+            "settled recent history rows timed out for buffer=$bufferId count=$minimumCount..$maximumCount",
             timeout,
         )
     }

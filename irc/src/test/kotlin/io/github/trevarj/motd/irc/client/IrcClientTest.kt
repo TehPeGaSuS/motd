@@ -764,10 +764,12 @@ class IrcClientTest {
         runCurrent()
         // We should REQ the newly advertised cap.
         assertTrue(ft.sent.any { it.startsWith("CAP REQ") && it.contains("draft/chathistory") })
+        assertTrue("draft/chathistory" in client.pendingFeatureCaps.value)
 
         ft.feed(":srv CAP motd ACK :draft/chathistory")
         runCurrent()
         assertTrue(client.hasCap("draft/chathistory"))
+        assertTrue(client.pendingFeatureCaps.value.isEmpty())
         job.cancel()
 
         assertTrue(collected.any { it is IrcEvent.CapsChanged && it.added.contains("draft/chathistory") })
@@ -868,6 +870,7 @@ class IrcClientTest {
         assertTrue(deferredRequests.none { it == "CAP REQ :message-tags" })
         assertTrue(deferredRequests.none { it == "CAP REQ :draft/chathistory" })
         assertTrue(deferredRequests.contains("CAP REQ :draft/read-marker"))
+        assertTrue("draft/read-marker" in client.pendingFeatureCaps.value)
 
         for (request in deferredRequests) {
             ft.feed(":srv CAP motd ACK :${request.substringAfter("CAP REQ :")}")
@@ -876,6 +879,7 @@ class IrcClientTest {
 
         val ready = client.state.value as IrcClientState.Ready
         assertTrue(ready.caps.contains("message-tags"))
+        assertTrue(client.pendingFeatureCaps.value.isEmpty())
     }
 
     @Test
@@ -909,6 +913,7 @@ class IrcClientTest {
             .filter { it.startsWith("CAP REQ :") }
             .drop(1)
         assertTrue(deferredRequests.any { it.contains("draft/read-marker") })
+        assertTrue(staleCap in client.pendingFeatureCaps.value)
         for (request in deferredRequests) {
             val caps = request.substringAfter("CAP REQ :")
             val reply = if (caps.split(' ').contains(staleCap)) "NAK" else "ACK"
@@ -918,6 +923,7 @@ class IrcClientTest {
 
         assertTrue(client.hasCap("draft/chathistory"))
         assertTrue(client.hasCap("draft/read-marker"))
+        assertTrue(client.pendingFeatureCaps.value.isEmpty())
     }
 
     @Test

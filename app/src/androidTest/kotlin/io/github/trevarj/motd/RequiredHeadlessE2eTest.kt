@@ -118,7 +118,7 @@ class RequiredHeadlessE2eTest {
                 observed.await()
             }
         }
-        TimelineRobot(compose).assertMessage(token)
+        TimelineRobot(compose).assertMessageVisible(canonical.tag())
         runBlocking {
             bootstrap.seams.connections().disconnect(network.childId)
             bootstrap.seams.connections().connect(network.childId)
@@ -135,7 +135,7 @@ class RequiredHeadlessE2eTest {
         }
         val after = runBlocking { probe.awaitCanonical(token, bufferId) }
         assertEquals(canonical.id, after.id)
-        TimelineRobot(compose).assertMessage(token)
+        TimelineRobot(compose).assertMessageVisible(after.tag())
 
         val fixture = File(
             InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,
@@ -211,9 +211,10 @@ class RequiredHeadlessE2eTest {
                 historySettled.await()
             }
         }
-        // CHATHISTORY caps primary events at 150; chat-only search omits replayed state events.
+        // Automatic CHATHISTORY fetches one 50-event newest page; chat-only search omits the
+        // replayed state event in that page.
         val recentWindow = runBlocking {
-            runProbe.awaitRecentRows(
+            runProbe.awaitStableRecentRows(
                 token = token,
                 bufferId = bufferId,
                 minimumCount = 49,
@@ -224,6 +225,9 @@ class RequiredHeadlessE2eTest {
             )
         }
         val newest = recentWindow.single { it.text == "$token row260" }
+        val orderedRecent = recentWindow.sortedBy { it.anchor() }
+        val oldestLoaded = orderedRecent.first()
+        val secondLoaded = orderedRecent[1]
         assertTrue(recentWindow.none { it.text == "$token row001" })
         assertMarkerAtLeast(bootstrap, bufferId, marker)
         val roomBeforeEntry = runBlocking {
@@ -245,25 +249,82 @@ class RequiredHeadlessE2eTest {
         assertTrue(boundedRow.unreadCountIncomplete)
 
         ChatListRobot(compose).open(bufferId)
-        val (firstUnread, secondUnread) = runBlocking {
-            withTimeout(45_000) {
-                val first = lifecycle.awaitCanonicalFromAnySender("$token row001", bufferId, timeoutMs = 45_000)
-                first to lifecycle.awaitCanonicalFromAnySender("$token row002", bufferId, timeoutMs = 45_000)
-            }
-        }
-        assertTrue(markerAnchor.serverTime < firstUnread.serverTime)
-        assertTrue(markerAnchor < firstUnread.anchor())
-        assertTrue(firstUnread.anchor() < newest.anchor())
         val timeline = TimelineRobot(compose)
-        timeline.assertUnreadEntry(firstUnread.tag(), secondUnread.tag())
+        timeline.assertUnreadEntry(
+            oldestLoaded.tag(),
+            secondLoaded.tag(),
+            expectedLabel = "49+ new messages",
+        )
         compose.waitForIdle()
         assertMarkerAtLeast(bootstrap, bufferId, marker)
+        runBlocking {
+            runProbe.awaitStableRecentRows(
+                token = token,
+                bufferId = bufferId,
+                minimumCount = 49,
+                maximumCount = 49,
+                expectedNewestOrdinal = 260,
+                requiredText = "$token row260",
+                excludedText = "$token row001",
+            )
+        }
 
-        // Reopening before marking read must reproduce the same frozen divider and viewport.
+        // Reopening before any older-history gesture reproduces the same bounded entry.
         scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         ChatListRobot(compose).apply { awaitTag("chatlist_row_$bufferId"); open(bufferId) }
-        timeline.assertUnreadEntry(firstUnread.tag(), secondUnread.tag())
+        timeline.assertUnreadEntry(
+            oldestLoaded.tag(),
+            secondLoaded.tag(),
+            expectedLabel = "49+ new messages",
+        )
         assertMarkerAtLeast(bootstrap, bufferId, marker)
+        runBlocking {
+            runProbe.awaitStableRecentRows(
+                token = token,
+                bufferId = bufferId,
+                minimumCount = 49,
+                maximumCount = 49,
+                expectedNewestOrdinal = 260,
+                requiredText = "$token row260",
+                excludedText = "$token row001",
+            )
+        }
+
+        // The first deliberate older gesture authorizes one bounded BEFORE page, not the backlog.
+        timeline.requestOlderHistory()
+        runBlocking {
+            runProbe.awaitStableRecentRows(
+                token = token,
+                bufferId = bufferId,
+                minimumCount = 50,
+                maximumCount = 99,
+                expectedNewestOrdinal = 260,
+                requiredText = "$token row211",
+                excludedText = "$token row001",
+            )
+        }
+        // Reaching the newly loaded boundary authorizes one more page, still not the full run.
+        timeline.scrollOlderUntil("$token row162")
+        runBlocking {
+            runProbe.awaitStableRecentRows(
+                token = token,
+                bufferId = bufferId,
+                minimumCount = 100,
+                maximumCount = 149,
+                expectedNewestOrdinal = 260,
+                requiredText = "$token row112",
+                excludedText = "$token row001",
+            )
+        }
+        timeline.scrollOlderUntil("$token row001")
+        val (firstUnread, secondUnread) = runBlocking {
+            lifecycle.awaitCanonicalFromAnySender("$token row001", bufferId) to
+                lifecycle.awaitCanonicalFromAnySender("$token row002", bufferId)
+        }
+        assertTrue(markerAnchor < firstUnread.anchor())
+        assertTrue(firstUnread.anchor() < secondUnread.anchor())
+        assertTrue(secondUnread.anchor() < newest.anchor())
+        timeline.assertMessageVisible(firstUnread.tag())
 
         timeline.scrollToBottom()
         runBlocking {

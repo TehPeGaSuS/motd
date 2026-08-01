@@ -553,6 +553,14 @@ class ChatModelsTest {
         assertTrue(showsSender(spacedLater, spaced))
     }
 
+    @Test fun `older history requires a user drag at the loaded boundary`() {
+        assertTrue(shouldRequestOlderHistory(12f, userInput = true, 50, 49))
+        assertFalse(shouldRequestOlderHistory(12f, userInput = false, 50, 49))
+        assertFalse(shouldRequestOlderHistory(-12f, userInput = true, 50, 49))
+        assertFalse(shouldRequestOlderHistory(12f, userInput = true, 50, 48))
+        assertFalse(shouldRequestOlderHistory(12f, userInput = true, 0, null))
+    }
+
     @Test fun `bubble gap tracks grouping and density`() {
         val comfortable = spacingFor(LayoutDensity.COMFORTABLE)
         val compact = spacingFor(LayoutDensity.COMPACT)
@@ -623,6 +631,17 @@ class ChatModelsTest {
         val ended = LoadState.NotLoading(endOfPaginationReached = true)
 
         assertEquals(
+            ChatHistoryUiState.OlderAvailable,
+            chatHistoryUiState(
+                BufferType.CHANNEL,
+                IrcClientState.Ready("me", emptySet(), emptyMap()),
+                ready,
+                ended,
+                historyComplete = false,
+                olderPagingAuthorized = false,
+            ),
+        )
+        assertEquals(
             ChatHistoryUiState.Incomplete(),
             chatHistoryUiState(
                 BufferType.CHANNEL,
@@ -630,6 +649,7 @@ class ChatModelsTest {
                 ready,
                 ended,
                 historyComplete = false,
+                olderPagingAuthorized = true,
             ),
         )
         assertEquals(

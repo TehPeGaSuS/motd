@@ -135,14 +135,6 @@ interface HistoryResyncController {
         client: IrcClient,
         isCurrent: () -> Boolean,
     ): HistoryResyncState
-
-    /** Fill the first page after a read marker when a durable gap can hide first unread. */
-    suspend fun prepareUnreadWindow(
-        buffer: BufferEntity,
-        marker: TimelineAnchor,
-        client: IrcClient,
-        isCurrent: () -> Boolean,
-    ): HistoryResyncState = HistoryResyncState.UpToDate
 }
 
 /**
@@ -294,176 +286,6 @@ class HistoryResyncCoordinator @Inject constructor(
         source = ClientHistorySource(client),
         isCurrent = isCurrent,
     )
-
-    override suspend fun prepareUnreadWindow(
-        buffer: BufferEntity,
-        marker: TimelineAnchor,
-        client: IrcClient,
-        isCurrent: () -> Boolean,
-    ): HistoryResyncState = prepareUnreadWindow(
-        networkId = buffer.networkId,
-        bufferId = buffer.id,
-        target = buffer.ircTarget,
-        marker = marker,
-        source = ClientHistorySource(client),
-        isCurrent = isCurrent,
-    )
-
-    internal suspend fun prepareUnreadWindow(
-        networkId: Long,
-        bufferId: Long,
-        target: String,
-        marker: TimelineAnchor,
-        source: HistorySource,
-        isCurrent: () -> Boolean = { true },
-    ): HistoryResyncState {
-        if (source.availability() !is HistoryAvailability.Ready || !isCurrent()) {
-            return historyUnavailable()
-        }
-        return try {
-            withNetworkLock(networkId) {
-                var roomId = db.bufferDao().canonicalId(bufferId) ?: bufferId
-                var inserted = 0
-                var previousBoundary: Boundary? = null
-                var gap = findHistoryGapContaining(roomId, marker)
-                val startsAfterMarker = gap == null
-                if (gap == null) gap = findFirstHistoryGapAfter(roomId, marker)
-                var directMarkerBoundary = if (gap == null) {
-                    db.bufferDao().observeById(roomId)?.takeIf { room ->
-                        !room.historyComplete && room.oldestFetchedTime?.let { it > marker.serverTime } == true
-                    }?.let {
-                        val markerMsgid = db.messageDao().byCanonicalId(marker.eventId)
-                            ?.takeIf { message -> message.bufferId == roomId }
-                            ?.msgid
-                        Boundary(
-                            msgid = markerMsgid,
-                            serverTime = marker.serverTime.minus(HISTORY_TIE_OVERLAP_MS)
-                                .coerceAtLeast(Instant.EPOCH.toEpochMilli()),
-                        )
-                    }
-                } else {
-                    null
-                }
-                while (true) {
-                    val currentGap = gap
-                    val boundary = directMarkerBoundary
-                        ?: currentGap?.let { Boundary(it.olderMsgid, it.olderServerTime) }
-                        ?: break
-                    if (boundary == previousBoundary) {
-                        return@withNetworkLock HistoryResyncState.Incomplete(
-                            inserted,
-                            "CHATHISTORY AFTER did not reach the read marker",
-                        )
-                    }
-                    previousBoundary = boundary
-                    val requested = requestAtBoundary(
-                        source = source,
-                        subcommand = ChatHistoryRequest.Subcommand.AFTER,
-                        target = target,
-                        boundary = boundary,
-                        secondBoundary = null,
-                        limit = minOf(source.pageLimit(), RECENT_PAGE_SIZE),
-                        msgidAllowed = source.supportsReference(HistoryReferenceType.MSGID),
-                    )
-                    if (requested == null) return@withNetworkLock HistoryResyncState.Incomplete(
-                        inserted,
-                        "CHATHISTORY AFTER has no usable read-marker boundary",
-                    )
-                    if (!isCurrent()) throw StaleConnectionException()
-                    val page = requested.response.boundedToRequest(requested.request)
-                    val persisted = ingestResult(
-                        networkId,
-                        roomId,
-                        requested.request,
-                        page,
-                        historyGapId = currentGap?.id,
-                    )
-                    inserted += persisted.inserted
-                    roomId = persisted.roomId
-                    if (
-                        page.newest?.msgid == null &&
-                        page.primaryMessageCount >= minOf(source.pageLimit(), RECENT_PAGE_SIZE)
-                    ) {
-                        return@withNetworkLock HistoryResyncState.Incomplete(
-                            inserted,
-                            "CHATHISTORY timestamp boundary is saturated before the read marker",
-                        )
-                    }
-                    // When a state event such as QUIT sits immediately after the read marker, the
-                    // missing interval starts after rather than around the marker. One bounded page
-                    // exposes the first unread chat row; older traversal remains scroll-driven.
-                    if (startsAfterMarker) break
-                    directMarkerBoundary = null
-                    gap = findHistoryGapContaining(roomId, marker)
-                }
-                if (inserted > 0) HistoryResyncState.Updated(inserted) else HistoryResyncState.UpToDate
-            }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: StaleConnectionException) {
-            staleConnection()
-        } catch (error: Exception) {
-            HistoryResyncState.Failed(error.message ?: "First-unread history request failed")
-        }
-    }
-
-    private suspend fun findHistoryGapContaining(
-        roomId: Long,
-        marker: TimelineAnchor,
-    ): io.github.trevarj.motd.data.db.HistoryGapEntity? {
-        for (gap in db.historyGapDao().forRoom(roomId)) {
-            if (
-                gap.recoverable &&
-                historyGapOlderAnchor(roomId, gap) <= marker &&
-                historyGapNewerAnchor(roomId, gap) > marker
-            ) {
-                return gap
-            }
-        }
-        return null
-    }
-
-    private suspend fun findFirstHistoryGapAfter(
-        roomId: Long,
-        marker: TimelineAnchor,
-    ): io.github.trevarj.motd.data.db.HistoryGapEntity? {
-        var earliest: Pair<io.github.trevarj.motd.data.db.HistoryGapEntity, TimelineAnchor>? = null
-        for (gap in db.historyGapDao().forRoom(roomId)) {
-            if (!gap.recoverable || historyGapNewerAnchor(roomId, gap) <= marker) continue
-            val older = historyGapOlderAnchor(roomId, gap)
-            if (older <= marker || earliest?.second?.let { older >= it } == true) continue
-            earliest = gap to older
-        }
-        return earliest?.first
-    }
-
-    private suspend fun historyGapOlderAnchor(
-        roomId: Long,
-        gap: io.github.trevarj.motd.data.db.HistoryGapEntity,
-    ): TimelineAnchor = gap.olderMsgid?.let { db.messageDao().byMsgid(roomId, it) }
-        ?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
-        ?: gap.olderEventId?.let { id ->
-            db.messageDao().byCanonicalId(id)?.takeIf { it.bufferId == roomId }
-                ?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
-        }
-        ?: gap.olderEventId?.let {
-            TimelineAnchor(gap.olderServerTime, it, gap.olderTimelineOrder ?: it)
-        }
-        ?: TimelineAnchor(gap.olderServerTime, Long.MIN_VALUE, Long.MIN_VALUE)
-
-    private suspend fun historyGapNewerAnchor(
-        roomId: Long,
-        gap: io.github.trevarj.motd.data.db.HistoryGapEntity,
-    ): TimelineAnchor = gap.newerMsgid?.let { db.messageDao().byMsgid(roomId, it) }
-        ?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
-        ?: gap.newerEventId?.let { id ->
-            db.messageDao().byCanonicalId(id)?.takeIf { it.bufferId == roomId }
-                ?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
-        }
-        ?: gap.newerEventId?.let {
-            TimelineAnchor(gap.newerServerTime, it, gap.newerTimelineOrder ?: it)
-        }
-        ?: TimelineAnchor(gap.newerServerTime, Long.MAX_VALUE, Long.MAX_VALUE)
 
     /**
      * A normal reconciliation owns the coarse per-network gate while it discovers targets and
@@ -1270,16 +1092,15 @@ class HistoryResyncCoordinator @Inject constructor(
                     msgidAllowed = source.supportsReference(HistoryReferenceType.MSGID),
                 )
             }
-        var request = boundedLatest?.request ?: ChatHistoryRequest(
+        val request = boundedLatest?.request ?: ChatHistoryRequest(
             subcommand = ChatHistoryRequest.Subcommand.LATEST,
             target = target,
             limit = requestLimit,
         )
-        var page = (boundedLatest?.response ?: request(source, request)).boundedToRequest(request)
+        val page = (boundedLatest?.response ?: request(source, request)).boundedToRequest(request)
         if (!isCurrent()) throw StaleConnectionException()
-        var inserted = ingest(networkId, bufferId, request, page)
-        var highWater = page.highWater()
-        var fetchedPrimary = page.primaryMessageCount
+        val inserted = ingest(networkId, bufferId, request, page)
+        val highWater = page.highWater()
         if (page.isTerminalPage()) return WorkResult(highWater = highWater, inserted = inserted)
         if (page.oldest?.msgid == null && page.primaryMessageCount >= request.limit) {
             return WorkResult(
@@ -1289,59 +1110,15 @@ class HistoryResyncCoordinator @Inject constructor(
             )
         }
 
-        var boundary = page.directionalBoundary(ChatHistoryRequest.Subcommand.LATEST)?.toBoundary()
-            ?: return WorkResult(
+        if (page.directionalBoundary(ChatHistoryRequest.Subcommand.LATEST) == null) {
+            return WorkResult(
                 WorkStatus.Incomplete("CHATHISTORY LATEST returned no usable oldest boundary"),
                 highWater,
                 inserted,
             )
-        while (fetchedPrimary < RECENT_PRIMARY_MESSAGE_LIMIT) {
-            if (!isCurrent()) throw StaleConnectionException()
-            val next = requestAtBoundary(
-                source = source,
-                subcommand = ChatHistoryRequest.Subcommand.BEFORE,
-                target = target,
-                boundary = boundary,
-                secondBoundary = null,
-                limit = minOf(requestLimit, RECENT_PRIMARY_MESSAGE_LIMIT - fetchedPrimary),
-                msgidAllowed = source.supportsReference(HistoryReferenceType.MSGID),
-            ) ?: return WorkResult(
-                WorkStatus.Incomplete("CHATHISTORY BEFORE has no usable response boundary"),
-                highWater,
-                inserted,
-            )
-            request = next.request
-            page = next.response.boundedToRequest(request)
-            if (!isCurrent()) throw StaleConnectionException()
-            inserted += ingest(networkId, bufferId, request, page)
-            fetchedPrimary += page.primaryMessageCount
-            highWater = maxHighWater(highWater, page.highWater())
-            if (page.isTerminalPage()) {
-                return WorkResult(highWater = highWater, inserted = inserted)
-            }
-            if (page.oldest?.msgid == null && page.primaryMessageCount >= request.limit) {
-                return WorkResult(
-                    WorkStatus.Incomplete("CHATHISTORY timestamp boundary is saturated"),
-                    highWater,
-                    inserted,
-                )
-            }
-            val nextBoundary = page.directionalBoundary(ChatHistoryRequest.Subcommand.BEFORE)
-                ?.toBoundary()
-                ?: return WorkResult(
-                    WorkStatus.Incomplete("CHATHISTORY BEFORE returned no usable oldest boundary"),
-                    highWater,
-                    inserted,
-                )
-            if (nextBoundary == boundary) {
-                return WorkResult(
-                    WorkStatus.Incomplete("CHATHISTORY BEFORE pagination did not advance"),
-                    highWater,
-                    inserted,
-                )
-            }
-            boundary = nextBoundary
         }
+        // ingest persisted this non-terminal oldest boundary as a durable gap. Automatic reconnect
+        // stops here; only user-authorized paging or manual refresh may traverse it with BEFORE.
         return WorkResult(highWater = highWater, inserted = inserted)
     }
 
@@ -2225,7 +2002,6 @@ class HistoryResyncCoordinator @Inject constructor(
         const val CHATHISTORY_CAP = "draft/chathistory"
         const val PAGE_LIMIT = 100
         const val RECENT_PAGE_SIZE = 50
-        const val RECENT_PRIMARY_MESSAGE_LIMIT = 150
         const val REQUEST_TIMEOUT_MS = 35_000L
         const val PENDING_MESSAGE_TIMEOUT_MS = 65_000L
         const val TARGETS_FUZZ_MS = 10_000L

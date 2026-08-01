@@ -87,6 +87,7 @@ data class ConnectionActivitySnapshot(
     val states: Map<Long, IrcClientState> = emptyMap(),
     val progressing: Map<Long, Boolean> = emptyMap(),
     val initializationComplete: Boolean = true,
+    val historyCatchUpPending: Set<Long> = emptySet(),
 )
 
 private val EMPTY_CONNECTION_ACTIVITY = MutableStateFlow(ConnectionActivitySnapshot())

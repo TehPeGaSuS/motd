@@ -57,6 +57,7 @@ internal class ConnectionRegistry(
             val generation: Long,
             val fingerprint: String,
             val state: IrcClientState,
+            val result: CompletableDeferred<Unit>,
         ) : Command
         data class ActorConnection(
             val networkId: Long,
@@ -64,6 +65,11 @@ internal class ConnectionRegistry(
             val connection: ManagedConnection?,
         ) : Command
         data class ActorStopped(val networkId: Long, val generation: Long) : Command
+        data class HistoryCatchUpFinished(
+            val networkId: Long,
+            val generation: Long,
+            val result: CompletableDeferred<Unit>,
+        ) : Command
         data class Callback(
             val networkId: Long,
             val generation: Long,
@@ -95,6 +101,7 @@ internal class ConnectionRegistry(
     private val actors = LinkedHashMap<Long, OwnedActor>()
     private val states = LinkedHashMap<Long, IrcClientState>()
     private val terminalFingerprints = HashMap<Long, String>()
+    private val historyCatchUpGenerations = HashMap<Long, Long>()
     private val observerJobs = mutableListOf<Job>()
     private val pendingEchoJobs = HashMap<String, Pair<Long, Job>>()
     private data class CallbackJob(
@@ -143,9 +150,8 @@ internal class ConnectionRegistry(
 
     suspend fun disconnect(networkId: Long) = request<Unit> { Command.Disconnect(networkId, it) }
 
-    fun actorState(networkId: Long, generation: Long, fingerprint: String, state: IrcClientState) {
-        commands.trySend(Command.ActorState(networkId, generation, fingerprint, state))
-    }
+    suspend fun actorState(networkId: Long, generation: Long, fingerprint: String, state: IrcClientState) =
+        request<Unit> { Command.ActorState(networkId, generation, fingerprint, state, it) }
 
     fun actorConnection(networkId: Long, generation: Long, connection: ManagedConnection?) {
         commands.trySend(Command.ActorConnection(networkId, generation, connection))
@@ -154,6 +160,9 @@ internal class ConnectionRegistry(
     fun actorStopped(networkId: Long, generation: Long) {
         commands.trySend(Command.ActorStopped(networkId, generation))
     }
+
+    suspend fun historyCatchUpFinished(networkId: Long, generation: Long) =
+        request<Unit> { Command.HistoryCatchUpFinished(networkId, generation, it) }
 
     suspend fun runIfCurrent(networkId: Long, generation: Long, block: suspend () -> Unit): Boolean =
         request { Command.Callback(networkId, generation, block, it) }
@@ -218,6 +227,7 @@ internal class ConnectionRegistry(
                 actors.clear()
                 states.clear()
                 terminalFingerprints.clear()
+                historyCatchUpGenerations.clear()
                 publish()
                 command.result.complete(cleanupJobs)
             }
@@ -264,9 +274,17 @@ internal class ConnectionRegistry(
                     ) {
                         terminalFingerprints[command.networkId] = command.fingerprint
                     }
+                    val prior = states[command.networkId]
+                    when {
+                        command.state is IrcClientState.Ready && prior !is IrcClientState.Ready ->
+                            historyCatchUpGenerations[command.networkId] = command.generation
+                        command.state !is IrcClientState.Ready ->
+                            historyCatchUpGenerations.remove(command.networkId)
+                    }
                     states[command.networkId] = command.state
                     publish()
                 }
+                command.result.complete(Unit)
             }
             is Command.ActorConnection -> {
                 if (generations.isCurrent(command.networkId, command.generation)) {
@@ -280,8 +298,16 @@ internal class ConnectionRegistry(
                         it.connection = null
                         it.isAlive = false
                     }
+                    historyCatchUpGenerations.remove(command.networkId)
                     publish()
                 }
+            }
+            is Command.HistoryCatchUpFinished -> {
+                if (historyCatchUpGenerations[command.networkId] == command.generation) {
+                    historyCatchUpGenerations.remove(command.networkId)
+                    publish()
+                }
+                command.result.complete(Unit)
             }
             is Command.Callback -> {
                 if (!generations.isCurrent(command.networkId, command.generation)) {
@@ -390,6 +416,7 @@ internal class ConnectionRegistry(
         // the actor is removed leaves an orphan in connectionStates forever: the drawer can show
         // a replacement network as Ready while the global banner still reports the stale actor.
         states.remove(networkId)
+        historyCatchUpGenerations.remove(networkId)
         if (clearTerminal) terminalFingerprints.remove(networkId)
     }
 
@@ -416,6 +443,7 @@ internal class ConnectionRegistry(
             states = immutableStates,
             progressing = actors.mapValues { (_, actor) -> actor.isAlive },
             initializationComplete = initialReconcileComplete,
+            historyCatchUpPending = historyCatchUpGenerations.keys.toSet(),
         )
         _states.value = immutableStates
     }

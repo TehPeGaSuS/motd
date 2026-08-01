@@ -3,6 +3,7 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.ui.chat.entryHistoryReady
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -73,6 +74,37 @@ class ConnectionRegistryTest {
         assertTrue(activity.progressing.getValue(1))
         assertEquals(IrcClientState.Connecting, activity.states.getValue(1))
         assertEquals(registry.connectionStates.value, activity.states)
+    }
+
+    @Test
+    fun historyCatchupReadinessStaysAtomicAcrossRecoverableReconnect() = runTest {
+        val registry = ConnectionRegistry(
+            backgroundScope,
+            actorFactory = { _, _ -> FakeActor() },
+            isConfigurationFailure = { false },
+        )
+        registry.beginStart()
+        registry.reconcile(listOf(network() to "fp"), setOf(1), emptySet())
+        val generation = registry.snapshot.value.actors.getValue(1).generation
+
+        registry.actorState(1, generation, "fp", IrcClientState.Ready("me", emptySet(), emptyMap()))
+        runCurrent()
+        assertFalse(entryHistoryReady(registry.connectionActivity.value, 1))
+
+        registry.actorState(1, generation, "fp", IrcClientState.Failed("retry", fatal = false))
+        runCurrent()
+        val retrying = registry.connectionActivity.value
+        assertTrue(retrying.states[1] is IrcClientState.Failed)
+        assertFalse(1 in retrying.historyCatchUpPending)
+        assertFalse(entryHistoryReady(retrying, 1))
+
+        registry.actorState(1, generation, "fp", IrcClientState.Ready("me", emptySet(), emptyMap()))
+        runCurrent()
+        assertFalse(entryHistoryReady(registry.connectionActivity.value, 1))
+
+        registry.historyCatchUpFinished(1, generation)
+        runCurrent()
+        assertTrue(entryHistoryReady(registry.connectionActivity.value, 1))
     }
 
     @Test

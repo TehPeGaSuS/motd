@@ -52,6 +52,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
@@ -216,6 +220,15 @@ fun bubbleGap(showSender: Boolean, hasOlder: Boolean, spacing: MotdSpacing): Dp 
     return if (showSender) spacing.bubbleBreakGap else spacing.bubbleBurstGap
 }
 
+/** A downward finger drag at the visual top of a reversed timeline asks for older history. */
+internal fun shouldRequestOlderHistory(
+    availableY: Float,
+    userInput: Boolean,
+    itemCount: Int,
+    lastVisibleIndex: Int?,
+): Boolean = userInput && availableY > 0f && itemCount > 0 &&
+    lastVisibleIndex != null && lastVisibleIndex >= itemCount - 1
+
 /**
  * Reverse-layout message list. Index 0 is the newest message (bottom). For each row we peek the
  * next (older) item to compute grouping, day separators, and the read-marker divider.
@@ -226,6 +239,7 @@ fun MessageList(
     listState: LazyListState,
     networkId: Long?,
     readMarkerTime: TimelineAnchor?,
+    readMarkerLabel: String? = null,
     onLongPress: (MessageEntity) -> Unit,
     onReply: (MessageEntity) -> Unit,
     // React to a message; the whole entity is passed so a still-pending own row (msgid == null) is
@@ -282,6 +296,7 @@ fun MessageList(
     onSenderClick: (String) -> Unit = {},
     onAcceptInvite: (Long) -> Unit = {},
     onDismissInvite: (Long) -> Unit = {},
+    onOlderHistoryRequested: () -> Unit = {},
 ) {
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
     // Keep the user's expanded JOIN/PART runs above the volatile Paging rows. A history sync may
@@ -291,13 +306,35 @@ fun MessageList(
     // a recycled row does not lose rich content halfway through a fling.
     val canStartNewRichContentWork = richContentReady && !scrolling
     val formatMessageTime = rememberMessageTimeFormatter()
+    val latestOlderHistoryRequest by rememberUpdatedState(onOlderHistoryRequested)
+    val olderHistoryConnection = remember(listState, items) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val lastVisible = listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index }
+                if (
+                    shouldRequestOlderHistory(
+                        availableY = available.y,
+                        userInput = source == NestedScrollSource.UserInput,
+                        itemCount = items.itemCount,
+                        lastVisibleIndex = lastVisible,
+                    )
+                ) {
+                    latestOlderHistoryRequest()
+                }
+                return Offset.Zero
+            }
+        }
+    }
     LazyColumn(
         state = listState,
         reverseLayout = true,
         // Retained rows can predate messages sent by earlier orchestrated journeys. Keep the
         // timeline addressable so the real-stack acceptance test can scroll to an imported row
         // instead of confusing an off-screen row with a missing one.
-        modifier = modifier.fillMaxSize().testTag("chat_timeline"),
+        modifier = modifier
+            .fillMaxSize()
+            .nestedScroll(olderHistoryConnection)
+            .testTag("chat_timeline"),
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
         // Stable keys stop paging invalidations (new message / echo confirm / page load) from
@@ -363,6 +400,7 @@ fun MessageList(
                         index = index,
                         newest = msg,
                         readMarkerTime = readMarkerTime,
+                        readMarkerLabel = readMarkerLabel,
                         expandedEventIds = expandedSystemEventIds,
                         onExpandedChange = { runIds, expanded ->
                             expandedSystemEventIds = updateExpandedSystemEvents(
@@ -387,6 +425,7 @@ fun MessageList(
                         msg = msg,
                         older = older,
                         readMarkerTime = readMarkerTime,
+                        readMarkerLabel = readMarkerLabel,
                         onExpand = { onToggleFool(msg.id) },
                     )
                 }
@@ -423,6 +462,7 @@ fun MessageList(
                         older = older,
                         formatTime = formatMessageTime,
                         readMarkerTime = readMarkerTime,
+                        readMarkerLabel = readMarkerLabel,
                         // An expanded fool row shows a small tap-to-re-collapse chip above its bubble so the
                         // toggle is bidirectional without stealing the bubble's long-press/link taps (#9).
                         onCollapseFool = if (isFool) ({ onToggleFool(msg.id) }) else null,
@@ -463,10 +503,14 @@ fun MessageList(
         // Append spinner / end-of-history / error affordances (plans/15 #27). This item sits at the
         // top of the reversed list, i.e. visually above the oldest message where APPEND loads more.
         item(key = "append-state", contentType = "loadstate") {
-            ChatHistoryFooter(historyUiState) {
-                onHistoryRetry()
-                items.retry()
-            }
+            ChatHistoryFooter(
+                state = historyUiState,
+                onLoadOlder = onOlderHistoryRequested,
+                onRetry = {
+                    onHistoryRetry()
+                    items.retry()
+                },
+            )
         }
     }
 }
@@ -807,6 +851,7 @@ private fun SystemEventRun(
     index: Int,
     newest: MessageEntity,
     readMarkerTime: TimelineAnchor?,
+    readMarkerLabel: String?,
     expandedEventIds: Set<Long>,
     onExpandedChange: (Collection<Long>, Boolean) -> Unit,
 ) {
@@ -840,7 +885,7 @@ private fun SystemEventRun(
     Column(modifier = Modifier.fillMaxWidth()) {
         if (showNewDivider) {
             NewMessagesDivider(
-                label = stringResource(R.string.chat_new_messages),
+                label = readMarkerLabel ?: stringResource(R.string.chat_new_messages),
                 modifier = Modifier.testTag("chat_read_marker_divider"),
             )
         }
@@ -906,6 +951,7 @@ private fun MessageRow(
     older: MessageEntity?,
     formatTime: (Long) -> String,
     readMarkerTime: TimelineAnchor?,
+    readMarkerLabel: String?,
     senderIsFriend: Boolean,
     reactions: List<ReactionChip>,
     knownNicks: Set<String>,
@@ -957,7 +1003,7 @@ private fun MessageRow(
 
     if (showNewDivider) {
         NewMessagesDivider(
-            label = stringResource(R.string.chat_new_messages),
+            label = readMarkerLabel ?: stringResource(R.string.chat_new_messages),
             modifier = Modifier.testTag("chat_read_marker_divider"),
         )
     }
@@ -1229,6 +1275,7 @@ private fun FoolPlaceholderRow(
     msg: MessageEntity,
     older: MessageEntity?,
     readMarkerTime: TimelineAnchor?,
+    readMarkerLabel: String?,
     onExpand: () -> Unit,
 ) {
     val showNewDivider = readMarkerTime != null &&
@@ -1243,7 +1290,7 @@ private fun FoolPlaceholderRow(
     Column(modifier = Modifier.fillMaxWidth()) {
         if (showNewDivider) {
             NewMessagesDivider(
-                label = stringResource(R.string.chat_new_messages),
+                label = readMarkerLabel ?: stringResource(R.string.chat_new_messages),
                 modifier = Modifier.testTag("chat_read_marker_divider"),
             )
         }
@@ -1307,20 +1354,38 @@ internal fun FoolCollapseChip(sender: String, tag: String, onCollapse: () -> Uni
 }
 
 const val CHAT_HISTORY_RETRY_TAG = "chat_history_retry"
+const val CHAT_HISTORY_LOAD_OLDER_TAG = "chat_history_load_older"
+const val CHAT_HISTORY_LOADING_TAG = "chat_history_loading"
 
 /** Only persisted protocol completion may render the beginning-of-history claim. */
 @Composable
-fun ChatHistoryFooter(state: ChatHistoryUiState, onRetry: () -> Unit) {
+fun ChatHistoryFooter(
+    state: ChatHistoryUiState,
+    onLoadOlder: () -> Unit,
+    onRetry: () -> Unit,
+) {
     when (state) {
         ChatHistoryUiState.Hidden -> Unit
         ChatHistoryUiState.Loading -> androidx.compose.foundation.layout.Box(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp)
+                .testTag(CHAT_HISTORY_LOADING_TAG),
             contentAlignment = androidx.compose.ui.Alignment.Center,
         ) {
             androidx.compose.material3.CircularProgressIndicator(
                 modifier = Modifier.size(20.dp),
                 strokeWidth = 2.dp,
             )
+        }
+        ChatHistoryUiState.OlderAvailable -> TextButton(
+            onClick = onLoadOlder,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .testTag(CHAT_HISTORY_LOAD_OLDER_TAG),
+        ) {
+            Text(stringResource(R.string.chat_history_load_older))
         }
         ChatHistoryUiState.Offline -> HistoryStatusText(R.string.chat_history_footer_offline)
         ChatHistoryUiState.Negotiating -> HistoryStatusText(R.string.chat_history_footer_negotiating)

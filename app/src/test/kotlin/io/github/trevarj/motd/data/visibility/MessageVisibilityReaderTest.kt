@@ -269,6 +269,28 @@ class MessageVisibilityReaderTest {
     }
 
     @Test
+    fun firstUnreadRespectsTheBoundedRecentIsland() = runTest {
+        val ids = db.messageDao().insertAll(
+            listOf(
+                message(bufferId, "older unread", sender = "bob", serverTime = 100, dedupKey = "old"),
+                message(bufferId, "recent unread", sender = "bob", serverTime = 900, dedupKey = "recent"),
+            ),
+        )
+        val recentBoundary = io.github.trevarj.motd.data.db.TimelineAnchor(900, ids[1])
+
+        val result = reader.firstVisibleUnreadAnchor(
+            bufferId = bufferId,
+            after = io.github.trevarj.motd.data.db.TimelineAnchor(50, 0),
+            spec = spec(FoolsMode.COLLAPSE),
+            bounds = io.github.trevarj.motd.data.visibility.MessageWindowBounds(
+                lowerBoundary = recentBoundary,
+            ),
+        )
+
+        assertEquals(recentBoundary, result)
+    }
+
+    @Test
     fun rawTailObserverFollowsRedirectChangedWithoutMessageInvalidation() = runTest {
         val networkId = db.bufferDao().observeById(bufferId)!!.networkId
         val winnerId = db.bufferDao().insert(buffer(networkId, "#winner"))

@@ -832,10 +832,12 @@ class ConnectionManagerImpl @Inject constructor(
             onLag = { id, lag -> setLag(id, lag) },
             onStopped = { id -> registry.actorStopped(id, generation) },
             onReady = { conn ->
-                registry.runIfCurrent(row.id, generation) {
-                    onReady(row, (conn as IrcClientConnection).client) {
-                        registry.isCurrent(row.id, generation)
-                    }
+                if (registry.isCurrent(row.id, generation)) {
+                    onReady(
+                        row,
+                        (conn as IrcClientConnection).client,
+                        generation,
+                    ) { registry.isCurrent(row.id, generation) }
                 }
             },
             pendingCertFailure = {
@@ -1189,6 +1191,16 @@ class ConnectionManagerImpl @Inject constructor(
     private suspend fun onReady(
         row: NetworkEntity,
         client: IrcClient,
+        generation: Long,
+        isCurrent: () -> Boolean,
+    ) {
+        onReadySession(row, client, generation, isCurrent)
+    }
+
+    private suspend fun onReadySession(
+        row: NetworkEntity,
+        client: IrcClient,
+        generation: Long,
         isCurrent: () -> Boolean,
     ) {
         if (!isCurrent()) return
@@ -1254,17 +1266,38 @@ class ConnectionManagerImpl @Inject constructor(
         // feature waiters alive for the exact connection rather than treating an early snapshot as
         // final. ConnectionActor cancels this scope as soon as Ready ends.
         coroutineScope {
-            val readMarkers = async {
-                awaitReadMarkerCapability(client)
-                if (isCurrent()) reconcileReadMarkersForConnection(row, client, isCurrent)
+            val initialReadMarkers = async {
+                val negotiated = awaitReadMarkerCapabilityDecision(client)
+                if (negotiated && isCurrent()) {
+                    reconcileReadMarkersForConnection(row, client, isCurrent)
+                }
+                negotiated
+            }
+            // Runtime CAP NEW can introduce read-marker support after the entry-critical deferred
+            // CAP decision. Keep that convergence alive for the connection without extending the
+            // initial history barrier indefinitely on servers that do not support the extension.
+            launch {
+                if (!initialReadMarkers.await()) {
+                    awaitReadMarkerCapabilityAvailable(client)
+                    if (isCurrent()) reconcileReadMarkersForConnection(row, client, isCurrent)
+                }
             }
             launch {
-                if (!awaitHistoryReady(client)) return@launch
+                val historyReady = awaitHistoryReady(client)
+                // Marker settlement is entry-critical even when CHATHISTORY is unsupported: the
+                // frozen unread target must use the server marker before this gate is released.
+                initialReadMarkers.join()
                 if (!isCurrent()) return@launch
-                // If read-marker was already negotiated, establish the durable max before
-                // history rows arrive. If it appears later, its own watcher will still converge.
-                if (client.hasReadMarkerCap()) readMarkers.join()
-                if (isCurrent()) catchUpForConnection(row.id, client)
+                if (!historyReady) {
+                    if (isCurrent() && clientFor(row.id) === client) {
+                        registry.historyCatchUpFinished(row.id, generation)
+                    }
+                    return@launch
+                }
+                catchUpForConnection(row.id, client)
+                if (isCurrent() && clientFor(row.id) === client) {
+                    registry.historyCatchUpFinished(row.id, generation)
+                }
             }
             launch {
                 // A bouncer child publishes its post-BIND CAP ACK after the first Ready snapshot.
@@ -1415,10 +1448,11 @@ class ConnectionManagerImpl @Inject constructor(
                     // ConnectionActor's long-lived collector persists the same event through
                     // EventProcessor. Wait until that durable max-only write is visible before
                     // allowing CHATHISTORY to populate unread-count queries.
-                    withTimeoutOrNull(READ_MARKER_PERSIST_TIMEOUT_MS) {
-                        bufferDao.observe(request.bufferId).first { buffer ->
-                            buffer?.readMarkerTime?.let { it >= timestamp } == true
-                        }
+                    bufferDao.observe(request.bufferId).first { buffer ->
+                        buffer?.let {
+                            it.readMarkerTime?.let { marker -> marker >= timestamp } == true &&
+                                it.localReadAnchorTime?.let { anchor -> anchor >= timestamp } == true
+                        } == true
                     }
                 }
             }.awaitAll()
@@ -1439,10 +1473,18 @@ class ConnectionManagerImpl @Inject constructor(
      * their post-bind CAP ACK via successive Ready snapshots, so the filter matches whenever either
      * cap lands.
      */
-    private suspend fun awaitReadMarkerCapability(client: IrcClient) {
+    private suspend fun awaitReadMarkerCapabilityDecision(client: IrcClient): Boolean {
+        if (client.hasReadMarkerCap()) return true
+        client.pendingFeatureCaps.first { pending ->
+            client.hasReadMarkerCap() || pending.none(::isReadMarkerCap)
+        }
+        return client.hasReadMarkerCap()
+    }
+
+    private suspend fun awaitReadMarkerCapabilityAvailable(client: IrcClient) {
         if (client.hasReadMarkerCap()) return
         client.state.filterIsInstance<IrcClientState.Ready>().first { ready ->
-            ready.caps.any { isReadMarkerCap(it) }
+            ready.caps.any(::isReadMarkerCap)
         }
     }
 
@@ -2010,7 +2052,6 @@ class ConnectionManagerImpl @Inject constructor(
         const val SOJU_READ_CAP = "soju.im/read"
         const val WEBPUSH_CAP = "soju.im/webpush"
         const val READ_MARKER_RESPONSE_TIMEOUT_MS = 5_000L
-        const val READ_MARKER_PERSIST_TIMEOUT_MS = 2_000L
         const val ECHO_TIMEOUT_MS = 30_000L
         const val INVITE_READY_TIMEOUT_MS = 30_000L
         const val ROSTER_REQUEST_TIMEOUT_MS = 15_000L

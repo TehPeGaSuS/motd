@@ -8,10 +8,14 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNode
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_LOADING_TAG
 import org.junit.Assert.assertTrue
 
 internal class ChatListRobot(compose: ComposeTestRule) : BaseRobot(compose) {
@@ -44,7 +48,12 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         rule.onNodeWithText("Link", useUnmergedTree = true).assertIsDisplayed()
     }
 
-    fun assertUnreadEntry(firstTag: String, secondTag: String, timeoutMs: Long = 30_000) {
+    fun assertUnreadEntry(
+        firstTag: String,
+        secondTag: String,
+        expectedLabel: String? = null,
+        timeoutMs: Long = 30_000,
+    ) {
         rule.waitForIdle()
         // Atomic history publication can leave Paging materializing the 80-row entry window for
         // longer than the generic component timeout on a cold hosted emulator.
@@ -52,6 +61,12 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         awaitTag(firstTag, timeoutMs)
         awaitTag(secondTag, timeoutMs)
         val timeline = rule.onNodeWithTag("chat_timeline", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        expectedLabel?.let {
+            rule.onNode(
+                hasText(it) and hasAnyAncestor(hasTestTag("chat_read_marker_divider")),
+                useUnmergedTree = true,
+            ).assertIsDisplayed()
+        }
         val divider = rule.onNodeWithTag("chat_read_marker_divider", useUnmergedTree = true)
             .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val first = rule.onNodeWithTag(firstTag, useUnmergedTree = true)
@@ -72,6 +87,34 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         )
         rule.onAllNodesWithTag(firstTag, useUnmergedTree = true).assertCountEquals(1)
         rule.onAllNodesWithTag(secondTag, useUnmergedTree = true).assertCountEquals(1)
+    }
+
+    fun requestOlderHistory() {
+        rule.onNodeWithTag("chat_timeline", useUnmergedTree = true)
+            .performTouchInput { swipeDown(durationMillis = 350) }
+        rule.waitForIdle()
+        if (
+            rule.onAllNodesWithTag(CHAT_HISTORY_LOADING_TAG, useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        ) {
+            rule.waitUntil(45_000) {
+                rule.onAllNodesWithTag(CHAT_HISTORY_LOADING_TAG, useUnmergedTree = true)
+                    .fetchSemanticsNodes().isEmpty()
+            }
+            rule.waitForIdle()
+        }
+    }
+
+    fun scrollOlderUntil(text: String, maximumSwipes: Int = 48) {
+        repeat(maximumSwipes) {
+            val target = rule.onNodeWithText(text, substring = true, useUnmergedTree = true)
+            if (runCatching { target.assertIsDisplayed() }.isSuccess) {
+                target.assertTextContains(text)
+                return
+            }
+            requestOlderHistory()
+        }
+        throw AssertionError("older history row did not become visible after $maximumSwipes swipes")
     }
 
     fun scrollToBottom() {

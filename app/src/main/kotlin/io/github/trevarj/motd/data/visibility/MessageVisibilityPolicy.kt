@@ -282,21 +282,41 @@ internal fun firstVisibleUnreadQuery(
     after: TimelineAnchor,
     spec: MessageVisibilitySpec,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
-): SimpleSQLiteQuery = SimpleSQLiteQuery(
-    "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
-        "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
-        "(m.timelineOrder = ? AND m.id > ?)))) " +
-        "AND ${MessageVisibilitySql(spec, identityRules).visibleUnread()} " +
-        "ORDER BY m.serverTime ASC, m.timelineOrder ASC, m.id ASC LIMIT 1",
-    arrayOf(
+    bounds: MessageWindowBounds = MessageWindowBounds(),
+): SimpleSQLiteQuery {
+    val lower = bounds.lowerBoundary
+    val upper = bounds.upperBoundary
+    val args = mutableListOf<Any>(
         bufferId,
         after.serverTime,
         after.serverTime,
         after.timelineOrder,
         after.timelineOrder,
         after.eventId,
-    ),
-)
+    )
+    lower?.let {
+        args += listOf(it.serverTime, it.serverTime, it.timelineOrder, it.timelineOrder, it.eventId)
+    }
+    upper?.let {
+        args += listOf(it.serverTime, it.serverTime, it.timelineOrder, it.timelineOrder, it.eventId)
+    }
+    return SimpleSQLiteQuery(
+        "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
+            "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
+            "(m.timelineOrder = ? AND m.id > ?)))) " +
+            (lower?.let {
+                "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
+                    "(m.timelineOrder = ? AND m.id >= ?)))) "
+            } ?: "") +
+            (upper?.let {
+                "AND (m.serverTime < ? OR (m.serverTime = ? AND (m.timelineOrder < ? OR " +
+                    "(m.timelineOrder = ? AND m.id <= ?)))) "
+            } ?: "") +
+            "AND ${MessageVisibilitySql(spec, identityRules).visibleUnread()} " +
+            "ORDER BY m.serverTime ASC, m.timelineOrder ASC, m.id ASC LIMIT 1",
+        args.toTypedArray(),
+    )
+}
 
 /**
  * Oldest unread nick mention among the newest [beforeIndex] visible-timeline rows: the nearest

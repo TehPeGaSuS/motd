@@ -377,122 +377,9 @@ class ChatViewModel @Inject constructor(
 
     private var nextVisibleSession = 0L
     private val visibleSession = MutableStateFlow<Long?>(null)
-    private val entryReadMarker = CompletableDeferred<TimelineAnchor?>()
-    private val entryHistoryPrepared = CompletableDeferred<Unit>()
-
-    private data class AutomaticHistoryTrigger(
-        val visibleSession: Long,
-        val buffer: BufferEntity,
-        val client: IrcClient,
-    )
-
-    private data class AutomaticHistoryState(
-        val visibleSession: Long?,
-        val connection: IrcClientState?,
-        val connectionProgressing: Boolean,
-        val initializationComplete: Boolean,
-        val trigger: AutomaticHistoryTrigger?,
-    )
 
     init {
         viewModelScope.launch { runDraftWriter() }
-        viewModelScope.launch {
-            combine(
-                buffer,
-                visibleSession,
-                connectionManager.connectionActivity,
-            ) { currentBuffer, session, activity ->
-                val connection = currentBuffer?.let {
-                    activity.states[it.networkId] ?: IrcClientState.Disconnected
-                }
-                val eligible = currentBuffer?.takeIf { it.type != BufferType.SERVER }
-                val client = eligible?.let { connectionManager.clientFor(it.networkId) }
-                AutomaticHistoryState(
-                    visibleSession = session,
-                    connection = connection,
-                    connectionProgressing = currentBuffer?.let {
-                        activity.progressing[it.networkId] == true
-                    } == true,
-                    initializationComplete = activity.initializationComplete,
-                    trigger = if (
-                        session != null && eligible != null &&
-                        connection is IrcClientState.Ready && client != null
-                    ) {
-                        AutomaticHistoryTrigger(session, eligible, client)
-                    } else null,
-                )
-            }
-                // Keep the null transition: it rearms the same client after a real disconnect.
-                .distinctUntilChanged { old, new ->
-                    old.visibleSession == new.visibleSession && old.connection == new.connection &&
-                        old.connectionProgressing == new.connectionProgressing &&
-                        old.initializationComplete == new.initializationComplete &&
-                        old.trigger?.buffer?.id == new.trigger?.buffer?.id &&
-                        old.trigger?.client === new.trigger?.client
-                }
-                .collectLatest { (session, connection, progressing, initialized, trigger) ->
-                    if (trigger == null) {
-                        val currentBuffer = buffer.value
-                        if (
-                            session != null &&
-                            (
-                                currentBuffer?.type == BufferType.SERVER ||
-                                    connection is IrcClientState.Failed && connection.fatal ||
-                                    initialized && !progressing
-                                )
-                        ) {
-                            entryHistoryPrepared.complete(Unit)
-                        }
-                        return@collectLatest
-                    }
-                    val current = {
-                        connectionManager.clientFor(trigger.buffer.networkId) === trigger.client
-                    }
-                    val marker = entryReadMarker.await().takeIf { !_entryPositionSettled.value }
-                    // A retained marker gap is the entry-critical request. Let it acquire history
-                    // single-flight before the redundant newest overlap so a slow LATEST cannot
-                    // hold first-unread positioning behind its full protocol timeout.
-                    val initialPreparation = marker?.let {
-                        historyResyncCoordinator.prepareUnreadWindow(
-                            buffer = trigger.buffer,
-                            marker = it,
-                            client = trigger.client,
-                            isCurrent = current,
-                        )
-                    }
-                    if (
-                        initialPreparation is HistoryResyncState.Updated &&
-                        visibleSession.value == trigger.visibleSession &&
-                        connState.value is IrcClientState.Ready &&
-                        current()
-                    ) {
-                        entryHistoryPrepared.complete(Unit)
-                    }
-                    historyResyncCoordinator.reconcileBuffer(
-                        buffer = trigger.buffer,
-                        client = trigger.client,
-                        isCurrent = current,
-                    )
-                    if (marker != null && initialPreparation !is HistoryResyncState.Updated) {
-                        historyResyncCoordinator.prepareUnreadWindow(
-                            buffer = trigger.buffer,
-                            marker = marker,
-                            client = trigger.client,
-                            isCurrent = current,
-                        )
-                    }
-                    // collectLatest cancellation on a recoverable disconnect must leave entry
-                    // unresolved for the replacement Ready generation. Complete only while this
-                    // exact visible session/client is still the active ready generation.
-                    if (
-                        visibleSession.value == trigger.visibleSession &&
-                        connState.value is IrcClientState.Ready &&
-                        current()
-                    ) {
-                        entryHistoryPrepared.complete(Unit)
-                    }
-                }
-        }
         viewModelScope.launch {
             combine(buffer, visibleSession) { currentBuffer, session ->
                 currentBuffer?.id?.takeIf { session != null }
@@ -693,8 +580,8 @@ class ChatViewModel @Inject constructor(
 
     // Frozen on buffer entry so the "New messages" divider keeps a stable boundary instead of
     // flashing/vanishing as markRead advances the live marker. Used ONLY for the divider now.
-    private val _readMarkerSnapshot = MutableStateFlow<TimelineAnchor?>(null)
-    val readMarkerSnapshot: StateFlow<TimelineAnchor?> = _readMarkerSnapshot.asStateFlow()
+    private val _unreadEntrySnapshot = MutableStateFlow<UnreadEntrySnapshot?>(null)
+    val unreadEntrySnapshot: StateFlow<UnreadEntrySnapshot?> = _unreadEntrySnapshot.asStateFlow()
 
     // Live read marker for the scroll-to-bottom FAB badge: unlike the frozen snapshot, this tracks
     // the buffer's real read marker, so once markRead advances it (at bottom) the badge count drops
@@ -1466,51 +1353,43 @@ class ChatViewModel @Inject constructor(
         // you just sent. Null (no real marker, or nothing unread from others) hides both.
         viewModelScope.launch {
             val entrySpec = MessageVisibilitySpec.from(settingsRepository.settings.first())
+            val initialEntryBuffer = bufferRepository.observeBuffer(bufferId).firstOrNull()
+            if (!hasDeepJump && initialEntryBuffer != null && initialEntryBuffer.type != BufferType.SERVER) {
+                connectionManager.connectionActivity.first { activity ->
+                    entryHistoryReady(activity, initialEntryBuffer.networkId)
+                }
+            }
+            // Read the buffer again after catch-up because read-marker convergence runs before the
+            // newest history page and may have advanced the durable marker while entry was waiting.
             val entryBuffer = bufferRepository.observeBuffer(bufferId).firstOrNull()
-            val realMarker: TimelineAnchor? = if (entryBuffer != null) {
-                visibilityReader.effectiveLocalReadAnchor(entryBuffer)
-            } else {
-                null
+            val realMarker: TimelineAnchor? = entryBuffer?.let {
+                visibilityReader.effectiveLocalReadAnchor(it)
             }
-            entryReadMarker.complete(realMarker)
-            if (
-                !hasDeepJump && entryBuffer?.type != BufferType.SERVER && realMarker != null &&
-                (
-                    messageRepository.hasHistoryGapAfter(bufferId, realMarker) ||
-                        entryBuffer?.let { connectionManager.clientFor(it.networkId) } != null ||
-                        !connectionManager.connectionActivity.value.initializationComplete ||
-                        entryBuffer?.let {
-                            connectionManager.connectionActivity.value.progressing[it.networkId] == true
-                        } == true
-                    )
-            ) {
-                // Keep painting the recent island while reconnecting. The user can abandon this
-                // positioning with the newest FAB, but a slow valid history request must not freeze
-                // a stale first-unread target before it completes.
-                entryHistoryPrepared.await()
-            }
-            // Oldest unread row past the marker (first message from someone else you have not seen),
-            // computed once and shared by the frozen divider and the entry target.
+            val recentBounds = messageRepository.historyWindowBounds(
+                bufferId,
+                HistoryWindowFocus.Recent,
+            )
+            // Resolve only inside the bounded recent island. A retained gap is represented as a
+            // lower-bound count; it must not redirect normal entry into an older paging island.
             val firstUnread = realMarker?.let {
-                visibilityReader.firstVisibleUnreadAnchor(bufferId, it, entrySpec)
+                visibilityReader.firstVisibleUnreadAnchor(bufferId, it, entrySpec, recentBounds)
             }
-            _readMarkerSnapshot.value = firstUnread
-                ?.let { TimelineAnchor(it.serverTime, it.eventId - 1L, it.timelineOrder) }
-            // A deep-link owns positioning. A normal open lands on the oldest unread message so the
-            // first unseen row tops the viewport and the rest of the unread continues below it; the
-            // scroll-to-bottom FAB (with its @-mention badge) is the natural next step. When the
-            // buffer is fully caught up (no unread marker), restore the last in-memory viewport when
-            // available, otherwise stay at the newest row. The frozen unread marker above still
-            // drives the divider and badge, but never repositions the window.
+            val unreadRow = entryBuffer?.let { room ->
+                bufferRepository.observeChatList().first()
+                    .firstOrNull { it.bufferId == room.id }
+            }
+            _unreadEntrySnapshot.value = firstUnread?.let {
+                UnreadEntrySnapshot(
+                    marker = TimelineAnchor(it.serverTime, it.eventId - 1L, it.timelineOrder),
+                    loadedCount = (unreadRow?.unreadCount ?: 1).coerceAtLeast(1),
+                    lowerBound = unreadRow?.unreadCountIncomplete == true ||
+                        recentBounds.lowerBoundary != null,
+                )
+            }
+            // A normal open remains on Recent and lands on its oldest loaded unread row. Only an
+            // explicit deep link may select Around; older traversal is authorized by user scroll.
             if (!hasDeepJump && !_entryPositionSettled.value) {
                 val entryAnchor = firstUnread ?: realMarker
-                entryAnchor?.let {
-                    historyWindowFocus.value = HistoryWindowFocus.Around(
-                        it.serverTime,
-                        it.eventId,
-                        it.timelineOrder,
-                    )
-                }
                 _initialTarget.value = when {
                     entryAnchor != null -> readMarkerEntryTarget(
                         entryAnchor,
@@ -1714,9 +1593,15 @@ class ChatViewModel @Inject constructor(
         activeJumpRequest = null
         _jumpTarget.value = null
         _initialTarget.value = null
-        entryHistoryPrepared.complete(Unit)
         historyWindowFocus.value = HistoryWindowFocus.Recent
         markEntryPositionSettled()
+    }
+
+    /** One-way authorization for RemoteMediator BEFORE requests in the current recent island. */
+    fun requestOlderHistory() {
+        if (historyWindowFocus.value == HistoryWindowFocus.Recent) {
+            historyWindowFocus.value = HistoryWindowFocus.RecentPaging
+        }
     }
 
     /** Re-resolve an exact mention inside the island where its viewport index was computed. */
@@ -1904,3 +1789,17 @@ internal fun needsDeepJumpResolution(
     entryPositionSettled: Boolean,
     entryPositionUnresolved: Boolean,
 ): Boolean = hasDeepJump && (!jumpConsumed || (!entryPositionSettled && !entryPositionUnresolved))
+
+internal fun entryHistoryReady(
+    activity: io.github.trevarj.motd.service.ConnectionActivitySnapshot,
+    networkId: Long,
+): Boolean = when (activity.states[networkId]) {
+    is IrcClientState.Ready -> networkId !in activity.historyCatchUpPending
+    IrcClientState.Connecting,
+    IrcClientState.Registering,
+    -> false
+    IrcClientState.Disconnected,
+    null,
+    -> activity.initializationComplete && activity.progressing[networkId] != true
+    is IrcClientState.Failed -> activity.progressing[networkId] != true
+}

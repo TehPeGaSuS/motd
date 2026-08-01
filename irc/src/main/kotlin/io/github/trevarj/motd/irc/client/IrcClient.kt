@@ -150,6 +150,9 @@ class IrcClient(
     private val _targetClassificationReady = MutableStateFlow(false)
     /** True once CHANTYPES is explicit or the registration burst confirms protocol defaults. */
     val targetClassificationReady: StateFlow<Boolean> = _targetClassificationReady.asStateFlow()
+    private val _pendingFeatureCaps = MutableStateFlow<Set<String>>(emptySet())
+    /** Runtime/deferred CAP requests that have not received ACK or NAK yet. */
+    val pendingFeatureCaps: StateFlow<Set<String>> = _pendingFeatureCaps.asStateFlow()
 
     private val _events = MutableSharedFlow<IrcEvent>(
         replay = 0,
@@ -233,6 +236,7 @@ class IrcClient(
         nextObserverSequence = 0L
         registered = false
         _targetClassificationReady.value = false
+        _pendingFeatureCaps.value = emptySet()
         _bouncerNetworks.value = emptyMap()   // drop any stale networks from a prior connection
         _state.value = IrcClientState.Connecting
         runJob = scope.launch { run(criticalEvents) }
@@ -254,6 +258,7 @@ class IrcClient(
         transport = null
         registered = false
         _targetClassificationReady.value = false
+        _pendingFeatureCaps.value = emptySet()
         ackedCaps.set(emptySet())
         runtimeAdvertisedCaps.clear()
         if (t != null) scope.launch { runCatching { t.close() } }
@@ -417,6 +422,7 @@ class IrcClient(
                 _targetClassificationReady.value =
                     a.isupport["CHANTYPES"] != null || a.assumeDefaultTargetClassification
                 ackedCaps.set(a.caps)
+                _pendingFeatureCaps.value = a.deferredCaps
                 registered = true
                 val isupportMap = isupportToMap(a.isupport)
                 _state.value = IrcClientState.Ready(a.nick, a.caps, isupportMap)
@@ -647,6 +653,7 @@ class IrcClient(
                 val alreadyAcked = ackedCaps.get().map { it.substringBefore('=') }.toSet()
                 val want = CapNegotiator.runtimeRequestSet(caps, alreadyAcked, config.extraCaps)
                 if (want.isNotEmpty()) {
+                    _pendingFeatureCaps.value += want
                     for (b in CapNegotiator.batches(want)) runCatching { sendSerialized(t, "CAP REQ :$b") }
                 }
             }
@@ -677,6 +684,10 @@ class IrcClient(
                     IrcEvent.CapsChanged(added.map { it.substringBefore('=') }.toSet(), removed),
                 )
             }
+            "NAK" -> Unit
+        }
+        if (sub == "ACK" || sub == "NAK" || sub == "DEL") {
+            _pendingFeatureCaps.value -= caps
         }
     }
 

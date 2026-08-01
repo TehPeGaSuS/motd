@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
+import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_LOAD_OLDER_TAG
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_RETRY_TAG
 import io.github.trevarj.motd.ui.chat.ChatHistoryFooter
 import io.github.trevarj.motd.ui.chat.ChatHistoryUiState
@@ -22,7 +23,11 @@ class ChatHistoryFooterUiTest {
         var retries = 0
         compose.setContent {
             MotdTheme {
-                ChatHistoryFooter(ChatHistoryUiState.Error) { retries++ }
+                ChatHistoryFooter(
+                    state = ChatHistoryUiState.Error,
+                    onLoadOlder = {},
+                    onRetry = { retries++ },
+                )
             }
         }
 
@@ -30,5 +35,24 @@ class ChatHistoryFooterUiTest {
             .assertHeightIsAtLeast(48.dp)
             .performClick()
         assertEquals(1, retries)
+    }
+
+    @Test
+    fun boundedRecentHistoryOffersNeutralLoadOlderAction() {
+        var requests = 0
+        compose.setContent {
+            MotdTheme {
+                ChatHistoryFooter(
+                    state = ChatHistoryUiState.OlderAvailable,
+                    onLoadOlder = { requests++ },
+                    onRetry = {},
+                )
+            }
+        }
+
+        compose.onNodeWithTag(CHAT_HISTORY_LOAD_OLDER_TAG)
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        assertEquals(1, requests)
     }
 }

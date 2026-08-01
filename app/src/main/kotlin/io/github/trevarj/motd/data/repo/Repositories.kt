@@ -109,8 +109,6 @@ interface MessageRepository {
         visibility: MessageVisibilitySpec,
         focus: HistoryWindowFocus,
     ): Int = countNewerThan(bufferId, serverTime, id, visibility)
-    /** Whether a durable missing interval can still hide the actual first unread row. */
-    suspend fun hasHistoryGapAfter(bufferId: Long, anchor: TimelineAnchor): Boolean = false
     /** Exact bounds used by the Pager generation for focus-relative viewport queries. */
     suspend fun historyWindowBounds(
         bufferId: Long,
@@ -126,7 +124,12 @@ interface MessageRepository {
 
 /** The contiguous local history segment rendered by one Pager generation. */
 sealed interface HistoryWindowFocus {
+    /** Paint the newest contiguous local island without allowing boundary-triggered network I/O. */
     data object Recent : HistoryWindowFocus
+
+    /** The user reached toward older rows, authorizing directional paging for the recent island. */
+    data object RecentPaging : HistoryWindowFocus
+
     data class Around(
         val serverTime: Long,
         val eventId: Long = Long.MIN_VALUE,

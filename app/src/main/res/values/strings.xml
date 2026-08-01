@@ -429,6 +429,10 @@
     <string name="chat_search">Search</string>
     <string name="chat_scroll_to_bottom">Scroll to bottom</string>
     <string name="chat_new_messages">New messages</string>
+    <plurals name="chat_new_messages_count">
+        <item quantity="one">%1$s new message</item>
+        <item quantity="other">%1$s new messages</item>
+    </plurals>
     <string name="chat_retry">Retry</string>
     <string name="chat_delete_failed">Delete</string>
     <string name="chat_sending">Sending…</string>
@@ -437,6 +441,7 @@
     <string name="chat_empty_message">Say hello to start the conversation.</string>
     <string name="chat_history_error">Couldn\'t load older messages</string>
     <string name="chat_history_incomplete">Older history may be incomplete</string>
+    <string name="chat_history_load_older">Load older messages</string>
     <string name="chat_history_loading_messages">Loading messages…</string>
     <string name="chat_history_syncing_messages">Finding first unread…</string>
     <string name="chat_history_sync_failed_inline">Couldn\'t sync messages</string>

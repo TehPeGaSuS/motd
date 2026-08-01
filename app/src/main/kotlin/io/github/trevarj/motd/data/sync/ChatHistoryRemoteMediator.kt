@@ -368,7 +368,9 @@ class ChatHistoryRemoteMediator(
     private suspend fun focusedOlderGap(gaps: List<HistoryGapEntity>): HistoryGapEntity? {
         val resolved = gaps.map { it to gapNewerAnchor(it) }
         return when (val current = focus) {
-            HistoryWindowFocus.Recent -> resolved.maxByOrNull { it.second }?.first
+            HistoryWindowFocus.Recent,
+            HistoryWindowFocus.RecentPaging,
+            -> resolved.maxByOrNull { it.second }?.first
             is HistoryWindowFocus.Around -> resolved
                 .filter { it.second <= current.anchor }
                 .maxByOrNull { it.second }
@@ -377,7 +379,7 @@ class ChatHistoryRemoteMediator(
     }
 
     private suspend fun focusedNewerGap(gaps: List<HistoryGapEntity>): HistoryGapEntity? {
-        if (focus is HistoryWindowFocus.Recent) return null
+        if (focus !is HistoryWindowFocus.Around) return null
         val anchor = (focus as HistoryWindowFocus.Around).anchor
         return gaps.map { it to gapOlderAnchor(it) }
             .filter { it.second >= anchor }

@@ -504,12 +504,10 @@ class HistoryResyncCoordinatorTest {
             coordinator.reconcileBuffer(networkId, bufferId, "#chan", source),
         )
         assertEquals(
-            listOf(
-                ChatHistoryRequest.Subcommand.LATEST,
-                ChatHistoryRequest.Subcommand.BEFORE,
-            ),
+            listOf(ChatHistoryRequest.Subcommand.LATEST),
             source.requests.map { it.subcommand },
         )
+        assertEquals(0, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.BEFORE })
         assertTrue(rows().none { it.msgid == "m102" })
     }
 
@@ -542,7 +540,7 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
-    fun automaticNetworkResyncBoundsThousandMessageGapToThreeRecentPages() = runTest {
+    fun automaticNetworkResyncBoundsThousandMessageGapToOneRecentPage() = runTest {
         processor.process(networkId, message("seed", 100))
         val source = FakeSource(pageLimit = 100) { request ->
             when (request.subcommand) {
@@ -567,13 +565,13 @@ class HistoryResyncCoordinatorTest {
             source,
         )
 
-        assertEquals(HistoryResyncState.Updated(150), result)
+        assertEquals(HistoryResyncState.Updated(50), result)
         val msgids = rows(loadSize = 2_000).mapNotNull { it.msgid }
-        assertEquals(151, msgids.size)
-        assertEquals(151, msgids.toSet().size)
+        assertEquals(51, msgids.size)
+        assertEquals(51, msgids.toSet().size)
         assertEquals("m1214", msgids.first())
         assertEquals("seed", msgids.last())
-        assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.BEFORE })
+        assertEquals(0, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.BEFORE })
         assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
         assertEquals(1_214L, syncPrefs.lastSuccessfulSync(networkId))
     }
@@ -602,101 +600,11 @@ class HistoryResyncCoordinatorTest {
         assertEquals(51, msgids.size)
         assertTrue((951..1_000).all { "m$it" in msgids })
         assertTrue("m1" !in msgids)
+        assertEquals(0, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.BEFORE })
     }
 
     @Test
-    fun automaticRecentWindowAggregatesShortResponsesIntoThreeLogicalPages() = runTest {
-        processor.process(networkId, message("seed", 100))
-        fun page(newest: Int) = (newest - 24..newest).map { message("m$it", it.toLong()) }
-        val source = FakeSource(pageLimit = 50) { request ->
-            when (request.subcommand) {
-                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
-                    targets = listOf("#chan" to 1_000L),
-                    endOfHistory = true,
-                )
-                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(page(1_000))
-                ChatHistoryRequest.Subcommand.BEFORE -> {
-                    val newest = request.bound1!!.removePrefix("msgid=m").toInt() - 1
-                    FakeResponse(page(newest))
-                }
-                else -> error("unexpected ${request.subcommand}")
-            }
-        }
-
-        val result = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
-
-        assertEquals(HistoryResyncState.Updated(150), result)
-        assertEquals(6, source.requests.count { it.subcommand != ChatHistoryRequest.Subcommand.TARGETS })
-        assertEquals(151, rows(loadSize = 500).size)
-        val gap = db.historyGapDao().forRoom(bufferId).single()
-        assertEquals(851L, gap.newerServerTime)
-    }
-
-    @Test
-    fun automaticRecentWindowReachesBudgetWhenServerReturnsTenMessagesPerResponse() = runTest {
-        processor.process(networkId, message("seed", 100))
-        var nextNewest = 1_000
-        val source = FakeSource(pageLimit = 50) { request ->
-            when (request.subcommand) {
-                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
-                    targets = listOf("#chan" to 1_000L),
-                    endOfHistory = true,
-                )
-                ChatHistoryRequest.Subcommand.LATEST,
-                ChatHistoryRequest.Subcommand.BEFORE,
-                -> {
-                    val oldest = nextNewest - 9
-                    FakeResponse((oldest..nextNewest).map { message("m$it", it.toLong()) })
-                        .also { nextNewest = oldest - 1 }
-                }
-                else -> error("unexpected ${request.subcommand}")
-            }
-        }
-
-        val result = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
-
-        assertEquals(HistoryResyncState.Updated(150), result)
-        assertEquals(15, source.requests.count { it.subcommand != ChatHistoryRequest.Subcommand.TARGETS })
-        assertEquals(151, rows(loadSize = 500).size)
-        assertEquals(851L, db.historyGapDao().forRoom(bufferId).single().newerServerTime)
-    }
-
-    @Test
-    fun automaticRecentWindowCapsTheFinalRequestAtTheRemainingBudget() = runTest {
-        processor.process(networkId, message("seed", 100))
-        val responseSizes = ArrayDeque(listOf(40, 50, 50, 10))
-        var nextNewest = 1_000
-        val source = FakeSource(pageLimit = 50) { request ->
-            when (request.subcommand) {
-                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
-                    targets = listOf("#chan" to 1_000L),
-                    endOfHistory = true,
-                )
-                ChatHistoryRequest.Subcommand.LATEST,
-                ChatHistoryRequest.Subcommand.BEFORE,
-                -> {
-                    val count = responseSizes.removeFirst()
-                    val oldest = nextNewest - count + 1
-                    FakeResponse((oldest..nextNewest).map { message("m$it", it.toLong()) })
-                        .also { nextNewest = oldest - 1 }
-                }
-                else -> error("unexpected ${request.subcommand}")
-            }
-        }
-
-        val result = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
-
-        assertEquals(HistoryResyncState.Updated(150), result)
-        assertEquals(
-            listOf(50, 50, 50, 10),
-            source.requests.filter { it.subcommand != ChatHistoryRequest.Subcommand.TARGETS }
-                .map { it.limit },
-        )
-        assertEquals(151, rows(loadSize = 500).size)
-    }
-
-    @Test
-    fun automaticNetworkResyncUsesNewestFirstPagesWhenRoomAlreadyHasTheLatestRow() = runTest {
+    fun automaticNetworkResyncUsesOneNewestPageWhenRoomAlreadyHasTheLatestRow() = runTest {
         processor.process(networkId, message("m2000", 2_000))
         syncPrefs.setLastSuccessfulSync(networkId, 0)
         val source = FakeSource(pageLimit = 100) { request ->
@@ -722,11 +630,11 @@ class HistoryResyncCoordinatorTest {
             source,
         )
 
-        assertEquals(HistoryResyncState.Updated(149), result)
+        assertEquals(HistoryResyncState.Updated(49), result)
         val msgids = rows(loadSize = 2_500).mapNotNull { it.msgid }
-        assertEquals(150, msgids.size)
-        assertTrue((1_851..2_000).all { "m$it" in msgids })
-        assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.BEFORE })
+        assertEquals(50, msgids.size)
+        assertTrue((1_951..2_000).all { "m$it" in msgids })
+        assertEquals(0, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.BEFORE })
         assertEquals("m2000", db.historyCursorDao().byRoom(bufferId)?.newestMsgid)
         assertEquals(2_000L, syncPrefs.lastSuccessfulSync(networkId))
     }
@@ -1394,10 +1302,10 @@ class HistoryResyncCoordinatorTest {
             listOf(
                 ChatHistoryRequest.Subcommand.TARGETS,
                 ChatHistoryRequest.Subcommand.LATEST,
-                ChatHistoryRequest.Subcommand.BEFORE,
             ),
             source.requests.map { it.subcommand },
         )
+        assertEquals(0, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.BEFORE })
         assertTrue(rows().any { it.msgid == "retained" })
     }
 
@@ -1704,434 +1612,6 @@ class HistoryResyncCoordinatorTest {
         assertEquals(102, rows().size)
         assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.AFTER })
         assertTrue(source.requests.any { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
-    }
-
-    @Test
-    fun unreadPreparationLoadsOnePageWhenAGapStartsImmediatelyAfterTheMarker() = runTest {
-        processor.process(networkId, message("marker", 100))
-        val stateId = db.messageDao().insertAll(
-            listOf(
-                MessageEntity(
-                    bufferId = bufferId,
-                    msgid = "state-boundary",
-                    serverTime = 110,
-                    sender = "alice",
-                    kind = MessageKind.QUIT,
-                    text = "quit",
-                    dedupKey = "state-boundary",
-                ),
-            ),
-        ).single()
-        processor.process(networkId, message("recent", 900))
-        val marker = checkNotNull(db.messageDao().byMsgid(bufferId, "marker"))
-        val recent = checkNotNull(db.messageDao().byMsgid(bufferId, "recent"))
-        db.historyGapDao().insert(
-            HistoryGapEntity(
-                roomId = bufferId,
-                olderMsgid = "state-boundary",
-                olderServerTime = 110,
-                newerMsgid = "recent",
-                newerServerTime = 900,
-                olderEventId = stateId,
-                olderTimelineOrder = stateId,
-                newerEventId = recent.id,
-                newerTimelineOrder = recent.timelineOrder,
-            ),
-        )
-        val source = FakeSource {
-            FakeResponse(events = listOf(message("first-unread", 120)))
-        }
-
-        val result = coordinator.prepareUnreadWindow(
-            networkId,
-            bufferId,
-            "#chan",
-            TimelineAnchor(marker.serverTime, marker.id, marker.timelineOrder),
-            source,
-        )
-
-        assertEquals(HistoryResyncState.Updated(1), result)
-        assertEquals(listOf("msgid=state-boundary"), source.requests.map { it.bound1 })
-        assertEquals("first-unread", db.messageDao().byMsgid(bufferId, "first-unread")?.text)
-    }
-
-    @Test
-    fun unreadPreparationUsesTheMarkerWhenIncompleteRecentHistoryHasNoTrackedGap() = runTest {
-        processor.process(networkId, message("marker", 100))
-        val room = checkNotNull(db.bufferDao().observeById(bufferId))
-        db.bufferDao().update(
-            room.copy(
-                oldestFetchedTime = 900,
-                historyComplete = false,
-            ),
-        )
-        val source = FakeSource(msgidRefs = false) {
-            FakeResponse(events = listOf(message("first-unread", 120)))
-        }
-
-        val result = coordinator.prepareUnreadWindow(
-            networkId,
-            bufferId,
-            "#chan",
-            TimelineAnchor(100, Long.MAX_VALUE, Long.MAX_VALUE),
-            source,
-        )
-
-        assertEquals(HistoryResyncState.Updated(1), result)
-        assertEquals(1, source.requests.size)
-        assertEquals(ChatHistorySelectors.timestamp(99), source.requests.single().bound1)
-        assertEquals("first-unread", db.messageDao().byMsgid(bufferId, "first-unread")?.text)
-    }
-
-    @Test
-    fun unreadPreparationPagesUntilItReachesAMarkerInsideTheGap() = runTest {
-        processor.process(networkId, message("old", 100))
-        processor.process(networkId, message("recent", 900))
-        val old = checkNotNull(db.messageDao().byMsgid(bufferId, "old"))
-        val recent = checkNotNull(db.messageDao().byMsgid(bufferId, "recent"))
-        db.historyGapDao().insert(
-            HistoryGapEntity(
-                roomId = bufferId,
-                olderMsgid = "old",
-                olderServerTime = 100,
-                newerMsgid = "recent",
-                newerServerTime = 900,
-                olderEventId = old.id,
-                olderTimelineOrder = old.timelineOrder,
-                newerEventId = recent.id,
-                newerTimelineOrder = recent.timelineOrder,
-            ),
-        )
-        val source = FakeSource(pageLimit = 50) { request ->
-            val start = request.bound1!!.removePrefix("msgid=").removePrefix("m").let {
-                if (it == "old") 100 else it.toInt()
-            }
-            FakeResponse(
-                events = (start + 1..start + 50).map { message("m$it", it.toLong()) },
-            )
-        }
-
-        val result = coordinator.prepareUnreadWindow(
-            networkId,
-            bufferId,
-            "#chan",
-            TimelineAnchor(175, Long.MAX_VALUE, Long.MAX_VALUE),
-            source,
-        )
-
-        assertEquals(HistoryResyncState.Updated(100), result)
-        assertEquals(2, source.requests.size)
-        assertEquals(listOf("msgid=old", "msgid=m150"), source.requests.map { it.bound1 })
-        assertEquals(200L, db.historyGapDao().forRoom(bufferId).single().olderServerTime)
-    }
-
-    @Test
-    fun unreadPreparationKeepsNetworkSingleFlightUntilTheGapWriteCommits() = runTest {
-        processor.process(networkId, message("old", 100))
-        processor.process(networkId, message("recent", 900))
-        val old = checkNotNull(db.messageDao().byMsgid(bufferId, "old"))
-        val recent = checkNotNull(db.messageDao().byMsgid(bufferId, "recent"))
-        db.historyGapDao().insert(
-            HistoryGapEntity(
-                roomId = bufferId,
-                olderMsgid = "old",
-                olderServerTime = 100,
-                newerMsgid = "recent",
-                newerServerTime = 900,
-                olderEventId = old.id,
-                olderTimelineOrder = old.timelineOrder,
-                newerEventId = recent.id,
-                newerTimelineOrder = recent.timelineOrder,
-            ),
-        )
-        val requestEntered = CompletableDeferred<Unit>()
-        val releaseResponse = CompletableDeferred<Unit>()
-        val source = FakeSource {
-            requestEntered.complete(Unit)
-            releaseResponse.await()
-            FakeResponse(events = listOf(message("past-marker", 200)))
-        }
-        val preparation = async {
-            coordinator.prepareUnreadWindow(
-                networkId,
-                bufferId,
-                "#chan",
-                TimelineAnchor(175, Long.MAX_VALUE, Long.MAX_VALUE),
-                source,
-            )
-        }
-        requestEntered.await()
-        val gapSeenByNextOwner = CompletableDeferred<HistoryGapEntity>()
-        val contender = async {
-            CanonicalHistorySingleFlight.withNetwork(networkId) {
-                gapSeenByNextOwner.complete(db.historyGapDao().forRoom(bufferId).single())
-            }
-        }
-        runCurrent()
-        assertFalse(gapSeenByNextOwner.isCompleted)
-
-        releaseResponse.complete(Unit)
-        preparation.await()
-        contender.await()
-
-        assertEquals(200L, gapSeenByNextOwner.await().olderServerTime)
-    }
-
-    @Test
-    fun unreadPreparationResolvesTheCanonicalRoomAfterWaitingForTheNetworkGate() = runTest {
-        val store = BufferStore(db)
-        val winner = store.getOrCreate(networkId, "queued-winner", "Queued Winner", BufferType.QUERY)
-        val loser = store.getOrCreate(networkId, "queued-room", "Queued", BufferType.QUERY)
-        val ids = db.messageDao().insertAll(
-            listOf(
-                MessageEntity(
-                    bufferId = loser.id,
-                    msgid = "queued-old",
-                    serverTime = 100,
-                    sender = "alice",
-                    kind = MessageKind.PRIVMSG,
-                    text = "old",
-                    dedupKey = "queued-old",
-                ),
-                MessageEntity(
-                    bufferId = loser.id,
-                    msgid = "queued-recent",
-                    serverTime = 900,
-                    sender = "alice",
-                    kind = MessageKind.PRIVMSG,
-                    text = "recent",
-                    dedupKey = "queued-recent",
-                ),
-            ),
-        )
-        db.historyGapDao().insert(
-            HistoryGapEntity(
-                roomId = loser.id,
-                olderMsgid = "queued-old",
-                olderServerTime = 100,
-                newerMsgid = "queued-recent",
-                newerServerTime = 900,
-                olderEventId = ids[0],
-                olderTimelineOrder = ids[0],
-                newerEventId = ids[1],
-                newerTimelineOrder = ids[1],
-            ),
-        )
-        val gateHeld = CompletableDeferred<Unit>()
-        val releaseGate = CompletableDeferred<Unit>()
-        val blocker = async {
-            CanonicalHistorySingleFlight.withNetwork(networkId) {
-                gateHeld.complete(Unit)
-                releaseGate.await()
-                store.mergeRooms(winner.id, loser.id)
-            }
-        }
-        gateHeld.await()
-        val source = FakeSource {
-            FakeResponse(
-                events = listOf(
-                    IrcEvent.ChatMessage(
-                        ctx = MessageContext("queued-page", 200, null, "batch", null),
-                        kind = IrcEvent.ChatKind.PRIVMSG,
-                        source = Prefix("Queued-Winner"),
-                        target = "me",
-                        text = "queued page",
-                        isSelf = false,
-                        replyToMsgid = null,
-                    ),
-                ),
-            )
-        }
-        val preparation = async {
-            coordinator.prepareUnreadWindow(
-                networkId,
-                loser.id,
-                "queued-winner",
-                TimelineAnchor(175, Long.MAX_VALUE, Long.MAX_VALUE),
-                source,
-            )
-        }
-        runCurrent()
-        assertTrue(source.requests.isEmpty())
-
-        releaseGate.complete(Unit)
-        blocker.await()
-        val result = preparation.await()
-
-        assertEquals(HistoryResyncState.Updated(1), result)
-        assertEquals(1, source.requests.size)
-        assertEquals(200L, db.historyGapDao().forRoom(winner.id).single().olderServerTime)
-    }
-
-    @Test
-    fun unreadPreparationFollowsTheCanonicalRoomReturnedByEachPersistedPage() = runTest {
-        val store = BufferStore(db)
-        val winner = store.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
-        store.bindQueryIdentity(winner.id, networkId, "alice", "Alice", "shared-account")
-        val loser = store.getOrCreate(networkId, "bob", "Bob", BufferType.QUERY)
-        val ids = db.messageDao().insertAll(
-            listOf(
-                MessageEntity(
-                    bufferId = loser.id,
-                    msgid = "merge-old",
-                    serverTime = 100,
-                    sender = "bob",
-                    kind = MessageKind.PRIVMSG,
-                    text = "old",
-                    dedupKey = "merge-old",
-                ),
-                MessageEntity(
-                    bufferId = loser.id,
-                    msgid = "merge-recent",
-                    serverTime = 900,
-                    sender = "bob",
-                    kind = MessageKind.PRIVMSG,
-                    text = "recent",
-                    dedupKey = "merge-recent",
-                ),
-            ),
-        )
-        db.historyGapDao().insert(
-            HistoryGapEntity(
-                roomId = loser.id,
-                olderMsgid = "merge-old",
-                olderServerTime = 100,
-                newerMsgid = "merge-recent",
-                newerServerTime = 900,
-                olderEventId = ids[0],
-                olderTimelineOrder = ids[0],
-                newerEventId = ids[1],
-                newerTimelineOrder = ids[1],
-            ),
-        )
-        var page = 0
-        val source = FakeSource { request ->
-            page++
-            val time = if (page == 1) 200L else 300L
-            FakeResponse(
-                events = listOf(
-                    IrcEvent.ChatMessage(
-                        ctx = MessageContext("merge-page-$page", time, "shared-account", "batch", null),
-                        kind = IrcEvent.ChatKind.PRIVMSG,
-                        source = Prefix("Bob"),
-                        target = "me",
-                        text = "page $page",
-                        isSelf = false,
-                        replyToMsgid = null,
-                    ),
-                ),
-            ).also {
-                if (page == 2) assertEquals("msgid=merge-page-1", request.bound1)
-            }
-        }
-
-        val result = coordinator.prepareUnreadWindow(
-            networkId,
-            loser.id,
-            "bob",
-            TimelineAnchor(250, Long.MAX_VALUE, Long.MAX_VALUE),
-            source,
-        )
-
-        assertEquals(HistoryResyncState.Updated(2), result)
-        assertEquals(2, source.requests.size)
-        assertEquals(winner.id, db.bufferDao().canonicalId(loser.id))
-        assertEquals(300L, db.historyGapDao().forRoom(winner.id).single().olderServerTime)
-    }
-
-    @Test
-    fun timestampOnlyUnreadPreparationExhaustsASaturatedMsgidTaggedBoundary() = runTest {
-        processor.process(networkId, message("old", 100))
-        processor.process(networkId, message("recent", 900))
-        val old = checkNotNull(db.messageDao().byMsgid(bufferId, "old"))
-        val recent = checkNotNull(db.messageDao().byMsgid(bufferId, "recent"))
-        db.historyGapDao().insert(
-            HistoryGapEntity(
-                roomId = bufferId,
-                olderMsgid = "old",
-                olderServerTime = 100,
-                newerMsgid = "recent",
-                newerServerTime = 900,
-                olderEventId = old.id,
-                olderTimelineOrder = old.timelineOrder,
-                newerEventId = recent.id,
-                newerTimelineOrder = recent.timelineOrder,
-            ),
-        )
-        val source = FakeSource(msgidRefs = false, pageLimit = 2) {
-            FakeResponse(
-                events = listOf(message("tagged-one", 150), message("tagged-two", 150)),
-            )
-        }
-
-        val result = coordinator.prepareUnreadWindow(
-            networkId,
-            bufferId,
-            "#chan",
-            TimelineAnchor(175, Long.MAX_VALUE, Long.MAX_VALUE),
-            source,
-        )
-
-        assertTrue(result is HistoryResyncState.Incomplete)
-        val gap = db.historyGapDao().forRoom(bufferId).single()
-        assertFalse(gap.recoverable)
-        assertEquals(150L, gap.olderServerTime)
-        assertEquals(null, gap.olderMsgid)
-        assertTrue(gap.olderServerTime <= 175 && gap.newerServerTime > 175)
-    }
-
-    @Test
-    fun unreadPreparationMakesTerminalEmptyAndContextOnlyGapsExplicitlyUnrecoverable() = runTest {
-        processor.process(networkId, message("old", 100))
-        processor.process(networkId, message("recent", 900))
-        val old = checkNotNull(db.messageDao().byMsgid(bufferId, "old"))
-        val recent = checkNotNull(db.messageDao().byMsgid(bufferId, "recent"))
-        suspend fun resetGap() {
-            db.historyGapDao().deleteForRoom(bufferId)
-            db.historyGapDao().insert(
-                HistoryGapEntity(
-                    roomId = bufferId,
-                    olderMsgid = "old",
-                    olderServerTime = 100,
-                    newerMsgid = "recent",
-                    newerServerTime = 900,
-                    olderEventId = old.id,
-                    olderTimelineOrder = old.timelineOrder,
-                    newerEventId = recent.id,
-                    newerTimelineOrder = recent.timelineOrder,
-                ),
-            )
-        }
-        val marker = TimelineAnchor(100, old.id, old.timelineOrder)
-
-        resetGap()
-        coordinator.prepareUnreadWindow(
-            networkId,
-            bufferId,
-            "#chan",
-            marker,
-            FakeSource { FakeResponse(endOfHistory = true) },
-        )
-        assertFalse(db.historyGapDao().forRoom(bufferId).single().recoverable)
-
-        resetGap()
-        val contextOnly = message("context", 150).copy(
-            ctx = message("context", 150).ctx.copy(isHistoryContext = true),
-        )
-        coordinator.prepareUnreadWindow(
-            networkId,
-            bufferId,
-            "#chan",
-            marker,
-            FakeSource {
-                FakeResponse(
-                    events = listOf(contextOnly),
-                    endOfHistory = true,
-                    primaryMessageCount = 0,
-                )
-            },
-        )
-        assertFalse(db.historyGapDao().forRoom(bufferId).single().recoverable)
     }
 
     @Test
@@ -2691,12 +2171,9 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
-    fun thousandMessageAbsencePublishesRecentPageImmediatelyAndStopsAfterThreePages() = runTest {
+    fun thousandMessageAbsencePublishesOneRecentPageAndPersistsOlderGap() = runTest {
         processor.process(networkId, message("m1000", 1_000))
         syncPrefs.setLastSuccessfulSync(networkId, 1_001)
-        val firstBeforeRequested = CompletableDeferred<Unit>()
-        val releaseFirstBefore = CompletableDeferred<Unit>()
-        var beforePage = 0
         fun page(newest: Int): List<IrcEvent> = List(50) { offset ->
             val ordinal = newest - offset
             message("m$ordinal", ordinal.toLong())
@@ -2709,48 +2186,26 @@ class HistoryResyncCoordinatorTest {
                     assertEquals(50, request.limit)
                     FakeResponse(page(2_000))
                 }
-                ChatHistoryRequest.Subcommand.BEFORE -> {
-                    assertEquals(50, request.limit)
-                    when (beforePage++) {
-                        0 -> {
-                            assertEquals("msgid=m1951", request.bound1)
-                            firstBeforeRequested.complete(Unit)
-                            releaseFirstBefore.await()
-                            FakeResponse(page(1_950))
-                        }
-                        else -> {
-                            assertEquals("msgid=m1901", request.bound1)
-                            FakeResponse(page(1_900))
-                        }
-                    }
-                }
                 else -> error("automatic recent sync must not issue ${request.subcommand}")
             }
         }
 
-        val sync = async {
-            coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
-        }
-        firstBeforeRequested.await()
-
+        assertEquals(
+            HistoryResyncState.Updated(50),
+            coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source),
+        )
         assertEquals(51, rows(loadSize = 1_200).size)
         assertEquals("m2000", rows(loadSize = 1_200).first().msgid)
-        releaseFirstBefore.complete(Unit)
-
-        assertEquals(HistoryResyncState.Updated(150), sync.await())
-        assertEquals(151, rows(loadSize = 1_200).size)
         assertEquals(
             listOf(
                 ChatHistoryRequest.Subcommand.TARGETS,
                 ChatHistoryRequest.Subcommand.LATEST,
-                ChatHistoryRequest.Subcommand.BEFORE,
-                ChatHistoryRequest.Subcommand.BEFORE,
             ),
             source.requests.map { it.subcommand },
         )
         val gap = db.historyGapDao().forRoom(bufferId).single()
         assertEquals(1_000L, gap.olderServerTime)
-        assertEquals(1_851L, gap.newerServerTime)
+        assertEquals(1_951L, gap.newerServerTime)
     }
 
     @Test

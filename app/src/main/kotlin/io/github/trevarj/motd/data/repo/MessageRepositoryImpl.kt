@@ -54,7 +54,11 @@ class MessageRepositoryImpl @Inject constructor(
         pagingContextFlow(bufferId, focus).flatMapLatest { context ->
             Pager(
                 config = MESSAGE_PAGING_CONFIG,
-                remoteMediator = mediatorFactory.create(context.roomId, focus),
+                // Normal entry must never turn a visible boundary into network work. A deliberate
+                // older-history gesture changes the focus to RecentPaging; deep links use Around.
+                remoteMediator = if (focus.allowsRemotePaging()) {
+                    mediatorFactory.create(context.roomId, focus)
+                } else null,
                 pagingSourceFactory = {
                     messageDao.pagingSource(
                         messagePagingQuery(
@@ -128,13 +132,6 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deleteMessage(id: Long) = messageDao.deleteWithAnchorFallback(id)
-
-    override suspend fun hasHistoryGapAfter(bufferId: Long, anchor: TimelineAnchor): Boolean =
-        resolveRoomId(bufferId).let { roomId ->
-            resolveHistoryGaps(roomId, historyGapDao.forRoom(roomId)).any { gap ->
-                gap.older <= anchor && gap.newer > anchor
-            }
-        }
 
     override suspend fun historyWindowBounds(
         bufferId: Long,
@@ -244,11 +241,15 @@ internal data class ResolvedHistoryGap(
 
 internal typealias HistoryWindowBounds = MessageWindowBounds
 
+internal fun HistoryWindowFocus.allowsRemotePaging(): Boolean = this != HistoryWindowFocus.Recent
+
 internal fun historyWindowBounds(
     focus: HistoryWindowFocus,
     gaps: List<ResolvedHistoryGap>,
 ): MessageWindowBounds = when (focus) {
-    HistoryWindowFocus.Recent -> MessageWindowBounds(
+    HistoryWindowFocus.Recent,
+    HistoryWindowFocus.RecentPaging,
+    -> MessageWindowBounds(
         lowerBoundary = gaps.maxByOrNull { it.newer }?.newer,
     )
     is HistoryWindowFocus.Around -> MessageWindowBounds(

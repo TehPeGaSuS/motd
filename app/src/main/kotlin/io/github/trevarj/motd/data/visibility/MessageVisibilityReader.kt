@@ -118,10 +118,11 @@ class MessageVisibilityReader @Inject constructor(
         bufferId: Long,
         after: TimelineAnchor,
         spec: MessageVisibilitySpec,
+        bounds: MessageWindowBounds = MessageWindowBounds(),
     ): TimelineAnchor? {
         val context = visibilityContext(bufferId)
         return db.messageDao().rawMessage(
-            firstVisibleUnreadQuery(context.roomId, after, spec, context.identityRules),
+            firstVisibleUnreadQuery(context.roomId, after, spec, context.identityRules, bounds),
         )
             ?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
     }
