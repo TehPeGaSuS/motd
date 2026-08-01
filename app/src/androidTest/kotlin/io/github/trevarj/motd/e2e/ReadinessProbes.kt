@@ -138,16 +138,44 @@ class MessageLifecycleProbe(
         }
 }
 
-/** Observes an exact row-and-sentinel fixture window through the same bounded search surface as the UI. */
+/** Observes fixture rows through the same bounded chat-only search surface as the UI. */
 class MessageRunProbe(
     private val search: SearchRepository,
     private val milestones: E2eMilestoneRecorder,
 ) {
+    suspend fun awaitRecentRows(
+        token: String,
+        bufferId: Long,
+        minimumCount: Int,
+        maximumCount: Int,
+        expectedNewestOrdinal: Int,
+        requiredText: String,
+        excludedText: String,
+        timeoutMs: Long = 45_000,
+    ): List<MessageEntity> = try {
+        withTimeout(timeoutMs) {
+            search.search(token, bufferId).first { hits ->
+                val rows = hits.map { it.message }.filter { it.text.startsWith("$token row") }
+                val texts = rows.map { it.text }
+                rows.size in minimumCount..maximumCount && requiredText in texts && excludedText !in texts
+            }.map { it.message }
+                .filter { it.text.startsWith("$token row") }
+                .also { validateRows(token, bufferId, it, expectedNewestOrdinal) }
+        }
+    } catch (timeout: TimeoutCancellationException) {
+        milestones.record("history_run_timeout", "buffer=$bufferId count=$minimumCount..$maximumCount")
+        throw AssertionError(
+            "bounded recent history rows timed out for buffer=$bufferId count=$minimumCount..$maximumCount",
+            timeout,
+        )
+    }
+
     suspend fun awaitRows(
         token: String,
         bufferId: Long,
         count: Int,
         expectedExtras: Set<String>,
+        expectedNewestOrdinal: Int,
         timeoutMs: Long = 45_000,
     ): List<MessageEntity> =
         try {
@@ -167,22 +195,33 @@ class MessageRunProbe(
                     check(extras.size == expectedExtras.size && extras.toSet() == expectedExtras) {
                         "fixture window contains unexpected non-row messages"
                     }
-                    rows.also {
-                        check(rows.map { it.id }.distinct().size == count) { "fixture run contains duplicate event ids" }
-                        check(rows.map { it.msgid }.distinct().size == count) { "fixture run contains duplicate msgids" }
-                        check(rows.map { it.text }.distinct().size == count) { "fixture run contains duplicate bodies" }
-                        val ordered = rows.sortedBy { it.text.substringAfter("$token ") }
-                        check(ordered.zipWithNext().all { (older, newer) -> older.anchor() < newer.anchor() }) {
-                            "fixture run is not in canonical chronological order"
-                        }
-                        milestones.record("history_run_canonical", "buffer=$bufferId count=$count")
-                    }
+                    rows.also { validateRows(token, bufferId, it, expectedNewestOrdinal) }
                 }
             }
         } catch (timeout: TimeoutCancellationException) {
             milestones.record("history_run_timeout", "buffer=$bufferId count=$count")
             throw AssertionError("canonical history row window timed out for buffer=$bufferId count=$count", timeout)
         }
+
+    private fun validateRows(
+        token: String,
+        bufferId: Long,
+        rows: List<MessageEntity>,
+        expectedNewestOrdinal: Int,
+    ) {
+        check(rows.map { it.id }.distinct().size == rows.size) { "fixture run contains duplicate event ids" }
+        check(rows.all { it.msgid != null }) { "fixture run contains a row without canonical msgid identity" }
+        check(rows.map { it.msgid }.distinct().size == rows.size) { "fixture run contains duplicate msgids" }
+        check(rows.map { it.text }.distinct().size == rows.size) { "fixture run contains duplicate bodies" }
+        val ordered = rows.sortedBy { it.text.substringAfter("$token row").toInt() }
+        val ordinals = ordered.map { it.text.substringAfter("$token row").toInt() }
+        val expectedOrdinals = (expectedNewestOrdinal - rows.size + 1..expectedNewestOrdinal).toList()
+        check(ordinals == expectedOrdinals) { "fixture run is not a contiguous newest-first suffix" }
+        check(ordered.zipWithNext().all { (older, newer) -> older.anchor() < newer.anchor() }) {
+            "fixture run is not in canonical chronological order"
+        }
+        milestones.record("history_run_canonical", "buffer=$bufferId count=${rows.size}")
+    }
 
     private fun MessageEntity.anchor(): TimelineAnchor = TimelineAnchor(serverTime, id, timelineOrder)
 }

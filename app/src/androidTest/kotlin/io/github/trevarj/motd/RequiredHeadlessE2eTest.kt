@@ -211,13 +211,16 @@ class RequiredHeadlessE2eTest {
                 historySettled.await()
             }
         }
-        // The 150-event reconnect cap includes the fixture client's non-searchable QUIT.
+        // CHATHISTORY caps primary events at 150; chat-only search omits replayed state events.
         val recentWindow = runBlocking {
-            runProbe.awaitRows(
+            runProbe.awaitRecentRows(
                 token = token,
                 bufferId = bufferId,
-                count = 149,
-                expectedExtras = setOf("$token marker"),
+                minimumCount = 100,
+                maximumCount = 150,
+                expectedNewestOrdinal = 260,
+                requiredText = "$token row260",
+                excludedText = "$token row001",
             )
         }
         val newest = recentWindow.single { it.text == "$token row260" }
@@ -292,6 +295,7 @@ class RequiredHeadlessE2eTest {
                 bufferId = bufferId,
                 count = 200,
                 expectedExtras = emptySet(),
+                expectedNewestOrdinal = 260,
             )
         }
         milestones.record("notification_restore_stable", "buffer=$bufferId event=${firstUnread.id}")

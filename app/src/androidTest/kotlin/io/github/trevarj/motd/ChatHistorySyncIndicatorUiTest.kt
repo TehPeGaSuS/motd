@@ -54,7 +54,7 @@ class ChatHistorySyncIndicatorUiTest {
         compose.mainClock.advanceTimeBy(1)
         compose.mainClock.advanceTimeBy(500)
         compose.onNodeWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertIsDisplayed()
-        compose.onNodeWithText("Syncing messages…").assertExists()
+        compose.onNodeWithText("Finding first unread…").assertExists()
     }
 
     @Test

@@ -4,6 +4,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
 import androidx.compose.ui.text.input.TextFieldValue
@@ -107,14 +108,16 @@ class ComposerUiTest {
         var starts = 0
         var stops = 0
         val recording = mutableStateOf(false)
+        val enabled = mutableStateOf(true)
+        val voiceEnabled = mutableStateOf(true)
         compose.setContent {
             MotdTheme {
                 Composer(
                     value = TextFieldValue(),
                     onValueChange = {},
                     onSend = {},
-                    enabled = true,
-                    voiceEnabled = true,
+                    enabled = enabled.value,
+                    voiceEnabled = voiceEnabled.value,
                     voiceRecording = recording.value,
                     onVoiceAccessibilityStart = {
                         starts++
@@ -144,37 +147,16 @@ class ComposerUiTest {
             assertEquals(1, stops)
         }
 
-        compose.setContent {
-            MotdTheme {
-                Composer(
-                    value = TextFieldValue(),
-                    onValueChange = {},
-                    onSend = {},
-                    enabled = false,
-                    voiceEnabled = true,
-                    onVoiceAccessibilityStart = { starts++ },
-                )
-            }
-        }
+        compose.runOnIdle { enabled.value = false }
         compose.onNodeWithTag("chat_composer_voice")
             .assertIsNotEnabled()
             .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnClick))
 
-        compose.setContent {
-            MotdTheme {
-                Composer(
-                    value = TextFieldValue(),
-                    onValueChange = {},
-                    onSend = {},
-                    enabled = true,
-                    voiceEnabled = false,
-                    onVoiceAccessibilityStart = { starts++ },
-                )
-            }
-        }
         compose.runOnIdle {
-            assertEquals(0, compose.onAllNodesWithTag("chat_composer_voice").fetchSemanticsNodes().size)
-            assertEquals(1, starts)
+            enabled.value = true
+            voiceEnabled.value = false
         }
+        compose.onAllNodesWithTag("chat_composer_voice").assertCountEquals(0)
+        compose.runOnIdle { assertEquals(1, starts) }
     }
 }
