@@ -8,12 +8,13 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.assertIsDisplayed
 import io.github.trevarj.motd.ui.components.AutocompletePanel
@@ -126,12 +127,15 @@ class ComposerUiTest {
                 )
             }
         }
+        compose.waitForIdle()
 
         compose.onNodeWithTag("chat_composer_voice").performTouchInput { click() }
         compose.waitForIdle()
         compose.runOnIdle { assertEquals(0, starts) }
 
-        compose.onNodeWithTag("chat_composer_voice").assertHasClickAction().performClick()
+        compose.onNodeWithTag("chat_composer_voice")
+            .assertHasClickAction()
+            .performSemanticsAction(SemanticsActions.OnClick)
         compose.waitForIdle()
         compose.runOnIdle { assertEquals(1, starts) }
 

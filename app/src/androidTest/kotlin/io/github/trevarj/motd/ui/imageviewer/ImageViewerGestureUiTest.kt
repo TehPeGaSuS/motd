@@ -55,21 +55,19 @@ class ImageViewerGestureUiTest {
             up()
         }
 
-        compose.runOnIdle {
-            val node = compose.onNodeWithTag(IMAGE_VIEWER_IMAGE_TAG).fetchSemanticsNode()
-            val transform = node.config[ImageViewerTransformKey]
-            val bounds = requireNotNull(
-                imageTransformBounds(
-                    intrinsicSize = androidx.compose.ui.geometry.Size(400f, 100f),
-                    viewportSize = IntSize(node.layoutInfo.width, node.layoutInfo.height),
-                ),
-            )
-            val expected = clampImageTransform(transform, bounds)
+        val node = compose.onNodeWithTag(IMAGE_VIEWER_IMAGE_TAG).fetchSemanticsNode()
+        val transform = node.config[ImageViewerTransformKey]
+        val bounds = requireNotNull(
+            imageTransformBounds(
+                intrinsicSize = androidx.compose.ui.geometry.Size(400f, 100f),
+                viewportSize = IntSize(node.layoutInfo.width, node.layoutInfo.height),
+            ),
+        )
+        val expected = clampImageTransform(transform, bounds)
 
-            assertTrue("pinch should zoom the fitted image", transform.scale > 1f)
-            assertEquals(expected, transform)
-            assertEquals("wide content remains vertically centered until it covers the viewport", 0f, transform.offsetY, 0.001f)
-        }
+        assertTrue("pinch should zoom the fitted image", transform.scale > 1f)
+        assertEquals(expected, transform)
+        assertEquals("wide content remains vertically centered until it covers the viewport", 0f, transform.offsetY, 0.001f)
     }
 
     @Test fun save_feedback_waits_for_completion_and_allows_retry() {

@@ -211,7 +211,7 @@ class RequiredHeadlessE2eTest {
                 historySettled.await()
             }
         }
-        val recentWindow = runBlocking { runProbe.awaitRun(token, bufferId, 151) }
+        val recentWindow = runBlocking { runProbe.awaitRows(token, bufferId, 150) }
         val newest = recentWindow.single { it.text == "$token row260" }
         assertTrue(recentWindow.none { it.text == "$token row001" })
         assertMarkerAtLeast(bootstrap, bufferId, marker)
@@ -277,7 +277,7 @@ class RequiredHeadlessE2eTest {
         timeline.assertMessageVisible(firstUnread.tag())
         scenario.scenario?.onActivity { it.recreate() }
         timeline.assertMessageVisible(firstUnread.tag())
-        runBlocking { runProbe.awaitRun(token, bufferId, 201) }
+        runBlocking { runProbe.awaitRows(token, bufferId, 200) }
         milestones.record("notification_restore_stable", "buffer=$bufferId event=${firstUnread.id}")
     }
 

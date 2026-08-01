@@ -3,14 +3,17 @@ package io.github.trevarj.motd
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.text.AnnotatedString
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.onboarding.BouncerAddDraft
 import io.github.trevarj.motd.ui.onboarding.BouncerAddState
@@ -92,8 +95,12 @@ class OnboardingBouncerUiTest {
         compose.onAllNodesWithTag("onboarding_bouncer_add_error").assertCountEquals(1)
         compose.onNodeWithTag("onboarding_bouncer_add_name").assertTextContains("New")
         compose.runOnIdle { state = state.copy(bouncerAdd = BouncerAddState.Success, bouncerAddDraft = BouncerAddDraft()) }
-        compose.onNodeWithTag("onboarding_bouncer_add_name").assertTextEquals("")
-        compose.onNodeWithTag("onboarding_bouncer_add_host").assertTextEquals("")
+        val emptyEditableText = SemanticsMatcher.expectValue(
+            SemanticsProperties.EditableText,
+            AnnotatedString(""),
+        )
+        compose.onNodeWithTag("onboarding_bouncer_add_name").assert(emptyEditableText)
+        compose.onNodeWithTag("onboarding_bouncer_add_host").assert(emptyEditableText)
     }
 
     private fun content(
