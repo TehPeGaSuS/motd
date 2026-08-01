@@ -1707,6 +1707,55 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun unreadPreparationLoadsOnePageWhenAGapStartsImmediatelyAfterTheMarker() = runTest {
+        processor.process(networkId, message("marker", 100))
+        val stateId = db.messageDao().insertAll(
+            listOf(
+                MessageEntity(
+                    bufferId = bufferId,
+                    msgid = "state-boundary",
+                    serverTime = 110,
+                    sender = "alice",
+                    kind = MessageKind.QUIT,
+                    text = "quit",
+                    dedupKey = "state-boundary",
+                ),
+            ),
+        ).single()
+        processor.process(networkId, message("recent", 900))
+        val marker = checkNotNull(db.messageDao().byMsgid(bufferId, "marker"))
+        val recent = checkNotNull(db.messageDao().byMsgid(bufferId, "recent"))
+        db.historyGapDao().insert(
+            HistoryGapEntity(
+                roomId = bufferId,
+                olderMsgid = "state-boundary",
+                olderServerTime = 110,
+                newerMsgid = "recent",
+                newerServerTime = 900,
+                olderEventId = stateId,
+                olderTimelineOrder = stateId,
+                newerEventId = recent.id,
+                newerTimelineOrder = recent.timelineOrder,
+            ),
+        )
+        val source = FakeSource {
+            FakeResponse(events = listOf(message("first-unread", 120)))
+        }
+
+        val result = coordinator.prepareUnreadWindow(
+            networkId,
+            bufferId,
+            "#chan",
+            TimelineAnchor(marker.serverTime, marker.id, marker.timelineOrder),
+            source,
+        )
+
+        assertEquals(HistoryResyncState.Updated(1), result)
+        assertEquals(listOf("msgid=state-boundary"), source.requests.map { it.bound1 })
+        assertEquals("first-unread", db.messageDao().byMsgid(bufferId, "first-unread")?.text)
+    }
+
+    @Test
     fun unreadPreparationPagesUntilItReachesAMarkerInsideTheGap() = runTest {
         processor.process(networkId, message("old", 100))
         processor.process(networkId, message("recent", 900))

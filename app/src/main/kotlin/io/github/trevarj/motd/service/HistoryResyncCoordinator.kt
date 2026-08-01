@@ -325,9 +325,12 @@ class HistoryResyncCoordinator @Inject constructor(
                 var roomId = db.bufferDao().canonicalId(bufferId) ?: bufferId
                 var inserted = 0
                 var previousBoundary: Boundary? = null
+                var gap = findHistoryGapContaining(roomId, marker)
+                val startsAfterMarker = gap == null
+                if (gap == null) gap = findFirstHistoryGapAfter(roomId, marker)
                 while (true) {
-                    val gap = findHistoryGapContaining(roomId, marker) ?: break
-                    val boundary = Boundary(gap.olderMsgid, gap.olderServerTime)
+                    val currentGap = gap ?: break
+                    val boundary = Boundary(currentGap.olderMsgid, currentGap.olderServerTime)
                     if (boundary == previousBoundary) {
                         return@withNetworkLock HistoryResyncState.Incomplete(
                             inserted,
@@ -355,7 +358,7 @@ class HistoryResyncCoordinator @Inject constructor(
                         roomId,
                         requested.request,
                         page,
-                        historyGapId = gap.id,
+                        historyGapId = currentGap.id,
                     )
                     inserted += persisted.inserted
                     roomId = persisted.roomId
@@ -368,6 +371,11 @@ class HistoryResyncCoordinator @Inject constructor(
                             "CHATHISTORY timestamp boundary is saturated before the read marker",
                         )
                     }
+                    // When a state event such as QUIT sits immediately after the read marker, the
+                    // missing interval starts after rather than around the marker. One bounded page
+                    // exposes the first unread chat row; older traversal remains scroll-driven.
+                    if (startsAfterMarker) break
+                    gap = findHistoryGapContaining(roomId, marker)
                 }
                 if (inserted > 0) HistoryResyncState.Updated(inserted) else HistoryResyncState.UpToDate
             }
@@ -394,6 +402,20 @@ class HistoryResyncCoordinator @Inject constructor(
             }
         }
         return null
+    }
+
+    private suspend fun findFirstHistoryGapAfter(
+        roomId: Long,
+        marker: TimelineAnchor,
+    ): io.github.trevarj.motd.data.db.HistoryGapEntity? {
+        var earliest: Pair<io.github.trevarj.motd.data.db.HistoryGapEntity, TimelineAnchor>? = null
+        for (gap in db.historyGapDao().forRoom(roomId)) {
+            if (!gap.recoverable || historyGapNewerAnchor(roomId, gap) <= marker) continue
+            val older = historyGapOlderAnchor(roomId, gap)
+            if (older <= marker || earliest?.second?.let { older >= it } == true) continue
+            earliest = gap to older
+        }
+        return earliest?.first
     }
 
     private suspend fun historyGapOlderAnchor(
