@@ -688,13 +688,20 @@ fun ChatContent(
             identityRules,
         )
     }
+    val onePagePaging = activeHistoryWindow.focus is HistoryWindowFocus.RecentPaging
+    val olderHistoryLoad = if (onePagePaging) {
+        items.loadState.mediator?.refresh ?: items.loadState.append
+    } else {
+        items.loadState.append
+    }
     val historyUiState = chatHistoryUiState(
         bufferType = state.buffer?.type,
         connectionState = state.connState,
         availability = historyAvailability,
-        append = items.loadState.append,
+        append = olderHistoryLoad,
         historyComplete = state.buffer?.historyComplete == true,
         olderPagingAuthorized = activeHistoryWindow.focus != HistoryWindowFocus.Recent,
+        onePagePaging = onePagePaging,
     )
     val unreadEntryLabel = unreadEntrySnapshot?.let { snapshot ->
         pluralStringResource(
@@ -712,29 +719,9 @@ fun ChatContent(
         is LoadState.NotLoading -> historySyncStatus
     }
     val readyRetryGate = remember(items) { HistoryReadyRetryGate() }
-    var primeAuthorizedPaging by remember(state.buffer?.id) { mutableStateOf(false) }
-    val requestOlderHistory = {
-        // An empty mediated store already APPEND-seeds itself with LATEST. Only a non-empty
-        // local generation needs its consumed boundary drag forwarded after the Pager swap.
-        primeAuthorizedPaging = items.itemCount > 0
-        onRequestOlderHistory()
-    }
-    LaunchedEffect(historyAvailability, items.loadState.append) {
-        if (readyRetryGate.update(historyAvailability, items.loadState.append)) {
+    LaunchedEffect(historyAvailability, olderHistoryLoad) {
+        if (readyRetryGate.update(historyAvailability, olderHistoryLoad)) {
             items.retry()
-        }
-    }
-    LaunchedEffect(activeHistoryWindow.focus) {
-        if (activeHistoryWindow.focus == HistoryWindowFocus.RecentPaging && primeAuthorizedPaging) {
-            // The boundary drag belongs to the outgoing local-only Pager. Wait until the
-            // user-authorized mediator is installed, then forward that one boundary hint.
-            val boundaryIndex = snapshotFlow {
-                Triple(items.loadState.mediator, items.loadState.refresh, items.itemCount)
-            }.first { (mediator, refresh, count) ->
-                mediator != null && refresh is LoadState.NotLoading && count > 0
-            }.third - 1
-            items[boundaryIndex]
-            primeAuthorizedPaging = false
         }
     }
     val traceBufferId = state.buffer?.id
@@ -1572,7 +1559,7 @@ fun ChatContent(
                         // Frozen read-marker so the "New messages" divider stays put (plans/15 #2).
                         readMarkerTime = unreadEntrySnapshot?.marker,
                         readMarkerLabel = unreadEntryLabel,
-                        onOlderHistoryRequested = requestOlderHistory,
+                        onOlderHistoryRequested = onRequestOlderHistory,
                         reactionChips = reactionChips,
                         replyPreview = replyPreview,
                         onReplyPreviewClick = onReplyPreviewClick,

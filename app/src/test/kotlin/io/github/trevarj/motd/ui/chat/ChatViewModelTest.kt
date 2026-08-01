@@ -1030,9 +1030,10 @@ class ChatViewModelTest {
 
         vm.requestOlderHistory()
         runCurrent()
-        assertEquals(HistoryWindowFocus.RecentPaging, vm.activeHistoryWindow.value.focus)
+        assertEquals(HistoryWindowFocus.RecentPaging(1), vm.activeHistoryWindow.value.focus)
         vm.requestOlderHistory()
-        assertEquals(HistoryWindowFocus.RecentPaging, vm.activeHistoryWindow.value.focus)
+        runCurrent()
+        assertEquals(HistoryWindowFocus.RecentPaging(2), vm.activeHistoryWindow.value.focus)
     }
 
     @Test

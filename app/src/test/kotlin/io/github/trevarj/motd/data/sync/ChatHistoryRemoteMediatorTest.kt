@@ -343,6 +343,41 @@ class ChatHistoryRemoteMediatorTest {
     }
 
     @Test
+    fun authorizedRecentGeneration_fetchesExactlyOneBeforePage() = runTest {
+        processor.process(networkId, chatMsg("seed", 500))
+        val history = FakeHistory(
+            before = ArrayDeque(
+                listOf(
+                    listOf(chatMsg("older-1", 100)),
+                    listOf(chatMsg("older-2", 50)),
+                ),
+            ),
+        )
+        val mediator = mediator(history, focus = HistoryWindowFocus.RecentPaging(1))
+
+        assertEquals(RemoteMediator.InitializeAction.LAUNCH_INITIAL_REFRESH, mediator.initialize())
+        val refresh = load(mediator, LoadType.REFRESH)
+        val append = load(mediator, LoadType.APPEND)
+
+        assertTrue((refresh as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertTrue((append as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(listOf(ChatHistoryRequest.Subcommand.BEFORE), history.calls)
+        assertEquals(2, rowCount())
+    }
+
+    @Test
+    fun authorizedRecentGeneration_seedsEmptyStoreWithExactlyOneLatestPage() = runTest {
+        val history = FakeHistory(latest = listOf(chatMsg("latest", 500)))
+        val mediator = mediator(history, focus = HistoryWindowFocus.RecentPaging(1))
+
+        val result = load(mediator, LoadType.REFRESH)
+
+        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(listOf(ChatHistoryRequest.Subcommand.LATEST), history.calls)
+        assertEquals(1, rowCount())
+    }
+
+    @Test
     fun unreadFocusedPrependPagesAfterAndShrinksOnlyTheNewerGap() = runTest {
         processor.process(networkId, chatMsg("old", 100))
         processor.process(networkId, chatMsg("recent", 900))

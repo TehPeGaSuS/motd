@@ -23,8 +23,10 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
@@ -50,28 +52,37 @@ class MessageRepositoryImpl @Inject constructor(
         bufferId: Long,
         visibility: MessageVisibilitySpec,
         focus: HistoryWindowFocus,
-    ): Flow<PagingData<MessageEntity>> =
-        pagingContextFlow(bufferId, focus).flatMapLatest { context ->
-            Pager(
-                config = MESSAGE_PAGING_CONFIG,
-                // Normal entry must never turn a visible boundary into network work. A deliberate
-                // older-history gesture changes the focus to RecentPaging; deep links use Around.
-                remoteMediator = if (focus.allowsRemotePaging()) {
-                    mediatorFactory.create(context.roomId, focus)
-                } else null,
-                pagingSourceFactory = {
-                    messageDao.pagingSource(
-                        messagePagingQuery(
-                            context.roomId,
-                            visibility,
-                            context.identityRules,
-                            context.bounds.lowerBoundary,
-                            context.bounds.upperBoundary,
-                        ),
-                    )
-                },
-            ).flow
-        }
+    ): Flow<PagingData<MessageEntity>> = flow {
+        // A fetched gap boundary can replace the local Pager so its expanded island is visible.
+        // Do not let that replacement spend the same interaction's remote-page authorization.
+        var recentPagePending = focus is HistoryWindowFocus.RecentPaging
+        emitAll(
+            pagingContextFlow(bufferId, focus).flatMapLatest { context ->
+                val attachMediator = focus.allowsRemotePaging() &&
+                    (focus !is HistoryWindowFocus.RecentPaging || recentPagePending)
+                recentPagePending = false
+                Pager(
+                    config = MESSAGE_PAGING_CONFIG,
+                    // Normal entry must never turn a visible boundary into network work. A deliberate
+                    // older-history gesture changes the focus to RecentPaging; deep links use Around.
+                    remoteMediator = if (attachMediator) {
+                        mediatorFactory.create(context.roomId, focus)
+                    } else null,
+                    pagingSourceFactory = {
+                        messageDao.pagingSource(
+                            messagePagingQuery(
+                                context.roomId,
+                                visibility,
+                                context.identityRules,
+                                context.bounds.lowerBoundary,
+                                context.bounds.upperBoundary,
+                            ),
+                        )
+                    },
+                ).flow
+            },
+        )
+    }
 
     // Kept for the frozen contract; scopes to a small, fixed msgid set (safe under 999 vars).
     override fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>> =
@@ -247,9 +258,10 @@ internal fun historyWindowBounds(
     focus: HistoryWindowFocus,
     gaps: List<ResolvedHistoryGap>,
 ): MessageWindowBounds = when (focus) {
-    HistoryWindowFocus.Recent,
-    HistoryWindowFocus.RecentPaging,
-    -> MessageWindowBounds(
+    HistoryWindowFocus.Recent -> MessageWindowBounds(
+        lowerBoundary = gaps.maxByOrNull { it.newer }?.newer,
+    )
+    is HistoryWindowFocus.RecentPaging -> MessageWindowBounds(
         lowerBoundary = gaps.maxByOrNull { it.newer }?.newer,
     )
     is HistoryWindowFocus.Around -> MessageWindowBounds(

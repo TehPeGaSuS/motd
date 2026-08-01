@@ -507,6 +507,7 @@ internal fun chatHistoryUiState(
     append: LoadState,
     historyComplete: Boolean,
     olderPagingAuthorized: Boolean = true,
+    onePagePaging: Boolean = false,
 ): ChatHistoryUiState {
     if (bufferType == null || bufferType == BufferType.SERVER) return ChatHistoryUiState.Hidden
     // A final capability decision supersedes a stale mediator error/loading state.
@@ -525,7 +526,7 @@ internal fun chatHistoryUiState(
         HistoryAvailability.Unsupported -> ChatHistoryUiState.Unsupported
         HistoryAvailability.NegotiatingOrOffline -> historyUnavailableState(connectionState)
         is HistoryAvailability.Ready -> if (append.endOfPaginationReached) {
-            if (olderPagingAuthorized) {
+            if (olderPagingAuthorized && !onePagePaging) {
                 ChatHistoryUiState.Incomplete()
             } else {
                 ChatHistoryUiState.OlderAvailable

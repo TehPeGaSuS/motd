@@ -1,6 +1,12 @@
 package io.github.trevarj.motd.data.repo
 
+import androidx.paging.ExperimentalPagingApi
+import androidx.paging.LoadType
+import androidx.paging.PagingData
 import androidx.paging.PagingSource
+import androidx.paging.PagingState
+import androidx.paging.RemoteMediator
+import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
@@ -14,6 +20,11 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -48,6 +59,46 @@ class MessageRepositoryPagingTest {
         assertTrue(MESSAGE_PAGING_CONFIG.enablePlaceholders)
         assertEquals(500, MESSAGE_PAGING_CONFIG.maxSize)
         assertEquals(250, MESSAGE_PAGING_CONFIG.jumpThreshold)
+    }
+
+    @OptIn(ExperimentalPagingApi::class, ExperimentalCoroutinesApi::class)
+    @Test
+    fun authorizedRecentRequestAttachesMediatorOnlyToItsFirstWindowGeneration() = runTest {
+        var mediatorCount = 0
+        val repository = MessageRepositoryImpl(
+            db.bufferDao(),
+            db.networkIdentityDao(),
+            db.messageDao(),
+            db.reactionDao(),
+            ChatHistoryMediatorFactory { _ ->
+                mediatorCount++
+                object : RemoteMediator<Int, MessageEntity>() {
+                    override suspend fun load(
+                        loadType: LoadType,
+                        state: PagingState<Int, MessageEntity>,
+                    ) = MediatorResult.Success(endOfPaginationReached = true)
+                }
+            },
+            db.historyGapDao(),
+        )
+        val emissions = mutableListOf<PagingData<MessageEntity>>()
+        val collected = async {
+            repository.messages(
+                bufferId,
+                MessageVisibilitySpec(),
+                HistoryWindowFocus.RecentPaging(1),
+            ).take(2).toList(emissions)
+        }
+        runCurrent()
+        assertEquals(1, mediatorCount)
+
+        db.historyGapDao().insert(
+            HistoryGapEntity(0, bufferId, "older", 100, "newer", 500),
+        )
+        collected.await()
+
+        assertEquals(2, emissions.size)
+        assertEquals(1, mediatorCount)
     }
 
     @Test

@@ -561,6 +561,16 @@ class ChatModelsTest {
         assertFalse(shouldRequestOlderHistory(12f, userInput = true, 0, null))
     }
 
+    @Test fun `older history drag authorizes only one page until the gesture ends`() {
+        val latch = OlderHistoryGestureLatch()
+
+        assertTrue(latch.requestIfEligible(12f, userInput = true, 50, 49))
+        assertFalse(latch.requestIfEligible(8f, userInput = true, 50, 49))
+
+        latch.reset()
+        assertTrue(latch.requestIfEligible(6f, userInput = true, 100, 99))
+    }
+
     @Test fun `bubble gap tracks grouping and density`() {
         val comfortable = spacingFor(LayoutDensity.COMFORTABLE)
         val compact = spacingFor(LayoutDensity.COMPACT)
@@ -650,6 +660,18 @@ class ChatModelsTest {
                 ended,
                 historyComplete = false,
                 olderPagingAuthorized = true,
+            ),
+        )
+        assertEquals(
+            ChatHistoryUiState.OlderAvailable,
+            chatHistoryUiState(
+                BufferType.CHANNEL,
+                IrcClientState.Ready("me", emptySet(), emptyMap()),
+                ready,
+                ended,
+                historyComplete = false,
+                olderPagingAuthorized = true,
+                onePagePaging = true,
             ),
         )
         assertEquals(

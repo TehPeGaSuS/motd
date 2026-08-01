@@ -576,7 +576,7 @@ class BufferStoreCanonicalTest {
         repository.messages(
             loser.id,
             io.github.trevarj.motd.data.visibility.MessageVisibilitySpec(),
-            HistoryWindowFocus.RecentPaging,
+            HistoryWindowFocus.RecentPaging(1),
         ).first()
         assertEquals(merged.id, mediatorRoomId)
     }

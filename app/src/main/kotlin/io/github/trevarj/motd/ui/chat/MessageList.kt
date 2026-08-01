@@ -66,6 +66,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTag as semanticsTestTag
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.paging.compose.LazyPagingItems
@@ -229,6 +230,28 @@ internal fun shouldRequestOlderHistory(
 ): Boolean = userInput && availableY > 0f && itemCount > 0 &&
     lastVisibleIndex != null && lastVisibleIndex >= itemCount - 1
 
+/** Collapses the many nested-scroll deltas in one physical drag into one paging request. */
+internal class OlderHistoryGestureLatch {
+    private var requested = false
+
+    fun requestIfEligible(
+        availableY: Float,
+        userInput: Boolean,
+        itemCount: Int,
+        lastVisibleIndex: Int?,
+    ): Boolean {
+        if (requested || !shouldRequestOlderHistory(availableY, userInput, itemCount, lastVisibleIndex)) {
+            return false
+        }
+        requested = true
+        return true
+    }
+
+    fun reset() {
+        requested = false
+    }
+}
+
 /**
  * Reverse-layout message list. Index 0 is the newest message (bottom). For each row we peek the
  * next (older) item to compute grouping, day separators, and the read-marker divider.
@@ -239,6 +262,7 @@ fun MessageList(
     listState: LazyListState,
     networkId: Long?,
     readMarkerTime: TimelineAnchor?,
+    modifier: Modifier = Modifier,
     readMarkerLabel: String? = null,
     onLongPress: (MessageEntity) -> Unit,
     onReply: (MessageEntity) -> Unit,
@@ -247,7 +271,6 @@ fun MessageList(
     onReact: (MessageEntity, String) -> Unit,
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
-    modifier: Modifier = Modifier,
     bufferId: Long? = null,
     conversationName: String? = null,
     directMessage: Boolean = false,
@@ -307,12 +330,13 @@ fun MessageList(
     val canStartNewRichContentWork = richContentReady && !scrolling
     val formatMessageTime = rememberMessageTimeFormatter()
     val latestOlderHistoryRequest by rememberUpdatedState(onOlderHistoryRequested)
+    val olderHistoryGestureLatch = remember(listState) { OlderHistoryGestureLatch() }
     val olderHistoryConnection = remember(listState, items) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 val lastVisible = listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index }
                 if (
-                    shouldRequestOlderHistory(
+                    olderHistoryGestureLatch.requestIfEligible(
                         availableY = available.y,
                         userInput = source == NestedScrollSource.UserInput,
                         itemCount = items.itemCount,
@@ -322,6 +346,11 @@ fun MessageList(
                     latestOlderHistoryRequest()
                 }
                 return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                olderHistoryGestureLatch.reset()
+                return Velocity.Zero
             }
         }
     }

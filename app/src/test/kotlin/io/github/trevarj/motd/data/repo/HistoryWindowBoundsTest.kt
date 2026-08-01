@@ -37,13 +37,13 @@ class HistoryWindowBoundsTest {
     fun recentWindowStartsAtTheNewestKnownIsland() {
         val expected = HistoryWindowBounds(lowerBoundary = TimelineAnchor(900, 900))
         assertEquals(expected, historyWindowBounds(HistoryWindowFocus.Recent, gaps))
-        assertEquals(expected, historyWindowBounds(HistoryWindowFocus.RecentPaging, gaps))
+        assertEquals(expected, historyWindowBounds(HistoryWindowFocus.RecentPaging(1), gaps))
     }
 
     @Test
     fun remotePagingRequiresUserAuthorizationOrAnExplicitAnchor() {
         assertFalse(HistoryWindowFocus.Recent.allowsRemotePaging())
-        assertTrue(HistoryWindowFocus.RecentPaging.allowsRemotePaging())
+        assertTrue(HistoryWindowFocus.RecentPaging(1).allowsRemotePaging())
         assertTrue(HistoryWindowFocus.Around(600).allowsRemotePaging())
     }
 

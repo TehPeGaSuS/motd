@@ -127,8 +127,8 @@ sealed interface HistoryWindowFocus {
     /** Paint the newest contiguous local island without allowing boundary-triggered network I/O. */
     data object Recent : HistoryWindowFocus
 
-    /** The user reached toward older rows, authorizing directional paging for the recent island. */
-    data object RecentPaging : HistoryWindowFocus
+    /** One deliberate older-boundary interaction; each id owns exactly one remote page. */
+    data class RecentPaging(val requestId: Long) : HistoryWindowFocus
 
     data class Around(
         val serverTime: Long,

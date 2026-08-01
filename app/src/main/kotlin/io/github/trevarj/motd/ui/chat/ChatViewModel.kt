@@ -226,6 +226,7 @@ class ChatViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, MessageVisibilitySpec())
 
     private val historyWindowFocus = MutableStateFlow<HistoryWindowFocus>(HistoryWindowFocus.Recent)
+    private var nextOlderHistoryRequestId = 0L
 
     val activeHistoryWindow: StateFlow<ActiveHistoryWindow> = historyWindowFocus.flatMapLatest { focus ->
         messageRepository.observeHistoryWindowBounds(bufferId, focus).map { bounds ->
@@ -1597,10 +1598,15 @@ class ChatViewModel @Inject constructor(
         markEntryPositionSettled()
     }
 
-    /** One-way authorization for RemoteMediator BEFORE requests in the current recent island. */
+    /** Each deliberate boundary interaction authorizes exactly one older remote page. */
     fun requestOlderHistory() {
-        if (historyWindowFocus.value == HistoryWindowFocus.Recent) {
-            historyWindowFocus.value = HistoryWindowFocus.RecentPaging
+        when (historyWindowFocus.value) {
+            HistoryWindowFocus.Recent,
+            is HistoryWindowFocus.RecentPaging,
+            -> historyWindowFocus.value = HistoryWindowFocus.RecentPaging(
+                requestId = ++nextOlderHistoryRequestId,
+            )
+            is HistoryWindowFocus.Around -> Unit
         }
     }
 

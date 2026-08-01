@@ -48,10 +48,9 @@ object CanonicalHistorySingleFlight {
  *           protocol page boundary. Completed empty pages and explicit end markers persist the
  *           confirmed start-of-history state through EventProcessor.
  *
- * We use SKIP_INITIAL_REFRESH so the cached DB paints instantly, which means Paging never calls
- * load(REFRESH) on open. On an empty store the local PagingSource yields an empty page and Paging
- * drives an APPEND past the end boundary — so the empty-buffer LATEST backfill lives in APPEND, not
- * only REFRESH, or a freshly-connected/cleared buffer would never fetch its recent history.
+ * Normal entry uses SKIP_INITIAL_REFRESH so the cached DB paints without network I/O. A deliberate
+ * recent-boundary request creates a one-shot Pager generation whose initial REFRESH runs exactly
+ * one older append operation, including LATEST seeding when the local store is empty.
  */
 @OptIn(ExperimentalPagingApi::class)
 class ChatHistoryRemoteMediator(
@@ -78,8 +77,15 @@ class ChatHistoryRemoteMediator(
     }
 
     override suspend fun initialize(): InitializeAction =
-        // Local cache is authoritative for the initial paint; only fetch on explicit boundary hit.
-        InitializeAction.SKIP_INITIAL_REFRESH
+        if (focus is HistoryWindowFocus.RecentPaging) {
+            // This Pager exists only because the user deliberately reached the older boundary.
+            // Launch one deterministic remote page instead of relying on a viewport hint surviving
+            // the preceding local-only Pager generation.
+            InitializeAction.LAUNCH_INITIAL_REFRESH
+        } else {
+            // Local cache is authoritative for normal entry and deep-link initial paint.
+            InitializeAction.SKIP_INITIAL_REFRESH
+        }
 
     override suspend fun load(loadType: LoadType, state: PagingState<Int, MessageEntity>): MediatorResult {
         return locks.getOrPut(bufferId, ::Mutex).withLock {
@@ -100,13 +106,24 @@ class ChatHistoryRemoteMediator(
                 val requestLimit = minOf(pageSize, availability.pageLimit).coerceAtLeast(1)
                 CanonicalHistorySingleFlight.withNetwork(networkId) {
                     when (loadType) {
-                        LoadType.REFRESH -> refresh(
-                            networkId,
-                            buffer.id,
-                            buffer.ircTarget,
-                            requestLimit,
-                            availability.referenceTypes,
-                        )
+                        LoadType.REFRESH -> if (focus is HistoryWindowFocus.RecentPaging) {
+                            append(
+                                networkId,
+                                buffer.id,
+                                buffer.ircTarget,
+                                buffer.historyComplete,
+                                requestLimit,
+                                availability.referenceTypes,
+                            ).stopAfterAuthorizedPage()
+                        } else {
+                            refresh(
+                                networkId,
+                                buffer.id,
+                                buffer.ircTarget,
+                                requestLimit,
+                                availability.referenceTypes,
+                            )
+                        }
                         LoadType.PREPEND -> prepend(
                             networkId,
                             buffer.id,
@@ -114,14 +131,19 @@ class ChatHistoryRemoteMediator(
                             requestLimit,
                             availability.referenceTypes,
                         )
-                        LoadType.APPEND -> append(
-                            networkId,
-                            buffer.id,
-                            buffer.ircTarget,
-                            buffer.historyComplete,
-                            requestLimit,
-                            availability.referenceTypes,
-                        )
+                        LoadType.APPEND -> if (focus is HistoryWindowFocus.RecentPaging) {
+                            // REFRESH owns this generation's single authorized request.
+                            MediatorResult.Success(endOfPaginationReached = true)
+                        } else {
+                            append(
+                                networkId,
+                                buffer.id,
+                                buffer.ircTarget,
+                                buffer.historyComplete,
+                                requestLimit,
+                                availability.referenceTypes,
+                            )
+                        }
                     }
                 }
             } catch (cancelled: CancellationException) {
@@ -368,9 +390,8 @@ class ChatHistoryRemoteMediator(
     private suspend fun focusedOlderGap(gaps: List<HistoryGapEntity>): HistoryGapEntity? {
         val resolved = gaps.map { it to gapNewerAnchor(it) }
         return when (val current = focus) {
-            HistoryWindowFocus.Recent,
-            HistoryWindowFocus.RecentPaging,
-            -> resolved.maxByOrNull { it.second }?.first
+            HistoryWindowFocus.Recent -> resolved.maxByOrNull { it.second }?.first
+            is HistoryWindowFocus.RecentPaging -> resolved.maxByOrNull { it.second }?.first
             is HistoryWindowFocus.Around -> resolved
                 .filter { it.second <= current.anchor }
                 .maxByOrNull { it.second }
@@ -380,11 +401,17 @@ class ChatHistoryRemoteMediator(
 
     private suspend fun focusedNewerGap(gaps: List<HistoryGapEntity>): HistoryGapEntity? {
         if (focus !is HistoryWindowFocus.Around) return null
-        val anchor = (focus as HistoryWindowFocus.Around).anchor
+        val anchor = focus.anchor
         return gaps.map { it to gapOlderAnchor(it) }
             .filter { it.second >= anchor }
             .minByOrNull { it.second }
             ?.first
+    }
+
+    /** A user-authorized recent Pager owns one request; the next gesture creates the next Pager. */
+    private fun MediatorResult.stopAfterAuthorizedPage(): MediatorResult = when (this) {
+        is MediatorResult.Error -> this
+        is MediatorResult.Success -> MediatorResult.Success(endOfPaginationReached = true)
     }
 
     private suspend fun gapOlderAnchor(gap: HistoryGapEntity) = gap.olderMsgid
