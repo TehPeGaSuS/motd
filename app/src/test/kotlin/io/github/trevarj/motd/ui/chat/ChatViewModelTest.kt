@@ -1198,10 +1198,10 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         val target = checkNotNull(vm.jumpTarget.value)
-        assertEquals(17, target.index)
+        assertEquals(3, target.index)
         assertEquals(mention.id, target.expectedEventId)
         assertEquals(mention.msgid, target.expectedMsgid)
-        assertTrue(messages.countedFocuses.last() is HistoryWindowFocus.Around)
+        assertEquals(HistoryWindowFocus.Recent, messages.countedFocuses.last())
     }
 
     @Test
@@ -1215,9 +1215,11 @@ class ChatViewModelTest {
             channel.copy(localUnreadFloorTime = 100),
             FakeConnectionManager(network.id),
             messages = messages,
+            jumpToTime = mention.serverTime,
+            jumpToEventId = mention.id,
         )
         vm.state.first { it.buffer != null }
-        vm.initialTarget.first { it != null }
+        vm.activeHistoryWindow.first { it.focus is HistoryWindowFocus.Around }
         val collected = mutableListOf<Boolean>()
         val collection = backgroundScope.launch {
             vm.hasNewerHistoryIsland.collect(collected::add)
@@ -1318,10 +1320,14 @@ class ChatViewModelTest {
         settings: FakeSettingsRepository = FakeSettingsRepository(),
         buffers: FakeBufferRepository = FakeBufferRepository(buffer, routeBufferId),
         jumpToMsgid: String? = null,
+        jumpToTime: Long = 0,
+        jumpToEventId: Long? = null,
     ): ChatViewModel {
         val eventSink: IrcEventSink = processor
         val routeState = mutableMapOf<String, Any>("bufferId" to routeBufferId)
         jumpToMsgid?.let { routeState["jumpToMsgid"] = it }
+        if (jumpToTime > 0) routeState["jumpToTime"] = jumpToTime
+        jumpToEventId?.let { routeState["jumpToEventId"] = it }
         return ChatViewModel(
             savedStateHandle = SavedStateHandle(routeState),
             messageRepository = messages,

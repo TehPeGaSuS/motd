@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
+import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
 import androidx.paging.LoadType
 import androidx.paging.PagingState
@@ -572,7 +573,11 @@ class BufferStoreCanonicalTest {
         )
 
         assertEquals(eventId, repository.byMsgid(loser.id, "redirected-message")?.id)
-        repository.messages(loser.id, io.github.trevarj.motd.data.visibility.MessageVisibilitySpec()).first()
+        repository.messages(
+            loser.id,
+            io.github.trevarj.motd.data.visibility.MessageVisibilitySpec(),
+            HistoryWindowFocus.RecentPaging,
+        ).first()
         assertEquals(merged.id, mediatorRoomId)
     }
 
