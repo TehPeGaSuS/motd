@@ -156,11 +156,18 @@ class MessageRunProbe(
         withTimeout(timeoutMs) {
             search.search(token, bufferId).first { hits ->
                 val rows = hits.map { it.message }.filter { it.text.startsWith("$token row") }
-                val texts = rows.map { it.text }
-                rows.size in minimumCount..maximumCount && requiredText in texts && excludedText !in texts
+                rows.any { it.text == requiredText }
             }.map { it.message }
                 .filter { it.text.startsWith("$token row") }
-                .also { validateRows(token, bufferId, it, expectedNewestOrdinal) }
+                .also { rows ->
+                    check(rows.size in minimumCount..maximumCount) {
+                        "bounded recent history count ${rows.size} is outside $minimumCount..$maximumCount"
+                    }
+                    check(rows.none { it.text == excludedText }) {
+                        "bounded recent history unexpectedly contains $excludedText"
+                    }
+                    validateRows(token, bufferId, rows, expectedNewestOrdinal)
+                }
         }
     } catch (timeout: TimeoutCancellationException) {
         milestones.record("history_run_timeout", "buffer=$bufferId count=$minimumCount..$maximumCount")

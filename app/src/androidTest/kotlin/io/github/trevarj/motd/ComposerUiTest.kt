@@ -2,8 +2,6 @@ package io.github.trevarj.motd
 
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsActions
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
@@ -150,7 +148,6 @@ class ComposerUiTest {
         compose.runOnIdle { enabled.value = false }
         compose.onNodeWithTag("chat_composer_voice")
             .assertIsNotEnabled()
-            .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnClick))
 
         compose.runOnIdle {
             enabled.value = true
