@@ -553,53 +553,46 @@ class ChatModelsTest {
         assertTrue(showsSender(spacedLater, spaced))
     }
 
-    @Test fun `older history requires a user drag at the loaded boundary`() {
-        assertTrue(shouldRequestOlderHistory(12f, userInput = true, 50, 49))
-        assertFalse(shouldRequestOlderHistory(12f, userInput = false, 50, 49))
-        assertFalse(shouldRequestOlderHistory(-12f, userInput = true, 50, 49))
-        assertFalse(shouldRequestOlderHistory(12f, userInput = true, 50, 48))
-        assertFalse(shouldRequestOlderHistory(12f, userInput = true, 0, null))
+    @Test fun `older history requires a released downward drag beyond slop at the boundary`() {
+        assertTrue(shouldRequestOlderHistory(true, 12f, 8f, 50, 49))
+        assertTrue(shouldRequestOlderHistory(true, 8f, 8f, 50, 49))
+        assertFalse(shouldRequestOlderHistory(true, 7.9f, 8f, 50, 49))
+        assertFalse(shouldRequestOlderHistory(true, 0f, 8f, 50, 49))
+        assertFalse(shouldRequestOlderHistory(true, -12f, 8f, 50, 49))
+        assertFalse(shouldRequestOlderHistory(false, 12f, 8f, 50, 49))
+        assertFalse(shouldRequestOlderHistory(true, 12f, 8f, 50, 48))
+        assertFalse(shouldRequestOlderHistory(true, 12f, 8f, 0, null))
     }
 
-    @Test fun `older history drag authorizes only one page until the gesture ends`() {
+    @Test fun `older history authorizes only one page per pointer gesture`() {
         val latch = OlderHistoryGestureLatch()
 
-        // The final child-consumed delta can be the first one that reveals the oldest loaded row.
-        assertFalse(
-            latch.requestAfterScrollIfEligible(
-                consumedY = 12f,
-                availableY = 0f,
-                userInput = true,
-                itemCount = 50,
-                lastVisibleIndex = 48,
-            ),
-        )
+        latch.beginGesture()
         assertTrue(
-            latch.requestAfterScrollIfEligible(
-                consumedY = 12f,
-                availableY = 0f,
-                userInput = true,
+            latch.requestOnReleaseIfEligible(
+                released = true,
+                displacementY = 12f,
+                minimumDisplacementY = 8f,
                 itemCount = 50,
                 lastVisibleIndex = 49,
             ),
         )
         assertFalse(
-            latch.requestAfterScrollIfEligible(
-                consumedY = 0f,
-                availableY = 8f,
-                userInput = true,
+            latch.requestOnReleaseIfEligible(
+                released = true,
+                displacementY = 12f,
+                minimumDisplacementY = 8f,
                 itemCount = 50,
                 lastVisibleIndex = 49,
             ),
         )
 
-        latch.reset()
-        // A later drag that overscrolls the boundary owns a new request.
+        latch.beginGesture()
         assertTrue(
-            latch.requestAfterScrollIfEligible(
-                consumedY = 0f,
-                availableY = 6f,
-                userInput = true,
+            latch.requestOnReleaseIfEligible(
+                released = true,
+                displacementY = 12f,
+                minimumDisplacementY = 8f,
                 itemCount = 100,
                 lastVisibleIndex = 99,
             ),

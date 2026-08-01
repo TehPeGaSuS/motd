@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_LOADING_TAG
+import io.github.trevarj.motd.ui.chat.OlderHistoryAuthorizationCountKey
 import org.junit.Assert.assertTrue
 
 internal class ChatListRobot(compose: ComposeTestRule) : BaseRobot(compose) {
@@ -29,6 +30,8 @@ internal class ChatRobot(compose: ComposeTestRule) : BaseRobot(compose) {
 }
 
 internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule) {
+    private var expectedOlderHistoryAuthorizationCount = 0
+
     fun assertMessage(text: String) {
         scrollContainerTo("chat_timeline", hasText(text, substring = true))
         rule.onNodeWithText(text, substring = true, useUnmergedTree = true).assertTextContains(text, substring = true)
@@ -91,6 +94,23 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
     fun requestOlderHistory() {
         rule.onNodeWithTag("chat_timeline", useUnmergedTree = true)
             .performTouchInput { swipeDown(durationMillis = 350) }
+        expectedOlderHistoryAuthorizationCount++
+        try {
+            rule.waitUntil(10_000) {
+                rule.onAllNodesWithTag("chat_timeline", useUnmergedTree = true)
+                    .fetchSemanticsNodes()
+                    .singleOrNull()
+                    ?.config
+                    ?.getOrElse(OlderHistoryAuthorizationCountKey) { 0 } ==
+                    expectedOlderHistoryAuthorizationCount
+            }
+        } catch (error: Throwable) {
+            throw AssertionError(
+                "older-history gesture was not authorized: expected request " +
+                    expectedOlderHistoryAuthorizationCount,
+                error,
+            )
+        }
         rule.waitForIdle()
         if (
             rule.onAllNodesWithTag(CHAT_HISTORY_LOADING_TAG, useUnmergedTree = true)

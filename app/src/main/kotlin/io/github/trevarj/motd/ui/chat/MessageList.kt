@@ -11,7 +11,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
@@ -44,21 +43,21 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
@@ -67,6 +66,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTag as semanticsTestTag
 import androidx.compose.ui.unit.Dp
@@ -119,13 +119,19 @@ import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdSpacing
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Limit collapsed system-event work per composed row during high-velocity history traversal. */
 internal const val MAX_COLLAPSED_SYSTEM_EVENTS = 24
+internal val OlderHistoryAuthorizationCountKey = SemanticsPropertyKey<Int>(
+    "OlderHistoryAuthorizationCount",
+)
 
 /** Refresh identity for expanded line content; changes when Paging extends a tail chunk. */
 internal data class SystemRunContentKey(val newestId: Long, val oldestId: Long, val count: Int)
@@ -224,38 +230,45 @@ fun bubbleGap(showSender: Boolean, hasOlder: Boolean, spacing: MotdSpacing): Dp 
     return if (showSender) spacing.bubbleBreakGap else spacing.bubbleBurstGap
 }
 
-/** A downward finger drag at the visual top of a reversed timeline asks for older history. */
+/** A released downward drag that reaches the visual top of a reversed timeline asks for history. */
 internal fun shouldRequestOlderHistory(
-    dragY: Float,
-    userInput: Boolean,
+    released: Boolean,
+    displacementY: Float,
+    minimumDisplacementY: Float,
     itemCount: Int,
     lastVisibleIndex: Int?,
-): Boolean = userInput && dragY > 0f && itemCount > 0 &&
+): Boolean = released && displacementY > 0f && displacementY >= minimumDisplacementY &&
+    itemCount > 0 &&
     lastVisibleIndex != null && lastVisibleIndex >= itemCount - 1
 
-/** Collapses the many nested-scroll deltas in one physical drag into one paging request. */
+/** Allows at most one paging request for each physical pointer gesture. */
 internal class OlderHistoryGestureLatch {
     private var requested = false
 
-    fun requestAfterScrollIfEligible(
-        consumedY: Float,
-        availableY: Float,
-        userInput: Boolean,
+    fun beginGesture() {
+        requested = false
+    }
+
+    fun requestOnReleaseIfEligible(
+        released: Boolean,
+        displacementY: Float,
+        minimumDisplacementY: Float,
         itemCount: Int,
         lastVisibleIndex: Int?,
     ): Boolean {
-        // The child may consume the final delta that first reveals the loaded boundary. Include
-        // both portions so an exact-boundary drag and an overscroll are detected in post-scroll.
-        val dragY = consumedY + availableY
-        if (requested || !shouldRequestOlderHistory(dragY, userInput, itemCount, lastVisibleIndex)) {
+        if (
+            requested || !shouldRequestOlderHistory(
+                released,
+                displacementY,
+                minimumDisplacementY,
+                itemCount,
+                lastVisibleIndex,
+            )
+        ) {
             return false
         }
         requested = true
         return true
-    }
-
-    fun reset() {
-        requested = false
     }
 }
 
@@ -338,25 +351,7 @@ fun MessageList(
     val formatMessageTime = rememberMessageTimeFormatter()
     val latestOlderHistoryRequest by rememberUpdatedState(onOlderHistoryRequested)
     val olderHistoryGestureLatch = remember(listState) { OlderHistoryGestureLatch() }
-    val olderHistoryConnection = remember(listState, items) {
-        object : NestedScrollConnection {
-            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                val lastVisible = listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index }
-                if (
-                    olderHistoryGestureLatch.requestAfterScrollIfEligible(
-                        consumedY = consumed.y,
-                        availableY = available.y,
-                        userInput = source == NestedScrollSource.UserInput,
-                        itemCount = items.itemCount,
-                        lastVisibleIndex = lastVisible,
-                    )
-                ) {
-                    latestOlderHistoryRequest()
-                }
-                return Offset.Zero
-            }
-        }
-    }
+    var olderHistoryAuthorizationCount by remember(bufferId) { mutableIntStateOf(0) }
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -366,15 +361,66 @@ fun MessageList(
         modifier = modifier
             .fillMaxSize()
             .pointerInput(olderHistoryGestureLatch) {
-                awaitEachGesture {
-                    // Reset on every physical down. onPreFling is not guaranteed for a drag that
-                    // ends below the fling threshold, so it cannot define the gesture boundary.
-                    awaitFirstDown(requireUnconsumed = false)
-                    olderHistoryGestureLatch.reset()
-                    waitForUpOrCancellation()
+                coroutineScope {
+                    val authorizationScope = this
+                    var settleJob: Job? = null
+                    awaitEachGesture {
+                        val down = awaitFirstDown(
+                            requireUnconsumed = false,
+                            pass = PointerEventPass.Initial,
+                        )
+                        settleJob?.cancel()
+                        olderHistoryGestureLatch.beginGesture()
+                        val startY = down.position.y
+                        var endY = startY
+                        var trackedPointerPresent = true
+                        var pointerEvent = awaitPointerEvent(PointerEventPass.Final)
+                        while (pointerEvent.changes.any { it.pressed }) {
+                            val change = pointerEvent.changes.firstOrNull { it.id == down.id }
+                            if (change == null) {
+                                trackedPointerPresent = false
+                            } else {
+                                endY = change.position.y
+                            }
+                            pointerEvent = awaitPointerEvent(PointerEventPass.Final)
+                        }
+                        pointerEvent.changes.firstOrNull { it.id == down.id }?.let { change ->
+                            endY = change.position.y
+                        } ?: run {
+                            trackedPointerPresent = false
+                        }
+                        val released = trackedPointerPresent &&
+                            pointerEvent.type == PointerEventType.Release
+                        val displacementY = endY - startY
+                        val minimumDisplacementY = viewConfiguration.touchSlop
+                        if (released) {
+                            settleJob = authorizationScope.launch {
+                                // Release can start a fling after the Final pointer pass. Let that
+                                // state publish, then inspect the boundary only once scrolling is idle.
+                                withFrameNanos { }
+                                snapshotFlow { listState.isScrollInProgress }.first { !it }
+                                val lastVisible = listState.layoutInfo.visibleItemsInfo
+                                    .maxOfOrNull { it.index }
+                                if (
+                                    olderHistoryGestureLatch.requestOnReleaseIfEligible(
+                                        released = true,
+                                        displacementY = displacementY,
+                                        minimumDisplacementY = minimumDisplacementY,
+                                        itemCount = items.itemCount,
+                                        lastVisibleIndex = lastVisible,
+                                    )
+                                ) {
+                                    olderHistoryAuthorizationCount++
+                                    latestOlderHistoryRequest()
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            .nestedScroll(olderHistoryConnection)
+            .semantics {
+                this[OlderHistoryAuthorizationCountKey] = olderHistoryAuthorizationCount
+            }
             .testTag("chat_timeline"),
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
