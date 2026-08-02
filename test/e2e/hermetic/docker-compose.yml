@@ -32,7 +32,9 @@ name: motd-e2e-hermetic
 
 services:
   ergo:
-    image: ghcr.io/ergochat/ergo:v2.18.0
+    # Pinned to the same ergo version the Nix e2e-stack fixture ships (2.17.0), so hosted CI
+    # and the local native stack exercise identical upstream IRCd behavior (msgid/echo/replay).
+    image: ghcr.io/ergochat/ergo:v2.17.0
     restart: unless-stopped
     volumes:
       - ./ergo/ircd.yaml:/ircd/ircd.yaml:ro

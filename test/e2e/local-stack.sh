@@ -64,6 +64,9 @@ export MOTD_STACK_PROFILE="$STACK_PROFILE"
 ERGO_PORT="${MOTD_ERGO_PORT:-6667}"
 SOJU_PORT="${MOTD_SOJU_PORT:-6697}"
 SOJU_HTTP_PORT="${MOTD_SOJU_HTTP_PORT:-6696}"
+# FILEHOST base host advertised in upload URLs. Default matches the adb-reverse topology; set
+# 10.0.2.2 to mirror the hosted hermetic stack, where the emulator reaches the host directly.
+SOJU_HTTP_INGRESS_HOST="${MOTD_SOJU_HTTP_INGRESS_HOST:-127.0.0.1}"
 export ERGO_HOST=127.0.0.1
 export ERGO_PORT
 export SOJU_PORT
@@ -217,7 +220,7 @@ message-store db
 file-upload fs $RUN/soju/uploads
 listen ircs://:$SOJU_PORT
 listen https://:$SOJU_HTTP_PORT
-http-ingress https://127.0.0.1:$SOJU_HTTP_PORT
+http-ingress https://$SOJU_HTTP_INGRESS_HOST:$SOJU_HTTP_PORT
 tls $RUN/soju/tls/cert.pem $RUN/soju/tls/key.pem
 listen unix+admin://$ADMIN_SOCK
 EOF
