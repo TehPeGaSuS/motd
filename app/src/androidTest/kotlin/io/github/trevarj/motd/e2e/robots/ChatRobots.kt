@@ -41,7 +41,10 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
     fun assertCompactAudioPlayer(messageTag: String) {
         val playerMatcher = hasTestTag("audio_player") and hasAnyAncestor(hasTestTag(messageTag))
         val detailsMatcher = hasTestTag("audio_player_details") and hasAnyAncestor(hasTestTag(messageTag))
-        scrollContainerTo("chat_timeline", hasTestTag(messageTag))
+        // A freshly uploaded voice row must round-trip through the filehost, the IRC echo, and Room
+        // before Paging can present it. Use the journey's network-dependent timeout rather than the
+        // generic 10s component wait, which is a cold-emulator flake edge for this row.
+        scrollContainerTo("chat_timeline", hasTestTag(messageTag), timeoutMs = 30_000)
         val players = rule.onAllNodes(playerMatcher, useUnmergedTree = true).assertCountEquals(1)
         val player = players[0].assertIsDisplayed()
         val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density

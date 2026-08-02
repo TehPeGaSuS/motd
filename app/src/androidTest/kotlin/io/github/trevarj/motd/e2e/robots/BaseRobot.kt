@@ -75,13 +75,13 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
         compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
     }
 
-    fun scrollContainerTo(containerTag: String, itemTag: String) =
-        scrollContainerTo(containerTag, hasTestTag(itemTag))
+    fun scrollContainerTo(containerTag: String, itemTag: String, timeoutMs: Long = 10_000) =
+        scrollContainerTo(containerTag, hasTestTag(itemTag), timeoutMs)
 
     /** Lazy descendants are retried until paging has made the requested item addressable. */
-    fun scrollContainerTo(containerTag: String, matcher: SemanticsMatcher) {
+    fun scrollContainerTo(containerTag: String, matcher: SemanticsMatcher, timeoutMs: Long = 10_000) {
         awaitTag(containerTag)
-        compose.waitUntil(10_000) {
+        compose.waitUntil(timeoutMs) {
             runCatching {
                 compose.onNodeWithTag(containerTag, useUnmergedTree = true).performScrollToNode(matcher)
             }.isSuccess
