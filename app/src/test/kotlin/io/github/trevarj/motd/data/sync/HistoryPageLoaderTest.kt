@@ -1,0 +1,246 @@
+package io.github.trevarj.motd.data.sync
+
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import androidx.room.Room
+import io.github.trevarj.motd.data.db.BufferEntity
+import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.irc.client.ChatHistoryReference
+import io.github.trevarj.motd.irc.client.ChatHistoryRequest
+import io.github.trevarj.motd.irc.client.ChatHistoryResponse
+import io.github.trevarj.motd.irc.client.HistoryAvailability
+import io.github.trevarj.motd.irc.client.HistoryReferenceType
+import io.github.trevarj.motd.irc.client.IrcCommandException
+import io.github.trevarj.motd.irc.client.IrcDisconnectedException
+import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.proto.Prefix
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.test.runTest
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+
+/**
+ * Fetch-primitive coverage for [HistoryPageLoader], driving a single directional page from a
+ * caller-supplied boundary against scripted responses. These mirror the boundary-handling cases the
+ * [ChatHistoryRemoteMediator] previously owned inline: the msgid→timestamp fallback, the
+ * non-advancing/saturated loop guards, and advertised-boundary trimming.
+ */
+@RunWith(RobolectricTestRunner::class)
+class HistoryPageLoaderTest {
+    private lateinit var db: MotdDatabase
+    private lateinit var processor: EventProcessor
+    private lateinit var loader: HistoryPageLoader
+    private var networkId = 0L
+    private var bufferId = 0L
+
+    @Before fun setUp() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        db = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java).allowMainThreadQueries().build()
+        processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
+        loader = HistoryPageLoader(processor)
+        networkId = db.networkDao().insert(
+            NetworkEntity(name = "libera", role = NetworkRole.DIRECT, host = "h", port = 6697, nick = "me", username = "me", realname = "Me"),
+        )
+        processor.onRegistered(networkId, "me", emptyMap())
+        db.bufferDao().insert(BufferEntity(networkId = networkId, name = "#chan", displayName = "#chan", type = BufferType.CHANNEL))
+        bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
+    }
+
+    @After fun tearDown() { db.close() }
+
+    private fun chatMsg(msgid: String, time: Long) = IrcEvent.ChatMessage(
+        ctx = MessageContext(msgid, time, null, "b", null),
+        kind = IrcEvent.ChatKind.PRIVMSG, source = Prefix("alice"), target = "#chan", text = msgid,
+        isSelf = false, replyToMsgid = null,
+    )
+
+    private fun messages(
+        events: List<IrcEvent>,
+        endOfHistory: Boolean = false,
+    ): ChatHistoryResponse.Messages {
+        val references = events.mapNotNull { event ->
+            val ctx = when (event) {
+                is IrcEvent.ChatMessage -> event.ctx
+                is IrcEvent.TagMessage -> event.ctx
+                else -> null
+            } ?: return@mapNotNull null
+            ChatHistoryReference(ctx.msgid, ctx.serverTime)
+        }
+        return ChatHistoryResponse.Messages(
+            events,
+            oldest = references.firstOrNull(),
+            newest = references.lastOrNull(),
+            endOfHistory = endOfHistory,
+            primaryMessageCount = references.size,
+        )
+    }
+
+    /** Scripts BEFORE responses and records the requests issued, mirroring the mediator's fake. */
+    private inner class FakeHistory(
+        val before: ArrayDeque<List<IrcEvent>> = ArrayDeque(),
+        val failureFor: ((ChatHistoryRequest) -> Throwable?)? = null,
+        val responseFor: ((ChatHistoryRequest) -> ChatHistoryResponse.Messages?)? = null,
+        val referenceTypes: Set<HistoryReferenceType> = setOf(
+            HistoryReferenceType.TIMESTAMP,
+            HistoryReferenceType.MSGID,
+        ),
+    ) : HistoryPageLoader.HistorySource {
+        val requests = mutableListOf<ChatHistoryRequest>()
+        override suspend fun availability(): HistoryAvailability = HistoryAvailability.Ready(referenceTypes, 100)
+        override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+            requests += req
+            failureFor?.invoke(req)?.let { throw it }
+            responseFor?.invoke(req)?.let { return it }
+            return when (req.subcommand) {
+                ChatHistoryRequest.Subcommand.BEFORE -> messages(before.removeFirstOrNull() ?: emptyList())
+                else -> messages(emptyList())
+            }
+        }
+    }
+
+    private suspend fun rowCount(): Int = db.messageDao().pagingSource(bufferId).load(
+        androidx.paging.PagingSource.LoadParams.Refresh(null, 100, false),
+    ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data.size }
+
+    private suspend fun loadOlder(
+        history: FakeHistory,
+        boundary: ChatHistoryReference,
+        pageSize: Int = 50,
+    ) = loader.loadPage(
+        networkId,
+        bufferId,
+        "#chan",
+        HistoryPageLoader.Direction.OLDER,
+        history,
+        pageSize,
+        boundary = boundary,
+    )
+
+    @Test
+    fun msgidRejectionFallsBackToAdvertisedTimestampAndPersistsFallbackRequest() = runTest {
+        processor.process(networkId, chatMsg("OpaqueCase", 500))
+        val history = FakeHistory(
+            before = ArrayDeque(listOf(listOf(chatMsg("older", 100)))),
+            failureFor = { request ->
+                if (request.bound1 == "msgid=OpaqueCase") {
+                    IrcCommandException("CHATHISTORY", "INVALID_MSGREFTYPE", "try timestamp")
+                } else {
+                    null
+                }
+            },
+        )
+
+        val result = loadOlder(history, ChatHistoryReference("OpaqueCase", 500))
+
+        assertTrue(result is HistoryPageLoader.PageResult.Loaded)
+        assertFalse((result as HistoryPageLoader.PageResult.Loaded).endOfDirection)
+        assertEquals(
+            listOf("msgid=OpaqueCase", "timestamp=1970-01-01T00:00:00.500Z"),
+            history.requests.map { it.bound1 },
+        )
+        assertNull(db.historyCursorDao().byRoom(bufferId)?.oldestMsgid)
+        assertEquals(100L, db.historyCursorDao().byRoom(bufferId)?.oldestServerTime)
+    }
+
+    @Test
+    fun unchangedBeforeBoundaryStopsWithoutClaimingCompletion() = runTest {
+        processor.process(networkId, chatMsg("seed", 500))
+        val history = FakeHistory(
+            responseFor = { request ->
+                messages(listOf(chatMsg("seed", 500)))
+                    .takeIf { request.subcommand == ChatHistoryRequest.Subcommand.BEFORE }
+            },
+        )
+
+        val result = loadOlder(history, ChatHistoryReference("seed", 500))
+
+        // A non-advancing cursor would refetch forever: stop this direction without marking the
+        // buffer's history complete.
+        assertTrue((result as HistoryPageLoader.PageResult.Loaded).endOfDirection)
+        assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+    }
+
+    @Test
+    fun saturatedTimestampOnlyBeforeStopsInsteadOfSkippingBoundaryPeers() = runTest {
+        processor.process(networkId, chatMsg("seed", 500))
+        val history = FakeHistory(
+            before = ArrayDeque(listOf(listOf(chatMsg("a", 100), chatMsg("b", 100)))),
+            referenceTypes = setOf(HistoryReferenceType.TIMESTAMP),
+        )
+
+        val result = loadOlder(history, ChatHistoryReference("seed", 500), pageSize = 2)
+
+        assertTrue((result as HistoryPageLoader.PageResult.Loaded).endOfDirection)
+        assertEquals("timestamp=1970-01-01T00:00:00.500Z", history.requests.single().bound1)
+        assertEquals(3, rowCount())
+        assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+        assertFalse(db.historyCursorDao().byRoom(bufferId)!!.historyComplete)
+    }
+
+    @Test
+    fun requestTimeoutSurfacesAsRetryableFailureNotCancellation() = runTest {
+        processor.process(networkId, chatMsg("seed", 500))
+        // A hung request must become a retryable transport failure. If the timeout escaped as a
+        // CancellationException, the mediator would rethrow it to Paging and freeze the direction's
+        // LoadState at Loading behind a stale pending request.
+        val history = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability = HistoryAvailability.Ready(
+                setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID),
+                100,
+            )
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse =
+                awaitCancellation()
+        }
+
+        var observed: Throwable? = null
+        try {
+            loader.loadPage(
+                networkId,
+                bufferId,
+                "#chan",
+                HistoryPageLoader.Direction.OLDER,
+                history,
+                boundary = ChatHistoryReference("seed", 500),
+            )
+        } catch (error: Throwable) {
+            observed = error
+        }
+
+        assertTrue(observed is IrcDisconnectedException)
+        assertFalse(observed is CancellationException)
+        assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+    }
+
+    @Test
+    fun timestampOnlyAdvertisementTrimsMsgidFromPersistedBoundary() = runTest {
+        processor.process(networkId, chatMsg("seed", 500))
+        // The server returns a page carrying a msgid, but the network never advertised MSGID: the
+        // stored cursor must be trimmed to the timestamp so a later BEFORE never sends that msgid.
+        val history = FakeHistory(
+            before = ArrayDeque(listOf(listOf(chatMsg("older", 100)))),
+            referenceTypes = setOf(HistoryReferenceType.TIMESTAMP),
+        )
+
+        val result = loadOlder(history, ChatHistoryReference("seed", 500))
+
+        assertTrue(result is HistoryPageLoader.PageResult.Loaded)
+        assertEquals(
+            listOf("timestamp=1970-01-01T00:00:00.500Z"),
+            history.requests.map { it.bound1 },
+        )
+        assertNull(db.historyCursorDao().byRoom(bufferId)?.oldestMsgid)
+        assertEquals(100L, db.historyCursorDao().byRoom(bufferId)?.oldestServerTime)
+    }
+}
