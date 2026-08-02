@@ -1470,6 +1470,21 @@ interface CanonicalTimelineDao {
     @Query("SELECT COALESCE(MAX(receiveOrder), 0) + 1 FROM event_observations WHERE networkId = :networkId")
     suspend fun nextReceiveOrder(networkId: Long): Long
 
+    /**
+     * Newest authoritative server time among rows that already existed (lower id) when [beforeEventId]
+     * was staged. Used to floor a self send's promoted echo time so a bouncer echo whose origin-server
+     * clock trails this device cannot re-sort the just-sent row before content that was on screen at
+     * send. The floor is always a real origin-server timestamp already in the timeline, so it never
+     * advances any serverTime past reality.
+     */
+    @Query(
+        """SELECT MAX(m.serverTime) FROM messages m
+           WHERE m.bufferId = :roomId
+             AND m.serverTimeAuthoritative = 1
+             AND m.id < :beforeEventId""",
+    )
+    suspend fun newestAuthoritativeServerTimeBefore(roomId: RoomId, beforeEventId: TimelineEventId): Long?
+
     @Query(
         """SELECT m.* FROM messages m
            WHERE m.bufferId = :roomId

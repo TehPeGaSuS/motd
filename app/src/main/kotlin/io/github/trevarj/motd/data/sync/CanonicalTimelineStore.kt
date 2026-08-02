@@ -488,11 +488,14 @@ class CanonicalTimelineStore @Inject constructor(
             canonical = coalesce(canonical, provisionalCandidate, incoming)
         }
 
-        val enriched = enrich(
+        val enriched = applySelfSendSortFloor(
             canonical,
-            incoming,
-            observation.timeProvenance,
-            observation.selfAttributionAuthoritative,
+            enrich(
+                canonical,
+                incoming,
+                observation.timeProvenance,
+                observation.selfAttributionAuthoritative,
+            ),
         )
         if (enriched != canonical) {
             dao.updateEvent(enriched)
@@ -651,6 +654,41 @@ class CanonicalTimelineStore @Inject constructor(
         dao.upsertEventRedirect(EventRedirectEntity(loser.id, winner.id))
         dao.deleteEvent(loser.id)
         return merged
+    }
+
+    /**
+     * Hold a just-sent message at the bottom when its bouncer echo carries an older origin-server
+     * time. A bouncer that fronts another network (e.g. soju in front of Libera) forwards the origin
+     * server's `time` tag, whose clock can trail this device by tens of seconds; promoting the
+     * optimistic device-clock row to that past time would otherwise re-sort it into the middle of the
+     * buffer. Floor the promoted time at the newest authoritative row that already existed when the
+     * send was staged. That floor is a real origin-server timestamp already stored here, so unlike a
+     * device-clock clamp it never pushes any serverTime past reality — the history cursor,
+     * `CHATHISTORY AFTER` boundary, and read-marker retime all stay honest.
+     */
+    private suspend fun applySelfSendSortFloor(
+        existing: TimelineEventEntity,
+        enriched: TimelineEventEntity,
+    ): TimelineEventEntity {
+        if (
+            !existing.isSelf ||
+            existing.pendingLabel == null ||
+            existing.serverTimeAuthoritative ||
+            !enriched.serverTimeAuthoritative
+        ) {
+            return enriched
+        }
+        val floor = dao.newestAuthoritativeServerTimeBefore(existing.bufferId, existing.id)
+            ?: return enriched
+        if (enriched.serverTime >= floor) return enriched
+        diagnostics.record("timeline", "self_echo_sort_clamp") {
+            mapOf(
+                "buffer_id" to existing.bufferId,
+                "event_id" to existing.id,
+                "echo_delta_ms" to floor - enriched.serverTime,
+            )
+        }
+        return enriched.copy(serverTime = floor)
     }
 
     private fun enrich(
