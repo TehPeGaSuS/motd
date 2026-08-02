@@ -3,15 +3,12 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MotdDatabase
-import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.RoomId
-import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.prefs.NoopHistorySyncPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.HistoryPageLoader
-import io.github.trevarj.motd.data.sync.HistoryPageWrite
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -22,7 +19,6 @@ import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcCommandException
-import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import java.time.Instant
@@ -34,29 +30,16 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
-
-enum class HistoryRefreshRange {
-    MISSING,
-    HOURS_24,
-    DAYS_7,
-    DAYS_30,
-    ALL_AVAILABLE,
-}
 
 sealed interface HistoryResyncState {
     data object Idle : HistoryResyncState
@@ -104,19 +87,9 @@ internal fun initialSyncStatusIfCurrent(
     current
 }
 
-/** Chat-facing boundary for manual and lifecycle-driven history reconciliation. */
+/** Chat-facing boundary for lifecycle-driven history reconciliation. */
 interface HistoryResyncController {
-    fun state(bufferId: Long): Flow<HistoryResyncState>
     fun syncStatus(bufferId: Long): Flow<HistorySyncStatus>
-    fun consumeState(bufferId: Long)
-    fun cancelBufferResync(bufferId: Long)
-
-    suspend fun resyncBuffer(
-        buffer: BufferEntity,
-        client: IrcClient,
-        isCurrent: () -> Boolean,
-        range: HistoryRefreshRange = HistoryRefreshRange.MISSING,
-    ): HistoryResyncState
 
     suspend fun reconcileBuffer(
         buffer: BufferEntity,
@@ -171,13 +144,9 @@ class HistoryResyncCoordinator @Inject constructor(
     }
 
     private data class RequestKey(val networkId: Long, val bufferId: Long?)
-    private enum class RequestIntent { AUTOMATIC, MANUAL }
     private data class RequestSpec(
         val key: RequestKey,
-        val intent: RequestIntent,
-        val range: HistoryRefreshRange? = null,
         val sourceIdentity: Any,
-        val cancellationGeneration: Long? = null,
     )
     private data class ActiveFlight(
         val spec: RequestSpec,
@@ -201,8 +170,6 @@ class HistoryResyncCoordinator @Inject constructor(
         val status: WorkStatus = WorkStatus.Complete,
         val highWater: Long? = null,
         val inserted: Int = 0,
-        val boundaryRejected: Boolean = false,
-        val continuationBoundary: ChatHistoryReference? = null,
     )
 
     private data class TargetPass(
@@ -227,43 +194,18 @@ class HistoryResyncCoordinator @Inject constructor(
     // Cancellation is non-suspending, so registration and removal share a synchronous monitor.
     private val activeGuard = Any()
     private val activeFlights = LinkedHashMap<RequestSpec, ActiveFlight>()
-    private val manualCancellationGenerations = ConcurrentHashMap<Long, AtomicLong>()
-    private val states = MutableStateFlow<Map<Long, HistoryResyncState>>(emptyMap())
     private val syncStatuses = MutableStateFlow<Map<Long, HistorySyncStatus>>(emptyMap())
     private val syncStatusGenerations = ConcurrentHashMap<Long, AtomicLong>()
     internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
-    internal var paginationRequestLimit: Int = PAGINATION_REQUEST_LIMIT
     internal var targetsRequestLimit: Int = TARGETS_REQUEST_LIMIT
-
-    override fun state(bufferId: Long): Flow<HistoryResyncState> = states
-        .map { it[bufferId] ?: HistoryResyncState.Idle }
-        .distinctUntilChanged()
 
     override fun syncStatus(bufferId: Long): Flow<HistorySyncStatus> = syncStatuses
         .map { it[bufferId] ?: HistorySyncStatus.Idle }
         .distinctUntilChanged()
 
-    override fun consumeState(bufferId: Long) {
-        states.update { it - bufferId }
-    }
-
-    override suspend fun resyncBuffer(
-        buffer: BufferEntity,
-        client: IrcClient,
-        isCurrent: () -> Boolean,
-        range: HistoryRefreshRange,
-    ): HistoryResyncState = resyncBuffer(
-        buffer,
-        client,
-        isCurrent,
-        range,
-        publishState = true,
-        healSparseGaps = true,
-    )
-
     /**
-     * Reconcile a visible chat without exposing manual-refresh progress or result snackbars. The
-     * request still shares the exact same per-buffer single flight as [resyncBuffer].
+     * Reconcile a visible chat. The request shares the exact same per-buffer single flight as the
+     * reconnect network pass.
      */
     override suspend fun reconcileBuffer(
         buffer: BufferEntity,
@@ -359,139 +301,6 @@ class HistoryResyncCoordinator @Inject constructor(
         }
     }
 
-    private suspend fun resyncBuffer(
-        buffer: BufferEntity,
-        client: IrcClient,
-        isCurrent: () -> Boolean,
-        range: HistoryRefreshRange,
-        publishState: Boolean,
-        healSparseGaps: Boolean,
-    ): HistoryResyncState {
-        val cancellationGeneration = if (publishState) {
-            manualCancellationGeneration(buffer.id)
-        } else {
-            null
-        }
-        diagnostics.record("history", "buffer_sync_requested") {
-            mapOf(
-                "network_id" to buffer.networkId,
-                "buffer_id" to buffer.id,
-                "range" to range.name,
-            )
-        }
-        val source = ClientHistorySource(client)
-        if (source.availability() !is HistoryAvailability.Ready) {
-            if (publishState) {
-                publishManualState(
-                    buffer.id,
-                    checkNotNull(cancellationGeneration),
-                    HistoryResyncState.WaitingForCapability,
-                )
-            }
-            when (awaitBouncerCapability(buffer.networkId, client, isCurrent)) {
-                CapabilityAvailability.AVAILABLE -> Unit
-                CapabilityAvailability.UNSUPPORTED -> {
-                    if (publishState) {
-                        publishManualState(
-                            buffer.id,
-                            checkNotNull(cancellationGeneration),
-                            HistoryResyncState.Unsupported,
-                        )
-                    }
-                    return HistoryResyncState.Unsupported
-                }
-                CapabilityAvailability.PENDING -> {
-                    val failed = HistoryResyncState.Failed("History support is still negotiating; try again")
-                    if (publishState) {
-                        publishManualState(
-                            buffer.id,
-                            checkNotNull(cancellationGeneration),
-                            failed,
-                        )
-                    }
-                    return failed
-                }
-            }
-        }
-        if (publishState) {
-            publishManualState(
-                buffer.id,
-                checkNotNull(cancellationGeneration),
-                HistoryResyncState.Running(limit = range.messageLimit),
-            )
-        }
-        val result = coalesced(
-            RequestSpec(
-                key = RequestKey(buffer.networkId, buffer.id),
-                intent = if (publishState) RequestIntent.MANUAL else RequestIntent.AUTOMATIC,
-                range = range,
-                sourceIdentity = source.flightIdentity(),
-                cancellationGeneration = cancellationGeneration,
-            ),
-        ) {
-            val syncGeneration = beginSyncStatus(buffer.id, HistorySyncStatus.Syncing)
-            try {
-                syncBufferRange(
-                    networkId = buffer.networkId,
-                    bufferId = buffer.id,
-                    target = buffer.displayName,
-                    source = source,
-                    isCurrent = isCurrent,
-                    range = range,
-                    healSparseGaps = healSparseGaps,
-                ).also { result ->
-                    finishSyncStatus(
-                        buffer.id,
-                        syncGeneration,
-                        if (isCurrent()) result.toSyncStatus() else HistorySyncStatus.Idle,
-                    )
-                }
-            } catch (cancelled: CancellationException) {
-                finishSyncStatus(buffer.id, syncGeneration, HistorySyncStatus.Idle)
-                throw cancelled
-            } catch (error: Exception) {
-                finishSyncStatus(
-                    buffer.id,
-                    syncGeneration,
-                    HistorySyncStatus.Failed(
-                        error.message?.take(160) ?: "History refresh failed",
-                    ),
-                )
-                throw error
-            }
-        }
-        if (publishState) {
-            publishManualState(buffer.id, checkNotNull(cancellationGeneration), result)
-        }
-        return result
-    }
-
-    /** Cancel the active user-requested refresh for [bufferId], if one exists. */
-    override fun cancelBufferResync(bufferId: Long) {
-        val cancellationGeneration = manualCancellationGenerations
-            .computeIfAbsent(bufferId) { AtomicLong() }
-            .incrementAndGet()
-        states.update { it - bufferId }
-        cancelSyncStatus(bufferId)
-        synchronized(activeGuard) {
-            activeFlights.values
-                .filter { flight ->
-                    flight.spec.key.bufferId == bufferId &&
-                        flight.spec.intent == RequestIntent.MANUAL &&
-                        flight.spec.cancellationGeneration
-                            ?.let { it < cancellationGeneration } == true
-                }
-                .forEach { flight ->
-                    if (activeFlights[flight.spec] === flight) {
-                        activeFlights.remove(flight.spec)
-                    }
-                    flight.deferred.cancel(
-                        CancellationException("manual history refresh cancelled"),
-                    )
-                }
-        }
-    }
-
     suspend fun resyncNetwork(
         networkId: Long,
         openBuffers: List<Pair<Long, String>>,
@@ -515,7 +324,6 @@ class HistoryResyncCoordinator @Inject constructor(
     ): HistoryResyncState = coalesced(
         RequestSpec(
             RequestKey(networkId, null),
-            RequestIntent.AUTOMATIC,
             sourceIdentity = source.flightIdentity(),
         ),
     ) {
@@ -737,36 +545,6 @@ class HistoryResyncCoordinator @Inject constructor(
         )
     }
 
-    internal suspend fun resyncBuffer(
-        networkId: Long,
-        bufferId: Long,
-        target: String,
-        source: HistorySource,
-        isCurrent: () -> Boolean = { true },
-        range: HistoryRefreshRange = HistoryRefreshRange.MISSING,
-    ): HistoryResyncState {
-        val cancellationGeneration = manualCancellationGeneration(bufferId)
-        return coalesced(
-            RequestSpec(
-                RequestKey(networkId, bufferId),
-                RequestIntent.MANUAL,
-                range,
-                source.flightIdentity(),
-                cancellationGeneration,
-            ),
-        ) {
-            syncBufferRange(
-                networkId,
-                bufferId,
-                target,
-                source,
-                isCurrent,
-                range,
-                healSparseGaps = true,
-            )
-        }
-    }
-
     internal suspend fun reconcileBuffer(
         networkId: Long,
         bufferId: Long,
@@ -783,8 +561,6 @@ class HistoryResyncCoordinator @Inject constructor(
         return coalesced(
             RequestSpec(
                 RequestKey(networkId, bufferId),
-                RequestIntent.AUTOMATIC,
-                HistoryRefreshRange.MISSING,
                 source.flightIdentity(),
             ),
         ) {
@@ -808,183 +584,6 @@ class HistoryResyncCoordinator @Inject constructor(
                 HistoryResyncState.Failed(error.message?.take(160) ?: "History refresh failed")
             }
         }
-    }
-
-    private suspend fun syncBufferRange(
-        networkId: Long,
-        bufferId: Long,
-        target: String,
-        source: HistorySource,
-        isCurrent: () -> Boolean,
-        range: HistoryRefreshRange,
-        healSparseGaps: Boolean,
-    ): HistoryResyncState {
-        when (source.availability()) {
-            HistoryAvailability.Unsupported -> return HistoryResyncState.Unsupported
-            HistoryAvailability.NegotiatingOrOffline -> return historyUnavailable()
-            is HistoryAvailability.Ready -> Unit
-        }
-        if (!isCurrent()) return staleConnection()
-        return try {
-            val work = publishHistoryAtomically(networkId, bufferId) { pages ->
-                when (range) {
-                    HistoryRefreshRange.MISSING -> syncTarget(
-                        networkId,
-                        bufferId,
-                        target,
-                        source,
-                        isCurrent,
-                        includeRecentOverlap = true,
-                        healSparseGaps = healSparseGaps,
-                        pages = pages,
-                    )
-                    HistoryRefreshRange.HOURS_24,
-                    HistoryRefreshRange.DAYS_7,
-                    HistoryRefreshRange.DAYS_30,
-                    -> syncSince(
-                        networkId = networkId,
-                        bufferId = bufferId,
-                        target = target,
-                        source = source,
-                        isCurrent = isCurrent,
-                        cutoff = range.cutoffMillis(Instant.now().toEpochMilli())!!,
-                        range = range,
-                        pages = pages,
-                    )
-                    HistoryRefreshRange.ALL_AVAILABLE -> syncAllAvailable(
-                        networkId,
-                        bufferId,
-                        target,
-                        source,
-                        isCurrent,
-                        pages,
-                    )
-                }
-            }
-            work.status.toState(work.inserted)
-        } catch (_: TimeoutCancellationException) {
-            HistoryResyncState.Failed("History refresh timed out")
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: StaleConnectionException) {
-            staleConnection()
-        } catch (error: Exception) {
-            HistoryResyncState.Failed(error.message?.take(160) ?: "History refresh failed")
-        }
-    }
-
-    /** Fetch the requested recent interval forward from its cutoff timestamp. */
-    private suspend fun syncSince(
-        networkId: Long,
-        bufferId: Long,
-        target: String,
-        source: HistorySource,
-        isCurrent: () -> Boolean,
-        cutoff: Long,
-        range: HistoryRefreshRange,
-        pages: MutableList<HistoryPageWrite>,
-    ): WorkResult = paginateMessages(
-        networkId = networkId,
-        expectedRoomId = bufferId,
-        target = target,
-        source = source,
-        isCurrent = isCurrent,
-        subcommand = ChatHistoryRequest.Subcommand.AFTER,
-        initialBoundary = ChatHistoryReference(msgid = null, serverTime = cutoff),
-        maxRequests = paginationRequestLimit,
-        pages = pages,
-        onFetched = { fetched ->
-            states.update { it + (bufferId to HistoryResyncState.Running(fetched, range.messageLimit)) }
-        },
-    )
-
-    /** Fetch newest pages first so the all-history cap remains useful for active chats. */
-    private suspend fun syncAllAvailable(
-        networkId: Long,
-        bufferId: Long,
-        target: String,
-        source: HistorySource,
-        isCurrent: () -> Boolean,
-        pages: MutableList<HistoryPageWrite>,
-    ): WorkResult {
-        val referenceTypes = source.referenceTypes()
-        val pageLimit = source.pageLimit()
-        if (!isCurrent()) throw StaleConnectionException()
-        val latestRequest = ChatHistoryRequest(
-            ChatHistoryRequest.Subcommand.LATEST,
-            target,
-            limit = minOf(pageLimit, ALL_HISTORY_LIMIT),
-        )
-        val latest = loader.fetchMessages(
-            networkId,
-            source,
-            latestRequest,
-            referenceTypes,
-            HistoryReferenceType.MSGID in referenceTypes,
-            requestTimeoutMs,
-        )
-        if (!isCurrent()) throw StaleConnectionException()
-        val latestInserted = stageHistoryPage(pages, latestRequest, latest)
-        val fetched = latest.primaryMessageCount
-        var highWater = latest.highWater()
-        states.update { it + (bufferId to HistoryResyncState.Running(fetched, ALL_HISTORY_LIMIT)) }
-        if (latest.isTerminalPage()) {
-            return WorkResult(highWater = highWater, inserted = latestInserted)
-        }
-
-        val oldest = latest.directionalBoundary(ChatHistoryRequest.Subcommand.LATEST)
-            ?: return WorkResult(
-                WorkStatus.Incomplete("CHATHISTORY LATEST returned no usable oldest boundary"),
-                highWater,
-                latestInserted,
-            )
-        if (loader.selectorOf(oldest, referenceTypes, HistoryReferenceType.MSGID in referenceTypes) == null) {
-            return WorkResult(
-                WorkStatus.Incomplete("CHATHISTORY LATEST returned an unsupported oldest boundary"),
-                highWater,
-                latestInserted,
-            )
-        }
-        if (fetched >= ALL_HISTORY_LIMIT) {
-            return WorkResult(
-                WorkStatus.Capped(
-                    "History refresh reached its $ALL_HISTORY_LIMIT-message safety cap",
-                    ALL_HISTORY_LIMIT,
-                ),
-                highWater,
-                latestInserted,
-            )
-        }
-        if (paginationRequestLimit <= 1) {
-            return WorkResult(
-                WorkStatus.Capped(
-                    "History refresh reached its $paginationRequestLimit-request safety cap",
-                    paginationRequestLimit,
-                ),
-                highWater,
-                latestInserted,
-            )
-        }
-
-        val older = paginateMessages(
-            networkId = networkId,
-            expectedRoomId = bufferId,
-            target = target,
-            source = source,
-            isCurrent = isCurrent,
-            subcommand = ChatHistoryRequest.Subcommand.BEFORE,
-            initialBoundary = oldest,
-            maxRequests = paginationRequestLimit - 1,
-            maxEvents = ALL_HISTORY_LIMIT - fetched,
-            pages = pages,
-            onFetched = { pageFetched ->
-                states.update {
-                    it + (bufferId to HistoryResyncState.Running(fetched + pageFetched, ALL_HISTORY_LIMIT))
-                }
-            },
-        )
-        highWater = maxHighWater(highWater, older.highWater)
-        return WorkResult(older.status, highWater, latestInserted + older.inserted)
     }
 
     private suspend fun syncTargets(
@@ -1156,489 +755,36 @@ class HistoryResyncCoordinator @Inject constructor(
     }
 
     /** Manual eager recovery retained for explicit Missing/All Available requests. */
-    private suspend fun syncTargetUntilSettled(
-        networkId: Long,
-        bufferId: Long,
-        target: String,
-        source: HistorySource,
-        isCurrent: () -> Boolean,
-        includeRecentOverlap: Boolean,
-        reconnectBoundary: ChatHistoryReference?,
-        discoveredLatestMessageTime: Long?,
-    ): WorkResult = publishHistoryAtomically(networkId, bufferId) { pages ->
-        syncTargetUntilSettled(
-            networkId = networkId,
-            bufferId = bufferId,
-            target = target,
-            source = source,
-            isCurrent = isCurrent,
-            includeRecentOverlap = includeRecentOverlap,
-            reconnectBoundary = reconnectBoundary,
-            discoveredLatestMessageTime = discoveredLatestMessageTime,
-            pages = pages,
-        )
-    }
-
-    private suspend fun syncTargetUntilSettled(
-        networkId: Long,
-        bufferId: Long,
-        target: String,
-        source: HistorySource,
-        isCurrent: () -> Boolean,
-        includeRecentOverlap: Boolean,
-        reconnectBoundary: ChatHistoryReference?,
-        discoveredLatestMessageTime: Long?,
-        pages: MutableList<HistoryPageWrite>,
-    ): WorkResult {
-        var boundary = reconnectBoundary
-        var overlap = includeRecentOverlap
-        var inserted = 0
-        var highWater: Long? = null
-        val continuationBoundaries = HashSet<ChatHistoryReference>()
-        while (true) {
-            val result = syncTarget(
-                networkId = networkId,
-                knownBufferId = bufferId,
-                target = target,
-                source = source,
-                isCurrent = isCurrent,
-                includeRecentOverlap = overlap,
-                reconnectBoundary = boundary,
-                discoveredLatestMessageTime = discoveredLatestMessageTime,
-                pages = pages,
-            )
-            inserted += result.inserted
-            highWater = maxHighWater(highWater, result.highWater)
-            if (result.status !is WorkStatus.Capped) {
-                return result.copy(highWater = highWater, inserted = inserted)
-            }
-
-            val continuationBoundary = result.continuationBoundary
-            if (continuationBoundary == null) {
-                return result.copy(highWater = highWater, inserted = inserted)
-            }
-            if (!continuationBoundaries.add(continuationBoundary)) {
-                return result.copy(
-                    status = WorkStatus.Incomplete("CHATHISTORY pagination repeated a continuation boundary"),
-                    highWater = highWater,
-                    inserted = inserted,
-                    continuationBoundary = null,
-                )
-            }
-            diagnostics.record("history", "target_sync_continued") {
-                mapOf(
-                    "network_id" to networkId,
-                    "buffer_id" to bufferId,
-                    "inserted" to inserted,
-                )
-            }
-            // The first pass may intentionally replay from the whole-network watermark. Every
-            // continuation must start at the boundary proven by that response, not newer Room
-            // state that may still leave a hole before a live event.
-            boundary = continuationBoundary
-            overlap = false
-            yield()
-        }
-    }
-
-    private suspend fun syncTarget(
-        networkId: Long,
-        knownBufferId: Long,
-        target: String,
-        source: HistorySource,
-        isCurrent: () -> Boolean,
-        includeRecentOverlap: Boolean,
-        reconnectBoundary: ChatHistoryReference? = null,
-        healSparseGaps: Boolean = false,
-        discoveredLatestMessageTime: Long? = null,
-        pages: MutableList<HistoryPageWrite>,
-    ): WorkResult {
-        val referenceTypes = source.referenceTypes()
-        val msgidAllowed = HistoryReferenceType.MSGID in referenceTypes
-        val pageLimit = source.pageLimit()
-        val bufferId = knownBufferId
-        val room = db.bufferDao().observeById(bufferId)
-        val protocolCursor = db.historyCursorDao().byRoom(bufferId)
-        val discardedBoundary = room?.let {
-            ChatHistoryReference(it.historyDiscardedThroughMsgid, it.historyDiscardedThroughTime)
-                .takeIf { boundary -> boundary.msgid != null || boundary.serverTime != null }
-        }
-        if (room?.dismissed == true) {
-            // TARGETS reports the newest retained chat timestamp. If it did not rediscover this
-            // tombstone, or its newest activity is at/before the discard floor, requesting LATEST
-            // can only replay content the user already forgot.
-            if (discoveredLatestMessageTime == null) return WorkResult()
-            val discardedThroughTime = discardedBoundary?.serverTime
-            if (discardedThroughTime != null && discoveredLatestMessageTime <= discardedThroughTime) {
-                return WorkResult()
-            }
-        }
-        val storedBoundary = if (protocolCursor != null) {
-            ChatHistoryReference(protocolCursor.newestMsgid, protocolCursor.newestServerTime)
-                .takeIf { it.msgid?.isNotEmpty() == true || it.serverTime != null }
-        } else {
-            latestBoundaryFromRoom(bufferId)
-        }
-        val boundary = reconnectBoundary ?: storedBoundary ?: discardedBoundary
-        // A live self-JOIN/part/topic row is not evidence that its retained chat history was
-        // imported. In particular, older releases marked a network sync complete after using that
-        // row as an AFTER cursor, leaving an existing bouncer channel permanently empty. Bypass
-        // AFTER for a target with no stored chat content and seed it from LATEST instead.
-        val lacksStoredChat = !hasStoredChat(bufferId) &&
-            pages.none { it.response.primaryMessageCount > 0 } &&
-            discardedBoundary == null
-        val knownOldestTime = when {
-            lacksStoredChat -> null
-            protocolCursor != null -> protocolCursor.oldestServerTime
-            else -> db.messageDao().oldestTime(bufferId)
-        }
-        val pagingBoundary = when {
-            room?.dismissed == true && discardedBoundary != null -> discardedBoundary
-            reconnectBoundary != null -> reconnectBoundary
-            lacksStoredChat -> null
-            else -> boundary
-        }
-        var highWater: Long? = null
-        var inserted = 0
-        var status: WorkStatus = WorkStatus.Complete
-        var forceLatest = false
-        val pagingBoundarySupported = pagingBoundary
-            ?.let { loader.selectorOf(it, referenceTypes, msgidAllowed) } != null
-        if (pagingBoundary != null && pagingBoundarySupported) {
-            val after = paginateMessages(
-                networkId = networkId,
-                expectedRoomId = bufferId,
-                target = target,
-                source = source,
-                isCurrent = isCurrent,
-                subcommand = ChatHistoryRequest.Subcommand.AFTER,
-                initialBoundary = pagingBoundary,
-                maxRequests = paginationRequestLimit,
-                pages = pages,
-            )
-            inserted += after.inserted
-            highWater = maxHighWater(highWater, after.highWater)
-            if (after.status != WorkStatus.Complete) {
-                if (after.boundaryRejected) {
-                    status = after.status
-                    forceLatest = true
-                } else {
-                    return WorkResult(
-                        status = after.status,
-                        highWater = highWater,
-                        inserted = inserted,
-                        continuationBoundary = after.continuationBoundary,
-                    )
-                }
-            }
-        }
-
-        var latestPage: ChatHistoryResponse.Messages? = null
-        if (
-            boundary == null || includeRecentOverlap || lacksStoredChat || room?.dismissed == true ||
-            pagingBoundary != null && !pagingBoundarySupported || forceLatest
-        ) {
-            // Keep a query's permanent discard floor on newest-page overlap requests. An
-            // unbounded LATEST can otherwise replay the exact msgidless message at that floor,
-            // which cannot be distinguished locally from a new same-timestamp event after the
-            // message row has been purged. IRCv3 defines bounded LATEST as excluding its selector.
-            val boundedLatest = discardedBoundary
-                ?.takeIf { room.type == BufferType.QUERY }
-                ?.let { discardFloor ->
-                    fetchPageOrNullOnRejectedBoundary(
-                        networkId = networkId,
-                        target = target,
-                        subcommand = ChatHistoryRequest.Subcommand.LATEST,
-                        source = source,
-                        boundary = discardFloor,
-                        secondBoundary = null,
-                        referenceTypes = referenceTypes,
-                        limit = pageLimit,
-                        msgidAllowed = msgidAllowed,
-                    )
-                }
-            val latestRequest = boundedLatest?.request ?: ChatHistoryRequest(
-                ChatHistoryRequest.Subcommand.LATEST,
-                target,
-                limit = pageLimit,
-            )
-            val latest = boundedLatest?.response ?: loader.fetchMessages(
-                networkId,
-                source,
-                latestRequest,
-                referenceTypes,
-                msgidAllowed,
-                requestTimeoutMs,
-            )
-            latestPage = latest
-            if (!isCurrent()) throw StaleConnectionException()
-            inserted += stageHistoryPage(pages, latestRequest, latest)
-            if (!isCurrent()) throw StaleConnectionException()
-            highWater = maxHighWater(highWater, latest.highWater())
-        }
-
-        // A newest-page overlap catches small holes but cannot repair a sparse timeline whose
-        // newest and oldest rows survived while more than one server page vanished locally. Only
-        // explicit MISSING reconciliation performs this bounded BETWEEN walk. Automatic visible-
-        // buffer and reconnect reconciliation stop at the newest-page overlap so merely reopening
-        // a chat cannot import hundreds of older retained messages.
-        val overlap = latestPage
-        if (overlap == null) {
-            return WorkResult(status, highWater, inserted)
-        }
-        if (overlap.isTerminalPage()) {
-            return WorkResult(status, highWater, inserted)
-        }
-        val backwardBoundary = overlap.directionalBoundary(ChatHistoryRequest.Subcommand.LATEST)
-            ?: return WorkResult(
-                status.merge(WorkStatus.Incomplete("CHATHISTORY LATEST returned no usable oldest boundary")),
-                highWater,
-                inserted,
-            )
-        if (loader.selectorOf(backwardBoundary, referenceTypes, msgidAllowed) == null) {
-            return WorkResult(
-                status.merge(WorkStatus.Incomplete("CHATHISTORY LATEST returned an unsupported oldest boundary")),
-                highWater,
-                inserted,
-            )
-        }
-        if (!healSparseGaps || knownOldestTime == null) {
-            return WorkResult(status, highWater, inserted)
-        }
-        val backwardServerTime = backwardBoundary.serverTime
-        if (backwardServerTime != null && backwardServerTime < knownOldestTime) {
-            return WorkResult(status, highWater, inserted)
-        }
-        val lower = ChatHistoryReference(
-            msgid = null,
-            serverTime = knownOldestTime.minus(HISTORY_TIE_OVERLAP_MS)
-                .coerceAtLeast(Instant.EPOCH.toEpochMilli()),
-        )
-        val between = paginateMessages(
-            networkId = networkId,
-            expectedRoomId = bufferId,
-            target = target,
-            source = source,
-            isCurrent = isCurrent,
-            subcommand = ChatHistoryRequest.Subcommand.BETWEEN,
-            initialBoundary = backwardBoundary,
-            secondBoundary = lower,
-            maxRequests = MISSING_BACKFILL_PAGE_LIMIT,
-            maxEvents = MISSING_BACKFILL_MESSAGE_LIMIT,
-            pages = pages,
-        )
-        return WorkResult(
-            status.merge(between.status),
-            maxHighWater(highWater, between.highWater),
-            inserted + between.inserted,
-        )
-    }
-
-    /**
-     * Traverse one directional response sequence. Page size is deliberately not a completion
-     * signal: a completed batch may be short or oversized, and context events do not count toward
-     * the server's limit. Only response metadata, an unusable cursor, or the safety caps terminate
-     * the traversal.
-     */
-    private suspend fun paginateMessages(
-        networkId: Long,
-        expectedRoomId: RoomId,
-        target: String,
-        source: HistorySource,
-        isCurrent: () -> Boolean,
-        subcommand: ChatHistoryRequest.Subcommand,
-        initialBoundary: ChatHistoryReference,
-        secondBoundary: ChatHistoryReference? = null,
-        maxRequests: Int,
-        maxEvents: Int? = null,
-        onFetched: (Int) -> Unit = {},
-        pages: MutableList<HistoryPageWrite>,
-    ): WorkResult {
-        require(
-            subcommand == ChatHistoryRequest.Subcommand.AFTER ||
-                subcommand == ChatHistoryRequest.Subcommand.BEFORE ||
-                subcommand == ChatHistoryRequest.Subcommand.BETWEEN,
-        )
-        val requestCap = maxRequests.coerceAtLeast(1)
-        if (maxRequests <= 0 || maxEvents != null && maxEvents <= 0) {
-            val limit = maxEvents ?: maxRequests
-            return WorkResult(
-                WorkStatus.Capped("CHATHISTORY $subcommand reached its $limit safety cap", limit),
-            )
-        }
-
-        val referenceTypes = source.referenceTypes()
-        val pageLimit = source.pageLimit()
-        var boundary = initialBoundary
-        var msgidAllowed = HistoryReferenceType.MSGID in referenceTypes
-        var fetched = 0
-        var highWater: Long? = null
-        var inserted = 0
-        val usedSelectors = HashSet<String>()
-        repeat(requestCap) { requestIndex ->
-            if (!isCurrent()) throw StaleConnectionException()
-            val remaining = maxEvents?.minus(fetched)
-            if (remaining != null && remaining <= 0) {
-                return WorkResult(
-                    WorkStatus.Capped(
-                        "CHATHISTORY $subcommand reached its $maxEvents-message safety cap",
-                        maxEvents,
-                    ),
-                    highWater,
-                    inserted,
-                )
-            }
-            val requested = fetchPageOrNullOnRejectedBoundary(
-                networkId = networkId,
-                target = target,
-                subcommand = subcommand,
-                source = source,
-                boundary = boundary,
-                secondBoundary = secondBoundary,
-                referenceTypes = referenceTypes,
-                limit = remaining?.let { minOf(pageLimit, it) } ?: pageLimit,
-                msgidAllowed = msgidAllowed,
-            ) ?: return WorkResult(
-                WorkStatus.Incomplete("CHATHISTORY $subcommand has no usable response boundary"),
-                highWater,
-                inserted,
-                boundaryRejected = true,
-            )
-            msgidAllowed = requested.msgidAllowed
-            usedSelectors += requested.selector.value
-            val page = requested.response
-            if (!isCurrent()) throw StaleConnectionException()
-            inserted += stageHistoryPage(pages, requested.request, page)
-            if (!isCurrent()) throw StaleConnectionException()
-            fetched += page.primaryMessageCount
-            onFetched(fetched)
-            highWater = maxHighWater(highWater, page.highWater())
-            if (page.isTerminalPage()) {
-                return WorkResult(highWater = highWater, inserted = inserted)
-            }
-
-            val next = page.directionalBoundary(subcommand) ?: return WorkResult(
-                WorkStatus.Incomplete(
-                    "CHATHISTORY $subcommand returned no usable response boundary",
-                ),
-                highWater,
-                inserted,
-            )
-            val nextSelector = loader.selectorOf(next, referenceTypes, msgidAllowed)
-                ?: return WorkResult(
-                    WorkStatus.Incomplete(
-                        "CHATHISTORY $subcommand returned an unsupported response boundary",
-                    ),
-                    highWater,
-                    inserted,
-                )
-            if (
-                nextSelector.type == HistoryReferenceType.TIMESTAMP &&
-                page.primaryMessageCount >= requested.request.limit
-            ) {
-                return WorkResult(
-                    WorkStatus.Incomplete(
-                        "CHATHISTORY $subcommand saturated a timestamp-only boundary",
-                    ),
-                    highWater,
-                    inserted,
-                )
-            }
-            val wrongTimestampDirection =
-                requested.selector.type == HistoryReferenceType.TIMESTAMP &&
-                    nextSelector.type == HistoryReferenceType.TIMESTAMP &&
-                    when (subcommand) {
-                        ChatHistoryRequest.Subcommand.AFTER ->
-                            next.serverTime!! <= boundary.serverTime!!
-                        ChatHistoryRequest.Subcommand.BEFORE,
-                        ChatHistoryRequest.Subcommand.BETWEEN,
-                        -> next.serverTime!! >= boundary.serverTime!!
-                    }
-            if (nextSelector.value in usedSelectors || wrongTimestampDirection) {
-                return WorkResult(
-                    WorkStatus.Incomplete("CHATHISTORY $subcommand pagination did not advance"),
-                    highWater,
-                    inserted,
-                )
-            }
-            if (maxEvents != null && fetched >= maxEvents) {
-                return WorkResult(
-                    WorkStatus.Capped(
-                        "CHATHISTORY $subcommand reached its $maxEvents-message safety cap",
-                        maxEvents,
-                    ),
-                    highWater,
-                    inserted,
-                    continuationBoundary = next,
-                )
-            }
-            if (requestIndex + 1 >= requestCap) {
-                return WorkResult(
-                    WorkStatus.Capped(
-                        "CHATHISTORY $subcommand reached its $requestCap-request safety cap",
-                        requestCap,
-                    ),
-                    highWater,
-                    inserted,
-                    continuationBoundary = next,
-                )
-            }
-            boundary = next
-        }
-        error("unreachable")
-    }
-
     private suspend fun coalesced(
         spec: RequestSpec,
         block: suspend () -> HistoryResyncState,
     ): HistoryResyncState {
-        while (true) {
-            val registration = synchronized(activeGuard) {
-                spec.ensureNotManuallyCancelled()
-                val joined = when (spec.intent) {
-                    RequestIntent.MANUAL -> activeFlights[spec]
-                    RequestIntent.AUTOMATIC -> activeFlights.values
-                        .firstOrNull { candidate ->
-                            candidate.spec.key == spec.key &&
-                                candidate.spec.intent == RequestIntent.MANUAL &&
-                                candidate.spec.sourceIdentity == spec.sourceIdentity
-                        }
-                        ?: activeFlights[spec]
+        val registration = synchronized(activeGuard) {
+            val joined = activeFlights[spec]
+            if (joined != null) {
+                FlightRegistration(joined, ownsFlight = false)
+            } else {
+                val deferred = scope.async(start = CoroutineStart.LAZY) {
+                    // Wire serialization now lives in the loader's per-network lock, acquired per
+                    // fetch inside block(); this flight only owns request-level coalescing and
+                    // user-facing status.
+                    block()
                 }
-                if (joined != null) {
-                    FlightRegistration(joined, ownsFlight = false)
-                } else {
-                    val deferred = scope.async(start = CoroutineStart.LAZY) {
-                        spec.ensureNotManuallyCancelled()
-                        // Wire serialization now lives in the loader's per-network lock, acquired per
-                        // fetch inside block(); this flight only owns request-level coalescing,
-                        // cancellation, and user-facing status.
-                        block()
-                    }
-                    val created = ActiveFlight(spec, deferred)
-                    activeFlights[spec] = created
-                    deferred.invokeOnCompletion {
-                        removeActiveFlight(created)
-                    }
-                    FlightRegistration(created, ownsFlight = true)
+                val created = ActiveFlight(spec, deferred)
+                activeFlights[spec] = created
+                deferred.invokeOnCompletion {
+                    removeActiveFlight(created)
                 }
+                FlightRegistration(created, ownsFlight = true)
             }
-            val flight = registration.flight
-            if (registration.ownsFlight) flight.deferred.start()
-            try {
-                return flight.deferred.await()
-            } catch (cancelled: CancellationException) {
-                currentCoroutineContext().ensureActive()
-                val shouldRetryAsAutomaticOwner =
-                    spec.intent == RequestIntent.AUTOMATIC &&
-                        flight.spec.intent == RequestIntent.MANUAL &&
-                        flight.deferred.isCancelled
-                if (!shouldRetryAsAutomaticOwner) throw cancelled
-                continue
-            } finally {
-                if (flight.deferred.isCompleted) {
-                    removeActiveFlight(flight)
-                }
+        }
+        val flight = registration.flight
+        if (registration.ownsFlight) flight.deferred.start()
+        try {
+            return flight.deferred.await()
+        } finally {
+            if (flight.deferred.isCompleted) {
+                removeActiveFlight(flight)
             }
         }
     }
@@ -1763,65 +909,6 @@ class HistoryResyncCoordinator @Inject constructor(
      * rows or intermediate ordering. Already-validated pages are retained on timeout/cancellation,
      * matching the previous eager-persistence behavior without exposing its incremental redraws.
      */
-    private suspend fun publishHistoryAtomically(
-        networkId: Long,
-        expectedRoomId: RoomId,
-        block: suspend (MutableList<HistoryPageWrite>) -> WorkResult,
-    ): WorkResult {
-        val pages = mutableListOf<HistoryPageWrite>()
-        val work = try {
-            block(pages)
-        } catch (error: Exception) {
-            try {
-                publishHistoryPages(networkId, expectedRoomId, pages)
-            } catch (publishError: Exception) {
-                error.addSuppressed(publishError)
-            }
-            throw error
-        }
-        return work.copy(
-            inserted = publishHistoryPages(networkId, expectedRoomId, pages),
-        )
-    }
-
-    private suspend fun publishHistoryPages(
-        networkId: Long,
-        expectedRoomId: RoomId,
-        pages: List<HistoryPageWrite>,
-    ): Int {
-        if (pages.isEmpty()) return 0
-        return withContext(NonCancellable) {
-            processor.persistHistoryPagesResult(networkId, pages, expectedRoomId).inserted
-        }
-    }
-
-    private fun stageHistoryPage(
-        pages: MutableList<HistoryPageWrite>,
-        request: ChatHistoryRequest,
-        page: ChatHistoryResponse.Messages,
-    ): Int {
-        pages += HistoryPageWrite(request, page)
-        // Durable insert count is known only after the atomic publication deduplicates all pages.
-        return 0
-    }
-
-    private fun manualCancellationGeneration(bufferId: Long): Long =
-        manualCancellationGenerations.computeIfAbsent(bufferId) { AtomicLong() }.get()
-
-    private fun publishManualState(
-        bufferId: Long,
-        cancellationGeneration: Long,
-        state: HistoryResyncState,
-    ) {
-        states.update { current ->
-            if (manualCancellationGeneration(bufferId) == cancellationGeneration) {
-                current + (bufferId to state)
-            } else {
-                current - bufferId
-            }
-        }
-    }
-
     private fun beginSyncStatus(bufferId: Long, status: HistorySyncStatus): Long {
         val generation = syncStatusGenerations
             .computeIfAbsent(bufferId) { AtomicLong() }
@@ -1870,23 +957,6 @@ class HistoryResyncCoordinator @Inject constructor(
         finishSyncStatus(bufferId, generation, result.toSyncStatus())
     }
 
-    private fun cancelSyncStatus(bufferId: Long) {
-        syncStatusGenerations.computeIfAbsent(bufferId) { AtomicLong() }.incrementAndGet()
-        syncStatuses.update { it - bufferId }
-    }
-
-    private fun RequestSpec.manualCancellationRequested(): Boolean {
-        if (intent != RequestIntent.MANUAL) return false
-        val bufferId = key.bufferId ?: return false
-        return cancellationGeneration != manualCancellationGeneration(bufferId)
-    }
-
-    private fun RequestSpec.ensureNotManuallyCancelled() {
-        if (manualCancellationRequested()) {
-            throw CancellationException("manual history refresh cancelled before execution")
-        }
-    }
-
     private fun WorkStatus.toState(
         inserted: Int,
         retryRecommended: Boolean = false,
@@ -1931,47 +1001,6 @@ class HistoryResyncCoordinator @Inject constructor(
 
     private fun maxHighWater(vararg values: Long?): Long? = values.filterNotNull().maxOrNull()
 
-    private val HistoryRefreshRange.messageLimit: Int?
-        get() = if (this == HistoryRefreshRange.ALL_AVAILABLE) ALL_HISTORY_LIMIT else null
-
-    private fun HistoryRefreshRange.cutoffMillis(now: Long): Long? = when (this) {
-        HistoryRefreshRange.HOURS_24 -> now - HOURS_24_MS
-        HistoryRefreshRange.DAYS_7 -> now - DAYS_7_MS
-        HistoryRefreshRange.DAYS_30 -> now - DAYS_30_MS
-        HistoryRefreshRange.MISSING,
-        HistoryRefreshRange.ALL_AVAILABLE,
-        -> null
-    }
-
-    private enum class CapabilityAvailability { AVAILABLE, UNSUPPORTED, PENDING }
-
-    private suspend fun awaitBouncerCapability(
-        networkId: Long,
-        client: IrcClient,
-        isCurrent: () -> Boolean,
-    ): CapabilityAvailability {
-        if (client.historyAvailability is HistoryAvailability.Ready) return CapabilityAvailability.AVAILABLE
-        val role = db.networkDao().byId(networkId)?.role
-        if (role != NetworkRole.BOUNCER_CHILD) {
-            return if (client.historyAvailability is HistoryAvailability.Unsupported) {
-                CapabilityAvailability.UNSUPPORTED
-            } else {
-                CapabilityAvailability.PENDING
-            }
-        }
-        val ready = withTimeoutOrNull(CAPABILITY_WAIT_TIMEOUT_MS) {
-            client.state.filterIsInstance<IrcClientState.Ready>().first { snapshot ->
-                snapshot.caps.any { it == CHATHISTORY_CAP || it.startsWith("$CHATHISTORY_CAP=") } &&
-                    client.historyAvailability is HistoryAvailability.Ready
-            }
-        }
-        return when {
-            !isCurrent() -> CapabilityAvailability.PENDING
-            ready != null || client.historyAvailability is HistoryAvailability.Ready -> CapabilityAvailability.AVAILABLE
-            else -> CapabilityAvailability.PENDING
-        }
-    }
-
     private class ClientHistorySource(private val client: IrcClient) : HistorySource {
         override suspend fun availability(): HistoryAvailability = client.historyAvailability
 
@@ -1997,22 +1026,12 @@ class HistoryResyncCoordinator @Inject constructor(
         HistoryResyncState.Failed("History support is still negotiating or the connection is offline")
 
     private companion object {
-        const val CHATHISTORY_CAP = "draft/chathistory"
         const val PAGE_LIMIT = 100
         const val RECENT_PAGE_SIZE = 50
         const val REQUEST_TIMEOUT_MS = 35_000L
         const val PENDING_MESSAGE_TIMEOUT_MS = 65_000L
         const val TARGETS_FUZZ_MS = 10_000L
-        const val HISTORY_TIE_OVERLAP_MS = 1L
-        const val CAPABILITY_WAIT_TIMEOUT_MS = 30_000L
         const val TARGET_CLASSIFICATION_WAIT_TIMEOUT_MS = 10_000L
-        const val ALL_HISTORY_LIMIT = 5_000
-        const val PAGINATION_REQUEST_LIMIT = 100
         const val TARGETS_REQUEST_LIMIT = 100
-        const val MISSING_BACKFILL_PAGE_LIMIT = 5
-        const val MISSING_BACKFILL_MESSAGE_LIMIT = 500
-        const val HOURS_24_MS = 24L * 60 * 60 * 1_000
-        const val DAYS_7_MS = 7L * 24 * 60 * 60 * 1_000
-        const val DAYS_30_MS = 30L * 24 * 60 * 60 * 1_000
     }
 }

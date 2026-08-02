@@ -61,7 +61,6 @@ import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncCoordinator
 import io.github.trevarj.motd.service.HistoryResyncController
-import io.github.trevarj.motd.service.HistoryRefreshRange
 import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.service.IrcEventSink
@@ -515,7 +514,6 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         assertTrue(history.reconciledBuffers.isEmpty())
-        assertEquals(HistoryResyncState.Idle, vm.historyResyncState.value)
     }
 
     @Test
@@ -579,23 +577,6 @@ class ChatViewModelTest {
 
         assertEquals(HistorySyncStatus.Partial("fixture"), vm.historySyncStatus.value)
         collector.cancel()
-    }
-
-    @Test
-    fun `manual incomplete history uses dismissible notice instead of timeline overlay`() = runTest {
-        val history = FakeHistoryResyncController()
-        val vm = viewModel(channel, FakeConnectionManager(network.id), history)
-        runCurrent()
-
-        history.setState(
-            HistoryResyncState.Incomplete(
-                inserted = 3,
-                reason = "fixture",
-            ),
-        )
-        runCurrent()
-
-        assertEquals(ChatUiEvent.HistoryIncomplete(3), vm.uiEvents.value.single().value)
     }
 
     @Test
@@ -1567,23 +1548,12 @@ class ChatViewModelTest {
     private class FakeHistoryResyncController(
         private val onReconcile: suspend (Int) -> Unit = {},
     ) : HistoryResyncController {
-        private val states = MutableStateFlow<HistoryResyncState>(HistoryResyncState.Idle)
         private val syncStatuses = MutableStateFlow<HistorySyncStatus>(HistorySyncStatus.Idle)
         val reconciledBuffers = mutableListOf<Long>()
         val pendingReconciledBuffers = mutableListOf<Long>()
 
-        override fun state(bufferId: Long): Flow<HistoryResyncState> = states
         override fun syncStatus(bufferId: Long): Flow<HistorySyncStatus> = syncStatuses
-        fun setState(state: HistoryResyncState) { states.value = state }
         fun setSyncStatus(status: HistorySyncStatus) { syncStatuses.value = status }
-        override fun consumeState(bufferId: Long) { states.value = HistoryResyncState.Idle }
-        override fun cancelBufferResync(bufferId: Long) = Unit
-        override suspend fun resyncBuffer(
-            buffer: BufferEntity,
-            client: IrcClient,
-            isCurrent: () -> Boolean,
-            range: HistoryRefreshRange,
-        ): HistoryResyncState = HistoryResyncState.UpToDate
 
         override suspend fun reconcileBuffer(
             buffer: BufferEntity,

@@ -599,39 +599,17 @@ class ChatModelsTest {
     }
 
     @Test fun `typed snackbar handles retry before acknowledging and preserves exact reply request`() {
-        val historyEvent = QueuedChatUiEvent(7, ChatUiEvent.HistoryIncomplete(3))
-        val historyOrder = mutableListOf<String>()
-        handleChatUiEventResult(
-            event = historyEvent,
-            actionPerformed = true,
-            retryReplyJump = { historyOrder += "unexpected" },
-            retryMissingHistory = { historyOrder += "retry" },
-            acknowledge = { historyOrder += "ack:$it" },
-        )
-        assertEquals(listOf("retry", "ack:7"), historyOrder)
-
+        val order = mutableListOf<String>()
         val request = ReplyJumpRequest("MiXeD/opaque=Reply")
         var retried: ReplyJumpRequest? = null
         handleChatUiEventResult(
             event = QueuedChatUiEvent(8, ChatUiEvent.ReplyJumpUnavailable(request)),
             actionPerformed = true,
-            retryReplyJump = { retried = it },
-            retryMissingHistory = {},
-            acknowledge = {},
+            retryReplyJump = { retried = it; order += "retry" },
+            acknowledge = { order += "ack:$it" },
         )
         assertEquals(request, retried)
-    }
-
-    @Test fun `manual history refresh outcomes use the title-adjacent notice`() {
-        assertTrue(ChatUiEvent.HistoryOffline.isHistoryRefreshNotice())
-        assertTrue(ChatUiEvent.HistoryUpdated(1).isHistoryRefreshNotice())
-        assertTrue(ChatUiEvent.HistoryUpToDate.isHistoryRefreshNotice())
-        assertTrue(ChatUiEvent.HistoryUnsupported.isHistoryRefreshNotice())
-        assertTrue(ChatUiEvent.HistoryFailed.isHistoryRefreshNotice())
-        assertTrue(ChatUiEvent.HistoryIncomplete(1).isHistoryRefreshNotice())
-        assertTrue(ChatUiEvent.HistoryCapped(inserted = 1, limit = 2).isHistoryRefreshNotice())
-        assertFalse(ChatUiEvent.InvalidCommand.isHistoryRefreshNotice())
-        assertFalse(ChatUiEvent.ReplyJumpUnavailable(ReplyJumpRequest("id")).isHistoryRefreshNotice())
+        assertEquals(listOf("retry", "ack:8"), order)
     }
 
     @Test fun `history footer derives the six states from append and availability`() {

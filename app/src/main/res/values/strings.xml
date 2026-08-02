@@ -17,28 +17,10 @@
     <string name="chatlist_no_networks_title">No networks configured</string>
     <string name="chatlist_no_networks_message">Add a network, or import a backup from Settings.</string>
     <string name="chatlist_archived_empty_title">No archived chats yet</string>
-    <string name="chat_refresh_history">Refresh history</string>
-    <plurals name="chat_history_updated">
-        <item quantity="one">History updated · %1$d new message</item>
-        <item quantity="other">History updated · %1$d new messages</item>
-    </plurals>
-    <string name="chat_history_up_to_date">History is up to date</string>
-    <string name="chat_history_unsupported">History refresh is not supported by this server</string>
-    <string name="chat_history_failed">History refresh failed</string>
-    <string name="chat_history_offline">Reconnect before refreshing history</string>
     <string name="chat_send_rejected">Couldn\'t save this message</string>
     <string name="chat_not_in_channel">You\'re not in this channel</string>
     <string name="chat_parted_banner_rejoin">Rejoin</string>
     <string name="chat_parted_banner_text">You\'re not in %1$s</string>
-    <string name="chat_history_refresh_title">Refresh history</string>
-    <string name="chat_history_refresh_description">Choose how much history to load for this chat.</string>
-    <string name="chat_history_range_missing">Missing messages</string>
-    <string name="chat_history_range_24h">Past 24 hours</string>
-    <string name="chat_history_range_7d">Past 7 days</string>
-    <string name="chat_history_range_30d">Past 30 days</string>
-    <string name="chat_history_range_all">All available (up to 5,000 messages)</string>
-    <string name="chat_history_refreshing">Refreshing history…</string>
-    <string name="chat_history_refreshing_progress">Refreshing history: %1$d / %2$d</string>
 
     <!-- New-conversation bottom sheet (WP6) -->
     <string name="new_sheet_join_channel">Join channel</string>
@@ -446,14 +428,6 @@
     <string name="chat_history_footer_offline">Reconnect to load older messages</string>
     <string name="chat_history_footer_negotiating">Waiting for history support…</string>
     <string name="chat_history_footer_unsupported">This server does not provide older history</string>
-    <plurals name="chat_history_resync_incomplete">
-        <item quantity="one">History refresh added %1$d message but could not verify the full range</item>
-        <item quantity="other">History refresh added %1$d messages but could not verify the full range</item>
-    </plurals>
-    <plurals name="chat_history_resync_capped">
-        <item quantity="one">History refresh added %1$d message and stopped at the %2$d-message safety limit</item>
-        <item quantity="other">History refresh added %1$d messages and stopped at the %2$d-message safety limit</item>
-    </plurals>
     <string name="chat_history_start">Beginning of history</string>
     <plurals name="chat_member_count">
         <item quantity="one">%1$d member</item>

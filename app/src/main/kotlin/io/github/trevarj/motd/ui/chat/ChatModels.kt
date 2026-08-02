@@ -416,13 +416,6 @@ sealed interface ChatUiEvent {
     data object ReactionSendFailed : ChatUiEvent
     data object SendRejected : ChatUiEvent
     data object NotInChannel : ChatUiEvent
-    data object HistoryOffline : ChatUiEvent
-    data class HistoryUpdated(val inserted: Int) : ChatUiEvent
-    data object HistoryUpToDate : ChatUiEvent
-    data object HistoryUnsupported : ChatUiEvent
-    data object HistoryFailed : ChatUiEvent
-    data class HistoryIncomplete(val inserted: Int) : ChatUiEvent
-    data class HistoryCapped(val inserted: Int, val limit: Int) : ChatUiEvent
     data class ReplyJumpUnavailable(val request: ReplyJumpRequest) : ChatUiEvent
     data object ConversationLayoutWriteFailed : ChatUiEvent
 }
@@ -456,39 +449,18 @@ internal class ChatUiEventQueue {
 }
 
 internal fun ChatUiEvent.hasRetryAction(): Boolean =
-    this is ChatUiEvent.ReplyJumpUnavailable ||
-        this is ChatUiEvent.HistoryFailed ||
-        this is ChatUiEvent.HistoryIncomplete ||
-        this is ChatUiEvent.HistoryCapped
-
-/** Manual history-refresh outcomes use a transient banner below the chat title. */
-internal fun ChatUiEvent.isHistoryRefreshNotice(): Boolean = when (this) {
-    ChatUiEvent.HistoryOffline,
-    is ChatUiEvent.HistoryUpdated,
-    ChatUiEvent.HistoryUpToDate,
-    ChatUiEvent.HistoryUnsupported,
-    ChatUiEvent.HistoryFailed,
-    is ChatUiEvent.HistoryIncomplete,
-    is ChatUiEvent.HistoryCapped,
-    -> true
-    else -> false
-}
+    this is ChatUiEvent.ReplyJumpUnavailable
 
 /** Run a snackbar action before acknowledging its replay-safe queued event. */
 internal fun handleChatUiEventResult(
     event: QueuedChatUiEvent,
     actionPerformed: Boolean,
     retryReplyJump: (ReplyJumpRequest) -> Unit,
-    retryMissingHistory: () -> Unit,
     acknowledge: (Long) -> Unit,
 ) {
     if (actionPerformed) {
         when (val value = event.value) {
             is ChatUiEvent.ReplyJumpUnavailable -> retryReplyJump(value.request)
-            ChatUiEvent.HistoryFailed,
-            is ChatUiEvent.HistoryIncomplete,
-            is ChatUiEvent.HistoryCapped,
-            -> retryMissingHistory()
             else -> Unit
         }
     }

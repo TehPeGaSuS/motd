@@ -56,8 +56,6 @@ import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncController
-import io.github.trevarj.motd.service.HistoryRefreshRange
-import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.SendAcceptance
@@ -434,45 +432,9 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    val historyResyncState: StateFlow<HistoryResyncState> = operationalBufferId
-        .flatMapLatest(historyResyncCoordinator::state)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryResyncState.Idle)
-
     val historySyncStatus: StateFlow<HistorySyncStatus> = operationalBufferId
         .flatMapLatest(historyResyncCoordinator::syncStatus)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistorySyncStatus.Idle)
-
-    init {
-        viewModelScope.launch {
-            var lastTerminal: HistoryResyncState? = null
-            historyResyncState.collect { result ->
-                val event = when (result) {
-                    is HistoryResyncState.Updated -> ChatUiEvent.HistoryUpdated(result.inserted)
-                    HistoryResyncState.UpToDate -> ChatUiEvent.HistoryUpToDate
-                    HistoryResyncState.Unsupported -> ChatUiEvent.HistoryUnsupported
-                    is HistoryResyncState.Incomplete -> ChatUiEvent.HistoryIncomplete(result.inserted)
-                    is HistoryResyncState.Capped -> ChatUiEvent.HistoryCapped(result.inserted, result.limit)
-                    // Hard failures retain the timeline retry action. Incomplete manual refreshes
-                    // use the dismissible snackbar instead of covering cached messages.
-                    is HistoryResyncState.Failed -> null
-                    else -> null
-                }
-                if (event == null) {
-                    lastTerminal = null
-                } else if (lastTerminal != result) {
-                    lastTerminal = result
-                    uiEventQueue.enqueue(event)
-                    if (
-                        result is HistoryResyncState.Updated ||
-                        result == HistoryResyncState.UpToDate ||
-                        result == HistoryResyncState.Unsupported
-                    ) {
-                        historyResyncCoordinator.consumeState(operationalBufferId.value)
-                    }
-                }
-            }
-        }
-    }
 
     private val typingNicks = operationalBufferId
         .flatMapLatest(typingTracker::typingNicks)
@@ -862,27 +824,6 @@ class ChatViewModel @Inject constructor(
     fun retryActiveAudio() = audioPlaybackController.retryActive()
 
     fun dismissActiveAudio() = audioPlaybackController.state.value.activeId?.let(audioPlaybackController::dismiss)
-
-    fun refreshHistory(range: HistoryRefreshRange = HistoryRefreshRange.MISSING) {
-        val currentBuffer = buffer.value ?: return
-        val client = connectionManager.clientFor(currentBuffer.networkId)
-        if (client == null || connState.value !is IrcClientState.Ready) {
-            uiEventQueue.enqueue(ChatUiEvent.HistoryOffline)
-            return
-        }
-        viewModelScope.launch {
-            historyResyncCoordinator.resyncBuffer(
-                buffer = currentBuffer,
-                client = client,
-                isCurrent = { connectionManager.clientFor(currentBuffer.networkId) === client },
-                range = range,
-            )
-        }
-    }
-
-    fun cancelHistoryRefresh() = historyResyncCoordinator.cancelBufferResync(operationalBufferId.value)
-
-    fun consumeHistoryResyncState() = historyResyncCoordinator.consumeState(operationalBufferId.value)
 
     /**
      * Parse [raw] and execute the resulting [ChatCommand]. `onOpenBuffer` navigates for /msg /query;
