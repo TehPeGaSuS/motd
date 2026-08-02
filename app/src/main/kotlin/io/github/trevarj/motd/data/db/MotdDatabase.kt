@@ -33,7 +33,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 22,
+    version = 23,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -692,6 +692,22 @@ val MIGRATION_21_22 = object : Migration(21, 22) {
             "CREATE INDEX IF NOT EXISTS `index_history_gaps_roomId_newerServerTime` " +
                 "ON `history_gaps` (`roomId`, `newerServerTime`)",
         )
+    }
+}
+
+/**
+ * v22 -> v23 repairs legacy `recoverable = 0` poison on `history_gaps`. Builds before commit
+ * 7f27e550 misused the flag: a saturated timestamp-only CHATHISTORY page (no older msgid) wrongly
+ * set recoverable = 0, permanently clamping the timeline so scrolling to the top of that buffer
+ * fetched nothing. The new semantics reserve recoverable = 0 for server-proven-empty intervals
+ * only, but a poisoned legacy row is indistinguishable from a genuinely empty one, so this
+ * data-only migration lifts every unrecoverable gap back to recoverable = 1. This is safe and
+ * self-healing: re-probing a truly empty interval fetches 0 rows, proves it empty, and re-marks it
+ * unrecoverable under the new rule, while a wrongly-poisoned interval is finally allowed to page.
+ */
+val MIGRATION_22_23 = object : Migration(22, 23) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("UPDATE history_gaps SET recoverable = 1 WHERE recoverable = 0")
     }
 }
 
