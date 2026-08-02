@@ -463,19 +463,35 @@ class ChatModelsTest {
         assertEquals(0, firstUnreadTopAnchorIndex(firstUnreadIndex = 1, rowsFit = 2))
     }
 
-    @Test fun `measured row correction aligns variable-height unread target`() {
+    @Test fun `measured row correction aligns variable-height unread target to the visual top`() {
+        // reverseLayout offsets grow from the viewport start (visual bottom); top alignment is
+        // offset + size == viewportEndOffset. scrollBy(delta) moves the item to offset - delta.
+        // Entry row just past the top edge (real reopen trace): a small positive nudge up.
         assertEquals(
-            1_797,
-            reverseItemStartCorrection(
-                itemOffset = 1_776,
-                viewportStartOffset = -21,
+            75,
+            reverseItemTopAlignmentCorrection(
+                itemOffset = 1_651,
+                itemSize = 222,
+                viewportEndOffset = 1_798,
             ),
         )
+        // Entry row resting at the max-scroll clamp (real first-open trace): a negative correction
+        // eases it down into exact top alignment instead of poking past the viewport end.
         assertEquals(
-            1_549,
-            reverseItemStartCorrection(
-                itemOffset = 1_528,
-                viewportStartOffset = -21,
+            -138,
+            reverseItemTopAlignmentCorrection(
+                itemOffset = 1_284,
+                itemSize = 376,
+                viewportEndOffset = 1_798,
+            ),
+        )
+        // Already top-aligned: no correction.
+        assertEquals(
+            0,
+            reverseItemTopAlignmentCorrection(
+                itemOffset = 1_576,
+                itemSize = 222,
+                viewportEndOffset = 1_798,
             ),
         )
     }

@@ -50,10 +50,24 @@ class MessageRepositoryImpl @Inject constructor(
         bufferId: Long,
         visibility: MessageVisibilitySpec,
         focus: HistoryWindowFocus,
+    ): Flow<PagingData<MessageEntity>> = messages(bufferId, visibility, focus, initialKey = null)
+
+    @OptIn(ExperimentalPagingApi::class)
+    override fun messages(
+        bufferId: Long,
+        visibility: MessageVisibilitySpec,
+        focus: HistoryWindowFocus,
+        initialKey: Int?,
     ): Flow<PagingData<MessageEntity>> =
         pagingContextFlow(bufferId, focus).flatMapLatest { context ->
                 Pager(
                     config = MESSAGE_PAGING_CONFIG,
+                    // Seed the first source load from the caller-computed key so a deep
+                    // open-at-first-unread entry materializes together with the viewport below it in
+                    // the initial refresh (see entryAnchorPagingKey — callers gate depth and shift
+                    // the key; Room clamps a key at or past the window end to the trailing load, so
+                    // a transiently smaller window cannot key past its own bounds).
+                    initialKey = initialKey?.coerceAtLeast(0),
                     // Scroll-driven paging: the mediator is always attached so Paging3 APPEND drives
                     // older history under Recent focus and AFTER/BEFORE gap fill under Around. The
                     // canonical id comes from pagingContextFlow, so a durable redirect still paints
@@ -267,3 +281,21 @@ internal val MESSAGE_PAGING_CONFIG = PagingConfig(
     maxSize = 500,
     jumpThreshold = 250,
 )
+
+/**
+ * Pager initial key for an open-at-first-unread entry anchored at timeline offset [index].
+ *
+ * Room's paging source treats a refresh key as the load's START offset (end-clamping it only when
+ * the key sits within `initialLoadSize` of the window end), so keying the Pager at the anchor
+ * itself would materialize the anchor plus OLDER rows only — every newer row below it in the
+ * reversed viewport would stay a placeholder until later prepend hints, which a regenerating
+ * bounded window can starve. Shift the key back by `initialLoadSize - pageSize` so the first load
+ * covers the anchor, a full viewport of newer rows below it, and one page of older rows above.
+ * Anchors inside the default newest load return null: the plain newest-first refresh already
+ * materializes them, keeping first-open backfill behavior untouched.
+ */
+internal fun entryAnchorPagingKey(index: Int): Int? {
+    val config = MESSAGE_PAGING_CONFIG
+    if (index < config.initialLoadSize) return null
+    return (index - (config.initialLoadSize - config.pageSize)).coerceAtLeast(0)
+}

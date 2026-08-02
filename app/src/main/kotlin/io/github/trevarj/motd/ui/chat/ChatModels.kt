@@ -103,6 +103,14 @@ internal const val TARGET_MATERIALIZATION_TIMEOUT_MS = 30_000L
 internal const val TOP_ALIGNMENT_TOLERANCE_PX = 1
 
 /**
+ * Upper bound on measure-correct passes when snapping the entry row to the viewport top. One pass
+ * suffices on a quiet layout; a pass whose scroll a racing Paging generation presentation clamps is
+ * observed on the next frame and re-corrected. The cap keeps a layout that legitimately cannot
+ * align (content shorter than the viewport) from spinning until the materialization timeout.
+ */
+internal const val TOP_ALIGNMENT_MAX_PASSES = 8
+
+/**
  * Decide whether an incoming message should pin the reverse list to the newest row (index 0). Only
  * autoscroll when the user is already at/near the bottom ([atBottom]) AND an already-populated
  * window grew ([newCount] > [oldCount]) — never yank a user who has scrolled up to read history.

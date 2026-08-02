@@ -98,6 +98,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -192,6 +193,7 @@ import io.github.trevarj.motd.ui.theme.MotdSizes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.spacingFor
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
@@ -289,7 +291,15 @@ fun ChatScreen(
     }
     var mentionRequest by remember { mutableStateOf<Pair<Long, String>?>(null) }
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val items = viewModel.messages.collectAsLazyPagingItems()
+    // Collect paging off the frame-aligned AndroidUiDispatcher. Bounded-window paging swaps the
+    // whole Pager when a persisted older page recedes the gap edge, which emits two PagingData
+    // back-to-back (the old Pager's invalidation generation plus the new Pager's first). cachedIn
+    // multicasts through a one-slot shareIn(replay = 1), so the second emission suspends until this
+    // collector consumes the first — and a collector parked on AndroidUiDispatcher.Main only runs
+    // with the choreographer, which can stay quiescent indefinitely on an idle screen. That wedge
+    // froze automatic history backfill after one page. Main.immediate resumes with ordinary Main
+    // messages instead, so generation handoff never depends on frame traffic.
+    val items = viewModel.messages.collectAsLazyPagingItems(Dispatchers.Main.immediate)
     val memberNicks by viewModel.memberNicks.collectAsStateWithLifecycle()
     val knownNicks by viewModel.knownNicks.collectAsStateWithLifecycle()
     val voiceState by voiceViewModel.state.collectAsStateWithLifecycle()
@@ -901,12 +911,24 @@ fun ChatContent(
                         initialPagingPage(count, append) != InitialPagingPage.Pending
                 }
         } != null
-        if (!pageReady) return null
+        if (!pageReady) {
+            AutoFollowTrace.record("materialize_page_not_ready", traceBufferId, traceSessionId) {
+                "target_index=${target.index} refresh=${items.loadState.refresh} " +
+                    "append=${items.loadState.append} item_count=${items.itemCount}"
+            }
+            return null
+        }
         val materializedIndex = materializableTargetIndex(
             requestedIndex = target.index,
             itemCount = items.itemCount,
             hasExactIdentity = target.expectedEventId != null || target.expectedMsgid != null,
-        ) ?: return null
+        )
+        if (materializedIndex == null) {
+            AutoFollowTrace.record("materialize_index_unaddressable", traceBufferId, traceSessionId) {
+                "target_index=${target.index} item_count=${items.itemCount}"
+            }
+            return null
+        }
         val row = requestAndAwaitTarget(
             index = materializedIndex,
             request = { index ->
@@ -929,6 +951,15 @@ fun ChatContent(
                 targetMaterialization(items, materializedIndex)
             },
         )
+        if (row == null) {
+            AutoFollowTrace.record("materialize_target_missing", traceBufferId, traceSessionId) {
+                "target_index=$materializedIndex refresh=${items.loadState.refresh} " +
+                    "prepend=${items.loadState.prepend} append=${items.loadState.append} " +
+                    "item_count=${items.itemCount} " +
+                    "loaded_start=${items.itemSnapshotList.placeholdersBefore} " +
+                    "loaded_count=${items.itemSnapshotList.items.size}"
+            }
+        }
         return row?.let { MaterializedChatTarget(it, materializedIndex) }
     }
 
@@ -978,6 +1009,10 @@ fun ChatContent(
                 }
         } != null
         if (!pageReady) {
+            AutoFollowTrace.record("initial_position_page_not_ready", traceBufferId, traceSessionId) {
+                "target_index=${target.index} refresh=${items.loadState.refresh} " +
+                    "append=${items.loadState.append} item_count=${items.itemCount}"
+            }
             onInitialPositionUnresolved()
             return@LaunchedEffect
         }
@@ -1017,22 +1052,61 @@ fun ChatContent(
                     }.first { it != null }
                 }
                 if (item != null) {
-                    val alignedIndex = item.index
-                    val layout = listState.layoutInfo
-                    val correction = reverseItemStartCorrection(
-                        itemOffset = item.offset,
-                        viewportStartOffset = layout.viewportStartOffset,
-                    )
-                    AutoFollowTrace.record("initial_position_align", traceBufferId, traceSessionId) {
-                        "target_index=$alignedIndex item_offset=${item.offset} item_size=${item.size} " +
-                            "viewport_start=${layout.viewportStartOffset} viewport_end=${layout.viewportEndOffset} " +
-                            "correction=$correction"
-                    }
-                    if (kotlin.math.abs(correction) > TOP_ALIGNMENT_TOLERANCE_PX) {
-                        listState.scrollBy(correction.toFloat())
+                    // A single fire-and-forget correction can race a Paging generation swap (the
+                    // reopen backfill deletes the history gap milliseconds after materialization,
+                    // regenerating the Pager): the lazy layout clamps the scroll mid-presentation
+                    // and silently discards the remainder, leaving the entry row at the reversed
+                    // viewport start (visual bottom) with the unread run below it uncomposed.
+                    // Re-measure and re-correct across frames until the row rests at the top. A
+                    // layout that legitimately cannot align (content shorter than the viewport)
+                    // stops moving and exits through the pass cap with the single-shot behavior.
+                    var pass = 0
+                    var unconsumedPasses = 0
+                    while (pass < TOP_ALIGNMENT_MAX_PASSES) {
+                        val visible = listState.layoutInfo.visibleItemsInfo
+                        val currentIndex = materializedTargetVisibleIndex(
+                            visible.map { it.key to it.index },
+                            row.id,
+                        )
+                        val current = visible.firstOrNull { it.index == currentIndex }
+                        if (current == null) {
+                            // A generation presentation can hide the row for a frame; observe the
+                            // settled layout before concluding it left the viewport.
+                            pass++
+                            withFrameNanos { }
+                            continue
+                        }
+                        val layout = listState.layoutInfo
+                        val correction = reverseItemTopAlignmentCorrection(
+                            itemOffset = current.offset,
+                            itemSize = current.size,
+                            viewportEndOffset = layout.viewportEndOffset,
+                        )
+                        AutoFollowTrace.record("initial_position_align", traceBufferId, traceSessionId) {
+                            "target_index=${current.index} item_offset=${current.offset} " +
+                                "item_size=${current.size} " +
+                                "viewport_start=${layout.viewportStartOffset} " +
+                                "viewport_end=${layout.viewportEndOffset} " +
+                                "correction=$correction pass=$pass"
+                        }
+                        if (kotlin.math.abs(correction) <= TOP_ALIGNMENT_TOLERANCE_PX) break
+                        val consumed = listState.scrollBy(correction.toFloat())
+                        pass++
+                        // Let the pending layout (and any racing generation presentation) apply
+                        // before re-measuring, so a clamped scroll is observed rather than trusted.
+                        withFrameNanos { }
+                        // Two consecutive fully unconsumed scrolls mean the list is legitimately
+                        // clamped (fewer unread than fit the viewport keep the newest row pinned at
+                        // the bottom, as firstUnreadTopAnchorIndex documents) — the rest position is
+                        // final. A single one may just be a racing presentation frame; retry.
+                        unconsumedPasses = if (consumed == 0f) unconsumedPasses + 1 else 0
+                        if (unconsumedPasses >= 2) break
                     }
                     row
                 } else {
+                    AutoFollowTrace.record("initial_position_align_missing", traceBufferId, traceSessionId) {
+                        "target_index=${target.index} item_count=${items.itemCount}"
+                    }
                     null
                 }
             } else {
@@ -1064,8 +1138,14 @@ fun ChatContent(
             suppressNextAutoFollow = true
             onInitialPositionHandled()
         } else if (targetRow != null) {
+            AutoFollowTrace.record("initial_position_reresolve", traceBufferId, traceSessionId) {
+                "target_index=${target.index} reason=identity_mismatch item_count=${items.itemCount}"
+            }
             onReresolveInitial(target)
         } else if (target.expectedEventId != null || target.expectedMsgid != null) {
+            AutoFollowTrace.record("initial_position_reresolve", traceBufferId, traceSessionId) {
+                "target_index=${target.index} reason=target_missing item_count=${items.itemCount}"
+            }
             onReresolveInitial(target)
         } else {
             AutoFollowTrace.record("initial_position_unresolved", traceBufferId, traceSessionId) {
@@ -1955,14 +2035,20 @@ fun ChatContent(
     }
 }
 
-/** Pixel delta that top-aligns an item whose logical offset is mirrored by `reverseLayout`. */
-internal fun reverseItemStartCorrection(
+/**
+ * Pixel delta for [androidx.compose.foundation.gestures.ScrollableState.scrollBy] that top-aligns
+ * an item in a `reverseLayout` list. Item offsets grow along the layout axis from the viewport
+ * start, which reverse layout places at the visual BOTTOM — so the visual top is the viewport END,
+ * and a top-aligned item has `offset + size == viewportEndOffset`. `scrollBy(delta)` moves an
+ * item's offset to `offset - delta`, hence the correction below lands the item exactly there.
+ * (The previous form aligned to `viewportStartOffset`, i.e. pinned the entry row to the visual
+ * bottom with the unread run below it uncomposed — the blank-reopen regression.)
+ */
+internal fun reverseItemTopAlignmentCorrection(
     itemOffset: Int,
-    viewportStartOffset: Int,
-): Int {
-    // LazyListItemInfo.offset is physical even in reverse layout; top alignment is viewport start.
-    return itemOffset - viewportStartOffset
-}
+    itemSize: Int,
+    viewportEndOffset: Int,
+): Int = itemOffset - (viewportEndOffset - itemSize)
 
 internal enum class ChatTitleTarget { CHANNEL_INFO, NICK_DETAILS, NONE }
 

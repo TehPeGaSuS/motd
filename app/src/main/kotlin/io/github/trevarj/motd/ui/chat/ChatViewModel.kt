@@ -30,6 +30,7 @@ import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.data.repo.HistoryWindowFocus
+import io.github.trevarj.motd.data.repo.entryAnchorPagingKey
 import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
 import io.github.trevarj.motd.data.repo.NoopNetworkIgnoreRepository
 import io.github.trevarj.motd.data.prefs.Settings
@@ -72,9 +73,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.filterNotNull
@@ -241,11 +244,53 @@ class ChatViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Every visibility change cancels the old generation and creates a positionally exact Pager. */
-    val messages: Flow<PagingData<MessageEntity>> = combine(filterSpecs, historyWindowFocus) { spec, focus ->
-        spec to focus
-    }.flatMapLatest { (spec, focus) ->
-        messageRepository.messages(bufferId, spec, focus)
-    }.cachedIn(viewModelScope)
+    val messages: Flow<PagingData<MessageEntity>> =
+        combine(filterSpecs, historyWindowFocus) { spec, focus -> spec to focus }
+            .flatMapLatest { (spec, focus) ->
+                flow {
+                    // Resolve the open-at-first-unread anchor BEFORE creating the Pager so a deep
+                    // entry collects ONE generation keyed from birth. Keying the already-collected
+                    // stream by swapping in a second Pager mid-presentation parks the new
+                    // generation's first page behind the cachedIn handoff, which left the reopened
+                    // timeline stuck on the stale generation with refresh loading (blank reopen).
+                    emitAll(
+                        messageRepository.messages(bufferId, spec, focus, entryPagingKey(spec, focus)),
+                    )
+                }
+            }.cachedIn(viewModelScope)
+
+    /**
+     * Pager initial key for the one-shot open-at-first-unread entry, resolved from the same durable
+     * state the entry pipeline reads: the oldest visible unread row inside the current Recent
+     * bounds. Null unless a pending Recent entry sits beyond the default newest load, so first-open
+     * backfill, escapes, mentions, and Around deep jumps all keep their unkeyed newest-first load.
+     * The entry pipeline still positions precisely; a marker that converges after this snapshot at
+     * worst yields an unkeyed-style placeholder scroll, never a wrong position.
+     */
+    private suspend fun entryPagingKey(spec: MessageVisibilitySpec, focus: HistoryWindowFocus): Int? {
+        if (focus !is HistoryWindowFocus.Recent) return null
+        if (_entryState.value !is EntryPositionState.Pending) return null
+        return try {
+            val room = bufferRepository.observeBuffer(bufferId).firstOrNull() ?: return null
+            val marker = visibilityReader.effectiveLocalReadAnchor(room) ?: return null
+            val bounds = messageRepository.historyWindowBounds(bufferId, focus)
+            val firstUnread = visibilityReader.firstVisibleUnreadAnchor(bufferId, marker, spec, bounds)
+                ?: return null
+            val index = messageRepository.countNewerThan(
+                bufferId,
+                firstUnread.serverTime,
+                firstUnread.eventId,
+                spec,
+                focus,
+            )
+            entryAnchorPagingKey(index)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: RuntimeException) {
+            // The key is an optimization; the timeline must present regardless.
+            null
+        }
+    }
 
     /** Newest stored wire row, including ignored tails; effective bottom may acknowledge it. */
     val rawNewestAnchor: StateFlow<TimelineAnchor?> = visibilityReader.observeLatestRawAnchor(bufferId)
@@ -1420,6 +1465,9 @@ class ChatViewModel @Inject constructor(
             spec,
             historyWindowFocus.value,
         )
+        // A deep anchor (past the default newest load) is materialized by the Pager's initialKey:
+        // the messages flow resolves the same anchor via entryPagingKey BEFORE the first
+        // generation, so this target only needs the index. See entryPagingKey.
         // forceScrollOnEntry: retained list state sits at the newest row on entry, so the gate must
         // still scroll to the (typically non-zero) anchor index instead of treating it as a no-op.
         // placeAtTop: ChatScreen realizes the top placement (off-screen load + measured snap) so the
@@ -1589,8 +1637,10 @@ class ChatViewModel @Inject constructor(
         activeJumpRequest = null
         _jumpTarget.value = null
         _initialTarget.value = null
-        historyWindowFocus.value = HistoryWindowFocus.Recent
+        // Settling entry first means a focus flip back to Recent re-resolves entryPagingKey as
+        // null: the escape lands on the live newest window, never a stale entry anchor.
         transitionEntry(EntryPositionState.Settled)
+        historyWindowFocus.value = HistoryWindowFocus.Recent
     }
 
     /** Re-resolve an exact mention inside the island where its viewport index was computed. */

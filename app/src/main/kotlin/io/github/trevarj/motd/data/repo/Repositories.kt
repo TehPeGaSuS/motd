@@ -82,6 +82,21 @@ interface MessageRepository {
         visibility: MessageVisibilitySpec,
         focus: HistoryWindowFocus,
     ): Flow<PagingData<MessageEntity>> = messages(bufferId, visibility)
+
+    /**
+     * As [messages], but seeds the Pager's first source load around [initialKey] (a 0-based
+     * timeline offset into the same focus/visibility query the PagingSource uses). Supplied for a
+     * large open-at-first-unread entry whose anchor sits beyond the default newest load, so the
+     * initial refresh materializes the entry row directly instead of forcing a scroll to an
+     * unloaded placeholder at the older paging boundary (which would drive a boundary APPEND and
+     * churn the generation before the row can compose). A null key preserves the newest-first load.
+     */
+    fun messages(
+        bufferId: Long,
+        visibility: MessageVisibilitySpec,
+        focus: HistoryWindowFocus,
+        initialKey: Int?,
+    ): Flow<PagingData<MessageEntity>> = messages(bufferId, visibility, focus)
     fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>>
     /** Canonical event-id lookup used by notification and restored-scroll anchors. */
     suspend fun byId(id: Long): MessageEntity? = null
