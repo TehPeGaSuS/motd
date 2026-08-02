@@ -74,8 +74,9 @@ version, seed, case, and fixture in that module's
   the relevant unit/integration tests, lint, and builds in the matrix above.
 - `.github/workflows/ci.yml` owns the complete required gate. Its `headless` job runs exactly
   four isolated `@FastHeadlessE2e` methods on API34 Pixel 6 AOSP, while the parallel
-  `component-ui` job runs all 63 hermetic component instrumentation cases and excludes the
-  real-stack annotation.
+  `component-ui` job runs all 64 hermetic component instrumentation cases and excludes the
+  real-stack annotation. That count is the number `test/e2e/component-suite.sh` enforces
+  (`EXPECTED_CASES`); keep the two in sync when component tests are added or removed.
   Push the candidate commit and require the complete CI gate to pass before
   tagging a release.
 - Use a physical device for hardware- or OS-integration evidence: input latency,

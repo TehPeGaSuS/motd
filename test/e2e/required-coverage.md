@@ -35,7 +35,7 @@ remains scheduled/manual.
 | join, send, search, completion, command, `/me` | one canonical UI send in `sendEchoPersistsVisibleRowAndReconnects`; composer/parser/ViewModel/EventProcessor tests |
 | replies, reactions, drafts | deterministic delivery, preview, mutation, canonical, and draft tests; choreography remains manual |
 | reconnect duplicate/new second send | one canonical row before/after reconnect plus deterministic echo/canonical/resync tests |
-| first-unread viewport and long offline gap | `unreadHistoryEntersAtMarkerAndRemainsCanonical` seeds 80 incoming rows through a second Ergo client, then proves marker placement, canonical order, exactly-once recovery, deliberate advancement, notification deep-jump, Activity recreation, and stable reopen behavior |
+| first-unread viewport and long offline gap | `unreadHistoryEntersAtMarkerAndRemainsCanonical` seeds 260 incoming rows through a second Ergo client, proves the bounded 49-row catch-up entry and marker placement, then pins scroll-driven paging — one automatic bounded page per open of an unread gap, then one page per deliberate boundary scroll — down to the oldest row, proving canonical order, exactly-once recovery, deliberate advancement, notification deep-jump, Activity recreation, and stable reopen behavior |
 | channel/member/friend/fool sheets | ViewModel/presentation/repository tests; scheduled UIAutomator |
 | settings and bouncer panels | `bootstrappedNavigationSettingsAndBouncerSmoke` plus preferences/catalog/model/ViewModel tests |
 | verified BouncerServ account/channel/console capability discovery | navigation/bouncer smoke after root readiness; BouncerServ command/session/model tests retain protocol and authorization detail |

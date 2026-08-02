@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.e2e.robots
 
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
@@ -11,11 +13,12 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_LOADING_TAG
-import io.github.trevarj.motd.ui.chat.OlderHistoryAuthorizationCountKey
 import org.junit.Assert.assertTrue
 
 internal class ChatListRobot(compose: ComposeTestRule) : BaseRobot(compose) {
@@ -30,8 +33,6 @@ internal class ChatRobot(compose: ComposeTestRule) : BaseRobot(compose) {
 }
 
 internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule) {
-    private var expectedOlderHistoryAuthorizationCount = 0
-
     fun assertMessage(text: String) {
         scrollContainerTo("chat_timeline", hasText(text, substring = true))
         rule.onNodeWithText(text, substring = true, useUnmergedTree = true).assertTextContains(text, substring = true)
@@ -57,7 +58,7 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         timeoutMs: Long = 30_000,
     ) {
         rule.waitForIdle()
-        // Atomic history publication can leave Paging materializing the 80-row entry window for
+        // Atomic history publication can leave Paging materializing the bounded entry window for
         // longer than the generic component timeout on a cold hosted emulator.
         awaitTag("chat_read_marker_divider", timeoutMs)
         awaitTag(firstTag, timeoutMs)
@@ -91,50 +92,80 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         rule.onAllNodesWithTag(secondTag, useUnmergedTree = true).assertCountEquals(1)
     }
 
-    fun requestOlderHistory() {
-        rule.onNodeWithTag("chat_timeline", useUnmergedTree = true)
-            .performTouchInput { swipeDown(durationMillis = 350) }
-        expectedOlderHistoryAuthorizationCount++
-        try {
-            rule.waitUntil(10_000) {
-                rule.onAllNodesWithTag("chat_timeline", useUnmergedTree = true)
-                    .fetchSemanticsNodes()
-                    .singleOrNull()
-                    ?.config
-                    ?.getOrElse(OlderHistoryAuthorizationCountKey) { 0 } ==
-                    expectedOlderHistoryAuthorizationCount
+    /**
+     * One deliberate older-paging step. The timeline is `reverseLayout = true`, so the newest row
+     * sits at index 0 and the oldest loaded row at the highest index; scrolling toward the last
+     * index moves the older (APPEND) boundary into the prefetch window and drives exactly one
+     * Paging APPEND.
+     *
+     * Determinism: `MESSAGE_PAGING_CONFIG` uses pageSize 50 > prefetchDistance 25. A scroll that
+     * stops at the boundary triggers exactly one APPEND; after the 50-row insert the retained
+     * viewport anchor sits 50 rows (> 25) above the new boundary, outside the prefetch range, so
+     * no second page fires until the next deliberate `scrollToOlderBoundary()` step. (Opening an
+     * unread gap is equally deterministic: the entry lands on the island's oldest unread row,
+     * whose load hint sits 0 rows from the APPEND boundary when the island fits under
+     * `initialLoadSize` = pageSize * 3 = 150, so every open fetches exactly ONE automatic older
+     * page — and never a second in the same open, because the deepest hinted index then sits 50
+     * rows above the new boundary. Reopens therefore compound one page per open; the required
+     * journey pins the 49 -> 99 -> 149 growth and its row212 -> row162 -> row112 entry anchors.)
+     */
+    fun scrollToOlderBoundary() {
+        awaitTag("chat_timeline")
+        val before = timelineItemCount()
+        val lastIndex = before - 1
+        if (lastIndex > 0) {
+            runCatching {
+                rule.onNodeWithTag("chat_timeline", useUnmergedTree = true).performScrollToIndex(lastIndex)
+            }.onFailure {
+                rule.onNodeWithTag("chat_timeline", useUnmergedTree = true)
+                    .performTouchInput { swipeDown(durationMillis = 300) }
             }
-        } catch (error: Throwable) {
-            throw AssertionError(
-                "older-history gesture was not authorized: expected request " +
-                    expectedOlderHistoryAuthorizationCount,
-                error,
-            )
+        } else {
+            rule.onNodeWithTag("chat_timeline", useUnmergedTree = true)
+                .performTouchInput { swipeDown(durationMillis = 300) }
+        }
+        // The boundary hit paints the shimmer footer while the APPEND is in flight, or the row set
+        // grows if the fixture page lands before the tag is first observed. If neither happens the
+        // step reached the confirmed start of history or loaded instantly; either way settle. The
+        // swallowed timeout costs at most 10s per fully-settled step (e.g. paging past the true
+        // start of history) and stays bounded: scrollOlderUntil's maximumSwipes cap still throws
+        // loudly if the requested row never becomes addressable.
+        runCatching {
+            rule.waitUntil(10_000) { isPresent(CHAT_HISTORY_LOADING_TAG) || timelineItemCount() > before }
+        }
+        if (isPresent(CHAT_HISTORY_LOADING_TAG)) {
+            rule.waitUntil(45_000) { !isPresent(CHAT_HISTORY_LOADING_TAG) }
         }
         rule.waitForIdle()
-        if (
-            rule.onAllNodesWithTag(CHAT_HISTORY_LOADING_TAG, useUnmergedTree = true)
-                .fetchSemanticsNodes().isNotEmpty()
-        ) {
-            rule.waitUntil(45_000) {
-                rule.onAllNodesWithTag(CHAT_HISTORY_LOADING_TAG, useUnmergedTree = true)
-                    .fetchSemanticsNodes().isEmpty()
-            }
-            rule.waitForIdle()
-        }
     }
 
+    /** Repeat [scrollToOlderBoundary] until a row containing [text] becomes addressable. */
     fun scrollOlderUntil(text: String, maximumSwipes: Int = 48) {
         repeat(maximumSwipes) {
-            val target = rule.onNodeWithText(text, substring = true, useUnmergedTree = true)
-            if (runCatching { target.assertIsDisplayed() }.isSuccess) {
-                target.assertTextContains(text)
+            val reached = runCatching {
+                rule.onNodeWithTag("chat_timeline", useUnmergedTree = true)
+                    .performScrollToNode(hasText(text, substring = true))
+            }.isSuccess
+            if (reached) {
+                rule.onNodeWithText(text, substring = true, useUnmergedTree = true)
+                    .assertTextContains(text, substring = true)
                 return
             }
-            requestOlderHistory()
+            scrollToOlderBoundary()
         }
-        throw AssertionError("older history row did not become visible after $maximumSwipes swipes")
+        throw AssertionError(
+            "older history row \"$text\" did not become addressable after $maximumSwipes deliberate scroll steps",
+        )
     }
+
+    private fun timelineItemCount(): Int =
+        rule.onAllNodesWithTag("chat_timeline", useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .singleOrNull()
+            ?.config
+            ?.getOrNull(SemanticsProperties.CollectionInfo)
+            ?.rowCount
+            ?: 0
 
     fun scrollToBottom() {
         awaitTag("chat_scroll_to_bottom_fab")
