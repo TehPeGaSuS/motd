@@ -3879,6 +3879,114 @@ class EventProcessorTest {
     }
 
     @Test
+    fun saturatedTimestampOnlyLatestRecordsARecoverableCatchUpGap() = runTest {
+        // Timestamp-only wire (soju advertises MSGREFTYPES=timestamp): boundary references carry no
+        // msgids and the reconnect catch-up LATEST page is saturated (primary == limit). The gap
+        // between the previous newest row and the page's oldest row must still be born RECOVERABLE:
+        // recoverable=false is reserved for server-proven-empty intervals, and per-fetch
+        // equal-timestamp ambiguity is the loader's per-page concern, not a reason to permanently
+        // block gap fill. (Regression pin: the old saturation rule made every soju catch-up gap
+        // unrecoverable, so opening an unread channel could never page older history.)
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx(null, 10), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"),
+                "#ts-only", "marker", false, null,
+            ),
+        )
+        val room = checkNotNull(db.bufferDao().byName(networkId, "#ts-only"))
+        val page = (212..261).map { time ->
+            IrcEvent.ChatMessage(
+                ctx(null, time.toLong()), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"),
+                "#ts-only", "row$time", false, null,
+            )
+        }
+
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#ts-only", limit = 50),
+            ChatHistoryResponse.Messages(
+                events = page,
+                oldest = ChatHistoryReference(null, 212),
+                newest = ChatHistoryReference(null, 261),
+                endOfHistory = false,
+                primaryMessageCount = 50,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        val gap = db.historyGapDao().forRoom(room.id).single()
+        assertTrue(gap.recoverable)
+        assertEquals(10L, gap.olderServerTime)
+        assertEquals(212L, gap.newerServerTime)
+    }
+
+    @Test
+    fun saturatedTimestampOnlyGapFillKeepsTheRecededRemainderRecoverable() = runTest {
+        // Filling a recoverable gap with a saturated msgid-less BEFORE page recedes its newer edge
+        // and must keep the remainder RECOVERABLE so the next APPEND can continue toward the marker.
+        val room = BufferStore(db).getOrCreate(networkId, "#ts-fill", "#ts-fill", BufferType.CHANNEL)
+        val gapId = db.historyGapDao().insert(
+            HistoryGapEntity(0, room.id, null, 10, null, 212),
+        )
+        val page = (162..211).map { time ->
+            IrcEvent.ChatMessage(
+                ctx(null, time.toLong()), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"),
+                "#ts-fill", "row$time", false, null,
+            )
+        }
+
+        processor.persistHistoryPageResult(
+            networkId = networkId,
+            request = ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.BEFORE,
+                "#ts-fill",
+                bound1 = "timestamp=1970-01-01T00:00:00.212Z",
+                limit = 50,
+            ),
+            response = ChatHistoryResponse.Messages(
+                events = page,
+                oldest = ChatHistoryReference(null, 162),
+                newest = ChatHistoryReference(null, 211),
+                endOfHistory = false,
+                primaryMessageCount = 50,
+            ),
+            expectedRoomId = room.id,
+            historyGapId = gapId,
+        )
+
+        val remainder = db.historyGapDao().forRoom(room.id).single()
+        assertTrue(remainder.recoverable)
+        assertEquals(10L, remainder.olderServerTime)
+        assertEquals(162L, remainder.newerServerTime)
+    }
+
+    @Test
+    fun emptyGapFillResponseStillMarksTheGapUnrecoverable() = runTest {
+        // The one legitimate route to recoverable=false: the server PROVED the interval empty by
+        // returning zero primary messages for the gap-directed request.
+        val room = BufferStore(db).getOrCreate(networkId, "#ts-empty", "#ts-empty", BufferType.CHANNEL)
+        val gapId = db.historyGapDao().insert(
+            HistoryGapEntity(0, room.id, null, 10, null, 212),
+        )
+
+        processor.persistHistoryPageResult(
+            networkId = networkId,
+            request = ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.BEFORE,
+                "#ts-empty",
+                bound1 = "timestamp=1970-01-01T00:00:00.212Z",
+                limit = 50,
+            ),
+            response = ChatHistoryResponse.Messages(emptyList(), null, null, false, 0),
+            expectedRoomId = room.id,
+            historyGapId = gapId,
+        )
+
+        assertFalse(db.historyGapDao().forRoom(room.id).single().recoverable)
+    }
+
+    @Test
     fun exactGapIdentityDisambiguatesEqualTimeTimestampFallback() = runTest {
         val room = BufferStore(db).getOrCreate(networkId, "#ambiguous-gap", "#ambiguous-gap", BufferType.CHANNEL)
         val firstId = db.historyGapDao().insert(

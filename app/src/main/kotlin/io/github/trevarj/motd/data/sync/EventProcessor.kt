@@ -1015,18 +1015,21 @@ class EventProcessor @Inject constructor(
                             gap.newerMsgid,
                             gapNewerAnchor,
                         ))
-                    val unsafeNextBoundary = !terminal && pageNewest.msgid == null &&
-                        response.primaryMessageCount >= request.limit
                     if (terminal && reachedNewerBoundary) {
                         db.historyGapDao().delete(gap.id)
                     } else {
+                        // recoverable=false means the SERVER PROVED the remainder empty (a terminal
+                        // response that still did not reach the far boundary). A saturated
+                        // timestamp-only page is not such proof: the interval stays fetchable and
+                        // per-fetch equal-timestamp ambiguity is handled by the loader's
+                        // cannotSafelyPageAfter per page, never by poisoning the gap.
                         updateOrDeleteGap(
                             gap.copy(
                                 olderMsgid = pageNewest.msgid,
                                 olderServerTime = pageNewestTime,
                                 olderEventId = pageNewestAnchor?.eventId,
                                 olderTimelineOrder = pageNewestAnchor?.timelineOrder,
-                                recoverable = !terminal && !unsafeNextBoundary,
+                                recoverable = !terminal,
                             ),
                         )
                     }
@@ -1037,18 +1040,21 @@ class EventProcessor @Inject constructor(
                             gap.olderMsgid,
                             gapOlderAnchor,
                         ))
-                    val unsafeNextBoundary = !terminal && pageOldest.msgid == null &&
-                        response.primaryMessageCount >= request.limit
                     if (terminal && reachedOlderBoundary) {
                         db.historyGapDao().delete(gap.id)
                     } else {
+                        // recoverable=false means the SERVER PROVED the remainder empty (a terminal
+                        // response that still did not reach the far boundary). A saturated
+                        // timestamp-only page is not such proof: the interval stays fetchable and
+                        // per-fetch equal-timestamp ambiguity is handled by the loader's
+                        // cannotSafelyPageBefore per page, never by poisoning the gap.
                         updateOrDeleteGap(
                             gap.copy(
                                 newerMsgid = pageOldest.msgid,
                                 newerServerTime = pageOldestTime,
                                 newerEventId = pageOldestAnchor?.eventId,
                                 newerTimelineOrder = pageOldestAnchor?.timelineOrder,
-                                recoverable = !terminal && !unsafeNextBoundary,
+                                recoverable = !terminal,
                             ),
                         )
                     }
@@ -1215,6 +1221,14 @@ class EventProcessor @Inject constructor(
                     }
                 }
                 if (!covered) {
+                    // Reconnect catch-up interval between the previous newest boundary and this
+                    // LATEST page's oldest row. Always born recoverable: recoverable=false is
+                    // reserved for server-proven-empty intervals (primaryMessageCount == 0 above).
+                    // On timestamp-only wires (soju advertises MSGREFTYPES=timestamp, stripping
+                    // msgid boundary references) a saturated page must NOT poison this gap — the
+                    // interval is fully fetchable via BEFORE from its newer edge, and the loader's
+                    // cannotSafelyPageBefore already stops each fetch at an ambiguous
+                    // equal-timestamp boundary per page.
                     db.historyGapDao().insert(
                         HistoryGapEntity(
                             roomId = roomId,
@@ -1226,8 +1240,7 @@ class EventProcessor @Inject constructor(
                             newerServerTime = pageOldestTime,
                             newerEventId = pageOldestAnchor?.eventId,
                             newerTimelineOrder = pageOldestAnchor?.timelineOrder,
-                            recoverable = pageOldest.msgid != null ||
-                                response.primaryMessageCount < request.limit,
+                            recoverable = true,
                         ),
                     )
                 }
