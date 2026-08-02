@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
 import io.github.trevarj.motd.data.repo.HistoryWindowFocus
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
@@ -55,6 +56,10 @@ class ChatHistoryRemoteMediator(
     // Owns the fetch/persist/concurrency primitives. Defaulted so the existing positional test
     // construction stays valid; production always injects the shared singleton via the factory.
     private val loader: HistoryPageLoader = HistoryPageLoader(processor),
+    // Opt-in decision-point journal for the paging control flow. Fields carry classification, ids,
+    // counts, timestamps, and msgid PRESENCE only — never message content or msgid values. This is
+    // the observability that identified the unrecoverable-gap append stall on timestamp-only wires.
+    private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
 ) : RemoteMediator<Int, MessageEntity>() {
 
     /**
@@ -78,12 +83,12 @@ class ChatHistoryRemoteMediator(
     override suspend fun load(loadType: LoadType, state: PagingState<Int, MessageEntity>): MediatorResult {
         return try {
             val buffer = bufferDao.observeById(bufferId)
-                ?: return MediatorResult.Success(endOfPaginationReached = true)
+                ?: return endLoad(loadType, "missing_buffer")
             if (buffer.type == BufferType.SERVER) {
                 // Console buffers have no CHATHISTORY target. With the mediator attached
                 // unconditionally, mirror the UI's Hidden rule here or every console open would
                 // emit junk `CHATHISTORY BEFORE <servername>` traffic.
-                return MediatorResult.Success(endOfPaginationReached = true)
+                return endLoad(loadType, "server_buffer")
             }
             val networkId = buffer.networkId
             // The loader re-derives availability, page limit, and reference types from the source per
@@ -98,12 +103,46 @@ class ChatHistoryRemoteMediator(
                     buffer.ircTarget,
                     buffer.historyComplete,
                 )
+            }.also { result ->
+                diagnostics.record("chat_history", "mediator_load_result") {
+                    mapOf(
+                        "load_type" to loadType.name,
+                        "room_id" to bufferId,
+                        "outcome" to when (result) {
+                            is MediatorResult.Success ->
+                                if (result.endOfPaginationReached) "end" else "more"
+                            is MediatorResult.Error -> "error"
+                            else -> "unknown"
+                        },
+                        "error_class" to (result as? MediatorResult.Error)
+                            ?.throwable?.let { it::class.simpleName },
+                    )
+                }
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (e: Exception) {
+            diagnostics.record("chat_history", "mediator_load_failed") {
+                mapOf(
+                    "load_type" to loadType.name,
+                    "room_id" to bufferId,
+                    "error_class" to e::class.simpleName,
+                )
+            }
             MediatorResult.Error(e)
         }
+    }
+
+    /**
+     * End pagination locally with the decision recorded; [reason] is a fixed classification. The
+     * field is named `end_reason` because DiagnosticLogger redacts any field literally named
+     * `reason` (IRC quit/kick reasons are user content; this classification is not).
+     */
+    private fun endLoad(loadType: LoadType, reason: String): MediatorResult {
+        diagnostics.record("chat_history", "mediator_load_ended") {
+            mapOf("load_type" to loadType.name, "room_id" to bufferId, "end_reason" to reason)
+        }
+        return MediatorResult.Success(endOfPaginationReached = true)
     }
 
     private suspend fun refresh(
@@ -135,10 +174,10 @@ class ChatHistoryRemoteMediator(
         val gaps = historyGapDao?.forRoom(roomId).orEmpty()
         val focusedGap = focusedOlderGap(gaps)
         if (focusedGap?.recoverable == false) {
-            return MediatorResult.Success(endOfPaginationReached = true)
+            return endLoad(LoadType.APPEND, "unrecoverable_focused_gap")
         }
         if (historyComplete && focusedGap == null) {
-            return MediatorResult.Success(endOfPaginationReached = true)
+            return endLoad(LoadType.APPEND, "history_complete")
         }
         val cursor = historyCursorDao?.byRoom(roomId)
         val oldest = focusedGap?.let { ChatHistoryReference(it.newerMsgid, it.newerServerTime) }
@@ -147,6 +186,17 @@ class ChatHistoryRemoteMediator(
             ?: messageDao.oldestBoundary(roomId)?.let {
                 ChatHistoryReference(it.msgid, it.serverTime)
             }
+        diagnostics.record("chat_history", "append_boundary") {
+            mapOf(
+                "room_id" to roomId,
+                "gap_count" to gaps.size,
+                "focused_gap_id" to focusedGap?.id,
+                "focused_gap_recoverable" to focusedGap?.recoverable,
+                "has_cursor" to (cursor != null),
+                "boundary_has_msgid" to (oldest?.msgid != null),
+                "boundary_server_time" to oldest?.serverTime,
+            )
+        }
         if (oldest == null) {
             // Empty local store hit the end boundary on first open. With SKIP_INITIAL_REFRESH the
             // REFRESH backfill never fires, so seed the newest page here via LATEST. If the server
@@ -370,6 +420,7 @@ class ChatHistoryMediatorFactoryImpl @Inject constructor(
     private val loader: HistoryPageLoader,
     private val historyCursorDao: HistoryCursorDao,
     private val historyGapDao: HistoryGapDao,
+    private val diagnostics: DiagnosticLogger,
 ) : ChatHistoryMediatorFactory {
     override fun create(
         bufferId: Long,
@@ -385,6 +436,7 @@ class ChatHistoryMediatorFactoryImpl @Inject constructor(
             historyGapDao = historyGapDao,
             focus = focus,
             loader = loader,
+            diagnostics = diagnostics,
         )
 
     // Resolve the live client lazily per call: the buffer can open before its network reaches

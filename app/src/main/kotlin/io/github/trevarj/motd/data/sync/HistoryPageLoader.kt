@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.sync
 
 import io.github.trevarj.motd.data.db.RoomId
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
@@ -44,6 +45,9 @@ import kotlinx.coroutines.yield
 @Singleton
 class HistoryPageLoader @Inject constructor(
     private val processor: EventProcessor,
+    // Opt-in fetch journal (availability gates, per-page outcomes, wire timeouts). Fields carry
+    // classification, ids, counts, timestamps, and msgid PRESENCE only — never message content.
+    private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
 ) {
     /**
      * Minimal seam over the live history transport (availability + a single labeled request),
@@ -127,6 +131,17 @@ class HistoryPageLoader @Inject constructor(
         boundary: ChatHistoryReference? = null,
     ): PageResult {
         val availability = source.availability()
+        diagnostics.record("chat_history", "loader_page_requested") {
+            mapOf(
+                "network_id" to networkId,
+                "room_id" to roomId,
+                "direction" to direction.name,
+                "availability" to availability::class.simpleName,
+                "boundary_has_msgid" to (boundary?.msgid != null),
+                "boundary_server_time" to boundary?.serverTime,
+                "gap_id" to gapId,
+            )
+        }
         val ready = when (availability) {
             HistoryAvailability.Unsupported -> return PageResult.Unsupported
             HistoryAvailability.NegotiatingOrOffline -> return PageResult.Unavailable(
@@ -144,6 +159,17 @@ class HistoryPageLoader @Inject constructor(
                 )
                 Direction.NEWER -> loadNewer(
                     networkId, roomId, target, source, requestLimit, referenceTypes, gapId, boundary,
+                )
+            }
+        }.also { result ->
+            diagnostics.record("chat_history", "loader_page_result") {
+                mapOf(
+                    "room_id" to roomId,
+                    "direction" to direction.name,
+                    "result" to result::class.simpleName,
+                    "primary_count" to (result as? PageResult.Loaded)?.primaryCount,
+                    "inserted_count" to (result as? PageResult.Loaded)?.insertedCount,
+                    "end_of_direction" to (result as? PageResult.Loaded)?.endOfDirection,
                 )
             }
         }
@@ -483,6 +509,9 @@ class HistoryPageLoader @Inject constructor(
                 }
             }
         } catch (timeout: TimeoutCancellationException) {
+            diagnostics.record("chat_history", "loader_wire_timeout") {
+                mapOf("network_id" to networkId, "timeout_ms" to timeoutMs, "retryable" to retryableTimeout)
+            }
             // For Paging (retryableTimeout), never let the timeout escape as a CancellationException:
             // the mediator rethrows those to Paging, whose accessor would keep this direction's
             // LoadState stuck at Loading with a stale pending request. Surface it as a retryable
