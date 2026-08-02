@@ -266,7 +266,10 @@ class RequiredHeadlessE2eTest {
         // settles at exactly 99 (row162..row260); each reopen compounds one more page:
         // 49 -> 99 -> 149, entry anchor row212 -> row162 -> row112, label 49+ -> 99+ -> 149+.
         // The bounded-catch-up proof stays the frozen "49+" divider above and the pre-open
-        // unreadCount==49 badge, both captured before the Pager attached.
+        // unreadCount==49 badge, both captured before the Pager attached. requiredText must be a
+        // row that only exists AFTER the transition this probe awaits: row162 is the oldest row of
+        // auto-append #1's page, so a still-pre-append 49-row emission (append on the wire) cannot
+        // satisfy the settle predicate — row260 would, and then fail the 99..99 count check.
         val postOpenWindow = runBlocking {
             runProbe.awaitStableRecentRows(
                 token = token,
@@ -274,7 +277,7 @@ class RequiredHeadlessE2eTest {
                 minimumCount = 99,
                 maximumCount = 99,
                 expectedNewestOrdinal = 260,
-                requiredText = "$token row260",
+                requiredText = "$token row162",
                 excludedText = "$token row001",
             )
         }
