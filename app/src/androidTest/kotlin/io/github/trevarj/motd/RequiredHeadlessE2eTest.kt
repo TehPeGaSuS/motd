@@ -351,9 +351,15 @@ class RequiredHeadlessE2eTest {
                     .putExtra(MotdNotifications.EXTRA_EVENT_ID, firstUnread.id),
             )
         }
-        timeline.assertMessageVisible(firstUnread.tag())
+        // The notification deep jump is a cold cross-activity entry: a new route, a fresh Pager
+        // generation keyed around a row ~260 messages deep, target materialization, and the entry
+        // scroll must all complete before the row is displayed. Budget it like the suite's other
+        // navigation/network-scale waits (20-45s) rather than the generic 10s component wait,
+        // which is a slow-hosted-emulator flake edge for this step.
+        timeline.assertMessageVisible(firstUnread.tag(), timeoutMs = 30_000)
         scenario.scenario?.onActivity { it.recreate() }
-        timeline.assertMessageVisible(firstUnread.tag())
+        // Activity recreation replays the same deep entry from scratch on the same cold budget.
+        timeline.assertMessageVisible(firstUnread.tag(), timeoutMs = 30_000)
         // Directional paging restores older rows; search then exposes its exact newest-200 cap.
         runBlocking {
             runProbe.awaitRows(
