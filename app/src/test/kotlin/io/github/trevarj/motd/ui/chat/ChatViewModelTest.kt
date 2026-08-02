@@ -1125,8 +1125,100 @@ class ChatViewModelTest {
 
         vm.onInitialPositionUnresolved()
 
-        assertTrue(vm.entryPositionUnresolved.value)
-        assertFalse(vm.entryMessageUnavailable.value)
+        assertEquals(
+            EntryPositionState.Unresolved(messageUnavailable = false),
+            vm.entryState.value,
+        )
+    }
+
+    @Test
+    fun `settled entry never downgrades to unresolved`() = runTest {
+        val vm = viewModel(channel, FakeConnectionManager(network.id))
+        vm.state.first { it.buffer != null }
+
+        vm.onInitialPositionHandled()
+        assertEquals(EntryPositionState.Settled, vm.entryState.value)
+
+        // A late unresolved signal (ordinary or explicit-jump failure) must not clear the gate open.
+        vm.onInitialPositionUnresolved()
+        assertEquals(EntryPositionState.Settled, vm.entryState.value)
+    }
+
+    @Test
+    fun `reply jump failure after concurrent entry settlement still reports unavailable`() = runTest {
+        val vm = viewModel(channel, FakeConnectionManager(network.id))
+        vm.state.first { it.buffer != null }
+
+        // The tap lands while entry is Pending, so the jump would settle entry; entry then settles
+        // on its own before the resolve completes NotFound.
+        vm.jumpToRepliedMessage("missing")
+        vm.onInitialPositionHandled()
+        advanceUntilIdle()
+
+        assertEquals(EntryPositionState.Settled, vm.entryState.value)
+        val failure = vm.uiEvents.value.single().value as ChatUiEvent.ReplyJumpUnavailable
+        assertEquals("missing", failure.request.msgid)
+    }
+
+    @Test
+    fun `message-unavailable failure never degrades to an ordinary unresolved entry`() = runTest {
+        val handle = SavedStateHandle()
+        val vm = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            jumpToMsgid = "missing-message",
+            savedStateHandle = handle,
+        )
+        advanceUntilIdle()
+        assertEquals(
+            EntryPositionState.Unresolved(messageUnavailable = true),
+            vm.entryState.value,
+        )
+
+        // A later ordinary unresolved signal must not clear the durable message-unavailable report;
+        // live state stays consistent with the persisted SavedState keys.
+        vm.onInitialPositionUnresolved()
+        assertEquals(
+            EntryPositionState.Unresolved(messageUnavailable = true),
+            vm.entryState.value,
+        )
+        assertTrue(handle.get<Boolean>("entry_position_unresolved") == true)
+        assertTrue(handle.get<Boolean>("entry_message_unavailable") == true)
+        assertFalse(handle.get<Boolean>("entry_position_settled") == true)
+    }
+
+    @Test
+    fun `entry state restores from persisted SavedState keys after process death`() = runTest {
+        val settled = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            restoredState = mapOf("entry_position_settled" to true),
+        )
+        assertEquals(EntryPositionState.Settled, settled.entryState.value)
+
+        val unavailable = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            restoredState = mapOf(
+                "entry_position_unresolved" to true,
+                "entry_message_unavailable" to true,
+            ),
+        )
+        assertEquals(
+            EntryPositionState.Unresolved(messageUnavailable = true),
+            unavailable.entryState.value,
+        )
+
+        // Settled wins even when an unresolved flag is also persisted (no downgrade on restore).
+        val both = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            restoredState = mapOf(
+                "entry_position_settled" to true,
+                "entry_position_unresolved" to true,
+            ),
+        )
+        assertEquals(EntryPositionState.Settled, both.entryState.value)
     }
 
     @Test
@@ -1215,8 +1307,10 @@ class ChatViewModelTest {
 
         advanceUntilIdle()
 
-        assertTrue(vm.entryPositionUnresolved.value)
-        assertTrue(vm.entryMessageUnavailable.value)
+        assertEquals(
+            EntryPositionState.Unresolved(messageUnavailable = true),
+            vm.entryState.value,
+        )
     }
 
     @Test
@@ -1283,14 +1377,19 @@ class ChatViewModelTest {
         jumpToMsgid: String? = null,
         jumpToTime: Long = 0,
         jumpToEventId: Long? = null,
+        restoredState: Map<String, Any> = emptyMap(),
+        // Injectable so a test can observe the write-through entry-position keys after transitions.
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
     ): ChatViewModel {
         val eventSink: IrcEventSink = processor
         val routeState = mutableMapOf<String, Any>("bufferId" to routeBufferId)
         jumpToMsgid?.let { routeState["jumpToMsgid"] = it }
         if (jumpToTime > 0) routeState["jumpToTime"] = jumpToTime
         jumpToEventId?.let { routeState["jumpToEventId"] = it }
+        routeState.putAll(restoredState)
+        routeState.forEach { (key, value) -> savedStateHandle[key] = value }
         return ChatViewModel(
-            savedStateHandle = SavedStateHandle(routeState),
+            savedStateHandle = savedStateHandle,
             messageRepository = messages,
             bufferRepository = buffers,
             networkIdentityDao = db.networkIdentityDao(),

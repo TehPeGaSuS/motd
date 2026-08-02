@@ -1304,23 +1304,18 @@ class ChatViewModel @Inject constructor(
     private val _initialTarget = MutableStateFlow<ChatPositionTarget?>(null)
     val initialTarget: StateFlow<ChatPositionTarget?> = _initialTarget.asStateFlow()
 
-    private val _entryPositionSettled = MutableStateFlow(
-        savedStateHandle.get<Boolean>(ENTRY_POSITION_SETTLED_KEY) == true,
+    // One-shot entry positioning as a single sealed state. Pending gates read-state advancement;
+    // Settled releases it; Unresolved keeps the gate (messageUnavailable => explicit jump failure).
+    // Restored bit-identically from the same three SavedState keys the latches used (settled wins).
+    private val _entryState = MutableStateFlow(
+        restoredEntryPositionState(
+            settled = savedStateHandle.get<Boolean>(ENTRY_POSITION_SETTLED_KEY) == true,
+            unresolved = savedStateHandle.get<Boolean>(ENTRY_POSITION_UNRESOLVED_KEY) == true,
+            messageUnavailable = savedStateHandle.get<Boolean>(ENTRY_MESSAGE_UNAVAILABLE_KEY) == true,
+        ),
     )
-    /** True only after a resolved entry/deep-link position has settled and may advance read state. */
-    val entryPositionSettled: StateFlow<Boolean> = _entryPositionSettled.asStateFlow()
-
-    private val _entryPositionUnresolved = MutableStateFlow(
-        savedStateHandle.get<Boolean>(ENTRY_POSITION_UNRESOLVED_KEY) == true,
-    )
-    /** Durable explicit failure state: entry remains read-gated until the user navigates away. */
-    val entryPositionUnresolved: StateFlow<Boolean> = _entryPositionUnresolved.asStateFlow()
-
-    private val _entryMessageUnavailable = MutableStateFlow(
-        savedStateHandle.get<Boolean>(ENTRY_MESSAGE_UNAVAILABLE_KEY) == true,
-    )
-    /** True only when an explicit message jump, rather than normal entry positioning, failed. */
-    val entryMessageUnavailable: StateFlow<Boolean> = _entryMessageUnavailable.asStateFlow()
+    /** One-shot entry/deep-link positioning state; read gating derives from it. */
+    val entryState: StateFlow<EntryPositionState> = _entryState.asStateFlow()
 
     // Re-resolve is allowed exactly once per normal-entry target; explicit jump requests carry
     // their own guard so a superseded request cannot spend the newer request's retry.
@@ -1340,8 +1335,7 @@ class ChatViewModel @Inject constructor(
         if (needsDeepJumpResolution(
                 hasDeepJump = hasDeepJump,
                 jumpConsumed = savedStateHandle.get<Boolean>(JUMP_CONSUMED_KEY) == true,
-                entryPositionSettled = _entryPositionSettled.value,
-                entryPositionUnresolved = _entryPositionUnresolved.value,
+                entryState = _entryState.value,
             )
         ) {
             savedStateHandle[JUMP_CONSUMED_KEY] = true
@@ -1390,7 +1384,7 @@ class ChatViewModel @Inject constructor(
             }
             // A normal open remains on Recent and lands on its oldest loaded unread row. Only an
             // explicit deep link may select Around; older traversal is authorized by user scroll.
-            if (!hasDeepJump && !_entryPositionSettled.value) {
+            if (!hasDeepJump && _entryState.value !is EntryPositionState.Settled) {
                 val entryAnchor = firstUnread ?: realMarker
                 _initialTarget.value = when {
                     entryAnchor != null -> readMarkerEntryTarget(
@@ -1579,13 +1573,13 @@ class ChatViewModel @Inject constructor(
         jumpResolveJob = null
         activeJumpRequest = null
         _jumpTarget.value = null
-        if (settlesEntryPosition) markEntryPositionSettled()
+        if (settlesEntryPosition) transitionEntry(EntryPositionState.Settled)
     }
 
     /** The screen completed its one-shot normal-entry positioning. */
     fun onInitialPositionHandled() {
         _initialTarget.value = null
-        markEntryPositionSettled()
+        transitionEntry(EntryPositionState.Settled)
     }
 
     /** The newest FAB is an explicit request to abandon an older focused island immediately. */
@@ -1596,7 +1590,7 @@ class ChatViewModel @Inject constructor(
         _jumpTarget.value = null
         _initialTarget.value = null
         historyWindowFocus.value = HistoryWindowFocus.Recent
-        markEntryPositionSettled()
+        transitionEntry(EntryPositionState.Settled)
     }
 
     /** Re-resolve an exact mention inside the island where its viewport index was computed. */
@@ -1645,7 +1639,7 @@ class ChatViewModel @Inject constructor(
     /** A target could not be loaded safely; retain the read gate rather than marking it read. */
     fun onInitialPositionUnresolved() {
         _initialTarget.value = null
-        if (!_entryPositionSettled.value) markEntryPositionUnresolved()
+        transitionEntry(EntryPositionState.Unresolved(messageUnavailable = false))
     }
 
     fun onJumpUnresolved(token: Long) {
@@ -1660,7 +1654,7 @@ class ChatViewModel @Inject constructor(
      * shared jump pipeline still supplies bounded paging, index-shift recovery, and highlighting.
      */
     fun jumpToRepliedMessage(msgid: String) {
-        val settlesEntryPosition = !_entryPositionSettled.value && !_entryPositionUnresolved.value
+        val settlesEntryPosition = _entryState.value is EntryPositionState.Pending
         val request = JumpRequest(
             token = ++nextJumpToken,
             msgid = msgid,
@@ -1685,27 +1679,43 @@ class ChatViewModel @Inject constructor(
         if (activeJumpRequest?.token != request.token) return
         jumpResolveJob = null
         activeJumpRequest = null
-        if (request.settlesEntryPosition) {
-            markEntryPositionUnresolved(messageUnavailable = true)
-        } else {
+        // Entry may have settled while this jump resolved; the settled gate must not downgrade,
+        // but the user's explicit tap still deserves the transient not-found feedback.
+        val reportedDurably = request.settlesEntryPosition &&
+            transitionEntry(EntryPositionState.Unresolved(messageUnavailable = true))
+        if (!reportedDurably) {
             request.msgid?.let { msgid ->
                 uiEventQueue.enqueue(ChatUiEvent.ReplyJumpUnavailable(ReplyJumpRequest(msgid)))
             }
         }
     }
 
-    private fun markEntryPositionSettled() {
-        savedStateHandle[ENTRY_POSITION_SETTLED_KEY] = true
-        _entryPositionSettled.value = true
-    }
-
-    private fun markEntryPositionUnresolved(messageUnavailable: Boolean = false) {
-        savedStateHandle[ENTRY_POSITION_UNRESOLVED_KEY] = true
-        if (messageUnavailable) {
-            savedStateHandle[ENTRY_MESSAGE_UNAVAILABLE_KEY] = true
-            _entryMessageUnavailable.value = true
+    /**
+     * Advance the one-shot entry state, never downgrading a [EntryPositionState.Settled] latch.
+     * Each accepted transition writes through to the same three SavedState keys the old latches
+     * used (settled / unresolved / message-unavailable), incrementally and never clearing a flag,
+     * so process-death restoration stays bit-identical.
+     *
+     * @return whether the transition was accepted (false only when the settled latch rejects it).
+     */
+    private fun transitionEntry(next: EntryPositionState): Boolean {
+        val current = _entryState.value
+        if (current is EntryPositionState.Settled) return false
+        // Merge unresolved reasons: a later ordinary failure must not clear a durable
+        // message-unavailable report, keeping live state consistent with the persisted key.
+        val merged = if (
+            current is EntryPositionState.Unresolved && next is EntryPositionState.Unresolved
+        ) {
+            EntryPositionState.Unresolved(current.messageUnavailable || next.messageUnavailable)
+        } else {
+            next
         }
-        _entryPositionUnresolved.value = true
+        val (settled, unresolved, messageUnavailable) = entryPositionSavedFlags(merged)
+        if (settled) savedStateHandle[ENTRY_POSITION_SETTLED_KEY] = true
+        if (unresolved) savedStateHandle[ENTRY_POSITION_UNRESOLVED_KEY] = true
+        if (messageUnavailable) savedStateHandle[ENTRY_MESSAGE_UNAVAILABLE_KEY] = true
+        _entryState.value = merged
+        return true
     }
 
     /**
@@ -1777,13 +1787,51 @@ class ChatViewModel @Inject constructor(
     }
 }
 
+/** One-shot entry/deep-link positioning outcome; the single source of read-gate advancement. */
+sealed interface EntryPositionState {
+    /** Positioning has not resolved yet; read state stays gated. */
+    data object Pending : EntryPositionState
+
+    /** A resolved position has settled; read state may advance. Never downgrades once reached. */
+    data object Settled : EntryPositionState
+
+    /**
+     * Positioning failed durably; the read gate is retained until the user navigates away.
+     * [messageUnavailable] distinguishes an explicit message-jump failure (surfaces a snackbar)
+     * from ordinary entry that simply could not be placed.
+     */
+    data class Unresolved(val messageUnavailable: Boolean) : EntryPositionState
+}
+
+/** Map the three restored SavedState booleans back into the sealed entry state (settled wins). */
+internal fun restoredEntryPositionState(
+    settled: Boolean,
+    unresolved: Boolean,
+    messageUnavailable: Boolean,
+): EntryPositionState = when {
+    settled -> EntryPositionState.Settled
+    unresolved -> EntryPositionState.Unresolved(messageUnavailable)
+    else -> EntryPositionState.Pending
+}
+
+/**
+ * The `(settled, unresolved, messageUnavailable)` SavedState flags a transition to [state] sets
+ * true. Writes are incremental (a `false` here never clears an already-persisted flag), matching
+ * the old per-latch write-through exactly.
+ */
+internal fun entryPositionSavedFlags(state: EntryPositionState): Triple<Boolean, Boolean, Boolean> =
+    when (state) {
+        EntryPositionState.Pending -> Triple(false, false, false)
+        EntryPositionState.Settled -> Triple(true, false, false)
+        is EntryPositionState.Unresolved -> Triple(false, true, state.messageUnavailable)
+    }
+
 /** Whether a deep link still needs its target/failure published after SavedState restoration. */
 internal fun needsDeepJumpResolution(
     hasDeepJump: Boolean,
     jumpConsumed: Boolean,
-    entryPositionSettled: Boolean,
-    entryPositionUnresolved: Boolean,
-): Boolean = hasDeepJump && (!jumpConsumed || (!entryPositionSettled && !entryPositionUnresolved))
+    entryState: EntryPositionState,
+): Boolean = hasDeepJump && (!jumpConsumed || entryState is EntryPositionState.Pending)
 
 internal fun entryHistoryReady(
     activity: io.github.trevarj.motd.service.ConnectionActivitySnapshot,

@@ -353,8 +353,7 @@ fun ChatScreen(
 
     val jumpTarget by viewModel.jumpTarget.collectAsStateWithLifecycle()
     val initialTarget by viewModel.initialTarget.collectAsStateWithLifecycle()
-    val entryPositionSettled by viewModel.entryPositionSettled.collectAsStateWithLifecycle()
-    val entryMessageUnavailable by viewModel.entryMessageUnavailable.collectAsStateWithLifecycle()
+    val entryState by viewModel.entryState.collectAsStateWithLifecycle()
     // Read marker frozen on entry so the "New messages" divider doesn't flash away (plans/15 #2).
     val unreadEntrySnapshot by viewModel.unreadEntrySnapshot.collectAsStateWithLifecycle()
     // Live read marker drives the FAB unread badge so it clears as messages are read (not on exit).
@@ -472,8 +471,7 @@ fun ChatScreen(
         mentionPrefill = mentionRequest,
         jumpTarget = jumpTarget,
         initialTarget = initialTarget,
-        entryPositionInitiallySettled = entryPositionSettled,
-        entryMessageUnavailable = entryMessageUnavailable,
+        entryState = entryState,
         activeHistoryWindow = activeHistoryWindow,
         hasNewerHistoryIsland = hasNewerHistoryIsland,
         onJumpHandled = viewModel::onJumpHandled,
@@ -632,8 +630,7 @@ fun ChatContent(
     mentionPrefill: Pair<Long, String>? = null,
     jumpTarget: ChatPositionTarget? = null,
     initialTarget: ChatPositionTarget? = null,
-    entryPositionInitiallySettled: Boolean = false,
-    entryMessageUnavailable: Boolean = false,
+    entryState: EntryPositionState = EntryPositionState.Pending,
     activeHistoryWindow: ActiveHistoryWindow = ActiveHistoryWindow(),
     hasNewerHistoryIsland: Boolean = false,
     onJumpHandled: (Long) -> Unit = {},
@@ -778,12 +775,13 @@ fun ChatContent(
 
     // Entry position is resolved once after refresh. Until then do not expose a transient FAB or
     // advance read state from a default index-0 layout.
-    var initialPositionSettled by remember(entryPositionInitiallySettled) {
-        mutableStateOf(entryPositionInitiallySettled)
+    val entryInitiallySettled = entryState is EntryPositionState.Settled
+    var initialPositionSettled by remember(entryInitiallySettled) {
+        mutableStateOf(entryInitiallySettled)
     }
     // The first Paging emission after entry settlement reflects data loaded for the target, not a
     // live arrival. Consume it without auto-follow so an unread target remains on screen.
-    var suppressNextAutoFollow by remember { mutableStateOf(!entryPositionInitiallySettled) }
+    var suppressNextAutoFollow by remember { mutableStateOf(!entryInitiallySettled) }
 
     var prefillConsumed by remember(traceBufferId) { mutableStateOf(false) }
 
@@ -828,8 +826,8 @@ fun ChatContent(
 
     val jumpNotLoaded = stringResource(R.string.chat_jump_not_loaded)
     // Only an explicit message destination reports failure; normal entry positioning is silent.
-    LaunchedEffect(entryMessageUnavailable) {
-        if (shouldPresentUnresolvedEntrySnackbar(entryMessageUnavailable)) {
+    LaunchedEffect(entryState) {
+        if (shouldPresentUnresolvedEntrySnackbar(entryState)) {
             snackbarHostState.showSnackbar(jumpNotLoaded)
         }
     }
@@ -2144,8 +2142,8 @@ internal fun composerTextForReply(
  * Uses the [Context] typing overload and a plural for the count (plans/15 #25).
  */
 /** A durable explicit-jump failure is the sole source of the not-loaded snackbar. */
-internal fun shouldPresentUnresolvedEntrySnackbar(entryMessageUnavailable: Boolean): Boolean =
-    entryMessageUnavailable
+internal fun shouldPresentUnresolvedEntrySnackbar(entryState: EntryPositionState): Boolean =
+    entryState is EntryPositionState.Unresolved && entryState.messageUnavailable
 
 /**
  * A completed REFRESH may still be followed by a Room/RemoteMediator APPEND. Do not decide entry

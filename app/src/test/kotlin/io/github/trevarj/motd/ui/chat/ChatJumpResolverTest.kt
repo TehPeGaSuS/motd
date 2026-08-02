@@ -125,11 +125,21 @@ class ChatJumpResolverTest {
     }
 
     @Test fun `ordinary unresolved entry does not present the not-loaded snackbar`() {
-        assertTrue(!shouldPresentUnresolvedEntrySnackbar(entryMessageUnavailable = false))
+        assertTrue(
+            !shouldPresentUnresolvedEntrySnackbar(
+                EntryPositionState.Unresolved(messageUnavailable = false),
+            ),
+        )
+        assertTrue(!shouldPresentUnresolvedEntrySnackbar(EntryPositionState.Pending))
+        assertTrue(!shouldPresentUnresolvedEntrySnackbar(EntryPositionState.Settled))
     }
 
     @Test fun `explicit unresolved message jump presents the not-loaded snackbar`() {
-        assertTrue(shouldPresentUnresolvedEntrySnackbar(entryMessageUnavailable = true))
+        assertTrue(
+            shouldPresentUnresolvedEntrySnackbar(
+                EntryPositionState.Unresolved(messageUnavailable = true),
+            ),
+        )
     }
 
     @Test fun `restored in-flight deep jump resolves again`() {
@@ -139,8 +149,11 @@ class ChatJumpResolverTest {
             needsDeepJumpResolution(
                 hasDeepJump = true,
                 jumpConsumed = restored.get<Boolean>("jump_consumed") == true,
-                entryPositionSettled = restored.get<Boolean>("entry_position_settled") == true,
-                entryPositionUnresolved = restored.get<Boolean>("entry_position_unresolved") == true,
+                entryState = restoredEntryPositionState(
+                    settled = restored.get<Boolean>("entry_position_settled") == true,
+                    unresolved = restored.get<Boolean>("entry_position_unresolved") == true,
+                    messageUnavailable = restored.get<Boolean>("entry_message_unavailable") == true,
+                ),
             ),
         )
     }
@@ -154,10 +167,36 @@ class ChatJumpResolverTest {
             !needsDeepJumpResolution(
                 hasDeepJump = true,
                 jumpConsumed = restored.get<Boolean>("jump_consumed") == true,
-                entryPositionSettled = restored.get<Boolean>("entry_position_settled") == true,
-                entryPositionUnresolved = restored.get<Boolean>("entry_position_unresolved") == true,
+                entryState = restoredEntryPositionState(
+                    settled = restored.get<Boolean>("entry_position_settled") == true,
+                    unresolved = restored.get<Boolean>("entry_position_unresolved") == true,
+                    messageUnavailable = restored.get<Boolean>("entry_message_unavailable") == true,
+                ),
             ),
         )
+    }
+
+    @Test fun `entry SavedState round-trips through the sealed state in both directions`() {
+        // Restore direction: a settled flag wins even when unresolved is also persisted.
+        assertEquals(
+            EntryPositionState.Settled,
+            restoredEntryPositionState(settled = true, unresolved = true, messageUnavailable = true),
+        )
+        assertEquals(
+            EntryPositionState.Pending,
+            restoredEntryPositionState(false, false, false),
+        )
+
+        // Write direction: the flags a transition persists restore back to the same state.
+        val states = listOf(
+            EntryPositionState.Settled,
+            EntryPositionState.Unresolved(messageUnavailable = false),
+            EntryPositionState.Unresolved(messageUnavailable = true),
+        )
+        for (state in states) {
+            val (settled, unresolved, messageUnavailable) = entryPositionSavedFlags(state)
+            assertEquals(state, restoredEntryPositionState(settled, unresolved, messageUnavailable))
+        }
     }
 
     @Test fun `empty refresh waits for a loading append then accepts its target rows`() {
