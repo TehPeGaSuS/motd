@@ -32,6 +32,14 @@ import kotlinx.coroutines.yield
  * endOfPagination outcome — stay with the caller ([ChatHistoryRemoteMediator]); the loader only
  * turns a `(direction, boundary)` pair into one persisted page and reports whether that direction is
  * exhausted or must stop to avoid a refetch loop.
+ *
+ * The loader is also the single wire-access primitive for the orchestration in
+ * [io.github.trevarj.motd.service.HistoryResyncCoordinator]: its multi-page reconnect/manual
+ * traversals build no requests of their own but call [fetchPage]/[fetchMessages]/[fetchTargets],
+ * which share this loader's per-network [Mutex] map so a scroll fetch and a reconnect catch-up
+ * serialize on the wire instead of racing pages into the same timeline. That covers every
+ * Paging-driven and coordinator-issued CHATHISTORY request; the one remaining path outside the
+ * loader is the deep-link AROUND prefetch in ChatJumpResolver (pre-existing, unrouted here).
  */
 @Singleton
 class HistoryPageLoader @Inject constructor(
@@ -53,11 +61,17 @@ class HistoryPageLoader @Inject constructor(
     /** Outcome of a single page fetch. */
     sealed interface PageResult {
         /**
-         * A page was fetched and persisted. [endOfDirection] is true when this direction is
-         * exhausted (server end reached) or must stop to avoid a non-advancing/saturated refetch
-         * loop; callers may still narrow that with their own per-focus gap accounting.
+         * A page was fetched and persisted. [primaryCount] is the fetched primary-message count and
+         * [insertedCount] the durable rows the persist actually added. [endOfDirection] is true when
+         * this direction is exhausted (server end reached) or must stop to avoid a
+         * non-advancing/saturated refetch loop; callers may still narrow that with their own
+         * per-focus gap accounting.
          */
-        data class Loaded(val primaryCount: Int, val endOfDirection: Boolean) : PageResult
+        data class Loaded(
+            val primaryCount: Int,
+            val insertedCount: Int,
+            val endOfDirection: Boolean,
+        ) : PageResult
 
         /** The network does not advertise CHATHISTORY. */
         data object Unsupported : PageResult
@@ -69,8 +83,24 @@ class HistoryPageLoader @Inject constructor(
         data class Failed(val cause: Throwable) : PageResult
     }
 
-    // The mediator's own gates are gone (Phase 2): this loader is the sole fetch serialization for
-    // Paging-driven history. The coordinator's separate single-flight collapses onto it in Phase 3.
+    /** A fetched, boundary-trimmed page plus the selector used and whether msgids remain usable. */
+    internal data class FetchedPage(
+        val response: ChatHistoryResponse.Messages,
+        val request: ChatHistoryRequest,
+        val selector: BoundarySelector,
+        val msgidAllowed: Boolean,
+    )
+
+    /** A CHATHISTORY selector value plus the reference type it was derived from. */
+    internal data class BoundarySelector(
+        val value: String,
+        val type: HistoryReferenceType,
+    )
+
+    // Sole fetch serialization for Paging-driven pages and the coordinator's reconnect/manual
+    // traversals: both acquire these per-network locks (Phase 3 gate collapse), so neither can
+    // interleave the other's pages on the socket. ChatJumpResolver's AROUND prefetch is the one
+    // history request that does not pass through these locks (pre-existing).
     private val networkLocks = ConcurrentHashMap<Long, Mutex>()
     private val inFlight = ConcurrentHashMap<FlightKey, CompletableDeferred<PageResult>>()
     internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
@@ -107,16 +137,14 @@ class HistoryPageLoader @Inject constructor(
         val requestLimit = minOf(pageSize, ready.pageLimit).coerceAtLeast(1)
         val referenceTypes = ready.referenceTypes
         return coalesced(FlightKey(networkId, roomId, direction)) {
-            networkLocks.getOrPut(networkId, ::Mutex).withLock {
-                when (direction) {
-                    Direction.LATEST -> loadLatest(networkId, roomId, target, source, requestLimit, referenceTypes)
-                    Direction.OLDER -> loadOlder(
-                        networkId, roomId, target, source, requestLimit, referenceTypes, gapId, boundary,
-                    )
-                    Direction.NEWER -> loadNewer(
-                        networkId, roomId, target, source, requestLimit, referenceTypes, gapId, boundary,
-                    )
-                }
+            when (direction) {
+                Direction.LATEST -> loadLatest(networkId, roomId, target, source, requestLimit, referenceTypes)
+                Direction.OLDER -> loadOlder(
+                    networkId, roomId, target, source, requestLimit, referenceTypes, gapId, boundary,
+                )
+                Direction.NEWER -> loadNewer(
+                    networkId, roomId, target, source, requestLimit, referenceTypes, gapId, boundary,
+                )
             }
         }
     }
@@ -130,28 +158,29 @@ class HistoryPageLoader @Inject constructor(
         requestLimit: Int,
         referenceTypes: Set<HistoryReferenceType>,
     ): PageResult {
+        val allowMsgid = HistoryReferenceType.MSGID in referenceTypes
         val request = ChatHistoryRequest(
             ChatHistoryRequest.Subcommand.LATEST,
             target,
             limit = requestLimit,
         )
-        val result = fetch(source, request)
+        val result = fetchMessages(
+            networkId, source, request, referenceTypes, allowMsgid, requestTimeoutMs, retryableTimeout = true,
+        )
         if (!result.isComplete && !result.hasUsableOldest(referenceTypes, true)) {
             return PageResult.Failed(
                 IllegalStateException("CHATHISTORY LATEST returned no advertised primary-message boundary"),
             )
         }
-        processor.persistHistoryPage(
+        val persisted = processor.persistHistoryPageResult(
             networkId,
             request,
-            result.withAdvertisedBoundaries(
-                referenceTypes,
-                allowMsgid = HistoryReferenceType.MSGID in referenceTypes,
-            ),
+            result,
             expectedRoomId = roomId,
         )
         return PageResult.Loaded(
             result.primaryMessageCount,
+            persisted.inserted,
             endOfDirection = result.isComplete ||
                 result.cannotSafelyPageBefore(referenceTypes, true, requestLimit),
         )
@@ -171,32 +200,28 @@ class HistoryPageLoader @Inject constructor(
         val oldest = boundary ?: return PageResult.Failed(
             IllegalStateException("CHATHISTORY BEFORE requires a local boundary"),
         )
-        val selected = oldest.selector(referenceTypes, allowMsgid = true)
-            ?: return PageResult.Failed(
+        if (selectorOf(oldest, referenceTypes, msgidAllowed = true) == null) {
+            return PageResult.Failed(
                 IllegalStateException("CHATHISTORY BEFORE has no advertised local boundary selector"),
             )
-        var request = ChatHistoryRequest(
-            ChatHistoryRequest.Subcommand.BEFORE,
-            target,
-            bound1 = selected.value,
-            limit = requestLimit,
-        )
-        var responseMsgidAllowed = selected.type == HistoryReferenceType.MSGID
-        val result = try {
-            fetch(source, request)
-        } catch (error: IrcCommandException) {
-            if (selected.type != HistoryReferenceType.MSGID || error.code != INVALID_MSGREFTYPE) {
-                throw error
-            }
-            val timestamp = oldest.selector(referenceTypes, allowMsgid = false) ?: throw error
-            request = request.copy(bound1 = timestamp.value)
-            responseMsgidAllowed = false
-            fetch(source, request)
         }
-        if (
-            !result.isComplete &&
-            !result.hasUsableOldest(referenceTypes, responseMsgidAllowed)
-        ) {
+        val fetched = fetchPage(
+            networkId,
+            target,
+            ChatHistoryRequest.Subcommand.BEFORE,
+            source,
+            oldest,
+            secondBoundary = null,
+            referenceTypes,
+            requestLimit,
+            msgidAllowed = true,
+            requestTimeoutMs,
+            retryableTimeout = true,
+        ) ?: return PageResult.Failed(
+            IllegalStateException("CHATHISTORY BEFORE has no advertised local boundary selector"),
+        )
+        val result = fetched.response
+        if (!result.isComplete && !result.hasUsableOldest(referenceTypes, fetched.msgidAllowed)) {
             return PageResult.Failed(
                 IllegalStateException("CHATHISTORY BEFORE returned no advertised primary-message boundary"),
             )
@@ -204,24 +229,27 @@ class HistoryPageLoader @Inject constructor(
         // Apply the page as one IRC history batch. EventProcessor wraps HistoryBatch in a single
         // Room transaction, so Paging sees one invalidation instead of up to 50 row-by-row refreshes
         // while the user is entering or flinging through a channel.
-        processor.persistHistoryPageResult(
+        val persisted = processor.persistHistoryPageResult(
             networkId,
-            request,
-            result.withAdvertisedBoundaries(referenceTypes, responseMsgidAllowed),
+            fetched.request,
+            result,
             expectedRoomId = roomId,
             historyGapId = gapId,
         )
-        if (result.isComplete) return PageResult.Loaded(result.primaryMessageCount, endOfDirection = true)
+        if (result.isComplete) {
+            return PageResult.Loaded(result.primaryMessageCount, persisted.inserted, endOfDirection = true)
+        }
         // A non-advancing cursor would refetch forever. A saturated timestamp-only page is also
         // ambiguous because BEFORE would skip any additional messages sharing its oldest timestamp.
         // Preserve the page, leave historyComplete false, and stop this direction.
         return PageResult.Loaded(
             result.primaryMessageCount,
+            persisted.inserted,
             endOfDirection = result.cannotSafelyPageBefore(
                 referenceTypes,
-                responseMsgidAllowed,
+                fetched.msgidAllowed,
                 requestLimit,
-                previous = selected,
+                previous = fetched.selector,
             ),
         )
     }
@@ -240,54 +268,150 @@ class HistoryPageLoader @Inject constructor(
         val newer = boundary ?: return PageResult.Failed(
             IllegalStateException("CHATHISTORY AFTER requires a local boundary"),
         )
-        val selected = newer.selector(referenceTypes, allowMsgid = true)
-            ?: return PageResult.Failed(
+        if (selectorOf(newer, referenceTypes, msgidAllowed = true) == null) {
+            return PageResult.Failed(
                 IllegalStateException("CHATHISTORY AFTER has no advertised local boundary selector"),
             )
-        var request = ChatHistoryRequest(
-            ChatHistoryRequest.Subcommand.AFTER,
-            target,
-            bound1 = selected.value,
-            limit = requestLimit,
-        )
-        var responseMsgidAllowed = selected.type == HistoryReferenceType.MSGID
-        val result = try {
-            fetch(source, request)
-        } catch (error: IrcCommandException) {
-            if (selected.type != HistoryReferenceType.MSGID || error.code != INVALID_MSGREFTYPE) {
-                throw error
-            }
-            val timestamp = newer.selector(referenceTypes, allowMsgid = false) ?: throw error
-            request = request.copy(bound1 = timestamp.value)
-            responseMsgidAllowed = false
-            fetch(source, request)
         }
-        if (
-            !result.isComplete &&
-            !result.hasUsableNewest(referenceTypes, responseMsgidAllowed)
-        ) {
+        val fetched = fetchPage(
+            networkId,
+            target,
+            ChatHistoryRequest.Subcommand.AFTER,
+            source,
+            newer,
+            secondBoundary = null,
+            referenceTypes,
+            requestLimit,
+            msgidAllowed = true,
+            requestTimeoutMs,
+            retryableTimeout = true,
+        ) ?: return PageResult.Failed(
+            IllegalStateException("CHATHISTORY AFTER has no advertised local boundary selector"),
+        )
+        val result = fetched.response
+        if (!result.isComplete && !result.hasUsableNewest(referenceTypes, fetched.msgidAllowed)) {
             return PageResult.Failed(
                 IllegalStateException("CHATHISTORY AFTER returned no advertised primary-message boundary"),
             )
         }
-        processor.persistHistoryPageResult(
+        val persisted = processor.persistHistoryPageResult(
             networkId,
-            request,
-            result.withAdvertisedBoundaries(referenceTypes, responseMsgidAllowed),
+            fetched.request,
+            result,
             expectedRoomId = roomId,
             historyGapId = gapId,
         )
         return PageResult.Loaded(
             result.primaryMessageCount,
+            persisted.inserted,
             endOfDirection = result.isComplete ||
                 result.cannotSafelyPageAfter(
                     referenceTypes,
-                    responseMsgidAllowed,
+                    fetched.msgidAllowed,
                     requestLimit,
-                    previous = selected,
+                    previous = fetched.selector,
                 ),
         )
     }
+
+    /**
+     * Build and run one directional CHATHISTORY message request from [boundary] (and optional
+     * [secondBoundary] for BETWEEN or a bounded LATEST floor), serialized on the per-network wire
+     * lock. [timeoutMs] bounds the whole operation — lock wait included — so a caller's budget
+     * (e.g. the urgent pending-message path) cannot silently stretch behind a busy wire. Applies
+     * the msgid→timestamp fallback on `INVALID_MSGREFTYPE` and trims boundaries the server never
+     * advertised. Returns null when [boundary] (or a required [secondBoundary]) has no advertised
+     * selector up front; a runtime msgid rejection with no advertised timestamp fallback instead
+     * rethrows the server's original [IrcCommandException] so callers keep its diagnostics. Does
+     * not persist; the caller owns persistence.
+     */
+    internal suspend fun fetchPage(
+        networkId: Long,
+        target: String,
+        subcommand: ChatHistoryRequest.Subcommand,
+        source: HistorySource,
+        boundary: ChatHistoryReference,
+        secondBoundary: ChatHistoryReference?,
+        referenceTypes: Set<HistoryReferenceType>,
+        limit: Int,
+        msgidAllowed: Boolean,
+        timeoutMs: Long,
+        retryableTimeout: Boolean = false,
+    ): FetchedPage? {
+        val selector = selectorOf(boundary, referenceTypes, msgidAllowed) ?: return null
+        val secondSelector = secondBoundary?.let { selectorOf(it, referenceTypes, msgidAllowed = false)?.value }
+        if (secondBoundary != null && secondSelector == null) return null
+        val request = ChatHistoryRequest(
+            subcommand = subcommand,
+            target = target,
+            bound1 = selector.value,
+            bound2 = secondSelector,
+            limit = limit.coerceAtLeast(1),
+        )
+        return onWireLock(networkId, timeoutMs, retryableTimeout) {
+            try {
+                FetchedPage(
+                    runRequest(source, request).withAdvertisedBoundaries(referenceTypes, msgidAllowed),
+                    request,
+                    selector,
+                    msgidAllowed,
+                )
+            } catch (error: IrcCommandException) {
+                if (selector.type != HistoryReferenceType.MSGID || error.code != INVALID_MSGREFTYPE) {
+                    throw error
+                }
+                // The pre-checks proved a msgid selector was advertised, yet the server rejected it
+                // at runtime and no timestamp fallback exists for this boundary. Surface the
+                // server's own error rather than a misleading "no selector" failure.
+                val timestamp = selectorOf(boundary, referenceTypes, msgidAllowed = false)
+                    ?: throw error
+                val fallbackRequest = request.copy(bound1 = timestamp.value)
+                FetchedPage(
+                    runRequest(source, fallbackRequest).withAdvertisedBoundaries(referenceTypes, false),
+                    fallbackRequest,
+                    timestamp,
+                    false,
+                )
+            }
+        }
+    }
+
+    /**
+     * Run an arbitrary pre-built message request (an unbounded LATEST seed, for example) on the
+     * per-network wire lock; [timeoutMs] bounds lock wait plus the request. The caller owns request
+     * construction of subcommand/target/limit and owns persistence.
+     */
+    internal suspend fun fetchMessages(
+        networkId: Long,
+        source: HistorySource,
+        request: ChatHistoryRequest,
+        referenceTypes: Set<HistoryReferenceType>,
+        msgidAllowed: Boolean,
+        timeoutMs: Long,
+        retryableTimeout: Boolean = false,
+    ): ChatHistoryResponse.Messages =
+        onWireLock(networkId, timeoutMs, retryableTimeout) {
+            runRequest(source, request).withAdvertisedBoundaries(referenceTypes, msgidAllowed)
+        }
+
+    /** Run one CHATHISTORY TARGETS discovery request on the per-network wire lock. */
+    internal suspend fun fetchTargets(
+        networkId: Long,
+        source: HistorySource,
+        request: ChatHistoryRequest,
+        timeoutMs: Long,
+    ): ChatHistoryResponse.Targets =
+        onWireLock(networkId, timeoutMs, retryableTimeout = false) {
+            source.chathistory(request) as? ChatHistoryResponse.Targets
+                ?: error("CHATHISTORY TARGETS returned a message response")
+        }
+
+    /** The advertised selector for [reference], or null when nothing usable was advertised. */
+    internal fun selectorOf(
+        reference: ChatHistoryReference,
+        referenceTypes: Set<HistoryReferenceType>,
+        msgidAllowed: Boolean,
+    ): BoundarySelector? = reference.selector(referenceTypes, msgidAllowed)
 
     /**
      * Coalesce concurrent identical fetches. The leader runs [block] in its caller's coroutine, so
@@ -332,33 +456,52 @@ class HistoryPageLoader @Inject constructor(
         }
     }
 
-    private suspend fun fetch(source: HistorySource, request: ChatHistoryRequest): ChatHistoryResponse.Messages {
+    /**
+     * Acquire the per-network wire lock and run [block] with [timeoutMs] bounding the WHOLE
+     * operation: lock wait plus the request(s). A timeout fired while still queued behind another
+     * fetch cancels the pending lock acquisition cleanly, so a caller's budget is honored even on a
+     * busy wire.
+     */
+    private suspend fun <T> onWireLock(
+        networkId: Long,
+        timeoutMs: Long,
+        retryableTimeout: Boolean,
+        block: suspend () -> T,
+    ): T {
         // withTimeout crosses a coroutine boundary, so coroutine stacktrace recovery would hand back
-        // a copy of whatever the source raised. RemoteMediator must let the original
+        // a copy of whatever the block raised. RemoteMediator must let the original
         // CancellationException instance reach Paging untouched, so capture and rethrow the exact
-        // throwable the source produced.
+        // throwable the block produced.
         var raised: Throwable? = null
-        val response = try {
-            withTimeout(requestTimeoutMs) {
+        return try {
+            withTimeout(timeoutMs) {
                 try {
-                    source.chathistory(request)
+                    networkLocks.getOrPut(networkId, ::Mutex).withLock { block() }
                 } catch (error: Throwable) {
                     raised = error
                     throw error
                 }
             }
-        } catch (_: TimeoutCancellationException) {
-            // Never let the timeout escape as a CancellationException: the mediator rethrows those
-            // to Paging, whose accessor would keep this direction's LoadState stuck at Loading with
-            // a stale pending request. Surface it as a retryable transport failure instead.
-            throw IrcDisconnectedException("CHATHISTORY", "request timed out")
+        } catch (timeout: TimeoutCancellationException) {
+            // For Paging (retryableTimeout), never let the timeout escape as a CancellationException:
+            // the mediator rethrows those to Paging, whose accessor would keep this direction's
+            // LoadState stuck at Loading with a stale pending request. Surface it as a retryable
+            // transport failure instead. The coordinator's traversals want the original timeout so
+            // their own TimeoutCancellationException handlers can report a friendly result.
+            if (retryableTimeout) throw IrcDisconnectedException("CHATHISTORY", "request timed out")
+            throw timeout
         } catch (error: Throwable) {
             throw raised ?: error
         }
-        return (response as? ChatHistoryResponse.Messages)
+    }
+
+    private suspend fun runRequest(
+        source: HistorySource,
+        request: ChatHistoryRequest,
+    ): ChatHistoryResponse.Messages =
+        (source.chathistory(request) as? ChatHistoryResponse.Messages)
             ?.boundedToRequest(request)
             ?: error("CHATHISTORY ${request.subcommand} returned a TARGETS response")
-    }
 
     /** Keep stored cursors constrained to selectors the server actually advertised. */
     private fun ChatHistoryResponse.Messages.withAdvertisedBoundaries(
@@ -424,15 +567,10 @@ class HistoryPageLoader @Inject constructor(
         }
     }
 
-    private data class BoundarySelector(
-        val value: String,
-        val type: HistoryReferenceType,
-    )
+    internal companion object {
+        /** IRCv3 error code for "this msgid selector type is not accepted"; shared with callers. */
+        internal const val INVALID_MSGREFTYPE = "INVALID_MSGREFTYPE"
 
-    private companion object {
-        private const val INVALID_MSGREFTYPE = "INVALID_MSGREFTYPE"
-
-        // Mirrors HistoryResyncCoordinator.REQUEST_TIMEOUT_MS; both collapse onto this loader later.
         private const val REQUEST_TIMEOUT_MS = 35_000L
     }
 }

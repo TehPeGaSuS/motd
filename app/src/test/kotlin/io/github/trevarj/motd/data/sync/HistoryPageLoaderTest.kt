@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.room.Room
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -30,6 +31,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -323,5 +325,170 @@ class HistoryPageLoaderTest {
         )
         assertNull(db.historyCursorDao().byRoom(bufferId)?.oldestMsgid)
         assertEquals(100L, db.historyCursorDao().byRoom(bufferId)?.oldestServerTime)
+    }
+
+    @Test
+    fun msgidRejectionWithoutTimestampFallbackSurfacesTheServersOriginalError() = runTest {
+        processor.process(networkId, chatMsg("OpaqueOnly", 500))
+        val rejection = IrcCommandException("CHATHISTORY", "INVALID_MSGREFTYPE", "try timestamp")
+        // MSGID-only advertisement: a runtime rejection leaves no timestamp fallback selector.
+        val history = FakeHistory(
+            failureFor = { request -> rejection.takeIf { request.bound1 == "msgid=OpaqueOnly" } },
+            referenceTypes = setOf(HistoryReferenceType.MSGID),
+        )
+
+        val observed = runCatching {
+            loadOlder(history, ChatHistoryReference("OpaqueOnly", null))
+        }.exceptionOrNull()
+
+        // The loader must rethrow the server's own diagnostics (the exact exception instance, so
+        // MediatorResult.Error carries them) instead of a misleading "no advertised selector"
+        // failure fabricated after the pre-checks already proved a selector existed.
+        assertSame(rejection, observed)
+        assertEquals(1, history.requests.size)
+    }
+
+    @Test
+    fun timeoutWhileQueuedBehindTheWireLockSurfacesAsRetryableFailure() = runTest {
+        processor.process(networkId, chatMsg("seed", 500))
+        val requests = mutableListOf<ChatHistoryRequest>()
+        val history = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability = HistoryAvailability.Ready(
+                setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID),
+                100,
+            )
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                requests += req
+                return awaitCancellation()
+            }
+        }
+        // A hung LATEST occupies the wire lock for its whole timeout window.
+        val hung = async {
+            runCatching {
+                loader.loadPage(networkId, bufferId, "#chan", HistoryPageLoader.Direction.LATEST, history)
+            }
+        }
+        runCurrent()
+
+        // The caller's budget bounds the WHOLE operation, lock wait included: the queued OLDER
+        // fetch must fail with the same retryable transport failure at its deadline instead of
+        // stretching its budget behind the busy wire (it never reaches the socket).
+        val queued = runCatching {
+            loadOlder(history, ChatHistoryReference("seed", 500))
+        }
+        assertTrue(queued.exceptionOrNull() is IrcDisconnectedException)
+        assertTrue(hung.await().exceptionOrNull() is IrcDisconnectedException)
+        assertEquals(1, requests.size)
+    }
+
+    @Test
+    fun concurrentIdenticalOlderLoadsCoalesceOntoOneWireRequest() = runTest {
+        processor.process(networkId, chatMsg("seed", 500))
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var calls = 0
+        val history = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability = HistoryAvailability.Ready(
+                setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID),
+                100,
+            )
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                calls++
+                entered.complete(Unit)
+                release.await()
+                return messages(listOf(chatMsg("older", 100)))
+            }
+        }
+
+        // Two live Pager generations issue the identical (network, room, OLDER) page. Only the leader
+        // hits the wire; the follower joins its in-flight fetch.
+        val leader = async { loadOlder(history, ChatHistoryReference("seed", 500)) }
+        entered.await()
+        val follower = async { loadOlder(history, ChatHistoryReference("seed", 500)) }
+        runCurrent()
+        release.complete(Unit)
+
+        assertTrue((leader.await() as HistoryPageLoader.PageResult.Loaded).primaryCount == 1)
+        assertTrue((follower.await() as HistoryPageLoader.PageResult.Loaded).primaryCount == 1)
+        assertEquals(1, calls)
+        assertEquals(2, rowCount())
+    }
+
+    @Test
+    fun distinctRoomsOnTheSameNetworkSerializeOnTheWire() = runTest {
+        db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "#other", displayName = "#other", type = BufferType.CHANNEL),
+        )
+        val otherId = db.bufferDao().byName(networkId, "#other")!!.id
+        val firstEntered = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+        val history = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability = HistoryAvailability.Ready(
+                setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID),
+                100,
+            )
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                order += "start:${req.target}"
+                if (req.target == "#chan") {
+                    firstEntered.complete(Unit)
+                    releaseFirst.await()
+                }
+                return messages(listOf(chatMsg("older", 100)))
+            }
+        }
+
+        val first = launch {
+            loader.loadPage(
+                networkId, bufferId, "#chan", HistoryPageLoader.Direction.OLDER, history,
+                boundary = ChatHistoryReference("seedChan", 500),
+            )
+        }
+        firstEntered.await()
+        val second = async {
+            loader.loadPage(
+                networkId, otherId, "#other", HistoryPageLoader.Direction.OLDER, history,
+                boundary = ChatHistoryReference("seedOther", 400),
+            )
+        }
+        runCurrent()
+
+        // The second room's fetch is blocked on the shared per-network wire lock: it has not started.
+        assertEquals(listOf("start:#chan"), order)
+        releaseFirst.complete(Unit)
+        second.await()
+        first.join()
+        assertEquals(listOf("start:#chan", "start:#other"), order)
+    }
+
+    @Test
+    fun gapDirectedOlderFillResolvesTheTargetedGap() = runTest {
+        processor.process(networkId, chatMsg("seed", 500))
+        val gapId = db.historyGapDao().insert(
+            HistoryGapEntity(
+                roomId = bufferId,
+                olderMsgid = "mid",
+                olderServerTime = 300,
+                newerMsgid = "seed",
+                newerServerTime = 500,
+            ),
+        )
+        val history = FakeHistory(
+            responseFor = { request ->
+                messages(listOf(chatMsg("old", 100)), endOfHistory = true)
+                    .takeIf { request.subcommand == ChatHistoryRequest.Subcommand.BEFORE }
+            },
+        )
+
+        val result = loader.loadPage(
+            networkId, bufferId, "#chan", HistoryPageLoader.Direction.OLDER, history,
+            gapId = gapId,
+            boundary = ChatHistoryReference("seed", 500),
+        )
+
+        // A terminal older page routed into the focused gap reaches its older boundary and closes it.
+        assertTrue((result as HistoryPageLoader.PageResult.Loaded).endOfDirection)
+        assertTrue(db.historyGapDao().forRoom(bufferId).isEmpty())
+        assertTrue(db.messageDao().byMsgid(bufferId, "old") != null)
     }
 }

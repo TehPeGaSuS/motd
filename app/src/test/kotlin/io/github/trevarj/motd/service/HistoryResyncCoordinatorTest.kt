@@ -16,7 +16,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
-import io.github.trevarj.motd.data.sync.CanonicalHistorySingleFlight
+import io.github.trevarj.motd.data.sync.HistoryPageLoader
 import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
@@ -181,7 +181,7 @@ class HistoryResyncCoordinatorTest {
         val responder: suspend (ChatHistoryRequest) -> FakeResponse,
     ) : HistoryResyncCoordinator.HistorySource {
         val requests = mutableListOf<ChatHistoryRequest>()
-        override fun availability(): HistoryAvailability = if (supported) {
+        override suspend fun availability(): HistoryAvailability = if (supported) {
             HistoryAvailability.Ready(
                 buildSet {
                     if (timestampRefs) add(HistoryReferenceType.TIMESTAMP)
@@ -396,7 +396,15 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
-    fun pendingMessageReconciliationBypassesNetworkWideHistoryGate() = runTest {
+    fun pendingMessagePromotionInterleavesBetweenResyncPages() = runTest {
+        // Phase 3 replaced the bespoke bypass of the network-wide gate with per-request wire
+        // serialization in the loader: an urgent pending promotion must be serviced BETWEEN two
+        // pages of an in-flight network resync — never queued behind the entire pass.
+        val loader = HistoryPageLoader(processor)
+        coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader)
+        val otherId = db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "#other", displayName = "#other", type = BufferType.CHANNEL),
+        )
         val pendingId = processor.insertPending(
             bufferId = bufferId,
             label = "local-pending",
@@ -405,19 +413,20 @@ class HistoryResyncCoordinatorTest {
             replyToMsgid = null,
             kind = MessageKind.PRIVMSG,
         )
-        val lockHeld = CompletableDeferred<Unit>()
-        val releaseLock = CompletableDeferred<Unit>()
-        val holder = backgroundScope.launch {
-            CanonicalHistorySingleFlight.withNetwork(networkId) {
-                lockHeld.complete(Unit)
-                releaseLock.await()
-            }
-        }
-        lockHeld.await()
-        try {
-            val source = FakeSource { request ->
-                assertEquals(ChatHistoryRequest.Subcommand.LATEST, request.subcommand)
-                FakeResponse(
+        val page1Entered = CompletableDeferred<Unit>()
+        val releasePage1 = CompletableDeferred<Unit>()
+        // The pass's per-buffer pages request limit RECENT_PAGE_SIZE (50); the pending promotion
+        // requests the full page limit (100), which distinguishes it in the recorded request order.
+        val source = FakeSource { request ->
+            when {
+                request.subcommand == ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(endOfHistory = true)
+                request.target == "#chan" && request.limit == 50 -> {
+                    page1Entered.complete(Unit)
+                    releasePage1.await()
+                    FakeResponse(listOf(message("m1", 100)), endOfHistory = true)
+                }
+                request.target == "#chan" -> FakeResponse(
                     events = listOf(
                         IrcEvent.ChatMessage(
                             ctx = MessageContext(
@@ -435,23 +444,42 @@ class HistoryResyncCoordinatorTest {
                             replyToMsgid = null,
                         ),
                     ),
-                    targets = emptyList(),
+                    endOfHistory = true,
                 )
+                else -> FakeResponse(listOf(message("o1", 300, target = "#other")), endOfHistory = true)
             }
-
-            assertEquals(
-                HistoryResyncState.UpToDate,
-                coordinator.reconcilePendingMessage(networkId, bufferId, "#chan", source),
-            )
-            assertEquals("durable-react-target", db.messageDao().byCanonicalId(pendingId)?.msgid)
-            assertEquals(
-                "durable-react-target",
-                db.historyCursorDao().byRoom(bufferId)?.newestMsgid,
-            )
-        } finally {
-            releaseLock.complete(Unit)
-            holder.join()
         }
+
+        val pass = async {
+            coordinator.resyncNetwork(
+                networkId,
+                listOf(bufferId to "#chan", otherId to "#other"),
+                source,
+            )
+        }
+        page1Entered.await()
+        // The pass holds the loader's wire lock for its first page. The urgent promotion queues on
+        // that per-request lock, taking the very next slot ahead of the pass's remaining pages.
+        val pending = async { coordinator.reconcilePendingMessage(networkId, bufferId, "#chan", source) }
+        runCurrent()
+        releasePage1.complete(Unit)
+
+        assertEquals(HistoryResyncState.UpToDate, pending.await())
+        assertEquals(HistoryResyncState.Updated(2), pass.await())
+        assertEquals("durable-react-target", db.messageDao().byCanonicalId(pendingId)?.msgid)
+        assertEquals("durable-react-target", db.historyCursorDao().byRoom(bufferId)?.newestMsgid)
+        // Request order on the wire is the proof: the pending LATEST (limit 100) was serviced
+        // strictly between the pass's two per-buffer pages (limit 50) — i.e. before the pass had
+        // even sent its final page, never queued behind the whole pass.
+        assertEquals(
+            listOf(
+                "TARGETS:*:100",
+                "LATEST:#chan:50",
+                "LATEST:#chan:100",
+                "LATEST:#other:50",
+            ),
+            source.requests.map { "${it.subcommand}:${it.target}:${it.limit}" },
+        )
     }
 
     @Test
@@ -2398,13 +2426,32 @@ class HistoryResyncCoordinatorTest {
 
     @Test
     fun immediateManualCancellationCannotMissQueuedRegistration() = runTest {
+        // Park the manual refresh at its first wire fetch by holding the loader's per-network lock,
+        // then cancel before it can send: the cancellation must take effect on the queued flight so
+        // no CHATHISTORY leaves the socket.
+        val loader = HistoryPageLoader(processor)
+        coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader)
         val lockHeld = CompletableDeferred<Unit>()
         val releaseLock = CompletableDeferred<Unit>()
         val holder = backgroundScope.launch {
-            CanonicalHistorySingleFlight.withNetwork(networkId) {
-                lockHeld.complete(Unit)
-                releaseLock.await()
-            }
+            loader.loadPage(
+                networkId,
+                bufferId,
+                "#chan",
+                HistoryPageLoader.Direction.LATEST,
+                object : HistoryPageLoader.HistorySource {
+                    override suspend fun availability(): HistoryAvailability =
+                        HistoryAvailability.Ready(
+                            setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID),
+                            100,
+                        )
+                    override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                        lockHeld.complete(Unit)
+                        releaseLock.await()
+                        return ChatHistoryResponse.Messages(emptyList(), null, null, true, 0)
+                    }
+                },
+            )
         }
         lockHeld.await()
         val source = FakeSource { FakeResponse(primaryMessageCount = 0) }

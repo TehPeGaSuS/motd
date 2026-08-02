@@ -101,6 +101,9 @@ internal class ConnectionRegistry(
     private val actors = LinkedHashMap<Long, OwnedActor>()
     private val states = LinkedHashMap<Long, IrcClientState>()
     private val terminalFingerprints = HashMap<Long, String>()
+    // Connection-lifecycle state, not a fetch lock: it tracks the in-flight reconnect catch-up
+    // generation per network so entryHistoryReady stays gated until that catch-up settles. All
+    // CHATHISTORY wire serialization lives in HistoryPageLoader's per-network lock, not here.
     private val historyCatchUpGenerations = HashMap<Long, Long>()
     private val observerJobs = mutableListOf<Job>()
     private val pendingEchoJobs = HashMap<String, Pair<Long, Job>>()

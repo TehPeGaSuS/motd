@@ -10,9 +10,8 @@ import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.prefs.NoopHistorySyncPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
-import io.github.trevarj.motd.data.sync.CanonicalHistorySingleFlight
+import io.github.trevarj.motd.data.sync.HistoryPageLoader
 import io.github.trevarj.motd.data.sync.HistoryPageWrite
-import io.github.trevarj.motd.data.sync.boundedToRequest
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -47,7 +46,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.filterIsInstance
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
@@ -138,10 +136,15 @@ interface HistoryResyncController {
 }
 
 /**
- * The sole reconnect/manual tail-revalidation entry point. Work is single-flight per request and
- * serialized per network so a foreground reconnect and a user refresh cannot race CHATHISTORY
- * pages into the same Room timeline. IRC-derived rows still flow exclusively through
- * [EventProcessor].
+ * The sole reconnect/manual tail-revalidation entry point. The coordinator decides WHAT to fetch
+ * (targets, ranges, ordering, gap recording, marker convergence) and what to report (states,
+ * per-buffer sync status); every wire fetch goes through [HistoryPageLoader], whose per-network
+ * lock serializes each individual CHATHISTORY request against scroll-driven Paging. Equivalent
+ * whole requests (a reconnect pass, a manual refresh) still coalesce onto one [ActiveFlight], but
+ * only to back user-facing status and cancellation — not as a fetch lock: two concurrent
+ * same-buffer LATEST fetches are safe because [EventProcessor] deduplicates rows by msgid/identity
+ * and gap recording recognizes an already-recorded interval. IRC-derived rows still flow
+ * exclusively through [EventProcessor].
  */
 @Singleton
 class HistoryResyncCoordinator @Inject constructor(
@@ -150,14 +153,21 @@ class HistoryResyncCoordinator @Inject constructor(
     private val syncPrefs: HistorySyncPrefs = NoopHistorySyncPrefs,
     @param:ApplicationScope private val scope: CoroutineScope,
     private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
+    // The single wire-fetch primitive: every CHATHISTORY request the coordinator issues goes through
+    // this shared singleton so reconnect/manual traversals serialize with scroll-driven Paging on the
+    // loader's per-network lock. Defaulted so tests keep the four-argument construction.
+    private val loader: HistoryPageLoader = HistoryPageLoader(processor),
 ) : HistoryResyncController {
-    internal interface HistorySource {
-        fun availability(): HistoryAvailability
+    // Reuses the loader's transport seam so a source can drive both the coordinator's orchestration
+    // and the loader's fetch primitives directly, and adds the discovery/classification metadata the
+    // reconnect pass needs (target normalization, channel detection, and a per-connection flight id).
+    internal interface HistorySource : HistoryPageLoader.HistorySource {
+        override suspend fun availability(): HistoryAvailability
+        override suspend fun chathistory(request: ChatHistoryRequest): ChatHistoryResponse
         fun flightIdentity(): Any = this
         fun canClassifyTargets(): Boolean = true
         fun normalizeTarget(target: String): String = IrcIdentityRules().normalize(target)
         fun isChannelTarget(target: String): Boolean = IrcIdentityRules().isChannel(target)
-        suspend fun chathistory(request: ChatHistoryRequest): ChatHistoryResponse
     }
 
     private data class RequestKey(val networkId: Long, val bufferId: Long?)
@@ -177,14 +187,6 @@ class HistoryResyncCoordinator @Inject constructor(
         val flight: ActiveFlight,
         val ownsFlight: Boolean,
     )
-    private data class Boundary(val msgid: String?, val serverTime: Long?)
-    private data class Selector(val value: String, val type: HistoryReferenceType)
-    private data class RequestedPage(
-        val response: ChatHistoryResponse.Messages,
-        val request: ChatHistoryRequest,
-        val selector: Selector,
-        val msgidAllowed: Boolean,
-    )
 
     private sealed interface WorkStatus {
         data object Complete : WorkStatus
@@ -200,7 +202,7 @@ class HistoryResyncCoordinator @Inject constructor(
         val highWater: Long? = null,
         val inserted: Int = 0,
         val boundaryRejected: Boolean = false,
-        val continuationBoundary: Boundary? = null,
+        val continuationBoundary: ChatHistoryReference? = null,
     )
 
     private data class TargetPass(
@@ -300,31 +302,39 @@ class HistoryResyncCoordinator @Inject constructor(
         source: HistorySource,
         isCurrent: () -> Boolean = { true },
     ): HistoryResyncState {
-        when (source.availability()) {
+        val ready = when (val availability = source.availability()) {
             HistoryAvailability.Unsupported -> return HistoryResyncState.Unsupported
             HistoryAvailability.NegotiatingOrOffline -> return historyUnavailable()
-            is HistoryAvailability.Ready -> Unit
+            is HistoryAvailability.Ready -> availability
         }
         if (!isCurrent()) return staleConnection()
+        val referenceTypes = ready.referenceTypes
+        val msgidAllowed = HistoryReferenceType.MSGID in referenceTypes
         return try {
             val request = ChatHistoryRequest(
                 subcommand = ChatHistoryRequest.Subcommand.LATEST,
                 target = target,
-                limit = source.pageLimit(),
+                limit = ready.pageLimit.coerceAtMost(PAGE_LIMIT).coerceAtLeast(1),
             )
-            val response = withTimeout(PENDING_MESSAGE_TIMEOUT_MS) {
-                source.chathistory(request)
-            }
-            val latest = (response as? ChatHistoryResponse.Messages)
-                ?.boundedToRequest(request)
-                ?: error("CHATHISTORY LATEST returned a TARGETS response")
+            // The loader serializes this LATEST on the same per-network wire lock as every other
+            // history fetch. Because that lock is held per wire request (never for a whole discovery
+            // pass), an urgent pending promotion interleaves between a network resync's pages instead
+            // of queuing behind the entire pass — the guarantee the old bespoke bypass provided.
+            val latest = loader.fetchMessages(
+                networkId,
+                source,
+                request,
+                referenceTypes,
+                msgidAllowed,
+                timeoutMs = PENDING_MESSAGE_TIMEOUT_MS,
+            )
             if (!isCurrent()) return staleConnection()
             val inserted = ingest(networkId, bufferId, request, latest)
             if (
                 !latest.isTerminalPage() &&
                 !latest.hasUsableDirectionalBoundary(
                     ChatHistoryRequest.Subcommand.LATEST,
-                    source,
+                    referenceTypes,
                 )
             ) {
                 HistoryResyncState.Incomplete(
@@ -531,7 +541,7 @@ class HistoryResyncCoordinator @Inject constructor(
         val upper = Instant.now().toEpochMilli() + TARGETS_FUZZ_MS
         val result = try {
             val discovery = if (source.canClassifyTargets()) {
-                discoverTargets(source, upper, lower)
+                discoverTargets(networkId, source, upper, lower)
             } else {
                 TargetDiscovery(
                     targets = emptyList(),
@@ -599,6 +609,7 @@ class HistoryResyncCoordinator @Inject constructor(
      * saturated tie that cannot move beyond the overlap is explicitly incomplete.
      */
     private suspend fun discoverTargets(
+        networkId: Long,
         source: HistorySource,
         upper: Long,
         lower: Long,
@@ -612,7 +623,8 @@ class HistoryResyncCoordinator @Inject constructor(
         var status: WorkStatus = WorkStatus.Complete
         val chunkLimit = targetsRequestLimit.coerceAtLeast(1)
         while (true) {
-            val response = requestTargets(
+            val response = loader.fetchTargets(
+                networkId,
                 source,
                 ChatHistoryRequest(
                     subcommand = ChatHistoryRequest.Subcommand.TARGETS,
@@ -621,6 +633,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     bound2 = ChatHistorySelectors.timestamp(lower),
                     limit = limit,
                 ),
+                requestTimeoutMs,
             )
             requestsInChunk++
             val page = response.targets
@@ -877,7 +890,7 @@ class HistoryResyncCoordinator @Inject constructor(
         source = source,
         isCurrent = isCurrent,
         subcommand = ChatHistoryRequest.Subcommand.AFTER,
-        initialBoundary = Boundary(msgid = null, serverTime = cutoff),
+        initialBoundary = ChatHistoryReference(msgid = null, serverTime = cutoff),
         maxRequests = paginationRequestLimit,
         pages = pages,
         onFetched = { fetched ->
@@ -894,6 +907,7 @@ class HistoryResyncCoordinator @Inject constructor(
         isCurrent: () -> Boolean,
         pages: MutableList<HistoryPageWrite>,
     ): WorkResult {
+        val referenceTypes = source.referenceTypes()
         val pageLimit = source.pageLimit()
         if (!isCurrent()) throw StaleConnectionException()
         val latestRequest = ChatHistoryRequest(
@@ -901,7 +915,14 @@ class HistoryResyncCoordinator @Inject constructor(
             target,
             limit = minOf(pageLimit, ALL_HISTORY_LIMIT),
         )
-        val latest = request(source, latestRequest)
+        val latest = loader.fetchMessages(
+            networkId,
+            source,
+            latestRequest,
+            referenceTypes,
+            HistoryReferenceType.MSGID in referenceTypes,
+            requestTimeoutMs,
+        )
         if (!isCurrent()) throw StaleConnectionException()
         val latestInserted = stageHistoryPage(pages, latestRequest, latest)
         val fetched = latest.primaryMessageCount
@@ -911,13 +932,13 @@ class HistoryResyncCoordinator @Inject constructor(
             return WorkResult(highWater = highWater, inserted = latestInserted)
         }
 
-        val oldest = latest.directionalBoundary(ChatHistoryRequest.Subcommand.LATEST)?.toBoundary()
+        val oldest = latest.directionalBoundary(ChatHistoryRequest.Subcommand.LATEST)
             ?: return WorkResult(
                 WorkStatus.Incomplete("CHATHISTORY LATEST returned no usable oldest boundary"),
                 highWater,
                 latestInserted,
             )
-        if (oldest.selector(source, source.supportsReference(HistoryReferenceType.MSGID)) == null) {
+        if (loader.selectorOf(oldest, referenceTypes, HistoryReferenceType.MSGID in referenceTypes) == null) {
             return WorkResult(
                 WorkStatus.Incomplete("CHATHISTORY LATEST returned an unsupported oldest boundary"),
                 highWater,
@@ -1064,16 +1085,19 @@ class HistoryResyncCoordinator @Inject constructor(
         discoveredLatestMessageTime: Long?,
     ): WorkResult {
         val room = db.bufferDao().observeById(bufferId) ?: throw StaleConnectionException()
-        val discardedBoundary = Boundary(
+        val referenceTypes = source.referenceTypes()
+        val msgidAllowed = HistoryReferenceType.MSGID in referenceTypes
+        val discardedBoundary = ChatHistoryReference(
             room.historyDiscardedThroughMsgid,
             room.historyDiscardedThroughTime,
         ).takeIf { it.msgid != null || it.serverTime != null }
         if (room.dismissed && discoveredLatestMessageTime == null) return WorkResult()
+        val discardedThroughTime = discardedBoundary?.serverTime
         if (
             room.dismissed &&
-            discardedBoundary?.serverTime != null &&
+            discardedThroughTime != null &&
             discoveredLatestMessageTime != null &&
-            discoveredLatestMessageTime <= discardedBoundary.serverTime
+            discoveredLatestMessageTime <= discardedThroughTime
         ) {
             return WorkResult()
         }
@@ -1082,14 +1106,16 @@ class HistoryResyncCoordinator @Inject constructor(
         val boundedLatest = discardedBoundary
             ?.takeIf { room.type == BufferType.QUERY }
             ?.let { floor ->
-                requestAtBoundary(
-                    source = source,
-                    subcommand = ChatHistoryRequest.Subcommand.LATEST,
+                fetchPageOrNullOnRejectedBoundary(
+                    networkId = networkId,
                     target = target,
+                    subcommand = ChatHistoryRequest.Subcommand.LATEST,
+                    source = source,
                     boundary = floor,
                     secondBoundary = null,
+                    referenceTypes = referenceTypes,
                     limit = requestLimit,
-                    msgidAllowed = source.supportsReference(HistoryReferenceType.MSGID),
+                    msgidAllowed = msgidAllowed,
                 )
             }
         val request = boundedLatest?.request ?: ChatHistoryRequest(
@@ -1097,7 +1123,14 @@ class HistoryResyncCoordinator @Inject constructor(
             target = target,
             limit = requestLimit,
         )
-        val page = (boundedLatest?.response ?: request(source, request)).boundedToRequest(request)
+        val page = boundedLatest?.response ?: loader.fetchMessages(
+            networkId,
+            source,
+            request,
+            referenceTypes,
+            msgidAllowed,
+            requestTimeoutMs,
+        )
         if (!isCurrent()) throw StaleConnectionException()
         val inserted = ingest(networkId, bufferId, request, page)
         val highWater = page.highWater()
@@ -1130,7 +1163,7 @@ class HistoryResyncCoordinator @Inject constructor(
         source: HistorySource,
         isCurrent: () -> Boolean,
         includeRecentOverlap: Boolean,
-        reconnectBoundary: Boundary?,
+        reconnectBoundary: ChatHistoryReference?,
         discoveredLatestMessageTime: Long?,
     ): WorkResult = publishHistoryAtomically(networkId, bufferId) { pages ->
         syncTargetUntilSettled(
@@ -1153,7 +1186,7 @@ class HistoryResyncCoordinator @Inject constructor(
         source: HistorySource,
         isCurrent: () -> Boolean,
         includeRecentOverlap: Boolean,
-        reconnectBoundary: Boundary?,
+        reconnectBoundary: ChatHistoryReference?,
         discoveredLatestMessageTime: Long?,
         pages: MutableList<HistoryPageWrite>,
     ): WorkResult {
@@ -1161,7 +1194,7 @@ class HistoryResyncCoordinator @Inject constructor(
         var overlap = includeRecentOverlap
         var inserted = 0
         var highWater: Long? = null
-        val continuationBoundaries = HashSet<Boundary>()
+        val continuationBoundaries = HashSet<ChatHistoryReference>()
         while (true) {
             val result = syncTarget(
                 networkId = networkId,
@@ -1215,17 +1248,19 @@ class HistoryResyncCoordinator @Inject constructor(
         source: HistorySource,
         isCurrent: () -> Boolean,
         includeRecentOverlap: Boolean,
-        reconnectBoundary: Boundary? = null,
+        reconnectBoundary: ChatHistoryReference? = null,
         healSparseGaps: Boolean = false,
         discoveredLatestMessageTime: Long? = null,
         pages: MutableList<HistoryPageWrite>,
     ): WorkResult {
+        val referenceTypes = source.referenceTypes()
+        val msgidAllowed = HistoryReferenceType.MSGID in referenceTypes
         val pageLimit = source.pageLimit()
         val bufferId = knownBufferId
         val room = db.bufferDao().observeById(bufferId)
         val protocolCursor = db.historyCursorDao().byRoom(bufferId)
         val discardedBoundary = room?.let {
-            Boundary(it.historyDiscardedThroughMsgid, it.historyDiscardedThroughTime)
+            ChatHistoryReference(it.historyDiscardedThroughMsgid, it.historyDiscardedThroughTime)
                 .takeIf { boundary -> boundary.msgid != null || boundary.serverTime != null }
         }
         if (room?.dismissed == true) {
@@ -1239,7 +1274,7 @@ class HistoryResyncCoordinator @Inject constructor(
             }
         }
         val storedBoundary = if (protocolCursor != null) {
-            Boundary(protocolCursor.newestMsgid, protocolCursor.newestServerTime)
+            ChatHistoryReference(protocolCursor.newestMsgid, protocolCursor.newestServerTime)
                 .takeIf { it.msgid?.isNotEmpty() == true || it.serverTime != null }
         } else {
             latestBoundaryFromRoom(bufferId)
@@ -1267,10 +1302,8 @@ class HistoryResyncCoordinator @Inject constructor(
         var inserted = 0
         var status: WorkStatus = WorkStatus.Complete
         var forceLatest = false
-        val pagingBoundarySupported = pagingBoundary?.selector(
-            source,
-            source.supportsReference(HistoryReferenceType.MSGID),
-        ) != null
+        val pagingBoundarySupported = pagingBoundary
+            ?.let { loader.selectorOf(it, referenceTypes, msgidAllowed) } != null
         if (pagingBoundary != null && pagingBoundarySupported) {
             val after = paginateMessages(
                 networkId = networkId,
@@ -1312,14 +1345,16 @@ class HistoryResyncCoordinator @Inject constructor(
             val boundedLatest = discardedBoundary
                 ?.takeIf { room.type == BufferType.QUERY }
                 ?.let { discardFloor ->
-                    requestAtBoundary(
-                        source = source,
-                        subcommand = ChatHistoryRequest.Subcommand.LATEST,
+                    fetchPageOrNullOnRejectedBoundary(
+                        networkId = networkId,
                         target = target,
+                        subcommand = ChatHistoryRequest.Subcommand.LATEST,
+                        source = source,
                         boundary = discardFloor,
                         secondBoundary = null,
+                        referenceTypes = referenceTypes,
                         limit = pageLimit,
-                        msgidAllowed = source.supportsReference(HistoryReferenceType.MSGID),
+                        msgidAllowed = msgidAllowed,
                     )
                 }
             val latestRequest = boundedLatest?.request ?: ChatHistoryRequest(
@@ -1327,7 +1362,14 @@ class HistoryResyncCoordinator @Inject constructor(
                 target,
                 limit = pageLimit,
             )
-            val latest = boundedLatest?.response ?: request(source, latestRequest)
+            val latest = boundedLatest?.response ?: loader.fetchMessages(
+                networkId,
+                source,
+                latestRequest,
+                referenceTypes,
+                msgidAllowed,
+                requestTimeoutMs,
+            )
             latestPage = latest
             if (!isCurrent()) throw StaleConnectionException()
             inserted += stageHistoryPage(pages, latestRequest, latest)
@@ -1347,13 +1389,13 @@ class HistoryResyncCoordinator @Inject constructor(
         if (overlap.isTerminalPage()) {
             return WorkResult(status, highWater, inserted)
         }
-        val backwardBoundary = overlap.directionalBoundary(ChatHistoryRequest.Subcommand.LATEST)?.toBoundary()
+        val backwardBoundary = overlap.directionalBoundary(ChatHistoryRequest.Subcommand.LATEST)
             ?: return WorkResult(
                 status.merge(WorkStatus.Incomplete("CHATHISTORY LATEST returned no usable oldest boundary")),
                 highWater,
                 inserted,
             )
-        if (backwardBoundary.selector(source, source.supportsReference(HistoryReferenceType.MSGID)) == null) {
+        if (loader.selectorOf(backwardBoundary, referenceTypes, msgidAllowed) == null) {
             return WorkResult(
                 status.merge(WorkStatus.Incomplete("CHATHISTORY LATEST returned an unsupported oldest boundary")),
                 highWater,
@@ -1363,10 +1405,11 @@ class HistoryResyncCoordinator @Inject constructor(
         if (!healSparseGaps || knownOldestTime == null) {
             return WorkResult(status, highWater, inserted)
         }
-        if (backwardBoundary.serverTime != null && backwardBoundary.serverTime < knownOldestTime) {
+        val backwardServerTime = backwardBoundary.serverTime
+        if (backwardServerTime != null && backwardServerTime < knownOldestTime) {
             return WorkResult(status, highWater, inserted)
         }
-        val lower = Boundary(
+        val lower = ChatHistoryReference(
             msgid = null,
             serverTime = knownOldestTime.minus(HISTORY_TIE_OVERLAP_MS)
                 .coerceAtLeast(Instant.EPOCH.toEpochMilli()),
@@ -1391,9 +1434,6 @@ class HistoryResyncCoordinator @Inject constructor(
         )
     }
 
-    private suspend fun <T> withNetworkLock(networkId: Long, block: suspend () -> T): T =
-        CanonicalHistorySingleFlight.withNetwork(networkId, block)
-
     /**
      * Traverse one directional response sequence. Page size is deliberately not a completion
      * signal: a completed batch may be short or oversized, and context events do not count toward
@@ -1407,8 +1447,8 @@ class HistoryResyncCoordinator @Inject constructor(
         source: HistorySource,
         isCurrent: () -> Boolean,
         subcommand: ChatHistoryRequest.Subcommand,
-        initialBoundary: Boundary,
-        secondBoundary: Boundary? = null,
+        initialBoundary: ChatHistoryReference,
+        secondBoundary: ChatHistoryReference? = null,
         maxRequests: Int,
         maxEvents: Int? = null,
         onFetched: (Int) -> Unit = {},
@@ -1427,8 +1467,10 @@ class HistoryResyncCoordinator @Inject constructor(
             )
         }
 
+        val referenceTypes = source.referenceTypes()
+        val pageLimit = source.pageLimit()
         var boundary = initialBoundary
-        var msgidAllowed = source.supportsReference(HistoryReferenceType.MSGID)
+        var msgidAllowed = HistoryReferenceType.MSGID in referenceTypes
         var fetched = 0
         var highWater: Long? = null
         var inserted = 0
@@ -1446,13 +1488,15 @@ class HistoryResyncCoordinator @Inject constructor(
                     inserted,
                 )
             }
-            val requested = requestAtBoundary(
-                source = source,
-                subcommand = subcommand,
+            val requested = fetchPageOrNullOnRejectedBoundary(
+                networkId = networkId,
                 target = target,
+                subcommand = subcommand,
+                source = source,
                 boundary = boundary,
                 secondBoundary = secondBoundary,
-                limit = remaining?.let { minOf(source.pageLimit(), it) } ?: source.pageLimit(),
+                referenceTypes = referenceTypes,
+                limit = remaining?.let { minOf(pageLimit, it) } ?: pageLimit,
                 msgidAllowed = msgidAllowed,
             ) ?: return WorkResult(
                 WorkStatus.Incomplete("CHATHISTORY $subcommand has no usable response boundary"),
@@ -1473,14 +1517,14 @@ class HistoryResyncCoordinator @Inject constructor(
                 return WorkResult(highWater = highWater, inserted = inserted)
             }
 
-            val next = page.directionalBoundary(subcommand)?.toBoundary() ?: return WorkResult(
+            val next = page.directionalBoundary(subcommand) ?: return WorkResult(
                 WorkStatus.Incomplete(
                     "CHATHISTORY $subcommand returned no usable response boundary",
                 ),
                 highWater,
                 inserted,
             )
-            val nextSelector = next.selector(source, msgidAllowed)
+            val nextSelector = loader.selectorOf(next, referenceTypes, msgidAllowed)
                 ?: return WorkResult(
                     WorkStatus.Incomplete(
                         "CHATHISTORY $subcommand returned an unsupported response boundary",
@@ -1544,47 +1588,6 @@ class HistoryResyncCoordinator @Inject constructor(
         error("unreachable")
     }
 
-    private suspend fun requestAtBoundary(
-        source: HistorySource,
-        subcommand: ChatHistoryRequest.Subcommand,
-        target: String,
-        boundary: Boundary,
-        secondBoundary: Boundary?,
-        limit: Int,
-        msgidAllowed: Boolean,
-    ): RequestedPage? {
-        val selector = boundary.selector(source, msgidAllowed) ?: return null
-        val secondSelector = secondBoundary?.selector(source, msgidAllowed = false)?.value
-        if (secondBoundary != null && secondSelector == null) return null
-        val historyRequest = ChatHistoryRequest(
-            subcommand = subcommand,
-            target = target,
-            bound1 = selector.value,
-            bound2 = secondSelector,
-            limit = limit.coerceAtLeast(1),
-        )
-        return try {
-            RequestedPage(
-                request(source, historyRequest).withUsableMsgidBoundaries(msgidAllowed),
-                historyRequest,
-                selector,
-                msgidAllowed,
-            )
-        } catch (error: IrcCommandException) {
-            if (selector.type != HistoryReferenceType.MSGID || error.code != INVALID_MSGREFTYPE) {
-                throw error
-            }
-            val timestamp = boundary.selector(source, msgidAllowed = false) ?: return null
-            val fallbackRequest = historyRequest.copy(bound1 = timestamp.value)
-            RequestedPage(
-                response = request(source, fallbackRequest).withUsableMsgidBoundaries(false),
-                request = fallbackRequest,
-                selector = timestamp,
-                msgidAllowed = false,
-            )
-        }
-    }
-
     private suspend fun coalesced(
         spec: RequestSpec,
         block: suspend () -> HistoryResyncState,
@@ -1607,10 +1610,10 @@ class HistoryResyncCoordinator @Inject constructor(
                 } else {
                     val deferred = scope.async(start = CoroutineStart.LAZY) {
                         spec.ensureNotManuallyCancelled()
-                        withNetworkLock(spec.key.networkId) {
-                            spec.ensureNotManuallyCancelled()
-                            block()
-                        }
+                        // Wire serialization now lives in the loader's per-network lock, acquired per
+                        // fetch inside block(); this flight only owns request-level coalescing,
+                        // cancellation, and user-facing status.
+                        block()
                     }
                     val created = ActiveFlight(spec, deferred)
                     activeFlights[spec] = created
@@ -1648,66 +1651,62 @@ class HistoryResyncCoordinator @Inject constructor(
         }
     }
 
-    private suspend fun request(
+    /**
+     * [HistoryPageLoader.fetchPage] rethrows the server's original `INVALID_MSGREFTYPE` when a
+     * rejected msgid boundary has no advertised timestamp fallback, so Paging surfaces those
+     * diagnostics via MediatorResult.Error. Reconnect/manual orchestration instead treats that
+     * unrecoverable local boundary exactly like a pre-check rejection (null): callers degrade to a
+     * LATEST seed rather than failing the whole pass on a stale stored cursor.
+     */
+    private suspend fun fetchPageOrNullOnRejectedBoundary(
+        networkId: Long,
+        target: String,
+        subcommand: ChatHistoryRequest.Subcommand,
         source: HistorySource,
-        request: ChatHistoryRequest,
-    ): ChatHistoryResponse.Messages {
-        val response = withTimeout(requestTimeoutMs) { source.chathistory(request) }
-        return (response as? ChatHistoryResponse.Messages)
-            ?.boundedToRequest(request)
-            ?.withUsableMsgidBoundaries(source.supportsReference(HistoryReferenceType.MSGID))
-            ?: error("CHATHISTORY ${request.subcommand} returned a TARGETS response")
-    }
-
-    /** Never persist a msgid continuation the server does not accept as a history selector. */
-    private fun ChatHistoryResponse.Messages.withUsableMsgidBoundaries(
-        allowMsgid: Boolean,
-    ): ChatHistoryResponse.Messages = if (allowMsgid) {
-        this
-    } else {
-        copy(
-            oldest = oldest?.copy(msgid = null),
-            newest = newest?.copy(msgid = null),
+        boundary: ChatHistoryReference,
+        secondBoundary: ChatHistoryReference?,
+        referenceTypes: Set<HistoryReferenceType>,
+        limit: Int,
+        msgidAllowed: Boolean,
+    ): HistoryPageLoader.FetchedPage? = try {
+        loader.fetchPage(
+            networkId = networkId,
+            target = target,
+            subcommand = subcommand,
+            source = source,
+            boundary = boundary,
+            secondBoundary = secondBoundary,
+            referenceTypes = referenceTypes,
+            limit = limit,
+            msgidAllowed = msgidAllowed,
+            timeoutMs = requestTimeoutMs,
         )
+    } catch (error: IrcCommandException) {
+        // Only the exact no-fallback msgid rejection degrades; every other command error (including
+        // a rejected timestamp selector) still propagates as a failure.
+        val unrecoverableMsgidRejection = error.code == HistoryPageLoader.INVALID_MSGREFTYPE &&
+            loader.selectorOf(boundary, referenceTypes, msgidAllowed = false) == null
+        if (!unrecoverableMsgidRejection) throw error
+        null
     }
 
-    private suspend fun requestTargets(
-        source: HistorySource,
-        request: ChatHistoryRequest,
-    ): ChatHistoryResponse.Targets {
-        val response = withTimeout(requestTimeoutMs) { source.chathistory(request) }
-        return response as? ChatHistoryResponse.Targets
-            ?: error("CHATHISTORY TARGETS returned a message response")
-    }
+    private suspend fun HistorySource.referenceTypes(): Set<HistoryReferenceType> =
+        (availability() as? HistoryAvailability.Ready)?.referenceTypes ?: emptySet()
 
-    private fun HistorySource.pageLimit(): Int =
+    private suspend fun HistorySource.pageLimit(): Int =
         ((availability() as? HistoryAvailability.Ready)?.pageLimit ?: PAGE_LIMIT)
             .coerceAtMost(PAGE_LIMIT)
             .coerceAtLeast(1)
 
-    private fun HistorySource.supportsReference(type: HistoryReferenceType): Boolean =
+    private suspend fun HistorySource.supportsReference(type: HistoryReferenceType): Boolean =
         (availability() as? HistoryAvailability.Ready)
             ?.referenceTypes
             ?.contains(type) == true
 
-    private suspend fun latestBoundaryFromRoom(bufferId: Long): Boundary? =
-        db.messageDao().latestBoundary(bufferId)?.let { Boundary(it.msgid, it.serverTime) }
+    private suspend fun latestBoundaryFromRoom(bufferId: Long): ChatHistoryReference? =
+        db.messageDao().latestBoundary(bufferId)?.let { ChatHistoryReference(it.msgid, it.serverTime) }
 
     private suspend fun hasStoredChat(bufferId: Long): Boolean = db.messageDao().hasStoredChat(bufferId)
-
-    private fun Boundary.selector(source: HistorySource, msgidAllowed: Boolean): Selector? =
-        if (
-            msgidAllowed && source.supportsReference(HistoryReferenceType.MSGID) &&
-            msgid?.isNotEmpty() == true
-        ) {
-            Selector(ChatHistorySelectors.msgid(msgid), HistoryReferenceType.MSGID)
-        } else if (source.supportsReference(HistoryReferenceType.TIMESTAMP) && serverTime != null) {
-            Selector(ChatHistorySelectors.timestamp(serverTime), HistoryReferenceType.TIMESTAMP)
-        } else {
-            null
-        }
-
-    private fun ChatHistoryReference.toBoundary(): Boundary = Boundary(msgid, serverTime)
 
     private fun ChatHistoryResponse.Messages.isTerminalPage(): Boolean =
         endOfHistory || primaryMessageCount == 0
@@ -1726,10 +1725,9 @@ class HistoryResyncCoordinator @Inject constructor(
 
     private fun ChatHistoryResponse.Messages.hasUsableDirectionalBoundary(
         subcommand: ChatHistoryRequest.Subcommand,
-        source: HistorySource,
+        referenceTypes: Set<HistoryReferenceType>,
     ): Boolean = directionalBoundary(subcommand)
-        ?.toBoundary()
-        ?.selector(source, source.supportsReference(HistoryReferenceType.MSGID)) != null
+        ?.let { loader.selectorOf(it, referenceTypes, HistoryReferenceType.MSGID in referenceTypes) } != null
 
     private fun ChatHistoryResponse.Messages.highWater(): Long? =
         if (primaryMessageCount == 0) null else maxHighWater(oldest?.serverTime, newest?.serverTime)
@@ -1975,7 +1973,7 @@ class HistoryResyncCoordinator @Inject constructor(
     }
 
     private class ClientHistorySource(private val client: IrcClient) : HistorySource {
-        override fun availability(): HistoryAvailability = client.historyAvailability
+        override suspend fun availability(): HistoryAvailability = client.historyAvailability
 
         override fun flightIdentity(): Any = client
 
@@ -2013,7 +2011,6 @@ class HistoryResyncCoordinator @Inject constructor(
         const val TARGETS_REQUEST_LIMIT = 100
         const val MISSING_BACKFILL_PAGE_LIMIT = 5
         const val MISSING_BACKFILL_MESSAGE_LIMIT = 500
-        const val INVALID_MSGREFTYPE = "INVALID_MSGREFTYPE"
         const val HOURS_24_MS = 24L * 60 * 60 * 1_000
         const val DAYS_7_MS = 7L * 24 * 60 * 60 * 1_000
         const val DAYS_30_MS = 30L * 24 * 60 * 60 * 1_000
