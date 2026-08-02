@@ -19,7 +19,12 @@ import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -115,7 +120,7 @@ class HistoryPageLoaderTest {
     ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data.size }
 
     private suspend fun loadOlder(
-        history: FakeHistory,
+        history: HistoryPageLoader.HistorySource,
         boundary: ChatHistoryReference,
         pageSize: Int = 50,
     ) = loader.loadPage(
@@ -221,6 +226,82 @@ class HistoryPageLoaderTest {
         assertTrue(observed is IrcDisconnectedException)
         assertFalse(observed is CancellationException)
         assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+    }
+
+    @Test
+    fun leaderCancelledMidFlightDoesNotPoisonAnActiveFollower() = runTest {
+        processor.process(networkId, chatMsg("seed", 500))
+        val firstFetchStarted = CompletableDeferred<Unit>()
+        val requests = mutableListOf<ChatHistoryRequest>()
+        val history = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability = HistoryAvailability.Ready(
+                setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID),
+                100,
+            )
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                requests += req
+                if (requests.size == 1) {
+                    // The leader's fetch hangs until its caller (a replaced Pager generation) is
+                    // cancelled mid-flight.
+                    firstFetchStarted.complete(Unit)
+                    awaitCancellation()
+                }
+                return messages(listOf(chatMsg("older", 100)))
+            }
+        }
+        val leader = launch {
+            loadOlder(history, ChatHistoryReference("seed", 500))
+        }
+        firstFetchStarted.await()
+        // A live generation's mediator joins the same (network, room, OLDER) flight as follower.
+        val follower = async {
+            loadOlder(history, ChatHistoryReference("seed", 500))
+        }
+        runCurrent()
+        leader.cancelAndJoin()
+
+        // The follower must not adopt the leader's cancellation (that would freeze the live
+        // generation's append LoadState at Loading); it retries and completes the page itself.
+        val result = follower.await()
+        assertTrue((result as HistoryPageLoader.PageResult.Loaded).primaryCount == 1)
+        assertEquals(2, requests.size)
+        assertEquals(2, rowCount())
+    }
+
+    @Test
+    fun followerCancellationDoesNotCancelTheLeaderFlight() = runTest {
+        processor.process(networkId, chatMsg("seed", 500))
+        val fetchStarted = CompletableDeferred<Unit>()
+        val releaseFetch = CompletableDeferred<Unit>()
+        val requests = mutableListOf<ChatHistoryRequest>()
+        val history = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability = HistoryAvailability.Ready(
+                setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID),
+                100,
+            )
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                requests += req
+                fetchStarted.complete(Unit)
+                releaseFetch.await()
+                return messages(listOf(chatMsg("older", 100)))
+            }
+        }
+        val leader = async {
+            loadOlder(history, ChatHistoryReference("seed", 500))
+        }
+        fetchStarted.await()
+        val follower = launch {
+            loadOlder(history, ChatHistoryReference("seed", 500))
+        }
+        runCurrent()
+        follower.cancelAndJoin()
+        releaseFetch.complete(Unit)
+
+        // Awaiting a shared flight must not propagate a follower's cancellation into the leader.
+        val result = leader.await()
+        assertTrue((result as HistoryPageLoader.PageResult.Loaded).primaryCount == 1)
+        assertEquals(1, requests.size)
+        assertEquals(2, rowCount())
     }
 
     @Test

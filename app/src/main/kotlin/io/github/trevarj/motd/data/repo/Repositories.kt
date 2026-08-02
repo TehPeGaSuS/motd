@@ -118,20 +118,14 @@ interface MessageRepository {
         bufferId: Long,
         focus: HistoryWindowFocus,
     ): Flow<MessageWindowBounds> = flowOf(MessageWindowBounds())
-    /** Execute exactly one user-authorized older-history request independently of Paging collection. */
-    suspend fun loadOlderPage(bufferId: Long, requestId: Long): Result<Unit> =
-        Result.failure(UnsupportedOperationException("Older history is unavailable"))
     /** Delete a locally-stored failed row by id, repairing any exact local read anchor. */
     suspend fun deleteMessage(id: Long)
 }
 
 /** The contiguous local history segment rendered by one Pager generation. */
 sealed interface HistoryWindowFocus {
-    /** Paint the newest contiguous local island without allowing boundary-triggered network I/O. */
+    /** Paint the newest contiguous local island; Paging3 APPEND drives older history over the wire. */
     data object Recent : HistoryWindowFocus
-
-    /** One deliberate older-boundary interaction while its explicit page command is in flight. */
-    data class RecentPaging(val requestId: Long) : HistoryWindowFocus
 
     data class Around(
         val serverTime: Long,
@@ -146,8 +140,7 @@ sealed interface HistoryWindowFocus {
  *  WP5 provides the real CHATHISTORY-backed implementation, WP10 rebinds. */
 @OptIn(androidx.paging.ExperimentalPagingApi::class) // RemoteMediator is experimental; annotation does not alter the frozen signature
 fun interface ChatHistoryMediatorFactory {
-    fun create(bufferId: Long): RemoteMediator<Int, MessageEntity>
-    fun create(bufferId: Long, focus: HistoryWindowFocus): RemoteMediator<Int, MessageEntity> = create(bufferId)
+    fun create(bufferId: Long, focus: HistoryWindowFocus): RemoteMediator<Int, MessageEntity>
 }
 
 interface SearchRepository {

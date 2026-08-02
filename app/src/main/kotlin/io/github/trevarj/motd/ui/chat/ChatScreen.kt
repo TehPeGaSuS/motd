@@ -174,7 +174,6 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.client.HistoryAvailability
-import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistoryResyncState
@@ -376,7 +375,6 @@ fun ChatScreen(
     val uiEvents by viewModel.uiEvents.collectAsStateWithLifecycle()
     val historyResyncState by viewModel.historyResyncState.collectAsStateWithLifecycle()
     val historySyncStatus by viewModel.historySyncStatus.collectAsStateWithLifecycle()
-    val olderHistoryPageState by viewModel.olderHistoryPageState.collectAsStateWithLifecycle()
     val activeHistoryWindow by viewModel.activeHistoryWindow.collectAsStateWithLifecycle()
     val hasNewerHistoryIsland by viewModel.hasNewerHistoryIsland.collectAsStateWithLifecycle()
     val isServerBuffer = state.buffer?.type == BufferType.SERVER
@@ -481,7 +479,6 @@ fun ChatScreen(
         onJumpHandled = viewModel::onJumpHandled,
         onInitialPositionHandled = viewModel::onInitialPositionHandled,
         onFocusRecentHistory = viewModel::focusRecentHistory,
-        onRequestOlderHistory = viewModel::requestOlderHistory,
         onFocusRecentMention = viewModel::focusRecentMention,
         onInitialPositionUnresolved = viewModel::onInitialPositionUnresolved,
         onScrollPositionChanged = viewModel::saveScrollPosition,
@@ -498,7 +495,6 @@ fun ChatScreen(
         onRetryReplyJump = viewModel::retryReplyJump,
         historyResyncState = historyResyncState,
         historySyncStatus = historySyncStatus,
-        olderHistoryPageState = olderHistoryPageState,
         historyAvailability = historyAvailability,
         onRefreshHistory = viewModel::refreshHistory,
         onCancelHistoryRefresh = viewModel::cancelHistoryRefresh,
@@ -643,7 +639,6 @@ fun ChatContent(
     onJumpHandled: (Long) -> Unit = {},
     onInitialPositionHandled: () -> Unit = {},
     onFocusRecentHistory: () -> Unit = {},
-    onRequestOlderHistory: () -> Unit = {},
     onFocusRecentMention: (ChatPositionTarget) -> Unit = {},
     onInitialPositionUnresolved: () -> Unit = {},
     onScrollPositionChanged: (ChatScrollPosition) -> Unit = {},
@@ -661,7 +656,6 @@ fun ChatContent(
     onRetryReplyJump: (ReplyJumpRequest) -> Unit = {},
     historyResyncState: HistoryResyncState = HistoryResyncState.Idle,
     historySyncStatus: HistorySyncStatus = HistorySyncStatus.Idle,
-    olderHistoryPageState: OlderHistoryPageState = OlderHistoryPageState.Idle,
     historyAvailability: HistoryAvailability = HistoryAvailability.NegotiatingOrOffline,
     onRefreshHistory: (HistoryRefreshRange) -> Unit = {},
     onCancelHistoryRefresh: () -> Unit = {},
@@ -691,21 +685,14 @@ fun ChatContent(
             identityRules,
         )
     }
-    val onePagePaging = olderHistoryPageState !is OlderHistoryPageState.Idle ||
-        activeHistoryWindow.focus is HistoryWindowFocus.RecentPaging
-    val olderHistoryLoad = when (olderHistoryPageState) {
-        OlderHistoryPageState.Loading -> LoadState.Loading
-        is OlderHistoryPageState.Failed -> LoadState.Error(olderHistoryPageState.error)
-        OlderHistoryPageState.Idle -> items.loadState.append
-    }
+    // Scroll-driven paging: the footer reflects the Paging APPEND state at the older end directly.
+    val olderHistoryLoad = items.loadState.append
     val historyUiState = chatHistoryUiState(
         bufferType = state.buffer?.type,
         connectionState = state.connState,
         availability = historyAvailability,
         append = olderHistoryLoad,
         historyComplete = state.buffer?.historyComplete == true,
-        olderPagingAuthorized = activeHistoryWindow.focus != HistoryWindowFocus.Recent,
-        onePagePaging = onePagePaging,
     )
     val unreadEntryLabel = unreadEntrySnapshot?.let { snapshot ->
         pluralStringResource(
@@ -725,11 +712,7 @@ fun ChatContent(
     val readyRetryGate = remember(items) { HistoryReadyRetryGate() }
     LaunchedEffect(historyAvailability, olderHistoryLoad) {
         if (readyRetryGate.update(historyAvailability, olderHistoryLoad)) {
-            if (olderHistoryPageState.usesExplicitRetry()) {
-                onRequestOlderHistory()
-            } else {
-                items.retry()
-            }
+            items.retry()
         }
     }
     val traceBufferId = state.buffer?.id
@@ -1567,7 +1550,6 @@ fun ChatContent(
                         // Frozen read-marker so the "New messages" divider stays put (plans/15 #2).
                         readMarkerTime = unreadEntrySnapshot?.marker,
                         readMarkerLabel = unreadEntryLabel,
-                        onOlderHistoryRequested = onRequestOlderHistory,
                         reactionChips = reactionChips,
                         replyPreview = replyPreview,
                         onReplyPreviewClick = onReplyPreviewClick,
@@ -1614,10 +1596,6 @@ fun ChatContent(
                         identityRules = identityRules,
                         historyUiState = historyUiState,
                         onHistoryRetry = {
-                            if (olderHistoryPageState.usesExplicitRetry()) {
-                                onRequestOlderHistory()
-                                return@MessageList
-                            }
                             val retryResync = historyResyncState is HistoryResyncState.Failed ||
                                 historyResyncState is HistoryResyncState.Incomplete ||
                                 historyResyncState is HistoryResyncState.Capped

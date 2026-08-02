@@ -5,6 +5,7 @@ import androidx.paging.LoadType
 import androidx.paging.PagingState
 import androidx.paging.RemoteMediator
 import io.github.trevarj.motd.data.db.BufferDao
+import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.HistoryCursorDao
@@ -23,18 +24,7 @@ import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.service.ConnectionManager
 import javax.inject.Inject
 import javax.inject.Singleton
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-
-/** Shared network gate for reconnect discovery and Paging history requests. */
-object CanonicalHistorySingleFlight {
-    private val networkLocks = ConcurrentHashMap<Long, Mutex>()
-
-    suspend fun <T> withNetwork(networkId: Long, block: suspend () -> T): T =
-        networkLocks.getOrPut(networkId, ::Mutex).withLock { block() }
-}
 
 /**
  * CHATHISTORY-backed directional paging. The list is DESC (newest first): APPEND fetches older
@@ -46,9 +36,10 @@ object CanonicalHistorySingleFlight {
  *           protocol page boundary. Completed empty pages and explicit end markers persist the
  *           confirmed start-of-history state through EventProcessor.
  *
- * Normal entry uses SKIP_INITIAL_REFRESH so the cached DB paints without network I/O. A deliberate
- * recent-boundary command invokes REFRESH explicitly and runs exactly one older append operation,
- * including LATEST seeding when the local store is empty.
+ * Every entry uses SKIP_INITIAL_REFRESH so the cached DB paints without network I/O; Paging3 then
+ * drives REFRESH (empty-store LATEST seed, otherwise no-op) and scroll-triggered APPEND for older
+ * history. Under Recent focus, PREPEND ends immediately because live events supply newer messages.
+ * The loader owns availability, page-limit derivation, and all fetch concurrency.
  */
 @OptIn(ExperimentalPagingApi::class)
 class ChatHistoryRemoteMediator(
@@ -79,73 +70,39 @@ class ChatHistoryRemoteMediator(
     }
 
     override suspend fun initialize(): InitializeAction =
-        if (focus is HistoryWindowFocus.RecentPaging) {
-            // This Pager exists only because the user deliberately reached the older boundary.
-            // Launch one deterministic remote page instead of relying on a viewport hint surviving
-            // the preceding local-only Pager generation.
-            InitializeAction.LAUNCH_INITIAL_REFRESH
-        } else {
-            // Local cache is authoritative for normal entry and deep-link initial paint.
-            InitializeAction.SKIP_INITIAL_REFRESH
-        }
+        // Local cache is authoritative for normal entry and deep-link initial paint; the Around page
+        // is pre-fetched by ChatJumpResolver. Paging drives REFRESH/APPEND explicitly afterward, and
+        // the loader owns availability + concurrency for each fetch it performs.
+        InitializeAction.SKIP_INITIAL_REFRESH
 
     override suspend fun load(loadType: LoadType, state: PagingState<Int, MessageEntity>): MediatorResult {
-        return locks.getOrPut(bufferId, ::Mutex).withLock {
-            try {
-                val buffer = bufferDao.observeById(bufferId)
-                    ?: return MediatorResult.Success(endOfPaginationReached = true)
-                val networkId = buffer.networkId
-                val availability = history.availability()
-                if (availability !is HistoryAvailability.Ready) {
-                    return when (availability) {
-                        HistoryAvailability.Unsupported -> MediatorResult.Success(endOfPaginationReached = true)
-                        HistoryAvailability.NegotiatingOrOffline -> MediatorResult.Error(
-                            IrcDisconnectedException("CHATHISTORY", "history is negotiating or offline"),
-                        )
-                        is HistoryAvailability.Ready -> error("unreachable")
-                    }
-                }
-                // availability is validated above; the loader independently re-derives its page
-                // limit and reference types from the same source per fetch.
-                CanonicalHistorySingleFlight.withNetwork(networkId) {
-                    when (loadType) {
-                        LoadType.REFRESH -> if (focus is HistoryWindowFocus.RecentPaging) {
-                            append(
-                                networkId,
-                                buffer.id,
-                                buffer.ircTarget,
-                                buffer.historyComplete,
-                            ).stopAfterAuthorizedPage()
-                        } else {
-                            refresh(
-                                networkId,
-                                buffer.id,
-                                buffer.ircTarget,
-                            )
-                        }
-                        LoadType.PREPEND -> prepend(
-                            networkId,
-                            buffer.id,
-                            buffer.ircTarget,
-                        )
-                        LoadType.APPEND -> if (focus is HistoryWindowFocus.RecentPaging) {
-                            // REFRESH owns this generation's single authorized request.
-                            MediatorResult.Success(endOfPaginationReached = true)
-                        } else {
-                            append(
-                                networkId,
-                                buffer.id,
-                                buffer.ircTarget,
-                                buffer.historyComplete,
-                            )
-                        }
-                    }
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (e: Exception) {
-                MediatorResult.Error(e)
+        return try {
+            val buffer = bufferDao.observeById(bufferId)
+                ?: return MediatorResult.Success(endOfPaginationReached = true)
+            if (buffer.type == BufferType.SERVER) {
+                // Console buffers have no CHATHISTORY target. With the mediator attached
+                // unconditionally, mirror the UI's Hidden rule here or every console open would
+                // emit junk `CHATHISTORY BEFORE <servername>` traffic.
+                return MediatorResult.Success(endOfPaginationReached = true)
             }
+            val networkId = buffer.networkId
+            // The loader re-derives availability, page limit, and reference types from the source per
+            // fetch and owns all wire serialization/coalescing, so no upfront availability gate or
+            // per-buffer lock is needed here.
+            when (loadType) {
+                LoadType.REFRESH -> refresh(networkId, buffer.id, buffer.ircTarget)
+                LoadType.PREPEND -> prepend(networkId, buffer.id, buffer.ircTarget)
+                LoadType.APPEND -> append(
+                    networkId,
+                    buffer.id,
+                    buffer.ircTarget,
+                    buffer.historyComplete,
+                )
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (e: Exception) {
+            MediatorResult.Error(e)
         }
     }
 
@@ -267,7 +224,6 @@ class ChatHistoryRemoteMediator(
         val resolved = gaps.map { it to gapNewerAnchor(it) }
         return when (val current = focus) {
             HistoryWindowFocus.Recent -> resolved.maxByOrNull { it.second }?.first
-            is HistoryWindowFocus.RecentPaging -> resolved.maxByOrNull { it.second }?.first
             is HistoryWindowFocus.Around -> resolved
                 .filter { it.second <= current.anchor }
                 .maxByOrNull { it.second }
@@ -282,12 +238,6 @@ class ChatHistoryRemoteMediator(
             .filter { it.second >= anchor }
             .minByOrNull { it.second }
             ?.first
-    }
-
-    /** A user-authorized recent command owns one request; the next gesture creates another token. */
-    private fun MediatorResult.stopAfterAuthorizedPage(): MediatorResult = when (this) {
-        is MediatorResult.Error -> this
-        is MediatorResult.Success -> MediatorResult.Success(endOfPaginationReached = true)
     }
 
     private suspend fun gapOlderAnchor(gap: HistoryGapEntity) = gap.olderMsgid
@@ -329,10 +279,6 @@ class ChatHistoryRemoteMediator(
             Long.MAX_VALUE,
             Long.MAX_VALUE,
         )
-
-    companion object {
-        private val locks = ConcurrentHashMap<Long, Mutex>()
-    }
 }
 
 /** Enforce the client-requested primary bound even when a server over-delivers a batch. */
@@ -425,18 +371,6 @@ class ChatHistoryMediatorFactoryImpl @Inject constructor(
     private val historyCursorDao: HistoryCursorDao,
     private val historyGapDao: HistoryGapDao,
 ) : ChatHistoryMediatorFactory {
-    override fun create(bufferId: Long): RemoteMediator<Int, MessageEntity> =
-        ChatHistoryRemoteMediator(
-            bufferId,
-            bufferDao,
-            messageDao,
-            processor,
-            historyFor(bufferId),
-            historyCursorDao = historyCursorDao,
-            historyGapDao = historyGapDao,
-            loader = loader,
-        )
-
     override fun create(
         bufferId: Long,
         focus: HistoryWindowFocus,

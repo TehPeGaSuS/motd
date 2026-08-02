@@ -12,11 +12,15 @@ import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 
 /**
  * Sole owner of a single CHATHISTORY page fetch: it builds the directional request from a
@@ -65,15 +69,16 @@ class HistoryPageLoader @Inject constructor(
         data class Failed(val cause: Throwable) : PageResult
     }
 
-    // A separate per-network gate from the coordinator/mediator single-flight: later phases collapse
-    // those onto this one, so the loader owns the wire serialization directly from the start.
+    // The mediator's own gates are gone (Phase 2): this loader is the sole fetch serialization for
+    // Paging-driven history. The coordinator's separate single-flight collapses onto it in Phase 3.
     private val networkLocks = ConcurrentHashMap<Long, Mutex>()
     private val inFlight = ConcurrentHashMap<FlightKey, CompletableDeferred<PageResult>>()
     internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
 
-    // TODO(phase3): the key omits the boundary, so distinct boundaries in one direction coalesce
-    // onto whichever page is in flight. Either add the boundary to the key or document/pin the
-    // any-fresh-page semantics when the outer mediator serialization is removed.
+    // The key deliberately omits the boundary: any fresh page for (network, room, direction)
+    // satisfies a concurrent request. Callers (Paging generations) re-read the local store after
+    // each page and issue their next load from their own boundary, so joining whichever page is in
+    // flight is safe and prevents a generation swap from double-fetching the same page.
     private data class FlightKey(val networkId: Long, val roomId: RoomId, val direction: Direction)
 
     /**
@@ -285,28 +290,45 @@ class HistoryPageLoader @Inject constructor(
     }
 
     /**
-     * Coalesce concurrent identical fetches. The leader runs [block] in its *caller's* coroutine —
-     * not a detached scope — so cancelling the leader also fails any joined followers. Unreachable
-     * this phase (the mediator's outer single-flight + per-buffer locks already serialize identical
-     * keys); before Phase 3 removes those, this must be hardened with a dedicated scope job or
-     * follower-retry-on-leader-cancel.
+     * Coalesce concurrent identical fetches. The leader runs [block] in its caller's coroutine, so
+     * cancelling the leader (e.g. a Pager generation replaced mid-APPEND by a bounds change) fails
+     * its own flight — but must not poison joined followers from live generations. A follower whose
+     * own context is still active treats the leader's [CancellationException] as "flight abandoned"
+     * and retries: it becomes the next leader or joins a newer flight. A follower that is itself
+     * cancelled rethrows its own cancellation; non-cancellation failures are shared by all awaiters.
      */
     private suspend fun coalesced(
         key: FlightKey,
         block: suspend () -> PageResult,
     ): PageResult {
-        inFlight[key]?.let { return it.await() }
-        val deferred = CompletableDeferred<PageResult>()
-        inFlight.putIfAbsent(key, deferred)?.let { return it.await() }
-        try {
-            val result = block()
-            deferred.complete(result)
-            return result
-        } catch (error: Throwable) {
-            deferred.completeExceptionally(error)
-            throw error
-        } finally {
-            inFlight.remove(key, deferred)
+        while (true) {
+            val existing = inFlight[key]
+            if (existing != null) {
+                try {
+                    return existing.await()
+                } catch (cancelled: CancellationException) {
+                    // Distinguish "the leader was cancelled" from "this follower was cancelled":
+                    // only a still-active follower may retry.
+                    currentCoroutineContext().ensureActive()
+                    // Let the cancelled leader finish unwinding (it removes the failed flight in
+                    // its finally) before re-inspecting the map, so the retry cannot busy-spin on
+                    // the same dead deferred.
+                    yield()
+                    continue
+                }
+            }
+            val deferred = CompletableDeferred<PageResult>()
+            if (inFlight.putIfAbsent(key, deferred) != null) continue
+            try {
+                val result = block()
+                deferred.complete(result)
+                return result
+            } catch (error: Throwable) {
+                deferred.completeExceptionally(error)
+                throw error
+            } finally {
+                inFlight.remove(key, deferred)
+            }
         }
     }
 

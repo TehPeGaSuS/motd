@@ -553,52 +553,6 @@ class ChatModelsTest {
         assertTrue(showsSender(spacedLater, spaced))
     }
 
-    @Test fun `older history requires a released downward drag beyond slop at the boundary`() {
-        assertTrue(shouldRequestOlderHistory(true, 12f, 8f, 50, 49))
-        assertTrue(shouldRequestOlderHistory(true, 8f, 8f, 50, 49))
-        assertFalse(shouldRequestOlderHistory(true, 7.9f, 8f, 50, 49))
-        assertFalse(shouldRequestOlderHistory(true, 0f, 8f, 50, 49))
-        assertFalse(shouldRequestOlderHistory(true, -12f, 8f, 50, 49))
-        assertFalse(shouldRequestOlderHistory(false, 12f, 8f, 50, 49))
-        assertFalse(shouldRequestOlderHistory(true, 12f, 8f, 50, 48))
-        assertFalse(shouldRequestOlderHistory(true, 12f, 8f, 0, null))
-    }
-
-    @Test fun `older history authorizes only one page per pointer gesture`() {
-        val latch = OlderHistoryGestureLatch()
-
-        latch.beginGesture()
-        assertTrue(
-            latch.requestOnReleaseIfEligible(
-                released = true,
-                displacementY = 12f,
-                minimumDisplacementY = 8f,
-                itemCount = 50,
-                lastVisibleIndex = 49,
-            ),
-        )
-        assertFalse(
-            latch.requestOnReleaseIfEligible(
-                released = true,
-                displacementY = 12f,
-                minimumDisplacementY = 8f,
-                itemCount = 50,
-                lastVisibleIndex = 49,
-            ),
-        )
-
-        latch.beginGesture()
-        assertTrue(
-            latch.requestOnReleaseIfEligible(
-                released = true,
-                displacementY = 12f,
-                minimumDisplacementY = 8f,
-                itemCount = 100,
-                lastVisibleIndex = 99,
-            ),
-        )
-    }
-
     @Test fun `bubble gap tracks grouping and density`() {
         val comfortable = spacingFor(LayoutDensity.COMFORTABLE)
         val compact = spacingFor(LayoutDensity.COMPACT)
@@ -664,109 +618,64 @@ class ChatModelsTest {
         assertFalse(ChatUiEvent.ReplyJumpUnavailable(ReplyJumpRequest("id")).isHistoryRefreshNotice())
     }
 
-    @Test fun `history footer requires persisted completion`() {
+    @Test fun `history footer derives the six states from append and availability`() {
         val ready = HistoryAvailability.Ready(setOf(HistoryReferenceType.MSGID), pageLimit = 50)
-        val ended = LoadState.NotLoading(endOfPaginationReached = true)
-
-        assertEquals(
-            ChatHistoryUiState.OlderAvailable,
-            chatHistoryUiState(
-                BufferType.CHANNEL,
-                IrcClientState.Ready("me", emptySet(), emptyMap()),
-                ready,
-                ended,
-                historyComplete = false,
-                olderPagingAuthorized = false,
-            ),
-        )
-        assertEquals(
-            ChatHistoryUiState.Incomplete(),
-            chatHistoryUiState(
-                BufferType.CHANNEL,
-                IrcClientState.Ready("me", emptySet(), emptyMap()),
-                ready,
-                ended,
-                historyComplete = false,
-                olderPagingAuthorized = true,
-            ),
-        )
-        assertEquals(
-            ChatHistoryUiState.OlderAvailable,
-            chatHistoryUiState(
-                BufferType.CHANNEL,
-                IrcClientState.Ready("me", emptySet(), emptyMap()),
-                ready,
-                ended,
-                historyComplete = false,
-                olderPagingAuthorized = true,
-                onePagePaging = true,
-            ),
-        )
-        assertEquals(
-            ChatHistoryUiState.ConfirmedStart,
-            chatHistoryUiState(
-                BufferType.CHANNEL,
-                IrcClientState.Ready("me", emptySet(), emptyMap()),
-                ready,
-                ended,
-                historyComplete = true,
-            ),
-        )
-    }
-
-    @Test fun `history footer distinguishes hidden loading availability and error states`() {
         val idle = LoadState.NotLoading(endOfPaginationReached = false)
-        val failed = LoadState.Error(IllegalStateException("offline"))
-        val ready = HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP), pageLimit = 50)
+        val ended = LoadState.NotLoading(endOfPaginationReached = true)
+        val failed = LoadState.Error(IllegalStateException("boom"))
+        val connected = IrcClientState.Ready("me", emptySet(), emptyMap())
 
         fun state(
+            bufferType: BufferType?,
             connection: IrcClientState?,
             availability: HistoryAvailability,
-            append: LoadState = idle,
-            bufferType: BufferType = BufferType.CHANNEL,
-        ) = chatHistoryUiState(
-            bufferType,
-            connection,
-            availability,
-            append,
-            historyComplete = false,
+            append: LoadState,
+            historyComplete: Boolean = false,
+        ) = chatHistoryUiState(bufferType, connection, availability, append, historyComplete)
+
+        // Hidden: no/server buffer, or a Ready timeline with nothing terminal to show. A Ready
+        // end-of-pagination without persisted completion (e.g. an unrecoverable gap) is silent
+        // because scroll-driven APPEND owns any further fetch.
+        assertEquals(ChatHistoryUiState.Hidden, state(null, connected, ready, idle))
+        assertEquals(ChatHistoryUiState.Hidden, state(BufferType.SERVER, connected, ready, idle))
+        assertEquals(ChatHistoryUiState.Hidden, state(BufferType.CHANNEL, connected, ready, idle))
+        assertEquals(ChatHistoryUiState.Hidden, state(BufferType.CHANNEL, connected, ready, ended))
+
+        // Loading: an APPEND page is in flight.
+        assertEquals(ChatHistoryUiState.Loading, state(BufferType.CHANNEL, connected, ready, LoadState.Loading))
+
+        // Retry: a recoverable append error while history is advertised.
+        assertEquals(ChatHistoryUiState.Retry, state(BufferType.CHANNEL, connected, ready, failed))
+
+        // Unavailable(offline): disconnected/fatal. Unavailable(negotiating): mid-registration,
+        // whether the append is an error or merely idle.
+        assertEquals(
+            ChatHistoryUiState.Unavailable(offline = true),
+            state(BufferType.CHANNEL, IrcClientState.Disconnected, HistoryAvailability.NegotiatingOrOffline, failed),
+        )
+        assertEquals(
+            ChatHistoryUiState.Unavailable(offline = false),
+            state(BufferType.CHANNEL, IrcClientState.Registering, HistoryAvailability.NegotiatingOrOffline, failed),
+        )
+        assertEquals(
+            ChatHistoryUiState.Unavailable(offline = false),
+            state(BufferType.CHANNEL, IrcClientState.Registering, HistoryAvailability.NegotiatingOrOffline, idle),
         )
 
+        // Unsupported: the capability decision supersedes any append state.
         assertEquals(
-            ChatHistoryUiState.Hidden,
-            state(IrcClientState.Disconnected, ready, bufferType = BufferType.SERVER),
-        )
-        assertEquals(
-            ChatHistoryUiState.Loading,
-            state(IrcClientState.Connecting, ready, append = LoadState.Loading),
-        )
-        assertEquals(
-            ChatHistoryUiState.Offline,
-            state(IrcClientState.Disconnected, HistoryAvailability.NegotiatingOrOffline, failed),
-        )
-        assertEquals(
-            ChatHistoryUiState.Negotiating,
-            state(IrcClientState.Registering, HistoryAvailability.NegotiatingOrOffline, failed),
+            ChatHistoryUiState.Unsupported,
+            state(BufferType.CHANNEL, connected, HistoryAvailability.Unsupported, idle),
         )
         assertEquals(
             ChatHistoryUiState.Unsupported,
-            state(IrcClientState.Ready("me", emptySet(), emptyMap()), HistoryAvailability.Unsupported),
+            state(BufferType.CHANNEL, connected, HistoryAvailability.Unsupported, failed),
         )
+
+        // ConfirmedStart: persisted completion at end-of-pagination.
         assertEquals(
-            ChatHistoryUiState.Unsupported,
-            state(
-                IrcClientState.Ready("me", emptySet(), emptyMap()),
-                HistoryAvailability.Unsupported,
-                append = failed,
-            ),
-        )
-        assertEquals(
-            ChatHistoryUiState.Error,
-            state(
-                IrcClientState.Ready("me", emptySet(), emptyMap()),
-                ready,
-                append = failed,
-            ),
+            ChatHistoryUiState.ConfirmedStart,
+            state(BufferType.CHANNEL, connected, ready, ended, historyComplete = true),
         )
     }
 
@@ -774,11 +683,7 @@ class ChatModelsTest {
         val gate = HistoryReadyRetryGate()
         val ready = HistoryAvailability.Ready(setOf(HistoryReferenceType.MSGID), pageLimit = 50)
         val disconnected = IrcDisconnectedException("CHATHISTORY", "offline")
-        val explicitFailure = OlderHistoryPageState.Failed(disconnected)
-        val offline = LoadState.Error(explicitFailure.error)
-
-        assertTrue(explicitFailure.usesExplicitRetry())
-        assertFalse(OlderHistoryPageState.Idle.usesExplicitRetry())
+        val offline = LoadState.Error(disconnected)
 
         assertTrue(gate.update(ready, offline))
         assertFalse(gate.update(ready, offline))

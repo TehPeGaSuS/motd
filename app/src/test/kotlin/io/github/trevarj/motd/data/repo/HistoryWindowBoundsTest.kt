@@ -3,8 +3,6 @@ package io.github.trevarj.motd.data.repo
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HistoryWindowBoundsTest {
@@ -37,14 +35,6 @@ class HistoryWindowBoundsTest {
     fun recentWindowStartsAtTheNewestKnownIsland() {
         val expected = HistoryWindowBounds(lowerBoundary = TimelineAnchor(900, 900))
         assertEquals(expected, historyWindowBounds(HistoryWindowFocus.Recent, gaps))
-        assertEquals(expected, historyWindowBounds(HistoryWindowFocus.RecentPaging(1), gaps))
-    }
-
-    @Test
-    fun onlyExplicitAnchorUsesPresentationDrivenRemotePaging() {
-        assertFalse(HistoryWindowFocus.Recent.allowsRemotePaging())
-        assertFalse(HistoryWindowFocus.RecentPaging(1).allowsRemotePaging())
-        assertTrue(HistoryWindowFocus.Around(600).allowsRemotePaging())
     }
 
     @Test

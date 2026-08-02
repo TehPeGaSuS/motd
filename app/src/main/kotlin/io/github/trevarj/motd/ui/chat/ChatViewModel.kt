@@ -225,11 +225,9 @@ class ChatViewModel @Inject constructor(
     private val filterSpec = filterSpecs
         .stateIn(viewModelScope, SharingStarted.Eagerly, MessageVisibilitySpec())
 
+    // Only ever Recent or Around now: scroll-driven Paging owns older-history fetches, so there is no
+    // per-gesture focus churn.
     private val historyWindowFocus = MutableStateFlow<HistoryWindowFocus>(HistoryWindowFocus.Recent)
-    private var nextOlderHistoryRequestId = 0L
-    private var olderHistoryPageJob: Job? = null
-    private val _olderHistoryPageState = MutableStateFlow<OlderHistoryPageState>(OlderHistoryPageState.Idle)
-    val olderHistoryPageState: StateFlow<OlderHistoryPageState> = _olderHistoryPageState.asStateFlow()
 
     val activeHistoryWindow: StateFlow<ActiveHistoryWindow> = historyWindowFocus.flatMapLatest { focus ->
         messageRepository.observeHistoryWindowBounds(bufferId, focus).map { bounds ->
@@ -1592,9 +1590,6 @@ class ChatViewModel @Inject constructor(
 
     /** The newest FAB is an explicit request to abandon an older focused island immediately. */
     fun focusRecentHistory() {
-        olderHistoryPageJob?.cancel()
-        olderHistoryPageJob = null
-        _olderHistoryPageState.value = OlderHistoryPageState.Idle
         jumpResolveJob?.cancel()
         jumpResolveJob = null
         activeJumpRequest = null
@@ -1602,25 +1597,6 @@ class ChatViewModel @Inject constructor(
         _initialTarget.value = null
         historyWindowFocus.value = HistoryWindowFocus.Recent
         markEntryPositionSettled()
-    }
-
-    /** Each deliberate boundary interaction executes one older page outside Paging collection. */
-    fun requestOlderHistory() {
-        if (historyWindowFocus.value !is HistoryWindowFocus.Recent) return
-        if (olderHistoryPageJob?.isActive == true) return
-        val focus = HistoryWindowFocus.RecentPaging(++nextOlderHistoryRequestId)
-        historyWindowFocus.value = focus
-        _olderHistoryPageState.value = OlderHistoryPageState.Loading
-        olderHistoryPageJob = viewModelScope.launch {
-            val result = messageRepository.loadOlderPage(bufferId, focus.requestId)
-            _olderHistoryPageState.value = result.fold(
-                onSuccess = { OlderHistoryPageState.Idle },
-                onFailure = { error -> OlderHistoryPageState.Failed(error) },
-            )
-            if (historyWindowFocus.value == focus) {
-                historyWindowFocus.value = HistoryWindowFocus.Recent
-            }
-        }
     }
 
     /** Re-resolve an exact mention inside the island where its viewport index was computed. */

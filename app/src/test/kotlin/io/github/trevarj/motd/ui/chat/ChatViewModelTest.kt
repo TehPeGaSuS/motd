@@ -50,7 +50,6 @@ import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcClientConfig
-import io.github.trevarj.motd.irc.client.IrcDisconnectedException
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
@@ -998,77 +997,6 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `older scroll runs one explicit page command and returns to the recent island`() = runTest {
-        val markerId = db.messageDao().insertAll(
-            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
-        ).single()
-        db.messageDao().insertAll(
-            listOf(message(channel.id, "older unread", "m101", "alice").copy(serverTime = 101)),
-        )
-        val recentId = db.messageDao().insertAll(
-            listOf(message(channel.id, "recent unread", "m900", "alice").copy(serverTime = 900)),
-        ).single()
-        val recent = checkNotNull(db.messageDao().byCanonicalId(recentId))
-        val bounds = io.github.trevarj.motd.data.visibility.MessageWindowBounds(
-            lowerBoundary = TimelineAnchor(recent.serverTime, recent.id, recent.timelineOrder),
-        )
-        val messages = FakeMessageRepository(
-            events = listOf(recent),
-            windowBounds = bounds,
-        )
-        val vm = viewModel(
-            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
-            FakeConnectionManager(network.id),
-            messages = messages,
-        )
-
-        vm.state.first { it.buffer != null }
-        val target = checkNotNull(vm.initialTarget.first { it != null })
-        val snapshot = checkNotNull(vm.unreadEntrySnapshot.first { it != null })
-        assertEquals(recentId, target.expectedEventId)
-        assertTrue(snapshot.lowerBound)
-        assertEquals(HistoryWindowFocus.Recent, messages.countedFocuses.last())
-
-        val pageGate = CompletableDeferred<Unit>()
-        messages.olderPageGate = pageGate
-        vm.requestOlderHistory()
-        runCurrent()
-        assertEquals(HistoryWindowFocus.RecentPaging(1), vm.activeHistoryWindow.value.focus)
-        assertEquals(OlderHistoryPageState.Loading, vm.olderHistoryPageState.value)
-        assertEquals(listOf(channel.id to 1L), messages.olderPageRequests)
-
-        // Room-bound changes may replace the local Pager while the explicit command continues.
-        messages.observedBounds.value = bounds.copy(
-            lowerBoundary = TimelineAnchor(recent.serverTime - 1, recent.id - 1, recent.timelineOrder - 1),
-        )
-        runCurrent()
-        vm.requestOlderHistory()
-        runCurrent()
-        assertEquals(listOf(channel.id to 1L), messages.olderPageRequests)
-
-        pageGate.complete(Unit)
-        advanceUntilIdle()
-        assertEquals(HistoryWindowFocus.Recent, vm.activeHistoryWindow.value.focus)
-        assertEquals(OlderHistoryPageState.Idle, vm.olderHistoryPageState.value)
-
-        val offline = IrcDisconnectedException("CHATHISTORY", "offline")
-        messages.olderPageGate = null
-        messages.olderPageResult = Result.failure(offline)
-        vm.requestOlderHistory()
-        advanceUntilIdle()
-        assertEquals(HistoryWindowFocus.Recent, vm.activeHistoryWindow.value.focus)
-        val failed = vm.olderHistoryPageState.value as OlderHistoryPageState.Failed
-        assertEquals(offline, failed.error)
-        assertTrue(failed.usesExplicitRetry())
-
-        messages.olderPageResult = Result.success(Unit)
-        vm.requestOlderHistory()
-        advanceUntilIdle()
-        assertEquals(listOf(channel.id to 1L, channel.id to 2L, channel.id to 3L), messages.olderPageRequests)
-        assertEquals(OlderHistoryPageState.Idle, vm.olderHistoryPageState.value)
-    }
-
-    @Test
     fun `cold ready entry anchors after connection catchup publishes the recent island`() = runTest {
         val markerId = db.messageDao().insertAll(
             listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
@@ -1616,9 +1544,6 @@ class ChatViewModelTest {
         var resolvedByMsgid: MessageEntity? = null
         var resolvedById: MessageEntity? = null
         val countedFocuses = mutableListOf<HistoryWindowFocus>()
-        val olderPageRequests = mutableListOf<Pair<Long, Long>>()
-        var olderPageGate: CompletableDeferred<Unit>? = null
-        var olderPageResult: Result<Unit> = Result.success(Unit)
         var reactionRows: List<ReactionEntity> = emptyList()
         val observedBounds = MutableStateFlow(windowBounds)
         var blockedMsgid: String? = null
@@ -1669,11 +1594,6 @@ class ChatViewModelTest {
             bufferId: Long,
             focus: HistoryWindowFocus,
         ) = observedBounds
-        override suspend fun loadOlderPage(bufferId: Long, requestId: Long): Result<Unit> {
-            olderPageRequests += bufferId to requestId
-            olderPageGate?.await()
-            return olderPageResult
-        }
     }
 
     private class RecordingTransport : IrcTransport {

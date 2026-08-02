@@ -487,27 +487,30 @@ internal fun handleChatUiEventResult(
     acknowledge(event.id)
 }
 
+/**
+ * Footer state for the older end of the reverse timeline. Scroll-driven paging drives APPEND
+ * automatically, so the footer only reflects the current [LoadState.append] plus the connection's
+ * history availability — there is no explicit "load older" affordance.
+ */
 sealed interface ChatHistoryUiState {
+    /** Nothing to show: server/no buffer, or a Ready timeline mid-history. */
     data object Hidden : ChatHistoryUiState
+
+    /** An APPEND page is in flight (shimmer). */
     data object Loading : ChatHistoryUiState
-    data object OlderAvailable : ChatHistoryUiState
-    data object Offline : ChatHistoryUiState
-    data object Negotiating : ChatHistoryUiState
+
+    /** A recoverable append error; the footer offers `items.retry()`. */
+    data object Retry : ChatHistoryUiState
+
+    /** History is unreachable: [offline] true when disconnected/fatal, false while negotiating. */
+    data class Unavailable(val offline: Boolean) : ChatHistoryUiState
+
+    /** The network does not advertise CHATHISTORY. */
     data object Unsupported : ChatHistoryUiState
-    data class Incomplete(val inserted: Int = 0) : ChatHistoryUiState
-    data class Capped(val inserted: Int, val limit: Int) : ChatHistoryUiState
-    data object Error : ChatHistoryUiState
+
+    /** Persisted protocol completion: the true start of history. */
     data object ConfirmedStart : ChatHistoryUiState
 }
-
-/** State of the explicit, user-authorized one-page history command. */
-sealed interface OlderHistoryPageState {
-    data object Idle : OlderHistoryPageState
-    data object Loading : OlderHistoryPageState
-    data class Failed(val error: Throwable) : OlderHistoryPageState
-}
-
-internal fun OlderHistoryPageState.usesExplicitRetry(): Boolean = this is OlderHistoryPageState.Failed
 
 internal fun chatHistoryUiState(
     bufferType: BufferType?,
@@ -515,8 +518,6 @@ internal fun chatHistoryUiState(
     availability: HistoryAvailability,
     append: LoadState,
     historyComplete: Boolean,
-    olderPagingAuthorized: Boolean = true,
-    onePagePaging: Boolean = false,
 ): ChatHistoryUiState {
     if (bufferType == null || bufferType == BufferType.SERVER) return ChatHistoryUiState.Hidden
     // A final capability decision supersedes a stale mediator error/loading state.
@@ -524,8 +525,9 @@ internal fun chatHistoryUiState(
     if (append is LoadState.Loading) return ChatHistoryUiState.Loading
     if (append is LoadState.Error) {
         return when (availability) {
-            HistoryAvailability.NegotiatingOrOffline -> historyUnavailableState(connectionState)
-            else -> ChatHistoryUiState.Error
+            HistoryAvailability.NegotiatingOrOffline ->
+                ChatHistoryUiState.Unavailable(offline = isHistoryOffline(connectionState))
+            else -> ChatHistoryUiState.Retry
         }
     }
     if (append.endOfPaginationReached && historyComplete) {
@@ -533,29 +535,19 @@ internal fun chatHistoryUiState(
     }
     return when (availability) {
         HistoryAvailability.Unsupported -> ChatHistoryUiState.Unsupported
-        HistoryAvailability.NegotiatingOrOffline -> historyUnavailableState(connectionState)
-        is HistoryAvailability.Ready -> if (append.endOfPaginationReached) {
-            if (olderPagingAuthorized && !onePagePaging) {
-                ChatHistoryUiState.Incomplete()
-            } else {
-                ChatHistoryUiState.OlderAvailable
-            }
-        } else {
-            ChatHistoryUiState.Hidden
-        }
+        HistoryAvailability.NegotiatingOrOffline ->
+            ChatHistoryUiState.Unavailable(offline = isHistoryOffline(connectionState))
+        // A Ready timeline pages older on scroll; end-of-pagination without persisted completion
+        // (e.g. an unrecoverable gap) has no affordance.
+        is HistoryAvailability.Ready -> ChatHistoryUiState.Hidden
     }
 }
 
-private fun historyUnavailableState(connectionState: IrcClientState?): ChatHistoryUiState =
-    when (connectionState) {
-        IrcClientState.Disconnected -> ChatHistoryUiState.Offline
-        is IrcClientState.Failed -> if (connectionState.fatal) {
-            ChatHistoryUiState.Offline
-        } else {
-            ChatHistoryUiState.Negotiating
-        }
-        else -> ChatHistoryUiState.Negotiating
-    }
+private fun isHistoryOffline(connectionState: IrcClientState?): Boolean = when (connectionState) {
+    IrcClientState.Disconnected -> true
+    is IrcClientState.Failed -> connectionState.fatal
+    else -> false
+}
 
 /** Retries each offline mediator failure once when its connection generation is Ready. */
 internal class HistoryReadyRetryGate {

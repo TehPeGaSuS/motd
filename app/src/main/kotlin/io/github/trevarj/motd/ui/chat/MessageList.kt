@@ -9,8 +9,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
@@ -43,30 +41,23 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerEventType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTag as semanticsTestTag
 import androidx.compose.ui.unit.Dp
@@ -119,19 +110,13 @@ import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdSpacing
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Limit collapsed system-event work per composed row during high-velocity history traversal. */
 internal const val MAX_COLLAPSED_SYSTEM_EVENTS = 24
-internal val OlderHistoryAuthorizationCountKey = SemanticsPropertyKey<Int>(
-    "OlderHistoryAuthorizationCount",
-)
 
 /** Refresh identity for expanded line content; changes when Paging extends a tail chunk. */
 internal data class SystemRunContentKey(val newestId: Long, val oldestId: Long, val count: Int)
@@ -230,48 +215,6 @@ fun bubbleGap(showSender: Boolean, hasOlder: Boolean, spacing: MotdSpacing): Dp 
     return if (showSender) spacing.bubbleBreakGap else spacing.bubbleBurstGap
 }
 
-/** A released downward drag that reaches the visual top of a reversed timeline asks for history. */
-internal fun shouldRequestOlderHistory(
-    released: Boolean,
-    displacementY: Float,
-    minimumDisplacementY: Float,
-    itemCount: Int,
-    lastVisibleIndex: Int?,
-): Boolean = released && displacementY > 0f && displacementY >= minimumDisplacementY &&
-    itemCount > 0 &&
-    lastVisibleIndex != null && lastVisibleIndex >= itemCount - 1
-
-/** Allows at most one paging request for each physical pointer gesture. */
-internal class OlderHistoryGestureLatch {
-    private var requested = false
-
-    fun beginGesture() {
-        requested = false
-    }
-
-    fun requestOnReleaseIfEligible(
-        released: Boolean,
-        displacementY: Float,
-        minimumDisplacementY: Float,
-        itemCount: Int,
-        lastVisibleIndex: Int?,
-    ): Boolean {
-        if (
-            requested || !shouldRequestOlderHistory(
-                released,
-                displacementY,
-                minimumDisplacementY,
-                itemCount,
-                lastVisibleIndex,
-            )
-        ) {
-            return false
-        }
-        requested = true
-        return true
-    }
-}
-
 /**
  * Reverse-layout message list. Index 0 is the newest message (bottom). For each row we peek the
  * next (older) item to compute grouping, day separators, and the read-marker divider.
@@ -339,7 +282,6 @@ fun MessageList(
     onSenderClick: (String) -> Unit = {},
     onAcceptInvite: (Long) -> Unit = {},
     onDismissInvite: (Long) -> Unit = {},
-    onOlderHistoryRequested: () -> Unit = {},
 ) {
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
     // Keep the user's expanded JOIN/PART runs above the volatile Paging rows. A history sync may
@@ -349,78 +291,15 @@ fun MessageList(
     // a recycled row does not lose rich content halfway through a fling.
     val canStartNewRichContentWork = richContentReady && !scrolling
     val formatMessageTime = rememberMessageTimeFormatter()
-    val latestOlderHistoryRequest by rememberUpdatedState(onOlderHistoryRequested)
-    val olderHistoryGestureLatch = remember(listState) { OlderHistoryGestureLatch() }
-    var olderHistoryAuthorizationCount by remember(bufferId) { mutableIntStateOf(0) }
     LazyColumn(
         state = listState,
         reverseLayout = true,
         // Retained rows can predate messages sent by earlier orchestrated journeys. Keep the
         // timeline addressable so the real-stack acceptance test can scroll to an imported row
-        // instead of confusing an off-screen row with a missing one.
+        // instead of confusing an off-screen row with a missing one. Scroll-driven paging: reaching
+        // the older end triggers Paging APPEND via the prefetch window, no gesture plumbing needed.
         modifier = modifier
             .fillMaxSize()
-            .pointerInput(olderHistoryGestureLatch) {
-                coroutineScope {
-                    val authorizationScope = this
-                    var settleJob: Job? = null
-                    awaitEachGesture {
-                        val down = awaitFirstDown(
-                            requireUnconsumed = false,
-                            pass = PointerEventPass.Initial,
-                        )
-                        settleJob?.cancel()
-                        olderHistoryGestureLatch.beginGesture()
-                        val startY = down.position.y
-                        var endY = startY
-                        var trackedPointerPresent = true
-                        var pointerEvent = awaitPointerEvent(PointerEventPass.Final)
-                        while (pointerEvent.changes.any { it.pressed }) {
-                            val change = pointerEvent.changes.firstOrNull { it.id == down.id }
-                            if (change == null) {
-                                trackedPointerPresent = false
-                            } else {
-                                endY = change.position.y
-                            }
-                            pointerEvent = awaitPointerEvent(PointerEventPass.Final)
-                        }
-                        pointerEvent.changes.firstOrNull { it.id == down.id }?.let { change ->
-                            endY = change.position.y
-                        } ?: run {
-                            trackedPointerPresent = false
-                        }
-                        val released = trackedPointerPresent &&
-                            pointerEvent.type == PointerEventType.Release
-                        val displacementY = endY - startY
-                        val minimumDisplacementY = viewConfiguration.touchSlop
-                        if (released) {
-                            settleJob = authorizationScope.launch {
-                                // Release can start a fling after the Final pointer pass. Let that
-                                // state publish, then inspect the boundary only once scrolling is idle.
-                                withFrameNanos { }
-                                snapshotFlow { listState.isScrollInProgress }.first { !it }
-                                val lastVisible = listState.layoutInfo.visibleItemsInfo
-                                    .maxOfOrNull { it.index }
-                                if (
-                                    olderHistoryGestureLatch.requestOnReleaseIfEligible(
-                                        released = true,
-                                        displacementY = displacementY,
-                                        minimumDisplacementY = minimumDisplacementY,
-                                        itemCount = items.itemCount,
-                                        lastVisibleIndex = lastVisible,
-                                    )
-                                ) {
-                                    olderHistoryAuthorizationCount++
-                                    latestOlderHistoryRequest()
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            .semantics {
-                this[OlderHistoryAuthorizationCountKey] = olderHistoryAuthorizationCount
-            }
             .testTag("chat_timeline"),
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
@@ -592,7 +471,6 @@ fun MessageList(
         item(key = "append-state", contentType = "loadstate") {
             ChatHistoryFooter(
                 state = historyUiState,
-                onLoadOlder = onOlderHistoryRequested,
                 onRetry = {
                     onHistoryRetry()
                     items.retry()
@@ -1441,14 +1319,16 @@ internal fun FoolCollapseChip(sender: String, tag: String, onCollapse: () -> Uni
 }
 
 const val CHAT_HISTORY_RETRY_TAG = "chat_history_retry"
-const val CHAT_HISTORY_LOAD_OLDER_TAG = "chat_history_load_older"
 const val CHAT_HISTORY_LOADING_TAG = "chat_history_loading"
 
-/** Only persisted protocol completion may render the beginning-of-history claim. */
+/**
+ * Older-end paging footer. Scroll-driven APPEND drives history automatically, so the footer only
+ * renders the shimmer, a retry affordance for recoverable errors, or a terminal status line. Only
+ * persisted protocol completion may render the beginning-of-history claim.
+ */
 @Composable
 fun ChatHistoryFooter(
     state: ChatHistoryUiState,
-    onLoadOlder: () -> Unit,
     onRetry: () -> Unit,
 ) {
     when (state) {
@@ -1465,31 +1345,19 @@ fun ChatHistoryFooter(
                 strokeWidth = 2.dp,
             )
         }
-        ChatHistoryUiState.OlderAvailable -> TextButton(
-            onClick = onLoadOlder,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp)
-                .testTag(CHAT_HISTORY_LOAD_OLDER_TAG),
-        ) {
-            Text(stringResource(R.string.chat_history_load_older))
-        }
-        ChatHistoryUiState.Offline -> HistoryStatusText(R.string.chat_history_footer_offline)
-        ChatHistoryUiState.Negotiating -> HistoryStatusText(R.string.chat_history_footer_negotiating)
-        ChatHistoryUiState.Unsupported -> HistoryStatusText(R.string.chat_history_footer_unsupported)
-        ChatHistoryUiState.ConfirmedStart -> HistoryStatusText(R.string.chat_history_start)
-        is ChatHistoryUiState.Incomplete -> HistoryRetryFooter(
-            text = stringResource(R.string.chat_history_incomplete),
-            onRetry = onRetry,
-        )
-        is ChatHistoryUiState.Capped -> HistoryRetryFooter(
-            text = pluralStringResource(R.plurals.chat_history_capped, state.limit, state.limit),
-            onRetry = onRetry,
-        )
-        ChatHistoryUiState.Error -> HistoryRetryFooter(
+        ChatHistoryUiState.Retry -> HistoryRetryFooter(
             text = stringResource(R.string.chat_history_error),
             onRetry = onRetry,
         )
+        is ChatHistoryUiState.Unavailable -> HistoryStatusText(
+            if (state.offline) {
+                R.string.chat_history_footer_offline
+            } else {
+                R.string.chat_history_footer_negotiating
+            },
+        )
+        ChatHistoryUiState.Unsupported -> HistoryStatusText(R.string.chat_history_footer_unsupported)
+        ChatHistoryUiState.ConfirmedStart -> HistoryStatusText(R.string.chat_history_start)
     }
 }
 

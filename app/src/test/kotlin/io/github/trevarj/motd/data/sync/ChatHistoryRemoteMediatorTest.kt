@@ -343,7 +343,9 @@ class ChatHistoryRemoteMediatorTest {
     }
 
     @Test
-    fun authorizedRecentGeneration_fetchesExactlyOneBeforePage() = runTest {
+    fun recentAppendWithLocalHistory_pagesExactlyOneBeforePagePerLoad() = runTest {
+        // Scroll-driven Recent paging: each APPEND fetches exactly one BEFORE page and the next
+        // APPEND advances the cursor to the previous page's oldest boundary.
         processor.process(networkId, chatMsg("seed", 500))
         val history = FakeHistory(
             before = ArrayDeque(
@@ -353,28 +355,47 @@ class ChatHistoryRemoteMediatorTest {
                 ),
             ),
         )
-        val mediator = mediator(history, focus = HistoryWindowFocus.RecentPaging(1))
+        val mediator = mediator(history)
 
-        assertEquals(RemoteMediator.InitializeAction.LAUNCH_INITIAL_REFRESH, mediator.initialize())
-        val refresh = load(mediator, LoadType.REFRESH)
-        val append = load(mediator, LoadType.APPEND)
-
-        assertTrue((refresh as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
-        assertTrue((append as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        val first = load(mediator, LoadType.APPEND)
+        assertFalse((first as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
         assertEquals(listOf(ChatHistoryRequest.Subcommand.BEFORE), history.calls)
+        assertEquals("msgid=seed", history.requests.single().bound1)
         assertEquals(2, rowCount())
+
+        val second = load(mediator, LoadType.APPEND)
+        assertFalse((second as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(
+            listOf(ChatHistoryRequest.Subcommand.BEFORE, ChatHistoryRequest.Subcommand.BEFORE),
+            history.calls,
+        )
+        assertEquals("msgid=older-1", history.requests.last().bound1)
+        assertEquals(3, rowCount())
     }
 
     @Test
-    fun authorizedRecentGeneration_seedsEmptyStoreWithExactlyOneLatestPage() = runTest {
-        val history = FakeHistory(latest = listOf(chatMsg("latest", 500)))
-        val mediator = mediator(history, focus = HistoryWindowFocus.RecentPaging(1))
+    fun recentRefreshWithLocalRows_isNoop() = runTest {
+        // Local rows already paint; REFRESH must not fetch and must leave APPEND to drive older.
+        processor.process(networkId, chatMsg("seed", 500))
+        val history = FakeHistory()
 
-        val result = load(mediator, LoadType.REFRESH)
+        val result = load(mediator(history), LoadType.REFRESH)
+
+        assertFalse((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertTrue(history.calls.isEmpty())
+        assertEquals(1, rowCount())
+    }
+
+    @Test
+    fun recentPrependEndsPagination() = runTest {
+        // Under Recent focus live events supply newer messages, so PREPEND ends immediately.
+        processor.process(networkId, chatMsg("seed", 500))
+        val history = FakeHistory()
+
+        val result = load(mediator(history), LoadType.PREPEND)
 
         assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
-        assertEquals(listOf(ChatHistoryRequest.Subcommand.LATEST), history.calls)
-        assertEquals(1, rowCount())
+        assertTrue(history.calls.isEmpty())
     }
 
     @Test
@@ -775,6 +796,35 @@ class ChatHistoryRemoteMediatorTest {
 
         assertTrue(observed === cancellation)
         assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+    }
+
+    @Test
+    fun serverBufferNeverIssuesHistoryRequests() = runTest {
+        // The mediator is attached unconditionally, but a SERVER console has no CHATHISTORY target:
+        // every LoadType must end pagination locally without touching the wire.
+        db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "server", displayName = "server", type = BufferType.SERVER),
+        )
+        val serverBufferId = db.bufferDao().byName(networkId, "server")!!.id
+        val history = FakeHistory(latest = listOf(chatMsg("a", 100)))
+        val mediator = ChatHistoryRemoteMediator(
+            serverBufferId,
+            db.bufferDao(),
+            db.messageDao(),
+            processor,
+            history,
+            50,
+            db.historyCursorDao(),
+            db.historyGapDao(),
+            HistoryWindowFocus.Recent,
+        )
+
+        listOf(LoadType.REFRESH, LoadType.PREPEND, LoadType.APPEND).forEach { type ->
+            val result = load(mediator, type)
+            assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        }
+
+        assertTrue(history.calls.isEmpty())
     }
 
     @Test

@@ -1,12 +1,9 @@
 package io.github.trevarj.motd.data.repo
 
 import androidx.paging.ExperimentalPagingApi
-import androidx.paging.LoadType
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
-import androidx.paging.PagingState
-import androidx.paging.RemoteMediator
 import io.github.trevarj.motd.data.db.BufferDao
 import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -23,7 +20,6 @@ import io.github.trevarj.motd.data.visibility.countTimelineNewerQuery
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import javax.inject.Inject
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -58,11 +54,11 @@ class MessageRepositoryImpl @Inject constructor(
         pagingContextFlow(bufferId, focus).flatMapLatest { context ->
                 Pager(
                     config = MESSAGE_PAGING_CONFIG,
-                    // Normal/recent paging is local-only. A user gesture runs an explicit one-page
-                    // command below; only deep-link islands retain presentation-driven mediation.
-                    remoteMediator = if (focus is HistoryWindowFocus.Around) {
-                        mediatorFactory.create(context.roomId, focus)
-                    } else null,
+                    // Scroll-driven paging: the mediator is always attached so Paging3 APPEND drives
+                    // older history under Recent focus and AFTER/BEFORE gap fill under Around. The
+                    // canonical id comes from pagingContextFlow, so a durable redirect still paints
+                    // and pages the winner room.
+                    remoteMediator = mediatorFactory.create(context.roomId, focus),
                     pagingSourceFactory = {
                         messageDao.pagingSource(
                             messagePagingQuery(
@@ -76,30 +72,6 @@ class MessageRepositoryImpl @Inject constructor(
                     },
                 ).flow
             }
-
-    @OptIn(ExperimentalPagingApi::class)
-    override suspend fun loadOlderPage(bufferId: Long, requestId: Long): Result<Unit> = try {
-        val result = mediatorFactory.create(
-            resolveRoomId(bufferId),
-            HistoryWindowFocus.RecentPaging(requestId),
-        ).load(
-            LoadType.REFRESH,
-            PagingState(
-                pages = emptyList(),
-                anchorPosition = null,
-                config = MESSAGE_PAGING_CONFIG,
-                leadingPlaceholderCount = 0,
-            ),
-        )
-        when (result) {
-            is RemoteMediator.MediatorResult.Error -> Result.failure(result.throwable)
-            is RemoteMediator.MediatorResult.Success -> Result.success(Unit)
-        }
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (error: Exception) {
-        Result.failure(error)
-    }
 
     // Kept for the frozen contract; scopes to a small, fixed msgid set (safe under 999 vars).
     override fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>> =
@@ -269,16 +241,11 @@ internal data class ResolvedHistoryGap(
 
 internal typealias HistoryWindowBounds = MessageWindowBounds
 
-internal fun HistoryWindowFocus.allowsRemotePaging(): Boolean = this is HistoryWindowFocus.Around
-
 internal fun historyWindowBounds(
     focus: HistoryWindowFocus,
     gaps: List<ResolvedHistoryGap>,
 ): MessageWindowBounds = when (focus) {
     HistoryWindowFocus.Recent -> MessageWindowBounds(
-        lowerBoundary = gaps.maxByOrNull { it.newer }?.newer,
-    )
-    is HistoryWindowFocus.RecentPaging -> MessageWindowBounds(
         lowerBoundary = gaps.maxByOrNull { it.newer }?.newer,
     )
     is HistoryWindowFocus.Around -> MessageWindowBounds(

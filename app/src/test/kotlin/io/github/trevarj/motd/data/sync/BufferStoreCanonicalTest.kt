@@ -560,7 +560,7 @@ class BufferStoreCanonicalTest {
             db.networkIdentityDao(),
             db.messageDao(),
             db.reactionDao(),
-            ChatHistoryMediatorFactory { roomId ->
+            ChatHistoryMediatorFactory { roomId, _ ->
                 mediatorRoomId = roomId
                 object : RemoteMediator<Int, MessageEntity>() {
                     override suspend fun load(
@@ -573,10 +573,12 @@ class BufferStoreCanonicalTest {
         )
 
         assertEquals(eventId, repository.byMsgid(loser.id, "redirected-message")?.id)
+        // Scroll-driven paging attaches the mediator even for Recent focus, so the first collection
+        // must build it with the canonical winner id (the redirect target), not the losing room id.
         repository.messages(
             loser.id,
             io.github.trevarj.motd.data.visibility.MessageVisibilitySpec(),
-            HistoryWindowFocus.RecentPaging(1),
+            HistoryWindowFocus.Recent,
         ).first()
         assertEquals(merged.id, mediatorRoomId)
     }
