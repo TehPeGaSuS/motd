@@ -195,6 +195,15 @@ class RequiredHeadlessE2eTest {
         FixtureIrcClient.connect(bootstrap.args).use { fixture ->
             (1..260).forEach { ordinal ->
                 fixture.sendMessage(bootstrap.args.channel, "$token row${ordinal.toString().padStart(3, '0')}")
+                // Timestamp injectivity: the PONG barrier proves Ergo stamped this row at some T,
+                // and the sleep keeps the next row from reaching the server before T + 2 ms, so
+                // every fixture row lands on a distinct millisecond. Timestamp-only CHATHISTORY
+                // paging (soju advertises MSGREFTYPES=timestamp; BEFORE is strictly-less-than)
+                // silently skips same-millisecond peers at page boundaries, so an unpaced burst
+                // (3+ rows per millisecond) makes deep paging lossy by construction — a fixture
+                // artifact, not app behavior.
+                fixture.flushThroughServer("${token}p$ordinal")
+                Thread.sleep(2)
             }
             fixture.flushThroughServer("${token}gap")
         }
@@ -257,80 +266,61 @@ class RequiredHeadlessE2eTest {
         )
         compose.waitForIdle()
         assertMarkerAtLeast(bootstrap, bufferId, marker)
-        // Opening the timeline attaches the scroll-driven Pager and lands the entry on its oldest
-        // loaded unread row, i.e. exactly the older (APPEND) boundary. Because the 49-row catch-up
-        // island fits under initialLoadSize (pageSize * 3 = 150), that entry hint sits 0 rows from
-        // the boundary (< prefetchDistance 25), so Paging deterministically fetches exactly ONE
-        // automatic older page per open — and never a second in the same open, since the deepest
-        // hinted index then sits 50 rows (> 25) above the new boundary. The window therefore
-        // settles at exactly 99 (row162..row260); each reopen compounds one more page:
-        // 49 -> 99 -> 149, entry anchor row212 -> row162 -> row112, label 49+ -> 99+ -> 149+.
-        // The bounded-catch-up proof stays the frozen "49+" divider above and the pre-open
-        // unreadCount==49 badge, both captured before the Pager attached. requiredText must be a
-        // row that only exists AFTER the transition this probe awaits: row162 is the oldest row of
-        // auto-append #1's page, so a still-pre-append 49-row emission (append on the wire) cannot
-        // satisfy the settle predicate — row260 would, and then fail the 99..99 count check.
+        // Opening the timeline attaches the scroll-driven Pager over the gap-bounded Recent window
+        // (49 unread fixture rows < initialLoadSize = pageSize * 3 = 150), so the local source
+        // exhausts its bound (nextKey == null) and Paging auto-fires an older APPEND with no
+        // scroll. Each persisted BEFORE page recedes the recoverable gap's newer edge, re-bounds
+        // the window, and repeats while the whole window still fits under initialLoadSize. The wire
+        // is timestamp-only (soju advertises MSGREFTYPES=timestamp): the catch-up gap must stay
+        // RECOVERABLE across msgid-less saturated pages for this backfill to run at all — the
+        // regression this pins. The bounded window also holds k >= 1 non-fixture state rows, all
+        // newer than row260 (the replayed state event inside the newest catch-up page — the reason
+        // the pre-open window is 49 rows of a 50-event page — plus the app's own reconnect state
+        // rows), and the backfill stops at
+        // the first generation whose WHOLE window reaches 150: k == 1 yields three pages (199
+        // fixture rows), k >= 2 yields two (149). Both are bounded and final — never the backlog —
+        // so the settle asserts the 149..199 range with row112 required (present in both terminal
+        // states, absent while the cascade is still at 99) and row001 excluded. The bounded-
+        // catch-up proof stays the frozen "49+" divider above and the pre-open unreadCount==49
+        // badge, both captured before the Pager attached.
         val postOpenWindow = runBlocking {
             runProbe.awaitStableRecentRows(
                 token = token,
                 bufferId = bufferId,
-                minimumCount = 99,
-                maximumCount = 99,
+                minimumCount = 149,
+                maximumCount = 199,
                 expectedNewestOrdinal = 260,
-                requiredText = "$token row162",
+                requiredText = "$token row112",
                 excludedText = "$token row001",
+                // row112 lands with cascade page 2, so a k <= 1 run is still mid-cascade when the
+                // required row first appears. A longer quiet window keeps a slow hosted emulator
+                // from settling on that pre-terminal 149 and handing the reopen divider stale
+                // oldest-row anchors once page 3 lands.
+                stableMs = 4_000,
             )
         }
-        // The reopen entry re-resolves against the grown island: its two oldest rows (row162,
-        // row163) become the next divider anchor.
+        // The reopen entry re-resolves against the grown island: its two oldest rows become the
+        // next divider anchor.
         val orderedPostOpen = postOpenWindow.sortedBy { it.anchor() }
         val reopenOldest = orderedPostOpen.first()
         val reopenSecond = orderedPostOpen[1]
 
-        // Reopening reproduces a bounded entry one deterministic auto-page deeper, not the backlog.
+        // Reopening anchors a bounded entry on the settled window, not the backlog. The divider
+        // count equals the visible unread window rows (fixture rows plus k), so no exact label is
+        // pinned here; the frozen "49+" assertion above already proves the bounded-catch-up label.
         scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         ChatListRobot(compose).apply { awaitTag("chatlist_row_$bufferId"); open(bufferId) }
         timeline.assertUnreadEntry(
             reopenOldest.tag(),
             reopenSecond.tag(),
-            expectedLabel = "99+ new messages",
         )
         assertMarkerAtLeast(bootstrap, bufferId, marker)
-        // Auto-append #2: the reopen entry hint at row162 drives exactly one more bounded page,
-        // settling at 149 rows with row112 loaded and row001 still out of reach.
-        runBlocking {
-            runProbe.awaitStableRecentRows(
-                token = token,
-                bufferId = bufferId,
-                minimumCount = 149,
-                maximumCount = 149,
-                expectedNewestOrdinal = 260,
-                requiredText = "$token row112",
-                excludedText = "$token row001",
-            )
-        }
-
-        // The first deliberate older-boundary scroll drives exactly one bounded BEFORE page, not
-        // the backlog: 149 -> 199 rows. row062 proves the deliberate page (row211/row112 were
-        // already present); row001 stays out of reach.
-        timeline.scrollToOlderBoundary()
-        runBlocking {
-            runProbe.awaitStableRecentRows(
-                token = token,
-                bufferId = bufferId,
-                minimumCount = 199,
-                maximumCount = 199,
-                expectedNewestOrdinal = 260,
-                requiredText = "$token row062",
-                excludedText = "$token row001",
-            )
-        }
-        // No exact pin is possible beyond 199 rows: the chat-only search surface returns only the
-        // newest 200 rows, so deeper windows saturate its count and (e.g.) 249 vs 260 loaded rows
-        // are indistinguishable there. The one-page-per-stop mechanism is already pinned three
-        // times under that cap (open 99, reopen 149, deliberate scroll 199); deeper paging is
-        // verified by row001 becoming reachable plus the terminal canonicality and newest-200 cap
-        // assertions below.
+        // No search pin after the reopen: its entry lands ON the window's oldest unread row (the
+        // APPEND boundary), so the boundary hint appends one more bounded page, which can saturate
+        // the chat-only search surface (newest-200 cap) and become indistinguishable from deeper
+        // windows there. The backfill mechanics are already pinned by the ranged settle above;
+        // deeper paging is verified by row001 becoming reachable via deliberate scrolling plus the
+        // terminal canonicality and newest-200 cap assertions below.
         timeline.scrollOlderUntil("$token row001")
         val (firstUnread, secondUnread) = runBlocking {
             lifecycle.awaitCanonicalFromAnySender("$token row001", bufferId) to

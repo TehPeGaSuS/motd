@@ -102,12 +102,12 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
      * stops at the boundary triggers exactly one APPEND; after the 50-row insert the retained
      * viewport anchor sits 50 rows (> 25) above the new boundary, outside the prefetch range, so
      * no second page fires until the next deliberate `scrollToOlderBoundary()` step. (Opening an
-     * unread gap is equally deterministic: the entry lands on the island's oldest unread row,
-     * whose load hint sits 0 rows from the APPEND boundary when the island fits under
-     * `initialLoadSize` = pageSize * 3 = 150, so every open fetches exactly ONE automatic older
-     * page — and never a second in the same open, because the deepest hinted index then sits 50
-     * rows above the new boundary. Reopens therefore compound one page per open; the required
-     * journey pins the 49 -> 99 -> 149 growth and its row212 -> row162 -> row112 entry anchors.)
+     * unread gap is bounded differently: while the gap-bounded window fits under `initialLoadSize`
+     * = pageSize * 3 = 150, the local source exhausts its bound (nextKey == null) and Paging
+     * auto-fires an older APPEND with no scroll, each persisted page re-bounding the window — a
+     * hint-free two-to-three-page backfill that halts at the first generation whose whole window
+     * reaches 150. RecentPagingAppendReproTest pins those mechanics; the required journey settles
+     * the cascade as a 149..199-row range before deliberate stepping resumes.)
      */
     fun scrollToOlderBoundary() {
         awaitTag("chat_timeline")
