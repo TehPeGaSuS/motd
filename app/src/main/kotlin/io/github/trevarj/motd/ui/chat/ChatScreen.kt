@@ -1215,6 +1215,31 @@ fun ChatContent(
         }
     }
 
+    // Newest row the timeline has actually placed on screen. Neither rawNewestAnchor (the room's
+    // newest stored row) nor the Paging snapshot proves display — both keep advancing while the
+    // screen is paused — but a measure pass does. Monotonic, so scrolling back through history
+    // never retracts what was already seen. Reverse layout: the first visible item is the newest.
+    var renderedNewestAnchor by remember(items, listState, visibilityPolicy) {
+        mutableStateOf<io.github.trevarj.motd.data.db.TimelineAnchor?>(null)
+    }
+    LaunchedEffect(items, listState, visibilityPolicy) {
+        snapshotFlow {
+            val laidOut = listState.layoutInfo.visibleItemsInfo.firstOrNull()
+            renderedBottomAnchor(
+                renderedIndex = laidOut?.index ?: -1,
+                renderedKey = laidOut?.key,
+                itemCount = items.itemCount,
+                peek = items::peek,
+                policy = visibilityPolicy,
+            )
+        }
+            .distinctUntilChanged()
+            .collect { anchor ->
+                val seen = renderedNewestAnchor
+                if (anchor != null && (seen == null || anchor > seen)) renderedNewestAnchor = anchor
+            }
+    }
+
     // Count nested programmatic scrolls rather than using a Boolean: an incoming pin may supersede
     // an explicit animation, and the cancelled animation must not briefly masquerade as a user drag.
     var programmaticScrolls by remember { mutableIntStateOf(0) }
@@ -1337,14 +1362,33 @@ fun ChatContent(
     // Mark read on new-message-while-at-bottom only (plans/07/15 #2): syncing while scrolled up
     // reading history would clear unread on other clients and destroy the local unread UX. The
     // bottom of a bounded older island is not the bottom of the conversation, so it never acks.
+    //
+    // viewportReadEnabled is a key here, so the pause/resume flip restarts the effect. Arrivals
+    // while paused correctly do not acknowledge, but the restart used to acknowledge them anyway
+    // the instant the screen came back, before a single one had been measured. Remembering that a
+    // pause happened lets the first run back clamp to what was actually rendered; every later run
+    // is steady state again. The flag is consumed by the first enabled run whether or not it
+    // acknowledges, so a clamp can never leak into a genuinely live viewport.
+    val pausedSinceLastRun = remember { mutableStateOf(false) }
     LaunchedEffect(
         rawNewestAnchor,
+        renderedNewestAnchor,
         atBottom,
         initialPositionSettled,
         viewportReadEnabled,
         hasNewerHistoryIsland,
     ) {
-        val newest = rawNewestAnchor ?: return@LaunchedEffect
+        if (!viewportReadEnabled) {
+            pausedSinceLastRun.value = true
+            return@LaunchedEffect
+        }
+        val resumed = pausedSinceLastRun.value
+        pausedSinceLastRun.value = false
+        val newest = viewportMarkReadAnchor(
+            rawNewest = rawNewestAnchor,
+            renderedNewest = renderedNewestAnchor,
+            resumed = resumed,
+        ) ?: return@LaunchedEffect
         val ackable = shouldMarkReadFromViewport(
             atBottom = atBottom,
             hasNewerHistoryIsland = hasNewerHistoryIsland,

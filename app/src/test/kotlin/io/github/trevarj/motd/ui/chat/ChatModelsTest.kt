@@ -781,6 +781,59 @@ class ChatModelsTest {
     }
 
     @Test
+    fun `a resumed viewport acknowledges display, not arrival`() {
+        val rendered = TimelineAnchor(1_000, 10, 10)
+        val raw = TimelineAnchor(5_000, 40, 40)
+        // Steady state is untouched: the room's newest row still retires the ignored raw tail.
+        assertEquals(raw, viewportMarkReadAnchor(raw, rendered, resumed = false))
+        // The first run after a pause may confirm only what the timeline actually put on screen.
+        assertEquals(rendered, viewportMarkReadAnchor(raw, rendered, resumed = true))
+        // Nothing arrived while paused, so the resume acknowledges exactly what it always did.
+        assertEquals(raw, viewportMarkReadAnchor(raw, raw, resumed = true))
+        // A rendered anchor can never overtake the room; the clamp only ever moves older.
+        assertEquals(rendered, viewportMarkReadAnchor(rendered, raw, resumed = true))
+        // Nothing was rendered yet: acknowledge nothing and let the next measure re-run the effect.
+        assertNull(viewportMarkReadAnchor(raw, null, resumed = true))
+        assertNull(viewportMarkReadAnchor(null, rendered, resumed = false))
+    }
+
+    @Test
+    fun `rendered bottom anchor refuses a layout that predates the paging snapshot`() {
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec())
+        val rows = listOf(
+            message(id = 40, serverTime = 5_000),
+            message(id = 30, serverTime = 4_000),
+            message(id = 10, serverTime = 1_000),
+        )
+        val peek = { index: Int -> rows.getOrNull(index) }
+
+        // The measure pass saw this snapshot: the key still identifies the row at that index.
+        assertEquals(
+            TimelineAnchor(5_000, 40, 40),
+            renderedBottomAnchor(0, 40L, rows.size, peek, policy),
+        )
+        // A prepend while the screen was paused shifted every index without a measure, so the
+        // laid-out key no longer matches: the index now names a row that was never on screen.
+        assertNull(renderedBottomAnchor(0, 10L, rows.size, peek, policy))
+        // Nothing laid out at all.
+        assertNull(renderedBottomAnchor(-1, null, rows.size, peek, policy))
+        assertNull(renderedBottomAnchor(3, 99L, rows.size, peek, policy))
+    }
+
+    @Test
+    fun `rendered bottom anchor skips an ignored row the way the effective bottom does`() {
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec(fools = setOf("troll")))
+        val rows = listOf(
+            message(id = 40, sender = "troll", serverTime = 5_000),
+            message(id = 30, serverTime = 4_000),
+        )
+        assertEquals(
+            TimelineAnchor(4_000, 30, 30),
+            renderedBottomAnchor(0, 40L, rows.size, { rows.getOrNull(it) }, policy),
+        )
+    }
+
+    @Test
     fun `lag tone thresholds bucket latency`() {
         assertEquals(LagTone.GOOD, lagTone(0))
         assertEquals(LagTone.GOOD, lagTone(299))

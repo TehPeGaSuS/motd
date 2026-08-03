@@ -385,6 +385,60 @@ internal fun shouldMarkReadFromViewport(
     viewportReadEnabled: Boolean,
 ): Boolean = viewportReadEnabled && initialPositionSettled && atBottom && !hasNewerHistoryIsland
 
+/**
+ * Newest row the timeline has actually placed on screen, or null while that cannot be proven.
+ *
+ * [renderedIndex]/[renderedKey] come from the last measure pass; [peek] reads the CURRENT Paging
+ * snapshot. Those two disagree whenever rows were presented without being measured — Paging keeps
+ * presenting while the screen is paused, and a prepend shifts every index — so an index on its own
+ * can name a row that was never displayed. The laid-out row carries its own key, and requiring it
+ * to still be the row at that index is what makes the pairing trustworthy. From there the scan
+ * walks OLDER only: rows below the rendered position are the ignored tail the effective bottom
+ * already treats as settled, and they were not on screen either.
+ */
+internal fun renderedBottomAnchor(
+    renderedIndex: Int,
+    renderedKey: Any?,
+    itemCount: Int,
+    peek: (Int) -> MessageEntity?,
+    policy: MessageVisibilityPolicy,
+): TimelineAnchor? {
+    if (renderedIndex < 0 || renderedIndex >= itemCount) return null
+    if (peek(renderedIndex)?.id != renderedKey) return null
+    val olderEnd = minOf(itemCount, renderedIndex + MAX_PLACEHOLDER_PROBES)
+    for (index in renderedIndex until olderEnd) {
+        val row = peek(index) ?: continue
+        if (policy.anchor(row)) return TimelineAnchor(row.serverTime, row.id, row.timelineOrder)
+    }
+    return null
+}
+
+/**
+ * The anchor one run of the viewport mark-read effect may acknowledge.
+ *
+ * A steady-state run acknowledges [rawNewest], the room's newest stored row, and has to keep doing
+ * so: an ignored raw tail below the viewport is already settled and only that anchor retires it.
+ *
+ * A resumed run is not steady state. `viewportReadEnabled` keys the effect, so the pause -> resume
+ * flip restarts it, and by then everything that arrived while the screen was away is already in
+ * [rawNewest] and in the Paging snapshot while nothing has measured it — the acknowledgement would
+ * be driven by arrival rather than by display, uploading a MARKREAD for a backlog the user never
+ * saw. Clamping that one run to [renderedNewest] lets a resume confirm only rows the timeline
+ * actually put on screen. It cannot over-acknowledge either: the clamp only ever moves the anchor
+ * older, so every gate [shouldMarkReadFromViewport] applies (the bounded-island one included) still
+ * decides whether anything is acknowledged at all.
+ */
+internal fun viewportMarkReadAnchor(
+    rawNewest: TimelineAnchor?,
+    renderedNewest: TimelineAnchor?,
+    resumed: Boolean,
+): TimelineAnchor? {
+    val raw = rawNewest ?: return null
+    if (!resumed) return raw
+    val rendered = renderedNewest ?: return null
+    return minOf(rendered, raw)
+}
+
 data class ChatScrollPosition(
     val index: Int,
     val offset: Int,

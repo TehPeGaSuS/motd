@@ -219,4 +219,60 @@ class BoundedIslandMarkReadTest {
         assertEquals(5_010L, db.bufferDao().observeById(roomId)?.localReadAnchorTime)
         assertEquals("reaching the real bottom clears unread", 0, unreadCount())
     }
+
+    /**
+     * The resume leg of the same defect: the mark-read effect is keyed on `viewportReadEnabled`, so
+     * coming back restarts it, and by then the backlog that arrived while the screen was paused is
+     * already in `rawNewestAnchor` and in the Paging snapshot while nothing has measured it.
+     */
+    @Test
+    fun `a resumed viewport acknowledges the rendered bottom, not the paused backlog`() = runTest {
+        val repository = repository()
+        val focus: HistoryWindowFocus = HistoryWindowFocus.Recent
+        val bounds = repository.historyWindowBounds(roomId, focus)
+        val (renderedRows, itemCount) = loadWindow(bounds)
+
+        // What the timeline was showing, proved by the laid-out row's own key rather than by an
+        // index that a later prepend would silently reassign.
+        val rendered = renderedBottomAnchor(
+            renderedIndex = 0,
+            renderedKey = renderedRows[0].id,
+            itemCount = itemCount,
+            peek = { index -> renderedRows.getOrNull(index) },
+            policy = policy,
+        )
+        assertEquals(newest, rendered?.eventId)
+
+        // Two messages land while the screen is paused. No measure pass runs for them.
+        insert("paused-1", serverTime = 6_000)
+        val pausedNewest = insert("paused-2", serverTime = 6_010)
+        val rawNewest = MessageVisibilityReader(db).latestRawAnchor(roomId)
+        assertEquals(pausedNewest, rawNewest?.eventId)
+
+        // At-bottom is still measured against the pre-pause layout, so the gate itself still opens:
+        // the anchor, not the gate, is what stops the unseen backlog being acknowledged.
+        val atBottom = isAtEffectiveBottom(
+            firstVisibleIndex = 0,
+            firstVisibleOffset = 0,
+            itemCount = itemCount,
+            peek = { index -> renderedRows.getOrNull(index) },
+            policy = policy,
+        )
+        assertTrue(
+            shouldMarkReadFromViewport(
+                atBottom = atBottom,
+                hasNewerHistoryIsland = hasNewerHistoryIsland(focus, bounds),
+                initialPositionSettled = true,
+                viewportReadEnabled = true,
+            ),
+        )
+        val acknowledged = checkNotNull(
+            viewportMarkReadAnchor(rawNewest = rawNewest, renderedNewest = rendered, resumed = true),
+        )
+        assertEquals(newest, acknowledged.eventId)
+
+        resolveAndAdvanceCurrentReadTarget(db, roomId, acknowledged)
+        assertEquals(5_010L, db.bufferDao().observeById(roomId)?.localReadAnchorTime)
+        assertEquals("the backlog that arrived while paused stays unread", 2, unreadCount())
+    }
 }
