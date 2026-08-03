@@ -158,35 +158,51 @@ class GapAnchorResolver @Inject constructor(private val messageDao: MessageDao) 
 }
 
 /**
- * The presented window for [focus]: the newest contiguous local island, clamped by the gaps that
- * bracket it.
+ * The presented window for [focus].
  *
- * `newer` edges only ever become lower bounds and `older` edges only ever become upper bounds, so
- * each side is projected through the bound role it feeds. Both bounds are inclusive at the anchor.
+ * ## Recent is UNBOUNDED, deliberately
+ *
+ * Recent used to clamp at the newest gap's newer edge, so every row on the far side of a gap was
+ * hidden while sitting durable and intact in Room. That presentation is retired: the timeline is one
+ * unbounded list and a gap is drawn as a tappable seam between the two rows it falls between (see
+ * [TimelineSeam]). The seam takes the SAME projection the old lower boundary took
+ * ([GapEdgeAnchor.asInclusiveLowerBound]), so the cut lands where the clamp used to — it just draws
+ * a line instead of deleting everything above it.
+ *
+ * This is the single choke point for that behavior. Returning any lower boundary here re-hides the
+ * far side of every gap and the seams stop rendering, because the row at a seam then has no
+ * materialized older neighbour and [seamAbove] abstains. `HistoryGapGeometryTest` pins the
+ * divergence from the frozen pre-refactor reference explicitly.
+ *
+ * [HistoryWindowFocus.Around] is untouched and still clamps on both sides: a deep-link island is a
+ * deliberately narrow view, and retiring it is a separate change. `newer` edges only ever become
+ * lower bounds and `older` edges only ever become upper bounds, so each side is projected through
+ * the bound role it feeds. Both Around bounds are inclusive at the anchor.
  */
-fun windowBounds(focus: HistoryWindowFocus, gaps: List<ResolvedGap>): MessageWindowBounds {
-    val lowerCandidates = gaps.map { it.newer.asInclusiveLowerBound() }
-    return when (focus) {
-        HistoryWindowFocus.Recent -> MessageWindowBounds(
-            // Recent paints everything at or after the newest gap; older islands stay hidden until
-            // the gap between them closes.
-            lowerBoundary = lowerCandidates.maxOrNull(),
-        )
+fun windowBounds(focus: HistoryWindowFocus, gaps: List<ResolvedGap>): MessageWindowBounds =
+    when (focus) {
+        HistoryWindowFocus.Recent -> MessageWindowBounds()
         is HistoryWindowFocus.Around -> MessageWindowBounds(
-            lowerBoundary = lowerCandidates.filter { it <= focus.anchor }.maxOrNull(),
+            lowerBoundary = gaps.map { it.newer.asInclusiveLowerBound() }
+                .filter { it <= focus.anchor }
+                .maxOrNull(),
             upperBoundary = gaps.map { it.older.asInclusiveUpperBound() }
                 .filter { it >= focus.anchor }
                 .minOrNull(),
         )
     }
-}
 
 /**
- * The gap that older (APPEND) paging should work on under [focus], or null when none applies.
+ * The gap that older paging should work on under [focus], or null when none applies.
  *
  * Ranked by each gap's NEWER edge — the edge an older page is requested BEFORE. Recent takes the
  * newest such edge; a focused window takes the newest edge at or before its anchor, so paging
  * grows the focused island downward instead of jumping to an unrelated one.
+ *
+ * Who asks matters, and the two callers are not symmetric. Under [HistoryWindowFocus.Around] this
+ * answers Paging's APPEND, because that window really is clamped at a gap. Under Recent it answers
+ * `HistoryGapFillCoordinator` — a tapped divider or the reconnect autopilot — and NOT the mediator,
+ * whose Recent window is unbounded and whose APPEND is therefore about the bottom of the timeline.
  */
 fun focusedOlderGap(focus: HistoryWindowFocus, gaps: List<ResolvedGap>): ResolvedGap? {
     val ranked = gaps.map { it to it.newer.asFocusNewerPosition() }

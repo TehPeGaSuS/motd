@@ -109,15 +109,32 @@ class HistoryPageLoader @Inject constructor(
     private val inFlight = ConcurrentHashMap<FlightKey, CompletableDeferred<PageResult>>()
     internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
 
-    // The key deliberately omits the boundary: any fresh page for (network, room, direction)
-    // satisfies a concurrent request. Callers (Paging generations) re-read the local store after
-    // each page and issue their next load from their own boundary, so joining whichever page is in
-    // flight is safe and prevents a generation swap from double-fetching the same page.
-    private data class FlightKey(val networkId: Long, val roomId: RoomId, val direction: Direction)
+    /**
+     * The identity a concurrent fetch may join.
+     *
+     * The key still omits the BOUNDARY, and for the original reason: two Paging generations of the
+     * same ladder re-read the local store after each page and issue their next load from their own
+     * boundary, so joining whichever page is in flight is safe and stops a generation swap from
+     * double-fetching. Both of them carry the same [gapId], so they still coalesce.
+     *
+     * It does NOT omit [gapId], because that is the one thing that makes two older-direction fetches
+     * for the same room genuinely different questions. `null` is the bottom-of-timeline ladder,
+     * which pages strictly below every open gap; a non-null id is a fill of one specific interior
+     * interval. Coalescing across that split hands the follower a page for an interval it never
+     * asked for and credits it with rows it did not fetch: its own boundary never moves and it reads
+     * its zero inserts as "this interval is exhausted", which is precisely how a bounded gap fill
+     * used to end after one page having inserted nothing.
+     */
+    private data class FlightKey(
+        val networkId: Long,
+        val roomId: RoomId,
+        val direction: Direction,
+        val gapId: Long?,
+    )
 
     /**
      * Fetch and persist exactly one page for [roomId] (always canonical) in [direction] from
-     * [boundary]. Concurrent identical `(network, room, direction)` requests coalesce onto one
+     * [boundary]. Concurrent identical `(network, room, direction, gapId)` requests coalesce onto one
      * in-flight fetch; distinct fetches on the same network still serialize on the wire.
      */
     suspend fun loadPage(
@@ -151,7 +168,7 @@ class HistoryPageLoader @Inject constructor(
         }
         val requestLimit = minOf(pageSize, ready.pageLimit).coerceAtLeast(1)
         val referenceTypes = ready.referenceTypes
-        return coalesced(FlightKey(networkId, roomId, direction)) {
+        return coalesced(FlightKey(networkId, roomId, direction, gapId)) {
             when (direction) {
                 Direction.LATEST -> loadLatest(networkId, roomId, target, source, requestLimit, referenceTypes)
                 Direction.OLDER -> loadOlder(

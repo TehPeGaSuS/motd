@@ -9,6 +9,7 @@ import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.history.GapAnchorResolver
+import io.github.trevarj.motd.data.history.NO_APPEND_PROGRESS
 import io.github.trevarj.motd.data.history.PageProgress
 import io.github.trevarj.motd.data.history.Pageability
 import io.github.trevarj.motd.data.history.focusedOlderGap
@@ -97,7 +98,24 @@ class HistoryGapFillCoordinator @Inject constructor(
         val insertedCount: Int,
         val endReason: String,
         val error: Throwable? = null,
-    )
+    ) {
+        /**
+         * Did this fill achieve anything at all?
+         *
+         * Exactly one outcome is [GapFillProgress.STALLED]: the anti-livelock stop with zero durable
+         * inserts. That combination says the interval is still owed — the seam is open, still
+         * recoverable, and its boundary is where it was — so a caller that gets one arming per seam
+         * has not actually spent it. Every other end (budget spent, gap closed, unrecoverable,
+         * transport error) either moved history or settled the question, and re-arming on those is
+         * how a bounded fill turns into a crawler.
+         */
+        val progress: GapFillProgress
+            get() = if (insertedCount == 0 && endReason == NO_APPEND_PROGRESS) {
+                GapFillProgress.STALLED
+            } else {
+                GapFillProgress.MOVED
+            }
+    }
 
     // Resolves stored gap edges against the local store so focus selection ranks gaps by real
     // timeline positions — the same projection the mediator and the repository's window geometry use.

@@ -24,6 +24,7 @@ import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.client.IrcClient
+import io.github.trevarj.motd.irc.client.IrcCommandException
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
@@ -52,8 +53,20 @@ import org.robolectric.RobolectricTestRunner
  * can no longer deliver APPEND demand at an interior seam, NOT because the cascade itself changed.
  * That test drives the same scripted wire through the mediator and through the coordinator on two
  * independent stores and asserts they issue the identical boundary ladder and stop for the identical
- * recorded reason. Everything else here covers what the coordinator adds on top: the per-gap page
- * budget, the per-room single flight, and the divider's in-flight state.
+ * recorded reason.
+ *
+ * The mediator side of that comparison runs under [HistoryWindowFocus.Around], because that is now
+ * the only focus whose APPEND is gap-directed: Recent presents an unbounded timeline, so its APPEND
+ * is the bottom-of-list backlog ladder and never the seam's — pinned by
+ * [recentMediatorAppendPagesTheGlobalLadderInsteadOfTheGapTheCoordinatorOwns], which is the same
+ * fixture with the focus swapped.
+ *
+ * The gap-selection and gap-boundary pins that used to live in `ChatHistoryRemoteMediatorTest`
+ * against Recent APPEND moved here with their fixtures and their reasoning intact; they describe the
+ * gap direction, and the gap direction is this class's.
+ *
+ * Everything else here covers what the coordinator adds on top: the per-gap page budget, the
+ * per-room single flight, and the divider's in-flight state.
  */
 @OptIn(ExperimentalPagingApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -223,6 +236,167 @@ class HistoryGapFillCoordinatorTest {
         error("${scenario.name}: coordinator never finished the gap")
     }
 
+    @Test
+    fun recentMediatorAppendPagesTheGlobalLadderInsteadOfTheGapTheCoordinatorOwns() = runTest {
+        // The other half of the equivalence above, and the reason it is stated against Around focus.
+        // Same fixture, same wire, Recent focus: the mediator does not walk the gap ladder at all.
+        // Its window is unbounded, so the APPEND Paging asks for is a request for backlog below the
+        // OLDEST retained row — here `marker`, on the far side of the seam that is now visible.
+        val scenario = scenarios().first()
+        val fixture = newFixture()
+        scenario.seed(fixture)
+        // The scenario's own script answers with rows INSIDE the gap regardless of what was asked
+        // for, which would only muddy this assertion; the request is what is under test, so the
+        // reply is a page from where the request actually points — below the whole timeline.
+        val history = FakeHistory(
+            pageScript(ScriptedPage(listOf(chatMsg("row5", 5)))),
+            scenario.referenceTypes,
+        )
+        val mediator = fixture.mediator(history, scenario.pageSize, HistoryWindowFocus.Recent)
+
+        mediator.load(LoadType.APPEND, emptyPagingState())
+
+        assertEquals(
+            listOf("timestamp=1970-01-01T00:00:00.010Z"),
+            history.requests.map { it.bound1 },
+        )
+        // Grounds the claim above: the ladder the coordinator walks for this same fixture starts at
+        // the gap's newer edge, which is a different request entirely.
+        assertEquals(
+            "the gap ladder starts somewhere else",
+            "timestamp=1970-01-01T00:00:00.212Z",
+            scenario.boundaries.first(),
+        )
+        // The seam is untouched by that page: still open, still recoverable, still where it was.
+        val gap = fixture.db.historyGapDao().forRoom(fixture.roomId).single()
+        assertTrue(gap.recoverable)
+        assertEquals(212L, gap.newerServerTime)
+    }
+
+    // =============================================================================================
+    // Gap-direction pins moved here from ChatHistoryRemoteMediatorTest, fixtures unchanged.
+    // =============================================================================================
+
+    @Test
+    fun gapFillPagesBeforeTheGapNewerEdgeInsteadOfTheGlobalOldestCursor() = runTest {
+        // Was `recentAppendPagesBeforeTheRecentIslandInsteadOfTheGlobalOldestCursor`. The property is
+        // unchanged and is exactly why the seam is fillable at all: a fill asks for the interval
+        // under the gap, not for backlog under the whole timeline, so it starts at the gap's NEWER
+        // edge even though an older local row exists below the gap.
+        val fixture = newFixture()
+        fixture.processor.process(fixture.networkId, chatMsg("old", 100))
+        fixture.processor.process(fixture.networkId, chatMsg("recent-boundary", 851))
+        fixture.db.historyGapDao().insert(
+            HistoryGapEntity(
+                roomId = fixture.roomId,
+                olderMsgid = "old",
+                olderServerTime = 100,
+                newerMsgid = "recent-boundary",
+                newerServerTime = 851,
+            ),
+        )
+        val history = FakeHistory(
+            pageScript(ScriptedPage(listOf(chatMsg("older-page", 801), chatMsg("newer-page", 850)))),
+        )
+
+        val fill = fixture.coordinator().fill(fixture.roomId, focused(), history, pageSize = 2)
+
+        assertEquals("msgid=recent-boundary", history.requests.first().bound1)
+        assertTrue("the fill made progress", fill.insertedCount > 0)
+        val gap = fixture.db.historyGapDao().forRoom(fixture.roomId).single()
+        assertEquals(100L, gap.olderServerTime)
+        assertEquals(801L, gap.newerServerTime)
+    }
+
+    @Test
+    fun focusedFillSelectsTheUnidentifiableEqualTimeGapEdge() = runTest {
+        // Was `pinnedCurrentBehavior_recentAppendSelectsTheUnidentifiableEqualTimeGapEdge`, verbatim
+        // apart from the driver. focusedOlderGap ranks gaps by `asFocusNewerPosition`, whose
+        // last-resort projection for an edge that resolves to no local row is the cohort CEILING.
+        // Two gaps share newerServerTime 500: one edge names a retained row, the other names nothing
+        // at all. The ceiling makes the UNIDENTIFIABLE gap win selection, so the fill pages from its
+        // bare timestamp instead of the retained row's msgid.
+        //
+        // This is the opposite convention from the window/seam projection, which puts an
+        // unidentifiable newer edge at the cohort FLOOR so it does not clamp (and so the seam is
+        // drawn under its whole equal-time cohort). Both are intentional: selection wants the
+        // unlocatable gap to win, placement wants it not to hide or split anything.
+        val fixture = newFixture()
+        fixture.processor.process(fixture.networkId, chatMsg("anchorRow", 500))
+        fixture.db.historyGapDao().insert(HistoryGapEntity(0, fixture.roomId, "a", 100, "anchorRow", 500))
+        fixture.db.historyGapDao().insert(HistoryGapEntity(0, fixture.roomId, "b", 200, null, 500))
+        val history = FakeHistory(pageScript(ScriptedPage(listOf(chatMsg("older-page", 450)))))
+
+        fixture.coordinator().fill(fixture.roomId, focused(), history, pageSize = 2)
+
+        assertEquals("timestamp=1970-01-01T00:00:00.500Z", history.requests.first().bound1)
+    }
+
+    @Test
+    fun timestampFallbackMarksOnlyTheExactSelectedEqualTimeGapExhausted() = runTest {
+        // Was a mediator test with the identical fixture. The msgid selector is rejected, the
+        // advertised timestamp fallback is retried, and the terminal empty page proves ONLY the
+        // selected gap's remainder gone — the equal-timestamp sibling the client did not page must
+        // keep its recoverable seam.
+        val fixture = newFixture()
+        val firstId = fixture.db.historyGapDao().insert(
+            HistoryGapEntity(0, fixture.roomId, "a", 100, "b", 500),
+        )
+        val secondId = fixture.db.historyGapDao().insert(
+            HistoryGapEntity(0, fixture.roomId, "c", 200, "d", 500),
+        )
+        val history = FakeHistory(
+            pageScript(),
+            failureFor = { request ->
+                IrcCommandException("CHATHISTORY", "INVALID_MSGREFTYPE", "try timestamp")
+                    .takeIf { request.bound1?.startsWith("msgid=") == true }
+            },
+        )
+
+        val fill = fixture.coordinator().fill(fixture.roomId, focused(), history, pageSize = 2)
+
+        assertEquals("exhausted_focused_gap", fill.endReason)
+        val selectedMsgid = history.requests.first().bound1?.removePrefix("msgid=")
+        val gaps = fixture.db.historyGapDao().forRoom(fixture.roomId).associateBy { it.id }
+        val selectedId = if (selectedMsgid == "b") firstId else secondId
+        val untouchedId = if (selectedId == firstId) secondId else firstId
+        assertFalse(checkNotNull(gaps[selectedId]).recoverable)
+        assertTrue(checkNotNull(gaps[untouchedId]).recoverable)
+        assertEquals("timestamp=1970-01-01T00:00:00.500Z", history.requests.last().bound1)
+    }
+
+    @Test
+    fun serverProvenEmptyRemainderStopsTheFillEvenAfterTheBoundaryReceded() = runTest {
+        // Was `serverProvenEmptyGapRemainderStopsAppendEvenAfterTheBoundaryReceded`. Progress must
+        // not outrank a server-proven-empty remainder: the page advanced the gap's newer edge AND
+        // persisted a row, but the terminal response that never reached the older boundary marks the
+        // remainder unrecoverable, so the fill is genuinely finished and the seam becomes permanent.
+        val fixture = newFixture()
+        fixture.processor.process(fixture.networkId, chatMsg("marker", 10))
+        fixture.processor.process(fixture.networkId, chatMsg("row212", 212))
+        fixture.db.historyGapDao().insert(
+            HistoryGapEntity(
+                roomId = fixture.roomId,
+                olderMsgid = "marker",
+                olderServerTime = 10,
+                newerMsgid = "row212",
+                newerServerTime = 212,
+            ),
+        )
+        val history = FakeHistory(
+            pageScript(ScriptedPage(listOf(chatMsg("row200", 200)), endOfHistory = true)),
+        )
+
+        val fill = fixture.coordinator().fill(fixture.roomId, focused(), history, pageSize = 2)
+
+        assertEquals("exhausted_focused_gap", fill.endReason)
+        assertEquals(1, fill.pagesLoaded)
+        assertEquals(3, rowCount(fixture))
+        val gap = fixture.db.historyGapDao().forRoom(fixture.roomId).single()
+        assertFalse(gap.recoverable)
+        assertEquals(200L, gap.newerServerTime)
+    }
+
     // =============================================================================================
     // What the coordinator adds on top of the inherited cascade.
     // =============================================================================================
@@ -345,6 +519,27 @@ class HistoryGapFillCoordinatorTest {
         assertEquals(gapId, gap.id)
         assertTrue("a stalled boundary is not proof the interval is gone", gap.recoverable)
         assertEquals(212L, gap.newerServerTime)
+        // Stopping this cascade is right; reporting it as EXHAUSTION to whoever armed it is not.
+        // Nothing landed and the seam is where it was, so the interval is still owed.
+        assertEquals(GapFillProgress.STALLED, fill.progress)
+    }
+
+    @Test
+    fun onlyAnEmptyHandedAntiLivelockStopReportsAStall() = runTest {
+        // The classification the autopilot re-arms on has to be narrow, or a bounded fill becomes a
+        // retry loop. Every end that moved history or settled the question keeps its arming spent.
+        fun fill(pages: Int, inserted: Int, reason: String) =
+            HistoryGapFillCoordinator.GapFill(gapId = 1, pagesLoaded = pages, insertedCount = inserted, endReason = reason)
+
+        assertEquals(GapFillProgress.STALLED, fill(1, 0, "no_append_progress").progress)
+        // The budget is exhaustion by design: the seam stays open and the user's tap resumes it.
+        assertEquals(GapFillProgress.MOVED, fill(3, 150, "page_budget").progress)
+        assertEquals(GapFillProgress.MOVED, fill(1, 50, "gap_filled").progress)
+        assertEquals(GapFillProgress.MOVED, fill(0, 0, "already_filling").progress)
+        assertEquals(GapFillProgress.MOVED, fill(1, 0, "exhausted_focused_gap").progress)
+        assertEquals(GapFillProgress.MOVED, fill(1, 0, "page_failed").progress)
+        // A page that inserted rows and still could not advance is progress, not contention.
+        assertEquals(GapFillProgress.MOVED, fill(1, 12, "no_append_progress").progress)
     }
 
     @Test
@@ -581,7 +776,14 @@ class HistoryGapFillCoordinatorTest {
             diagnostics,
         )
 
-        fun mediator(history: FakeHistory, pageSize: Int) = ChatHistoryRemoteMediator(
+        fun mediator(
+            history: FakeHistory,
+            pageSize: Int,
+            // Around, because the mediator's gap-directed older cascade lives only there now. Every
+            // fixture in this file puts its gap's newer edge well below this anchor, so the gap is
+            // the selected one for as long as it exists.
+            focus: HistoryWindowFocus = HistoryWindowFocus.Around(FOCUS_ANCHOR_TIME),
+        ) = ChatHistoryRemoteMediator(
             bufferId = roomId,
             bufferDao = db.bufferDao(),
             messageDao = db.messageDao(),
@@ -590,7 +792,7 @@ class HistoryGapFillCoordinatorTest {
             pageSize = pageSize,
             historyCursorDao = db.historyCursorDao(),
             historyGapDao = db.historyGapDao(),
-            focus = HistoryWindowFocus.Recent,
+            focus = focus,
             loader = loader,
             diagnostics = diagnostics,
         )
@@ -622,6 +824,8 @@ class HistoryGapFillCoordinatorTest {
             HistoryReferenceType.MSGID,
         ),
         private val onRequest: (suspend (ChatHistoryRequest) -> Unit)? = null,
+        /** Per-request rejection, for the msgid→timestamp fallback ladder. */
+        private val failureFor: ((ChatHistoryRequest) -> Throwable?)? = null,
     ) : HistoryGapFillCoordinator.HistorySource, ChatHistoryRemoteMediator.HistorySource {
         val requests = mutableListOf<ChatHistoryRequest>()
 
@@ -631,6 +835,7 @@ class HistoryGapFillCoordinatorTest {
         override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
             requests += req
             onRequest?.invoke(req)
+            failureFor?.invoke(req)?.let { throw it }
             val page = script(req)
             return messages(page.events, page.endOfHistory)
         }
@@ -683,6 +888,9 @@ class HistoryGapFillCoordinatorTest {
     private companion object {
         /** Loop guard: no scenario here needs anywhere near this many drives. */
         const val MAX_LADDER_STEPS = 12
+
+        /** Newer than every gap edge in this file, so Around focus always selects the fixture gap. */
+        const val FOCUS_ANCHOR_TIME = 10_000L
     }
 }
 

@@ -40,6 +40,7 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
+import io.github.trevarj.motd.data.sync.GapFillProgress
 import io.github.trevarj.motd.data.sync.HistoryGapFiller
 import io.github.trevarj.motd.data.sync.NoopHistoryGapFiller
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
@@ -261,6 +262,42 @@ class ChatViewModel @Inject constructor(
      */
     fun fillGap(gapId: Long) = viewModelScope.launch {
         gapFiller.fillGap(operationalBufferId.value, gapId)
+    }
+
+    /**
+     * Hands-free fill for the newest recoverable seam, so a reconnect's catch-up gap closes without
+     * the user having to find its divider and tap it.
+     *
+     * The decision is [HistoryGapAutopilot]'s and is deliberately conservative; this only supplies
+     * the inputs and runs the fill. Started here rather than in [init] because it needs
+     * [timelineSeams], and collecting that flow is what keeps the seam observer alive.
+     */
+    private fun runGapAutopilot() = viewModelScope.launch {
+        val autopilot = HistoryGapAutopilot()
+        combine(
+            operationalBufferId,
+            visibleSession,
+            historyAvailability,
+            entryState,
+            timelineSeams,
+        ) { roomId, session, availability, entry, seams ->
+            autopilot.arm(
+                roomId,
+                session,
+                availability,
+                entrySettled = entry !is EntryPositionState.Pending,
+                seams = seams.seams,
+            )
+        }.filterNotNull().collect { armed ->
+            // One budgeted fill. The coordinator drops it if the room is already filling, so a tap
+            // racing the autopilot costs a classification, not a duplicate ladder.
+            //
+            // `combine` emits into this collector sequentially, so `arm` cannot run while this call
+            // is suspended: the release below always lands before the next arming is decided.
+            if (gapFiller.fillNewestGap(armed.roomId) == GapFillProgress.STALLED) {
+                autopilot.releaseStalled(armed)
+            }
+        }
     }
 
     /** A focused older island keeps an explicit escape to the independently loaded recent island. */
@@ -1362,6 +1399,10 @@ class ChatViewModel @Inject constructor(
     /** One-shot entry/deep-link positioning state; read gating derives from it. */
     val entryState: StateFlow<EntryPositionState> = _entryState.asStateFlow()
 
+    // Started here, not in the first init block: viewModelScope dispatches on Main.immediate, so the
+    // collector runs eagerly and would read `entryState` before this line initialized it.
+    init { runGapAutopilot() }
+
     // Re-resolve is allowed exactly once per normal-entry target; explicit jump requests carry
     // their own guard so a superseded request cannot spend the newer request's retry.
     private var initialReresolveUsed = false
@@ -1410,8 +1451,9 @@ class ChatViewModel @Inject constructor(
                 bufferId,
                 HistoryWindowFocus.Recent,
             )
-            // Resolve only inside the bounded recent island. A retained gap is represented as a
-            // lower-bound count; it must not redirect normal entry into an older paging island.
+            // Recent is unbounded now, so this resolves against every retained row. That is the same
+            // answer the old bounded call gave: a window bound could only ever hide rows the client
+            // already holds, and a gap's far side is by definition rows it does not.
             val firstUnread = realMarker?.let {
                 visibilityReader.firstVisibleUnreadAnchor(bufferId, it, entrySpec, recentBounds)
             }
@@ -1426,8 +1468,12 @@ class ChatViewModel @Inject constructor(
                     UnreadEntrySnapshot(
                         marker = TimelineAnchor(it.serverTime, it.eventId - 1L, it.timelineOrder),
                         loadedCount = (unreadRow?.unreadCount ?: 1).coerceAtLeast(1),
-                        lowerBound = unreadRow?.unreadCountIncomplete == true ||
-                            recentBounds.lowerBoundary != null,
+                        // Gap-derived only. The window-bounds disjunct that used to sit here is now
+                        // always false (Recent no longer passes a lower boundary), and it was always
+                        // the weaker of the two: `unreadCountIncomplete` is computed in SQL from the
+                        // room's stored gaps against its read marker, so it states "some unread
+                        // history is missing" directly instead of inferring it from a clamp.
+                        lowerBound = unreadRow?.unreadCountIncomplete == true,
                     )
                 }
                 _unreadEntrySnapshot.value = frozen

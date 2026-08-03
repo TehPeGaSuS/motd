@@ -37,6 +37,16 @@ sealed interface Pageability {
 data class PageProgress(val previous: ChatHistoryReference?, val insertedCount: Int)
 
 /**
+ * The anti-livelock stop: nothing landed and the next request would be byte-identical.
+ *
+ * Named because two very different callers read it. For Paging it is terminal — there is nothing
+ * else the direction can do. For a demand-driven gap fill it is not a statement about the interval
+ * at all, only about this attempt, so the caller that armed the fill is entitled to tell the two
+ * apart. Emitted verbatim as an `end_reason` diagnostic field; treat it as a wire contract.
+ */
+const val NO_APPEND_PROGRESS = "no_append_progress"
+
+/**
  * Older-direction (APPEND / CHATHISTORY BEFORE) pageability.
  *
  * Called twice per load with the same rules: once before fetching, to pick the boundary, and once
@@ -48,6 +58,8 @@ data class PageProgress(val previous: ChatHistoryReference?, val insertedCount: 
  * @param cursorOldest the stored protocol cursor's oldest boundary, if one exists
  * @param oldestLocalRow the oldest retained row's boundary, if the store is non-empty
  * @param progress non-null only on the post-page call
+ * @param gapFloor the oldest OLDER edge among the room's open gaps, for a caller that must not page
+ *   into an interval a gap owns; null when the caller IS the gap-directed one (see [openGapFloor])
  */
 fun olderPageability(
     focusedGap: HistoryGapEntity?,
@@ -55,6 +67,7 @@ fun olderPageability(
     cursorOldest: ChatHistoryReference?,
     oldestLocalRow: ChatHistoryReference?,
     progress: PageProgress?,
+    gapFloor: ChatHistoryReference? = null,
 ): Pageability {
     // Same condition, two classifications: before a page the gap was already known unrecoverable,
     // after a page the fetch itself proved the remainder empty. Field tooling distinguishes a stall
@@ -68,21 +81,70 @@ fun olderPageability(
     // interior interval that is still recoverable.
     if (historyComplete && focusedGap == null) return Pageability.End("history_complete")
 
-    // Boundary ladder: the focused gap's newer edge (page BEFORE the island the gap sits under),
-    // else the stored protocol cursor, else the oldest retained row.
+    // Boundary ladder. A gap-directed caller pages BEFORE the island its gap sits under, full stop.
+    //
+    // The ungapped caller — the mediator's bottom-of-timeline APPEND — instead takes the OLDEST
+    // point it knows, and that is a minimum rather than a preference order for two separate reasons:
+    //
+    //  - `cursorOldest` is not a lower bound on the local rows. A LATEST page landing a NEWER island
+    //    (reconnect catch-up) unions its own oldest into the cursor, so on a store that was empty
+    //    before the disconnect the cursor ends up NEWER than rows the client already holds. Taking
+    //    it in preference re-requests an interval that is already durable;
+    //  - [gapFloor] is where the two demand sources are held apart. An open gap owns the interval
+    //    strictly between its edges, so requesting BEFORE any point at or above a gap's OLDER edge
+    //    reaches into that interval. Clamping to the oldest such edge puts every ungapped request
+    //    strictly BELOW every open gap: BEFORE is strictly-older-than, so the two can no longer name
+    //    the same rows, whichever of them runs first.
+    //
+    // With no open gap the floor is absent and this degenerates to "page below the oldest thing I
+    // know", which is the ladder it has always been.
     val boundary = focusedGap?.let { ChatHistoryReference(it.newerMsgid, it.newerServerTime) }
-        ?: cursorOldest?.takeIf { it.msgid != null || it.serverTime != null }
-        ?: oldestLocalRow
+        ?: olderOf(
+            olderOf(cursorOldest?.takeIf { it.msgid != null || it.serverTime != null }, oldestLocalRow),
+            gapFloor,
+        )
 
     if (progress != null && progress.insertedCount == 0 && !boundary.advancedFrom(progress.previous)) {
         // Anti-livelock guard: nothing landed AND the next request would be identical, so reporting
         // "more" would have Paging hammer the wire forever.
-        return Pageability.End("no_append_progress")
+        return Pageability.End(NO_APPEND_PROGRESS)
     }
     // A null boundary is not an end: an empty store simply has nothing to page BEFORE yet, and the
     // newest page seeds one. With SKIP_INITIAL_REFRESH the remote REFRESH never fires on first
     // open, so this is where a fresh buffer's backfill actually starts.
     return boundary?.let { Pageability.Page(it, focusedGap?.id) } ?: Pageability.SeedLatest
+}
+
+/**
+ * The floor an ungapped older request must stay at or below so it cannot enter an interval a gap
+ * owns: the OLDEST `older` edge among [gaps], or null when the room has none.
+ *
+ * Recoverability is deliberately not filtered on. An unrecoverable gap still covers an interval —
+ * one the server has PROVEN empty — so re-requesting it is wasted wire traffic whose empty result
+ * the anti-livelock rule would then read as "this direction is finished". Either way that interval
+ * belongs to the gap and not to the bottom-of-timeline ladder.
+ *
+ * The edge is taken by server time alone. Both consumers of this value serialize it to a CHATHISTORY
+ * BEFORE selector, which is strictly-older-than on timestamp, so equal-timestamp precision buys
+ * nothing here; the exact edge identity still travels with the gap for the fill that owns it.
+ */
+fun openGapFloor(gaps: List<HistoryGapEntity>): ChatHistoryReference? = gaps
+    .minByOrNull { it.olderServerTime }
+    ?.let { ChatHistoryReference(it.olderMsgid, it.olderServerTime) }
+
+/**
+ * The older of two boundaries.
+ *
+ * A boundary with no server time cannot be ordered against one that has it — a bare msgid names an
+ * event whose position only the server knows — so it yields rather than guessing. Every gap edge and
+ * every retained row carries a server time; only a stored protocol cursor can lack one.
+ */
+internal fun olderOf(a: ChatHistoryReference?, b: ChatHistoryReference?): ChatHistoryReference? {
+    if (a == null) return b
+    if (b == null) return a
+    val aTime = a.serverTime ?: return b
+    val bTime = b.serverTime ?: return a
+    return if (bTime < aTime) b else a
 }
 
 /**

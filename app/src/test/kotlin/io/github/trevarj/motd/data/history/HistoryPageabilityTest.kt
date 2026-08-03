@@ -42,7 +42,8 @@ class HistoryPageabilityTest {
         cursorOldest: ChatHistoryReference? = null,
         oldestLocalRow: ChatHistoryReference? = null,
         progress: PageProgress? = null,
-    ) = olderPageability(focusedGap, historyComplete, cursorOldest, oldestLocalRow, progress)
+        gapFloor: ChatHistoryReference? = null,
+    ) = olderPageability(focusedGap, historyComplete, cursorOldest, oldestLocalRow, progress, gapFloor)
 
     // --- older direction: terminal branches -----------------------------------------------------
 
@@ -105,10 +106,19 @@ class HistoryPageabilityTest {
     }
 
     @Test
-    fun theStoredCursorOutranksTheOldestLocalRow() {
-        val result = older(cursorOldest = ref("cursor", 50), oldestLocalRow = ref("row", 10))
-
-        assertEquals(Pageability.Page(ref("cursor", 50), focusedGapId = null), result)
+    fun theUngappedLadderTakesTheOldestOfTheCursorAndTheOldestLocalRow() {
+        // Not a preference order: whichever names the older point wins, in both directions. A
+        // reconnect LATEST page unions its own oldest row into the stored cursor, so on a store that
+        // was empty before the disconnect the cursor can end up NEWER than rows already held, and
+        // paging BEFORE it would re-request an interval that is already durable.
+        assertEquals(
+            Pageability.Page(ref("row", 10), focusedGapId = null),
+            older(cursorOldest = ref("cursor", 50), oldestLocalRow = ref("row", 10)),
+        )
+        assertEquals(
+            Pageability.Page(ref("cursor", 5), focusedGapId = null),
+            older(cursorOldest = ref("cursor", 5), oldestLocalRow = ref("row", 10)),
+        )
     }
 
     @Test
@@ -121,15 +131,79 @@ class HistoryPageabilityTest {
 
     @Test
     fun aCursorWithOnlyATimestampIsStillUsable() {
-        val result = older(cursorOldest = ref(null, 50), oldestLocalRow = ref("row", 10))
+        val result = older(cursorOldest = ref(null, 50), oldestLocalRow = ref("row", 90))
 
         assertEquals(Pageability.Page(ref(null, 50), focusedGapId = null), result)
+    }
+
+    @Test
+    fun aCursorWithNoServerTimeCannotBeOrderedAndYields() {
+        // A bare msgid names an event whose position only the server knows, so it cannot be compared
+        // against a timestamped boundary; the orderable one is taken rather than guessing.
+        val result = older(cursorOldest = ref("cursor", null), oldestLocalRow = ref("row", 10))
+
+        assertEquals(Pageability.Page(ref("row", 10), focusedGapId = null), result)
     }
 
     @Test
     fun noBoundaryAtAllSeedsTheNewestPage() {
         // Fresh or cleared store: with SKIP_INITIAL_REFRESH this is where backfill actually starts.
         assertEquals(Pageability.SeedLatest, older())
+    }
+
+    // --- older direction: the gap floor ----------------------------------------------------------
+
+    @Test
+    fun theGapFloorClampsAnUngappedLadderStrictlyBelowTheGap() {
+        // The reconnect shape: the cursor sits exactly ON the gap's newer edge, so the ungapped
+        // ladder would issue the identical request the gap's own fill issues. Clamping to the gap's
+        // older edge puts it strictly below the interval instead — BEFORE is strictly-older-than, so
+        // the two demand sources can no longer name the same rows.
+        val result = older(
+            cursorOldest = ref("newer", 500),
+            oldestLocalRow = ref("newer", 500),
+            gapFloor = ref("older", 100),
+        )
+
+        assertEquals(Pageability.Page(ref("older", 100), focusedGapId = null), result)
+    }
+
+    @Test
+    fun theGapFloorNeverRaisesTheLadderAboveDeeperLocalHistory() {
+        // A deep island below the gap: clamping UP to the gap's older edge would re-request rows the
+        // client already holds, whose zero inserts the anti-livelock rule then reads as terminal.
+        val result = older(oldestLocalRow = ref("deep", 5), gapFloor = ref("older", 100))
+
+        assertEquals(Pageability.Page(ref("deep", 5), focusedGapId = null), result)
+    }
+
+    @Test
+    fun theGapFloorDoesNotApplyToAGapDirectedCaller() {
+        // The fill IS the gap-directed caller; clamping it below its own gap would fetch the one
+        // interval it is not there for.
+        val result = older(focusedGap = gap(), gapFloor = ref("older", 100))
+
+        assertEquals(Pageability.Page(ref("newer", 500), focusedGapId = 7), result)
+    }
+
+    @Test
+    fun theGapFloorIsTheOldestOlderEdgeAcrossEveryOpenGap() {
+        assertEquals(null, openGapFloor(emptyList()))
+        assertEquals(
+            ref("older", 100),
+            openGapFloor(
+                listOf(
+                    gap(id = 1, olderMsgid = "mid", olderServerTime = 300, newerServerTime = 400),
+                    gap(id = 2, olderMsgid = "older", olderServerTime = 100),
+                ),
+            ),
+        )
+        // Recoverability is not filtered on: a server-proven-empty interval still belongs to its gap
+        // and re-requesting it would return nothing, which the ungapped ladder reads as terminal.
+        assertEquals(
+            ref("older", 100),
+            openGapFloor(listOf(gap(recoverable = false))),
+        )
     }
 
     // --- older direction: the progress rule ------------------------------------------------------

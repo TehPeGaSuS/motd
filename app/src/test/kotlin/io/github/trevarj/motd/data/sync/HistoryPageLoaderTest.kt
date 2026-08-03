@@ -125,6 +125,7 @@ class HistoryPageLoaderTest {
         history: HistoryPageLoader.HistorySource,
         boundary: ChatHistoryReference,
         pageSize: Int = 50,
+        gapId: Long? = null,
     ) = loader.loadPage(
         networkId,
         bufferId,
@@ -132,6 +133,7 @@ class HistoryPageLoaderTest {
         HistoryPageLoader.Direction.OLDER,
         history,
         pageSize,
+        gapId = gapId,
         boundary = boundary,
     )
 
@@ -412,6 +414,77 @@ class HistoryPageLoaderTest {
         assertTrue((follower.await() as HistoryPageLoader.PageResult.Loaded).primaryCount == 1)
         assertEquals(1, calls)
         assertEquals(2, rowCount())
+    }
+
+    @Test
+    fun aGapDirectedOlderLoadNeverJoinsTheBottomOfTimelineLadder() = runTest {
+        // The two demand sources on an unbounded timeline are asking different questions: `null` is
+        // the bottom-of-timeline ladder, which pages strictly below every open gap, and a gap id is a
+        // fill of one specific interior interval. Coalescing across that split hands the follower a
+        // page for an interval it never requested and credits it with rows it did not fetch — its own
+        // boundary never moves, so it reads its zero inserts as "this interval is exhausted", which
+        // is exactly how a bounded gap fill ends after one page having achieved nothing.
+        processor.process(networkId, chatMsg("seed", 500))
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val bounds = mutableListOf<String?>()
+        val history = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability = HistoryAvailability.Ready(
+                setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID),
+                100,
+            )
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                bounds += req.bound1
+                if (bounds.size == 1) {
+                    entered.complete(Unit)
+                    release.await()
+                }
+                return messages(listOf(chatMsg("older-${bounds.size}", 100L * bounds.size)))
+            }
+        }
+
+        val ladder = async { loadOlder(history, ChatHistoryReference("seed", 500)) }
+        entered.await()
+        val fill = async { loadOlder(history, ChatHistoryReference("gap-edge", 900), gapId = 7) }
+        runCurrent()
+        release.complete(Unit)
+        ladder.await()
+        fill.await()
+
+        assertEquals(listOf("msgid=seed", "msgid=gap-edge"), bounds)
+    }
+
+    @Test
+    fun twoGenerationsOfTheSameGapFillStillCoalesce() = runTest {
+        // The original rationale is untouched: two live generations of the SAME question re-read the
+        // store after each page and issue their next load from their own boundary, so joining
+        // whichever page is in flight is still safe and still stops a generation swap double-fetching.
+        processor.process(networkId, chatMsg("seed", 500))
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var calls = 0
+        val history = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability = HistoryAvailability.Ready(
+                setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID),
+                100,
+            )
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                calls++
+                entered.complete(Unit)
+                release.await()
+                return messages(listOf(chatMsg("older", 100)))
+            }
+        }
+
+        val leader = async { loadOlder(history, ChatHistoryReference("seed", 500), gapId = 7) }
+        entered.await()
+        val follower = async { loadOlder(history, ChatHistoryReference("seed", 500), gapId = 7) }
+        runCurrent()
+        release.complete(Unit)
+        leader.await()
+        follower.await()
+
+        assertEquals(1, calls)
     }
 
     @Test
