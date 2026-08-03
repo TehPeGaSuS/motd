@@ -1005,7 +1005,8 @@ class ChatViewModelTest {
         val frozen = checkNotNull(first.unreadEntrySnapshot.first { it != null })
         assertEquals(101L, frozen.marker.serverTime)
         assertEquals(unreadIds.first() - 1L, frozen.marker.eventId)
-        assertTrue(visit.get<Boolean>("unread_entry_snapshot_computed") == true)
+        // Await the durable flag: the snapshot flow can emit before the persist lands.
+        visit.getStateFlow("unread_entry_snapshot_computed", false).first { it }
         assertEquals(101L, visit.get<Long>("unread_entry_snapshot_time"))
 
         // Process death. The durable marker has meanwhile advanced past every unread row, so a
@@ -1024,7 +1025,9 @@ class ChatViewModelTest {
         reentered.state.first { it.buffer != null }
         advanceUntilIdle()
         assertNull(reentered.unreadEntrySnapshot.value)
-        assertTrue(reentry.get<Boolean>("unread_entry_snapshot_computed") == true)
+        // The freeze persists off the test scheduler, so await the durable flag rather than
+        // reading it straight after advanceUntilIdle: on a loaded machine it has not landed yet.
+        reentry.getStateFlow("unread_entry_snapshot_computed", false).first { it }
         assertEquals(0L, reentry.get<Long>("unread_entry_snapshot_time"))
 
         // ...and that frozen absence survives process death too: messages arriving after entry
