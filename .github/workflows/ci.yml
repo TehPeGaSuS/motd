@@ -116,8 +116,46 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      # A cached AVD + snapshot is only valid for the emulator that produced it,
+      # so the key has to carry the emulator revision: when the runner image
+      # upgrades its bundled emulator, a prefix-identical key would otherwise
+      # restore a stale snapshot and degrade into odd boots and flaky runs.
+      - name: Resolve emulator revision for the AVD cache key
+        id: emulator-revision
+        run: |
+          set -uo pipefail
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Android/Sdk}}"
+          revision=""
+          # Preferred source: the emulator binary the run will actually use.
+          if [ -x "$sdk/emulator/emulator" ]; then
+            revision="$(timeout 60 "$sdk/emulator/emulator" -version 2>/dev/null \
+              | sed -n 's/.*emulator version \([0-9][0-9A-Za-z.]*\).*/\1/p' \
+              | head -n 1)" || revision=""
+          fi
+          # Fallback: the installed SDK package revision, no binary launch.
+          if [ -z "$revision" ] && [ -x "$sdk/cmdline-tools/latest/bin/sdkmanager" ]; then
+            revision="$(timeout 300 "$sdk/cmdline-tools/latest/bin/sdkmanager" \
+              --list_installed 2>/dev/null \
+              | awk -F'|' '$1 ~ /^[[:space:]]*emulator[[:space:]]*$/ {
+                  gsub(/[[:space:]]/, "", $2); print $2; exit }')" || revision=""
+          fi
+          # Last resorts keep the key non-empty. The runner image version moves
+          # whenever the bundled emulator does, and a fully unresolvable
+          # revision falls back to a per-run key so the job cold-creates the AVD
+          # instead of trusting a cache entry it cannot validate.
+          if [ -z "$revision" ] && [ -n "${ImageVersion:-}" ]; then
+            revision="image-${ImageVersion}"
+          fi
+          if [ -z "$revision" ]; then
+            revision="unresolved-${GITHUB_RUN_ID:-$(date +%s)}"
+          fi
+          revision="$(printf '%s' "$revision" | tr -c 'A-Za-z0-9._-' '-')"
+          echo "Emulator revision for AVD cache key: $revision"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
       # Cache the AVD + a warm boot snapshot so runs load a snapshot instead of
       # cold-booting. Key covers every dimension that changes the image/AVD.
+      # No restore-keys on purpose: a prefix match would reintroduce exactly the
+      # stale-AVD reuse the emulator revision is here to prevent.
       - name: AVD cache
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         id: avd-cache
@@ -125,7 +163,7 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-api34-default-x86_64-pixel6
+          key: avd-api34-default-x86_64-pixel6-emu-${{ steps.emulator-revision.outputs.revision }}
       - name: Create AVD and generate snapshot for caching
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
