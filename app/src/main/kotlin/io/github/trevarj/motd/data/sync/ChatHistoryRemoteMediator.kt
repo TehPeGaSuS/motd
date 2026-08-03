@@ -9,6 +9,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.HistoryCursorDao
+import io.github.trevarj.motd.data.db.HistoryCursorEntity
 import io.github.trevarj.motd.data.db.HistoryGapDao
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.ircTarget
@@ -36,6 +37,11 @@ import kotlinx.coroutines.CancellationException
  *           boundary yet) pull LATEST once to backfill on first open; otherwise BEFORE the oldest
  *           protocol page boundary. Completed empty pages and explicit end markers persist the
  *           confirmed start-of-history state through EventProcessor.
+ *
+ * Paging treats `endOfPaginationReached` as PERMANENT for a direction, so both directional loads
+ * report it only when paging is genuinely finished (gap closed/unrecoverable, history complete, or a
+ * page that made no progress) — never merely because the loader had to stop at one ambiguous
+ * equal-timestamp page edge. See [appendResult].
  *
  * Every entry uses SKIP_INITIAL_REFRESH so the cached DB paints without network I/O; Paging3 then
  * drives REFRESH (empty-store LATEST seed, otherwise no-op) and scroll-triggered APPEND for older
@@ -138,9 +144,13 @@ class ChatHistoryRemoteMediator(
      * field is named `end_reason` because DiagnosticLogger redacts any field literally named
      * `reason` (IRC quit/kick reasons are user content; this classification is not).
      */
-    private fun endLoad(loadType: LoadType, reason: String): MediatorResult {
+    private fun endLoad(
+        loadType: LoadType,
+        reason: String,
+        extra: Map<String, Any?> = emptyMap(),
+    ): MediatorResult {
         diagnostics.record("chat_history", "mediator_load_ended") {
-            mapOf("load_type" to loadType.name, "room_id" to bufferId, "end_reason" to reason)
+            mapOf("load_type" to loadType.name, "room_id" to bufferId, "end_reason" to reason) + extra
         }
         return MediatorResult.Success(endOfPaginationReached = true)
     }
@@ -180,12 +190,7 @@ class ChatHistoryRemoteMediator(
             return endLoad(LoadType.APPEND, "history_complete")
         }
         val cursor = historyCursorDao?.byRoom(roomId)
-        val oldest = focusedGap?.let { ChatHistoryReference(it.newerMsgid, it.newerServerTime) }
-            ?: cursor?.let { ChatHistoryReference(it.oldestMsgid, it.oldestServerTime) }
-            ?.takeIf { it.msgid != null || it.serverTime != null }
-            ?: messageDao.oldestBoundary(roomId)?.let {
-                ChatHistoryReference(it.msgid, it.serverTime)
-            }
+        val oldest = olderBoundary(roomId, focusedGap, cursor)
         diagnostics.record("chat_history", "append_boundary") {
             mapOf(
                 "room_id" to roomId,
@@ -208,7 +213,7 @@ class ChatHistoryRemoteMediator(
                 HistoryPageLoader.Direction.LATEST,
                 history,
                 pageSize,
-            ).toMediatorResult()
+            ).appendResult(roomId, previous = null)
         }
         return loader.loadPage(
             networkId,
@@ -219,7 +224,81 @@ class ChatHistoryRemoteMediator(
             pageSize,
             gapId = focusedGap?.id,
             boundary = oldest,
-        ).toMediatorResult()
+        ).appendResult(roomId, previous = oldest)
+    }
+
+    /**
+     * Decide APPEND terminality from PROGRESS rather than from the loader's per-page cursor guard.
+     *
+     * [HistoryPageLoader.PageResult.Loaded.endOfDirection] conflates two different facts: "this
+     * direction is exhausted" and "I cannot safely page again from THIS cursor" (an ambiguous
+     * equal-timestamp boundary at a saturated page edge). Paging treats `endOfPaginationReached` as
+     * permanently terminal for the direction, so reporting the second fact kills older backfill after
+     * a single page on a timestamp-only wire (soju advertises `MSGREFTYPES=timestamp`), where every
+     * saturated page trips it. Terminate only when older paging is genuinely finished:
+     *  - the focused older gap became server-proven unrecoverable, or
+     *  - history is complete and no focused gap remains, or
+     *  - the page made no progress at all.
+     * Otherwise the boundary moved (or rows landed), so the next APPEND issues a different request
+     * and the ambiguity that stopped this page no longer applies.
+     */
+    private suspend fun HistoryPageLoader.PageResult.appendResult(
+        roomId: Long,
+        previous: ChatHistoryReference?,
+    ): MediatorResult {
+        val page = this as? HistoryPageLoader.PageResult.Loaded ?: return toMediatorResult()
+        val remaining = focusedOlderGap(historyGapDao?.forRoom(roomId).orEmpty())
+        if (remaining?.recoverable == false) {
+            return endLoad(LoadType.APPEND, "exhausted_focused_gap")
+        }
+        if (bufferDao.observeById(roomId)?.historyComplete == true && remaining == null) {
+            return endLoad(LoadType.APPEND, "history_complete")
+        }
+        val next = olderBoundary(roomId, remaining, historyCursorDao?.byRoom(roomId))
+        if (page.insertedCount == 0 && !next.advancedFrom(previous)) {
+            // Anti-livelock guard: the next APPEND would repeat this exact request, so returning
+            // "more" here would have Paging hammer the wire. A silent permanent stop is hard to
+            // diagnose in the field, so record the boundary that failed to move.
+            return endLoad(
+                LoadType.APPEND,
+                "no_append_progress",
+                mapOf(
+                    "primary_count" to page.primaryCount,
+                    "end_of_direction" to page.endOfDirection,
+                    "focused_gap_id" to remaining?.id,
+                    "boundary_has_msgid" to (next?.msgid != null),
+                    "boundary_server_time" to next?.serverTime,
+                ),
+            )
+        }
+        return MediatorResult.Success(endOfPaginationReached = false)
+    }
+
+    /**
+     * The APPEND boundary: the focused older gap's newer edge, else the stored protocol cursor, else
+     * the oldest retained row. Recomputed after a page so a cursor that actually receded can be told
+     * apart from one that did not.
+     */
+    private suspend fun olderBoundary(
+        roomId: Long,
+        focusedGap: HistoryGapEntity?,
+        cursor: HistoryCursorEntity?,
+    ): ChatHistoryReference? =
+        focusedGap?.let { ChatHistoryReference(it.newerMsgid, it.newerServerTime) }
+            ?: cursor?.let { ChatHistoryReference(it.oldestMsgid, it.oldestServerTime) }
+            ?.takeIf { it.msgid != null || it.serverTime != null }
+            ?: messageDao.oldestBoundary(roomId)?.let {
+                ChatHistoryReference(it.msgid, it.serverTime)
+            }
+
+    /**
+     * Would paging from this boundary issue a different request than [previous]? Losing a msgid at an
+     * unchanged timestamp is NOT an advance: timestamp-only wires strip advertised msgid references,
+     * so the next request would carry the identical timestamp selector over the identical interval.
+     */
+    private fun ChatHistoryReference?.advancedFrom(previous: ChatHistoryReference?): Boolean {
+        if (this == null || previous == null) return this != previous
+        return serverTime != previous.serverTime || (msgid != null && msgid != previous.msgid)
     }
 
     /** Grow an unread/deep-link segment toward the recent window. */
@@ -232,32 +311,42 @@ class ChatHistoryRemoteMediator(
             ?: return MediatorResult.Success(endOfPaginationReached = true)
         if (!gap.recoverable) return MediatorResult.Success(endOfPaginationReached = true)
         val boundary = ChatHistoryReference(gap.olderMsgid, gap.olderServerTime)
-        return when (
-            val page = loader.loadPage(
-                networkId,
-                roomId,
-                target,
-                HistoryPageLoader.Direction.NEWER,
-                history,
-                pageSize,
-                gapId = gap.id,
-                boundary = boundary,
+        val result = loader.loadPage(
+            networkId,
+            roomId,
+            target,
+            HistoryPageLoader.Direction.NEWER,
+            history,
+            pageSize,
+            gapId = gap.id,
+            boundary = boundary,
+        )
+        val page = result as? HistoryPageLoader.PageResult.Loaded ?: return result.toMediatorResult()
+        // The focused newer gap shrank as this page was persisted; re-read it and apply the same
+        // progress rule APPEND uses. A saturated timestamp-only catch-up page trips the loader's
+        // cannotSafelyPageAfter guard, which says "not from this cursor", not "no newer history";
+        // reporting it to Paging would permanently terminate PREPEND, leaving the reconnect gap open
+        // and everything newer than it outside the Around window forever.
+        val remaining = focusedNewerGap(historyGapDao?.forRoom(roomId).orEmpty())
+            ?: return endLoad(LoadType.PREPEND, "newer_gap_closed")
+        if (!remaining.recoverable) return endLoad(LoadType.PREPEND, "exhausted_focused_gap")
+        val next = ChatHistoryReference(remaining.olderMsgid, remaining.olderServerTime)
+        if (page.insertedCount == 0 && !next.advancedFrom(boundary)) {
+            // Anti-livelock guard, mirroring APPEND: an unmoved boundary with nothing persisted
+            // means the next PREPEND would repeat this request verbatim.
+            return endLoad(
+                LoadType.PREPEND,
+                "no_prepend_progress",
+                mapOf(
+                    "primary_count" to page.primaryCount,
+                    "end_of_direction" to page.endOfDirection,
+                    "focused_gap_id" to remaining.id,
+                    "boundary_has_msgid" to (next.msgid != null),
+                    "boundary_server_time" to next.serverTime,
+                ),
             )
-        ) {
-            is HistoryPageLoader.PageResult.Loaded -> {
-                // The focused newer gap shrank as this page was persisted; re-read it to decide
-                // whether a recoverable remainder still justifies another PREPEND.
-                val remaining = focusedNewerGap(historyGapDao?.forRoom(roomId).orEmpty())
-                MediatorResult.Success(
-                    endOfPaginationReached = remaining == null ||
-                        !remaining.recoverable ||
-                        page.endOfDirection,
-                )
-            }
-            HistoryPageLoader.PageResult.Unsupported -> MediatorResult.Success(endOfPaginationReached = true)
-            is HistoryPageLoader.PageResult.Unavailable -> MediatorResult.Error(page.cause)
-            is HistoryPageLoader.PageResult.Failed -> MediatorResult.Error(page.cause)
         }
+        return MediatorResult.Success(endOfPaginationReached = false)
     }
 
     /** Map a loader outcome onto this direction's Paging result. */
