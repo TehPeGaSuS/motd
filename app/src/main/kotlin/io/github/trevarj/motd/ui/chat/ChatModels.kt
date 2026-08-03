@@ -343,6 +343,24 @@ internal fun shouldShowNewestFab(
     autoScrolling: Boolean,
 ): Boolean = (!atBottom || hasNewerHistoryIsland) && !autoScrolling
 
+/**
+ * Viewport acknowledgement is only honest when the window's bottom is the conversation's bottom.
+ *
+ * The mark-read effect reads at-bottom from the CURRENT paging window but acknowledges the room's
+ * newest stored row, and those are different rows inside a bounded [HistoryWindowFocus.Around]
+ * island: any deep jump that lands below a retained history gap gets an upper boundary that
+ * deliberately excludes newer rows, so index 0 is the island's bottom, not the room's. Advancing the
+ * durable anchor there marks messages read that were never displayed and uploads a MARKREAD that
+ * clears unread on every other client. [hasNewerHistoryIsland] is derived from the same window
+ * bounds the PagingSource is built from, so it flips in lockstep with the island it describes.
+ */
+internal fun shouldMarkReadFromViewport(
+    atBottom: Boolean,
+    hasNewerHistoryIsland: Boolean,
+    initialPositionSettled: Boolean,
+    viewportReadEnabled: Boolean,
+): Boolean = viewportReadEnabled && initialPositionSettled && atBottom && !hasNewerHistoryIsland
+
 data class ChatScrollPosition(
     val index: Int,
     val offset: Int,

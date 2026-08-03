@@ -1117,10 +1117,18 @@ fun ChatContent(
         }
     }
 
+    // The save/dispose effects below outlive a window flip, so read the island flag through the
+    // latest composition rather than the value captured when the collector started.
+    val latestHasNewerHistoryIsland by rememberUpdatedState(hasNewerHistoryIsland)
+
     fun saveCurrentScrollPosition() {
         if (!initialPositionSettled) return
         val index = listState.firstVisibleItemIndex
-        if (isAtEffectiveBottom(
+        // Clearing the saved position means "resume at the live bottom next time". Inside a bounded
+        // island the window's index 0 is only the island's bottom, so clearing there would silently
+        // discard the user's place in history; save the anchor instead.
+        if (!latestHasNewerHistoryIsland &&
+            isAtEffectiveBottom(
                 firstVisibleIndex = index,
                 firstVisibleOffset = listState.firstVisibleItemScrollOffset,
                 itemCount = items.itemCount,
@@ -1327,10 +1335,23 @@ fun ChatContent(
         ChatTitleTarget.NONE -> null
     }
     // Mark read on new-message-while-at-bottom only (plans/07/15 #2): syncing while scrolled up
-    // reading history would clear unread on other clients and destroy the local unread UX.
-    LaunchedEffect(rawNewestAnchor, atBottom, initialPositionSettled, viewportReadEnabled) {
+    // reading history would clear unread on other clients and destroy the local unread UX. The
+    // bottom of a bounded older island is not the bottom of the conversation, so it never acks.
+    LaunchedEffect(
+        rawNewestAnchor,
+        atBottom,
+        initialPositionSettled,
+        viewportReadEnabled,
+        hasNewerHistoryIsland,
+    ) {
         val newest = rawNewestAnchor ?: return@LaunchedEffect
-        if (viewportReadEnabled && initialPositionSettled && atBottom && newest.serverTime > 0) {
+        val ackable = shouldMarkReadFromViewport(
+            atBottom = atBottom,
+            hasNewerHistoryIsland = hasNewerHistoryIsland,
+            initialPositionSettled = initialPositionSettled,
+            viewportReadEnabled = viewportReadEnabled,
+        )
+        if (ackable && newest.serverTime > 0) {
             AutoFollowTrace.record("viewport_markread", traceBufferId, traceSessionId) {
                 "marker=${newest.serverTime}:${newest.eventId} item_count=${items.itemCount}"
             }

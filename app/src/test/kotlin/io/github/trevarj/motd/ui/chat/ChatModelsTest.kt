@@ -734,6 +734,32 @@ class ChatModelsTest {
     }
 
     @Test
+    fun `viewport acknowledgement requires the conversation bottom, not the island bottom`() {
+        // The one behavior change: a bounded older island never acknowledges, even at its bottom.
+        assertFalse(
+            shouldMarkReadFromViewport(
+                atBottom = true,
+                hasNewerHistoryIsland = true,
+                initialPositionSettled = true,
+                viewportReadEnabled = true,
+            ),
+        )
+        // Unbounded window at bottom still acknowledges exactly as before.
+        assertTrue(
+            shouldMarkReadFromViewport(
+                atBottom = true,
+                hasNewerHistoryIsland = false,
+                initialPositionSettled = true,
+                viewportReadEnabled = true,
+            ),
+        )
+        // Every pre-existing precondition still gates on its own.
+        assertFalse(shouldMarkReadFromViewport(false, false, true, true))
+        assertFalse(shouldMarkReadFromViewport(true, false, false, true))
+        assertFalse(shouldMarkReadFromViewport(true, false, true, false))
+    }
+
+    @Test
     fun `lag tone thresholds bucket latency`() {
         assertEquals(LagTone.GOOD, lagTone(0))
         assertEquals(LagTone.GOOD, lagTone(299))
