@@ -3962,6 +3962,78 @@ class EventProcessorTest {
     }
 
     @Test
+    fun saturatedTimestampOnlySeedRecordsNoDegenerateGap() = runTest {
+        // Source-level invariant for the fresh-buffer seed on a timestamp-only wire: the page is
+        // saturated (primary == limit) and msgid-less with no prior newest boundary and no focused
+        // gap, which used to write a ZERO-WIDTH `recoverable = false` gap on the page's oldest row.
+        // Both claims were false — an interval whose edges name the same row cannot hold a message,
+        // and recoverable=false is reserved for server-proven-empty intervals — and the row poisoned
+        // paging (an unrecoverable focused gap is terminal for APPEND) and the Recent window (it
+        // clamps at the edge row). Nothing missing was observed, so nothing is recorded; the cursor
+        // and historyComplete=false carry "there may be more" on their own.
+        val room = BufferStore(db).getOrCreate(networkId, "#ts-seed", "#ts-seed", BufferType.CHANNEL)
+        val page = (212..261).map { time ->
+            IrcEvent.ChatMessage(
+                ctx(null, time.toLong()), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"),
+                "#ts-seed", "row$time", false, null,
+            )
+        }
+
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#ts-seed", limit = 50),
+            ChatHistoryResponse.Messages(
+                events = page,
+                oldest = ChatHistoryReference(null, 212),
+                newest = ChatHistoryReference(null, 261),
+                endOfHistory = false,
+                primaryMessageCount = 50,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        assertTrue(db.historyGapDao().forRoom(room.id).isEmpty())
+        // The page is still not proof of completeness, so older paging stays open.
+        assertFalse(checkNotNull(db.bufferDao().observeById(room.id)).historyComplete)
+        assertEquals(212L, checkNotNull(db.historyCursorDao().byRoom(room.id)).oldestServerTime)
+    }
+
+    @Test
+    fun saturatedTimestampOnlyBeforePageRecordsNoDegenerateGap() = runTest {
+        // Same invariant for the cursor-driven BEFORE page (no focused gap). Every page of a soju
+        // backfill ladder is saturated and msgid-less, so the old rule would have written one
+        // unrecoverable zero-width gap per page — each of which permanently ends older paging.
+        val room = BufferStore(db).getOrCreate(networkId, "#ts-before", "#ts-before", BufferType.CHANNEL)
+        val page = (162..211).map { time ->
+            IrcEvent.ChatMessage(
+                ctx(null, time.toLong()), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"),
+                "#ts-before", "row$time", false, null,
+            )
+        }
+
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.BEFORE,
+                "#ts-before",
+                bound1 = "timestamp=1970-01-01T00:00:00.212Z",
+                limit = 50,
+            ),
+            ChatHistoryResponse.Messages(
+                events = page,
+                oldest = ChatHistoryReference(null, 162),
+                newest = ChatHistoryReference(null, 211),
+                endOfHistory = false,
+                primaryMessageCount = 50,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        assertTrue(db.historyGapDao().forRoom(room.id).isEmpty())
+        assertFalse(checkNotNull(db.bufferDao().observeById(room.id)).historyComplete)
+    }
+
+    @Test
     fun emptyGapFillResponseStillMarksTheGapUnrecoverable() = runTest {
         // The one legitimate route to recoverable=false: the server PROVED the interval empty by
         // returning zero primary messages for the gap-directed request.

@@ -1144,39 +1144,45 @@ class EventProcessor @Inject constructor(
             }
         }
 
-        val saturatedBoundary = when (request.subcommand) {
+        // A saturated msgid-less page edge is an AMBIGUOUS CURSOR, not a missing interval, so it is
+        // recorded as an observation and never as a durable gap.
+        //
+        // `history_gaps` rows mean exactly one thing: "messages are missing strictly between these
+        // two known boundaries". A row whose older and newer edges name the SAME event asserts
+        // nothing — a zero-width interval cannot hold a message — and `recoverable = false` is
+        // reserved for intervals the server PROVED empty (the primaryMessageCount == 0 branch
+        // above). A saturated timestamp-only page proves neither, so writing that row states two
+        // falsehoods at once and both of its consumers act on them: the mediator treats an
+        // unrecoverable focused gap as permanently terminal (killing older backfill from page one on
+        // every soju MSGREFTYPES=timestamp wire), and `historyWindowBounds` clamps the Recent window
+        // at the edge row (hiding whatever backfill did land). This mirrors the directional branches
+        // above and the catch-up insert below, which already refuse to let saturation poison a gap.
+        //
+        // What saturation genuinely means — "additional messages may share this boundary timestamp,
+        // so the SAME cursor cannot be paged past safely" — is a per-fetch property and stays where
+        // it already lives: HistoryPageLoader's cannotSafelyPageBefore/cannotSafelyPageAfter end
+        // that fetch at the ambiguous edge, `historyComplete` is still only set by a terminal
+        // response, and the mediator re-issues only after the boundary actually advanced.
+        val ambiguousBoundary = when (request.subcommand) {
             ChatHistoryRequest.Subcommand.LATEST,
             ChatHistoryRequest.Subcommand.BEFORE,
-            -> pageOldest to pageOldestAnchor
-            ChatHistoryRequest.Subcommand.AFTER -> pageNewest to pageNewestAnchor
+            -> pageOldest
+            ChatHistoryRequest.Subcommand.AFTER -> pageNewest
             else -> null
-        }?.takeIf { (reference, _) ->
+        }?.takeIf { reference ->
             !terminal && reference.msgid == null &&
                 response.primaryMessageCount >= request.limit &&
                 directionalGap == null &&
                 (request.subcommand != ChatHistoryRequest.Subcommand.LATEST || previousNewest == null)
         }
-        saturatedBoundary?.let { (reference, anchor) ->
-            val time = checkNotNull(reference.serverTime)
-            val alreadyRecorded = db.historyGapDao().forRoom(roomId).any { gap ->
-                !gap.recoverable &&
-                    gap.olderServerTime == time && gap.newerServerTime == time &&
-                    gap.olderEventId == anchor?.eventId && gap.newerEventId == anchor?.eventId
-            }
-            if (!alreadyRecorded) {
-                db.historyGapDao().insert(
-                    HistoryGapEntity(
-                        roomId = roomId,
-                        olderMsgid = reference.msgid,
-                        olderServerTime = time,
-                        newerMsgid = reference.msgid,
-                        newerServerTime = time,
-                        recoverable = false,
-                        olderEventId = anchor?.eventId,
-                        olderTimelineOrder = anchor?.timelineOrder,
-                        newerEventId = anchor?.eventId,
-                        newerTimelineOrder = anchor?.timelineOrder,
-                    ),
+        if (ambiguousBoundary != null) {
+            diagnostics.record("chat_history", "ambiguous_saturated_boundary") {
+                mapOf(
+                    "room_id" to roomId,
+                    "subcommand" to request.subcommand.name,
+                    "boundary_server_time" to ambiguousBoundary.serverTime,
+                    "primary_count" to response.primaryMessageCount,
+                    "limit" to request.limit,
                 )
             }
         }

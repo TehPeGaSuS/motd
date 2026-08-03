@@ -671,26 +671,51 @@ class ChatHistoryRemoteMediatorTest {
     }
 
     @Test
-    fun saturatedTimestampOnlyLatestStopsWithoutClaimingHistoryComplete() = runTest {
+    fun saturatedTimestampOnlyLatestSeedKeepsOlderBackfillAlive() = runTest {
+        // A fresh buffer's first LATEST seed on a timestamp-only wire (soju advertises
+        // MSGREFTYPES=timestamp) is saturated and msgid-less. That used to make EventProcessor write
+        // a zero-width `recoverable = false` gap on the page's oldest row, and this test used to pin
+        // the consequence: the seed reported terminal and a reopened mediator issued NO further
+        // request, so a fresh buffer could never fetch a single older page. Both halves of that
+        // expectation were wrong at the source — an interval whose two edges name the same row holds
+        // no messages, and `recoverable = false` means "the server proved this empty", which a
+        // saturated page never proves. With the write removed the seed leaves no gap behind and the
+        // next APPEND pages older from the boundary the seed established.
         val history = FakeHistory(
             latest = listOf(chatMsg("a", 100), chatMsg("b", 100)),
+            before = ArrayDeque(listOf(listOf(chatMsg("older1", 50), chatMsg("older2", 60)))),
             referenceTypes = setOf(HistoryReferenceType.TIMESTAMP),
         )
+        val mediator = mediator(history, pageSize = 2)
 
-        val result = load(mediator(history, pageSize = 2), LoadType.APPEND)
+        val result = load(mediator, LoadType.APPEND)
 
-        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertFalse((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
         assertEquals(2, rowCount())
         assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
         assertFalse(db.historyCursorDao().byRoom(bufferId)!!.historyComplete)
+        assertTrue("a saturated seed records no durable gap", db.historyGapDao().forRoom(bufferId).isEmpty())
 
-        val reopened = load(mediator(history, pageSize = 2), LoadType.APPEND)
-        assertTrue((reopened as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
-        assertEquals(1, history.requests.size)
+        val next = load(mediator, LoadType.APPEND)
+
+        assertFalse((next as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(4, rowCount())
+        assertEquals(
+            listOf(null, "timestamp=1970-01-01T00:00:00.100Z"),
+            history.requests.map { it.bound1 },
+        )
     }
 
     @Test
-    fun saturatedTimestampOnlyBeforeStopsInsteadOfSkippingBoundaryPeers() = runTest {
+    fun saturatedTimestampOnlyBeforeKeepsPagingFromTheRecededBoundary() = runTest {
+        // Cursor-driven BEFORE, same wire regime, same removed write. Paging older past a saturated
+        // msgid-less edge can still skip messages that share the edge's timestamp — the protocol
+        // offers no selector for them — but that risk is per-fetch and is why
+        // HistoryPageLoader.cannotSafelyPageBefore ends THIS fetch there and why history is never
+        // marked complete. It is not a reason to stop the direction forever: the old behavior did not
+        // recover those peers either (the gap it wrote was unrecoverable, so nothing ever fetched
+        // it), it merely also discarded every older page. The mediator now continues while the
+        // boundary keeps receding, and stops on the server's own terminal page.
         processor.process(networkId, chatMsg("seed", 500))
         val history = FakeHistory(
             before = ArrayDeque(
@@ -698,16 +723,64 @@ class ChatHistoryRemoteMediatorTest {
             ),
             referenceTypes = setOf(HistoryReferenceType.TIMESTAMP),
         )
+        val mediator = mediator(history, pageSize = 2)
 
-        val result = load(mediator(history, pageSize = 2), LoadType.APPEND)
+        val result = load(mediator, LoadType.APPEND)
 
-        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertFalse((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
         assertEquals(3, rowCount())
         assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+        assertTrue("a saturated page records no durable gap", db.historyGapDao().forRoom(bufferId).isEmpty())
 
-        val reopened = load(mediator(history, pageSize = 2), LoadType.APPEND)
+        // The scripted wire is exhausted, so the next BEFORE is the server's empty (terminal) page:
+        // the direction ends on proof, and only then is history complete.
+        val reopened = load(mediator, LoadType.APPEND)
         assertTrue((reopened as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
-        assertEquals(1, history.requests.size)
+        assertEquals(
+            listOf("timestamp=1970-01-01T00:00:00.500Z", "timestamp=1970-01-01T00:00:00.100Z"),
+            history.requests.map { it.bound1 },
+        )
+        assertTrue(db.bufferDao().observeById(bufferId)!!.historyComplete)
+    }
+
+    @Test
+    fun freshTimestampOnlyBufferBackfillsPastTheSeedPage() = runTest {
+        // The hosted-CI shape end to end, with no hand-written gap anywhere: an EMPTY buffer, a
+        // saturated msgid-less LATEST seed, then a cursor-driven BEFORE ladder. Before the fix the
+        // seed wrote an unrecoverable zero-width gap and this whole ladder measured exactly one
+        // request; now every saturated page keeps the direction alive and only the server's empty
+        // page ends it.
+        val history = FakeHistory(
+            latest = listOf(chatMsg("a", 100), chatMsg("b", 110)),
+            before = ArrayDeque(
+                listOf(
+                    listOf(chatMsg("c", 80), chatMsg("d", 90)),
+                    listOf(chatMsg("e", 60), chatMsg("f", 70)),
+                    emptyList(),
+                ),
+            ),
+            referenceTypes = setOf(HistoryReferenceType.TIMESTAMP),
+        )
+        val mediator = mediator(history, pageSize = 2)
+
+        val ends = (1..4).map {
+            (load(mediator, LoadType.APPEND) as RemoteMediator.MediatorResult.Success)
+                .endOfPaginationReached
+        }
+
+        assertEquals(listOf(false, false, false, true), ends)
+        assertEquals(
+            listOf(
+                null,
+                "timestamp=1970-01-01T00:00:00.100Z",
+                "timestamp=1970-01-01T00:00:00.080Z",
+                "timestamp=1970-01-01T00:00:00.060Z",
+            ),
+            history.requests.map { it.bound1 },
+        )
+        assertEquals(6, rowCount())
+        assertTrue(db.historyGapDao().forRoom(bufferId).isEmpty())
+        assertTrue(db.bufferDao().observeById(bufferId)!!.historyComplete)
     }
 
     @Test

@@ -477,21 +477,23 @@ class ReconnectGapPresentationTest {
     }
 
     /**
-     * **The wire-specific trigger candidate, driven entirely by production code.** A fresh buffer's
-     * first CHATHISTORY LATEST seed on a timestamp-only wire returns a SATURATED, msgid-less,
-     * non-terminal page, which arms every precondition of the degenerate-gap insert at
-     * `EventProcessor.kt:1147-1182`.
+     * A fresh buffer's first CHATHISTORY LATEST seed on a timestamp-only wire returns a SATURATED,
+     * msgid-less, non-terminal page. That page used to arm a degenerate zero-width gap insert in
+     * `EventProcessor.reconcileHistoryGaps`, which named the same event on both edges and marked it
+     * `recoverable = false`.
      *
-     * Measured outcome: production does write that gap, and it is degenerate (`older == newer`),
-     * msgid-less, and `recoverable = false` — three of the four conditions the starving shape needs.
-     * The fourth is where the trigger dies: `newerEventId` is NOT null. `resolvePageBoundary`
-     * matches the boundary reference against the page's persisted rows **by serverTime** when the
-     * msgid is stripped, so the edge resolves to the real boundary row and the resulting
-     * lowerBoundary is inclusive at it. The window is bounded to the newest island, as designed, and
-     * nothing is starved.
+     * That insert was removed: a zero-width interval asserts that messages are missing between a row
+     * and itself, and `recoverable = false` is reserved for server-proven-empty remainders, which a
+     * saturated page never proves. Both of its consumers acted on those falsehoods — the mediator
+     * treated the unrecoverable focused gap as permanently terminal, and `historyWindowBounds`
+     * clamped the Recent window at the edge row.
+     *
+     * This test now pins the absence: the seed writes no gap at all, so nothing bounds the Recent
+     * window and nothing terminates older backfill. The ambiguous boundary is recorded as a
+     * diagnostic instead of being encoded as a false interval.
      */
     @Test
-    fun saturatedTimestampOnlyLatestSeedWritesADegenerateGapThatStillResolvesItsEventId() = runTest {
+    fun saturatedTimestampOnlyLatestSeedWritesNoDegenerateGap() = runTest {
         Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
         try {
             val history = SaturatedTimestampWire(
@@ -501,26 +503,18 @@ class ReconnectGapPresentationTest {
             val repository = repository(history)
             val presented = presentation(repository, rounds = 8)
 
-            val gap = db.historyGapDao().forRoom(bufferId).single()
+            val gaps = db.historyGapDao().forRoom(bufferId)
             val boundaryRow = checkNotNull(db.messageDao().byMsgid(bufferId, "seed0"))
             val bounds = repository.historyWindowBounds(bufferId, HistoryWindowFocus.Recent)
             println(
-                "DEGENERATE-GAP requests=${history.calls} " +
-                    "gap(older=${gap.olderServerTime}/${gap.olderMsgid}/${gap.olderEventId} " +
-                    "newer=${gap.newerServerTime}/${gap.newerMsgid}/${gap.newerEventId} rec=${gap.recoverable}) " +
+                "NO-DEGENERATE-GAP requests=${history.calls} gaps=$gaps " +
                     "boundaryRow(id=${boundaryRow.id} t=${boundaryRow.serverTime}) " +
                     "lower=${bounds.lowerBoundary} itemCount=${presented.itemCount}",
             )
 
-            // Conditions the trigger needs, confirmed present.
-            assertEquals("degenerate zero-width gap", gap.olderServerTime, gap.newerServerTime)
-            assertEquals("msgid-less newer edge on a timestamp-only wire", null, gap.newerMsgid)
-            assertEquals("inserted unrecoverable", false, gap.recoverable)
-            assertEquals("edge sits exactly on a real row", boundaryRow.serverTime, gap.newerServerTime)
-            // The condition that kills the trigger.
-            assertNotNull("degenerate gap still resolves an eventId", gap.newerEventId)
-            assertEquals("resolved boundary anchors at the real row", boundaryRow.id, bounds.lowerBoundary?.eventId)
-            assertTrue("window bounded to the newest island, not blanked", presented.itemCount > 0)
+            assertTrue("saturated seed writes no gap", gaps.isEmpty())
+            assertEquals("no gap means nothing bounds the Recent window", null, bounds.lowerBoundary)
+            assertTrue("window presents the seeded rows", presented.itemCount > 0)
         } finally {
             Dispatchers.resetMain()
         }
