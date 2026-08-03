@@ -386,25 +386,47 @@ internal data class TargetMaterialization<T>(
     val generation: Any? = null,
 )
 
+/** Re-request cadence for a target whose Paging load hint produced no observable load. */
+internal const val TARGET_REHINT_INTERVAL_MS = 1_000L
+
 /** Request exactly one placeholder and wait for that position, without scanning the dataset. */
 internal suspend fun <T> requestAndAwaitTarget(
     index: Int,
     request: suspend (Int) -> Boolean,
     snapshots: Flow<TargetMaterialization<T>>,
+    rehintIntervalMs: Long = TARGET_REHINT_INTERVAL_MS,
 ): T? {
     val before = snapshots.first()
     if (!request(index)) return null
     var observedLoading = before.loading
     return withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
-        snapshots.firstOrNull { snapshot ->
-            observedLoading = observedLoading || snapshot.loading
-            val replaced = snapshot.generation != before.generation
-            val newFailure = snapshot.failed && (!before.failed || observedLoading || replaced)
-            snapshot.item != null || newFailure ||
-                (!snapshot.addressable && !snapshot.loading) ||
-                ((observedLoading || replaced) && !snapshot.loading)
+        while (true) {
+            var streamEnded = false
+            val terminal = withTimeoutOrNull(rehintIntervalMs) {
+                snapshots.firstOrNull { snapshot ->
+                    observedLoading = observedLoading || snapshot.loading
+                    val replaced = snapshot.generation != before.generation
+                    val newFailure = snapshot.failed && (!before.failed || observedLoading || replaced)
+                    snapshot.item != null || newFailure ||
+                        (!snapshot.addressable && !snapshot.loading) ||
+                        ((observedLoading || replaced) && !snapshot.loading)
+                }.also { streamEnded = it == null }
+            }
+            when {
+                terminal != null -> return@withTimeoutOrNull terminal.item
+                streamEnded -> return@withTimeoutOrNull null
+                // A whole interval passed with no terminal snapshot and no load ever observed for a
+                // parked placeholder viewport: Paging can drop the single viewport hint when it
+                // races the generation's initial prepend/refresh, and nothing else will ever load
+                // the target. Re-issue the idempotent request so the hint is re-recorded instead of
+                // sitting quiescent until the outer cap.
+                else -> if (!request(index)) return@withTimeoutOrNull null
+            }
         }
-    }?.item
+        // withTimeoutOrNull cancels the loop at the materialization cap.
+        @Suppress("UNREACHABLE_CODE")
+        null
+    }
 }
 
 data class ReplyJumpRequest(val msgid: String)

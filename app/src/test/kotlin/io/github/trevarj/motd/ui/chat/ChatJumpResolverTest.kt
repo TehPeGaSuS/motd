@@ -333,6 +333,47 @@ class ChatJumpResolverTest {
         assertEquals(null, loaded)
     }
 
+    @Test fun `dropped viewport hint is re-requested until the target materializes`() = runTest {
+        // Paging can drop the single items[index] hint when it races the generation's initial
+        // prepend/refresh, leaving a quiescent unloaded placeholder viewport with no further
+        // snapshot changes. The await loop must re-issue the idempotent request instead of sitting
+        // until the outer cap (deep-jump stall observed on the notification-entry journey).
+        val expected = msg(324, 7, 1, "target")
+        var hints = 0
+
+        val loaded = requestAndAwaitTarget(
+            index = 260,
+            request = { hints++; true },
+            snapshots = flow {
+                emit(TargetMaterialization<MessageEntity>(null, loading = false, generation = 1))
+                if (hints >= 2) {
+                    emit(TargetMaterialization(expected, loading = false, generation = 1))
+                } else {
+                    awaitCancellation()
+                }
+            },
+        )
+
+        assertEquals(expected, loaded)
+        assertEquals(2, hints)
+    }
+
+    @Test fun `completed snapshot stream without a terminal state stays unresolved`() = runTest {
+        val requested = mutableListOf<Int>()
+
+        val loaded = requestAndAwaitTarget<MessageEntity>(
+            index = 9,
+            request = { requested += it; true },
+            snapshots = flow {
+                emit(TargetMaterialization(null, loading = false, generation = 1))
+            },
+        )
+
+        assertEquals(null, loaded)
+        // A finished stream must bail out instead of re-requesting in a hot loop.
+        assertEquals(listOf(9), requested)
+    }
+
     @Test fun local_hit_returns_index_and_highlight() = runTest {
         val repo = FakeMessageRepository(
             listOf(
