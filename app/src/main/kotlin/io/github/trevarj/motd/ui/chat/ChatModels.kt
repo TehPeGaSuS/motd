@@ -70,73 +70,6 @@ data class TimelineSeamState(
 /** One seam as a row renders it: which gap to fill on tap, and the state its divider draws. */
 data class RowSeam(val gapId: Long, val state: HistoryGapState)
 
-/** One hands-free fill the autopilot has decided to start. */
-internal data class GapAutopilotArming(
-    val roomId: Long,
-    val gapId: Long,
-    val position: TimelineAnchor,
-)
-
-/**
- * Decides when a seam gets filled without the user tapping it.
- *
- * The case this exists for is reconnect catch-up: the bouncer replays a newest page, a gap opens
- * between it and what the client already had, and the user should not have to notice a divider and
- * tap it to get their own missed conversation back. So the NEWEST recoverable seam — the reconnect
- * one — is filled hands-free.
- *
- * What it must NOT become is a background history crawler. Two rules keep it honest, and they are
- * both about NOT arming:
- *
- *  1. **One arming per seam, not per emission.** [HistoryGapFillCoordinator][
- *     io.github.trevarj.motd.data.sync.HistoryGapFillCoordinator] bounds a single fill to its page
- *     budget, so re-arming on every seam update would turn a bounded fill into an unbounded loop.
- *     A fill that spends its budget leaves the seam open with its newer edge RECEDED, i.e. moved
- *     older, so [armedThrough] rejects it: the seam stays visible and tappable and the rest of that
- *     gap is fetched only if the user asks.
- *  2. **Newer than anything already armed.** Closing the newest gap can promote an older seam to
- *     "newest recoverable". That seam is old history nobody asked for, and fetching it unprompted is
- *     precisely the regression this design is guarding against — before the divider existed, nothing
- *     ever fetched a deep gap on its own. Requiring a strictly newer position means a genuine
- *     reconnect gap (which always lands at the newest end) arms, and a promotion from below never
- *     does.
- *
- * [visibleSession] is only the "the room is on screen" gate; it deliberately does NOT reset
- * [armedThrough]. Backgrounding and resuming the app is not new information about history, so it
- * must not spend another budget on a seam this instance already worked on. What DOES re-arm is the
- * only thing that should: an instance of this class lives with one ChatViewModel, so re-entering the
- * room starts fresh — the same one-budget-per-open the timeline has always done — and everything
- * else that arms is a genuinely newer seam.
- *
- * [entrySettled] is the ordering constraint, and it is not optional. Normal entry FREEZES what was
- * unread at the moment the room opened — the divider position and its "N+" label — and it resolves
- * that from the store. A fill racing it rewrites the store first, so the frozen boundary lands on
- * rows the autopilot had just fetched instead of on what the user actually arrived to. Entry
- * resolves first, then history is filled underneath it.
- */
-internal class HistoryGapAutopilot {
-    private var armedThrough: TimelineAnchor? = null
-
-    fun arm(
-        roomId: Long,
-        visibleSession: Long?,
-        availability: HistoryAvailability,
-        entrySettled: Boolean,
-        seams: List<TimelineSeam>,
-    ): GapAutopilotArming? {
-        if (visibleSession == null) return null
-        if (!entrySettled) return null
-        // Nothing to page against while the network is negotiating or offline; the next Ready
-        // emission re-evaluates, so a room opened before its connection settles still catches up.
-        if (availability !is HistoryAvailability.Ready) return null
-        // Seams are ordered oldest-first, so the last recoverable one is the newest.
-        val newest = seams.lastOrNull { it.recoverable } ?: return null
-        armedThrough?.let { if (newest.position <= it) return null }
-        armedThrough = newest.position
-        return GapAutopilotArming(roomId, newest.gapId, newest.position)
-    }
-}
-
 /**
  * The seam drawn above [row]'s content in the reversed timeline, or null when that slot draws
  * nothing.
@@ -700,14 +633,9 @@ internal fun handleChatUiEventResult(
 }
 
 /**
- * Footer state for the older end of the reverse timeline — the BOTTOM of the list, past the oldest
- * retained row. Scroll-driven paging drives APPEND automatically, so the footer only reflects the
- * current [LoadState.append] plus the connection's history availability; there is no explicit "load
- * older" affordance here.
- *
- * Interior history gaps are not this footer's business. The timeline is presented unbounded, so a
- * gap is a seam drawn between two materialized rows with its own tappable [HistoryGapState] divider
- * ([rowSeam]); it never reaches the bottom of the list and never shows up in [LoadState.append].
+ * Footer state for the older end of the reverse timeline. Scroll-driven paging drives APPEND
+ * automatically, so the footer only reflects the current [LoadState.append] plus the connection's
+ * history availability — there is no explicit "load older" affordance.
  */
 sealed interface ChatHistoryUiState {
     /** Nothing to show: server/no buffer, or a Ready timeline mid-history. */
@@ -754,10 +682,8 @@ internal fun chatHistoryUiState(
         HistoryAvailability.Unsupported -> ChatHistoryUiState.Unsupported
         HistoryAvailability.NegotiatingOrOffline ->
             ChatHistoryUiState.Unavailable(offline = isHistoryOffline(connectionState))
-        // A Ready timeline pages older on scroll. End-of-pagination without persisted completion
-        // (an unmoving boundary, say) has no affordance: the retry belongs to the wire error state,
-        // not to a footer that would claim history exists. An unrecoverable gap no longer reaches
-        // here at all — it ends nothing, it draws a seam.
+        // A Ready timeline pages older on scroll; end-of-pagination without persisted completion
+        // (e.g. an unrecoverable gap) has no affordance.
         is HistoryAvailability.Ready -> ChatHistoryUiState.Hidden
     }
 }

@@ -261,7 +261,7 @@ internal abstract class AppModule {
         /**
          * The timeline's narrow view of the gap-fill coordinator. Adapted rather than bound,
          * because the coordinator is a concrete collaborator of the sync layer and stays that way;
-         * only the tap-a-seam action, the autopilot's arm, and the in-flight ids reach the UI.
+         * only the tap-a-seam action and the in-flight ids reach the UI.
          */
         @Provides
         @Singleton
@@ -270,9 +270,6 @@ internal abstract class AppModule {
                 override val fillsInFlight = coordinator.fillsInFlight
                 override suspend fun fillGap(roomId: Long, gapId: Long) {
                     coordinator.fillGap(roomId, gapId)
-                }
-                override suspend fun fillNewestGap(roomId: Long) {
-                    coordinator.fillFocusedGap(roomId)
                 }
             }
 

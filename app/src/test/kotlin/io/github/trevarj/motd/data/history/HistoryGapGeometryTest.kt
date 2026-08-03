@@ -283,22 +283,11 @@ class HistoryGapGeometryTest {
     }
 
     @Test
-    fun recentWindowNoLongerStartsAtTheNewestKnownIsland() {
-        // The pinned inversion. The frozen reference still clamps at the newest gap's newer edge —
-        // that is what it is for — and the module deliberately no longer does, because the timeline
-        // is presented unbounded with a seam drawn at the gap instead of everything below it hidden.
-        //
-        // Asserted against the reference rather than against a bare `null` on purpose: a
-        // windowBounds that stopped seeing gaps entirely would also return no boundary here, and
-        // this pairing tells the two apart — the reference proves these fixtures DO contain a gap
-        // that the old rule would have clamped on.
-        val clamped = historyWindowBounds(HistoryWindowFocus.Recent, portedOld())
-        assertEquals(MessageWindowBounds(lowerBoundary = TimelineAnchor(900, 900)), clamped)
+    fun recentWindowStartsAtTheNewestKnownIsland() {
+        val expected = MessageWindowBounds(lowerBoundary = TimelineAnchor(900, 900))
 
-        val presented = windowBounds(HistoryWindowFocus.Recent, portedNew())
-
-        assertEquals(MessageWindowBounds(), presented)
-        assertNotEquals(clamped, presented)
+        assertEquals(expected, windowBounds(HistoryWindowFocus.Recent, portedNew()))
+        assertEquals(historyWindowBounds(HistoryWindowFocus.Recent, portedOld()), windowBounds(HistoryWindowFocus.Recent, portedNew()))
     }
 
     @Test
@@ -325,16 +314,12 @@ class HistoryGapGeometryTest {
         val around = HistoryWindowFocus.Around(100, eventId = 10, timelineOrder = 10)
 
         assertEquals(MessageWindowBounds(upperBoundary = older), windowBounds(around, new))
+        assertEquals(MessageWindowBounds(lowerBoundary = newer), windowBounds(HistoryWindowFocus.Recent, new))
         assertEquals(historyWindowBounds(around, old), windowBounds(around, new))
-        // Recent diverges here too, and this fixture is the sharpest place to say so: the reference
-        // separates the two equal-timestamp edges with an exact anchor, which is precisely the
-        // clamp that used to hide the older edge's row. The module keeps both rows and lets the seam
-        // fall between them.
         assertEquals(
-            MessageWindowBounds(lowerBoundary = newer),
             historyWindowBounds(HistoryWindowFocus.Recent, old),
+            windowBounds(HistoryWindowFocus.Recent, new),
         )
-        assertEquals(MessageWindowBounds(), windowBounds(HistoryWindowFocus.Recent, new))
     }
 
     @Test
@@ -346,18 +331,16 @@ class HistoryGapGeometryTest {
     // --- windowBounds: the permissive (non-clamping) role of an unidentifiable edge -------------
 
     @Test
-    fun unidentifiableNewerEdgeDoesNotClampItsEqualTimeCohortOutOfAFocusedWindow() {
+    fun unidentifiableNewerEdgeDoesNotClampItsEqualTimeCohortOutOfTheRecentWindow() {
         val cohortRow = TimelineAnchor(500, 42, 42)
-        val gap = listOf(resolved(newer = GapEdgeAnchor.TimeOnly(500)))
-        val bounds = windowBounds(HistoryWindowFocus.Around(900), gap)
+        val bounds = windowBounds(
+            HistoryWindowFocus.Recent,
+            listOf(resolved(newer = GapEdgeAnchor.TimeOnly(500))),
+        )
 
         // Inclusive at the anchor, so a row AT the boundary is still presented. A MAX sentinel here
         // would exclude every equal-time row and could empty the window outright.
         assertTrue(checkNotNull(bounds.lowerBoundary) <= cohortRow)
-        // Recent cannot be starved by this edge at all any more — it passes no boundary whatsoever,
-        // so the sentinel choice cannot reach the presented timeline through that branch. The
-        // projection itself still matters: `timelineSeams` takes the same one to place the seam.
-        assertEquals(MessageWindowBounds(), windowBounds(HistoryWindowFocus.Recent, gap))
     }
 
     @Test

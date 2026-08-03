@@ -16,7 +16,6 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
-import io.github.trevarj.motd.data.history.seamAbove
 import io.github.trevarj.motd.data.sync.ChatHistoryRemoteMediator
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.MessageNotifier
@@ -35,7 +34,6 @@ import io.github.trevarj.motd.irc.proto.Prefix
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -64,11 +62,6 @@ import org.robolectric.RobolectricTestRunner
  * inert (`HistoryAvailability.Unsupported`, so it never fetches or rewrites a gap) except the last,
  * which deliberately re-introduces mediator/generation churn. That isolates window bounds from both
  * the mediator's `endOfPaginationReached` behavior and Pager generation churn.
- *
- * Recent is unbounded now, so "the echo survives" is no longer the whole answer and every survival
- * case also pins WHERE THE SEAM LANDS in the presented list ([seamPlacements]). Surviving with the
- * break shown in the wrong slot would be a different bug wearing the same green tick: the point of
- * removing the clamp was to say "history is missing here", and "here" is the assertion.
  *
  * Reversed timeline: the paging query is `ORDER BY serverTime DESC, timelineOrder DESC, id DESC`, so
  * index 0 is the newest row — exactly the row the E2E scrolls to on its 5s bottom reset.
@@ -235,40 +228,17 @@ class ReconnectGapPresentationTest {
             if (differ.itemCount > 0) differ.getItem(0)
         }
         advanceUntilIdle()
-        // Placeholders are kept as nulls on purpose: MessageList composes over exactly this list, and
-        // a seam's placement depends on whether its row's OLDER neighbour is materialized.
-        val rows = (0 until differ.itemCount).map { differ.peek(it) }
+        val loaded = (0 until differ.itemCount).mapNotNull { differ.peek(it) }
         val newest = if (differ.itemCount > 0) differ.peek(0) else null
         job.cancel()
-        return Presentation(differ.itemCount, newest, rows)
+        return Presentation(differ.itemCount, newest, loaded.map { it.msgid })
     }
 
     private data class Presentation(
         val itemCount: Int,
         val newest: MessageEntity?,
-        /** Newest-first, with unmaterialized placeholders left as null. */
-        val rows: List<MessageEntity?>,
-    ) {
-        val loadedMsgids: List<String?> get() = rows.filterNotNull().map { it.msgid }
-    }
-
-    /**
-     * The seam slots the presented list actually draws, as `(row msgid, gapId)` newest-first.
-     *
-     * Walks the snapshot exactly as `MessageList` does — index 0 newest, older neighbour at the next
-     * index, a null neighbour left undecidable — so this is the rendered divider, not a restatement
-     * of the seam list.
-     */
-    private suspend fun seamPlacements(
-        repository: MessageRepositoryImpl,
-        presented: Presentation,
-    ): List<Pair<String?, Long>> {
-        val seams = repository.observeTimelineSeams(bufferId).first()
-        return presented.rows.mapIndexedNotNull { index, row ->
-            row ?: return@mapIndexedNotNull null
-            seamAbove(row, presented.rows.getOrNull(index + 1), seams)?.let { row.msgid to it.gapId }
-        }
-    }
+        val loadedMsgids: List<String?>,
+    )
 
     private suspend fun report(label: String, repository: MessageRepositoryImpl, echo: MessageEntity, p: Presentation) {
         val bounds = repository.historyWindowBounds(bufferId, HistoryWindowFocus.Recent)
@@ -310,13 +280,6 @@ class ReconnectGapPresentationTest {
             assertTrue("reconnect gap still open and recoverable", gap.recoverable)
             assertTrue("live echo inside the Recent window", windowContains(repository, echo.id))
             assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
-            // The window keeps the echo AND says why the rows below it are not contiguous: one seam,
-            // in the slot above the first catch-up row, which is the gap's newer edge.
-            assertEquals(
-                "seam slot",
-                listOf("catchup0" to gap.id),
-                seamPlacements(repository, presented),
-            )
         } finally {
             Dispatchers.resetMain()
         }
@@ -346,12 +309,6 @@ class ReconnectGapPresentationTest {
             assertNotNull("timestamp-only gap still carries a resolvable eventId", gap.newerEventId)
             assertTrue("live echo inside the Recent window", windowContains(repository, echo.id))
             assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
-            // A stripped msgid changes which resolver rung finds the edge, not where the seam lands.
-            assertEquals(
-                "seam slot",
-                listOf("catchup0" to gap.id),
-                seamPlacements(repository, presented),
-            )
         } finally {
             Dispatchers.resetMain()
         }
@@ -384,13 +341,6 @@ class ReconnectGapPresentationTest {
 
             assertTrue("live echo inside the Recent window", windowContains(repository, echo.id))
             assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
-            // One millisecond older than the echo puts the seam in the echo's own slot: the break is
-            // genuinely between seed260 and the echo, and it is drawn there rather than applied.
-            assertEquals(
-                "seam slot",
-                listOf(VOICE_MSGID to db.historyGapDao().forRoom(bufferId).single().id),
-                seamPlacements(repository, presented),
-            )
         } finally {
             Dispatchers.resetMain()
         }
@@ -437,16 +387,6 @@ class ReconnectGapPresentationTest {
             assertTrue("live echo inside the Recent window", windowContains(repository, echo.id))
             assertTrue("Recent window is not blanked", presented.itemCount > 0)
             assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
-            // The cohort-floor projection is what keeps this honest at the tie: the seam sits UNDER
-            // the whole equal-timestamp cohort, so it lands in the echo's slot instead of slicing
-            // through the cohort at a position the client cannot justify — and instead of the
-            // cohort-ceiling anchor that used to sit above every materialized row, match nothing,
-            // and leave a silently truncated timeline with no indication anything was missing.
-            assertEquals(
-                "seam slot",
-                listOf(VOICE_MSGID to db.historyGapDao().forRoom(bufferId).single().id),
-                seamPlacements(repository, presented),
-            )
         } finally {
             Dispatchers.resetMain()
         }
@@ -488,38 +428,25 @@ class ReconnectGapPresentationTest {
             assertNotNull("live echo durable in Room", db.messageDao().byMsgid(bufferId, VOICE_MSGID))
             assertTrue("live echo inside the Recent window", windowContains(repository, echo.id))
             assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
-            // Backfill moves the gap under the collector, so the seam's exact slot is a function of
-            // how far the churn got. What must hold regardless: a live row arriving at the newest end
-            // is never fenced off behind a seam it is not actually adjacent to.
-            assertTrue(
-                "the live echo must not be separated from the timeline by a seam",
-                seamPlacements(repository, presented).none { it.first == VOICE_MSGID },
-            )
         } finally {
             Dispatchers.resetMain()
         }
     }
 
     /**
-     * **The pinned statement of this whole stage: Recent passes no lower boundary at all.**
-     *
-     * The first half is the mechanism that made a lower boundary dangerous, kept verbatim because it
-     * is the reason the boundary is gone. A Recent lowerBoundary at or above the newest local row
-     * excludes every row including that one: the lower-bound SQL is inclusive at the anchor
+     * **Mechanism pin, independent of how gap edges are resolved.** Answers directly whether a
+     * Recent lowerBoundary at or above the newest local row can exclude every row including that
+     * newest one. It can: the lower-bound SQL is inclusive at the anchor
      * (`serverTime > t OR (serverTime = t AND (timelineOrder > o OR (timelineOrder = o AND id >= e)))`),
-     * so an anchor dominating the newest row's `(timelineOrder, id)` at the same serverTime leaves
-     * the window empty. It refutes the reasoning that "Recent sets only a lowerBoundary, so a live
-     * message newer than every gap can never be excluded": a boundary that lands at or above the
-     * newest row takes the whole timeline with it.
+     * so an anchor that dominates the newest row's `(timelineOrder, id)` at the same serverTime
+     * leaves the window empty.
      *
-     * The second half is what makes that unreachable rather than merely unlikely. Reached through
-     * the repository, with the worst gap the fixture can build — an unidentifiable newer edge tying
-     * the newest row's millisecond, exactly the shape that emptied the window before `e91698a0` —
-     * Recent produces NO boundary of any kind. The dangerous input still exists; there is simply no
-     * longer a code path that turns it into a clamp.
+     * This refutes the reasoning that "Recent sets only a lowerBoundary, so a live message newer
+     * than every gap can never be excluded". A live message newer than every gap is fine; a
+     * boundary that lands at or above the newest row is not, and it takes the whole timeline with it.
      */
     @Test
-    fun recentPassesNoLowerBoundaryHoweverBadTheGapEdgeIs() = runTest {
+    fun aRecentLowerBoundaryAtOrAboveTheNewestRowEmptiesTheWholeWindow() = runTest {
         seedBacklog()
         val newest = checkNotNull(db.messageDao().byMsgid(bufferId, "seed260"))
 
@@ -547,26 +474,6 @@ class ReconnectGapPresentationTest {
         assertEquals("MAX_VALUE lower boundary empties the window", 0, exclusive.size)
         assertEquals("MIN_VALUE lower boundary keeps the newest row", 1, permissive.size)
         assertEquals("a resolved boundary is inclusive at its own row", 1, resolved.size)
-
-        // Now the pin. An unidentifiable newer edge at the newest row's own millisecond is the worst
-        // case the resolver can be handed, and it produces no boundary.
-        db.historyGapDao().insert(
-            HistoryGapEntity(
-                roomId = bufferId,
-                olderMsgid = null, olderServerTime = base + 100_000,
-                newerMsgid = null, newerServerTime = newest.serverTime,
-                recoverable = true,
-            ),
-        )
-        val repository = repository()
-        val bounds = repository.historyWindowBounds(bufferId, HistoryWindowFocus.Recent)
-
-        assertEquals("Recent passes no lower boundary", null, bounds.lowerBoundary)
-        assertEquals("Recent passes no upper boundary", null, bounds.upperBoundary)
-        // ...and the gap is not being ignored: it publishes a seam, which is how the break is shown
-        // now. A `windowBounds` that had simply stopped seeing gaps would also return no boundary.
-        assertEquals(1, repository.observeTimelineSeams(bufferId).first().size)
-        assertTrue("every seeded row stays reachable", windowContains(repository, newest.id))
     }
 
     /**
@@ -608,12 +515,6 @@ class ReconnectGapPresentationTest {
             assertTrue("saturated seed writes no gap", gaps.isEmpty())
             assertEquals("no gap means nothing bounds the Recent window", null, bounds.lowerBoundary)
             assertTrue("window presents the seeded rows", presented.itemCount > 0)
-            // No gap, so no seam either: the ambiguous boundary is recorded as a diagnostic, not
-            // encoded as a false interval that would now draw a divider claiming lost history.
-            assertEquals(
-                emptyList<Pair<String?, Long>>(),
-                seamPlacements(repository, presented),
-            )
         } finally {
             Dispatchers.resetMain()
         }
@@ -699,12 +600,6 @@ class ReconnectGapPresentationTest {
             assertTrue("live self-send inside the Recent window", windowContains(repository(history), echo.id))
             assertTrue("Recent window is not blanked", presented.itemCount > 0)
             assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
-            // The clamped self-send ties the newest catch-up row's millisecond, which is the exact
-            // cohort a seam projection can slice through. It must never end up above the send.
-            assertTrue(
-                "the clamped self-send must not be fenced off by a seam",
-                seamPlacements(repository(history), presented).none { it.first == VOICE_MSGID },
-            )
         } finally {
             Dispatchers.resetMain()
         }

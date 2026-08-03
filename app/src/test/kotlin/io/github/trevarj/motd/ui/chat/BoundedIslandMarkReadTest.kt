@@ -189,20 +189,12 @@ class BoundedIslandMarkReadTest {
         val focus: HistoryWindowFocus = HistoryWindowFocus.Recent
         val bounds = repository.historyWindowBounds(roomId, focus)
 
-        // Recent is unbounded on BOTH sides now, so index 0 really is the room's newest row and the
-        // rows below the gap are present rather than clamped away. The mark-read gate is unmoved by
-        // that: it only ever asked whether the window has a NEWER island above it, which Recent has
-        // never had, so removing the lower bound cannot change its answer.
-        assertNull("Recent window must not be capped above", bounds.upperBoundary)
-        assertNull("Recent window is no longer clamped at the gap", bounds.lowerBoundary)
+        // The Recent window is open at the top, so its index 0 really is the room's newest row.
+        assertNull("Recent window must not be capped", bounds.upperBoundary)
         assertFalse(hasNewerHistoryIsland(focus, bounds))
 
         val (recentRows, itemCount) = loadWindow(bounds)
-        assertEquals(
-            "both islands are presented, with the seam drawn between them",
-            listOf("new-2", "new-1", "old-2", "old-1"),
-            recentRows.map { it.text },
-        )
+        assertEquals(listOf("new-2", "new-1"), recentRows.map { it.text })
 
         val atBottom = isAtEffectiveBottom(
             firstVisibleIndex = 0,

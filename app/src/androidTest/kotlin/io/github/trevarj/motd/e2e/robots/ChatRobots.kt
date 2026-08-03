@@ -20,7 +20,6 @@ import androidx.compose.ui.test.swipeDown
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.trevarj.motd.e2e.TimelineDiagnostics
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_LOADING_TAG
-import io.github.trevarj.motd.ui.components.CHAT_GAP_DIVIDER_TAG
 import org.junit.Assert.assertTrue
 
 /** Spacing between the bottom resets a newest-row wait is allowed to issue. */
@@ -186,16 +185,13 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
      * Determinism: `MESSAGE_PAGING_CONFIG` uses pageSize 50 > prefetchDistance 25. A scroll that
      * stops at the boundary triggers exactly one APPEND; after the 50-row insert the retained
      * viewport anchor sits 50 rows (> 25) above the new boundary, outside the prefetch range, so
-     * no second page fires until the next deliberate `scrollToOlderBoundary()` step.
-     *
-     * What this step canNOT do is cross a history gap. The timeline is presented unbounded, so the
-     * local source only runs dry at the true oldest retained row and the APPEND it drives asks for
-     * backlog BELOW the whole timeline. An interior gap is closed by tapping its divider
-     * ([fillGapUntilClosed]), never by scrolling. Paging3 still auto-fires an APPEND with no scroll
-     * whenever the initial source load returns `nextKey == null`, which any store smaller than
-     * `initialLoadSize` (pageSize * 3 = 150) does; that is unconditional Paging behavior and is why
-     * no step here can promise "exactly one page per user action".
-     * `RecentPagingAppendReproTest` pins both mechanics.
+     * no second page fires until the next deliberate `scrollToOlderBoundary()` step. (Opening an
+     * unread gap is bounded differently: while the gap-bounded window fits under `initialLoadSize`
+     * = pageSize * 3 = 150, the local source exhausts its bound (nextKey == null) and Paging
+     * auto-fires an older APPEND with no scroll, each persisted page re-bounding the window — a
+     * hint-free two-to-three-page backfill that halts at the first generation whose whole window
+     * reaches 150. RecentPagingAppendReproTest pins those mechanics; the required journey settles
+     * the cascade as a 149..199-row range before deliberate stepping resumes.)
      */
     fun scrollToOlderBoundary() {
         awaitTag("chat_timeline")
@@ -225,67 +221,6 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
             rule.waitUntil(45_000) { !isPresent(CHAT_HISTORY_LOADING_TAG) }
         }
         rule.waitForIdle()
-    }
-
-    /**
-     * Bring the fillable history seam into composition, reporting whether one is reachable at all.
-     *
-     * The divider is drawn INSIDE the row on the newer side of its gap, never as its own list item,
-     * so it exists only once that row AND its older neighbour are materialized — `seamAbove`
-     * abstains on an unmaterialized neighbour rather than guessing a position that would jump the
-     * moment the placeholder loads. A seam below the initial load therefore has to be PAGED DOWN TO
-     * before it can be seen, one deliberate boundary step at a time.
-     */
-    private fun reachGapDivider(maximumSteps: Int = 3): Boolean {
-        awaitTag("chat_timeline")
-        repeat(maximumSteps) {
-            if (isPresent(CHAT_GAP_DIVIDER_TAG)) return true
-            // Same shape as scrollOlderUntil, and for the same reason: a seam sitting mid-list is
-            // LOADED but uncomposed, and only a walk composes the rows in between. A plain
-            // scroll-to-last-index jumps straight past it and would never bring it into the tree.
-            //
-            // NOT SIDE-EFFECT FREE, and callers must place it accordingly: a performScrollToNode
-            // MISS resets the container to index 0 before sweeping, and index 0 in this reversed
-            // list is the newest row — which the viewport mark-read effect reads as "the user is at
-            // the bottom" and acknowledges the whole room. Only call this once the journey no longer
-            // depends on anything being unread.
-            val reached = runCatching {
-                container("chat_timeline").performScrollToNode(hasTestTag(CHAT_GAP_DIVIDER_TAG))
-            }.isSuccess
-            if (reached) return true
-            scrollToOlderBoundary()
-        }
-        return false
-    }
-
-    /**
-     * Tap the history seam until the timeline stops offering one, and report whether it ever found
-     * one to tap.
-     *
-     * Each tap grants the fill coordinator ONE fresh page budget, so a gap deeper than that budget
-     * legitimately needs more than one tap — that is the affordance working as designed, not a
-     * retry. The wait is on rows landing rather than on a spinner: a recoverable seam keeps the same
-     * test tag while it loads, because it stays the same control with a busy state description.
-     *
-     * Tolerant of finding nothing, deliberately. The reconnect autopilot fills the newest seam
-     * hands-free on each open, so whether a seam survives to be tapped depends on how deep it still
-     * is — asserting that one is present here would be asserting on a race with the app's own
-     * catch-up. What the caller can rely on is the postcondition: after this returns, the far side
-     * of the gap is reachable, and scrolling alone could not have made it so.
-     */
-    fun fillGapUntilClosed(maximumTaps: Int = 4): Boolean {
-        if (!reachGapDivider()) return false
-        repeat(maximumTaps) {
-            val before = timelineItemCount()
-            rule.onAllNodesWithTag(CHAT_GAP_DIVIDER_TAG, useUnmergedTree = true)[0].performClick()
-            runCatching { rule.waitUntil(45_000) { timelineItemCount() > before } }
-            rule.waitForIdle()
-            // The fill recedes the gap, so its divider moves DEEPER rather than vanishing. Absence
-            // right here only means it left the composed window; page toward it again to tell a
-            // closed seam apart from a receded one.
-            if (!reachGapDivider()) return true
-        }
-        throw AssertionError("the history seam was still fillable after $maximumTaps taps")
     }
 
     /** Repeat [scrollToOlderBoundary] until a row containing [text] becomes addressable. */
