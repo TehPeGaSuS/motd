@@ -5,6 +5,7 @@ import androidx.paging.LoadType
 import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.paging.RemoteMediator
+import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
@@ -13,6 +14,7 @@ import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
+import io.github.trevarj.motd.data.history.seamAbove
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
@@ -23,6 +25,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -45,6 +48,16 @@ class MessageRepositoryPagingTest {
 
     @After
     fun tearDown() = db.close()
+
+    @OptIn(ExperimentalPagingApi::class)
+    private fun repository() = MessageRepositoryImpl(
+        db.bufferDao(),
+        db.networkIdentityDao(),
+        db.messageDao(),
+        db.reactionDao(),
+        ChatHistoryMediatorFactory { _, _ -> error("paging is driven by the source directly here") },
+        db.historyGapDao(),
+    )
 
     @Test
     fun pagingConfigIsPlaceholderAwareAndBounded() {
@@ -87,27 +100,61 @@ class MessageRepositoryPagingTest {
     }
 
     @Test
-    fun sameTimestampBoundaryKeepsOnlyTheSelectedRecentIsland() = runTest {
+    fun sameTimestampGapPresentsBothIslandsWithASeamBetweenThem() = runTest {
+        // The sharpest shape of the retired clamp. Two rows share serverTime 100 and are told apart
+        // only by their exact `(timelineOrder, id)` tuples, and a gap sits between them. The lower
+        // boundary this used to derive was inclusive at the newer row, so the older row — durable,
+        // intact, and the user's own history — was excluded from the presented window with nothing
+        // on screen to say so.
+        //
+        // Recent passes no boundary now, so BOTH rows are presented and the break between them is
+        // rendered instead of applied: exactly one seam, in the newer row's slot.
         val olderId = db.messageDao().insertAll(
             listOf(message(bufferId, "older", "alice", 100, "older", msgid = "older")),
         ).single()
         val newerId = db.messageDao().insertAll(
             listOf(message(bufferId, "newer", "alice", 100, "newer", msgid = "newer")),
         ).single()
+        val older = checkNotNull(db.messageDao().byCanonicalId(olderId))
         val newer = checkNotNull(db.messageDao().byCanonicalId(newerId))
+        db.historyGapDao().insert(
+            HistoryGapEntity(
+                roomId = bufferId,
+                olderMsgid = "older",
+                olderServerTime = 100,
+                olderEventId = olderId,
+                olderTimelineOrder = older.timelineOrder,
+                newerMsgid = "newer",
+                newerServerTime = 100,
+                newerEventId = newerId,
+                newerTimelineOrder = newer.timelineOrder,
+            ),
+        )
+        val repository = repository()
+        val bounds = repository.historyWindowBounds(bufferId, HistoryWindowFocus.Recent)
+        assertNull("an equal-timestamp gap must not clamp the Recent window", bounds.lowerBoundary)
 
         val page = db.messageDao().pagingSource(
             messagePagingQuery(
                 bufferId,
                 MessageVisibilitySpec(),
-                lowerBoundary = TimelineAnchor(100, newer.id, newer.timelineOrder),
+                lowerBoundary = bounds.lowerBoundary,
+                upperBoundary = bounds.upperBoundary,
             ),
         ).load(
             PagingSource.LoadParams.Refresh(null, 50, false),
         ).requirePage()
 
-        assertEquals(listOf(newerId), page.data.map { it.id })
-        assertFalse(page.data.any { it.id == olderId })
+        assertEquals(listOf(newerId, olderId), page.data.map { it.id })
+
+        // The seam lands where the clamp used to cut, and only there: it takes the same projection
+        // the old lower boundary took, so the cut is drawn in the position it was previously applied.
+        val seams = repository.observeTimelineSeams(bufferId).first()
+        assertEquals(TimelineAnchor(100, newer.id, newer.timelineOrder), seams.single().position)
+        val placements = page.data.mapIndexedNotNull { index, row ->
+            seamAbove(row, page.data.getOrNull(index + 1), seams)?.let { row.text to it.gapId }
+        }
+        assertEquals(listOf("newer" to seams.single().gapId), placements)
     }
 
     @Test

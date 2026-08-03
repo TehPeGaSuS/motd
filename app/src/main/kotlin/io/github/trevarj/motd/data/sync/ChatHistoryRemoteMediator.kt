@@ -43,7 +43,9 @@ import kotlinx.coroutines.CancellationException
  * APPEND  → older boundary; stop when historyComplete/no cap; when the buffer is empty (no oldest
  *           boundary yet) pull LATEST once to backfill on first open; otherwise BEFORE the oldest
  *           protocol page boundary. Completed empty pages and explicit end markers persist the
- *           confirmed start-of-history state through EventProcessor.
+ *           confirmed start-of-history state through EventProcessor. Under Recent focus this is the
+ *           bottom-of-timeline ladder only — interior history gaps belong to
+ *           [HistoryGapFillCoordinator]; see [appendFocusedGap].
  *
  * Paging treats `endOfPaginationReached` as PERMANENT for a direction, so both directional loads
  * report it only when paging is genuinely finished (gap closed/unrecoverable, history complete, or a
@@ -194,7 +196,7 @@ class ChatHistoryRemoteMediator(
         historyComplete: Boolean,
     ): MediatorResult {
         val gaps = historyGapDao?.forRoom(roomId).orEmpty()
-        val focusedGap = focusedOlderGap(focus, gapAnchors.resolve(roomId, gaps))?.gap
+        val focusedGap = appendFocusedGap(roomId, gaps)
         val cursor = historyCursorDao?.byRoom(roomId)
         val pageability = olderPageability(
             focusedGap = focusedGap,
@@ -236,6 +238,29 @@ class ChatHistoryRemoteMediator(
         }
     }
 
+    /**
+     * The gap older paging is working on, or null when APPEND is not gap-directed.
+     *
+     * Recent is deliberately NOT gap-directed. Its window is unbounded, so the local PagingSource
+     * only runs dry at the true oldest retained row — never at an interior seam — and the APPEND
+     * Paging asks for is therefore always a request for backlog BELOW the bottom of the timeline.
+     * Aiming it at a gap made it answer a question nobody asked, and one consequence was a real
+     * defect: an unrecoverable gap anywhere in the room reported the whole direction permanently
+     * finished, so scrolling to the bottom of the list could never fetch another page. Interior
+     * seams are owned by [HistoryGapFillCoordinator], which is driven by taps and by the autopilot
+     * rather than by Paging running out of rows.
+     *
+     * [HistoryWindowFocus.Around] keeps the gap direction: that window IS clamped at a gap, so
+     * running out of local rows there really does mean "the gap below this island".
+     */
+    private suspend fun appendFocusedGap(
+        roomId: Long,
+        gaps: List<HistoryGapEntity>,
+    ): HistoryGapEntity? = when (focus) {
+        HistoryWindowFocus.Recent -> null
+        is HistoryWindowFocus.Around -> focusedOlderGap(focus, gapAnchors.resolve(roomId, gaps))?.gap
+    }
+
     /** The APPEND decision point: which gap was selected and which boundary the request carries. */
     private fun recordAppendBoundary(
         roomId: Long,
@@ -266,7 +291,9 @@ class ChatHistoryRemoteMediator(
      * permanently terminal for the direction, so reporting the second fact kills older backfill after
      * a single page on a timestamp-only wire (soju advertises `MSGREFTYPES=timestamp`), where every
      * saturated page trips it. Terminate only when older paging is genuinely finished:
-     *  - the focused older gap became server-proven unrecoverable, or
+     *  - the focused older gap became server-proven unrecoverable (Around focus only — Recent has no
+     *    focused gap, so an unrecoverable seam elsewhere in the room can no longer end this
+     *    direction), or
      *  - history is complete and no focused gap remains, or
      *  - the page made no progress at all.
      * Otherwise the boundary moved (or rows landed), so the next APPEND issues a different request
@@ -280,10 +307,7 @@ class ChatHistoryRemoteMediator(
         // Re-read AFTER the persist, and deliberately so: this page may have shrunk or closed the
         // focused gap, receded the cursor, or proven history complete, and every one of those facts
         // is an input to terminality. The decision itself is pure, so the reads stay here in the open.
-        val remaining = focusedOlderGap(
-            focus,
-            gapAnchors.resolve(roomId, historyGapDao?.forRoom(roomId).orEmpty()),
-        )?.gap
+        val remaining = appendFocusedGap(roomId, historyGapDao?.forRoom(roomId).orEmpty())
         val historyComplete = bufferDao.observeById(roomId)?.historyComplete == true
         val cursorOldest = historyCursorDao?.byRoom(roomId)
             ?.let { ChatHistoryReference(it.oldestMsgid, it.oldestServerTime) }

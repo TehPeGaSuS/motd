@@ -77,12 +77,24 @@ class HistoryWindowBoundsTest {
 //
 // These three declarations shipped in `MessageRepositoryImpl.kt` until the window rule moved to
 // `io.github.trevarj.motd.data.history.windowBounds`. They are retained here, verbatim and
-// test-only, as the equivalence net for that move: the tests above pin the reference against the
-// literal bounds it has always produced, and `HistoryGapGeometryTest` asserts the module agrees
-// with the reference on the same fixtures.
+// test-only, and they now serve TWO purposes for `HistoryGapGeometryTest`:
 //
-// DO NOT edit them to follow the module. Their whole value is that they are the old behavior; a
-// change here silently turns the parity assertions into a tautology.
+//  - AROUND is still an equivalence net. That branch was never changed, so the module and the
+//    reference must keep agreeing on the same fixtures, exactly as when the code moved.
+//  - RECENT is a divergence net. Recent deliberately stopped clamping at the newest gap (the
+//    timeline is presented unbounded and a gap is drawn as a seam instead), so the reference is
+//    what the module must NOT do any more. `HistoryGapGeometryTest` asserts that difference
+//    explicitly, on both sides, rather than deleting the comparison.
+//
+// That second role is why this file is not dead weight and must not be removed with the old
+// behavior it describes: without it, "Recent no longer clamps" would be asserted only against a
+// literal `null`, which is also what a windowBounds that silently stopped seeing gaps returns.
+// The tests above keep the reference itself honest by pinning it to the literal bounds it has
+// always produced.
+//
+// DO NOT edit these declarations to follow the module. Their whole value is that they are the old
+// behavior; a change here turns the parity assertions into a tautology and the divergence
+// assertions into noise.
 // ---------------------------------------------------------------------------------------------
 
 internal data class ResolvedHistoryGap(

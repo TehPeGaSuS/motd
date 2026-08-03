@@ -833,6 +833,111 @@ class ChatModelsTest {
         )
     }
 
+    // --- history gap autopilot --------------------------------------------------------------------
+
+    private fun seam(gapId: Long, serverTime: Long, recoverable: Boolean = true) =
+        io.github.trevarj.motd.data.history.TimelineSeam(
+            gapId = gapId,
+            position = TimelineAnchor(serverTime, gapId, gapId),
+            recoverable = recoverable,
+        )
+
+    private val ready = HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP), 100)
+
+    @Test
+    fun `autopilot arms once for the newest recoverable seam`() {
+        val autopilot = HistoryGapAutopilot()
+        // Seams arrive oldest-first, so the newest recoverable one is the last: an older seam that
+        // happens to be listed after it must not win.
+        val seams = listOf(seam(gapId = 1, serverTime = 100), seam(gapId = 2, serverTime = 900))
+
+        val armed = autopilot.arm(roomId = 7, visibleSession = 1, availability = ready, entrySettled = true, seams = seams)
+
+        assertEquals(GapAutopilotArming(7, 2, TimelineAnchor(900, 2, 2)), armed)
+        // The same seam list is republished on every fill-progress emission. Re-arming there would
+        // turn the coordinator's bounded fill into an unbounded loop.
+        assertNull(autopilot.arm(7, 1, ready, true, seams))
+    }
+
+    @Test
+    fun `autopilot does not re-arm for a seam its own fill receded`() {
+        val autopilot = HistoryGapAutopilot()
+        autopilot.arm(7, 1, ready, true, listOf(seam(gapId = 2, serverTime = 900)))
+
+        // A budgeted fill leaves the gap open with its newer edge moved OLDER. The rest of that gap
+        // is the user's to ask for, via the divider that is still on screen.
+        assertNull(autopilot.arm(7, 1, ready, true, listOf(seam(gapId = 2, serverTime = 600))))
+    }
+
+    @Test
+    fun `autopilot does not chase an older seam promoted by closing the newest one`() {
+        val autopilot = HistoryGapAutopilot()
+        autopilot.arm(7, 1, ready, true, listOf(seam(gapId = 1, serverTime = 100), seam(gapId = 2, serverTime = 900)))
+
+        // Gap 2 closed, so gap 1 is now "newest recoverable". It is old history nobody asked for;
+        // fetching it unprompted is the regression the budget and this rule exist to prevent.
+        assertNull(autopilot.arm(7, 1, ready, true, listOf(seam(gapId = 1, serverTime = 100))))
+    }
+
+    @Test
+    fun `autopilot arms again for a genuinely newer seam`() {
+        val autopilot = HistoryGapAutopilot()
+        autopilot.arm(7, 1, ready, true, listOf(seam(gapId = 2, serverTime = 900)))
+
+        // A second reconnect always lands its catch-up gap at the newest end, which is exactly what
+        // this rule lets through and nothing else.
+        val armed = autopilot.arm(7, 1, ready, true, listOf(seam(gapId = 2, serverTime = 900), seam(gapId = 3, serverTime = 5_000)))
+
+        assertEquals(3L, armed?.gapId)
+    }
+
+    @Test
+    fun `autopilot is gated on visibility, a ready transport, and a settled entry`() {
+        val autopilot = HistoryGapAutopilot()
+        val seams = listOf(seam(gapId = 2, serverTime = 900))
+
+        assertNull("not on screen", autopilot.arm(7, null, ready, true, seams))
+        assertNull(
+            "no transport to page against",
+            autopilot.arm(7, 1, HistoryAvailability.NegotiatingOrOffline, true, seams),
+        )
+        assertNull("history unsupported", autopilot.arm(7, 1, HistoryAvailability.Unsupported, true, seams))
+        // Entry freezes the unread boundary from the store, so a fill that lands first would move
+        // the divider onto rows the autopilot itself had just fetched.
+        assertNull("entry has not resolved yet", autopilot.arm(7, 1, ready, false, seams))
+        // None of the three consumed the seam: the gate is not a latch, so a room opened before its
+        // connection settles — or before its entry positions — still catches up afterwards.
+        assertEquals(2L, autopilot.arm(7, 1, ready, true, seams)?.gapId)
+    }
+
+    @Test
+    fun `autopilot ignores an unrecoverable seam`() {
+        val autopilot = HistoryGapAutopilot()
+
+        // Nothing left to fetch: a fill would cost a classification and change nothing.
+        assertNull(autopilot.arm(7, 1, ready, true, listOf(seam(gapId = 4, serverTime = 900, recoverable = false))))
+        // ...and refusing it is not the same as consuming it: the real seam still arms.
+        assertEquals(2L, autopilot.arm(7, 1, ready, true, listOf(seam(gapId = 2, serverTime = 900)))?.gapId)
+    }
+
+    @Test
+    fun `autopilot does not re-arm across a pause and resume`() {
+        val autopilot = HistoryGapAutopilot()
+        val seams = listOf(seam(gapId = 2, serverTime = 900))
+        assertEquals(2L, autopilot.arm(7, 1, ready, true, seams)?.gapId)
+
+        // Backgrounding and resuming is not new information about history. Spending another budget
+        // on the same seam because the screen came back would make the visible divider a lie: it
+        // says the user decides how much more to fetch.
+        assertNull(autopilot.arm(7, null, ready, true, seams))
+        assertNull(autopilot.arm(7, 2, ready, true, seams))
+        // A reconnect gap arriving while it was away still arms, because it is genuinely newer.
+        assertEquals(
+            3L,
+            autopilot.arm(7, 2, ready, true, seams + seam(gapId = 3, serverTime = 5_000))?.gapId,
+        )
+    }
+
     @Test
     fun `lag tone thresholds bucket latency`() {
         assertEquals(LagTone.GOOD, lagTone(0))

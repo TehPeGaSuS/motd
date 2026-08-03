@@ -28,19 +28,16 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * The seam pipeline is wired end to end — repository → ViewModel state → [rowSeam] → divider — and
- * is nevertheless DARK: under today's window bounds no seam can reach a rendered slot.
+ * The seam pipeline end to end — repository → ViewModel state → [rowSeam] → divider — over a real
+ * store, a real paging query, and the real repository bounds.
  *
- * Both halves are proved here against the same real store:
- *  - the dark property, over windows materialized by the real repository bounds and the real paging
- *    query, under both Recent and a deep-jump Around focus;
- *  - the lit property, over an unbounded snapshot of the identical rows, where the seam lands in
- *    exactly one slot and carries the state its gap implies.
+ * This file used to assert the opposite. While Recent clamped the window AT the gap, the row
+ * adjacent to a seam had no materialized older neighbor, `seamAbove` abstained on the undecidable
+ * slot, and NOTHING could render however correctly it was wired. Recent is unbounded now, so those
+ * cases invert: the seam is drawn, once, between the two islands.
  *
- * The mechanism is not a filter anywhere in the UI. It is geometry: today's bounds clamp the window
- * AT the gap, so the row adjacent to a seam has no materialized older neighbor, and `seamAbove`
- * abstains on an undecidable slot. Widening the bounds is the next stage; the day it lands, the lit
- * tests below are what the timeline starts doing.
+ * Deliberately kept: the Around case still renders no seam, because that window is still clamped.
+ * It is the live statement of what the abstention rule does, not leftover dark coverage.
  */
 @RunWith(RobolectricTestRunner::class)
 @OptIn(androidx.paging.ExperimentalPagingApi::class)
@@ -144,19 +141,29 @@ class TimelineSeamPresentationTest {
         assertTrue("a fillable gap must publish a recoverable seam", seam.recoverable)
     }
 
-    // --- dark: no seam can render under today's bounds ---------------------------------------------
+    // --- lit: the seam renders in the real Recent window -------------------------------------------
 
     @Test
-    fun `the recent window renders no seam`() = runTest {
+    fun `the recent window renders the seam between the two islands`() = runTest {
         val bounds = repository().historyWindowBounds(roomId, HistoryWindowFocus.Recent)
+        // The inversion, stated at its cause: Recent passes no boundary at all, so the far side of
+        // the gap is materialized and the seam has a decidable slot. A lower boundary here would put
+        // this file straight back to rendering nothing.
+        assertNull("Recent must pass no lower boundary", bounds.lowerBoundary)
+        assertNull("Recent must pass no upper boundary", bounds.upperBoundary)
         val rows = loadWindow(bounds)
-        assertEquals(listOf("new-2", "new-1"), rows.map { it.text })
+        assertEquals(listOf("new-2", "new-1", "old-2", "old-1"), rows.map { it.text })
 
-        assertEquals(emptyList<Pair<String, RowSeam>>(), renderedSeams(rows, seamState()))
+        val rendered = renderedSeams(rows, seamState())
 
-        // Why, precisely: the window's lower bound IS the seam's position, so the only row the seam
-        // could attach to is the oldest one in the window, whose older neighbor is not materialized.
-        assertEquals(bounds.lowerBoundary, seamState().seams.single().position)
+        // Exactly one slot, above the first row at or after the gap — not above the last row on the
+        // far side, and not once per island.
+        assertEquals(listOf("new-1"), rendered.map { it.first })
+        assertEquals(HistoryGapState.Recoverable, rendered.single().second.state)
+        assertEquals(newer1, seamState().seams.single().position.eventId)
+
+        // The abstention rule is unchanged and still applies at the BOTTOM of the loaded list: a
+        // null older neighbor is an unmaterialized placeholder, not a proven edge.
         assertNull(
             "an unmaterialized older neighbor makes the slot undecidable, so the seam abstains",
             rowSeam(rows.last(), null, seamState()),
@@ -164,7 +171,7 @@ class TimelineSeamPresentationTest {
     }
 
     @Test
-    fun `a deep-jump island renders no seam either`() = runTest {
+    fun `a deep-jump island renders no seam`() = runTest {
         // A notification/search/permalink jump below the gap: the window is capped by the gap's
         // older edge, so the seam sits above everything the island materialized.
         val focus = HistoryWindowFocus.Around(serverTime = 1_000, eventId = older1, timelineOrder = older1)
@@ -195,21 +202,7 @@ class TimelineSeamPresentationTest {
         }
     }
 
-    // --- lit: the same wiring over an unbounded snapshot -------------------------------------------
-
-    @Test
-    fun `an unbounded snapshot draws the seam above the first row after the gap`() = runTest {
-        val rows = loadWindow(MessageWindowBounds())
-        assertEquals(listOf("new-2", "new-1", "old-2", "old-1"), rows.map { it.text })
-
-        val rendered = renderedSeams(rows, seamState())
-
-        // Exactly one slot, and it is the row at the gap's newer edge — above its bubble, below the
-        // last row on the far side of the gap.
-        assertEquals(1, rendered.size)
-        assertEquals("new-1", rendered.single().first)
-        assertEquals(HistoryGapState.Recoverable, rendered.single().second.state)
-    }
+    // --- the state each seam carries ---------------------------------------------------------------
 
     @Test
     fun `a fill in flight renders that seam as loading`() = runTest {
