@@ -43,10 +43,12 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.BeforeClass
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
+import org.junit.runners.model.TestClass
 
 /** Marks the real-stack, isolated journeys required by the headless API34 gate. */
 @Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
@@ -158,7 +160,7 @@ class RequiredHeadlessE2eTest {
                 ).filterIsInstance<VoiceSendProgress.Complete>().first()
             }
             val voice = runBlocking { probe.awaitCanonicalContaining("voice", upload.url, bufferId) }
-            TimelineRobot(compose).assertCompactAudioPlayer(voice.tag())
+            TimelineRobot(compose).assertCompactAudioPlayer(voice.tag(), voice.id)
             milestones.record("filehost_audio_rendered", "buffer=$bufferId")
         } finally {
             fixture.delete()
@@ -356,10 +358,15 @@ class RequiredHeadlessE2eTest {
         // scroll must all complete before the row is displayed. Budget it like the suite's other
         // navigation/network-scale waits (20-45s) rather than the generic 10s component wait,
         // which is a slow-hosted-emulator flake edge for this step.
-        timeline.assertMessageVisible(firstUnread.tag(), timeoutMs = 30_000)
+        //
+        // Headroom, not a fix: the app's own materialization cap is TARGET_MATERIALIZATION_TIMEOUT_MS
+        // (30s), so a 30s test budget ties with the production deadline and loses by construction
+        // whenever the deep jump legitimately needs its full cap. 45s leaves the app room to finish
+        // and still fails loudly if it never does.
+        timeline.assertMessageVisible(firstUnread.tag(), timeoutMs = 45_000)
         scenario.scenario?.onActivity { it.recreate() }
         // Activity recreation replays the same deep entry from scratch on the same cold budget.
-        timeline.assertMessageVisible(firstUnread.tag(), timeoutMs = 30_000)
+        timeline.assertMessageVisible(firstUnread.tag(), timeoutMs = 45_000)
         // Directional paging restores older rows; search then exposes its exact newest-200 cap.
         runBlocking {
             runProbe.awaitRows(
@@ -435,4 +442,44 @@ class RequiredHeadlessE2eTest {
         TimelineAnchor(serverTime, id, timelineOrder)
 
     private fun io.github.trevarj.motd.data.db.MessageEntity.tag(): String = "chat_message_${msgid ?: id}"
+
+    companion object {
+        /**
+         * The four journeys share one hermetic soju/ergo stack and one channel, so their execution
+         * order is load-bearing rather than incidental: `unreadHistory…` seeds ~260 backlog rows
+         * that `sendEcho…` then sends and pages against, and the deep-jump steps depend on that
+         * depth existing. JUnit's default sorter orders methods by name hashCode, so renaming,
+         * adding, or removing a journey silently permutes the sequence and quietly changes what
+         * every later journey runs against — the kind of change that surfaces as an unexplained
+         * required-gate flake rather than a failing assertion.
+         *
+         * Per-journey channel isolation would be the stronger fix, but the fixture stack pre-joins
+         * a single channel (`FixtureArgs.channel`, also used directly by `FixtureIrcClient`), so
+         * deriving a channel per journey would mean new join plumbing on both the app seam and the
+         * harness. Pinning the order is the least invasive change that still removes the silent
+         * breakage: any permutation fails here, once, with an explicit message.
+         */
+        private val JOURNEY_ORDER = listOf(
+            "unreadHistoryEntersAtMarkerAndRemainsCanonical",
+            "bootstrappedNavigationSettingsAndBouncerSmoke",
+            "sendEchoPersistsVisibleRowAndReconnects",
+            "onboardingTrustsEphemeralTlsAndImportsNetwork",
+        )
+
+        /** `TestClass` applies the same sorter `BlockJUnit4ClassRunner.computeTestMethods` uses. */
+        @BeforeClass
+        @JvmStatic
+        fun pinJourneyOrder() {
+            val actual = TestClass(RequiredHeadlessE2eTest::class.java)
+                .getAnnotatedMethods(Test::class.java)
+                .map { it.name }
+            assertEquals(
+                "required E2E journey order changed: these journeys share one channel and the " +
+                    "later ones depend on the backlog the earlier ones seed. Re-pin JOURNEY_ORDER " +
+                    "only after confirming the new sequence still satisfies those dependencies.",
+                JOURNEY_ORDER,
+                actual,
+            )
+        }
+    }
 }

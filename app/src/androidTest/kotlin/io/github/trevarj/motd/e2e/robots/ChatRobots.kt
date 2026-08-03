@@ -21,6 +21,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_LOADING_TAG
 import org.junit.Assert.assertTrue
 
+/** Spacing between the bottom resets a newest-row wait is allowed to issue. */
+private const val NEWEST_ROW_RESET_INTERVAL_MS = 5_000L
+
 internal class ChatListRobot(compose: ComposeTestRule) : BaseRobot(compose) {
     fun open(bufferId: Long) = click("chatlist_row_$bufferId")
 }
@@ -38,13 +41,13 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         rule.onNodeWithText(text, substring = true, useUnmergedTree = true).assertTextContains(text, substring = true)
     }
 
-    fun assertCompactAudioPlayer(messageTag: String) {
+    fun assertCompactAudioPlayer(messageTag: String, rowId: Long) {
         val playerMatcher = hasTestTag("audio_player") and hasAnyAncestor(hasTestTag(messageTag))
         val detailsMatcher = hasTestTag("audio_player_details") and hasAnyAncestor(hasTestTag(messageTag))
         // A freshly uploaded voice row must round-trip through the filehost, the IRC echo, and Room
         // before Paging can present it. Use the journey's network-dependent timeout rather than the
         // generic 10s component wait, which is a cold-emulator flake edge for this row.
-        scrollContainerTo("chat_timeline", hasTestTag(messageTag), timeoutMs = 30_000)
+        awaitNewestRow(messageTag, rowId, timeoutMs = 30_000)
         val players = rule.onAllNodes(playerMatcher, useUnmergedTree = true).assertCountEquals(1)
         val player = players[0].assertIsDisplayed()
         val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
@@ -52,6 +55,40 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         assertTrue("audio player height was ${heightDp}dp", heightDp <= 84f)
         rule.onAllNodes(detailsMatcher, useUnmergedTree = true).assertCountEquals(1)[0].performClick()
         rule.onNodeWithText("Link", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    /**
+     * Waits for a row at the NEWEST end of the timeline, which under `reverseLayout = true` lives
+     * at index 0, and leaves it aligned in the viewport.
+     *
+     * This wait must never sweep. A `performScrollToNode` miss walks the container to the oldest
+     * loaded row, which is the Paging APPEND boundary: the append rewrites the history gap, the gap
+     * rebuilds the Pager, and the new generation churns the very snapshot the wait is polling — the
+     * oracle would keep destroying the state it measures. Instead poll the key path, which resolves
+     * the row's index over the loaded list and throws without moving on a miss, and allow at most
+     * one bottom reset per interval in case an earlier step parked the viewport in older history.
+     */
+    private fun awaitNewestRow(messageTag: String, rowId: Long, timeoutMs: Long) {
+        awaitTag("chat_timeline")
+        var nextResetAt = 0L
+        rule.waitUntil("timeline scrolled to newest row $messageTag (key $rowId)", timeoutMs) {
+            if (isPresent(messageTag) || tryScrollContainerToKey("chat_timeline", rowId)) {
+                // Composed is not the same as fully visible, and the details row below is clicked.
+                // The row is composed by now, so this short-circuits on the descendant match rather
+                // than sweeping.
+                return@waitUntil runCatching {
+                    container("chat_timeline").performScrollToNode(hasTestTag(messageTag))
+                }.isSuccess
+            }
+            val now = System.currentTimeMillis()
+            if (now >= nextResetAt) {
+                nextResetAt = now + NEWEST_ROW_RESET_INTERVAL_MS
+                // Index 0 is the newest row, so a reset only ever moves toward the newer (PREPEND)
+                // end and can never trip the older APPEND boundary.
+                runCatching { container("chat_timeline").performScrollToIndex(0) }
+            }
+            false
+        }
     }
 
     fun assertUnreadEntry(
