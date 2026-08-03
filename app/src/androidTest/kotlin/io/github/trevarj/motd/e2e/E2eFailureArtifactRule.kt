@@ -3,7 +3,12 @@ package io.github.trevarj.motd.e2e
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.platform.io.PlatformTestStorageRegistry
+import dagger.hilt.android.EntryPointAccessors
 import io.github.trevarj.motd.MainActivity
+import io.github.trevarj.motd.MotdApplication
+import io.github.trevarj.motd.di.RequiredE2eEntryPoint
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import kotlinx.coroutines.runBlocking
 import org.junit.rules.TestWatcher
 import org.junit.runner.Description
 
@@ -20,6 +25,11 @@ class E2eFailureArtifactRule(
         // This is the launcher-visible post-start boundary. It contains only the fixed test id;
         // AGP collects it through AndroidX test storage without relying on app data directories.
         writeOutput("required-e2e/started.jsonl", "{\"test\":\"${safeName()}\"}\n", append = true)
+        // Arm the app's own decision journal for the whole journey. It is opt-in and off by
+        // default, records classification/ids/counts only, and is exported below on failure —
+        // control-flow defects like the history-paging demand race are otherwise observable as a row
+        // count and nothing else, which is a CI cycle per hypothesis.
+        runCatching { diagnostics().setEnabled(true) }
     }
 
     override fun failed(e: Throwable, description: Description) {
@@ -50,6 +60,24 @@ class E2eFailureArtifactRule(
         writeOutput("$prefix/lazy-state.json", "{\"visible\":[]}")
         writeOutput("$prefix/connections.json", "{\"states\":[]}")
         writeOutput("$prefix/milestones.jsonl", milestones.render())
+        exportDiagnostics("$prefix/diagnostics.log")
+    }
+
+    /** The app journal for this journey, or nothing at all if the app side is unreachable. */
+    private fun exportDiagnostics(path: String) {
+        runCatching {
+            val logger = diagnostics()
+            PlatformTestStorageRegistry.getInstance().openOutputFile(path, false).use { output ->
+                runBlocking { logger.exportTo(output) }
+            }
+        }
+    }
+
+    private fun diagnostics(): DiagnosticLogger {
+        val app = InstrumentationRegistry.getInstrumentation().targetContext
+            .applicationContext as MotdApplication
+        return EntryPointAccessors.fromApplication(app, RequiredE2eEntryPoint::class.java)
+            .diagnostics()
     }
 
     private fun safeName(): String = (description?.className.orEmpty() + "_" + description?.methodName.orEmpty())

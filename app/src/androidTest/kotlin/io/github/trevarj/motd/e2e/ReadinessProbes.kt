@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.withTimeout
 
 class HistorySyncProbe(
@@ -181,7 +182,17 @@ class MessageRunProbe(
         )
     }
 
-    /** Waits for the bounded fixture window to stop growing before validating its size. */
+    /**
+     * Waits for the bounded fixture window to stop growing before validating its size.
+     *
+     * Every snapshot is recorded on the way past, not only the one that settles, because this probe
+     * CANNOT succeed early: `debounce(stableMs).first { requiredText present }` either settles on a
+     * window that has been quiet for [stableMs] and contains [requiredText], or it times out. A bare
+     * `TimeoutCancellationException` from that shape is almost content-free — it cannot distinguish
+     * "the transition never started" from "it started and stopped somewhere else" — so the failure
+     * carries the last observation instead: `count=/oldest=/newest=`, plus the same values as a
+     * milestone so a red run is diffable against the green baseline CI already uploads.
+     */
     @OptIn(FlowPreview::class)
     suspend fun awaitStableRecentRows(
         token: String,
@@ -193,32 +204,52 @@ class MessageRunProbe(
         excludedText: String,
         stableMs: Long = 1_500,
         timeoutMs: Long = 45_000,
-    ): List<MessageEntity> = try {
-        withTimeout(timeoutMs) {
-            search.search(token, bufferId)
-                .map { hits ->
-                    hits.map { it.message }.filter { it.text.startsWith("$token row") }
-                }
-                .distinctUntilChangedBy { rows -> rows.map { it.id } }
-                .debounce(stableMs)
-                .first { rows -> rows.any { it.text == requiredText } }
-                .also { rows ->
-                    check(rows.size in minimumCount..maximumCount) {
-                        "settled recent history count ${rows.size} is outside $minimumCount..$maximumCount"
+    ): List<MessageEntity> {
+        var observed: List<MessageEntity> = emptyList()
+        var snapshots = 0
+        return try {
+            withTimeout(timeoutMs) {
+                search.search(token, bufferId)
+                    .map { hits ->
+                        hits.map { it.message }.filter { it.text.startsWith("$token row") }
                     }
-                    check(rows.none { it.text == excludedText }) {
-                        "settled recent history unexpectedly contains $excludedText"
+                    .distinctUntilChangedBy { rows -> rows.map { it.id } }
+                    .onEach { rows ->
+                        observed = rows
+                        snapshots++
                     }
-                    validateRows(token, bufferId, rows, expectedNewestOrdinal)
-                    milestones.record("history_run_stable", "buffer=$bufferId count=${rows.size}")
-                }
+                    .debounce(stableMs)
+                    .first { rows -> rows.any { it.text == requiredText } }
+                    .also { rows ->
+                        check(rows.size in minimumCount..maximumCount) {
+                            "settled recent history count ${rows.size} is outside $minimumCount..$maximumCount"
+                        }
+                        check(rows.none { it.text == excludedText }) {
+                            "settled recent history unexpectedly contains $excludedText"
+                        }
+                        validateRows(token, bufferId, rows, expectedNewestOrdinal)
+                        milestones.record("history_run_stable", "buffer=$bufferId count=${rows.size}")
+                    }
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            val seen = observed.describe(token)
+            milestones.record(
+                "history_run_stable_timeout",
+                "buffer=$bufferId want=$minimumCount..$maximumCount snapshots=$snapshots $seen",
+            )
+            throw AssertionError(
+                "settled recent history rows timed out for buffer=$bufferId " +
+                    "want=$minimumCount..$maximumCount snapshots=$snapshots $seen required=$requiredText",
+                timeout,
+            )
         }
-    } catch (timeout: TimeoutCancellationException) {
-        milestones.record("history_run_stable_timeout", "buffer=$bufferId count=$minimumCount..$maximumCount")
-        throw AssertionError(
-            "settled recent history rows timed out for buffer=$bufferId count=$minimumCount..$maximumCount",
-            timeout,
-        )
+    }
+
+    /** The last observation, as the three facts that identify which terminal state was reached. */
+    private fun List<MessageEntity>.describe(token: String): String {
+        val ordered = sortedBy { it.text.substringAfter("$token row").toIntOrNull() ?: Int.MIN_VALUE }
+        return "count=$size oldest=${ordered.firstOrNull()?.text ?: "none"} " +
+            "newest=${ordered.lastOrNull()?.text ?: "none"}"
     }
 
     suspend fun awaitRows(

@@ -6,7 +6,10 @@ e2e_audit_required_artifacts() {
   while IFS= read -r file; do
     base="${file##*/}"
     case "$base" in
-      summary.json|fixture.jsonl|pretest.json|started.jsonl|failure.json|route.json|semantics.json|lazy-state.json|connections.json|milestones.jsonl|timeline.json) ;;
+      # diagnostics.log is the app's own journal, exported on failure. It is admissible here
+      # because DiagnosticLogger records classification, ids, counts and timestamps only, omits
+      # known sensitive field names, and the forbidden-field grep below still applies to it.
+      summary.json|fixture.jsonl|pretest.json|started.jsonl|failure.json|route.json|semantics.json|lazy-state.json|connections.json|milestones.jsonl|timeline.json|diagnostics.log) ;;
       *) echo "privacy audit rejected unexpected artifact: $base" >&2; return 1 ;;
     esac
   done < <(find "$output_dir" -type f -print)
