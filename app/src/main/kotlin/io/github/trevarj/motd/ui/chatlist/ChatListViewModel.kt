@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.InvitationEventRow
 import io.github.trevarj.motd.data.db.InviteState
+import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
@@ -20,9 +21,12 @@ import io.github.trevarj.motd.service.ChannelCloseCoordinator
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
@@ -98,6 +102,10 @@ class ChatListViewModel @Inject constructor(
         // fresh ViewModel after process/configuration recreation re-drives any unfinished leaves.
         channelCloseCoordinator.start()
     }
+
+    // One-shot: unmuting marked a muted backlog read, so the screen can report it and offer an undo.
+    private val _muteBacklogSuppressions = MutableSharedFlow<List<MuteBacklogSuppression>>(extraBufferCapacity = 1)
+    val muteBacklogSuppressions: SharedFlow<List<MuteBacklogSuppression>> = _muteBacklogSuppressions.asSharedFlow()
 
     // Scope selection survives config changes; null = unified list (default).
     private val selection = MutableStateFlow(savedStateHandle.get<Long?>(KEY_SELECTED))
@@ -179,7 +187,15 @@ class ChatListViewModel @Inject constructor(
     fun setMuted(bufferIds: Collection<Long>, muted: Boolean) {
         val ids = bufferIds.toList().distinct()
         if (ids.isEmpty()) return
-        viewModelScope.launch { ids.forEach { bufferRepository.setMuted(it, muted) } }
+        viewModelScope.launch {
+            val suppressed = ids.mapNotNull { bufferRepository.setMuted(it, muted) }
+            if (suppressed.isNotEmpty()) _muteBacklogSuppressions.emit(suppressed)
+        }
+    }
+
+    /** Put back the mute backlog floors an unmute advanced past (snackbar undo). */
+    fun undoMuteBacklogSuppression(suppressions: List<MuteBacklogSuppression>) = viewModelScope.launch {
+        suppressions.forEach { bufferRepository.restoreMuteBacklog(it) }
     }
 
     fun setArchived(bufferId: Long, archived: Boolean) = setArchived(listOf(bufferId), archived)

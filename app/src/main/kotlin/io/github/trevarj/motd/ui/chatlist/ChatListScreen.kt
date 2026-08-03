@@ -63,6 +63,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
@@ -133,6 +135,7 @@ import io.github.trevarj.motd.ui.components.ConnectionBanner
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AudioPlaybackViewModel
 import io.github.trevarj.motd.ui.components.EmptyState
+import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import android.os.SystemClock
@@ -172,8 +175,16 @@ fun ChatListScreen(
         if (!state.loading) defaultChatBufferId(state.rows)?.let(onDefaultBufferAvailable)
     }
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    MuteBacklogUndoEffect(
+        suppressions = viewModel.muteBacklogSuppressions,
+        hostState = snackbarHostState,
+        onUndo = viewModel::undoMuteBacklogSuppression,
+    )
+
     ChatListContent(
         state = state,
+        snackbarHostState = snackbarHostState,
         audioPlaybackState = audioPlaybackState,
         onAudioToggle = audioViewModel::toggle,
         onAudioCancelLoading = audioViewModel::cancelLoading,
@@ -217,6 +228,7 @@ internal fun defaultChatBufferId(rows: List<ChatListRow>): Long? = rows.maxWithO
 @Composable
 fun ChatListContent(
     state: ChatListState,
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     audioPlaybackState: AudioPlaybackState = AudioPlaybackState(),
     onAudioToggle: () -> Unit = {},
     onAudioCancelLoading: () -> Unit = {},
@@ -329,6 +341,7 @@ fun ChatListContent(
     ) {
         Scaffold(
             modifier = Modifier.testTag("screen_chat_list"),
+            snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 ChatListTopBar(
                     modifier = Modifier.testTag(if (selectionActive) "chatlist_selection_top_app_bar" else "chatlist_top_app_bar"),

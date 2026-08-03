@@ -18,6 +18,7 @@ import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.UserEntity
@@ -1591,7 +1592,7 @@ class ChatViewModelTest {
             buffer.takeIf { id == routeId || id == current.id } ?: flowOf(null)
         override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = flowOf(emptyList())
         override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
-        override suspend fun setMuted(id: Long, muted: Boolean) = Unit
+        override suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? = null
         override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean {
             layoutWrites += id to layout
             if (layoutWriteResult) buffer.value = buffer.value.copy(layoutDensityOverride = layout)

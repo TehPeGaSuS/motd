@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.MemberEntity
+import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.identityRules
@@ -110,6 +111,10 @@ class ChannelInfoViewModel @Inject constructor(
     val leaveMutation: StateFlow<LeaveMutationState> = _leaveMutation
     private val _operationEvents = MutableSharedFlow<ChannelInfoOperationEvent>(extraBufferCapacity = 1)
     val operationEvents: SharedFlow<ChannelInfoOperationEvent> = _operationEvents.asSharedFlow()
+
+    // One-shot: unmuting marked the muted backlog read, so the screen can report it and offer an undo.
+    private val _muteBacklogSuppressions = MutableSharedFlow<MuteBacklogSuppression>(extraBufferCapacity = 1)
+    val muteBacklogSuppressions: SharedFlow<MuteBacklogSuppression> = _muteBacklogSuppressions.asSharedFlow()
 
     fun init(bufferId: Long) {
         bufferIdFlow.value = bufferId
@@ -244,7 +249,14 @@ class ChannelInfoViewModel @Inject constructor(
     }
 
     fun setMuted(muted: Boolean) = viewModelScope.launch {
-        state.value.buffer?.let { bufferRepository.setMuted(it.id, muted) }
+        state.value.buffer
+            ?.let { bufferRepository.setMuted(it.id, muted) }
+            ?.let { _muteBacklogSuppressions.emit(it) }
+    }
+
+    /** Put back the mute backlog floor an unmute advanced past (snackbar undo). */
+    fun undoMuteBacklogSuppression(suppression: MuteBacklogSuppression) = viewModelScope.launch {
+        bufferRepository.restoreMuteBacklog(suppression)
     }
 
     /** Reset a previous local PART failure before showing the leave confirmation. */

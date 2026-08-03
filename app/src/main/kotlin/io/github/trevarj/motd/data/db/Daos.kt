@@ -422,12 +422,38 @@ interface BufferDao {
     )
     suspend fun advanceLocalUnreadFloor(id: Long, timestamp: Long)
 
+    /** Put the local floor back where [setMuted] found it; the undo half of unmute suppression. */
+    @Query("UPDATE buffers SET localUnreadFloorTime = :timestamp WHERE id = :id")
+    suspend fun restoreLocalUnreadFloor(id: Long, timestamp: Long?)
+
+    /**
+     * Unmuting drops the backlog that piled up while muted: the local floor jumps to the newest
+     * incoming chat so the badge does not dump messages the user muted away. That is deliberate but
+     * lossy, so it returns a [MuteBacklogSuppression] whenever the advance actually hid unread
+     * activity — callers surface it and route the undo through [restoreLocalUnreadFloor]. Null means
+     * nothing visible changed (muting, or nothing unread above the effective floor).
+     */
     @Transaction
-    suspend fun setMuted(id: Long, muted: Boolean) {
+    suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? {
+        var suppression: MuteBacklogSuppression? = null
         if (!muted) {
-            latestIncomingChatTime(id)?.let { advanceLocalUnreadFloor(id, it) }
+            val before = rawById(id)
+            val latest = latestIncomingChatTime(id)
+            if (latest != null) {
+                // Unread is counted above MAX(read anchor, floor), so only chat newer than that
+                // effective floor is being hidden; a no-op advance must stay silent.
+                val effectiveFloor = maxOf(
+                    before?.localReadAnchorTime ?: 0L,
+                    before?.localUnreadFloorTime ?: 0L,
+                )
+                if (latest > effectiveFloor) {
+                    suppression = MuteBacklogSuppression(id, before?.localUnreadFloorTime)
+                }
+                advanceLocalUnreadFloor(id, latest)
+            }
         }
         writeMuted(id, muted)
+        return suppression
     }
 
     @Query("UPDATE buffers SET topic = :topic, topicSetBy = :setBy WHERE id = :id")
@@ -639,6 +665,13 @@ data class BufferReadMarkerRow(
 
 /** Per-nick last-spoke time in a channel (PRIVMSG/NOTICE/ACTION, isSelf=0). Projection, not an entity. */
 data class LastSpokeRow(val nick: String, val lastSpokeAt: Long)
+
+/**
+ * A backlog an unmute hid by advancing the local mute floor (see [BufferDao.setMuted]), reported so
+ * the UI can say it happened and offer an undo. [previousFloorTime] is the floor to put back; null
+ * means the buffer had no floor before the unmute.
+ */
+data class MuteBacklogSuppression(val bufferId: Long, val previousFloorTime: Long?)
 
 @Dao
 interface MessageDao {

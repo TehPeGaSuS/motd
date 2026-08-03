@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkBufferToolRow
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkIgnoreEntity
@@ -13,9 +14,12 @@ import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.service.ConnectionManager
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -57,6 +61,10 @@ class NetworkToolsViewModel @Inject constructor(
     private val buffersFlow = networkIdFlow.flatMapLatest { id ->
         if (id == null) flowOf(emptyList()) else toolsRepository.observeBuffers(id)
     }
+
+    // One-shot: unmuting marked a muted backlog read, so the screen can report it and offer an undo.
+    private val _muteBacklogSuppressions = MutableSharedFlow<MuteBacklogSuppression>(extraBufferCapacity = 1)
+    val muteBacklogSuppressions: SharedFlow<MuteBacklogSuppression> = _muteBacklogSuppressions.asSharedFlow()
 
     val state: StateFlow<NetworkToolsUiState> =
         combine(
@@ -107,7 +115,12 @@ class NetworkToolsViewModel @Inject constructor(
     }
 
     fun setMuted(bufferId: Long, muted: Boolean) = viewModelScope.launch {
-        toolsRepository.setMuted(bufferId, muted)
+        toolsRepository.setMuted(bufferId, muted)?.let { _muteBacklogSuppressions.emit(it) }
+    }
+
+    /** Put back the mute backlog floor an unmute advanced past (snackbar undo). */
+    fun undoMuteBacklogSuppression(suppression: MuteBacklogSuppression) = viewModelScope.launch {
+        toolsRepository.restoreMuteBacklog(suppression)
     }
 
     fun oper(username: String, password: String) =

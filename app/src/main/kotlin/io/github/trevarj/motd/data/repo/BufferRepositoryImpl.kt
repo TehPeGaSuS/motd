@@ -6,6 +6,7 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MemberDao
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageDao
+import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
@@ -54,8 +55,12 @@ class BufferRepositoryImpl @Inject constructor(
         bufferDao.setPinned(bufferDao.canonicalId(id) ?: id, pinned)
     }
 
-    override suspend fun setMuted(id: Long, muted: Boolean) {
+    override suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? =
         bufferDao.setMuted(bufferDao.canonicalId(id) ?: id, muted)
+
+    override suspend fun restoreMuteBacklog(suppression: MuteBacklogSuppression) {
+        // The suppression already carries the canonical id setMuted wrote to.
+        bufferDao.restoreLocalUnreadFloor(suppression.bufferId, suppression.previousFloorTime)
     }
 
     override suspend fun setArchived(id: Long, archived: Boolean) {

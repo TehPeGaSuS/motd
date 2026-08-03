@@ -23,6 +23,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,6 +47,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 
 @Composable
 fun NetworkToolsScreen(
@@ -54,9 +57,16 @@ fun NetworkToolsScreen(
 ) {
     LaunchedEffect(networkId) { viewModel.init(networkId) }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    MuteBacklogUndoEffect(
+        suppressions = viewModel.muteBacklogSuppressions,
+        hostState = snackbarHostState,
+        onUndo = viewModel::undoMuteBacklogSuppression,
+    )
     NetworkToolsContent(
         state = state,
         onBack = onBack,
+        snackbarHostState = snackbarHostState,
         onAddIgnore = viewModel::addIgnore,
         onSetIgnoreEnabled = viewModel::setIgnoreEnabled,
         onDeleteIgnore = viewModel::deleteIgnore,
@@ -75,6 +85,7 @@ fun NetworkToolsScreen(
 fun NetworkToolsContent(
     state: NetworkToolsUiState,
     onBack: () -> Unit,
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onAddIgnore: (String) -> Unit = {},
     onSetIgnoreEnabled: (Long, Boolean) -> Unit = { _, _ -> },
     onDeleteIgnore: (Long) -> Unit = {},
@@ -87,6 +98,7 @@ fun NetworkToolsContent(
     onSquit: (String, String) -> Unit = { _, _ -> },
 ) {
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.network_tools_title)) },

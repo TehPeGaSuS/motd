@@ -36,6 +36,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -71,6 +73,7 @@ import io.github.trevarj.motd.ui.chat.LagTone
 import io.github.trevarj.motd.ui.chat.NickActionSheet
 import io.github.trevarj.motd.ui.chat.lagTone
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.service.RosterLoadState
 
@@ -94,9 +97,17 @@ fun ChannelInfoScreen(
         }
     }
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    MuteBacklogUndoEffect(
+        suppressions = viewModel.muteBacklogSuppressions,
+        hostState = snackbarHostState,
+        onUndo = viewModel::undoMuteBacklogSuppression,
+    )
+
     ChannelInfoContent(
         state = state,
         onBack = onBack,
+        snackbarHostState = snackbarHostState,
         onSetPinned = viewModel::setPinned,
         onSetMuted = viewModel::setMuted,
         onLeave = viewModel::part,
@@ -143,6 +154,7 @@ fun ChannelInfoScreen(
 fun ChannelInfoContent(
     state: ChannelInfoUiState,
     onBack: () -> Unit,
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onSetPinned: (Boolean) -> Unit,
     onSetMuted: (Boolean) -> Unit,
     onLeave: () -> Unit,
@@ -170,6 +182,7 @@ fun ChannelInfoContent(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.channelinfo_title)) },

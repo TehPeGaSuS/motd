@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.repo
 
 import io.github.trevarj.motd.data.db.BufferDao
+import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkBufferToolRow
 import io.github.trevarj.motd.data.db.NetworkIgnoreDao
 import io.github.trevarj.motd.data.db.NetworkIgnoreEntity
@@ -37,7 +38,10 @@ class NetworkIgnoreRepositoryImpl @Inject constructor(
         ignoreDao.delete(id)
     }
 
-    override suspend fun setMuted(bufferId: Long, muted: Boolean) {
+    override suspend fun setMuted(bufferId: Long, muted: Boolean): MuteBacklogSuppression? =
         bufferDao.setMuted(bufferDao.canonicalId(bufferId) ?: bufferId, muted)
+
+    override suspend fun restoreMuteBacklog(suppression: MuteBacklogSuppression) {
+        bufferDao.restoreLocalUnreadFloor(suppression.bufferId, suppression.previousFloorTime)
     }
 }

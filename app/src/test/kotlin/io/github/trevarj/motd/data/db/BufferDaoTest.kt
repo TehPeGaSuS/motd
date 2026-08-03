@@ -535,4 +535,65 @@ class BufferDaoTest {
         msgDao.insertAll(listOf(message(bid, "new", serverTime = 400, dedupKey = "mute-4")))
         assertEquals(1, bufDao.observeChatList().first().single().unreadCount)
     }
+
+    @Test
+    fun `unmute reports the backlog it hid and the reported floor restores it`() = runTest {
+        val bufDao = db.bufferDao()
+        val msgDao = db.messageDao()
+        val bid = bufDao.insert(buffer(networkId, "#undo"))
+        bufDao.setMuted(bid, true)
+        msgDao.insertAll(
+            listOf(
+                message(bid, "one", serverTime = 100, dedupKey = "undo-1"),
+                message(bid, "two", serverTime = 200, dedupKey = "undo-2"),
+            ),
+        )
+
+        val suppression = bufDao.setMuted(bid, false)
+
+        assertEquals(MuteBacklogSuppression(bid, previousFloorTime = null), suppression)
+        assertEquals(0, bufDao.observeChatList().first().single().unreadCount)
+
+        bufDao.restoreLocalUnreadFloor(bid, checkNotNull(suppression).previousFloorTime)
+
+        assertNull(bufDao.observeById(bid)!!.localUnreadFloorTime)
+        assertEquals(2, bufDao.observeChatList().first().single().unreadCount)
+    }
+
+    @Test
+    fun `undoing a later unmute restores the earlier floor, not the whole history`() = runTest {
+        val bufDao = db.bufferDao()
+        val msgDao = db.messageDao()
+        val bid = bufDao.insert(buffer(networkId, "#twice"))
+        bufDao.setMuted(bid, true)
+        msgDao.insertAll(listOf(message(bid, "old", serverTime = 100, dedupKey = "twice-1")))
+        bufDao.setMuted(bid, false)
+
+        bufDao.setMuted(bid, true)
+        msgDao.insertAll(listOf(message(bid, "new", serverTime = 200, dedupKey = "twice-2")))
+        val suppression = checkNotNull(bufDao.setMuted(bid, false))
+
+        assertEquals(100L, suppression.previousFloorTime)
+        bufDao.restoreLocalUnreadFloor(bid, suppression.previousFloorTime)
+
+        // Only the second mute's backlog comes back; the first dismissal stays dismissed.
+        assertEquals(1, bufDao.observeChatList().first().single().unreadCount)
+    }
+
+    @Test
+    fun `unmute stays silent when the floor advance hides nothing`() = runTest {
+        val bufDao = db.bufferDao()
+        val msgDao = db.messageDao()
+        val bid = bufDao.insert(buffer(networkId, "#quiet"))
+        msgDao.insertAll(listOf(message(bid, "seen", serverTime = 100, dedupKey = "quiet-1")))
+        // The floor already covers the newest message, so the advance is a no-op with nothing to lose.
+        bufDao.update(bufDao.rawById(bid)!!.copy(localUnreadFloorTime = 100))
+        bufDao.setMuted(bid, true)
+
+        assertNull(bufDao.setMuted(bid, false))
+        // Muting an empty conversation has nothing to report either.
+        val empty = bufDao.insert(buffer(networkId, "#empty"))
+        assertNull(bufDao.setMuted(empty, false))
+        assertNull(bufDao.setMuted(bid, true))
+    }
 }

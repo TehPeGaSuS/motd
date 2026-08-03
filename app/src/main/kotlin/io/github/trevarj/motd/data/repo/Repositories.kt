@@ -7,6 +7,7 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.InvitationEventRow
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkBufferToolRow
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkIgnoreEntity
@@ -39,7 +40,10 @@ interface NetworkIgnoreRepository {
     suspend fun addIgnore(networkId: Long, pattern: String): Result<Unit>
     suspend fun setIgnoreEnabled(id: Long, enabled: Boolean)
     suspend fun deleteIgnore(id: Long)
-    suspend fun setMuted(bufferId: Long, muted: Boolean)
+    /** Non-null when unmuting hid a backlog; see BufferDao.setMuted. */
+    suspend fun setMuted(bufferId: Long, muted: Boolean): MuteBacklogSuppression?
+    /** Undo the backlog a previous [setMuted] hid. */
+    suspend fun restoreMuteBacklog(suppression: MuteBacklogSuppression) = Unit
 }
 
 object NoopNetworkIgnoreRepository : NetworkIgnoreRepository {
@@ -48,7 +52,7 @@ object NoopNetworkIgnoreRepository : NetworkIgnoreRepository {
     override suspend fun addIgnore(networkId: Long, pattern: String): Result<Unit> = Result.success(Unit)
     override suspend fun setIgnoreEnabled(id: Long, enabled: Boolean) = Unit
     override suspend fun deleteIgnore(id: Long) = Unit
-    override suspend fun setMuted(bufferId: Long, muted: Boolean) = Unit
+    override suspend fun setMuted(bufferId: Long, muted: Boolean): MuteBacklogSuppression? = null
 }
 
 interface BufferRepository {
@@ -62,7 +66,10 @@ interface BufferRepository {
     /** Per-nick last-spoke time in a channel (PRIVMSG/NOTICE/ACTION, isSelf=0). Empty when unavailable. */
     fun observeLastSpokeByNick(bufferId: Long): Flow<Map<String, Long>> = flowOf(emptyMap())
     suspend fun setPinned(id: Long, pinned: Boolean)
-    suspend fun setMuted(id: Long, muted: Boolean)
+    /** Non-null when unmuting hid a backlog; see BufferDao.setMuted. */
+    suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression?
+    /** Undo the backlog a previous [setMuted] hid. */
+    suspend fun restoreMuteBacklog(suppression: MuteBacklogSuppression) = Unit
     /** Hide or restore a durable CHANNEL/QUERY without altering its IRC membership or history. */
     suspend fun setArchived(id: Long, archived: Boolean) = Unit
     /** Persists a nullable per-conversation override; false means the requested room disappeared. */

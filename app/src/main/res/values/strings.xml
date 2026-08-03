@@ -848,6 +848,11 @@
     <string name="chatlist_unmute">Unmute</string>
     <string name="chatlist_archive">Archive</string>
     <string name="chatlist_unarchive">Unarchive</string>
+
+    <!-- Shown wherever a chat can be unmuted: unmuting marks the muted backlog read, so say so and
+         offer a way back. -->
+    <string name="mute_backlog_dismissed">Older messages marked read</string>
+    <string name="mute_backlog_undo">Undo</string>
     <plurals name="chatlist_selected_count">
         <item quantity="one">%d selected</item>
         <item quantity="other">%d selected</item>

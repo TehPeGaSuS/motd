@@ -7,6 +7,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.FoolsMode
@@ -210,7 +211,7 @@ class ChannelInfoTopicMutationTest {
         )
         override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = flowOf(emptyList())
         override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
-        override suspend fun setMuted(id: Long, muted: Boolean) = Unit
+        override suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? = null
         override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean = true
         override suspend fun deleteBuffer(id: Long) = Unit
     }

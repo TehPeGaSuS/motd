@@ -5,6 +5,7 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MemberEntity
+import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
@@ -40,7 +41,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 
-/** Covers durable channel-close requests and immediate local-only deletion. */
+/**
+ * Covers durable channel-close requests, immediate local-only deletion, and the row actions that
+ * report back to the screen (archive overrides, unmute backlog dismissal).
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatListDeleteTest {
 
@@ -51,9 +55,19 @@ class ChatListDeleteTest {
         override fun observeBuffer(id: Long): Flow<BufferEntity?> = flowOf(null)
         override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = flowOf(emptyList())
         override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
-        override suspend fun setMuted(id: Long, muted: Boolean) = Unit
+        override suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? = null
         override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean = true
         override suspend fun deleteBuffer(id: Long) { deleted += id }
+    }
+
+    /** Reports a hidden backlog for every unmute and records the floors an undo puts back. */
+    private class MutingBufferRepository : FakeBufferRepository() {
+        val restored = mutableListOf<MuteBacklogSuppression>()
+        override suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? =
+            if (muted) null else MuteBacklogSuppression(id, previousFloorTime = id * 10)
+        override suspend fun restoreMuteBacklog(suppression: MuteBacklogSuppression) {
+            restored += suppression
+        }
     }
 
     private class FakeNetworkRepository : NetworkRepository {
@@ -209,6 +223,47 @@ class ChatListDeleteTest {
         runCurrent()
 
         assertEquals(listOf("pending:7", "delete:9"), ops)
+    }
+
+    @Test
+    fun unmute_announcesDismissedBacklogOnce_andUndoRestoresEveryFloor() = runTest {
+        val ops = mutableListOf<String>()
+        val buffers = MutingBufferRepository()
+        val vm = vm(buffers, FakeConnectionManager(ops), FakeChannelCloseCoordinator(ops))
+        val announced = mutableListOf<List<MuteBacklogSuppression>>()
+        val collection = launch { vm.muteBacklogSuppressions.collect { announced += it } }
+        runCurrent()
+
+        vm.setMuted(listOf(7L, 9L), false)
+        runCurrent()
+
+        val suppressions = listOf(
+            MuteBacklogSuppression(7L, previousFloorTime = 70),
+            MuteBacklogSuppression(9L, previousFloorTime = 90),
+        )
+        assertEquals(listOf(suppressions), announced)
+
+        vm.undoMuteBacklogSuppression(suppressions)
+        runCurrent()
+
+        assertEquals(suppressions, buffers.restored)
+        collection.cancel()
+    }
+
+    @Test
+    fun mute_saysNothing_becauseNoBacklogIsDismissed() = runTest {
+        val ops = mutableListOf<String>()
+        val buffers = MutingBufferRepository()
+        val vm = vm(buffers, FakeConnectionManager(ops), FakeChannelCloseCoordinator(ops))
+        val announced = mutableListOf<List<MuteBacklogSuppression>>()
+        val collection = launch { vm.muteBacklogSuppressions.collect { announced += it } }
+        runCurrent()
+
+        vm.setMuted(7L, true)
+        runCurrent()
+
+        assertEquals(emptyList<List<MuteBacklogSuppression>>(), announced)
+        collection.cancel()
     }
 
     @Test
