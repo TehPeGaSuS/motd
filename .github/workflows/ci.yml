@@ -192,7 +192,9 @@ jobs:
           emulator-options: -no-window -no-snapshot-save -noaudio -no-boot-anim -gpu swiftshader_indirect
           script: ./test/e2e/fast-suite.sh connected
       - name: Upload privacy-safe required diagnostics
-        if: failure()
+        # always(), not failure(): the journeys also record a passing timeline
+        # snapshot, and a red run is only diffable against a green baseline.
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: headless-diagnostics
