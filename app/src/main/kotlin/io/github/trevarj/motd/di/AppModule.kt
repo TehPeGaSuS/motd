@@ -42,6 +42,8 @@ import io.github.trevarj.motd.data.repo.SearchRepositoryImpl
 import io.github.trevarj.motd.data.sync.ChatHistoryMediatorFactoryImpl
 import io.github.trevarj.motd.data.sync.ChatSoundPlayer
 import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.data.sync.HistoryGapFillCoordinator
+import io.github.trevarj.motd.data.sync.HistoryGapFiller
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -256,6 +258,21 @@ internal abstract class AppModule {
     abstract fun pushHealthStore(impl: DataStorePushHealthStore): PushHealthStore
 
     companion object {
+        /**
+         * The timeline's narrow view of the gap-fill coordinator. Adapted rather than bound,
+         * because the coordinator is a concrete collaborator of the sync layer and stays that way;
+         * only the tap-a-seam action and the in-flight ids reach the UI.
+         */
+        @Provides
+        @Singleton
+        fun historyGapFiller(coordinator: HistoryGapFillCoordinator): HistoryGapFiller =
+            object : HistoryGapFiller {
+                override val fillsInFlight = coordinator.fillsInFlight
+                override suspend fun fillGap(roomId: Long, gapId: Long) {
+                    coordinator.fillGap(roomId, gapId)
+                }
+            }
+
         /** Provide the real crypto/health collaborators; EventProcessor owns notification policy. */
         @Provides
         @Singleton

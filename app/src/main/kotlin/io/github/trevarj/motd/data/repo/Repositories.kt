@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.db.NetworkIgnoreEntity
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.MessageWindowBounds
 import io.github.trevarj.motd.data.prefs.LayoutDensity
@@ -140,6 +141,14 @@ interface MessageRepository {
         bufferId: Long,
         focus: HistoryWindowFocus,
     ): Flow<MessageWindowBounds> = flowOf(MessageWindowBounds())
+    /**
+     * Seams for the room's stored history gaps, ordered oldest-first.
+     *
+     * Focus-independent by construction: a seam marks where a gap interrupts the stored stream, and
+     * that position does not change with which island is being presented. Whether a given seam ends
+     * up in a rendered slot is decided per row by `seamAbove` against the materialized neighbors.
+     */
+    fun observeTimelineSeams(bufferId: Long): Flow<List<TimelineSeam>> = flowOf(emptyList())
     /** Delete a locally-stored failed row by id, repairing any exact local read anchor. */
     suspend fun deleteMessage(id: Long)
 }

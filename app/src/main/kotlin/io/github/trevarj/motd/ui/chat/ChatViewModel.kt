@@ -40,6 +40,8 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
+import io.github.trevarj.motd.data.sync.HistoryGapFiller
+import io.github.trevarj.motd.data.sync.NoopHistoryGapFiller
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dcc.DccTransferController
@@ -196,6 +198,9 @@ class ChatViewModel @Inject constructor(
     private val visibilityReader: MessageVisibilityReader,
     private val historyResyncCoordinator: HistoryResyncController,
     private val userDao: UserDao,
+    // Narrow seam over HistoryGapFillCoordinator; the Noop default keeps hand-built call sites
+    // (tests) free of a live history transport, exactly as networkIgnoreRepository does below.
+    private val gapFiller: HistoryGapFiller = NoopHistoryGapFiller,
     private val networkIgnoreRepository: NetworkIgnoreRepository = NoopNetworkIgnoreRepository,
     contentPreviewPrefs: ContentPreviewPrefs,
 ) : ViewModel() {
@@ -235,6 +240,28 @@ class ChatViewModel @Inject constructor(
             ActiveHistoryWindow(focus, bounds)
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ActiveHistoryWindow())
+
+    /**
+     * The room's history seams, joined with the gaps a fill is running for.
+     *
+     * Not keyed on [historyWindowFocus]: a seam's position comes from the gap itself, so the list is
+     * the same under Recent and Around. Which seams land in a rendered slot is decided per row by
+     * [rowSeam] against the neighbors Paging actually materialized.
+     */
+    val timelineSeams: StateFlow<TimelineSeamState> = combine(
+        messageRepository.observeTimelineSeams(bufferId),
+        gapFiller.fillsInFlight,
+    ) { seams, filling -> TimelineSeamState(seams, filling) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TimelineSeamState())
+
+    /**
+     * Tap on a seam. The coordinator pins the gap, owns the single flight and the page budget, and
+     * publishes progress through [HistoryGapFiller.fillsInFlight], so a second tap while one is
+     * running is dropped there rather than queued here.
+     */
+    fun fillGap(gapId: Long) = viewModelScope.launch {
+        gapFiller.fillGap(operationalBufferId.value, gapId)
+    }
 
     /** A focused older island keeps an explicit escape to the independently loaded recent island. */
     val hasNewerHistoryIsland: StateFlow<Boolean> = activeHistoryWindow.map { window ->

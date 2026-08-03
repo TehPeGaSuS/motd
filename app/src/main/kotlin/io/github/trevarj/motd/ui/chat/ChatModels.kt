@@ -10,11 +10,14 @@ import io.github.trevarj.motd.data.visibility.CONVERSATION_KINDS
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.MessageWindowBounds
+import io.github.trevarj.motd.data.history.TimelineSeam
+import io.github.trevarj.motd.data.history.seamAbove
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.ui.components.HistoryGapState
 import io.github.trevarj.motd.ui.components.ReactionChip
 import androidx.paging.LoadState
 import kotlinx.coroutines.flow.Flow
@@ -39,6 +42,50 @@ data class ActiveHistoryWindow(
     val focus: HistoryWindowFocus = HistoryWindowFocus.Recent,
     val bounds: MessageWindowBounds = MessageWindowBounds(),
 )
+
+/**
+ * Every seam the room currently has, plus the gaps a fill is running for.
+ *
+ * The two travel together because the divider's state is a function of both: the seam supplies the
+ * gap's identity and recoverability, the in-flight set supplies whether it is spinning right now.
+ */
+data class TimelineSeamState(
+    val seams: List<TimelineSeam> = emptyList(),
+    val filling: Set<Long> = emptySet(),
+) {
+    /**
+     * How one seam's divider renders.
+     *
+     * Recoverability is checked FIRST. An unrecoverable gap has nothing left to fetch, so it can
+     * never be in flight; ordering the other way would let a stale in-flight id paint a spinner on
+     * a seam that will never move.
+     */
+    fun stateFor(seam: TimelineSeam): HistoryGapState = when {
+        !seam.recoverable -> HistoryGapState.Unrecoverable
+        seam.gapId in filling -> HistoryGapState.Loading
+        else -> HistoryGapState.Recoverable
+    }
+}
+
+/** One seam as a row renders it: which gap to fill on tap, and the state its divider draws. */
+data class RowSeam(val gapId: Long, val state: HistoryGapState)
+
+/**
+ * The seam drawn above [row]'s content in the reversed timeline, or null when that slot draws
+ * nothing.
+ *
+ * Every seam call site in `MessageList` goes through this, so the composables are one-line wrappers
+ * around it and a unit test asserting on it is asserting on the rendered slot.
+ *
+ * [olderNeighbor] must be the same neighbor the caller's own dividers are computed against — for a
+ * collapsed system run that is the row just older than the WHOLE run, not the next index.
+ */
+fun rowSeam(
+    row: MessageEntity,
+    olderNeighbor: MessageEntity?,
+    seams: TimelineSeamState,
+): RowSeam? = seamAbove(row, olderNeighbor, seams.seams)
+    ?.let { RowSeam(it.gapId, seams.stateFor(it)) }
 
 /** Frozen normal-entry boundary; [lowerBound] means older unread rows are not loaded yet. */
 data class UnreadEntrySnapshot(

@@ -97,6 +97,7 @@ import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
+import io.github.trevarj.motd.ui.components.HistoryGapDivider
 import io.github.trevarj.motd.ui.components.NewMessagesDivider
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
@@ -217,7 +218,9 @@ fun bubbleGap(showSender: Boolean, hasOlder: Boolean, spacing: MotdSpacing): Dp 
 
 /**
  * Reverse-layout message list. Index 0 is the newest message (bottom). For each row we peek the
- * next (older) item to compute grouping, day separators, and the read-marker divider.
+ * next (older) item to compute grouping, day separators, the read-marker divider, and the history
+ * seam. All four are drawn inside the row's own composition, so the item count stays exactly the
+ * message count.
  */
 @Composable
 fun MessageList(
@@ -282,6 +285,10 @@ fun MessageList(
     onSenderClick: (String) -> Unit = {},
     onAcceptInvite: (Long) -> Unit = {},
     onDismissInvite: (Long) -> Unit = {},
+    // Stored history gaps as rendered seams. Carried like readMarkerTime: a raw value each row kind
+    // interprets against its own older neighbor, never a list item of its own (see the items block).
+    timelineSeams: TimelineSeamState = TimelineSeamState(),
+    onLoadGap: (Long) -> Unit = {},
 ) {
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
     // Keep the user's expanded JOIN/PART runs above the volatile Paging rows. A history sync may
@@ -306,6 +313,11 @@ fun MessageList(
         // Stable keys stop paging invalidations (new message / echo confirm / page load) from
         // re-anchoring the viewport by index and reusing per-row state across messages (plans/15
         // #4). Placeholder rows fall back to the position key.
+        //
+        // A seam is drawn INSIDE the newer row's composition, never as its own item(). An extra item
+        // would change items.itemCount and shift itemKey, which would in turn break the
+        // "countNewerThan == list index" contract ChatJumpResolver documents, the placeholder math,
+        // auto-follow, every jump index, and entryAnchorPagingKey — all at once.
         items(
             count = items.itemCount,
             key = items.itemKey { it.id },
@@ -322,35 +334,44 @@ fun MessageList(
             val older = if (index + 1 < items.itemCount) items.peek(index + 1) else null
             val newer = if (index - 1 >= 0) items.peek(index - 1) else null
 
+            // The self-contained card/pill kinds below draw no dividers of their own, so they get
+            // the seam through a wrapper rather than as a parameter. Skipping them would hide the
+            // break whenever a gap happens to be bounded by an invite, a netsplit, or a transfer.
             if (msg.kind == MessageKind.INVITE) {
-                LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
-                    InvitationCard(
-                        message = msg,
-                        onJoin = { onAcceptInvite(msg.id) },
-                        onDismiss = { onDismissInvite(msg.id) },
-                    )
+                TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap) {
+                    LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
+                        InvitationCard(
+                            message = msg,
+                            onJoin = { onAcceptInvite(msg.id) },
+                            onDismiss = { onDismissInvite(msg.id) },
+                        )
+                    }
                 }
                 return@items
             }
 
             if (msg.kind == MessageKind.NETSPLIT || msg.kind == MessageKind.NETJOIN) {
-                LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
-                    NetworkBatchPill(msg)
+                TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap) {
+                    LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
+                        NetworkBatchPill(msg)
+                    }
                 }
                 return@items
             }
 
             if (msg.kind == MessageKind.DCC_TRANSFER) {
-                LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
-                    val transferFlow = remember(msg.id) { dccTransfer(msg) }
-                    val transfer by transferFlow.collectAsStateWithLifecycle()
-                    DccTransferCard(
-                        message = msg,
-                        transfer = transfer,
-                        onAccept = onAcceptDccTransfer,
-                        onReject = onRejectDccTransfer,
-                        onRemove = onRemoveDccTransfer,
-                    )
+                TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap) {
+                    LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
+                        val transferFlow = remember(msg.id) { dccTransfer(msg) }
+                        val transfer by transferFlow.collectAsStateWithLifecycle()
+                        DccTransferCard(
+                            message = msg,
+                            transfer = transfer,
+                            onAccept = onAcceptDccTransfer,
+                            onReject = onRejectDccTransfer,
+                            onRemove = onRemoveDccTransfer,
+                        )
+                    }
                 }
                 return@items
             }
@@ -367,6 +388,8 @@ fun MessageList(
                         newest = msg,
                         readMarkerTime = readMarkerTime,
                         readMarkerLabel = readMarkerLabel,
+                        timelineSeams = timelineSeams,
+                        onLoadGap = onLoadGap,
                         expandedEventIds = expandedSystemEventIds,
                         onExpandedChange = { runIds, expanded ->
                             expandedSystemEventIds = updateExpandedSystemEvents(
@@ -392,6 +415,8 @@ fun MessageList(
                         older = older,
                         readMarkerTime = readMarkerTime,
                         readMarkerLabel = readMarkerLabel,
+                        seam = rowSeam(msg, older, timelineSeams),
+                        onLoadGap = onLoadGap,
                         onExpand = { onToggleFool(msg.id) },
                     )
                 }
@@ -429,6 +454,8 @@ fun MessageList(
                         formatTime = formatMessageTime,
                         readMarkerTime = readMarkerTime,
                         readMarkerLabel = readMarkerLabel,
+                        seam = rowSeam(msg, older, timelineSeams),
+                        onLoadGap = onLoadGap,
                         // An expanded fool row shows a small tap-to-re-collapse chip above its bubble so the
                         // toggle is bidirectional without stealing the bubble's long-press/link taps (#9).
                         onCollapseFool = if (isFool) ({ onToggleFool(msg.id) }) else null,
@@ -630,6 +657,42 @@ private fun formatDccBytes(bytes: Long): String {
     return if (unit == 0) "$bytes ${units[unit]}" else "%.1f %s".format(value, units[unit])
 }
 
+/**
+ * Draws the seam belonging to one row's slot, or nothing at all.
+ *
+ * [seam] is resolved by [rowSeam] at each call site against the SAME older neighbor that site uses
+ * for its read-marker divider, so the seam and the read marker can never disagree about where the
+ * slot is.
+ */
+@Composable
+private fun TimelineSeamDivider(seam: RowSeam?, onLoadGap: (Long) -> Unit) {
+    if (seam == null) return
+    HistoryGapDivider(state = seam.state, onLoad = { onLoadGap(seam.gapId) })
+}
+
+/**
+ * Seam wrapper for the row kinds that render a self-contained card or pill and draw no dividers of
+ * their own (INVITE, NETSPLIT/NETJOIN, DCC_TRANSFER).
+ *
+ * The Column only appears when there IS a seam: with none, the row composes exactly as before, so
+ * these kinds keep their current layout on the overwhelmingly common path.
+ */
+@Composable
+private fun TimelineSeamAbove(
+    seam: RowSeam?,
+    onLoadGap: (Long) -> Unit,
+    content: @Composable () -> Unit,
+) {
+    if (seam == null) {
+        content()
+        return
+    }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        TimelineSeamDivider(seam, onLoadGap)
+        content()
+    }
+}
+
 /** A quiet, stable-height skeleton prevents placeholder-only pages from measuring as zero rows. */
 @Composable
 internal fun MessagePlaceholderRow() {
@@ -817,6 +880,8 @@ private fun SystemEventRun(
     newest: MessageEntity,
     readMarkerTime: TimelineAnchor?,
     readMarkerLabel: String?,
+    timelineSeams: TimelineSeamState,
+    onLoadGap: (Long) -> Unit,
     expandedEventIds: Set<Long>,
     onExpandedChange: (Collection<Long>, Boolean) -> Unit,
 ) {
@@ -844,10 +909,15 @@ private fun SystemEventRun(
     val showDay = remember(oldest.serverTime, olderThanRun?.serverTime) {
         olderThanRun == null || dayStart(oldest.serverTime) != dayStart(olderThanRun.serverTime)
     }
+    // The whole run occupies one slot, so its seam is bracketed by the run's newest row and the row
+    // just older than the ENTIRE run — the same pair the read-marker divider above is derived from.
+    // Anything else would let a seam falling inside the run disappear with the collapsed rows.
+    val seam = rowSeam(newest, olderThanRun, timelineSeams)
 
     // Column so the pill and any dividers stack vertically. A bare item slot stacks siblings on top
     // of each other (its MeasurePolicy behaves like a Box), which would overlap the divider text.
     Column(modifier = Modifier.fillMaxWidth()) {
+        TimelineSeamDivider(seam, onLoadGap)
         if (showNewDivider) {
             NewMessagesDivider(
                 label = readMarkerLabel ?: stringResource(R.string.chat_new_messages),
@@ -917,6 +987,8 @@ private fun MessageRow(
     formatTime: (Long) -> String,
     readMarkerTime: TimelineAnchor?,
     readMarkerLabel: String?,
+    seam: RowSeam?,
+    onLoadGap: (Long) -> Unit,
     senderIsFriend: Boolean,
     reactions: List<ReactionChip>,
     knownNicks: Set<String>,
@@ -950,6 +1022,14 @@ private fun MessageRow(
 ) {
     // The lazy list reverses item order, not a row's children. Render the divider before the first
     // unread bubble so the boundary is visually above that message.
+    //
+    // A null [older] means two different things in this function, and both are correct. The unread
+    // and day rules below treat it as a REAL EDGE and draw: each is derived from this row's own
+    // anchor, so an unloaded neighbor cannot change the answer — at worst the divider is redrawn
+    // identically once the neighbor materializes. The seam ([rowSeam] → `seamAbove`) treats it as
+    // UNKNOWN and abstains: a seam's slot is defined by the pair, so with no lower end the placement
+    // is genuinely undecidable and a guess would visibly jump when the placeholder loads. Do not
+    // unify them.
     val showNewDivider = readMarkerTime != null &&
         msg.timelineAnchor() > readMarkerTime &&
         (older == null || older.timelineAnchor() <= readMarkerTime)
@@ -965,6 +1045,10 @@ private fun MessageRow(
     val spacing = LocalSpacing.current
     val showSender = showsSender(msg, older)
     val gap = bubbleGap(showSender, older != null, spacing)
+
+    // Outermost boundary of the row: the history break comes before the read marker, because the
+    // messages the marker separates all sit on this side of the gap.
+    TimelineSeamDivider(seam, onLoadGap)
 
     if (showNewDivider) {
         NewMessagesDivider(
@@ -1241,8 +1325,12 @@ private fun FoolPlaceholderRow(
     older: MessageEntity?,
     readMarkerTime: TimelineAnchor?,
     readMarkerLabel: String?,
+    seam: RowSeam?,
+    onLoadGap: (Long) -> Unit,
     onExpand: () -> Unit,
 ) {
+    // Same divided convention as MessageRow: a null [older] is a real edge for the unread and day
+    // rules (both derived from this row alone) and an unknown one for the seam (defined by the pair).
     val showNewDivider = readMarkerTime != null &&
         msg.timelineAnchor() > readMarkerTime &&
         (older == null || older.timelineAnchor() <= readMarkerTime)
@@ -1253,6 +1341,7 @@ private fun FoolPlaceholderRow(
     // Column so the placeholder row and any dividers stack vertically rather than overlapping (a bare
     // item slot stacks its children like a Box).
     Column(modifier = Modifier.fillMaxWidth()) {
+        TimelineSeamDivider(seam, onLoadGap)
         if (showNewDivider) {
             NewMessagesDivider(
                 label = readMarkerLabel ?: stringResource(R.string.chat_new_messages),

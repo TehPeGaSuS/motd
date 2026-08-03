@@ -13,6 +13,8 @@ import io.github.trevarj.motd.data.db.ReactionDao
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.history.GapAnchorResolver
+import io.github.trevarj.motd.data.history.TimelineSeam
+import io.github.trevarj.motd.data.history.timelineSeams
 import io.github.trevarj.motd.data.history.windowBounds
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.MessageWindowBounds
@@ -160,6 +162,21 @@ class MessageRepositoryImpl @Inject constructor(
         bufferId: Long,
         focus: HistoryWindowFocus,
     ): Flow<MessageWindowBounds> = pagingContextFlow(bufferId, focus).map { it.bounds }
+
+    // Same three steps the paging context takes for its window bounds — observe the room's stored
+    // gaps, resolve both edges against the local store, project them — but through the seam
+    // projection instead of the bound one. Deliberately NOT derived from pagingContextFlow: seams do
+    // not depend on focus, and a per-focus flow would re-emit an identical seam list on every window
+    // change while missing gaps outside the current island, which are exactly the ones a seam marks.
+    override fun observeTimelineSeams(bufferId: Long): Flow<List<TimelineSeam>> =
+        bufferDao.observe(bufferId).flatMapLatest { room ->
+            if (room == null) {
+                flowOf(emptyList())
+            } else {
+                historyGapDao.observeForRoom(room.id)
+                    .map { gaps -> timelineSeams(gapAnchors.resolve(room.id, gaps)) }
+            }
+        }.distinctUntilChanged()
 
     private fun canonicalRoomIdFlow(bufferId: Long): Flow<Long> = bufferDao.observe(bufferId)
         .map { it?.id ?: bufferId }

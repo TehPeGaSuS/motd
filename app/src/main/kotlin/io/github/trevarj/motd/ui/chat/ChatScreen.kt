@@ -379,6 +379,7 @@ fun ChatScreen(
     val historySyncStatus by viewModel.historySyncStatus.collectAsStateWithLifecycle()
     val activeHistoryWindow by viewModel.activeHistoryWindow.collectAsStateWithLifecycle()
     val hasNewerHistoryIsland by viewModel.hasNewerHistoryIsland.collectAsStateWithLifecycle()
+    val timelineSeams by viewModel.timelineSeams.collectAsStateWithLifecycle()
     val isServerBuffer = state.buffer?.type == BufferType.SERVER
     val titleTarget = chatTitleTarget(state.buffer?.type)
 
@@ -477,6 +478,8 @@ fun ChatScreen(
         entryState = entryState,
         activeHistoryWindow = activeHistoryWindow,
         hasNewerHistoryIsland = hasNewerHistoryIsland,
+        timelineSeams = timelineSeams,
+        onLoadGap = viewModel::fillGap,
         onJumpHandled = viewModel::onJumpHandled,
         onInitialPositionHandled = viewModel::onInitialPositionHandled,
         onFocusRecentHistory = viewModel::focusRecentHistory,
@@ -632,6 +635,10 @@ fun ChatContent(
     entryState: EntryPositionState = EntryPositionState.Pending,
     activeHistoryWindow: ActiveHistoryWindow = ActiveHistoryWindow(),
     hasNewerHistoryIsland: Boolean = false,
+    // Stored history gaps, rendered as in-row seams by MessageList. Independent of the active
+    // window: the seam list describes the gaps, the window decides which rows are on screen.
+    timelineSeams: TimelineSeamState = TimelineSeamState(),
+    onLoadGap: (Long) -> Unit = {},
     onJumpHandled: (Long) -> Unit = {},
     onInitialPositionHandled: () -> Unit = {},
     onFocusRecentHistory: () -> Unit = {},
@@ -1609,6 +1616,8 @@ fun ChatContent(
                         // Frozen read-marker so the "New messages" divider stays put (plans/15 #2).
                         readMarkerTime = unreadEntrySnapshot?.marker,
                         readMarkerLabel = unreadEntryLabel,
+                        timelineSeams = timelineSeams,
+                        onLoadGap = onLoadGap,
                         reactionChips = reactionChips,
                         replyPreview = replyPreview,
                         onReplyPreviewClick = onReplyPreviewClick,
