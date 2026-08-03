@@ -589,8 +589,40 @@ class ChatViewModel @Inject constructor(
 
     // Frozen on buffer entry so the "New messages" divider keeps a stable boundary instead of
     // flashing/vanishing as markRead advances the live marker. Used ONLY for the divider now.
-    private val _unreadEntrySnapshot = MutableStateFlow<UnreadEntrySnapshot?>(null)
+    //
+    // The freeze is per VISIT, and until it was persisted only a live ViewModel carried it: rotation
+    // kept the divider but a process death dropped it, and the init freeze below then re-derived it
+    // from a read anchor that had already advanced past everything the user had not read on entry.
+    // SavedStateHandle belongs to this destination's NavBackStackEntry — the same handle that
+    // already carries the entry-position latches — so persisting here gives the boundary exactly the
+    // visit's lifetime: it survives process death, and popping the destination discards it so a
+    // deliberate re-entry recomputes.
+    private val unreadEntrySnapshotRestored =
+        savedStateHandle.get<Boolean>(UNREAD_SNAPSHOT_COMPUTED_KEY) == true
+    private val _unreadEntrySnapshot = MutableStateFlow(
+        restoredUnreadEntrySnapshot(
+            computed = unreadEntrySnapshotRestored,
+            markerServerTime = savedStateHandle.get<Long>(UNREAD_SNAPSHOT_TIME_KEY) ?: 0L,
+            markerEventId = savedStateHandle.get<Long>(UNREAD_SNAPSHOT_EVENT_KEY) ?: 0L,
+            markerTimelineOrder = savedStateHandle.get<Long>(UNREAD_SNAPSHOT_ORDER_KEY) ?: 0L,
+            loadedCount = savedStateHandle.get<Int>(UNREAD_SNAPSHOT_COUNT_KEY) ?: 0,
+            lowerBound = savedStateHandle.get<Boolean>(UNREAD_SNAPSHOT_LOWER_BOUND_KEY) == true,
+        ),
+    )
     val unreadEntrySnapshot: StateFlow<UnreadEntrySnapshot?> = _unreadEntrySnapshot.asStateFlow()
+
+    /**
+     * Write the frozen boundary through to SavedState, absence included: the computed flag is what
+     * stops a later process from re-freezing this visit against advanced durable state.
+     */
+    private fun persistUnreadEntrySnapshot(snapshot: UnreadEntrySnapshot?) {
+        savedStateHandle[UNREAD_SNAPSHOT_COMPUTED_KEY] = true
+        savedStateHandle[UNREAD_SNAPSHOT_TIME_KEY] = snapshot?.marker?.serverTime ?: 0L
+        savedStateHandle[UNREAD_SNAPSHOT_EVENT_KEY] = snapshot?.marker?.eventId ?: 0L
+        savedStateHandle[UNREAD_SNAPSHOT_ORDER_KEY] = snapshot?.marker?.timelineOrder ?: 0L
+        savedStateHandle[UNREAD_SNAPSHOT_COUNT_KEY] = snapshot?.loadedCount ?: 0
+        savedStateHandle[UNREAD_SNAPSHOT_LOWER_BOUND_KEY] = snapshot?.lowerBound == true
+    }
 
     // Live read marker for the scroll-to-bottom FAB badge: unlike the frozen snapshot, this tracks
     // the buffer's real read marker, so once markRead advances it (at bottom) the badge count drops
@@ -1360,13 +1392,19 @@ class ChatViewModel @Inject constructor(
                 bufferRepository.observeChatList().first()
                     .firstOrNull { it.bufferId == room.id }
             }
-            _unreadEntrySnapshot.value = firstUnread?.let {
-                UnreadEntrySnapshot(
-                    marker = TimelineAnchor(it.serverTime, it.eventId - 1L, it.timelineOrder),
-                    loadedCount = (unreadRow?.unreadCount ?: 1).coerceAtLeast(1),
-                    lowerBound = unreadRow?.unreadCountIncomplete == true ||
-                        recentBounds.lowerBoundary != null,
-                )
+            // Freeze exactly once per visit. A restored snapshot already IS this visit's boundary;
+            // re-deriving it here would place the divider at what is unread now, not on entry.
+            if (!unreadEntrySnapshotRestored) {
+                val frozen = firstUnread?.let {
+                    UnreadEntrySnapshot(
+                        marker = TimelineAnchor(it.serverTime, it.eventId - 1L, it.timelineOrder),
+                        loadedCount = (unreadRow?.unreadCount ?: 1).coerceAtLeast(1),
+                        lowerBound = unreadRow?.unreadCountIncomplete == true ||
+                            recentBounds.lowerBoundary != null,
+                    )
+                }
+                _unreadEntrySnapshot.value = frozen
+                persistUnreadEntrySnapshot(frozen)
             }
             // A normal open remains on Recent and lands on its oldest loaded unread row. Only an
             // explicit deep link may select Around; older traversal is authorized by user scroll.
@@ -1770,6 +1808,15 @@ class ChatViewModel @Inject constructor(
         const val ENTRY_POSITION_SETTLED_KEY = "entry_position_settled"
         const val ENTRY_POSITION_UNRESOLVED_KEY = "entry_position_unresolved"
         const val ENTRY_MESSAGE_UNAVAILABLE_KEY = "entry_message_unavailable"
+
+        // The divider boundary frozen on entry, flattened into Bundle-safe primitives. New keys
+        // only: no existing SavedState or preference projection changes shape.
+        const val UNREAD_SNAPSHOT_COMPUTED_KEY = "unread_entry_snapshot_computed"
+        const val UNREAD_SNAPSHOT_TIME_KEY = "unread_entry_snapshot_time"
+        const val UNREAD_SNAPSHOT_EVENT_KEY = "unread_entry_snapshot_event"
+        const val UNREAD_SNAPSHOT_ORDER_KEY = "unread_entry_snapshot_order"
+        const val UNREAD_SNAPSHOT_COUNT_KEY = "unread_entry_snapshot_count"
+        const val UNREAD_SNAPSHOT_LOWER_BOUND_KEY = "unread_entry_snapshot_lower_bound"
 
         // Max wait for a pending own message's msgid to land before a queued reaction gives up.
         // Urgent history recovery may wait behind one unlabeled 30s wire request before its own

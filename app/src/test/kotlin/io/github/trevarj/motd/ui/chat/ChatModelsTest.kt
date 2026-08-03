@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
@@ -438,6 +439,26 @@ class ChatModelsTest {
                 atBottom = true,
             ),
         )
+    }
+
+    @Test fun `a frozen entry boundary restores an absence as an absence`() {
+        // Computed-with-a-marker round-trips verbatim.
+        assertEquals(
+            UnreadEntrySnapshot(TimelineAnchor(101, 7, 9), loadedCount = 3, lowerBound = true),
+            restoredUnreadEntrySnapshot(
+                computed = true,
+                markerServerTime = 101,
+                markerEventId = 7,
+                markerTimelineOrder = 9,
+                loadedCount = 3,
+                lowerBound = true,
+            ),
+        )
+        // A visit that froze the ABSENCE of a boundary keeps it: recomputing would raise a divider
+        // for messages that arrived after entry, which is what freezing on entry prevents.
+        assertNull(restoredUnreadEntrySnapshot(true, 0, 0, 0, 0, false))
+        // Never frozen (a genuinely new visit) is not the same state and must recompute instead.
+        assertNull(restoredUnreadEntrySnapshot(false, 101, 7, 9, 3, true))
     }
 
     @Test fun `saved scroll position always restores`() {

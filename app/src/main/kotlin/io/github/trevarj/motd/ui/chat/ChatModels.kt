@@ -47,6 +47,30 @@ data class UnreadEntrySnapshot(
     val lowerBound: Boolean,
 )
 
+/**
+ * Rebuild the frozen entry boundary from its flat SavedState projection.
+ *
+ * [computed] is state in its own right, not a null check: it separates "this visit never froze a
+ * boundary" from "this visit froze the absence of one". Recomputing the second case after process
+ * death would raise a divider for messages that arrived AFTER entry, which is precisely what
+ * freezing on entry exists to prevent, so a restored absence is returned as an absence.
+ */
+internal fun restoredUnreadEntrySnapshot(
+    computed: Boolean,
+    markerServerTime: Long,
+    markerEventId: Long,
+    markerTimelineOrder: Long,
+    loadedCount: Int,
+    lowerBound: Boolean,
+): UnreadEntrySnapshot? {
+    if (!computed || markerServerTime <= 0) return null
+    return UnreadEntrySnapshot(
+        marker = TimelineAnchor(markerServerTime, markerEventId, markerTimelineOrder),
+        loadedCount = loadedCount.coerceAtLeast(1),
+        lowerBound = lowerBound,
+    )
+}
+
 /** Match a stored actor using its persisted account/casemapped identity, never display spelling. */
 fun MessageEntity.matchesConfiguredActor(
     configured: Set<String>,

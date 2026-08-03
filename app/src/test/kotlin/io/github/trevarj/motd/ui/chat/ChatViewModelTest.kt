@@ -979,6 +979,72 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `frozen divider boundary survives process death and is never re-derived`() = runTest {
+        val markerId = db.messageDao().insertAll(
+            listOf(
+                message(channel.id, "marker", null, "alice").copy(
+                    serverTime = 100,
+                    dedupKey = "marker",
+                ),
+            ),
+        ).single()
+        val unreadIds = db.messageDao().insertAll(
+            (1..3).map { ordinal ->
+                message(channel.id, "unread-$ordinal", null, "alice").copy(
+                    serverTime = 100L + ordinal,
+                    dedupKey = "unread-$ordinal",
+                )
+            },
+        )
+        val entered = channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId)
+        // The visit's back-stack entry (and its SavedStateHandle) outlives the process; the
+        // ViewModel does not.
+        val visit = SavedStateHandle()
+        val first = viewModel(entered, FakeConnectionManager(network.id), savedStateHandle = visit)
+        first.state.first { it.buffer != null }
+        val frozen = checkNotNull(first.unreadEntrySnapshot.first { it != null })
+        assertEquals(101L, frozen.marker.serverTime)
+        assertEquals(unreadIds.first() - 1L, frozen.marker.eventId)
+        assertTrue(visit.get<Boolean>("unread_entry_snapshot_computed") == true)
+        assertEquals(101L, visit.get<Long>("unread_entry_snapshot_time"))
+
+        // Process death. The durable marker has meanwhile advanced past every unread row, so a
+        // re-derivation would place the divider at what is unread NOW — nowhere — and the user
+        // would come back with no idea where they had stopped reading.
+        val read = channel.copy(localReadAnchorTime = 103, localReadAnchorEventId = unreadIds.last())
+        val restored = viewModel(read, FakeConnectionManager(network.id), savedStateHandle = visit)
+        restored.state.first { it.buffer != null }
+        advanceUntilIdle()
+        assertEquals(frozen, restored.unreadEntrySnapshot.value)
+
+        // A deliberate re-entry pops the destination, so the next visit starts from a fresh handle
+        // and freezes again — here, the absence of a boundary, recorded as durable state.
+        val reentry = SavedStateHandle()
+        val reentered = viewModel(read, FakeConnectionManager(network.id), savedStateHandle = reentry)
+        reentered.state.first { it.buffer != null }
+        advanceUntilIdle()
+        assertNull(reentered.unreadEntrySnapshot.value)
+        assertTrue(reentry.get<Boolean>("unread_entry_snapshot_computed") == true)
+        assertEquals(0L, reentry.get<Long>("unread_entry_snapshot_time"))
+
+        // ...and that frozen absence survives process death too: messages arriving after entry
+        // belong below the divider this visit never had, not above a newly invented one.
+        db.messageDao().insertAll(
+            listOf(
+                message(channel.id, "after-entry", null, "alice").copy(
+                    serverTime = 200,
+                    dedupKey = "after-entry",
+                ),
+            ),
+        )
+        val restoredAbsence =
+            viewModel(read, FakeConnectionManager(network.id), savedStateHandle = reentry)
+        restoredAbsence.state.first { it.buffer != null }
+        advanceUntilIdle()
+        assertNull(restoredAbsence.unreadEntrySnapshot.value)
+    }
+
+    @Test
     fun `cold ready entry anchors after connection catchup publishes the recent island`() = runTest {
         val markerId = db.messageDao().insertAll(
             listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
