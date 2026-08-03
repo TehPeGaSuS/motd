@@ -202,13 +202,18 @@ class MessageRepositoryImpl @Inject constructor(
     ): List<ResolvedHistoryGap> = gaps.map { gap ->
         ResolvedHistoryGap(
             gap = gap,
+            // The fallback is chosen by how the anchor is USED as a window edge, not by which side
+            // of the gap it names. `older` only ever becomes an upperBoundary and `newer` only ever
+            // becomes a lowerBoundary (see historyWindowBounds), and both bounds are inclusive at
+            // the anchor. An unidentifiable boundary must therefore be maximally PERMISSIVE within
+            // its serverTime — see resolveGapBoundary.
             older = resolveGapBoundary(
                 roomId,
                 gap.olderMsgid,
                 gap.olderServerTime,
                 gap.olderEventId,
                 gap.olderTimelineOrder,
-                fallback = Long.MIN_VALUE,
+                fallback = Long.MAX_VALUE,
             ),
             newer = resolveGapBoundary(
                 roomId,
@@ -216,11 +221,26 @@ class MessageRepositoryImpl @Inject constructor(
                 gap.newerServerTime,
                 gap.newerEventId,
                 gap.newerTimelineOrder,
-                fallback = Long.MAX_VALUE,
+                fallback = Long.MIN_VALUE,
             ),
         )
     }
 
+    /**
+     * Resolve one stored gap edge to a comparable timeline position, preferring the exact local row
+     * (msgid, then retained eventId), then the stored tuple, and finally a synthetic anchor.
+     *
+     * [fallback] is reached only when the client cannot identify the boundary event AT ALL: no
+     * resolvable msgid, no eventId. [TimelineAnchor] compares serverTime, then timelineOrder, then
+     * eventId, so a `Long.MAX_VALUE` fallback would not merely be imprecise — it would dominate
+     * every real row sharing the boundary's serverTime and, used as the Recent lowerBoundary,
+     * exclude all of them. With a gap edge at or above the newest local row that empties the
+     * presented window entirely: the timeline composes nothing and no paging key resolves, even
+     * though every row is durable in Room. Callers therefore pass the fallback that is maximally
+     * permissive for the bound this edge feeds. An unknown boundary cannot say where the gap is, so
+     * bounding the window at a guessed position is not more truthful than not bounding it — only
+     * more destructive.
+     */
     private suspend fun resolveGapBoundary(
         roomId: Long,
         msgid: String?,
