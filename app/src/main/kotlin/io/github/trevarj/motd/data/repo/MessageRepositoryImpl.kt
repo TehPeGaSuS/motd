@@ -8,12 +8,12 @@ import io.github.trevarj.motd.data.db.BufferDao
 import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.HistoryGapDao
-import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.ReactionDao
 import io.github.trevarj.motd.data.db.ReactionEntity
-import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.data.history.GapAnchorResolver
+import io.github.trevarj.motd.data.history.windowBounds
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.MessageWindowBounds
 import io.github.trevarj.motd.data.visibility.countTimelineNewerQuery
@@ -38,6 +38,10 @@ class MessageRepositoryImpl @Inject constructor(
     private val reactionDao: ReactionDao,
     private val mediatorFactory: ChatHistoryMediatorFactory,
     private val historyGapDao: HistoryGapDao,
+    // Gap-edge geometry lives in :data.history and is shared with the mediator. It is a stateless
+    // reader over messageDao, so the default keeps hand-built call sites (tests) unchanged while
+    // Hilt supplies the same instance through GapAnchorResolver's own @Inject constructor.
+    private val gapAnchors: GapAnchorResolver = GapAnchorResolver(messageDao),
 ) : MessageRepository {
     @OptIn(ExperimentalPagingApi::class)
     override fun messages(
@@ -172,7 +176,7 @@ class MessageRepositoryImpl @Inject constructor(
                         PagingContext(
                             room.id,
                             identity?.identityRules ?: IrcIdentityRules(),
-                            historyWindowBounds(focus, resolveHistoryGaps(room.id, gaps)),
+                            windowBounds(focus, gapAnchors.resolve(room.id, gaps)),
                         )
                     }
             }
@@ -189,73 +193,9 @@ class MessageRepositoryImpl @Inject constructor(
         return PagingContext(
             room.id,
             identityRules,
-            historyWindowBounds(
-                focus,
-                resolveHistoryGaps(room.id, historyGapDao.forRoom(room.id)),
-            ),
+            windowBounds(focus, gapAnchors.resolve(room.id, historyGapDao.forRoom(room.id))),
         )
     }
-
-    private suspend fun resolveHistoryGaps(
-        roomId: Long,
-        gaps: List<HistoryGapEntity>,
-    ): List<ResolvedHistoryGap> = gaps.map { gap ->
-        ResolvedHistoryGap(
-            gap = gap,
-            // The fallback is chosen by how the anchor is USED as a window edge, not by which side
-            // of the gap it names. `older` only ever becomes an upperBoundary and `newer` only ever
-            // becomes a lowerBoundary (see historyWindowBounds), and both bounds are inclusive at
-            // the anchor. An unidentifiable boundary must therefore be maximally PERMISSIVE within
-            // its serverTime — see resolveGapBoundary.
-            older = resolveGapBoundary(
-                roomId,
-                gap.olderMsgid,
-                gap.olderServerTime,
-                gap.olderEventId,
-                gap.olderTimelineOrder,
-                fallback = Long.MAX_VALUE,
-            ),
-            newer = resolveGapBoundary(
-                roomId,
-                gap.newerMsgid,
-                gap.newerServerTime,
-                gap.newerEventId,
-                gap.newerTimelineOrder,
-                fallback = Long.MIN_VALUE,
-            ),
-        )
-    }
-
-    /**
-     * Resolve one stored gap edge to a comparable timeline position, preferring the exact local row
-     * (msgid, then retained eventId), then the stored tuple, and finally a synthetic anchor.
-     *
-     * [fallback] is reached only when the client cannot identify the boundary event AT ALL: no
-     * resolvable msgid, no eventId. [TimelineAnchor] compares serverTime, then timelineOrder, then
-     * eventId, so a `Long.MAX_VALUE` fallback would not merely be imprecise — it would dominate
-     * every real row sharing the boundary's serverTime and, used as the Recent lowerBoundary,
-     * exclude all of them. With a gap edge at or above the newest local row that empties the
-     * presented window entirely: the timeline composes nothing and no paging key resolves, even
-     * though every row is durable in Room. Callers therefore pass the fallback that is maximally
-     * permissive for the bound this edge feeds. An unknown boundary cannot say where the gap is, so
-     * bounding the window at a guessed position is not more truthful than not bounding it — only
-     * more destructive.
-     */
-    private suspend fun resolveGapBoundary(
-        roomId: Long,
-        msgid: String?,
-        serverTime: Long,
-        eventId: Long?,
-        timelineOrder: Long?,
-        fallback: Long,
-    ): TimelineAnchor = msgid?.let { messageDao.byMsgid(roomId, it) }
-        ?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
-        ?: eventId?.let { id ->
-            messageDao.byCanonicalId(id)?.takeIf { it.bufferId == roomId }
-                ?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
-        }
-        ?: eventId?.let { TimelineAnchor(serverTime, it, timelineOrder ?: it) }
-        ?: TimelineAnchor(serverTime, fallback, fallback)
 
     private suspend fun resolveRoomId(bufferId: Long): Long =
         bufferDao.canonicalId(bufferId) ?: bufferId
@@ -264,33 +204,6 @@ class MessageRepositoryImpl @Inject constructor(
         val roomId: Long,
         val identityRules: IrcIdentityRules,
         val bounds: MessageWindowBounds,
-    )
-}
-
-internal data class ResolvedHistoryGap(
-    val gap: HistoryGapEntity,
-    val older: TimelineAnchor,
-    val newer: TimelineAnchor,
-)
-
-internal typealias HistoryWindowBounds = MessageWindowBounds
-
-internal fun historyWindowBounds(
-    focus: HistoryWindowFocus,
-    gaps: List<ResolvedHistoryGap>,
-): MessageWindowBounds = when (focus) {
-    HistoryWindowFocus.Recent -> MessageWindowBounds(
-        lowerBoundary = gaps.maxByOrNull { it.newer }?.newer,
-    )
-    is HistoryWindowFocus.Around -> MessageWindowBounds(
-        lowerBoundary = gaps
-            .filter { it.newer <= focus.anchor }
-            .maxByOrNull { it.newer }
-            ?.newer,
-        upperBoundary = gaps
-            .filter { it.older >= focus.anchor }
-            .minByOrNull { it.older }
-            ?.older,
     )
 }
 

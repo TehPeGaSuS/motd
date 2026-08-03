@@ -288,7 +288,7 @@ class ReconnectGapPresentationTest {
     /**
      * Hosted-CI wire: soju advertises `MSGREFTYPES=timestamp`, so the catch-up page's boundary
      * references carry no msgid and the gap's newer edge must be resolved through the stored
-     * eventId/serverTime fallback chain in `MessageRepositoryImpl.resolveGapBoundary`.
+     * eventId/serverTime rungs of `GapAnchorResolver.resolve`.
      */
     @Test
     fun liveEchoIsPresentedOnATimestampOnlyReconnectGap() = runTest {
@@ -348,8 +348,8 @@ class ReconnectGapPresentationTest {
 
     /**
      * **Regression pin for the window-bounds starvation.** The gap's newer edge has neither a
-     * resolvable msgid nor an eventId, so it can only be resolved through the fallback in
-     * `MessageRepositoryImpl.resolveGapBoundary`, and it ties the live echo's millisecond.
+     * resolvable msgid nor an eventId, so `GapAnchorResolver.resolve` can only reach it as a
+     * `GapEdgeAnchor.TimeOnly`, and it ties the live echo's millisecond.
      *
      * With the original `Long.MAX_VALUE` fallback this blanked the timeline completely — measured
      * `lower=TimelineAnchor(t, MAX, MAX)`, `itemCount=0`, `inWindow=false` — because
@@ -459,8 +459,8 @@ class ReconnectGapPresentationTest {
             return (result as PagingSource.LoadResult.Page).data
         }
 
-        // The exclusive extreme: what resolveGapBoundary used to synthesize for an unidentifiable
-        // newer edge. Nothing survives, not even the row whose serverTime it shares.
+        // The exclusive extreme: what an unidentifiable newer edge used to synthesize before
+        // e91698a0. Nothing survives, not even the row whose serverTime it shares.
         val exclusive = rowsUnder(TimelineAnchor(newest.serverTime, Long.MAX_VALUE, Long.MAX_VALUE))
         // The permissive extreme: the row at the boundary's serverTime is kept.
         val permissive = rowsUnder(TimelineAnchor(newest.serverTime, Long.MIN_VALUE, Long.MIN_VALUE))
@@ -485,7 +485,7 @@ class ReconnectGapPresentationTest {
      * That insert was removed: a zero-width interval asserts that messages are missing between a row
      * and itself, and `recoverable = false` is reserved for server-proven-empty remainders, which a
      * saturated page never proves. Both of its consumers acted on those falsehoods — the mediator
-     * treated the unrecoverable focused gap as permanently terminal, and `historyWindowBounds`
+     * treated the unrecoverable focused gap as permanently terminal, and the history window
      * clamped the Recent window at the edge row.
      *
      * This test now pins the absence: the seed writes no gap at all, so nothing bounds the Recent

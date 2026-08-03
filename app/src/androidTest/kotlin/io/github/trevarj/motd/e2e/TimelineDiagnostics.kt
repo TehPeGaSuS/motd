@@ -16,9 +16,10 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.platform.io.PlatformTestStorageRegistry
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.history.GapEdgeAnchor
+import io.github.trevarj.motd.data.history.ResolvedGap
+import io.github.trevarj.motd.data.history.windowBounds
 import io.github.trevarj.motd.data.repo.HistoryWindowFocus
-import io.github.trevarj.motd.data.repo.ResolvedHistoryGap
-import io.github.trevarj.motd.data.repo.historyWindowBounds
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import java.io.File
@@ -344,10 +345,11 @@ internal class TimelineDiagnostics(
                     put("newerServerTime", resolved.gap.newerServerTime)
                     putNullable("newerEventId", resolved.gap.newerEventId)
                     putNullable("newerTimelineOrder", resolved.gap.newerTimelineOrder)
-                    // Resolved edges are what the window is actually built from: a synthetic
-                    // MAX/MIN eventId here is the signature of an unidentifiable boundary.
-                    put("resolvedOlder", resolved.older.json())
-                    put("resolvedNewer", resolved.newer.json())
+                    // Resolved edges are what the window is actually built from, projected through
+                    // the bound role each one feeds: a synthetic MAX/MIN eventId here is the
+                    // signature of an unidentifiable boundary.
+                    put("resolvedOlder", resolved.older.asInclusiveUpperBound().json())
+                    put("resolvedNewer", resolved.newer.asInclusiveLowerBound().json())
                 },
             )
         }
@@ -357,7 +359,7 @@ internal class TimelineDiagnostics(
     /**
      * The window the Pager generation is bounded by.
      *
-     * The rule itself is the production [historyWindowBounds]; only the per-edge resolution is
+     * The rule itself is the production [windowBounds]; only the per-edge resolution is
      * mirrored here (see [resolveBoundary]) because it needs DAO lookups this read-only connection
      * has to perform itself. `Recent` is the focus a chat-list entry opens under; the `Around`
      * variant anchored at the target is recorded alongside it so a jump-focused generation is
@@ -375,7 +377,7 @@ internal class TimelineDiagnostics(
         // both candidate windows are recorded instead of guessing which generation is attached.
         out.put("focusObservable", false)
         out.put("gapCount", resolved.size)
-        historyWindowBounds(HistoryWindowFocus.Recent, resolved).let { bounds ->
+        windowBounds(HistoryWindowFocus.Recent, resolved).let { bounds ->
             out.put(
                 "recent",
                 JSONObject().apply {
@@ -385,7 +387,7 @@ internal class TimelineDiagnostics(
             )
         }
         anchorOf(db, targetKey)?.let { anchor ->
-            val around = historyWindowBounds(
+            val around = windowBounds(
                 HistoryWindowFocus.Around(anchor.serverTime, anchor.eventId, anchor.timelineOrder),
                 resolved,
             )
@@ -413,7 +415,7 @@ internal class TimelineDiagnostics(
         gaps: List<HistoryGapEntity>,
         targetKey: Long,
     ): JSONObject {
-        val bounds = historyWindowBounds(HistoryWindowFocus.Recent, resolve(db, roomId, gaps))
+        val bounds = windowBounds(HistoryWindowFocus.Recent, resolve(db, roomId, gaps))
         // Default spec and identity rules: the required journeys never change the join/part/quit
         // or fools settings, and an empty fools set makes identity normalization inert.
         val query = messagePagingQuery(
@@ -450,16 +452,16 @@ internal class TimelineDiagnostics(
 
     // ------------------------------------------------------------------------------- plumbing
 
-    private fun resolve(db: SQLiteDatabase, roomId: Long, gaps: List<HistoryGapEntity>): List<ResolvedHistoryGap> =
+    private fun resolve(db: SQLiteDatabase, roomId: Long, gaps: List<HistoryGapEntity>): List<ResolvedGap> =
         gaps.map { gap ->
-            ResolvedHistoryGap(
+            ResolvedGap(
                 gap = gap,
-                older = resolveBoundary(db, roomId, gap.olderMsgid, gap.olderServerTime, gap.olderEventId, gap.olderTimelineOrder, Long.MAX_VALUE),
-                newer = resolveBoundary(db, roomId, gap.newerMsgid, gap.newerServerTime, gap.newerEventId, gap.newerTimelineOrder, Long.MIN_VALUE),
+                older = resolveBoundary(db, roomId, gap.olderMsgid, gap.olderServerTime, gap.olderEventId, gap.olderTimelineOrder),
+                newer = resolveBoundary(db, roomId, gap.newerMsgid, gap.newerServerTime, gap.newerEventId, gap.newerTimelineOrder),
             )
         }
 
-    /** Mirrors `MessageRepositoryImpl.resolveGapBoundary`, including its redirect-following lookup. */
+    /** Mirrors `GapAnchorResolver.resolve`, including its redirect-following lookup. */
     private fun resolveBoundary(
         db: SQLiteDatabase,
         roomId: Long,
@@ -467,12 +469,11 @@ internal class TimelineDiagnostics(
         serverTime: Long,
         eventId: Long?,
         timelineOrder: Long?,
-        fallback: Long,
-    ): TimelineAnchor {
-        msgid?.let { anchorByMsgid(db, roomId, it) }?.let { return it }
-        eventId?.let { anchorByCanonicalId(db, it, roomId) }?.let { return it }
-        eventId?.let { return TimelineAnchor(serverTime, it, timelineOrder ?: it) }
-        return TimelineAnchor(serverTime, fallback, fallback)
+    ): GapEdgeAnchor {
+        msgid?.let { anchorByMsgid(db, roomId, it) }?.let { return GapEdgeAnchor.Exact(it) }
+        eventId?.let { anchorByCanonicalId(db, it, roomId) }?.let { return GapEdgeAnchor.Exact(it) }
+        eventId?.let { return GapEdgeAnchor.Exact(TimelineAnchor(serverTime, it, timelineOrder ?: it)) }
+        return GapEdgeAnchor.TimeOnly(serverTime)
     }
 
     private fun anchorByMsgid(db: SQLiteDatabase, roomId: Long, msgid: String): TimelineAnchor? =

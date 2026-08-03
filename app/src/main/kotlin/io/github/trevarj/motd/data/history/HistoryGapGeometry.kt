@@ -5,6 +5,7 @@ import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.data.visibility.MessageWindowBounds
+import javax.inject.Inject
 
 /**
  * One stored history-gap edge, resolved as far as the local store allows, plus the role-specific
@@ -112,7 +113,7 @@ data class ResolvedGap(
  * and finally the timestamp alone. Only the last rung is ambiguous; the first three all produce
  * [GapEdgeAnchor.Exact] and are role-independent.
  */
-class GapAnchorResolver(private val messageDao: MessageDao) {
+class GapAnchorResolver @Inject constructor(private val messageDao: MessageDao) {
 
     suspend fun resolve(roomId: Long, gaps: List<HistoryGapEntity>): List<ResolvedGap> =
         gaps.map { gap ->
