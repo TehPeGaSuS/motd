@@ -1124,4 +1124,96 @@ class ChatHistoryRemoteMediatorTest {
         assertTrue(history.calls.isEmpty())
         assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
     }
+
+    // =============================================================================================
+    // CHARACTERIZATION PINS — these assert TODAY'S behavior, not desired behavior.
+    //
+    // They exist so a behavior-preserving refactor of the paging decision logic cannot drift
+    // silently. `pinnedCurrentBehavior_saturatedTimestampOnlyRefreshIsTerminalForBothDirections`
+    // in particular pins a LATENT DEFECT: do not "fix" it by editing the test.
+    // =============================================================================================
+
+    @Test
+    fun pinnedCurrentBehavior_saturatedTimestampOnlyRefreshIsTerminalForBothDirections() = runTest {
+        // PINNED CURRENT BEHAVIOR — LATENT DEFECT. Do not treat this as the desired contract.
+        //
+        // refresh() forwards the loader's endOfDirection straight through toMediatorResult(). On a
+        // timestamp-only wire (soju advertises MSGREFTYPES=timestamp) a SATURATED LATEST page trips
+        // HistoryPageLoader.cannotSafelyPageBefore, which means "not safe from THIS cursor", never
+        // "no older history" — and the loader reports it as endOfDirection = true. On REFRESH,
+        // endOfPaginationReached is terminal for BOTH directions permanently.
+        //
+        // The identical page fetched through append()'s empty-buffer LATEST seed goes through the
+        // progress rule instead and correctly keeps paging — see
+        // `saturatedTimestampOnlyLatestSeedKeepsOlderBackfillAlive`, same fixture, same page,
+        // opposite outcome. This is the same shape as the APPEND bug already fixed; it stays masked
+        // in production only because SKIP_INITIAL_REFRESH means remote REFRESH fires solely on an
+        // explicit retry/refresh of an empty buffer.
+        //
+        // The assertions below also record that nothing PROVED history ended: no completion flag was
+        // written, so the terminal verdict rests entirely on the per-fetch cursor guard.
+        val history = FakeHistory(
+            latest = listOf(chatMsg("a", 100), chatMsg("b", 100)),
+            referenceTypes = setOf(HistoryReferenceType.TIMESTAMP),
+        )
+
+        val result = load(mediator(history, pageSize = 2), LoadType.REFRESH)
+
+        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(listOf(ChatHistoryRequest.Subcommand.LATEST), history.calls)
+        assertEquals(2, rowCount())
+        assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+        assertFalse(db.historyCursorDao().byRoom(bufferId)!!.historyComplete)
+    }
+
+    @Test
+    fun pinnedCurrentBehavior_recentAppendSelectsTheUnidentifiableEqualTimeGapEdge() = runTest {
+        // PINNED CURRENT BEHAVIOR. focusedOlderGap ranks gaps by gapNewerAnchor, whose last-resort
+        // fallback for an edge that resolves to no local row is TimelineAnchor(t, MAX, MAX). Two
+        // gaps share newerServerTime 500: one edge names a retained row, the other names nothing at
+        // all. The MAX sentinel makes the UNIDENTIFIABLE gap win Recent selection, so APPEND pages
+        // from its bare timestamp instead of the retained row's msgid.
+        //
+        // This is the opposite convention from the window bounds in MessageRepositoryImpl, which
+        // resolves an unidentifiable newer edge to MIN so it does not clamp rows out of view. Both
+        // are intentional: selection wants the unlocatable gap to win, the window wants it not to
+        // hide anything.
+        processor.process(networkId, chatMsg("anchorRow", 500))
+        db.historyGapDao().insert(HistoryGapEntity(0, bufferId, "a", 100, "anchorRow", 500))
+        db.historyGapDao().insert(HistoryGapEntity(0, bufferId, "b", 200, null, 500))
+        val history = FakeHistory(before = ArrayDeque(listOf(listOf(chatMsg("older-page", 450)))))
+
+        load(mediator(history), LoadType.APPEND)
+
+        assertEquals(
+            "timestamp=1970-01-01T00:00:00.500Z",
+            history.requests.single().bound1,
+        )
+    }
+
+    @Test
+    fun pinnedCurrentBehavior_focusedPrependSelectsTheUnidentifiableEqualTimeGapEdge() = runTest {
+        // PINNED CURRENT BEHAVIOR, mirror of the test above. focusedNewerGap ranks gaps by
+        // gapOlderAnchor, whose last-resort fallback is TimelineAnchor(t, MIN, MIN), and takes the
+        // MINIMUM edge at or after the focus anchor. Two gaps share olderServerTime 500: the MIN
+        // sentinel again makes the unidentifiable one win, so PREPEND pages AFTER its bare timestamp
+        // rather than after the retained row's msgid.
+        processor.process(networkId, chatMsg("oldAnchor", 500))
+        processor.process(networkId, chatMsg("recent", 900))
+        db.historyGapDao().insert(HistoryGapEntity(0, bufferId, "oldAnchor", 500, "recent", 900))
+        db.historyGapDao().insert(HistoryGapEntity(0, bufferId, null, 500, null, 950))
+        val history = FakeHistory(
+            responseFor = { request ->
+                messages(listOf(chatMsg("next", 600)))
+                    .takeIf { request.subcommand == ChatHistoryRequest.Subcommand.AFTER }
+            },
+        )
+
+        load(mediator(history, focus = HistoryWindowFocus.Around(500)), LoadType.PREPEND)
+
+        assertEquals(
+            "timestamp=1970-01-01T00:00:00.500Z",
+            history.requests.first().bound1,
+        )
+    }
 }
