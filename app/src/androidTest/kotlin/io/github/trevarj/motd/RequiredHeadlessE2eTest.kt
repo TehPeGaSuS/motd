@@ -23,6 +23,7 @@ import io.github.trevarj.motd.e2e.HistorySyncProbe
 import io.github.trevarj.motd.e2e.MessageLifecycleProbe
 import io.github.trevarj.motd.e2e.MessageRunProbe
 import io.github.trevarj.motd.e2e.ScenarioHolder
+import io.github.trevarj.motd.e2e.TimelineDiagnostics
 import io.github.trevarj.motd.e2e.robots.BouncerRobot
 import io.github.trevarj.motd.e2e.robots.ChatListRobot
 import io.github.trevarj.motd.e2e.robots.ChatRobot
@@ -160,7 +161,23 @@ class RequiredHeadlessE2eTest {
                 ).filterIsInstance<VoiceSendProgress.Complete>().first()
             }
             val voice = runBlocking { probe.awaitCanonicalContaining("voice", upload.url, bufferId) }
-            TimelineRobot(compose).assertCompactAudioPlayer(voice.tag(), voice.id)
+            // This is the journey's historically opaque failure: the row is provably in Room, yet
+            // the timeline neither composes it nor resolves its Paging key. Snapshot the presented
+            // list, the key map, Room, and the history window on both outcomes so the next run
+            // reports which of those disagrees instead of only that the wait expired.
+            TimelineRobot(compose).assertCompactAudioPlayer(
+                voice.tag(),
+                voice.id,
+                diagnostics = TimelineDiagnostics(
+                    compose = compose,
+                    targetContext = InstrumentationRegistry.getInstrumentation().targetContext,
+                    artifactPrefix = artifacts.artifactPrefix(),
+                    milestones = milestones,
+                    bufferId = bufferId,
+                    probedEventId = voice.id,
+                    probedMsgid = voice.msgid,
+                ),
+            )
             milestones.record("filehost_audio_rendered", "buffer=$bufferId")
         } finally {
             fixture.delete()

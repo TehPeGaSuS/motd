@@ -18,11 +18,15 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.trevarj.motd.e2e.TimelineDiagnostics
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_LOADING_TAG
 import org.junit.Assert.assertTrue
 
 /** Spacing between the bottom resets a newest-row wait is allowed to issue. */
 private const val NEWEST_ROW_RESET_INTERVAL_MS = 5_000L
+
+/** Artifact subdirectory the newest-row snapshots are written under. */
+private const val NEWEST_ROW_DIAGNOSTIC_LABEL = "newest_row"
 
 internal class ChatListRobot(compose: ComposeTestRule) : BaseRobot(compose) {
     fun open(bufferId: Long) = click("chatlist_row_$bufferId")
@@ -41,13 +45,17 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         rule.onNodeWithText(text, substring = true, useUnmergedTree = true).assertTextContains(text, substring = true)
     }
 
-    fun assertCompactAudioPlayer(messageTag: String, rowId: Long) {
+    fun assertCompactAudioPlayer(
+        messageTag: String,
+        rowId: Long,
+        diagnostics: TimelineDiagnostics? = null,
+    ) {
         val playerMatcher = hasTestTag("audio_player") and hasAnyAncestor(hasTestTag(messageTag))
         val detailsMatcher = hasTestTag("audio_player_details") and hasAnyAncestor(hasTestTag(messageTag))
         // A freshly uploaded voice row must round-trip through the filehost, the IRC echo, and Room
         // before Paging can present it. Use the journey's network-dependent timeout rather than the
         // generic 10s component wait, which is a cold-emulator flake edge for this row.
-        awaitNewestRow(messageTag, rowId, timeoutMs = 30_000)
+        awaitNewestRow(messageTag, rowId, timeoutMs = 30_000, diagnostics = diagnostics)
         val players = rule.onAllNodes(playerMatcher, useUnmergedTree = true).assertCountEquals(1)
         val player = players[0].assertIsDisplayed()
         val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
@@ -67,27 +75,63 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
      * oracle would keep destroying the state it measures. Instead poll the key path, which resolves
      * the row's index over the loaded list and throws without moving on a miss, and allow at most
      * one bottom reset per interval in case an earlier step parked the viewport in older history.
+     *
+     * [diagnostics], when supplied, snapshots the presented list, the Paging key map, Room, and the
+     * history window on both outcomes. It runs strictly after the wait has decided, is read-only,
+     * and swallows its own errors, so it can neither change the verdict nor mask the timeout.
      */
-    private fun awaitNewestRow(messageTag: String, rowId: Long, timeoutMs: Long) {
+    private fun awaitNewestRow(
+        messageTag: String,
+        rowId: Long,
+        timeoutMs: Long,
+        diagnostics: TimelineDiagnostics? = null,
+    ) {
         awaitTag("chat_timeline")
         var nextResetAt = 0L
-        rule.waitUntil("timeline scrolled to newest row $messageTag (key $rowId)", timeoutMs) {
-            if (isPresent(messageTag) || tryScrollContainerToKey("chat_timeline", rowId)) {
-                // Composed is not the same as fully visible, and the details row below is clicked.
-                // The row is composed by now, so this short-circuits on the descendant match rather
-                // than sweeping.
-                return@waitUntil runCatching {
-                    container("chat_timeline").performScrollToNode(hasTestTag(messageTag))
-                }.isSuccess
+        try {
+            rule.waitUntil("timeline scrolled to newest row $messageTag (key $rowId)", timeoutMs) {
+                if (isPresent(messageTag) || tryScrollContainerToKey("chat_timeline", rowId)) {
+                    // Composed is not the same as fully visible, and the details row below is
+                    // clicked. The row is composed by now, so this short-circuits on the descendant
+                    // match rather than sweeping.
+                    return@waitUntil runCatching {
+                        container("chat_timeline").performScrollToNode(hasTestTag(messageTag))
+                    }.isSuccess
+                }
+                val now = System.currentTimeMillis()
+                if (now >= nextResetAt) {
+                    nextResetAt = now + NEWEST_ROW_RESET_INTERVAL_MS
+                    // Index 0 is the newest row, so a reset only ever moves toward the newer
+                    // (PREPEND) end and can never trip the older APPEND boundary.
+                    runCatching { container("chat_timeline").performScrollToIndex(0) }
+                }
+                false
             }
-            val now = System.currentTimeMillis()
-            if (now >= nextResetAt) {
-                nextResetAt = now + NEWEST_ROW_RESET_INTERVAL_MS
-                // Index 0 is the newest row, so a reset only ever moves toward the newer (PREPEND)
-                // end and can never trip the older APPEND boundary.
-                runCatching { container("chat_timeline").performScrollToIndex(0) }
+        } catch (failure: Throwable) {
+            // Capture, then rethrow the original failure untouched.
+            runCatching {
+                diagnostics?.capture(
+                    label = NEWEST_ROW_DIAGNOSTIC_LABEL,
+                    outcome = "timeout",
+                    containerTag = "chat_timeline",
+                    targetTag = messageTag,
+                    targetKey = rowId,
+                    budgetMs = timeoutMs,
+                )
             }
-            false
+            throw failure
+        }
+        // A green run has to produce the same shape of snapshot, or the red one has nothing to be
+        // diffed against.
+        runCatching {
+            diagnostics?.capture(
+                label = NEWEST_ROW_DIAGNOSTIC_LABEL,
+                outcome = "pass",
+                containerTag = "chat_timeline",
+                targetTag = messageTag,
+                targetKey = rowId,
+                budgetMs = timeoutMs,
+            )
         }
     }
 

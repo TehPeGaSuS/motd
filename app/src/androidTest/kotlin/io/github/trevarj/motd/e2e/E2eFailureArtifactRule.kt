@@ -31,9 +31,15 @@ class E2eFailureArtifactRule(
         try { if (failure != null) capture() } finally { holder.close() }
     }
 
+    /**
+     * Directory the running journey's structural artifacts live in, so a journey-owned diagnostic
+     * lands beside them under the same collected `required-e2e` tree instead of inventing a path.
+     */
+    fun artifactPrefix(): String = "required-e2e/${safeName()}"
+
     private fun capture() {
         val error = failure ?: return
-        val prefix = "required-e2e/${safeName()}"
+        val prefix = artifactPrefix()
         writeOutput(
             "$prefix/failure.json",
             "{\"test\":\"${safeName()}\",\"throwable\":\"${error::class.java.name}\",\"frames\":[" +
