@@ -21,7 +21,7 @@ FOSS lint and debug assembly:
 ```sh
 nix develop -c ./gradlew \
   :app:lintFossDebug :app:assembleFossDebug \
-  --stacktrace --no-daemon --max-workers=1
+  --stacktrace
 ```
 
 Full release-parity Gradle verification:
@@ -31,14 +31,18 @@ nix develop .#native -c ./gradlew \
   :irc:build \
   :app:testFossDebugUnitTest :app:testFossReleaseUnitTest \
   :app:lintFossDebug :app:lintFossRelease :app:assembleFossRelease \
-  --stacktrace --no-daemon --max-workers=1
+  --stacktrace
 ```
 
 The Google/FCM flavor is dormant. Do not run Google Gradle tasks or build a
 Google APK unless the maintainer explicitly reactivates that distribution.
 
-Lint warnings are errors. Keep the single-worker/no-daemon form for final lint
-and release checks because it avoids a known Android lint worker race.
+Lint warnings are errors. Run with the warm daemon and the repo's bounded worker
+cap (`org.gradle.workers.max` in `gradle.properties`); do not add
+`--no-daemon --max-workers=1`, which cost ~30x the wall-clock for no deterministic
+protection. Lint can still rarely hit the `ModifierDeclarationDetector`
+classloader race; just re-run (the warm daemon makes the retry ~10s). Required CI
+and release both wrap lint in a bounded retry for the same reason.
 
 ## Deterministic generated tests
 
@@ -57,6 +61,13 @@ effective counts, index ranges, and any manual overrides.
 - `MOTD_FUZZ_CASE=<index>` replays one independently seeded case.
 - `MOTD_FUZZ_PROFILE=pr|nightly` selects the bounded workload.
 - `MOTD_FUZZ_CASES=<count>` and `MOTD_FUZZ_STEPS=<count>` override campaign size.
+  Only positive values apply (`0` is ignored and falls back to the profile), so
+  the minimum is `1`. For the tightest inner loop when iterating on code
+  unrelated to the fuzzed surfaces, run e.g.
+  `MOTD_FUZZ_CASES=1 MOTD_FUZZ_STEPS=1 ./gradlew :app:testFossDebugUnitTest` to
+  shrink the generated campaign to a single case; the committed regression corpus
+  still runs. Never commit that reduced profile; leave the CI/default counts
+  intact so coverage is not silently lost.
 - `MOTD_FUZZ_SHARD=<zero-based index>` offsets generated case indices by one
   configured case-count, allowing parallel jobs to cover disjoint cases under
   the same reproducible seed. Exact `MOTD_FUZZ_CASE` replay ignores the shard.

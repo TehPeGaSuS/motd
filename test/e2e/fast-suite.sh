@@ -89,7 +89,9 @@ run_direct_suite() {
   local -a methods
   app_apk="${FAST_E2E_APP_APK:-$REPO/app/build/outputs/apk/foss/e2e/app-foss-e2e.apk}"
   test_apk="${FAST_E2E_TEST_APK:-$REPO/app/build/outputs/apk/androidTest/foss/e2e/app-foss-e2e-androidTest.apk}"
-  "$REPO/gradlew" :app:assembleFossE2e :app:assembleFossE2eAndroidTest --stacktrace --no-daemon --max-workers=1
+  # Daemon on for warm rebuilds; --max-workers=2 because the emulator + native
+  # stack are already resident and competing for the 14 GiB box's RAM.
+  "$REPO/gradlew" :app:assembleFossE2e :app:assembleFossE2eAndroidTest --stacktrace --max-workers=2
   e2e_adb install -r -g "$app_apk" >/dev/null
   e2e_adb install -r "$test_apk" >/dev/null
   runner="$(e2e_adb shell pm list instrumentation | sed -n "s#^instrumentation:\([^ ]*\) (target=${FAST_E2E_TARGET_PACKAGE})#\1#p" | head -1 | tr -d '\r')"

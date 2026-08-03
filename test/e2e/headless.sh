@@ -78,8 +78,13 @@ boot_emulator() {
   fi
   ensure_avd
   log "booting $AVD_NAME as $SERIAL"
+  # Quickboot: load the named snapshot when present and save it on the clean
+  # `adb emu kill` in down(). The first boot has no snapshot and cold-boots (the
+  # 120s wait below still guards); every boot after a reboot or `down` restores
+  # the snapshot instead of paying a full cold boot. App state is irrelevant to
+  # the snapshot because fast-suite reinstalls the APKs and pm-clears per method.
   setsid emulator "@$AVD_NAME" -port "$EMULATOR_PORT" -no-window -noaudio \
-    -no-boot-anim -gpu swiftshader_indirect >"$LOG_FILE" 2>&1 &
+    -no-boot-anim -gpu swiftshader_indirect -snapshot default-boot >"$LOG_FILE" 2>&1 &
   printf '%s\n' "$!" >"$PID_FILE"
   printf '%s\n' "$SERIAL" >"$SERIAL_FILE"
 
@@ -182,7 +187,7 @@ full() {
   up
   log "building shell-runbook E2E APK"
   nix develop "$REPO" -c ./gradlew :app:assembleFossE2e \
-    --stacktrace --no-daemon --max-workers=1
+    --stacktrace --max-workers=2
   ANDROID_SERIAL="$SERIAL" SERIAL="$SERIAL" \
     MOTD_PKG=io.github.trevarj.motd.debug \
     MOTD_APK="$REPO/app/build/outputs/apk/foss/e2e/app-foss-e2e.apk" \
@@ -206,7 +211,7 @@ showcase() {
   up
   log "building showcase E2E APK"
   nix develop "$REPO" -c ./gradlew :app:assembleFossE2e \
-    --stacktrace --no-daemon --max-workers=1
+    --stacktrace --max-workers=2
   log "capturing public showcase screenshots into $screenshot_dir"
   ANDROID_SERIAL="$SERIAL" SERIAL="$SERIAL" \
     MOTD_PKG=io.github.trevarj.motd.debug \
