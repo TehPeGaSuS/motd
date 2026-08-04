@@ -62,6 +62,8 @@ class AgentwireViewModel @Inject constructor(
     private var client: IrcClient? = null
     private var startedOnce = false
     private var sendFailureStage = "transport"
+    private var sendErrorClass: String? = null
+    private var untrustedRecorded = false
     private var joinTarget: Pair<Long, String>? = null
     private val autoReviewConfirmedSessions = HashSet<String>()
 
@@ -258,6 +260,7 @@ class AgentwireViewModel @Inject constructor(
         session.reset()
         // Only a user-visible entry anchors the deadline; internal resyncs reuse it.
         budget.anchor()
+        untrustedRecorded = false
         recordSyncStarted(trigger)
         _state.value = session.beginSync(_state.value)
             .copy(sync = AgentwireSyncState.Syncing(attempt = 0, startedAtMs = budget.startedAtMs))
@@ -296,8 +299,18 @@ class AgentwireViewModel @Inject constructor(
     }
 
     private suspend fun sendSyncRequest(id: String): Boolean {
+        sendErrorClass = null
         val sent = sendActionInternal("sync.request", id = id) != null
-        if (!sent) sendFailureStage = syncSendStage()
+        if (!sent) {
+            sendFailureStage = syncSendStage()
+            diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "send_failed") {
+                mapOf(
+                    "channel_fp" to diagnostics.fingerprint(_state.value.channel),
+                    "stage" to sendFailureStage,
+                    "error_class" to (sendErrorClass ?: "none"),
+                )
+            }
+        }
         return sent
     }
 
@@ -343,12 +356,27 @@ class AgentwireViewModel @Inject constructor(
     private fun recordSyncFailed(failure: AgentwireSyncFailure) {
         diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "sync_failed") {
             // `reason` is a redacted field name in the journal, hence `end_reason`/`detail_class`.
+            buildMap<String, Any?> {
+                put("channel_fp", diagnostics.fingerprint(_state.value.channel))
+                put("end_reason", failure.endReason())
+                put("attempts", budget.attempts)
+                put("elapsed_ms", budget.elapsedMs())
+                put("detail_class", detailClass(failure))
+                // One field per non-zero ignore counter: the evidence for a silent handshake.
+                putAll(session.ignoreCounters().diagnosticFields())
+            }
+        }
+    }
+
+    /** Once per handshake: the account is fingerprinted, and the running tally lands in sync_failed. */
+    private fun recordUntrustedEvents(account: String) {
+        if (untrustedRecorded) return
+        untrustedRecorded = true
+        diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "untrusted_events") {
             mapOf(
                 "channel_fp" to diagnostics.fingerprint(_state.value.channel),
-                "end_reason" to failure.endReason(),
-                "attempts" to budget.attempts,
-                "elapsed_ms" to budget.elapsedMs(),
-                "detail_class" to detailClass(failure),
+                "account_fp" to diagnostics.fingerprint(account),
+                "count" to (session.ignoreCounters().counts[IgnoreReason.UNTRUSTED_ACCOUNT] ?: 1),
             )
         }
     }
@@ -385,6 +413,7 @@ class AgentwireViewModel @Inject constructor(
     private suspend fun ingest(event: SequencedIrcEvent) {
         val result = session.ingest(_state.value, event)
         if (result is AgentwireDeliveryCoordinator.Result.Rejected) {
+            result.untrustedAccount?.let(::recordUntrustedEvents)
             _state.value = result.state
             return
         }
@@ -406,6 +435,14 @@ class AgentwireViewModel @Inject constructor(
             // Deliberately no budget.anchor(): an internal restart must not extend the deadline.
             _state.value = result.state
                 .copy(sync = AgentwireSyncState.Syncing(budget.attempts, budget.startedAtMs))
+            untrustedRecorded = false
+            diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "resync") {
+                mapOf(
+                    "channel_fp" to diagnostics.fingerprint(_state.value.channel),
+                    "trigger" to result.cause.wireName,
+                    "sequence_delta" to result.sequenceDelta,
+                )
+            }
             recordSyncStarted(
                 when (result.cause) {
                     AgentwireResyncCause.GAP -> AgentwireSyncTrigger.RESYNC_GAP
@@ -525,6 +562,7 @@ class AgentwireViewModel @Inject constructor(
             activeClient.sendAgentwire(current.channel, envelope, envelope.readablePreview())
         }.getOrElse {
             _state.update { state -> state.copy(error = it.message ?: "Unable to send Agentwire action") }
+            sendErrorClass = it::class.java.simpleName
             false
         }
         if (sent && kind != "sync.request") {

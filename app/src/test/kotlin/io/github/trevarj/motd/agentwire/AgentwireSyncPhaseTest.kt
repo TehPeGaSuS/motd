@@ -29,6 +29,7 @@ import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.SendAcceptance
+import java.io.OutputStream
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -164,15 +165,57 @@ class AgentwireSyncPhaseTest {
             assertTrue("the handshake starts only once the channel is joined", syncRequests(transport).isNotEmpty())
         }
 
+    @Test
+    fun `untrusted events during a handshake are counted and named in the timeout`() = runTest(dispatcher) {
+        val transport = RecordingTransport()
+        val client = readyClient(transport)
+        val diagnostics = RecordingDiagnostics()
+        val viewModel = viewModel(
+            FakeConnections(client),
+            FakeBufferRepository(buffer(joined = true)),
+            diagnostics,
+        )
+        advanceTimeBy(10)
+        runCurrent()
+        val syncId = syncRequests(transport).last()
+
+        repeat(2) { transport.feed(tagMessage("impostor", hello(syncId))) }
+        runCurrent()
+        assertEquals(
+            "Ignoring agent events from account impostor. The channel topic trusts only agent=agent.",
+            viewModel.state.value.error,
+        )
+
+        advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
+        runCurrent()
+        val failed = viewModel.state.value.sync as AgentwireSyncState.Failed
+        val timeout = failed.failure as AgentwireSyncFailure.Timeout
+        assertEquals(2, timeout.counters.counts[IgnoreReason.UNTRUSTED_ACCOUNT])
+
+        val untrusted = diagnostics.records.single { it.event == "untrusted_events" }
+        assertEquals(AGENTWIRE_DIAGNOSTIC_COMPONENT, untrusted.component)
+        assertEquals(diagnostics.fingerprint("impostor"), untrusted.fields["account_fp"])
+        val syncFailed = diagnostics.records.last { it.event == "sync_failed" }
+        assertEquals("timeout", syncFailed.fields["end_reason"])
+        assertEquals(2, syncFailed.fields["ignored_untrusted_account"])
+        assertTrue(
+            "an account name must never reach the journal raw",
+            diagnostics.records.none { record ->
+                record.fields.values.any { it?.toString()?.contains("impostor") == true }
+            },
+        )
+    }
+
     private fun TestScope.viewModel(
         connections: FakeConnections,
         buffers: FakeBufferRepository,
+        diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
     ): AgentwireViewModel = AgentwireViewModel(
         savedStateHandle = SavedStateHandle(mapOf("bufferId" to BUFFER_ID)),
         prefs = FakeAgentwirePrefs(),
         buffers = buffers,
         connections = connections,
-        diagnostics = DiagnosticLogger.Noop,
+        diagnostics = diagnostics,
         clock = AppClock { testScheduler.currentTime },
     )
 
@@ -224,6 +267,17 @@ class AgentwireSyncPhaseTest {
         params = listOf(CHANNEL),
     ).serialize()
 
+    private fun hello(reply: String) = AgentwireEnvelope(
+        kind = "agent.hello",
+        type = "event",
+        id = UUID.randomUUID().toString(),
+        at = 1,
+        instance = "bridge",
+        epoch = "epoch-1",
+        reply = reply,
+        data = buildJsonObject { put("epoch", "epoch-1") },
+    )
+
     private fun actionFailed(reply: String, message: String) = AgentwireEnvelope(
         kind = "action.failed",
         type = "event",
@@ -245,6 +299,20 @@ class AgentwireSyncPhaseTest {
         }
         override suspend fun close() = inbound.close().let { }
         suspend fun feed(line: String) = inbound.send(line)
+    }
+
+    private class RecordingDiagnostics : DiagnosticLogger {
+        data class Record(val component: String, val event: String, val fields: Map<String, Any?>)
+
+        val records = mutableListOf<Record>()
+        override val enabled = MutableStateFlow(true)
+        override fun setEnabled(enabled: Boolean) = Unit
+        override fun record(component: String, event: String, fields: () -> Map<String, Any?>) {
+            records += Record(component, event, fields())
+        }
+        // Deliberately not value-embedding, so the "no raw identity" assertion is meaningful.
+        override fun fingerprint(value: String?): String? = value?.let { "fp-${it.hashCode()}" }
+        override suspend fun exportTo(output: OutputStream) = Unit
     }
 
     private class FakeAgentwirePrefs : AgentwirePrefs(ApplicationProvider.getApplicationContext<Context>()) {

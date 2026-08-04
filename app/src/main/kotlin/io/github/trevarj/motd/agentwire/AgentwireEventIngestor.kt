@@ -35,6 +35,8 @@ internal class AgentwireEventIngestor(
             val state: AgentwireUiState,
             val protocolFailure: Boolean,
             val detail: String,
+            /** Present for an untrusted sender; fingerprinted, never logged raw. */
+            val account: String? = null,
         ) : Result
         data object ReassemblyExpired : Result
         data class Applied(val state: AgentwireUiState, val envelope: AgentwireEnvelope) : Result
@@ -115,7 +117,7 @@ internal class AgentwireEventIngestor(
     private fun untrusted(state: AgentwireUiState, account: String, trusted: String): Result.Rejected {
         // Shown to the user, never logged: the diagnostic journal only records a fingerprint.
         val detail = "Ignoring agent events from account $account. The channel topic trusts only agent=$trusted."
-        return Result.Rejected(state.copy(error = detail), protocolFailure = false, detail = detail)
+        return Result.Rejected(state.copy(error = detail), protocolFailure = false, detail = detail, account = account)
     }
 
     private fun protocolFailure(state: AgentwireUiState, detail: String): Result.Rejected =
@@ -137,7 +139,8 @@ internal class AgentwireDeliveryCoordinator(
             val envelope: AgentwireEnvelope,
             val syncCompleted: Boolean,
         ) : Result
-        data class Rejected(val state: AgentwireUiState) : Result
+        /** [untrustedAccount] is set when the sender is not the topic-provisioned backend. */
+        data class Rejected(val state: AgentwireUiState, val untrustedAccount: String? = null) : Result
 
         /** The bridge answered the live sync id with `action.failed`. */
         data class SyncRejected(val state: AgentwireUiState, val detail: String) : Result
@@ -196,6 +199,9 @@ internal class AgentwireDeliveryCoordinator(
     fun ingest(state: AgentwireUiState, delivered: SequencedIrcEvent): Result {
         val prior = lastSequence
         lastSequence = delivered.sequence
+        // The sequence is the client's global observer counter, not an agentwire-only one, so any
+        // DROP_OLDEST loss anywhere on the connection forces a resync here. Acceptable at the
+        // observer's capacity of 4096, and the `resync` diagnostic now says how often it fires.
         if (prior != null && delivered.sequence != prior + 1) {
             return resync(
                 state,
@@ -241,7 +247,7 @@ internal class AgentwireDeliveryCoordinator(
     private fun rejected(result: AgentwireEventIngestor.Result.Rejected): Result {
         if (!result.protocolFailure) {
             count(IgnoreReason.UNTRUSTED_ACCOUNT)
-            return Result.Rejected(result.state)
+            return Result.Rejected(result.state, result.account)
         }
         protocolFailures += 1
         if (awaitingSync && protocolFailures >= AGENTWIRE_PROTOCOL_FAILURE_LIMIT) {
