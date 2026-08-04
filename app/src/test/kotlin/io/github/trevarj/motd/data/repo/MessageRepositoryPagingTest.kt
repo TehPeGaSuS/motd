@@ -202,6 +202,85 @@ class MessageRepositoryPagingTest {
     }
 
     @Test
+    fun entryIndexIsOneDomainAcrossTheRepositoryAndTheVisibilityReader() = runTest {
+        // The normal-entry rule (preferredEntryTarget) compares three indices that arrive by two
+        // different code paths: the unread anchor comes from MessageRepositoryImpl.countNewerThan,
+        // the saved viewport and the furthest-displayed watermark from
+        // MessageVisibilityReader.countTimelineNewer. They agree today because both funnel into
+        // countTimelineNewerQuery with the same room resolution, identity rules, spec, and
+        // (serverTime, timelineOrder, id) tie-break — and nothing but this test enforces that.
+        //
+        // If either grows a predicate the other lacks, the entry rule silently compares two
+        // coordinate systems: the wrong anchor wins near ties, and entryPagingKey keys the Pager at
+        // a position the entry target does not scroll to. No other test would fail, because every
+        // other test exercises one path or the other, never both against each other.
+        //
+        // The list-position oracle is the third leg: it pins both paths to the ORDER the
+        // PagingSource actually presents, so a predicate added to both at once still fails here.
+        val repository = repository()
+        (1..40).forEach { ordinal ->
+            db.messageDao().insertAll(
+                listOf(
+                    message(
+                        bufferId = bufferId,
+                        text = "row-$ordinal",
+                        // Deliberate ties: consecutive rows share a millisecond in pairs, so the
+                        // (timelineOrder, id) tie-break decides their order and any drift in it
+                        // shows up as an off-by-one right where entry decisions are closest.
+                        sender = when {
+                            ordinal % 7 == 0 -> "fool"
+                            ordinal % 11 == 0 -> "me"
+                            else -> "person"
+                        },
+                        serverTime = (ordinal / 2).toLong() + 1,
+                        dedupKey = "row-$ordinal",
+                        msgid = "row-$ordinal",
+                        kind = if (ordinal % 5 == 0) MessageKind.JOIN else MessageKind.PRIVMSG,
+                        isSelf = ordinal % 11 == 0,
+                    ),
+                ),
+            )
+        }
+        val specs = listOf(
+            MessageVisibilitySpec(),
+            MessageVisibilitySpec(showJoinPartQuit = false),
+            MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.HIDE),
+            MessageVisibilitySpec(
+                showJoinPartQuit = false,
+                fools = setOf("fool"),
+                foolsMode = FoolsMode.COLLAPSE,
+            ),
+        )
+
+        for (spec in specs) {
+            val presented = db.messageDao().pagingSource(messagePagingQuery(bufferId, spec))
+                .load(PagingSource.LoadParams.Refresh(null, 100, false))
+                .requirePage()
+                .data
+            for (ordinal in 1..40) {
+                val row = checkNotNull(db.messageDao().byMsgid(bufferId, "row-$ordinal"))
+                val fromRepository = repository.countNewerThan(bufferId, row.serverTime, row.id, spec)
+                val fromReader = reader.countTimelineNewer(bufferId, row.serverTime, row.id, spec)
+                assertEquals(
+                    "row-$ordinal under $spec: entry indices must come from one domain",
+                    fromReader,
+                    fromRepository,
+                )
+                // Rows the spec hides have no position of their own; the shared count still has to
+                // name the slot they would occupy, which is where the presented list splits.
+                val presentedIndex = presented.indexOfFirst { it.id == row.id }
+                if (presentedIndex >= 0) {
+                    assertEquals(
+                        "row-$ordinal under $spec: the index must be its list position",
+                        presentedIndex,
+                        fromRepository,
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
     fun importingOlderHistoryAfterRecentPageKeepsNewestWindowInFront() = runTest {
         val recentIds = db.messageDao().insertAll(
             (1..25).map { ordinal ->
