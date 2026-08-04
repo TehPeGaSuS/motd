@@ -15,6 +15,10 @@ automation in `.github/workflows/release.yml` is authoritative.
    already exist locally or remotely.
 5. Confirm the four signing secrets exist in GitHub: `KEYSTORE_BASE64`,
    `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD`.
+6. Write `fastlane/metadata/android/en-US/changelogs/<motdVersionCode>.txt` for
+   the new version code. No repo script reads `fastlane/`, so a missing file
+   fails nothing locally or in CI—it only surfaces as a blank "What's New" once
+   the F-Droid metadata advances. Keep it user-facing and under 500 characters.
 
 The Google/FCM distribution is paused. Do not build, sign, attach, or publish a
 Google APK, and do not require Firebase client or relay configuration for a
@@ -45,6 +49,16 @@ runs the FOSS release build, tests, and lint.
 
 The release description should contain a changelog of commits since
 the last version.
+
+## F-Droid
+
+The fdroiddata metadata is external to this repository and is not advanced by
+the release workflow. `docs/fdroid.md` holds the recipe and
+`docs/human-fdroid-update.md` the per-release steps.
+
+Do not bump the fdroiddata merge request on every tag. It advances only when the
+maintainer judges a release good and stable, and only when they ask. A tag with
+green CI is not by itself grounds to update it.
 
 ## Failure recovery
 
