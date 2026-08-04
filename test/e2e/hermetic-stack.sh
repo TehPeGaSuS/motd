@@ -53,11 +53,20 @@ stop_soju() {
 }
 
 start_soju() {
+  local container
   if [ -n "$(compose ps -q --status running soju)" ]; then
     wait_for_soju_ready
     return
   fi
-  compose start soju
+  # `compose start` re-resolves depends_on and re-runs ergo-provision (~23s) even though only soju
+  # was stopped and ergo never went away. That was being spent inside the readiness budget the
+  # reconnect steps depend on. Its dependencies are already up, so start the container directly.
+  container="$(compose ps -q soju)"
+  if [ -n "$container" ]; then
+    docker start "$container" >/dev/null
+  else
+    compose start soju
+  fi
   wait_for_soju_ready
 }
 
