@@ -48,6 +48,7 @@ internal object CapTiers {
         "soju.im/bouncer-networks",
         "soju.im/bouncer-networks-notify",
         "soju.im/webpush",
+        "soju.im/search",
         MULTILINE_CAP,
     )
 

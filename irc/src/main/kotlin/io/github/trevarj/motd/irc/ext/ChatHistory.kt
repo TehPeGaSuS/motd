@@ -11,8 +11,11 @@ import java.time.format.DateTimeFormatterBuilder
 object ChatHistorySelectors {
     private val timestampFormatter = DateTimeFormatterBuilder().appendInstant(3).toFormatter()
 
-    fun timestamp(epochMillis: Long): String =
-        "timestamp=${timestampFormatter.format(Instant.ofEpochMilli(epochMillis))}"
+    /** Millisecond-precision ISO instant; soju rejects a dropped zero fractional part. */
+    fun isoTimestamp(epochMillis: Long): String =
+        timestampFormatter.format(Instant.ofEpochMilli(epochMillis))
+
+    fun timestamp(epochMillis: Long): String = "timestamp=${isoTimestamp(epochMillis)}"
 
     /** IRCv3 message references are opaque and case-sensitive. */
     fun msgid(value: String): String = "msgid=$value"

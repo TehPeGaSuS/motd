@@ -7,7 +7,11 @@ import io.github.trevarj.motd.irc.ext.BatchTree
 import io.github.trevarj.motd.irc.ext.BouncerCommands
 import io.github.trevarj.motd.irc.ext.ChatHistoryCommands
 import io.github.trevarj.motd.irc.ext.ReadMarkerCommands
+import io.github.trevarj.motd.irc.ext.SearchCommands
+import io.github.trevarj.motd.irc.ext.SearchRequest
+import io.github.trevarj.motd.irc.ext.SearchResultMessage
 import io.github.trevarj.motd.irc.ext.TypingOutbox
+import io.github.trevarj.motd.irc.ext.parseSearchResult
 import io.github.trevarj.motd.irc.ext.WebPushCommands
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.IrcParseException
@@ -909,6 +913,51 @@ class IrcClient(
                 primaryMessageCount = primaryMessages.size,
             )
         }
+    }
+
+    /**
+     * True when this connection can run server-side SEARCH: Ready, `soju.im/search` acked, and
+     * labeled-response available. SEARCH results are correlated by label only — there is no
+     * unlabeled fallback, because nothing else distinguishes them from ordinary traffic.
+     */
+    val searchAvailable: Boolean
+        get() = _state.value is IrcClientState.Ready &&
+            hasCap("soju.im/search") && hasCap("labeled-response")
+
+    /**
+     * Run one soju SEARCH and return its hits in server (ascending) order.
+     *
+     * Results are transient: they are never routed into the event stream and never persisted, since
+     * a hit says nothing about which intervals of history the client holds.
+     *
+     * @throws IrcCommandException on a `FAIL SEARCH` reply.
+     * @throws IrcTimeoutException after [LABEL_TIMEOUT_MS] with no completed response.
+     * @throws IrcProtocolException on a malformed or wrongly typed response batch.
+     * @throws IllegalStateException when [searchAvailable] is false.
+     * @throws IrcDisconnectedException when there is no transport.
+     */
+    suspend fun search(req: SearchRequest): List<SearchResultMessage> {
+        check(searchAvailable) { "SEARCH is unavailable on this connection" }
+        // Buffering under the label keeps the result PRIVMSGs out of the normal event flow, the
+        // same property `chathistory` relies on.
+        val response = sendLabeledResponse(SearchCommands.search(req))
+        val root = response.rootBatch
+            ?: if (response.messages.isEmpty()) {
+                // Tolerated: a zero-result SEARCH may complete without ever opening a batch.
+                return emptyList()
+            } else {
+                throw IrcProtocolException("SEARCH", "response did not contain a complete root batch")
+            }
+        if (
+            root.command != "BATCH" ||
+            !root.params.getOrNull(1).orEmpty().equals("soju.im/search", ignoreCase = true)
+        ) {
+            throw IrcProtocolException(
+                "SEARCH",
+                "unexpected batch type ${root.params.getOrNull(1).orEmpty()}",
+            )
+        }
+        return response.messages.mapNotNull(::parseSearchResult)
     }
 
     /** Rebuild nested response framing so one multiline history item remains one logical event. */

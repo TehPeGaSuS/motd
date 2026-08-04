@@ -3,6 +3,9 @@ package io.github.trevarj.motd.irc.client
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.ServerTimeSource
+import io.github.trevarj.motd.irc.ext.SearchRequest
+import io.github.trevarj.motd.irc.ext.SearchResultKind
+import io.github.trevarj.motd.irc.ext.SearchResultMessage
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -1487,5 +1490,136 @@ class IrcClientTest {
 
         val marker = collected.filterIsInstance<IrcEvent.ReadMarker>().first()
         assertEquals("#motd", marker.target)
+    }
+
+    /** Caps a soju connection needs for server-side SEARCH; correlation is label-only. */
+    private val searchCaps = "message-tags server-time batch labeled-response soju.im/search"
+
+    @Test
+    fun `soju search cap is requested when advertised`() = runTest {
+        val ft = FakeTransport()
+        val client = IrcClient(config(), ft.factory(), clientScope())
+        client.start()
+        runCurrent()
+
+        ft.feed(":srv CAP * LS :$fullLs soju.im/search")
+        runCurrent()
+
+        assertTrue("soju.im/search must be negotiable", "soju.im/search" in CapTiers.ALL)
+        assertTrue(
+            ft.sent.toString(),
+            ft.sent.any { it.startsWith("CAP REQ") && it.contains("soju.im/search") },
+        )
+    }
+
+    @Test
+    fun `search round trip assembles the soju search batch`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredWithCaps(ft, searchCaps)
+        assertTrue(client.searchAvailable)
+
+        val result = clientScope().async {
+            client.search(SearchRequest(target = "#motd", text = "coroutine", from = "alice"))
+        }
+        runCurrent()
+
+        val sent = ft.sent.last { it.contains("SEARCH") }
+        assertTrue(sent, sent.contains("in=#motd;text=coroutine;from=alice;limit=100"))
+        val label = responseLabel(sent)
+        ft.feed("@label=$label BATCH +s soju.im/search")
+        ft.feed(
+            "@batch=s;time=2026-07-14T19:00:00.000Z;msgid=older " +
+                ":alice!u@h PRIVMSG #motd :older coroutine hit",
+        )
+        ft.feed(
+            "@batch=s;time=2026-07-14T19:05:00.000Z;msgid=newer " +
+                ":alice!u@h PRIVMSG #motd :ACTION mentions coroutines",
+        )
+        ft.feed("@batch=s :srv NOTICE #motd :not a chat hit but still a result")
+        ft.feed("BATCH -s")
+        runCurrent()
+
+        val hits = result.await()
+        // Server (ascending) order is preserved verbatim; nothing is sorted or deduplicated here.
+        assertEquals(listOf("older", "newer", null), hits.map { it.msgid })
+        assertEquals(
+            listOf(SearchResultKind.PRIVMSG, SearchResultKind.ACTION, SearchResultKind.NOTICE),
+            hits.map { it.kind },
+        )
+        assertEquals("mentions coroutines", hits[1].text)
+        assertEquals(1_784_055_600_000L, hits[0].serverTime)
+        assertNull(hits[2].serverTime)
+    }
+
+    @Test
+    fun `search FAIL completes with the server code`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredWithCaps(ft, searchCaps)
+
+        val result = clientScope().async {
+            runCatching { client.search(SearchRequest(target = "#motd", text = "x")) }
+        }
+        runCurrent()
+        val label = responseLabel(ft.sent.last { it.contains("SEARCH") })
+        ft.feed("@label=$label FAIL SEARCH INVALID_PARAMS :missing in attribute")
+        runCurrent()
+
+        val error = result.await().exceptionOrNull()
+        assertTrue(error.toString(), error is IrcCommandException)
+        assertEquals("SEARCH", (error as IrcCommandException).ircCommand)
+        assertEquals("INVALID_PARAMS", error.code)
+    }
+
+    @Test
+    fun `search rejects a wrong batch type`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredWithCaps(ft, searchCaps)
+
+        val result = clientScope().async {
+            runCatching { client.search(SearchRequest(target = "#motd", text = "x")) }
+        }
+        runCurrent()
+        val label = responseLabel(ft.sent.last { it.contains("SEARCH") })
+        ft.feed("@label=$label BATCH +s chathistory #motd")
+        ft.feed("BATCH -s")
+        runCurrent()
+
+        assertTrue(result.await().exceptionOrNull() is IrcProtocolException)
+    }
+
+    @Test
+    fun `search without the cap throws before writing`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredWithCaps(ft, "message-tags server-time batch labeled-response")
+        assertFalse(client.searchAvailable)
+        val before = ft.sent.size
+
+        val error = runCatching { client.search(SearchRequest(target = "#motd", text = "x")) }
+            .exceptionOrNull()
+
+        assertTrue(error.toString(), error is IllegalStateException)
+        assertEquals("an unavailable SEARCH must not touch the wire", before, ft.sent.size)
+    }
+
+    @Test
+    fun `search empty batch yields no results`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredWithCaps(ft, searchCaps)
+
+        val batched = clientScope().async { client.search(SearchRequest(target = "#motd", text = "x")) }
+        runCurrent()
+        val batchedLabel = responseLabel(ft.sent.last { it.contains("SEARCH") })
+        ft.feed("@label=$batchedLabel BATCH +s soju.im/search")
+        ft.feed("BATCH -s")
+        runCurrent()
+        assertEquals(emptyList<SearchResultMessage>(), batched.await())
+
+        // Tolerated the other way too: a zero-result SEARCH that never opens a batch.
+        val unbatched = clientScope().async { client.search(SearchRequest(target = "#motd", text = "y")) }
+        runCurrent()
+        val unbatchedLabel = responseLabel(ft.sent.last { it.contains("SEARCH") })
+        ft.feed("@label=$unbatchedLabel ACK")
+        runCurrent()
+        assertEquals(emptyList<SearchResultMessage>(), unbatched.await())
     }
 }

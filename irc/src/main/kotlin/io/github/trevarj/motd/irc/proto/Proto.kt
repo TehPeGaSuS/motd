@@ -124,8 +124,13 @@ data class IrcMessage(
             return sb.toString()
         }
 
-        /** Escape a tag value per the IRCv3 escape table. */
-        private fun escapeTagValue(value: String): String {
+        /**
+         * Escape a tag value per the IRCv3 escape table.
+         *
+         * Also reused for `key=value;key=value` attribute lists (soju's `irc.ParseTags` form),
+         * which share this escaping so `;`, spaces, and CR/LF cannot break out of a value.
+         */
+        internal fun escapeTagValue(value: String): String {
             val sb = StringBuilder(value.length)
             for (c in value) {
                 when (c) {
