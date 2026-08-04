@@ -160,6 +160,10 @@ class MotdNotifications @Inject constructor(
                             type = buffer.type,
                             hasMention = event.hasMention,
                             eventId = event.id,
+                            // Recovery re-presents state the user may already have been alerted
+                            // about (the claim/present/complete cycle was interrupted after an
+                            // unknown amount of presentation work); it must never re-alert.
+                            firstPresentation = false,
                             message = IrcEvent.ChatMessage(
                                 ctx = MessageContext(
                                     msgid = event.msgid,
@@ -263,7 +267,7 @@ class MotdNotifications @Inject constructor(
         type: BufferType,
         hasMention: Boolean,
         message: IrcEvent.ChatMessage,
-    ) = postIncoming(networkId, bufferId, type, hasMention, eventId = null, message)
+    ) = postIncoming(networkId, bufferId, type, hasMention, eventId = null, message, firstPresentation = true)
 
     override suspend fun onCanonicalIncoming(
         networkId: Long,
@@ -272,7 +276,7 @@ class MotdNotifications @Inject constructor(
         hasMention: Boolean,
         eventId: Long,
         message: IrcEvent.ChatMessage,
-    ) = postIncoming(networkId, bufferId, type, hasMention, eventId, message)
+    ) = postIncoming(networkId, bufferId, type, hasMention, eventId, message, firstPresentation = true)
 
     private suspend fun postIncoming(
         networkId: Long,
@@ -281,6 +285,7 @@ class MotdNotifications @Inject constructor(
         hasMention: Boolean,
         eventId: Long?,
         message: IrcEvent.ChatMessage,
+        firstPresentation: Boolean,
     ) {
         // Plain suspend reads: Room and DataStore dispatch off the main thread on their own. The
         // events collector runs on Dispatchers.Main, so the previous runBlocking { suspend query }
@@ -359,6 +364,9 @@ class MotdNotifications @Inject constructor(
         } else {
             emptyList()
         }
+        // True only when this call appends a body the user has not been notified about yet; an
+        // identity-upgrade re-post of an already-notified body must never re-alert.
+        var addedNewBody = false
         val style = synchronized(history) {
             val keys = historyKeys.getOrPut(bufferId, ::mutableListOf)
             val conversation = history.getOrPut(bufferId) {
@@ -401,6 +409,7 @@ class MotdNotifications @Inject constructor(
             } else {
                 keys += key
                 if (keys.size > MAX_NOTIFICATION_MESSAGES) keys.removeAt(0)
+                addedNewBody = true
                 conversation.also { it.addMessage(message.text, message.ctx.serverTime, person) }
             }
         }
@@ -454,10 +463,15 @@ class MotdNotifications @Inject constructor(
             .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
             .setStyle(style)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            // Canonical ChatSoundPlayer owns persisted, mark-before-playback audio. Keeping the
-            // OS notification presentation silent prevents a crash-recovery repost from sounding
-            // a second time while retaining the high-importance visual notification channel.
-            .setSilent(true)
+            // The first presentation of a newly notified body alerts through its notification
+            // channel, so heads-up peeking, per-channel sound/vibration, and Do Not Disturb are
+            // user-governed. Every re-presentation stays silent: a crash-recovery repost
+            // (firstPresentation = false) re-presents state the user may already have been alerted
+            // about, and an identity-upgrade re-post of an already-notified body
+            // (addedNewBody = false) must not re-alert either. This never doubles up with
+            // ChatSoundPlayer's in-conversation cue: that plays only when the buffer is
+            // foregrounded, and shouldPostNotification suppresses posting in exactly that case.
+            .setSilent(!(firstPresentation && addedNewBody))
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
             .addExtras(android.os.Bundle().apply {
@@ -482,6 +496,7 @@ class MotdNotifications @Inject constructor(
                 "msgid_fp" to diagnostics.fingerprint(message.ctx.msgid),
                 "body_fp" to diagnostics.fingerprint(message.text),
                 "permission" to canPost,
+                "alerted" to (firstPresentation && addedNewBody),
             )
         }
     }

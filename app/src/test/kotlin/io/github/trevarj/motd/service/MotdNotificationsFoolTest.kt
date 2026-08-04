@@ -108,6 +108,12 @@ class MotdNotificationsFoolTest {
         assertEquals(NotificationCompat.GROUP_ALERT_SUMMARY, notification.groupAlertBehavior)
     }
 
+    /** A first presentation alerts through its channel (no NotificationCompat silent-group marker). */
+    private fun assertAlerting(notification: android.app.Notification) {
+        assertNull(notification.group)
+        assertEquals(NotificationCompat.GROUP_ALERT_ALL, notification.groupAlertBehavior)
+    }
+
     /**
      * The crash repro path: add a fool, then run the notification pipeline for that fool's message.
      * onIncoming reads the fools DataStore + the buffer via suspend calls (no runBlocking on the
@@ -133,7 +139,7 @@ class MotdNotificationsFoolTest {
         assertEquals(1, postedCount())
         val posted = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
             .activeNotifications.single().notification
-        assertSilent(posted)
+        assertAlerting(posted)
         val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted)
         assertNotNull(style?.messages?.single()?.person?.icon)
     }
