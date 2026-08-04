@@ -298,6 +298,10 @@ fun MessageList(
     // a recycled row does not lose rich content halfway through a fling.
     val canStartNewRichContentWork = richContentReady && !scrolling
     val formatMessageTime = rememberMessageTimeFormatter()
+    // A skeleton the size of the rows this conversation actually renders, so a page landing (which
+    // regenerates the PagingSource and turns loaded rows back into placeholders) does not reflow
+    // everything below each swap. Deferred read: only the composed skeletons see the change.
+    val placeholderHeight = rememberTimelineRowHeight(listState, bufferId)
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -328,7 +332,7 @@ fun MessageList(
         ) { index ->
             val msg = items[index]
             if (msg == null) {
-                MessagePlaceholderRow()
+                MessagePlaceholderRow(placeholderHeight)
                 return@items
             }
             val older = if (index + 1 < items.itemCount) items.peek(index + 1) else null
@@ -693,13 +697,20 @@ private fun TimelineSeamAbove(
     }
 }
 
-/** A quiet, stable-height skeleton prevents placeholder-only pages from measuring as zero rows. */
+/**
+ * A quiet skeleton, sized like the rows around it.
+ *
+ * Nonzero height stops a placeholder-only page from measuring as zero rows; a height that tracks the
+ * conversation's real rows ([rememberTimelineRowHeight]) stops each skeleton -> real swap from
+ * reflowing the list below it. [height] is a lambda so the estimate is read inside this composable:
+ * a new estimate then invalidates the composed skeletons rather than the whole timeline.
+ */
 @Composable
-internal fun MessagePlaceholderRow() {
+internal fun MessagePlaceholderRow(height: () -> Dp = { DEFAULT_TIMELINE_ROW_HEIGHT }) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .height(height())
             .clearAndSetSemantics {},
         contentAlignment = Alignment.CenterStart,
     ) {
@@ -918,6 +929,7 @@ private fun SystemEventRun(
     // of each other (its MeasurePolicy behaves like a Box), which would overlap the divider text.
     Column(modifier = Modifier.fillMaxWidth()) {
         TimelineSeamDivider(seam, onLoadGap)
+        if (showDay) DaySeparator(timeMs = oldest.serverTime)
         if (showNewDivider) {
             NewMessagesDivider(
                 label = readMarkerLabel ?: stringResource(R.string.chat_new_messages),
@@ -933,7 +945,6 @@ private fun SystemEventRun(
             onExpandedChange = { expanded -> onExpandedChange(runIds, expanded) },
             modifier = Modifier.testTag("chat_system_pill"),
         )
-        if (showDay) DaySeparator(timeMs = oldest.serverTime)
     }
 }
 
@@ -1049,6 +1060,11 @@ private fun MessageRow(
     // Outermost boundary of the row: the history break comes before the read marker, because the
     // messages the marker separates all sit on this side of the gap.
     TimelineSeamDivider(seam, onLoadGap)
+
+    // [showDay] is the boundary between this row and its OLDER neighbour, which the reversed list
+    // draws ABOVE this one, so the chip belongs before the bubble like every other divider here.
+    // Emitting it last put it below the bubble, i.e. against the newer neighbour, one row too low.
+    if (showDay) DaySeparator(timeMs = msg.serverTime)
 
     if (showNewDivider) {
         NewMessagesDivider(
@@ -1309,8 +1325,6 @@ private fun MessageRow(
             onDelete = { onDelete(msg) },
         )
     }
-
-    if (showDay) DaySeparator(timeMs = msg.serverTime)
 }
 
 /**
@@ -1342,6 +1356,7 @@ private fun FoolPlaceholderRow(
     // item slot stacks its children like a Box).
     Column(modifier = Modifier.fillMaxWidth()) {
         TimelineSeamDivider(seam, onLoadGap)
+        if (showDay) DaySeparator(timeMs = msg.serverTime)
         if (showNewDivider) {
             NewMessagesDivider(
                 label = readMarkerLabel ?: stringResource(R.string.chat_new_messages),
@@ -1371,8 +1386,6 @@ private fun FoolPlaceholderRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-
-        if (showDay) DaySeparator(timeMs = msg.serverTime)
     }
 }
 
