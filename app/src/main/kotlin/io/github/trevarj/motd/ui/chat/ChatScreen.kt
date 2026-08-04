@@ -145,6 +145,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.paging.ItemSnapshotList
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -169,6 +170,7 @@ import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.canSendReactionTags
@@ -512,6 +514,7 @@ fun ChatScreen(
         historyAvailability = historyAvailability,
         conversationLayout = state.conversationLayout,
         onConversationLayoutSelected = viewModel::setConversationLayoutOverride,
+        diagnostics = viewModel.diagnostics,
     )
 
     // Nick sheet (plans/16 §5.8): actions render immediately; whois fills in when it lands.
@@ -676,6 +679,9 @@ fun ChatContent(
     nearestUnreadMentionBelow: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> ChatPositionTarget? = { _, _ -> null },
     conversationLayout: ConversationLayoutState = ConversationLayoutState(),
     onConversationLayoutSelected: (io.github.trevarj.motd.data.prefs.LayoutDensity?) -> Unit = {},
+    // Opt-in journal for the timeline's own Paging generations. Noop by default so previews and
+    // hand-built call sites need nothing; the required E2E gate arms the real one for the journey.
+    diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
 ) {
     val listState = rememberLazyListState()
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
@@ -1409,6 +1415,119 @@ fun ChatContent(
                     }
                 }
             }
+    }
+
+    // Viewport pin. A Paging presentation whose loaded window no longer covers the viewport turns
+    // the anchor row into a placeholder, and a placeholder carries a private positional key rather
+    // than the row's id — so LazyListState's key-based re-anchoring fails at exactly the moment it
+    // is needed, and the viewport keeps a raw index that the same presentation may have moved every
+    // row away from. [timelinePresentationPin] restores that index from a row conserved across both
+    // presentations, or declines; see its documentation for why every uncertain case declines.
+    //
+    // Guards, in order, and all of them mandatory:
+    //   * initialPositionSettled — entry positioning owns the viewport until it says otherwise, and
+    //     it deliberately scrolls through unloaded rows to get there.
+    //   * not scrolling and not mid-programmatic-scroll — a pin landing inside a drag or a fling
+    //     would itself be the jump this exists to prevent.
+    //   * not following, and not at the bottom — the auto-follow effect above issues its own
+    //     requestScrollToItem(0) for the same presentation and must win; two requests in one frame
+    //     resolve to the last one issued, and it must not be this.
+    //
+    // The collector never suspends, so it keeps up with the conflated presentation flow and the
+    // request reaches the same remeasure that presents the update.
+    LaunchedEffect(items, listState, initialPositionSettled) {
+        if (!initialPositionSettled) return@LaunchedEffect
+        var previous: ItemSnapshotList<MessageEntity>? = null
+        snapshotFlow { items.itemSnapshotList }.collect { snapshot ->
+            val prior = previous
+            previous = snapshot
+            if (prior == null) return@collect
+            if (listState.isScrollInProgress || programmaticScrolls > 0) return@collect
+            if (autoFollow.following || atBottom) return@collect
+            val index = listState.firstVisibleItemIndex
+            val key = prior.getOrNull(index)?.id ?: return@collect
+            // Fast path, and the same answer timelinePresentationPin gives: a key the presentation
+            // still loads is one Compose re-anchors natively. Checked here without materializing
+            // either window so an ordinary live arrival allocates nothing.
+            if (snapshot.items.any { it.id == key }) return@collect
+            val pin = timelinePresentationPin(
+                anchor = TimelineViewportAnchor(
+                    index = index,
+                    offset = listState.firstVisibleItemScrollOffset,
+                    key = key,
+                ),
+                previous = prior.toTimelineWindow(),
+                current = snapshot.toTimelineWindow(),
+            ) ?: return@collect
+            listState.requestScrollToItem(pin.index, pin.offset)
+            val fields = mapOf(
+                "anchor_key" to key,
+                "from_index" to index,
+                "to_index" to pin.index,
+                "offset" to pin.offset,
+                "item_count" to snapshot.size,
+                "placeholders_before" to snapshot.placeholdersBefore,
+                "loaded_count" to snapshot.items.size,
+            )
+            diagnostics.record("chat_timeline", "presentation_pin") { fields }
+            AutoFollowTrace.record("presentation_pin", traceBufferId, traceSessionId) {
+                formatTimelineGenerationFields(fields)
+            }
+        }
+    }
+
+    // Generation watch. Nothing in this app can currently see a Paging GENERATION change from the
+    // UI side — the timeline reports counts and nothing else — and that is why the visible churn
+    // after a catch-up run has stayed un-arbitrated. Every fetched page persists in its own Room
+    // transaction, so one catch-up produces several invalidations in a second, and each
+    // regeneration re-places a bounded loaded window under a viewport that never moved.
+    //
+    // Journal ONE line per PRESENTATION (never per frame) carrying the three quantities that
+    // separate the competing explanations: where the loaded window landed, what became of the
+    // viewport's anchor row, and whether the snapshot was momentarily empty. Reading guide lives on
+    // [timelineGenerationFields].
+    //
+    // Started only while the journal is armed, so an ordinary device pays nothing at all: the
+    // collector does not exist, and the per-presentation id list it reads is never built.
+    val journalArmed by diagnostics.enabled.collectAsStateWithLifecycle()
+    LaunchedEffect(items, listState, journalArmed, traceBufferId) {
+        if (!journalArmed) return@LaunchedEffect
+        var previous: TimelineWindow? = null
+        var generation = 0L
+        snapshotFlow { items.itemSnapshotList.toTimelineWindow() }.collect { current ->
+            generation++
+            val prior = previous
+            previous = current
+            // Read before the frame: the lazy list has not remeasured against this presentation
+            // yet, so index/offset still describe the layout `prior` was measured into.
+            val beforeIndex = listState.firstVisibleItemIndex
+            val before = TimelineViewportAnchor(
+                index = beforeIndex,
+                offset = listState.firstVisibleItemScrollOffset,
+                key = prior?.idAt(beforeIndex),
+            )
+            withFrameNanos { }
+            val afterIndex = listState.firstVisibleItemIndex
+            val after = TimelineViewportAnchor(
+                index = afterIndex,
+                offset = listState.firstVisibleItemScrollOffset,
+                key = current.idAt(afterIndex),
+            )
+            val fields = timelineGenerationFields(
+                generation = generation,
+                previous = prior,
+                current = current,
+                before = before,
+                after = after,
+                settled = initialPositionSettled,
+                scrolling = listState.isScrollInProgress,
+                following = autoFollow.following,
+            )
+            diagnostics.record("chat_timeline", "generation_presented") { fields }
+            AutoFollowTrace.record("generation_presented", traceBufferId, traceSessionId) {
+                formatTimelineGenerationFields(fields)
+            }
+        }
     }
     val buffer = state.buffer
     val titleTarget = chatTitleTarget(buffer?.type)
