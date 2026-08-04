@@ -500,6 +500,7 @@ fun ChatScreen(
         onInitialPositionUnresolved = viewModel::onInitialPositionUnresolved,
         onScrollPositionChanged = viewModel::saveScrollPosition,
         onClearScrollPosition = viewModel::clearScrollPosition,
+        onFurthestDisplayedChanged = viewModel::recordFurthestDisplayed,
         onVisibleMsgidsChanged = viewModel::setVisibleMsgids,
         onNeedMembers = viewModel::ensureMembersObserved,
         onJumpUnresolved = viewModel::onJumpUnresolved,
@@ -658,6 +659,8 @@ fun ChatContent(
     onInitialPositionUnresolved: () -> Unit = {},
     onScrollPositionChanged: (ChatScrollPosition) -> Unit = {},
     onClearScrollPosition: () -> Unit = {},
+    // Deepest row this visit put on screen. Local-only entry input; never read state, never wire.
+    onFurthestDisplayedChanged: (io.github.trevarj.motd.data.db.TimelineAnchor) -> Unit = {},
     onVisibleMsgidsChanged: (List<String>) -> Unit = {},
     // How deep the viewport's older edge has reached, and the seams within loading reach of it. The
     // ViewModel's history rule loads a seam the reader has scrolled to, so this is its whole demand
@@ -1200,6 +1203,41 @@ fun ChatContent(
     }
     DisposableEffect(initialPositionSettled, listState, visibilityPolicy) {
         onDispose { saveCurrentScrollPosition() }
+    }
+
+    // How far back into history this visit actually got, which is a different question from where
+    // the reader stopped: a reader who enters at the unread divider and works FORWARD leaves a park
+    // that is newer than the divider, and only this watermark distinguishes that from a backfill
+    // landing unread history older than the park. [preferredEntryTarget] is its only consumer.
+    //
+    // Read state is not involved and must not become involved. The reverse-layout mirror of this
+    // (renderedNewestAnchor, above) is what clamps a resumed viewport MARKREAD; this one goes to a
+    // process-local map and never to the wire.
+    //
+    // Cost is kept at the same edges as the saved position — scroll start/stop plus disposal —
+    // rather than on every measure pass. Recording at scroll START is what captures the depth a
+    // reader entered at before they fling away from it; a single drag that goes deep and returns
+    // without settling can still under-report, which degrades to the depth-only rule and never to a
+    // wrong "already seen".
+    fun recordFurthestDisplayed() {
+        if (!initialPositionSettled) return
+        val deepest = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return
+        val anchor = displayedDepthAnchor(
+            deepestVisibleIndex = deepest,
+            itemCount = items.itemCount,
+            peek = items::peek,
+            policy = visibilityPolicy,
+        ) ?: return
+        onFurthestDisplayedChanged(anchor)
+    }
+    LaunchedEffect(initialPositionSettled, listState, visibilityPolicy) {
+        if (!initialPositionSettled) return@LaunchedEffect
+        snapshotFlow { listState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { recordFurthestDisplayed() }
+    }
+    DisposableEffect(initialPositionSettled, listState, visibilityPolicy) {
+        onDispose { recordFurthestDisplayed() }
     }
 
     LaunchedEffect(initialPositionSettled, listState) {

@@ -648,31 +648,102 @@ data class ChatPositionTarget(
 )
 
 /**
- * Which anchor a normal open lands on when a room offers both a saved viewport and unread history:
- * whichever sits DEEPER in history, i.e. the larger reversed index.
+ * Whether a normal open lands on the first unread row rather than on the saved viewport.
  *
- * The two are usually mutually exclusive — reaching the effective bottom clears the saved position,
- * so a saved position exists only for a reader who left mid-history — and this rule decides the
- * overlap. Choosing the older row is the property that matters, not a fixed winner: everything
- * between the two anchors then lies BELOW the restored viewport, in the reader's forward scroll
- * direction, so neither candidate is ever skipped past.
+ * The first unread row wins only when it is DEEPER than anything the reader has actually had on
+ * screen — older than every row this process displayed in the room. Otherwise the saved viewport
+ * wins.
  *
- * Concretely: a viewport parked 400 rows back is not dragged forward because twenty messages arrived
- * while its reader was on the chat list, and a backfill that lands unread history OLDER than the
- * park still opens at the first unread row rather than stranding it above the viewport.
+ * Depth alone cannot decide this, because "park newer than first-unread" describes two opposite
+ * situations that are identical in index space:
+ *
+ *  - A reader who ENTERED at the divider 300 rows back, read forward to row 100, and left. The read
+ *    marker does not advance mid-history — [shouldMarkReadFromViewport] requires the effective
+ *    bottom — so the first unread row is still the divider they started from, and reopening there
+ *    resets 200 rows of reading, every time, until they once reach the bottom.
+ *  - A reader parked 48 rows back for whom a BACKFILL then landed unread history at row 198, older
+ *    than anything they have seen. Restoring the park strands that run above the viewport, unseen
+ *    and unreachable without scrolling backwards.
+ *
+ * [furthestDisplayedIndex] is what tells them apart, because it is the only input that reports what
+ * the reader's eyes reached rather than what the timeline contains: the first case has a watermark
+ * AT the divider, the second one far newer than the backfilled unread. It is emphatically NOT the
+ * read marker — see [ChatScrollPositionStore] — and nothing here is ever written back into read
+ * state or broadcast as MARKREAD.
+ *
+ * With no watermark (nothing displayed yet in this process) the rule falls back to depth, which is
+ * the previous behavior: the deeper anchor wins, so everything between the two lies BELOW the
+ * restored viewport in the reader's forward scroll direction and neither candidate is skipped past.
  *
  * A deep jump (notification or search) precedes both and never reaches here: it is an explicit
- * destination, so it owns positioning outright. Ties go to the unread target, which carries the
- * same row plus its top placement.
+ * destination, so it owns positioning outright. Ties in the fallback go to the unread target, which
+ * carries the same row plus its top placement.
  */
+internal fun firstUnreadWinsEntry(
+    savedIndex: Int,
+    firstUnreadIndex: Int,
+    furthestDisplayedIndex: Int?,
+): Boolean = when (furthestDisplayedIndex) {
+    null -> firstUnreadIndex >= savedIndex
+    // A park is by construction a row that was displayed, so the watermark is normally at least as
+    // deep as it. The max is what keeps the rule honest if a watermark is ever recorded late.
+    else -> firstUnreadIndex > maxOf(savedIndex, furthestDisplayedIndex)
+}
+
+/** [firstUnreadWinsEntry] applied to the two entry targets. */
 internal fun preferredEntryTarget(
     saved: ChatPositionTarget?,
     firstUnread: ChatPositionTarget?,
+    furthestDisplayedIndex: Int?,
 ): ChatPositionTarget? = when {
     saved == null -> firstUnread
     firstUnread == null -> saved
-    saved.index > firstUnread.index -> saved
-    else -> firstUnread
+    firstUnreadWinsEntry(saved.index, firstUnread.index, furthestDisplayedIndex) -> firstUnread
+    else -> saved
+}
+
+/**
+ * [firstUnreadWinsEntry] applied to the two entry indices, for the Pager key.
+ *
+ * The key must name the anchor entry will LAND on, not merely one deep enough to cover both:
+ * keying deeper than the chosen target pushes that target out of the initial window and back into
+ * the placeholder scroll this key exists to avoid.
+ */
+internal fun preferredEntryIndex(
+    savedIndex: Int?,
+    firstUnreadIndex: Int?,
+    furthestDisplayedIndex: Int?,
+): Int? = when {
+    savedIndex == null -> firstUnreadIndex
+    firstUnreadIndex == null -> savedIndex
+    firstUnreadWinsEntry(savedIndex, firstUnreadIndex, furthestDisplayedIndex) -> firstUnreadIndex
+    else -> savedIndex
+}
+
+/**
+ * Deepest row the timeline has actually placed on screen, or null while that cannot be proven.
+ *
+ * Reverse layout: [deepestVisibleIndex] is the LAST entry of `visibleItemsInfo`, the row at the top
+ * of the window. The scan walks NEWER only, which is the direction that cannot over-claim — a
+ * placeholder at the top edge was displayed as a blank skeleton, not as a row anyone could read, so
+ * the watermark falls back to the newest anchorable row at or below it. Under-claiming costs a
+ * fallback to depth-only entry; over-claiming would silently suppress a genuine unread entry, so
+ * the asymmetry is deliberate.
+ */
+internal fun displayedDepthAnchor(
+    deepestVisibleIndex: Int,
+    itemCount: Int,
+    peek: (Int) -> MessageEntity?,
+    policy: MessageVisibilityPolicy,
+): TimelineAnchor? {
+    if (deepestVisibleIndex < 0 || itemCount <= 0) return null
+    val start = minOf(deepestVisibleIndex, itemCount - 1)
+    val newerEnd = maxOf(0, start - MAX_PLACEHOLDER_PROBES)
+    for (index in start downTo newerEnd) {
+        val row = peek(index) ?: continue
+        if (policy.anchor(row)) return TimelineAnchor(row.serverTime, row.id, row.timelineOrder)
+    }
+    return null
 }
 
 /** Identity-free targets describe an insertion point, which may sit just past the last row. */

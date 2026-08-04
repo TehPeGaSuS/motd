@@ -365,10 +365,11 @@ class ChatViewModel @Inject constructor(
      * destination is the jump target, not the entry anchor, and it reaches that row by requesting the
      * placeholder inside this SAME generation rather than by rebuilding the Pager around it.
      *
-     * BOTH entry anchors are considered, and the deeper one keys the Pager, because that is the one
-     * [preferredEntryTarget] lands on — a saved viewport parked 400 rows into history is exactly as
-     * far outside the newest load as a deep unread anchor, and reaching it by scrolling to an
-     * unloaded placeholder is the churn this key exists to avoid.
+     * BOTH entry anchors are considered, and the key names the one [preferredEntryTarget] will
+     * actually land on — resolved through [preferredEntryIndex], the same rule, on the same inputs
+     * — because a saved viewport parked 400 rows into history is exactly as far outside the newest
+     * load as a deep unread anchor, and reaching it by scrolling to an unloaded placeholder is the
+     * churn this key exists to avoid.
      *
      * The entry pipeline still positions precisely; state that converges after this snapshot at
      * worst yields an unkeyed-style placeholder scroll, never a wrong position.
@@ -381,9 +382,11 @@ class ChatViewModel @Inject constructor(
             // saved anchor that cannot be resolved YET is not a saved anchor that is gone.
             val savedIndex = restoredScrollPosition(spec, discardUnresolved = false)?.index
             val unreadIndex = firstUnreadEntryIndex(spec)
-            // The larger reversed index is the older row, which is the one preferredEntryTarget
-            // chooses; keying there covers the other candidate as well, since it lies below.
-            val anchorIndex = listOfNotNull(savedIndex, unreadIndex).maxOrNull() ?: return null
+            val anchorIndex = preferredEntryIndex(
+                savedIndex = savedIndex,
+                firstUnreadIndex = unreadIndex,
+                furthestDisplayedIndex = furthestDisplayedEntryIndex(spec),
+            ) ?: return null
             entryAnchorPagingKey(anchorIndex)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
@@ -391,6 +394,21 @@ class ChatViewModel @Inject constructor(
             // The key is an optimization; the timeline must present regardless.
             null
         }
+    }
+
+    /**
+     * Timeline index of the deepest row this process has displayed in the room, or null if none.
+     *
+     * Counted with the same `countTimelineNewerQuery` the two entry anchors use, so all three live
+     * in one coordinate system. The identity-resolving overload is deliberate: a coalesced
+     * watermark row follows its winner rather than counting against a retired event id.
+     */
+    private suspend fun furthestDisplayedEntryIndex(spec: MessageVisibilitySpec): Int? {
+        val roomId = operationalBufferId.value
+        val seen = scrollPositionStore.furthestDisplayed(roomId)
+            ?: bufferId.takeIf { it != roomId }?.let(scrollPositionStore::furthestDisplayed)
+            ?: return null
+        return visibilityReader.countTimelineNewer(bufferId, seen.serverTime, seen.eventId, spec)
     }
 
     /** Timeline index of the room's oldest visible unread row, or null when it is caught up. */
@@ -1509,17 +1527,20 @@ class ChatViewModel @Inject constructor(
                 _unreadEntrySnapshot.value = frozen
                 persistUnreadEntrySnapshot(frozen)
             }
-            // A normal open lands on the deeper of two anchors — the oldest unread row and the
-            // viewport this room was last left at — with the bare read marker as the fallback for a
-            // room that offers neither. A deep link owns its own target and never reaches here.
+            // A normal open chooses between two anchors — the oldest unread row and the viewport
+            // this room was last left at — with the bare read marker as the fallback for a room
+            // that offers neither. A deep link owns its own target and never reaches here.
             //
             // The read marker used to divert entry on its own, which made the saved viewport
             // unreachable: every room anyone has opened HAS a read anchor, so the restore branch ran
             // only for rooms that had never been read. That is the "leaving and re-entering does not
-            // restore my position" defect; [preferredEntryTarget] states the rule that replaces it.
+            // restore my position" defect; [preferredEntryTarget] states the rule that replaces it,
+            // and the furthest-displayed watermark is the input that keeps that rule from resetting
+            // a reader who is working FORWARD through an unread backlog they have not yet finished.
             //
-            // The two indices are comparable because they are the same count: `countNewerThan` and
-            // `countTimelineNewer` are both `countTimelineNewerQuery` over this room and spec.
+            // All three indices are comparable because they are the same count: `countNewerThan` and
+            // `countTimelineNewer` are both `countTimelineNewerQuery` over this room and spec —
+            // pinned by MessageRepositoryPagingTest so neither can grow a predicate the other lacks.
             if (!hasDeepJump && _entryState.value !is EntryPositionState.Settled) {
                 val unreadTarget = firstUnread?.let {
                     readMarkerEntryTarget(it, entrySpec, requireExactIdentity = true)
@@ -1527,6 +1548,7 @@ class ChatViewModel @Inject constructor(
                 _initialTarget.value = preferredEntryTarget(
                     saved = restoredScrollPosition(entrySpec),
                     firstUnread = unreadTarget,
+                    furthestDisplayedIndex = furthestDisplayedEntryIndex(entrySpec),
                 )
                     ?: realMarker?.let {
                         readMarkerEntryTarget(it, entrySpec, requireExactIdentity = false)
@@ -1767,6 +1789,16 @@ class ChatViewModel @Inject constructor(
 
     fun clearScrollPosition() {
         scrollPositionStore.remove(operationalBufferId.value)
+    }
+
+    /**
+     * The timeline put this row on screen. Local-only: it decides where a REOPEN lands and nothing
+     * else. It is not read state, is never persisted, and never leaves the device — see
+     * [ChatScrollPositionStore]. The outbound `MARKREAD` path is [markRead] alone, and it is
+     * driven by [shouldMarkReadFromViewport] at the effective bottom, which this cannot reach.
+     */
+    fun recordFurthestDisplayed(anchor: TimelineAnchor) {
+        scrollPositionStore.recordFurthestDisplayed(operationalBufferId.value, anchor)
     }
 
     /** A target could not be loaded safely; retain the read gate rather than marking it read. */

@@ -1412,19 +1412,34 @@ class ChatViewModelTest {
         },
     )
 
-    private fun savedAt(rowId: Long, msgid: String, serverTime: Long, offset: Int = 0) =
-        ChatScrollPositionStore().apply {
-            put(
-                channel.id,
-                ChatScrollPosition(
-                    index = 0,
-                    offset = offset,
-                    msgid = msgid,
-                    serverTime = serverTime,
-                    rowId = rowId,
-                ),
-            )
+    /**
+     * A parked viewport, and optionally the deepest row this process displayed in the room.
+     * [displayed] is `(rowId, serverTime)`, the same shape the screen reports after a measure pass.
+     */
+    private fun savedAt(
+        rowId: Long,
+        msgid: String,
+        serverTime: Long,
+        offset: Int = 0,
+        displayed: Pair<Long, Long>? = null,
+    ) = ChatScrollPositionStore().apply {
+        put(
+            channel.id,
+            ChatScrollPosition(
+                index = 0,
+                offset = offset,
+                msgid = msgid,
+                serverTime = serverTime,
+                rowId = rowId,
+            ),
+        )
+        displayed?.let { (id, time) ->
+            recordFurthestDisplayed(channel.id, TimelineAnchor(time, id, id))
         }
+    }
+
+    /** Counts every entry index from the one real database, the way the shipped repository does. */
+    private fun realCounts() = FakeMessageRepository(counts = MessageVisibilityReader(db))
 
     @Test
     fun `a fully read room reopens at the saved viewport rather than the read marker`() = runTest {
@@ -1461,8 +1476,10 @@ class ChatViewModelTest {
         val vm = viewModel(
             channel.copy(localReadAnchorTime = 400, localReadAnchorEventId = ids[3]),
             FakeConnectionManager(network.id),
-            // The unread boundary is one row deep; the parked viewport is four.
-            messages = FakeMessageRepository(newerCount = 1),
+            // The unread boundary is the newest row (index 0); the parked viewport is four deep.
+            // Counted from the same database as the saved viewport, so the comparison the rule makes
+            // is between two indices in one domain rather than against a constant.
+            messages = realCounts(),
             scrollPositions = savedAt(parked, "m1", serverTime = 100),
         )
         vm.state.first { it.buffer != null }
@@ -1483,16 +1500,109 @@ class ChatViewModelTest {
         val vm = viewModel(
             channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = ids.first()),
             FakeConnectionManager(network.id),
-            // The unread boundary is four rows deep; the parked viewport is one.
-            messages = FakeMessageRepository(newerCount = 4),
+            // The unread boundary is three rows deep; the parked viewport is one. Both counted from
+            // the one database, so this pins depths rather than a constant against a real index.
+            messages = realCounts(),
             scrollPositions = savedAt(ids[3], "m4", serverTime = 400),
         )
         vm.state.first { it.buffer != null }
 
         val target = checkNotNull(vm.initialTarget.first { it != null })
         assertFalse("unread deeper than the park must not be skipped past", target.fromSavedPosition)
-        assertEquals(4, target.index)
+        assertEquals(3, target.index)
         assertTrue(target.placeAtTop)
+    }
+
+    @Test
+    fun `a reader working forward through unread reopens where they got to`() = runTest {
+        // The case the deeper-of rule cannot reach on its own. The reader ENTERED at the unread
+        // divider three rows back, read forward, and left one row from the bottom. The read marker
+        // did not move — advancing it needs the effective bottom (shouldMarkReadFromViewport) — so
+        // the first unread row is still the divider they started from, and depth alone would send
+        // them straight back to it on every reopen until they once reached the bottom.
+        //
+        // This is the SAME shape as the test above: park newer than first-unread. What separates
+        // them is the watermark, which says the reader already had that divider row on screen.
+        val ids = seedFiveRows()
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = ids.first()),
+            FakeConnectionManager(network.id),
+            messages = realCounts(),
+            scrollPositions = savedAt(
+                ids[3],
+                "m4",
+                serverTime = 400,
+                // Entered at the divider (index 3) and worked forward to index 1.
+                displayed = ids[1] to 200L,
+            ),
+        )
+        vm.state.first { it.buffer != null }
+
+        val target = checkNotNull(vm.initialTarget.first { it != null })
+        assertTrue("200 rows of reading must not be reset", target.fromSavedPosition)
+        assertEquals(1, target.index)
+        assertEquals(ids[3], target.expectedEventId)
+    }
+
+    @Test
+    fun `unread the reader has never displayed still wins over the park`() = runTest {
+        // The required E2E reopen, in miniature, and the boundary of the watermark rule: the unread
+        // run reaches ONE row deeper than anything that has been on screen, so it is genuinely
+        // unseen history above the viewport and must keep the entry and its top placement. The park
+        // and the read marker are identical to the test above; only the watermark differs.
+        val ids = seedFiveRows()
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = ids.first()),
+            FakeConnectionManager(network.id),
+            messages = realCounts(),
+            scrollPositions = savedAt(
+                ids[3],
+                "m4",
+                serverTime = 400,
+                // Displayed down to index 2; the first unread row sits at 3.
+                displayed = ids[2] to 300L,
+            ),
+        )
+        vm.state.first { it.buffer != null }
+
+        val target = checkNotNull(vm.initialTarget.first { it != null })
+        assertFalse("unseen unread history must not be stranded above the viewport", target.fromSavedPosition)
+        assertEquals(3, target.index)
+        assertTrue(target.placeAtTop)
+    }
+
+    @Test
+    fun `the Pager is keyed at the anchor entry actually lands on`() = runTest {
+        // The key and the target must name the same row. A forward reader's target is the park, so
+        // keying the deeper unread anchor instead would rebuild the generation around a row entry
+        // never scrolls to and push the park back out into the placeholder scroll the key exists to
+        // avoid. 200 rows, so both candidates sit beyond the default newest load.
+        val ids = db.messageDao().insertAll(
+            (1..200).map { ordinal ->
+                message(channel.id, "row$ordinal", "m$ordinal", "alice").copy(
+                    serverTime = ordinal.toLong(),
+                    dedupKey = "row$ordinal",
+                )
+            },
+        )
+        val messages = realCounts()
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 1, localReadAnchorEventId = ids.first()),
+            FakeConnectionManager(network.id),
+            messages = messages,
+            scrollPositions = savedAt(
+                ids[20],
+                "m21",
+                serverTime = 21,
+                // Entered at the first unread row (index 198) and read forward to the park (179).
+                displayed = ids[1] to 2L,
+            ),
+        )
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messages.collect { } }
+
+        // entryAnchorPagingKey(179) for the park, NOT entryAnchorPagingKey(198) for the divider.
+        assertEquals(79, messages.firstInitialKey.await())
+        assertEquals(179, vm.initialTarget.first { it != null }?.index)
     }
 
     @Test
@@ -1807,6 +1917,14 @@ class ChatViewModelTest {
     private class FakeMessageRepository(
         private val events: List<MessageEntity> = emptyList(),
         private val newerCount: Int = 0,
+        /**
+         * Real timeline counts, from the same database the ViewModel resolves the saved viewport
+         * and the displayed watermark against. Entry compares all three, so a constant here models
+         * two coordinate systems — the incoherence
+         * [io.github.trevarj.motd.data.repo.MessageRepositoryPagingTest] pins against. Tests that
+         * only need "some index" keep the constant.
+         */
+        private val counts: MessageVisibilityReader? = null,
     ) : MessageRepository {
         val msgid = MutableStateFlow<String?>(null)
         val deletedIds = mutableListOf<Long>()
@@ -1853,7 +1971,7 @@ class ChatViewModelTest {
             serverTime: Long,
             id: Long,
             visibility: MessageVisibilitySpec,
-        ): Int = newerCount
+        ): Int = counts?.countTimelineNewer(bufferId, serverTime, id, visibility) ?: newerCount
         override suspend fun deleteMessage(id: Long) { deletedIds += id }
     }
 

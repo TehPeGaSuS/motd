@@ -1261,6 +1261,89 @@ class ChatModelsTest {
     }
 
     @Test
+    fun `a reader working forward through unread keeps their place`() {
+        // 300 unread. The reader ENTERED at the divider (index 300, so the watermark is 300), read
+        // forward to row 100, and left. The read marker cannot advance mid-history — marking read
+        // needs the effective bottom — so the first unread row is STILL the divider. Depth alone
+        // cannot see the difference between this and a backfill; the watermark can, because the
+        // reader has already had row 300 on screen.
+        assertFalse(firstUnreadWinsEntry(savedIndex = 100, firstUnreadIndex = 300, 300))
+        // Messages arriving while they were away shift both indices by the same amount.
+        assertFalse(firstUnreadWinsEntry(savedIndex = 110, firstUnreadIndex = 310, 310))
+        // They kept going on a later visit: still their place, never back to the divider.
+        assertFalse(firstUnreadWinsEntry(savedIndex = 20, firstUnreadIndex = 300, 300))
+    }
+
+    @Test
+    fun `unread older than anything displayed still wins entry`() {
+        // The required E2E reopen: the reader saw down to row 48, then a backfill landed 150 rows of
+        // unread history at 198. Nothing above the park has ever been on screen, so restoring the
+        // park would strand the whole run above the viewport.
+        assertTrue(firstUnreadWinsEntry(savedIndex = 40, firstUnreadIndex = 198, 48))
+        // One row deeper than the watermark is already unseen; equality is not.
+        assertTrue(firstUnreadWinsEntry(savedIndex = 40, firstUnreadIndex = 49, 48))
+        assertFalse(firstUnreadWinsEntry(savedIndex = 40, firstUnreadIndex = 48, 48))
+    }
+
+    @Test
+    fun `no watermark falls back to the deeper anchor`() {
+        // Nothing displayed yet this process: the previous depth-only rule, unchanged, including
+        // its tie going to the unread target and its top placement.
+        assertTrue(firstUnreadWinsEntry(savedIndex = 1, firstUnreadIndex = 4, null))
+        assertTrue(firstUnreadWinsEntry(savedIndex = 4, firstUnreadIndex = 4, null))
+        assertFalse(firstUnreadWinsEntry(savedIndex = 4, firstUnreadIndex = 1, null))
+        // A watermark shallower than the park cannot happen (a park was displayed), but if it ever
+        // did, the depth rule still holds and a park is never skipped past.
+        assertFalse(firstUnreadWinsEntry(savedIndex = 400, firstUnreadIndex = 300, 10))
+    }
+
+    @Test
+    fun `entry target and pager key resolve the same anchor`() {
+        val saved = ChatPositionTarget(index = 100, fromSavedPosition = true)
+        val unread = ChatPositionTarget(index = 300, placeAtTop = true)
+
+        // Forward reader: the target is the park, so the Pager must be keyed at the park. Keying at
+        // the deeper anchor instead would push the chosen target out of the initial window.
+        assertEquals(saved, preferredEntryTarget(saved, unread, furthestDisplayedIndex = 300))
+        assertEquals(100, preferredEntryIndex(100, 300, 300))
+        // Backfilled unread: both switch together.
+        assertEquals(unread, preferredEntryTarget(saved, unread, furthestDisplayedIndex = 48))
+        assertEquals(300, preferredEntryIndex(100, 300, 48))
+        // One candidate only: the watermark cannot veto the sole anchor either way.
+        assertEquals(unread, preferredEntryTarget(null, unread, furthestDisplayedIndex = 300))
+        assertEquals(saved, preferredEntryTarget(saved, null, furthestDisplayedIndex = 300))
+        assertNull(preferredEntryTarget(null, null, furthestDisplayedIndex = 300))
+        assertNull(preferredEntryIndex(null, null, 300))
+    }
+
+    @Test
+    fun `the displayed watermark never claims a row the reader could not read`() {
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec(fools = setOf("troll")))
+        val rows = listOf(
+            message(id = 40, serverTime = 5_000),
+            message(id = 30, serverTime = 4_000),
+            message(id = 20, sender = "troll", serverTime = 3_000),
+            message(id = 10, serverTime = 1_000),
+        )
+        val peek = { index: Int -> rows.getOrNull(index) }
+
+        // Reverse layout: the deepest visible index is the row at the TOP of the window.
+        assertEquals(TimelineAnchor(1_000, 10, 10), displayedDepthAnchor(3, rows.size, peek, policy))
+        // A hidden fool at the top edge was never presented, so the watermark stops at the newest
+        // row that was — walking older instead would claim rows below the window as seen.
+        assertEquals(TimelineAnchor(4_000, 30, 30), displayedDepthAnchor(2, rows.size, peek, policy))
+        // A placeholder is a blank skeleton, not a row: fall back to the newest real row under it.
+        assertEquals(
+            TimelineAnchor(5_000, 40, 40),
+            displayedDepthAnchor(2, rows.size, { index -> rows.getOrNull(index).takeIf { index == 0 } }, policy),
+        )
+        // Nothing laid out, and an index past the snapshot, report nothing rather than guessing.
+        assertNull(displayedDepthAnchor(-1, rows.size, peek, policy))
+        assertNull(displayedDepthAnchor(0, 0, peek, policy))
+        assertEquals(TimelineAnchor(1_000, 10, 10), displayedDepthAnchor(99, rows.size, peek, policy))
+    }
+
+    @Test
     fun `lag tone thresholds bucket latency`() {
         assertEquals(LagTone.GOOD, lagTone(0))
         assertEquals(LagTone.GOOD, lagTone(299))
