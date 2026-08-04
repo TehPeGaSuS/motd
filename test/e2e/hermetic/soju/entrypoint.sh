@@ -41,6 +41,15 @@ if [ ! -f "$TLS_DIR/cert.pem" ]; then
 fi
 
 # 2. Start soju in the background.
+#
+# /var/lib/soju is a named volume, so a `compose stop` leaves the previous run's admin socket
+# behind and the fresh soju cannot bind it ("address already in use"). The reconnect steps stop
+# and start this container, so that is the normal path, not an edge case. Nothing else can hold
+# the socket at this point: the entrypoint owns the only soju in the container. Removing it also
+# keeps the wait below honest, since a stale socket file satisfies `-S` immediately and would
+# otherwise let provisioning proceed against a listener soju never bound.
+rm -f "$ADMIN_SOCK"
+
 log "starting soju"
 soju -config "$CONFIG" &
 SOJU_PID=$!
