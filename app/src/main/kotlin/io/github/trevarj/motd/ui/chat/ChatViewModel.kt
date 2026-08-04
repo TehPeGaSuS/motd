@@ -45,6 +45,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dcc.DccTransferController
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -202,6 +203,11 @@ class ChatViewModel @Inject constructor(
     // (tests) free of a live history transport, exactly as networkIgnoreRepository does below.
     private val gapFiller: HistoryGapFiller = NoopHistoryGapFiller,
     private val networkIgnoreRepository: NetworkIgnoreRepository = NoopNetworkIgnoreRepository,
+    // The app's own decision journal, handed to the screen so the timeline's Paging generations can
+    // be journalled alongside the history-fetch decisions that cause them. Public because the
+    // consumer is the composable, not this class; Noop default for hand-built call sites, as
+    // gapFiller above.
+    val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
     contentPreviewPrefs: ContentPreviewPrefs,
 ) : ViewModel() {
     val contentPreviews: StateFlow<ContentPreviewConfig> = contentPreviewPrefs.config
