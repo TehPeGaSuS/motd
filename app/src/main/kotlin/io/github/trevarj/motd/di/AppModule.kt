@@ -268,11 +268,8 @@ internal abstract class AppModule {
         fun historyGapFiller(coordinator: HistoryGapFillCoordinator): HistoryGapFiller =
             object : HistoryGapFiller {
                 override val fillsInFlight = coordinator.fillsInFlight
-                override suspend fun fillGap(roomId: Long, gapId: Long) {
-                    coordinator.fillGap(roomId, gapId)
-                }
-                override suspend fun fillNewestGap(roomId: Long) =
-                    coordinator.fillNewestGap(roomId).progress
+                override suspend fun fillGap(roomId: Long, gapId: Long) =
+                    coordinator.fillGap(roomId, gapId).progress
             }
 
         /** Provide the real crypto/health collaborators; EventProcessor owns notification policy. */

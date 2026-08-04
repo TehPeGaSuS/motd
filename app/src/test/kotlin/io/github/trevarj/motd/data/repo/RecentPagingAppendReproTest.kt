@@ -230,8 +230,10 @@ class RecentPagingAppendReproTest {
     )
 
     /**
-     * One armed autopilot run: exactly what `HistoryGapFiller.fillNewestGap` does, with the source
-     * supplied explicitly because there is no live client behind the coordinator here.
+     * One hands-free fill: exactly what `HistoryGapFiller.fillGap` does when the timeline decides a
+     * visible seam owes history, with the source supplied explicitly because there is no live client
+     * behind the coordinator here. The selection is the ladder's own — this room holds one gap, so
+     * naming it and ranking it come to the same thing.
      */
     private suspend fun runAutopilot(history: BoundaryScriptedHistory) = coordinator().fill(
         bufferId,

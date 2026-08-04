@@ -39,7 +39,6 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
-import io.github.trevarj.motd.data.sync.GapFillProgress
 import io.github.trevarj.motd.data.sync.HistoryGapFiller
 import io.github.trevarj.motd.data.sync.NoopHistoryGapFiller
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
@@ -80,6 +79,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Dispatchers
@@ -235,8 +235,15 @@ class ChatViewModel @Inject constructor(
     private val filterSpec = filterSpecs
         .stateIn(viewModelScope, SharingStarted.Eagerly, MessageVisibilitySpec())
 
+    // Published by [runHistoryGapFills]. Both start conservative — no transport, nothing failed —
+    // so a seam composed before the rule has evaluated anything offers its retry rather than a
+    // spinner that would never resolve.
+    private val historyUnavailable = MutableStateFlow(true)
+    private val failedGapIds = MutableStateFlow<Set<Long>>(emptySet())
+
     /**
-     * The room's history seams, joined with the gaps a fill is running for.
+     * The room's history seams, joined with what each one is doing: the gaps a load is running for,
+     * whether there is any transport to load with, and the gaps whose last attempt failed.
      *
      * A seam's position comes from the gap itself, so this list does not depend on where the
      * viewport is. Which seams land in a rendered slot is decided per row by [rowSeam] against the
@@ -245,51 +252,88 @@ class ChatViewModel @Inject constructor(
     val timelineSeams: StateFlow<TimelineSeamState> = combine(
         messageRepository.observeTimelineSeams(bufferId),
         gapFiller.fillsInFlight,
-    ) { seams, filling -> TimelineSeamState(seams, filling) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TimelineSeamState())
+        historyUnavailable,
+        failedGapIds,
+    ) { seams, filling, unavailable, failed ->
+        TimelineSeamState(seams, filling, unavailable, failed)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TimelineSeamState())
+
+    /** The viewport's demand for history, reported by the timeline. See [setSeamPrefetch]. */
+    private val seamPrefetch = MutableStateFlow(SeamPrefetch())
+
+    private var nextGapTapToken = 0L
+    private val gapTapRequest = MutableStateFlow<GapTapRequest?>(null)
 
     /**
-     * Tap on a seam. The coordinator pins the gap, owns the single flight and the page budget, and
-     * publishes progress through [HistoryGapFiller.fillsInFlight], so a second tap while one is
-     * running is dropped there rather than queued here.
+     * What the viewport says about history, debounced by the caller: the seams within loading reach
+     * of its older edge, and how deep into history that edge has got.
+     *
+     * This is the rule's only demand signal, so an empty set is a statement too (nothing is within
+     * reach) and must be reported. Both halves matter: the set says WHICH seams may load,
+     * [lastVisibleIndex] says whether the reader has moved since the last load, which is what stops
+     * a stationary viewport fetching twice.
      */
-    fun fillGap(gapId: Long) = viewModelScope.launch {
-        gapFiller.fillGap(operationalBufferId.value, gapId)
+    fun setSeamPrefetch(lastVisibleIndex: Int, gapIds: Set<Long>) {
+        val next = SeamPrefetch(lastVisibleIndex, gapIds)
+        if (seamPrefetch.value != next) seamPrefetch.value = next
     }
 
     /**
-     * Hands-free fill for the newest recoverable seam, so a reconnect's catch-up gap closes without
-     * the user having to find its divider and tap it.
+     * Tap on a failed seam's divider: the retry, and the only tap the timeline still has.
      *
-     * The decision is [HistoryGapAutopilot]'s and is deliberately conservative; this only supplies
-     * the inputs and runs the fill. Started here rather than in [init] because it needs
-     * [timelineSeams], and collecting that flow is what keeps the seam observer alive.
+     * Routed through the same request stream and the same [SeamLoadingRule] as a scroll-driven
+     * load, deliberately. Calling the coordinator directly from here would put a second fetch in
+     * flight beside the timeline's own, which is the contention the mediator's boundary floor and the
+     * loader's flight key exist to keep off the wire.
      */
-    private fun runGapAutopilot() = viewModelScope.launch {
-        val autopilot = HistoryGapAutopilot()
-        combine(
-            operationalBufferId,
+    fun fillGap(gapId: Long) {
+        gapTapRequest.value = GapTapRequest(gapId, ++nextGapTapToken)
+    }
+
+    /**
+     * Run the timeline's history rule: scrolling toward a seam loads across it, exactly as scrolling
+     * to the end of the list appends.
+     *
+     * ONE sequential collector owns every load this screen starts, and that is load-bearing rather
+     * than tidy. `combine` runs its transform and this collector in the same coroutine, so
+     * [SeamLoadingRule.next] cannot decide a new load while another is suspended here: each
+     * request is settled before the next is offered, no two seams are ever loading at once, and the
+     * retry tap cannot race the scroll-driven path into the coordinator's single flight.
+     *
+     * Started here rather than in [init] because it needs [timelineSeams] and [entryState], and
+     * collecting the seam flow is also what keeps the seam observer alive.
+     */
+    private fun runHistoryGapFills() = viewModelScope.launch {
+        val rule = SeamLoadingRule()
+        val gate = combine(
             visibleSession,
             historyAvailability,
+            connState,
             entryState,
-            timelineSeams,
-        ) { roomId, session, availability, entry, seams ->
-            autopilot.arm(
-                roomId,
-                session,
-                availability,
+        ) { session, availability, connection, entry ->
+            SeamLoadingGate(
+                onScreen = session != null,
+                historyReady = availability is HistoryAvailability.Ready,
                 entrySettled = entry !is EntryPositionState.Pending,
-                seams = seams.seams,
+                // NOT `!historyReady`: a fresh connection spends a moment negotiating, and painting
+                // "couldn't load" across every seam for that moment is an error the reader never had.
+                historyUnreachable = historyUnreachable(availability, connection),
             )
-        }.filterNotNull().collect { armed ->
-            // One budgeted fill. The coordinator drops it if the room is already filling, so a tap
-            // racing the autopilot costs a classification, not a duplicate ladder.
-            //
-            // `combine` emits into this collector sequentially, so `arm` cannot run while this call
-            // is suspended: the release below always lands before the next arming is decided.
-            if (gapFiller.fillNewestGap(armed.roomId) == GapFillProgress.STALLED) {
-                autopilot.releaseStalled(armed)
-            }
+        }.distinctUntilChanged().onEach { historyUnavailable.value = it.historyUnreachable }
+        combine(
+            operationalBufferId,
+            gate,
+            timelineSeams,
+            seamPrefetch,
+            gapTapRequest,
+        ) { roomId, currentGate, seams, prefetch, tap ->
+            rule.next(roomId, currentGate, seams.seams, prefetch, tap)
+        }.filterNotNull().collect { request ->
+            // Publish before as well as after: a retry tap clears its gap's failure, and the divider
+            // must show the load it started rather than the error it is already retrying.
+            failedGapIds.value = rule.failedGapIds
+            rule.settle(request, gapFiller.fillGap(request.roomId, request.gapId))
+            failedGapIds.value = rule.failedGapIds
         }
     }
 
@@ -1374,7 +1418,7 @@ class ChatViewModel @Inject constructor(
 
     // Started here, not in the first init block: viewModelScope dispatches on Main.immediate, so the
     // collector runs eagerly and would read `entryState` before this line initialized it.
-    init { runGapAutopilot() }
+    init { runHistoryGapFills() }
 
     // Re-resolve is allowed exactly once per normal-entry target; explicit jump requests carry
     // their own guard so a superseded request cannot spend the newer request's retry.

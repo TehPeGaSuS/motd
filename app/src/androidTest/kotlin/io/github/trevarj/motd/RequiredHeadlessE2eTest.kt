@@ -285,22 +285,33 @@ class RequiredHeadlessE2eTest {
         )
         compose.waitForIdle()
         assertMarkerAtLeast(bootstrap, bufferId, marker)
-        // Opening the timeline arms the reconnect-catch-up autopilot: the newest recoverable seam is
-        // filled hands-free, exactly once, bounded by HistoryGapFillCoordinator.PAGE_BUDGET (3) at
-        // the 50-row page size. The seam is left OPEN and tappable below whatever that reaches. The
-        // wire is timestamp-only (soju advertises MSGREFTYPES=timestamp): the catch-up gap must stay
-        // RECOVERABLE across msgid-less saturated pages for the fill to run past its FIRST page at
-        // all — the regression this pins, and the reason the lower end of the range is 149 rather
-        // than 99.
+        // Opening the timeline is what loads across the seam, and it is the ordinary rule rather
+        // than a reconnect special case: normal entry parks the first unread row at the top of the
+        // viewport, that row is the one on the NEWER side of the catch-up gap, so the seam is inside
+        // the same prefetch reach that makes scrolling to the END of the list append. One approach
+        // fetches one quantum — HistoryGapFillCoordinator.PAGE_BUDGET (3) at the 50-row page size —
+        // and then the seam has receded 150 rows, far outside SEAM_PREFETCH_DISTANCE (25), so a
+        // viewport that does not move fetches nothing more. The wire is timestamp-only (soju
+        // advertises MSGREFTYPES=timestamp): the catch-up gap must stay RECOVERABLE across
+        // msgid-less saturated pages for the fill to run past its FIRST page at all — the regression
+        // this pins, and the reason the count is 199 rather than 99.
+        //
+        // This step is also the negative control for the seam-prefetch signal itself. Loading has
+        // exactly one demand source now, so a signal that never reports the seam — a viewport range
+        // that is never derived, a debounce that never settles, a set never handed to the ViewModel
+        // — leaves the window at 49 and fails here loudly rather than degrading quietly.
         //
         // An EXACT count, because the outcome is deterministic: 49 + 3 * 50 = 199. It used to be a
-        // range only because two demand sources were both aiming at this interval — the autopilot's
-        // fill and Paging's own Recent APPEND — and which of them claimed a boundary first decided
-        // how many of the fill's three pages landed anything. That contention is gone structurally:
-        // Recent APPEND is clamped strictly below every open gap and can no longer name an interval
-        // a gap owns, and the loader no longer coalesces a gap-directed fetch with the
-        // bottom-of-timeline ladder, so neither can be handed the other's page. A range here would
-        // now hide exactly the defect it was papering over.
+        // range only because two demand sources were both aiming at this interval — the seam's own
+        // load and Paging's Recent APPEND — and which of them claimed a boundary first decided how
+        // many of the three pages landed anything. That contention is gone structurally: Recent
+        // APPEND is clamped strictly below every open gap and can no longer name an interval a gap
+        // owns, and the loader no longer coalesces a gap-directed fetch with the bottom-of-timeline
+        // ladder, so neither can be handed the other's page. Seam loads are serialized on one
+        // collector as well, so no second seam can be loading beside this one. What pins the count
+        // to ONE approach is the rule's own bound: a gap already fetched at this viewport depth is
+        // refused until the reader scrolls further into history, and nothing here scrolls. A range
+        // would now hide exactly the defect it was papering over.
         //
         // 199 is also the most this surface can observe: the chat-only search caps at newest-200
         // rows, and the marker row occupies the 200th slot.
@@ -351,25 +362,25 @@ class RequiredHeadlessE2eTest {
         // newest-200 cap assertions below.
         //
         // Reaching row001 is now a two-step journey, and the order is the contract. The oldest
-        // fixture rows are on the far side of the seam, and SCROLLING CAN NO LONGER FETCH THEM:
-        // Paging's APPEND pages below the bottom of the timeline, never through an interior gap. The
-        // gap closes through the fill path — the divider's tap, or the autopilot that arms on this
-        // open — and only then does deliberate scrolling reach the oldest row. So the pair below is
-        // one assertion: if the fill path did not work, `scrollOlderUntil` exhausts its 48
-        // deliberate steps and fails loudly.
+        // fixture rows are on the far side of the seam, and PAGING CANNOT FETCH THEM: Paging's
+        // APPEND pages below the bottom of the timeline, never through an interior gap. What closes
+        // the gap is the reader SCROLLING TOWARD IT — the reopen's entry parks on its newer row, and
+        // the sweeps below approach it again — so the pair is one assertion: if scrolling toward a
+        // seam no longer loads across it, the first call runs out of approaches and, failing that,
+        // `scrollOlderUntil` exhausts its 48 deliberate steps. Both fail loudly.
         //
-        // The tap is not asserted to have happened. The autopilot fills the newest seam hands-free
-        // on every open, so whether one survives long enough to be tapped is a race with the app's
-        // own catch-up; pinning it here would pin the race, not the behavior. The divider's
-        // rendering, placement, state and budget are covered deterministically by
-        // TimelineSeamPresentationTest, ReconnectGapPresentationTest and
-        // HistoryGapFillCoordinatorTest.
+        // No tap is issued, and that is the point rather than an omission: a seam behaves like the
+        // end of the list, so the divider offers a tap only when a fetch actually FAILED. A journey
+        // that tapped it would be exercising the error path and calling it the ordinary one. The
+        // divider's rendering, placement, states and the coordinator's quantum are covered
+        // deterministically by TimelineSeamPresentationTest, ReconnectGapPresentationTest and
+        // HistoryGapFillCoordinatorTest; the loading rule itself by ChatModelsTest.
         //
         // Note the ordering constraint too: this is the first step allowed to walk the timeline
         // looking for the divider, because a `performScrollToNode` miss resets to index 0 — the
         // newest row — and the viewport mark-read effect reads that as reaching the bottom. Every
         // assertion above depends on the room still having unread rows.
-        timeline.fillGapUntilClosed()
+        timeline.awaitGapFilledByScrolling()
         timeline.scrollOlderUntil("$token row001")
         val (firstUnread, secondUnread) = runBlocking {
             lifecycle.awaitCanonicalFromAnySender("$token row001", bufferId) to

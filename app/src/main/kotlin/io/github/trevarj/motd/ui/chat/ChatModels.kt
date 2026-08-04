@@ -12,6 +12,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.history.seamAbove
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.sync.GapFillProgress
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -36,14 +37,23 @@ val JPQ_KINDS: Set<MessageKind> = JOIN_PART_QUIT_KINDS
 typealias MessageFilterSpec = MessageVisibilitySpec
 
 /**
- * Every seam the room currently has, plus the gaps a fill is running for.
+ * Every seam the room currently has, plus everything needed to say what each one is doing.
  *
- * The two travel together because the divider's state is a function of both: the seam supplies the
- * gap's identity and recoverability, the in-flight set supplies whether it is spinning right now.
+ * They travel together because the divider's state is a function of all of it: the seam supplies the
+ * gap's identity and recoverability, [filling] supplies whether a fetch is on the wire for it right
+ * now, and [historyUnavailable]/[failed] supply the only two reasons a seam is not being loaded.
  */
 data class TimelineSeamState(
     val seams: List<TimelineSeam> = emptyList(),
     val filling: Set<Long> = emptySet(),
+    /**
+     * There is no history transport at all, so nothing can load across any seam. True by default so
+     * a caller that does not model the rule gets a tappable seam rather than a spinner that will
+     * never resolve.
+     */
+    val historyUnavailable: Boolean = true,
+    /** Gaps whose last load attempt failed. The only gaps whose divider offers a tap. */
+    val failed: Set<Long> = emptySet(),
 ) {
     /**
      * How one seam's divider renders.
@@ -51,127 +61,250 @@ data class TimelineSeamState(
      * Recoverability is checked FIRST. An unrecoverable gap has nothing left to fetch, so it can
      * never be in flight; ordering the other way would let a stale in-flight id paint a spinner on
      * a seam that will never move.
+     *
+     * [HistoryGapState.Loading] is the DEFAULT for a recoverable seam, and that is the whole shape
+     * of the rule. A seam is only ever composed when the viewport has reached it, and reaching it is
+     * what loads it — exactly as reaching the end of the list loads more. A resting "tap to load"
+     * state would be a second affordance for something already happening, which is the incoherence
+     * this design exists to remove. The tap survives only where loading genuinely is not happening:
+     * a failed attempt, or no transport to attempt with.
+     *
+     * [filling] is checked before [failed] so a retry that is already running shows its progress
+     * rather than the error it is retrying.
      */
     fun stateFor(seam: TimelineSeam): HistoryGapState = when {
         !seam.recoverable -> HistoryGapState.Unrecoverable
         seam.gapId in filling -> HistoryGapState.Loading
-        else -> HistoryGapState.Recoverable
+        historyUnavailable || seam.gapId in failed -> HistoryGapState.Failed
+        else -> HistoryGapState.Loading
     }
 }
 
-/** One seam as a row renders it: which gap to fill on tap, and the state its divider draws. */
+/** One seam as a row renders it: which gap to retry on tap, and the state its divider draws. */
 data class RowSeam(val gapId: Long, val state: HistoryGapState)
 
-/** One hands-free fill the autopilot has decided to start. */
-internal data class GapAutopilotArming(
-    val roomId: Long,
-    val gapId: Long,
-    val position: TimelineAnchor,
+/**
+ * How close a seam has to be to the older edge of the viewport before history is loaded across it,
+ * in rows.
+ *
+ * The seam is the end of the list as far as the reader is concerned, so it uses the end of the
+ * list's rule. `MESSAGE_PAGING_CONFIG` pages older history at `prefetchDistance = 25` with
+ * `pageSize = 50`, and matching that number is what makes the two behave identically — including
+ * the property the whole design rests on: a page inserts MORE rows than the trigger distance, so one
+ * fetch always pushes the seam back out of its own trigger zone. A stationary viewport therefore
+ * fetches once and stops, and only more scrolling brings the seam back within reach.
+ */
+const val SEAM_PREFETCH_DISTANCE: Int = 25
+
+/**
+ * What the viewport currently says about history: which seams are close enough to load across, and
+ * how far the reader has scrolled toward history.
+ *
+ * [lastVisibleIndex] is the OLDEST row on screen in the reversed list, so it only grows as the user
+ * scrolls into history. That is what [SeamLoadingRule] uses to tell "the user is still scrolling
+ * toward this seam" from "the viewport has not moved since the last fetch", with no counter and no
+ * budget involved.
+ */
+internal data class SeamPrefetch(
+    val lastVisibleIndex: Int = -1,
+    val gapIds: Set<Long> = emptySet(),
 )
 
 /**
- * Decides when a seam gets filled without the user tapping it.
+ * The gap ids close enough to the older edge of the viewport that history should be loading across
+ * them.
  *
- * The case this exists for is reconnect catch-up: the bouncer replays a newest page, a gap opens
- * between it and what the client already had, and the user should not have to notice a divider and
- * tap it to get their own missed conversation back. So the NEWEST recoverable seam — the reconnect
- * one — is filled hands-free.
+ * A seam is drawn INSIDE the composition of the row on its newer side ([seamAbove]). Rather than
+ * re-deriving that per row — which would have to reproduce `MessageList`'s chunking, including a
+ * collapsed system run resolving its seam against the neighbor of the WHOLE run — this takes the
+ * union of the slots covered by the visible rows PLUS the next [prefetchDistance] rows below them:
+ * the half-open anchor interval from the older neighbor of that extended end up to and including the
+ * NEWEST visible row.
  *
- * What it must NOT become is a background history crawler. Two rules keep it honest, and they are
- * both about NOT arming:
+ * Extending only at the older end is deliberate and is the direction of travel. A seam the reader
+ * has already scrolled past sits NEWER than everything on screen, falls outside the interval, and
+ * stops being loaded — the same way Paging stops appending once you scroll back up.
  *
- *  1. **One arming per seam, not per emission.** [HistoryGapFillCoordinator][
- *     io.github.trevarj.motd.data.sync.HistoryGapFillCoordinator] bounds a single fill to its page
- *     budget, so re-arming on every seam update would turn a bounded fill into an unbounded loop.
- *     A fill that spends its budget leaves the seam open with its newer edge RECEDED, i.e. moved
- *     older, so [armedThrough] rejects it: the seam stays visible and tappable and the rest of that
- *     gap is fetched only if the user asks.
- *  2. **Newer than anything already armed.** Closing the newest gap can promote an older seam to
- *     "newest recoverable". That seam is old history nobody asked for, and fetching it unprompted is
- *     precisely the regression this design is guarding against — before the divider existed, nothing
- *     ever fetched a deep gap on its own. Requiring a strictly newer position means a genuine
- *     reconnect gap (which always lands at the newest end) arms, and a promotion from below never
- *     does.
- *
- * [visibleSession] is only the "the room is on screen" gate; it deliberately does NOT reset
- * [armedThrough]. Backgrounding and resuming the app is not new information about history, so it
- * must not spend another budget on a seam this instance already worked on. What DOES re-arm is the
- * only thing that should: an instance of this class lives with one ChatViewModel, so re-entering the
- * room starts fresh — the same one-budget-per-open the timeline has always done — and everything
- * else that arms is a genuinely newer seam.
- *
- * [entrySettled] is the ordering constraint, and it is not optional. Normal entry FREEZES what was
- * unread at the moment the room opened — the divider position and its "N+" label — and it resolves
- * that from the store. A fill racing it rewrites the store first, so the frozen boundary lands on
- * rows the autopilot had just fetched instead of on what the user actually arrived to. Entry
- * resolves first, then history is filled underneath it.
- *
- * The one thing that does NOT spend an arming is a fill that achieved nothing; see [releaseStalled].
+ * [firstVisibleIndex]/[lastVisibleIndex] are Paging indices from `LazyListState.layoutInfo`, so
+ * `first` is the newest row on screen. Unmaterialized rows are skipped; when the extended end has no
+ * materialized older neighbor the interval closes at the oldest materialized row's own anchor, which
+ * matches [seamAbove] abstaining rather than guessing a position that would move the moment the
+ * placeholder loads.
  */
-internal class HistoryGapAutopilot {
-    private var armedThrough: TimelineAnchor? = null
-    private var armedFrom: TimelineAnchor? = null
-    private var releases = 0
+fun seamsWithinPrefetch(
+    firstVisibleIndex: Int,
+    lastVisibleIndex: Int,
+    itemCount: Int,
+    peek: (Int) -> MessageEntity?,
+    seams: List<TimelineSeam>,
+    prefetchDistance: Int = SEAM_PREFETCH_DISTANCE,
+): Set<Long> {
+    if (seams.isEmpty() || itemCount <= 0) return emptySet()
+    val first = firstVisibleIndex.coerceAtLeast(0)
+    if (first > itemCount - 1) return emptySet()
+    val reach = (lastVisibleIndex + prefetchDistance).coerceIn(first, itemCount - 1)
+    val newestRow = (first..reach).firstNotNullOfOrNull(peek) ?: return emptySet()
+    val oldestIndex = (reach downTo first).firstOrNull { peek(it) != null } ?: return emptySet()
+    val oldestRow = peek(oldestIndex) ?: return emptySet()
+    val olderNeighbor = if (oldestIndex + 1 < itemCount) peek(oldestIndex + 1) else null
+    val lowerExclusive = (olderNeighbor ?: oldestRow).timelineAnchor()
+    val upperInclusive = newestRow.timelineAnchor()
+    return seams
+        .asSequence()
+        .filter { it.position > lowerExclusive && it.position <= upperInclusive }
+        .map { it.gapId }
+        .toSet()
+}
 
-    fun arm(
+private fun MessageEntity.timelineAnchor() = TimelineAnchor(serverTime, id, timelineOrder)
+
+/** Whether the screen is in a state where history can be loaded across a seam at all. */
+internal data class SeamLoadingGate(
+    val onScreen: Boolean,
+    val historyReady: Boolean,
+    val entrySettled: Boolean,
+    /**
+     * History is not merely unresolved but out of reach — the network is offline or does not serve
+     * CHATHISTORY — so a seam should say so rather than spin. Distinct from `!historyReady`, which
+     * is also true for the second it takes a fresh connection to negotiate.
+     */
+    val historyUnreachable: Boolean = false,
+) {
+    val armable: Boolean get() = onScreen && historyReady && entrySettled
+}
+
+/** Is history out of reach for good enough reasons to tell the reader about? */
+internal fun historyUnreachable(
+    availability: HistoryAvailability,
+    connectionState: IrcClientState?,
+): Boolean = when (availability) {
+    HistoryAvailability.Unsupported -> true
+    HistoryAvailability.NegotiatingOrOffline -> isHistoryOffline(connectionState)
+    is HistoryAvailability.Ready -> false
+}
+
+/** A tap on a failed seam's divider. [token] makes each tap a distinct event over a StateFlow. */
+internal data class GapTapRequest(val gapId: Long, val token: Long)
+
+/** One load the timeline has decided to start, and where the demand came from. */
+internal data class GapFillRequest(
+    val roomId: Long,
+    val gapId: Long,
+    val fromTap: Boolean,
+)
+
+/**
+ * The timeline's one history rule: **a seam behaves exactly like the end of the list.**
+ *
+ * Scrolling toward a seam loads history across it, with a spinner, for as long as the user keeps
+ * scrolling toward it. There is no "tap to load", no per-seam allowance to run out of, and no
+ * special case for the newest gap: after a reconnect the catch-up gap simply happens to be where the
+ * room opens, so hands-free catch-up falls out of the general rule rather than being a mechanism of
+ * its own. The divider offers a tap in exactly one situation — the last attempt failed — and then it
+ * is a retry.
+ *
+ * ## Why this cannot run away
+ *
+ * The bound is the reader's attention, not a counter, and it comes from two facts that hold together:
+ *
+ *  1. **A fetch pushes its own seam out of the trigger zone.** Filling recedes the gap's newer edge,
+ *     so the seam's slot moves further into history by however many rows landed. One page is 50 rows
+ *     against a [SEAM_PREFETCH_DISTANCE] of 25, so a stationary viewport gets one fetch and then the
+ *     seam is out of reach. This is the same pageSize-beats-prefetchDistance relationship that makes
+ *     Paging's own APPEND fire once per deliberate scroll step rather than cascading.
+ *  2. **A gap does not re-fire until the reader scrolls further toward it.** [next] remembers the
+ *     [SeamPrefetch.lastVisibleIndex] each gap was last fetched at, and a gap already fetched at the
+ *     current depth is refused. That closes fact 1's remaining hole — a page that lands FEWER rows
+ *     than the trigger distance would otherwise leave the seam inside its own zone and loop against
+ *     an idle viewport. The memory is dropped as soon as the seam leaves the zone, so scrolling away
+ *     and coming back loads again, which is what the reader expects.
+ *
+ * So a 10k-message gap cannot drain unprompted: every page costs one deliberate scroll toward it,
+ * and stopping stops the fetching. Nothing is fetched for a seam the reader never scrolled to, which
+ * is the property the retired page budget used to protect by asking for a tap.
+ *
+ * ## Contention is not failure
+ *
+ * `b71d0c34`'s rule survives, and is simpler here than it was: a fill that ends empty-handed — the
+ * anti-livelock stop with zero inserts, or one that never pinned the gap because the room's single
+ * flight was taken — says nothing about the seam. It must NOT mark the gap failed, because the
+ * interval is still owed and the divider would be advertising an error that never happened. It just
+ * does not re-fire at this depth; the next scroll toward the seam tries again. The old
+ * `RELEASE_BUDGET` counter that bounded those retries is gone because the scroll depth already
+ * bounds them.
+ *
+ * ## The gate
+ *
+ * [SeamLoadingGate.onScreen] is "the room is on screen". [SeamLoadingGate.historyReady] is "there is
+ * a transport to page against", and the next Ready emission re-evaluates, so a room opened while its
+ * connection negotiates still loads once it settles; [SeamLoadingGate.historyUnreachable] is the
+ * separate question of whether to SAY so, and it is what stops an offline seam spinning at a
+ * transport that is not coming back. [SeamLoadingGate.entrySettled]
+ * is an ordering constraint and is not optional: normal entry FREEZES what was unread when the room
+ * opened, from the store, and a fill that rewrites the store first would land that frozen boundary
+ * on rows this class had just fetched. Entry resolves first, then history loads underneath it.
+ *
+ * A tap bypasses the gate. The user is looking at a failed divider; nothing about a pending entry or
+ * a stale availability snapshot makes their retry wrong.
+ */
+internal class SeamLoadingRule {
+    private val fetchedAtDepth = mutableMapOf<Long, Int>()
+    private val failures = mutableSetOf<Long>()
+    private var consumedTapToken = 0L
+
+    /** Gaps whose last attempt failed, for the divider that has to offer the retry. */
+    val failedGapIds: Set<Long> get() = failures.toSet()
+
+    /** The load to start now, or null. Exactly one [settle] must follow each non-null result. */
+    fun next(
         roomId: Long,
-        visibleSession: Long?,
-        availability: HistoryAvailability,
-        entrySettled: Boolean,
+        gate: SeamLoadingGate,
         seams: List<TimelineSeam>,
-    ): GapAutopilotArming? {
-        if (visibleSession == null) return null
-        if (!entrySettled) return null
-        // Nothing to page against while the network is negotiating or offline; the next Ready
-        // emission re-evaluates, so a room opened before its connection settles still catches up.
-        if (availability !is HistoryAvailability.Ready) return null
-        // Seams are ordered oldest-first, so the last recoverable one is the newest.
-        val newest = seams.lastOrNull { it.recoverable } ?: return null
-        armedThrough?.let { if (newest.position <= it) return null }
-        armedFrom = armedThrough
-        armedThrough = newest.position
-        return GapAutopilotArming(roomId, newest.gapId, newest.position)
+        prefetch: SeamPrefetch,
+        tap: GapTapRequest?,
+    ): GapFillRequest? {
+        // A seam that has left the zone forgets where it was last fetched, so scrolling away and
+        // back is a fresh approach rather than a depth already spent.
+        fetchedAtDepth.keys.retainAll(prefetch.gapIds)
+        if (tap != null && tap.token > consumedTapToken) {
+            consumedTapToken = tap.token
+            failures -= tap.gapId
+            fetchedAtDepth[tap.gapId] = prefetch.lastVisibleIndex
+            return GapFillRequest(roomId, tap.gapId, fromTap = true)
+        }
+        if (!gate.armable) return null
+        // Newest first when two seams share the zone: the reader is scrolling INTO history, so the
+        // nearer hole is the one they are reading toward. Only one is started either way — the other
+        // is offered on the next emission, and serializing them is what keeps a second fetch from
+        // computing its boundary against a store this one is halfway through moving.
+        val candidate = seams
+            .filter { seam ->
+                seam.recoverable &&
+                    seam.gapId in prefetch.gapIds &&
+                    seam.gapId !in failures &&
+                    fetchedAtDepth[seam.gapId].let { it == null || prefetch.lastVisibleIndex > it }
+            }
+            .maxWithOrNull(compareBy({ it.position }, { it.gapId }))
+            ?: return null
+        fetchedAtDepth[candidate.gapId] = prefetch.lastVisibleIndex
+        return GapFillRequest(roomId, candidate.gapId, fromTap = false)
     }
 
     /**
-     * Hand [armed]'s arming back, because the fill it started achieved literally nothing.
+     * Record what [request]'s load attempt achieved.
      *
-     * Spending the single arming on a page that inserted no rows and did not move its boundary makes
-     * the strictly-newer rule permanent for the wrong reason: nothing about the seam changed, so no
-     * later seam is newer, so hands-free catch-up is retired for the rest of the visit while the
-     * interval it was supposed to fetch is still missing, still recoverable, and still on screen.
-     * A fill that came back empty-handed is a statement about that attempt, not about the seam.
-     *
-     * Bounded three ways, and all three have to hold for this not to become a retry loop:
-     *  - only [io.github.trevarj.motd.data.sync.GapFillProgress.STALLED] reaches here, which is the
-     *    anti-livelock stop with zero inserts. A fill that spent its budget, closed the seam, or
-     *    failed on the wire keeps its arming spent;
-     *  - [RELEASE_BUDGET] is a hard count for the life of this instance, i.e. for one room visit. It
-     *    is never reset — not by a newer seam, not by backgrounding — so the hands-free fills a visit
-     *    can start is capped at `1 + RELEASE_BUDGET`, each still bounded by the coordinator's own
-     *    page budget;
-     *  - releasing only rewinds the watermark. It does not itself start anything: the next arming
-     *    still has to come from an emission of the seam flow, so with the room quiescent nothing
-     *    happens at all, and after the contending fetch lands the seam that re-arms is the RECEDED
-     *    one — the very case the strictly-newer rule would otherwise reject forever.
-     *
-     * A superseding arming (a genuinely newer seam armed in the meantime) is left alone; that one is
-     * legitimately spent and the stale release must not resurrect the seam beneath it.
+     * Only [GapFillProgress.FAILED][io.github.trevarj.motd.data.sync.GapFillProgress] raises the one
+     * affordance this design still has: the wire errored, or there was no transport. Everything else
+     * leaves the seam loading. [GapFillProgress.MOVED] additionally clears a previous failure, since
+     * a page that landed is the retry having worked.
      */
-    fun releaseStalled(armed: GapAutopilotArming) {
-        if (armedThrough != armed.position) return
-        if (releases >= RELEASE_BUDGET) return
-        releases++
-        armedThrough = armedFrom
-    }
-
-    internal companion object {
-        /**
-         * Stalled fills whose arming is returned, per room visit. Two, because one covers a single
-         * contending fetch and the second covers that fetch's own follow-on page; a third would be
-         * indistinguishable from retrying on hope.
-         */
-        internal const val RELEASE_BUDGET = 2
+    fun settle(request: GapFillRequest, progress: GapFillProgress) {
+        when (progress) {
+            GapFillProgress.FAILED -> failures += request.gapId
+            GapFillProgress.MOVED -> failures -= request.gapId
+            // Contention, not failure: the interval is still owed and the next scroll retries it.
+            GapFillProgress.STALLED, GapFillProgress.DROPPED -> Unit
+        }
     }
 }
 
@@ -819,7 +952,7 @@ internal fun chatHistoryUiState(
     }
 }
 
-private fun isHistoryOffline(connectionState: IrcClientState?): Boolean = when (connectionState) {
+internal fun isHistoryOffline(connectionState: IrcClientState?): Boolean = when (connectionState) {
     IrcClientState.Disconnected -> true
     is IrcClientState.Failed -> connectionState.fatal
     else -> false

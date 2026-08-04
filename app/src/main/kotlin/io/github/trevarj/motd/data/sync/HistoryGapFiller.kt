@@ -5,9 +5,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * The three things the timeline needs from [HistoryGapFillCoordinator]: start a fill for a tapped
- * seam, start one hands-free for whichever seam sits newest (the reconnect catch-up autopilot), and
- * know which gaps are filling right now so their dividers can show progress.
+ * The two things the timeline needs from [HistoryGapFillCoordinator]: fill a NAMED gap, and know
+ * which gaps are filling right now so their dividers can show progress.
+ *
+ * Every fill names its gap id, whoever asked for it. There is no "fill whichever seam is newest"
+ * entry point any more: the timeline decides which seam to work on from what the reader has scrolled
+ * to, so by the time it calls here the gap is already chosen. The returned [GapFillProgress] is what
+ * tells the caller whether the attempt broke, which is the only outcome the divider has to report.
  *
  * Narrow on purpose, mirroring how `HistoryResyncController` fronts its own coordinator. The
  * coordinator owns a live per-network wire, a page budget, and a diagnostics journal; a ViewModel
@@ -17,36 +21,38 @@ interface HistoryGapFiller {
     /** Gap ids with a fill in flight, for the spinner on their divider rows. */
     val fillsInFlight: StateFlow<Set<Long>>
 
-    /** Fill the tapped gap. Each tap grants a fresh page budget. */
-    suspend fun fillGap(roomId: RoomId, gapId: Long)
-
-    /**
-     * Fill whichever gap older paging would work on under Recent focus — the newest seam in the
-     * room. One page budget per call, exactly like a tap; the caller decides how often to arm it.
-     */
-    suspend fun fillNewestGap(roomId: RoomId): GapFillProgress
+    /** Fill [gapId]. Each call grants one fresh page budget, whether a tap or the timeline asked. */
+    suspend fun fillGap(roomId: RoomId, gapId: Long): GapFillProgress
 }
 
 /**
- * Whether a hands-free fill moved history, told apart from whether it FINISHED.
+ * What one load attempt across a seam achieved.
  *
- * A tap does not need this — the user is standing right there and the divider is still on screen —
- * but the autopilot arms itself once per seam, so it has to know the difference between a fill that
- * spent its budget (or closed the seam) and one that came back having achieved literally nothing
- * while the seam is still open and still recoverable. The second is contention, not exhaustion, and
- * treating it as exhaustion is what silently retires hands-free catch-up for the rest of a visit.
+ * The timeline loads history as the reader scrolls toward a seam, so the only outcome it has to act
+ * on is the one that has to STOP that and show something: a genuine failure. Everything else leaves
+ * the seam loading, and the distinctions below exist so a fill that came back empty-handed is never
+ * mistaken for one that broke.
  */
 enum class GapFillProgress {
-    /** The fill inserted rows, moved its boundary, or ended for a reason of its own. */
+    /** The fill inserted rows, moved its boundary, or settled the question. */
     MOVED,
 
     /** Nothing landed and the boundary did not move: the interval is still owed. */
     STALLED,
+
+    /**
+     * The fill never engaged the gap at all: the room was already filling, the gap had closed, or
+     * the room cannot hold one. Like [STALLED] this is a statement about the attempt rather than
+     * about the seam.
+     */
+    DROPPED,
+
+    /** The attempt broke: a transport error, or no history transport at all. The one retryable end. */
+    FAILED,
 }
 
 /** No history transport at all: nothing ever fills, so every seam keeps the state it already has. */
 object NoopHistoryGapFiller : HistoryGapFiller {
     override val fillsInFlight: StateFlow<Set<Long>> = MutableStateFlow(emptySet())
-    override suspend fun fillGap(roomId: RoomId, gapId: Long) = Unit
-    override suspend fun fillNewestGap(roomId: RoomId) = GapFillProgress.MOVED
+    override suspend fun fillGap(roomId: RoomId, gapId: Long) = GapFillProgress.MOVED
 }

@@ -188,6 +188,8 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.spacingFor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
@@ -198,6 +200,18 @@ import kotlinx.coroutines.withTimeoutOrNull
  *  typing doesn't flash suggestions on every character. */
 private const val AUTOCOMPLETE_SHOW_DEBOUNCE_MS = 250L
 private const val REACTION_PREFETCH_ROWS = 12
+
+/**
+ * Quiet period the seam-prefetch signal has to survive before history is loaded across a seam.
+ *
+ * A fling crosses every row between its start and its end, and every one of those frames is a new
+ * `visibleItemsInfo`. Reporting them all would load a seam the reader merely flew past and, with
+ * several seams in the swept range, would ask for a different one on each frame. Debouncing means
+ * the signal describes where the viewport SETTLED, so one gesture makes one decision at the depth it
+ * actually stopped at. 300 ms is comfortably longer than the frame cadence of a decelerating fling
+ * and short enough that scrolling up to a seam still loads without the reader waiting on it.
+ */
+private const val SEAM_PREFETCH_SETTLE_MS = 300L
 private const val MAX_VISIBLE_REACTION_MSGIDS = 80
 private const val MAX_UNREAD_BADGE_COUNT = 100
 internal const val HISTORY_SYNC_INDICATOR_DELAY_MS = 5_000L
@@ -476,6 +490,7 @@ fun ChatScreen(
         entryState = entryState,
         timelineSeams = timelineSeams,
         onLoadGap = viewModel::fillGap,
+        onSeamPrefetchChanged = viewModel::setSeamPrefetch,
         onJumpHandled = viewModel::onJumpHandled,
         onInitialPositionHandled = viewModel::onInitialPositionHandled,
         onJumpToNewest = viewModel::jumpToNewest,
@@ -641,6 +656,10 @@ fun ChatContent(
     onScrollPositionChanged: (ChatScrollPosition) -> Unit = {},
     onClearScrollPosition: () -> Unit = {},
     onVisibleMsgidsChanged: (List<String>) -> Unit = {},
+    // How deep the viewport's older edge has reached, and the seams within loading reach of it. The
+    // ViewModel's history rule loads a seam the reader has scrolled to, so this is its whole demand
+    // signal — see SEAM_PREFETCH_SETTLE_MS.
+    onSeamPrefetchChanged: (Int, Set<Long>) -> Unit = { _, _ -> },
     onNeedMembers: () -> Unit = {},
     onJumpUnresolved: (Long) -> Unit = {},
     onReresolveJump: (Long) -> Unit = {},
@@ -1193,6 +1212,47 @@ fun ChatContent(
                 if (idleWindow != null) {
                     onVisibleMsgidsChanged(visibleReactionMsgids(items, listState))
                 }
+            }
+    }
+
+    // The viewport's demand for history, for the ViewModel's "a seam is the end of the list" rule.
+    //
+    // Keyed on the SEAM LIST rather than on the whole TimelineSeamState: the in-flight and failed
+    // sets change around every load, and restarting for those would re-report a viewport whose load
+    // is already running. Seam POSITIONS do move as a load recedes them, and recomputing on that
+    // edge is the point — a seam a page pushed past the prefetch reach must stop being reported.
+    @OptIn(FlowPreview::class)
+    LaunchedEffect(items, listState, timelineSeams.seams) {
+        // Rooms without a single stored gap are the overwhelming majority, and they have nothing to
+        // demand. Return before observing `layoutInfo` at all rather than deriving a reach that can
+        // only ever be empty: this effect would otherwise re-read that snapshot state on every
+        // measure pass of every timeline in the app, competing with scrolling and paging for the
+        // main thread in exactly the rooms that can never use the answer.
+        if (timelineSeams.seams.isEmpty()) {
+            onSeamPrefetchChanged(-1, emptySet())
+            return@LaunchedEffect
+        }
+        snapshotFlow {
+            val visible = listState.layoutInfo.visibleItemsInfo
+            if (visible.isEmpty()) null else visible.first().index to visible.last().index
+        }
+            .distinctUntilChanged()
+            .debounce(SEAM_PREFETCH_SETTLE_MS)
+            .collect { range ->
+                val (newestIndex, oldestIndex) = range ?: return@collect onSeamPrefetchChanged(
+                    -1,
+                    emptySet(),
+                )
+                onSeamPrefetchChanged(
+                    oldestIndex,
+                    seamsWithinPrefetch(
+                        firstVisibleIndex = newestIndex,
+                        lastVisibleIndex = oldestIndex,
+                        itemCount = items.itemCount,
+                        peek = items::peek,
+                        seams = timelineSeams.seams,
+                    ),
+                )
             }
     }
 

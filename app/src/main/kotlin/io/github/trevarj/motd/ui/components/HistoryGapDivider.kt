@@ -20,7 +20,6 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.Dp
@@ -28,22 +27,31 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
-/** Test tag for the recoverable (tappable) history seam. */
+/** Test tag for a seam history can still cross: loading, or a failed attempt offering its retry. */
 const val CHAT_GAP_DIVIDER_TAG: String = "chat_gap_divider"
 
 /** Test tag for the permanent seam left where the server no longer holds that history. */
 const val CHAT_GAP_DIVIDER_UNRECOVERABLE_TAG: String = "chat_gap_divider_unrecoverable"
 
 /**
- * Presentation state of one history seam. The caller owns which gap this is and whether a fill is
- * in flight; the composable only renders the state it is handed.
+ * Presentation state of one history seam. The caller owns which gap this is and what is happening to
+ * it; the composable only renders the state it is handed.
  */
 sealed interface HistoryGapState {
-    /** The gap can still be filled from the server; the seam is tappable. */
-    data object Recoverable : HistoryGapState
-
-    /** A fill for this gap is in flight: progress is shown and the seam stops accepting taps. */
+    /**
+     * The ordinary state of a seam the user is looking at: history is being loaded across it.
+     *
+     * A seam behaves like the end of the list, so scrolling toward it loads more and shows a
+     * spinner. There is deliberately no "tap to load" resting state — a recoverable seam is only
+     * ever composed when the viewport has reached it, and reaching it is what loads it.
+     */
     data object Loading : HistoryGapState
+
+    /**
+     * The last attempt to load across this seam did not work — a transport error, or no history
+     * transport at all. This is the ONLY state that offers a tap, and the tap is a retry.
+     */
+    data object Failed : HistoryGapState
 
     /** The server has expired that history. Permanent, non-interactive, never dismissible. */
     data object Unrecoverable : HistoryGapState
@@ -54,7 +62,7 @@ sealed interface HistoryGapState {
  * side of the gap (like [NewMessagesDivider] and [DaySeparator], not as its own list item).
  *
  * Two shapes share one visual language: hairline rules flanking a centered low-emphasis label.
- * [HistoryGapState.Recoverable] reads and behaves as a button and invokes [onLoad];
+ * [HistoryGapState.Failed] reads and behaves as a button and invokes [onLoad];
  * [HistoryGapState.Unrecoverable] is a plain statement that the messages above it are gone from the
  * server, which is what makes the user's own older stored messages visible below it.
  */
@@ -67,37 +75,32 @@ fun HistoryGapDivider(
     val interactive = state != HistoryGapState.Unrecoverable
     val label = stringResource(
         when (state) {
-            HistoryGapState.Recoverable -> R.string.chat_history_gap_load
+            HistoryGapState.Failed -> R.string.chat_history_gap_failed
             HistoryGapState.Loading -> R.string.chat_history_gap_loading
             HistoryGapState.Unrecoverable -> R.string.chat_history_gap_unavailable
         },
     )
-    val loadAction = stringResource(R.string.chat_history_gap_load_action)
-    val busy = stringResource(R.string.chat_history_gap_loading)
+    val retryAction = stringResource(R.string.chat_history_gap_retry_action)
 
     // The tag identifies the variant, so it is applied after the caller's modifier: E2E must be able
-    // to tell a fillable seam from an expired one no matter who composes it.
+    // to tell a seam history can still cross from an expired one no matter who composes it.
     val tag = if (interactive) CHAT_GAP_DIVIDER_TAG else CHAT_GAP_DIVIDER_UNRECOVERABLE_TAG
-    // Only the tappable variant reserves a 48 dp touch target; the permanent seam stays as slim as
-    // the other dividers because nothing aims at it.
-    val sizing = if (interactive) Modifier.heightIn(min = 48.dp) else Modifier
-    val interaction = if (interactive) {
-        Modifier
+    // Only the RETRY reserves a 48 dp touch target. A loading seam is a progress statement, not a
+    // control, so it stays as slim as the other dividers — as does the permanent one.
+    val sizing = if (state == HistoryGapState.Failed) Modifier.heightIn(min = 48.dp) else Modifier
+    val interaction = when (state) {
+        // The one control the timeline still has, and it only exists because something broke.
+        HistoryGapState.Failed -> Modifier
             .semantics {
                 role = Role.Button
                 contentDescription = label
-                if (state == HistoryGapState.Loading) stateDescription = busy
             }
-            // Disabled rather than absent while filling: the control keeps its identity for screen
-            // readers but a second tap cannot queue another fetch.
-            .clickable(
-                enabled = state == HistoryGapState.Recoverable,
-                onClickLabel = loadAction,
-                onClick = onLoad,
-            )
-    } else {
-        // Merged into a single non-clickable node; nothing here advertises an action.
-        Modifier.semantics(mergeDescendants = true) { contentDescription = label }
+            .clickable(onClickLabel = retryAction, onClick = onLoad)
+        // Merged into a single non-clickable node. Announcing a Button here would advertise an
+        // action that does not exist: history is already loading, and a tap could only duplicate it.
+        HistoryGapState.Loading,
+        HistoryGapState.Unrecoverable,
+        -> Modifier.semantics(mergeDescendants = true) { contentDescription = label }
     }
 
     Row(
@@ -138,9 +141,9 @@ fun HistoryGapDivider(
 
 @PreviewLightDark
 @Composable
-private fun HistoryGapDividerRecoverablePreview() {
+private fun HistoryGapDividerFailedPreview() {
     MotdTheme {
-        HistoryGapDivider(state = HistoryGapState.Recoverable, onLoad = {})
+        HistoryGapDivider(state = HistoryGapState.Failed, onLoad = {})
     }
 }
 

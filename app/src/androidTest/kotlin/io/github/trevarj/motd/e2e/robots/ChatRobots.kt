@@ -190,8 +190,10 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
      *
      * What this step canNOT do is cross a history gap. The timeline is presented unbounded, so the
      * local source only runs dry at the true oldest retained row and the APPEND it drives asks for
-     * backlog BELOW the whole timeline. An interior gap is closed by tapping its divider
-     * ([fillGapUntilClosed]), never by scrolling. Paging3 still auto-fires an APPEND with no scroll
+     * backlog BELOW the whole timeline. An interior gap is closed by the fill path, which this step
+     * reaches only indirectly: scrolling a seam within reach is what loads across it
+     * ([awaitGapFilledByScrolling]), and APPEND itself never walks through one. Paging3 still
+     * auto-fires an APPEND with no scroll
      * whenever the initial source load returns `nextKey == null`, which any store smaller than
      * `initialLoadSize` (pageSize * 3 = 150) does; that is unconditional Paging behavior and is why
      * no step here can promise "exactly one page per user action".
@@ -259,33 +261,51 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
     }
 
     /**
-     * Tap the history seam until the timeline stops offering one, and report whether it ever found
-     * one to tap.
+     * Scroll toward the history seam until it closes, never tapping it. Reports whether a seam was
+     * ever on screen at all.
      *
-     * Each tap grants the fill coordinator ONE fresh page budget, so a gap deeper than that budget
-     * legitimately needs more than one tap — that is the affordance working as designed, not a
-     * retry. The wait is on rows landing rather than on a spinner: a recoverable seam keeps the same
-     * test tag while it loads, because it stays the same control with a busy state description.
+     * This is the timeline's one history rule driven end to end: a seam is the end of the list, so
+     * scrolling toward it loads across it. Every step here is a scroll and nothing else — no click
+     * is issued, so if the rule stops working this cannot silently substitute a tap for it: the seam
+     * stays on screen, the row count stops moving, and the sweeps run out.
      *
-     * Tolerant of finding nothing, deliberately. The reconnect autopilot fills the newest seam
-     * hands-free on each open, so whether a seam survives to be tapped depends on how deep it still
-     * is — asserting that one is present here would be asserting on a race with the app's own
+     * Each sweep is one deliberate approach and therefore one load. That is the rule's bound made
+     * visible: the loop cannot drain a gap without scrolling toward it every time, and a caller who
+     * stops calling stops the fetching. The wait is on rows landing rather than on a spinner,
+     * because a loading seam and a failed one share a test tag — they are one control with a busy
+     * state description. The seam recedes rather than vanishes, so absence right here only means it
+     * left the composed window; page toward it again to tell a closed seam apart from a receded one.
+     *
+     * Tolerant of finding nothing, deliberately. The room opens AT the seam after a reconnect (the
+     * first unread row is the one on its newer side), so the rule may well have closed it before
+     * this runs. Asserting a seam is present here would be asserting on a race with the app's own
      * catch-up. What the caller can rely on is the postcondition: after this returns, the far side
-     * of the gap is reachable, and scrolling alone could not have made it so.
+     * of the gap is reachable, and no tap was involved in making it so.
      */
-    fun fillGapUntilClosed(maximumTaps: Int = 4): Boolean {
-        if (!reachGapDivider()) return false
-        repeat(maximumTaps) {
+    fun awaitGapFilledByScrolling(maximumSweeps: Int = 6): Boolean {
+        var everSeen = false
+        repeat(maximumSweeps) {
+            if (!reachGapDivider()) return everSeen
+            everSeen = true
+            // Composed is not the same as WITHIN REACH, and reach is what the app measures: it
+            // derives the demand from `LazyListState.layoutInfo`, which excludes a divider that a
+            // beyond-bounds composition kept alive outside the viewport. `reachGapDivider` can
+            // return on the composed check alone, so put the seam in the viewport explicitly.
+            runCatching {
+                container("chat_timeline").performScrollToNode(hasTestTag(CHAT_GAP_DIVIDER_TAG))
+            }
             val before = timelineItemCount()
-            rule.onAllNodesWithTag(CHAT_GAP_DIVIDER_TAG, useUnmergedTree = true)[0].performClick()
-            runCatching { rule.waitUntil(45_000) { timelineItemCount() > before } }
+            runCatching {
+                rule.waitUntil(45_000) {
+                    !isPresent(CHAT_GAP_DIVIDER_TAG) || timelineItemCount() > before
+                }
+            }
             rule.waitForIdle()
-            // The fill recedes the gap, so its divider moves DEEPER rather than vanishing. Absence
-            // right here only means it left the composed window; page toward it again to tell a
-            // closed seam apart from a receded one.
-            if (!reachGapDivider()) return true
         }
-        throw AssertionError("the history seam was still fillable after $maximumTaps taps")
+        throw AssertionError(
+            "the history seam was still open after $maximumSweeps deliberate approaches: scrolling " +
+                "toward a seam no longer loads across it",
+        )
     }
 
     /** Repeat [scrollToOlderBoundary] until a row containing [text] becomes addressable. */

@@ -34,7 +34,8 @@ import kotlinx.coroutines.sync.Mutex
 /**
  * Demand-driven fills for an INTERIOR history gap: the same older-direction cascade
  * [ChatHistoryRemoteMediator.append] runs, with the demand source swapped from "Paging ran out of
- * local rows" to "the user tapped the gap divider" (or an autopilot decided to try).
+ * local rows" to "this seam is on screen and owes history" — whether the timeline decided that on
+ * its own or the user tapped the divider.
  *
  * Why this cannot live in the mediator: a Paging3 `RemoteMediator` is only asked to APPEND when the
  * local `PagingSource` runs dry. Once the timeline is presented UNBOUNDED — every retained row
@@ -79,10 +80,18 @@ class HistoryGapFillCoordinator @Inject constructor(
 
     /** Which gap a fill works on. Chosen once per fill and then pinned by id. */
     internal sealed interface GapSelection {
-        /** A tapped divider names its gap outright. */
+        /**
+         * The caller names its gap outright. This is the only selection production uses: the
+         * timeline decides which seam to work on from what the user can see, so the gap is already
+         * chosen by the time it gets here.
+         */
         data class ById(val gapId: Long) : GapSelection
 
-        /** Autopilot: the newest seam in the room, from [newestPageableGap]. */
+        /**
+         * The gap older paging would work on under Recent focus — the newest seam in the room, from
+         * [newestPageableGap]. This is the ladder's own ranking rather than a demand source, and it
+         * is where [fill]'s selection is pinned against a room holding more than one seam.
+         */
         data object Newest : GapSelection
     }
 
@@ -99,20 +108,31 @@ class HistoryGapFillCoordinator @Inject constructor(
         val error: Throwable? = null,
     ) {
         /**
-         * Did this fill achieve anything at all?
+         * What this fill achieved, for a caller that has to decide whether to say something.
          *
-         * Exactly one outcome is [GapFillProgress.STALLED]: the anti-livelock stop with zero durable
-         * inserts. That combination says the interval is still owed — the seam is open, still
-         * recoverable, and its boundary is where it was — so a caller that gets one arming per seam
-         * has not actually spent it. Every other end (budget spent, gap closed, unrecoverable,
-         * transport error) either moved history or settled the question, and re-arming on those is
-         * how a bounded fill turns into a crawler.
+         * [GapFillProgress.FAILED] is checked FIRST and is the only end that raises an affordance,
+         * so it has to be exactly the ends that broke: an [error] from the wire or the persist, and
+         * the network that cannot serve history at all. A fill that inserted rows and then failed is
+         * still a failure — the reader was mid-load and the load stopped.
+         *
+         * Two ends say "not yet", and both are statements about the ATTEMPT rather than about the
+         * seam, so neither may advertise an error:
+         *  - [GapFillProgress.STALLED] is the anti-livelock stop with zero durable inserts. The seam
+         *    is open, still recoverable, and its boundary is where it was, so the interval is still
+         *    owed;
+         *  - [GapFillProgress.DROPPED] is a [gapId] of null, i.e. no gap was ever pinned — the
+         *    room's single flight was already taken, the gap had closed, or the room cannot hold
+         *    one. Nothing was even asked of the wire.
+         *
+         * Every other end (budget spent, gap closed, interval proven gone) moved history or settled
+         * the question.
          */
         val progress: GapFillProgress
-            get() = if (insertedCount == 0 && endReason == NO_APPEND_PROGRESS) {
-                GapFillProgress.STALLED
-            } else {
-                GapFillProgress.MOVED
+            get() = when {
+                error != null || endReason == HISTORY_UNSUPPORTED -> GapFillProgress.FAILED
+                gapId == null -> GapFillProgress.DROPPED
+                insertedCount == 0 && endReason == NO_APPEND_PROGRESS -> GapFillProgress.STALLED
+                else -> GapFillProgress.MOVED
             }
     }
 
@@ -130,13 +150,9 @@ class HistoryGapFillCoordinator @Inject constructor(
     /** Gap ids with a fill in flight, for the spinner on their divider rows. */
     val fillsInFlight: StateFlow<Set<Long>> = filling.asStateFlow()
 
-    /** Fill the tapped gap. Each tap grants a fresh page budget. */
+    /** Fill the named gap. Each call grants a fresh page budget. */
     suspend fun fillGap(roomId: RoomId, gapId: Long): GapFill =
         fill(roomId, GapSelection.ById(gapId), historyFor(roomId))
-
-    /** Fill the newest seam in the room — the reconnect catch-up gap when there is one. */
-    suspend fun fillNewestGap(roomId: RoomId): GapFill =
-        fill(roomId, GapSelection.Newest, historyFor(roomId))
 
     internal suspend fun fill(
         roomId: RoomId,
@@ -234,7 +250,7 @@ class HistoryGapFillCoordinator @Inject constructor(
                 val page = when (result) {
                     is HistoryPageLoader.PageResult.Loaded -> result
                     HistoryPageLoader.PageResult.Unsupported ->
-                        return GapFill(gapId, pages, inserted, "history_unsupported")
+                        return GapFill(gapId, pages, inserted, HISTORY_UNSUPPORTED)
                     is HistoryPageLoader.PageResult.Unavailable ->
                         return GapFill(gapId, pages, inserted, "history_unavailable", result.cause)
                     is HistoryPageLoader.PageResult.Failed ->
@@ -269,7 +285,7 @@ class HistoryGapFillCoordinator @Inject constructor(
         }
     }
 
-    /** Pin the gap for the whole fill: a tap names its own, the autopilot takes the newest. */
+    /** Pin the gap for the whole fill: the caller names its own, or the ladder takes the newest. */
     private suspend fun selectGapId(roomId: RoomId, selection: GapSelection): Long? {
         val gaps = historyGapDao.forRoom(roomId)
         return when (selection) {
@@ -346,11 +362,22 @@ class HistoryGapFillCoordinator @Inject constructor(
     internal companion object {
         /**
          * Pages one fill may fetch for one gap (~150 rows at the default page size), matching the
-         * scale a scroll-driven cascade reached before the divider existed. A tap grants a fresh
-         * budget, so a deep seam is filled deliberately rather than in one unbounded sweep.
+         * scale a scroll-driven cascade reached before the divider existed.
+         *
+         * This is no longer what stops a gap draining — the caller's demand is, since it only asks
+         * again when the reader scrolls further toward the seam. What the budget still is, is the
+         * QUANTUM of one such ask: how much a single approach to a seam fetches before handing
+         * control back. Three pages rather than one because a gap fill's first page frequently lands
+         * on rows the client already holds (the boundary cohort, and the whole page on a
+         * timestamp-only wire), so a one-page quantum could leave a seam that did not visibly move.
+         * The cascade still stops early the moment the gap closes, is proven empty, or stops making
+         * progress, so the budget is a ceiling and rarely the reason a fill ends.
          */
         internal const val PAGE_BUDGET = 3
 
         private const val PAGE_SIZE = 50
+
+        /** The network cannot serve history at all; classified as a failure rather than an end. */
+        internal const val HISTORY_UNSUPPORTED = "history_unsupported"
     }
 }

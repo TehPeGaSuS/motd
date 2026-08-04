@@ -24,6 +24,7 @@ import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcCommandException
+import io.github.trevarj.motd.irc.client.IrcDisconnectedException
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
@@ -491,21 +492,41 @@ class HistoryGapFillCoordinatorTest {
     }
 
     @Test
-    fun onlyAnEmptyHandedAntiLivelockStopReportsAStall() = runTest {
-        // The classification the autopilot re-arms on has to be narrow, or a bounded fill becomes a
-        // retry loop. Every end that moved history or settled the question keeps its arming spent.
-        fun fill(pages: Int, inserted: Int, reason: String) =
-            HistoryGapFillCoordinator.GapFill(gapId = 1, pagesLoaded = pages, insertedCount = inserted, endReason = reason)
+    fun onlyABrokenAttemptIsReportedAsAFailure() = runTest {
+        // The timeline loads history as the reader scrolls toward a seam, so the only classification
+        // that raises an affordance is FAILED. It has to be exactly the ends that broke: anything
+        // wider turns a quiet stop into an error message about history that is not missing.
+        fun fill(pages: Int, inserted: Int, reason: String, error: Throwable? = null) =
+            HistoryGapFillCoordinator.GapFill(
+                gapId = 1,
+                pagesLoaded = pages,
+                insertedCount = inserted,
+                endReason = reason,
+                error = error,
+            )
 
         assertEquals(GapFillProgress.STALLED, fill(1, 0, "no_append_progress").progress)
-        // The budget is exhaustion by design: the seam stays open and the user's tap resumes it.
+        // The budget is a quantum, not exhaustion: the reader scrolls on and it loads again.
         assertEquals(GapFillProgress.MOVED, fill(3, 150, "page_budget").progress)
         assertEquals(GapFillProgress.MOVED, fill(1, 50, "gap_filled").progress)
-        assertEquals(GapFillProgress.MOVED, fill(0, 0, "already_filling").progress)
         assertEquals(GapFillProgress.MOVED, fill(1, 0, "exhausted_focused_gap").progress)
-        assertEquals(GapFillProgress.MOVED, fill(1, 0, "page_failed").progress)
         // A page that inserted rows and still could not advance is progress, not contention.
         assertEquals(GapFillProgress.MOVED, fill(1, 12, "no_append_progress").progress)
+        // Broken: the wire errored, or the network cannot serve history at all. A fill that landed
+        // rows and THEN broke is still broken — the reader was mid-load and the load stopped.
+        val cause = IrcDisconnectedException("CHATHISTORY", null)
+        assertEquals(GapFillProgress.FAILED, fill(1, 0, "page_failed", cause).progress)
+        assertEquals(GapFillProgress.FAILED, fill(1, 0, "history_unavailable", cause).progress)
+        assertEquals(GapFillProgress.FAILED, fill(2, 40, "error", cause).progress)
+        assertEquals(GapFillProgress.FAILED, fill(1, 0, "history_unsupported").progress)
+        // The ends that never pin a gap carry no gap id, and they are the ones that reach here as
+        // pure contention: the room's single flight was already taken, or there was no gap left.
+        fun unpinned(reason: String) =
+            HistoryGapFillCoordinator.GapFill(gapId = null, pagesLoaded = 0, insertedCount = 0, endReason = reason)
+
+        assertEquals(GapFillProgress.DROPPED, unpinned("already_filling").progress)
+        assertEquals(GapFillProgress.DROPPED, unpinned("no_gap").progress)
+        assertEquals(GapFillProgress.DROPPED, unpinned("missing_room").progress)
     }
 
     @Test

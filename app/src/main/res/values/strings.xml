@@ -430,8 +430,8 @@
     <string name="chat_history_footer_unsupported">This server does not provide older history</string>
     <string name="chat_history_start">Beginning of history</string>
     <!-- History gap seam: a visible marker where the timeline has a hole -->
-    <string name="chat_history_gap_load">Tap to load missing history</string>
-    <string name="chat_history_gap_load_action">Load missing history</string>
+    <string name="chat_history_gap_failed">Couldn\'t load missing history — tap to retry</string>
+    <string name="chat_history_gap_retry_action">Retry loading missing history</string>
     <string name="chat_history_gap_loading">Loading missing history…</string>
     <string name="chat_history_gap_unavailable">Older messages unavailable from the server</string>
     <plurals name="chat_member_count">
