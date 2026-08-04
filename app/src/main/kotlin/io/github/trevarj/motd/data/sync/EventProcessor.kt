@@ -884,6 +884,19 @@ class EventProcessor @Inject constructor(
         val previousNewestAnchor = previousNewest?.let {
             resolveStoredBoundary(initialCanonicalId, it, newest = true)
         }
+        // The bottom of what this room already holds, taken as the OLDER of the stored cursor and
+        // the oldest retained row — the same minimum the APPEND ladder pages BEFORE
+        // (`olderPageability`). Preferring the cursor the way [previousNewest] does would put this
+        // boundary ABOVE retained rows whenever a reconnect LATEST page seeded a fresh cursor over a
+        // store that already held older live rows, and an island gap recorded against it would then
+        // span history that is present.
+        val previousOldest = olderBoundary(
+            before?.let { ChatHistoryReference(it.oldestMsgid, it.oldestServerTime) }
+                ?.takeIf { it.msgid != null || it.serverTime != null },
+            messageDao.oldestBoundary(initialCanonicalId)?.let {
+                ChatHistoryReference(it.msgid, it.serverTime)
+            },
+        )
 
         val pageEventIds = if (response.events.isNotEmpty()) {
             activeProtocolPageCursorWrites += networkId
@@ -948,12 +961,20 @@ class EventProcessor @Inject constructor(
                 historyComplete = complete || base?.historyComplete == true,
             ),
         )
+        // Resolved AFTER ingest and against the post-merge winner: inserting an older page renumbers
+        // timelineOrder for the rows above it, so a snapshot taken before this page would compare
+        // unequal to the page's own anchor for what is the SAME event.
+        val previousOldestAnchor = previousOldest?.let {
+            resolveStoredBoundary(canonicalRoomId, it, newest = false)
+        }
         reconcileHistoryGaps(
             roomId = canonicalRoomId,
             request = request,
             response = response,
             previousNewest = previousNewest,
             previousNewestAnchor = previousNewestAnchor,
+            previousOldest = previousOldest,
+            previousOldestAnchor = previousOldestAnchor,
             pageRows = pageEventIds.mapNotNull { messageDao.byCanonicalId(it) }
                 .filter { it.bufferId == canonicalRoomId },
             historyGapId = historyGapId,
@@ -967,7 +988,8 @@ class EventProcessor @Inject constructor(
      * Reconcile one fetched protocol interval with durable missing intervals. Pages may arrive from
      * either side of a gap or from a deep-link request in its middle, so overlap can close, shrink,
      * or split a gap. LATEST creates a new gap only when it proves a newer retained island without
-     * reaching the previously known newest boundary.
+     * reaching the previously known newest boundary, and a non-LATEST page creates one only when it
+     * proves an OLDER retained island below the previously known oldest boundary.
      */
     private suspend fun reconcileHistoryGaps(
         roomId: RoomId,
@@ -975,6 +997,8 @@ class EventProcessor @Inject constructor(
         response: ChatHistoryResponse.Messages,
         previousNewest: ChatHistoryReference?,
         previousNewestAnchor: TimelineAnchor?,
+        previousOldest: ChatHistoryReference?,
+        previousOldestAnchor: TimelineAnchor?,
         pageRows: List<MessageEntity>,
         historyGapId: Long?,
     ) {
@@ -1004,10 +1028,14 @@ class EventProcessor @Inject constructor(
         val pageNewestAnchor = resolvePageBoundary(pageNewest, pageRows, oldest = false)
 
         val gaps = db.historyGapDao().forRoom(roomId)
+        // Whether this page touched any recorded interval. A page that did is already accounted
+        // for by the close/shrink/split branches below and must not also record an island gap.
+        var overlappedExistingGap = directionalGap != null
         gaps.forEach { gap ->
             val gapOlderAnchor = historyGapAnchor(roomId, gap, older = true)
             val gapNewerAnchor = historyGapAnchor(roomId, gap, older = false)
             if (directionalGap?.id == gap.id) {
+                overlappedExistingGap = true
                 if (request.subcommand == ChatHistoryRequest.Subcommand.AFTER) {
                     val reachedNewerBoundary = pageNewestTime > gap.newerServerTime ||
                         (pageNewestTime == gap.newerServerTime && pageNewest.matchesBoundary(
@@ -1081,6 +1109,7 @@ class EventProcessor @Inject constructor(
             if (!overlaps) {
                 return@forEach
             }
+            overlappedExistingGap = true
             // Timeline order is assigned locally and cannot prove that a distinct equal-time
             // server event crossed an existing protocol boundary. At equal timestamps only the
             // exact persisted boundary proves coverage; otherwise retain the uncovered prefix or
@@ -1141,6 +1170,64 @@ class EventProcessor @Inject constructor(
                         ),
                     )
                 }
+            }
+        }
+
+        // A non-LATEST page that lands strictly below every retained row and touches no recorded
+        // gap creates a new OLDEST island. Without a recorded interval between the island's newest
+        // edge and the previously-oldest retained boundary the timeline renders false adjacency AND
+        // the interval is permanently unfillable: the APPEND ladder pages BEFORE the island's
+        // OLDEST row, so it never asks for anything above it. Symmetric to the LATEST catch-up
+        // insert below, and born recoverable for the same reasons.
+        //
+        // Accepted imprecision: a deep BEFORE whose bound is NOT the previously-oldest boundary
+        // records `[pageNewest .. previousOldest]`, which includes the server-proven-empty
+        // `(pageNewest .. bound]` prefix. The row is recoverable, a fill shrinks it, and no code
+        // path issues such a request today — the ungapped ladder always pages BEFORE exactly this
+        // boundary, and a gap-directed fill arrives here with a focused `historyGapId`.
+        if (
+            request.subcommand != ChatHistoryRequest.Subcommand.LATEST &&
+            !overlappedExistingGap &&
+            previousOldest?.serverTime != null
+        ) {
+            val prevTime = checkNotNull(previousOldest.serverTime)
+            // Equal timestamps only prove a DISTINCT event when the comparison is decidable —
+            // msgids on both sides, or a resolvable anchor on both. When neither side can be
+            // identified the page's newest row may BE the previously-oldest row, and the gap would
+            // be a zero-width row asserting a missing message that cannot exist.
+            val decidableAtEqualTime = (pageNewest.msgid != null && previousOldest.msgid != null) ||
+                (pageNewestAnchor != null && previousOldestAnchor != null)
+            val strictlyBelow = pageNewestTime < prevTime ||
+                (
+                    pageNewestTime == prevTime && decidableAtEqualTime &&
+                        !pageNewest.matchesBoundary(
+                            pageNewestAnchor,
+                            previousOldest.msgid,
+                            previousOldestAnchor,
+                        )
+                    )
+            // A BEFORE page is adjacent to its request bound by protocol. When that bound IS the
+            // previously-oldest boundary (the ordinary append ladder) the interval is server-proven
+            // contiguous, and recording a gap would draw a false seam on every appended page.
+            val provenAdjacent = request.subcommand == ChatHistoryRequest.Subcommand.BEFORE &&
+                request.bound1.matches(previousOldest.msgid, prevTime)
+            if (strictlyBelow && !provenAdjacent) {
+                db.historyGapDao().insert(
+                    HistoryGapEntity(
+                        roomId = roomId,
+                        olderMsgid = pageNewest.msgid,
+                        olderServerTime = pageNewestTime,
+                        olderEventId = pageNewestAnchor?.eventId,
+                        olderTimelineOrder = pageNewestAnchor?.timelineOrder,
+                        newerMsgid = previousOldest.msgid,
+                        newerServerTime = prevTime,
+                        newerEventId = previousOldestAnchor?.eventId,
+                        newerTimelineOrder = previousOldestAnchor?.timelineOrder,
+                        // recoverable = false stays reserved for server-proven-empty intervals;
+                        // saturation must never poison this gap.
+                        recoverable = true,
+                    ),
+                )
             }
         }
 

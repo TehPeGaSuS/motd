@@ -25,6 +25,7 @@ import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
+import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.event.ServerTimeSource
@@ -3919,6 +3920,305 @@ class EventProcessorTest {
         assertTrue(gap.recoverable)
         assertEquals(10L, gap.olderServerTime)
         assertEquals(212L, gap.newerServerTime)
+    }
+
+    @Test
+    fun aroundPageBelowAllRetainedRowsRecordsARecoverableIslandGap() = runTest {
+        // A deep-link AROUND page can land strictly older than every retained row. Nothing then
+        // records the interval between that new island's NEWEST edge and the previously-oldest
+        // retained boundary, so the timeline renders false adjacency across it AND the interval is
+        // unfillable: the APPEND ladder pages BEFORE the island's oldest row, never above it.
+        val room = seedIslandHost("#island")
+        val around = (500..502).map { time -> islandRow("#island", time) }
+
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.AROUND,
+                "#island",
+                bound1 = "msgid=m501",
+                limit = 50,
+            ),
+            ChatHistoryResponse.Messages(
+                events = around,
+                oldest = ChatHistoryReference("m500", 500),
+                newest = ChatHistoryReference("m502", 502),
+                endOfHistory = false,
+                primaryMessageCount = 3,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        val gap = db.historyGapDao().forRoom(room.id).single()
+        assertTrue("an island gap is born recoverable", gap.recoverable)
+        val islandNewest = checkNotNull(db.messageDao().byMsgid(room.id, "m502"))
+        assertEquals("m502", gap.olderMsgid)
+        assertEquals(502L, gap.olderServerTime)
+        assertEquals(islandNewest.id, gap.olderEventId)
+        assertEquals(islandNewest.timelineOrder, gap.olderTimelineOrder)
+        val retainedOldest = checkNotNull(db.messageDao().byMsgid(room.id, "m2000"))
+        assertEquals("m2000", gap.newerMsgid)
+        assertEquals(2000L, gap.newerServerTime)
+        assertEquals(retainedOldest.id, gap.newerEventId)
+        assertEquals(retainedOldest.timelineOrder, gap.newerTimelineOrder)
+    }
+
+    @Test
+    fun beforePageFromTheOldestBoundaryRecordsNoIslandGap() = runTest {
+        // The ordinary APPEND ladder pages BEFORE the previously-oldest boundary, which makes the
+        // returned page adjacent to it BY PROTOCOL. Recording a gap there would draw a seam on
+        // every appended page of healthy history. Both advertised selector forms must be honored.
+        val byMsgid = seedIslandHost("#ladder-msgid", prefix = "lm")
+        appendLadderPage(byMsgid, "#ladder-msgid", prefix = "lm", bound1 = ChatHistorySelectors.msgid("lm2000"))
+        assertEquals(
+            db.historyGapDao().forRoom(byMsgid.id).toString(),
+            0,
+            db.historyGapDao().forRoom(byMsgid.id).size,
+        )
+
+        val byTimestamp = seedIslandHost("#ladder-ts", prefix = "lt")
+        appendLadderPage(byTimestamp, "#ladder-ts", prefix = "lt", bound1 = ChatHistorySelectors.timestamp(2000))
+        assertEquals(
+            db.historyGapDao().forRoom(byTimestamp.id).toString(),
+            0,
+            db.historyGapDao().forRoom(byTimestamp.id).size,
+        )
+    }
+
+    @Test
+    fun aroundPageOverlappingTheOldestRetainedRowRecordsNoIslandGap() = runTest {
+        // The page straddles the previously-oldest retained row, so it is not a separate island.
+        val room = seedIslandHost("#overlap", prefix = "ov")
+
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.AROUND,
+                "#overlap",
+                bound1 = "msgid=ov2000",
+                limit = 50,
+            ),
+            ChatHistoryResponse.Messages(
+                events = listOf(1900, 1950, 2050).map { islandRow("#overlap", it, prefix = "ov") },
+                oldest = ChatHistoryReference("ov1900", 1900),
+                newest = ChatHistoryReference("ov2050", 2050),
+                endOfHistory = false,
+                primaryMessageCount = 3,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        val gaps = db.historyGapDao().forRoom(room.id)
+        assertEquals(gaps.toString(), 0, gaps.size)
+    }
+
+    @Test
+    fun aroundPageInsideAnExistingGapSplitsWithoutAnIslandGap() = runTest {
+        // Landing inside a recorded interval splits it. The split branch already accounts for the
+        // page, so the island rule must not add a third row on top of the two halves.
+        val room = seedIslandHost("#split", prefix = "sp")
+        aroundPage(room, "#split", prefix = "sp", times = 500..502, bound1 = "msgid=sp501")
+        assertEquals(1, db.historyGapDao().forRoom(room.id).size)
+
+        aroundPage(room, "#split", prefix = "sp", times = 800..802, bound1 = "msgid=sp801")
+
+        val gaps = db.historyGapDao().forRoom(room.id).sortedBy { it.olderServerTime }
+        assertEquals(gaps.toString(), 2, gaps.size)
+        assertEquals(502L, gaps.first().olderServerTime)
+        assertEquals(800L, gaps.first().newerServerTime)
+        assertEquals(802L, gaps.last().olderServerTime)
+        assertEquals(2000L, gaps.last().newerServerTime)
+    }
+
+    @Test
+    fun islandGapIsFillableByBeforePagingFromItsNewerEdge() = runTest {
+        // End-to-end recoverability: the interval the island rule records must be reachable by a
+        // gap-directed BEFORE from its newer edge, and close when the fill reaches the island.
+        val room = seedIslandHost("#fillable", prefix = "fi")
+        aroundPage(room, "#fillable", prefix = "fi", times = 500..502, bound1 = "msgid=fi501")
+        val gapId = db.historyGapDao().forRoom(room.id).single().id
+
+        processor.persistHistoryPageResult(
+            networkId = networkId,
+            request = ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.BEFORE,
+                "#fillable",
+                bound1 = "msgid=fi2000",
+                limit = 50,
+            ),
+            response = ChatHistoryResponse.Messages(
+                // BEFORE is exclusive only of its bound, so the fill reaches back onto the island's
+                // newest row (fi502) and continues upward from there.
+                events = listOf(502, 600, 700).map { islandRow("#fillable", it, prefix = "fi") },
+                oldest = ChatHistoryReference("fi502", 502),
+                newest = ChatHistoryReference("fi700", 700),
+                endOfHistory = false,
+                primaryMessageCount = 3,
+            ),
+            expectedRoomId = room.id,
+            historyGapId = gapId,
+        )
+
+        val gaps = db.historyGapDao().forRoom(room.id)
+        assertEquals(gaps.toString(), 0, gaps.size)
+        assertNotNull(db.messageDao().byMsgid(room.id, "fi600"))
+    }
+
+    @Test
+    fun msgidlessEqualTimestampIslandBoundaryWithMatchingAnchorRecordsNoGap() = runTest {
+        // A msgid-less page boundary at the previously-oldest timestamp that resolves to the SAME
+        // stored event is not below it. Only the exact tuple proves that, never the timestamp.
+        val room = seedIslandHost("#anchor", prefix = "an")
+
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.AROUND,
+                "#anchor",
+                bound1 = ChatHistorySelectors.timestamp(2000),
+                limit = 50,
+            ),
+            ChatHistoryResponse.Messages(
+                // The 2000 row replays without its msgid and dedups onto the retained row.
+                events = listOf(1900, 2000).map { islandRow("#anchor", it, prefix = null) },
+                oldest = ChatHistoryReference(null, 1900),
+                newest = ChatHistoryReference(null, 2000),
+                endOfHistory = false,
+                primaryMessageCount = 2,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        val gaps = db.historyGapDao().forRoom(room.id)
+        assertEquals(gaps.toString(), 0, gaps.size)
+    }
+
+    @Test
+    fun undecidableEqualTimestampIslandBoundaryRecordsNoGap() = runTest {
+        // Fully msgid-less on both sides: the stored oldest boundary has no resolvable identity, so
+        // the page's equal-time newest row MAY BE that same row. A gap here would be zero-width and
+        // assert a missing message that cannot exist between an event and itself.
+        processor.process(networkId, islandRow("#undecidable", 2000, prefix = null))
+        val room = checkNotNull(db.bufferDao().byName(networkId, "#undecidable"))
+
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.AROUND,
+                "#undecidable",
+                bound1 = ChatHistorySelectors.timestamp(2000),
+                limit = 50,
+            ),
+            ChatHistoryResponse.Messages(
+                events = listOf(
+                    islandRow("#undecidable", 1900, prefix = null),
+                    IrcEvent.ChatMessage(
+                        ctx(null, 2000), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"),
+                        "#undecidable", "a different line at the same instant", false, null,
+                    ),
+                ),
+                oldest = ChatHistoryReference(null, 1900),
+                newest = ChatHistoryReference(null, 2000),
+                endOfHistory = false,
+                primaryMessageCount = 2,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        val gaps = db.historyGapDao().forRoom(room.id)
+        assertEquals(gaps.toString(), 0, gaps.size)
+    }
+
+    @Test
+    fun timestampOnlyAroundIslandGapStoresTheExactIslandEdgeTuple() = runTest {
+        // Timestamp-only wire (soju MSGREFTYPES=timestamp): the island's newest edge still carries
+        // the exact local tuple so an equal-timestamp neighbor can never be mistaken for it. The
+        // newer edge has no resolvable identity on this wire and falls back to its timestamp.
+        processor.process(networkId, islandRow("#ts-island", 2000, prefix = null))
+        processor.process(networkId, islandRow("#ts-island", 2100, prefix = null))
+        val room = checkNotNull(db.bufferDao().byName(networkId, "#ts-island"))
+
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.AROUND,
+                "#ts-island",
+                bound1 = ChatHistorySelectors.timestamp(501),
+                limit = 50,
+            ),
+            ChatHistoryResponse.Messages(
+                events = (500..502).map { islandRow("#ts-island", it, prefix = null) },
+                oldest = ChatHistoryReference(null, 500),
+                newest = ChatHistoryReference(null, 502),
+                endOfHistory = false,
+                primaryMessageCount = 3,
+            ),
+            expectedRoomId = room.id,
+        )
+
+        val gap = db.historyGapDao().forRoom(room.id).single()
+        val islandNewest = pagingList(room.id).single { it.text == "row502" }
+        assertTrue(gap.recoverable)
+        assertNull(gap.olderMsgid)
+        assertEquals(502L, gap.olderServerTime)
+        assertEquals(islandNewest.id, gap.olderEventId)
+        assertEquals(islandNewest.timelineOrder, gap.olderTimelineOrder)
+        assertNull(gap.newerMsgid)
+        assertEquals(2000L, gap.newerServerTime)
+        assertNull(gap.newerEventId)
+    }
+
+    /** Two retained rows at T=2000/2100 so a page below them forms a distinct older island. */
+    private suspend fun seedIslandHost(target: String, prefix: String? = "m"): BufferEntity {
+        processor.process(networkId, islandRow(target, 2000, prefix))
+        processor.process(networkId, islandRow(target, 2100, prefix))
+        return checkNotNull(db.bufferDao().byName(networkId, target))
+    }
+
+    private fun islandRow(target: String, time: Int, prefix: String? = "m") = IrcEvent.ChatMessage(
+        ctx(prefix?.let { "$it$time" }, time.toLong()), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"),
+        target, "row$time", false, null,
+    )
+
+    private suspend fun aroundPage(
+        room: BufferEntity,
+        target: String,
+        prefix: String,
+        times: IntRange,
+        bound1: String,
+    ) {
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.AROUND, target, bound1 = bound1, limit = 50),
+            ChatHistoryResponse.Messages(
+                events = times.map { islandRow(target, it, prefix) },
+                oldest = ChatHistoryReference("$prefix${times.first}", times.first.toLong()),
+                newest = ChatHistoryReference("$prefix${times.last}", times.last.toLong()),
+                endOfHistory = false,
+                primaryMessageCount = times.count(),
+            ),
+            expectedRoomId = room.id,
+        )
+    }
+
+    private suspend fun appendLadderPage(
+        room: BufferEntity,
+        target: String,
+        prefix: String,
+        bound1: String,
+    ) {
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.BEFORE, target, bound1 = bound1, limit = 50),
+            ChatHistoryResponse.Messages(
+                events = (500..502).map { islandRow(target, it, prefix) },
+                oldest = ChatHistoryReference("${prefix}500", 500),
+                newest = ChatHistoryReference("${prefix}502", 502),
+                endOfHistory = false,
+                primaryMessageCount = 3,
+            ),
+            expectedRoomId = room.id,
+        )
     }
 
     @Test
