@@ -358,36 +358,53 @@ class ChatViewModel @Inject constructor(
             }.cachedIn(viewModelScope)
 
     /**
-     * Pager initial key for the one-shot open-at-first-unread entry, resolved from the same durable
-     * state the entry pipeline reads: the room's oldest visible unread row. Null unless a pending
-     * entry sits beyond the default newest load, so first-open backfill, escapes and mentions keep
-     * their unkeyed newest-first load. A deep jump is excluded outright: its destination is the
-     * jump target, not the read marker, and it reaches that row by requesting the placeholder inside
-     * this SAME generation rather than by rebuilding the Pager around it.
-     * The entry pipeline still positions precisely; a marker that converges after this snapshot at
+     * Pager initial key for the one-shot normal entry, resolved from the same durable state the
+     * entry pipeline reads: the room's oldest visible unread row and its saved viewport. Null unless
+     * a pending entry sits beyond the default newest load, so first-open backfill, escapes and
+     * mentions keep their unkeyed newest-first load. A deep jump is excluded outright: its
+     * destination is the jump target, not the entry anchor, and it reaches that row by requesting the
+     * placeholder inside this SAME generation rather than by rebuilding the Pager around it.
+     *
+     * BOTH entry anchors are considered, and the deeper one keys the Pager, because that is the one
+     * [preferredEntryTarget] lands on — a saved viewport parked 400 rows into history is exactly as
+     * far outside the newest load as a deep unread anchor, and reaching it by scrolling to an
+     * unloaded placeholder is the churn this key exists to avoid.
+     *
+     * The entry pipeline still positions precisely; state that converges after this snapshot at
      * worst yields an unkeyed-style placeholder scroll, never a wrong position.
      */
     private suspend fun entryPagingKey(spec: MessageVisibilitySpec): Int? {
         if (routeHasDeepJump) return null
         if (_entryState.value !is EntryPositionState.Pending) return null
         return try {
-            val room = bufferRepository.observeBuffer(bufferId).firstOrNull() ?: return null
-            val marker = visibilityReader.effectiveLocalReadAnchor(room) ?: return null
-            val firstUnread = visibilityReader.firstVisibleUnreadAnchor(bufferId, marker, spec)
-                ?: return null
-            val index = messageRepository.countNewerThan(
-                bufferId,
-                firstUnread.serverTime,
-                firstUnread.eventId,
-                spec,
-            )
-            entryAnchorPagingKey(index)
+            // Non-destructive on this path: it runs before catch-up has finished writing, and a
+            // saved anchor that cannot be resolved YET is not a saved anchor that is gone.
+            val savedIndex = restoredScrollPosition(spec, discardUnresolved = false)?.index
+            val unreadIndex = firstUnreadEntryIndex(spec)
+            // The larger reversed index is the older row, which is the one preferredEntryTarget
+            // chooses; keying there covers the other candidate as well, since it lies below.
+            val anchorIndex = listOfNotNull(savedIndex, unreadIndex).maxOrNull() ?: return null
+            entryAnchorPagingKey(anchorIndex)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (_: RuntimeException) {
             // The key is an optimization; the timeline must present regardless.
             null
         }
+    }
+
+    /** Timeline index of the room's oldest visible unread row, or null when it is caught up. */
+    private suspend fun firstUnreadEntryIndex(spec: MessageVisibilitySpec): Int? {
+        val room = bufferRepository.observeBuffer(bufferId).firstOrNull() ?: return null
+        val marker = visibilityReader.effectiveLocalReadAnchor(room) ?: return null
+        val firstUnread = visibilityReader.firstVisibleUnreadAnchor(bufferId, marker, spec)
+            ?: return null
+        return messageRepository.countNewerThan(
+            bufferId,
+            firstUnread.serverTime,
+            firstUnread.eventId,
+            spec,
+        )
     }
 
     /** Newest stored wire row, including ignored tails; effective bottom may acknowledge it. */
@@ -1492,17 +1509,29 @@ class ChatViewModel @Inject constructor(
                 _unreadEntrySnapshot.value = frozen
                 persistUnreadEntrySnapshot(frozen)
             }
-            // A normal open lands on the oldest loaded unread row; a deep link owns its own target.
+            // A normal open lands on the deeper of two anchors — the oldest unread row and the
+            // viewport this room was last left at — with the bare read marker as the fallback for a
+            // room that offers neither. A deep link owns its own target and never reaches here.
+            //
+            // The read marker used to divert entry on its own, which made the saved viewport
+            // unreachable: every room anyone has opened HAS a read anchor, so the restore branch ran
+            // only for rooms that had never been read. That is the "leaving and re-entering does not
+            // restore my position" defect; [preferredEntryTarget] states the rule that replaces it.
+            //
+            // The two indices are comparable because they are the same count: `countNewerThan` and
+            // `countTimelineNewer` are both `countTimelineNewerQuery` over this room and spec.
             if (!hasDeepJump && _entryState.value !is EntryPositionState.Settled) {
-                val entryAnchor = firstUnread ?: realMarker
-                _initialTarget.value = when {
-                    entryAnchor != null -> readMarkerEntryTarget(
-                        entryAnchor,
-                        entrySpec,
-                        requireExactIdentity = firstUnread != null,
-                    )
-                    else -> restoredScrollPosition(entrySpec) ?: ChatPositionTarget(index = 0)
+                val unreadTarget = firstUnread?.let {
+                    readMarkerEntryTarget(it, entrySpec, requireExactIdentity = true)
                 }
+                _initialTarget.value = preferredEntryTarget(
+                    saved = restoredScrollPosition(entrySpec),
+                    firstUnread = unreadTarget,
+                )
+                    ?: realMarker?.let {
+                        readMarkerEntryTarget(it, entrySpec, requireExactIdentity = false)
+                    }
+                    ?: ChatPositionTarget(index = 0)
             }
         }
         viewModelScope.launch {
@@ -1541,7 +1570,18 @@ class ChatViewModel @Inject constructor(
         )
     }
 
-    private suspend fun restoredScrollPosition(spec: MessageVisibilitySpec): ChatPositionTarget? {
+    /**
+     * The viewport this room was last left at, re-resolved against the live timeline.
+     *
+     * [discardUnresolved] forgets a saved position whose anchor no longer resolves, which is right
+     * for the one-shot entry decision (the row is gone and nothing will bring it back) and wrong for
+     * the Pager key, which is computed before catch-up has finished writing: there, "cannot resolve"
+     * usually means "not stored yet".
+     */
+    private suspend fun restoredScrollPosition(
+        spec: MessageVisibilitySpec,
+        discardUnresolved: Boolean = true,
+    ): ChatPositionTarget? {
         val roomId = operationalBufferId.value
         val saved = scrollPositionStore.get(roomId)
             ?: bufferId.takeIf { it != roomId }?.let(scrollPositionStore::get)
@@ -1553,7 +1593,7 @@ class ChatViewModel @Inject constructor(
             id = saved.rowId,
             spec = spec,
         ) ?: run {
-            scrollPositionStore.remove(roomId)
+            if (discardUnresolved) scrollPositionStore.remove(roomId)
             return null
         }
         val index = visibilityReader.countTimelineNewer(

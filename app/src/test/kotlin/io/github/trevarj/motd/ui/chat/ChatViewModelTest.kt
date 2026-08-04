@@ -87,6 +87,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
@@ -1401,6 +1402,149 @@ class ChatViewModelTest {
         assertEquals(37, positions.get(channel.id)?.offset)
     }
 
+    /** Five rows, oldest first, at serverTime 100..500. Index 0 is the newest. */
+    private suspend fun seedFiveRows(): List<Long> = db.messageDao().insertAll(
+        (1..5).map { ordinal ->
+            message(channel.id, "row$ordinal", "m$ordinal", "alice").copy(
+                serverTime = 100L * ordinal,
+                dedupKey = "row$ordinal",
+            )
+        },
+    )
+
+    private fun savedAt(rowId: Long, msgid: String, serverTime: Long, offset: Int = 0) =
+        ChatScrollPositionStore().apply {
+            put(
+                channel.id,
+                ChatScrollPosition(
+                    index = 0,
+                    offset = offset,
+                    msgid = msgid,
+                    serverTime = serverTime,
+                    rowId = rowId,
+                ),
+            )
+        }
+
+    @Test
+    fun `a fully read room reopens at the saved viewport rather than the read marker`() = runTest {
+        // The reported defect, at the level that decides it. Enter, scroll up, back out, re-enter:
+        // the room is fully read, so it has no unread anchor and the saved viewport is the ONLY
+        // statement of where the reader was. Entry used to divert to the read marker whenever the
+        // room had a read anchor at all — which is every room anyone has ever opened — so the saved
+        // position was resolved only for rooms that had never been read, and the restore silently
+        // never happened.
+        val ids = seedFiveRows()
+        val parked = ids.first()
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 500, localReadAnchorEventId = ids.last()),
+            FakeConnectionManager(network.id),
+            scrollPositions = savedAt(parked, "m1", serverTime = 100, offset = 12),
+        )
+        vm.state.first { it.buffer != null }
+
+        val target = checkNotNull(vm.initialTarget.first { it != null })
+        assertTrue("a fully-read room must reopen where the reader parked", target.fromSavedPosition)
+        assertEquals(4, target.index)
+        assertEquals(12, target.offset)
+        assertEquals(parked, target.expectedEventId)
+    }
+
+    @Test
+    fun `a viewport parked deeper than the unread boundary survives new messages`() = runTest {
+        // Unread arrived while the reader was away, but they had parked FURTHER back in history
+        // than where the unread starts. Entering at the unread row would drag them forward, out of
+        // the history they were reading, and past nothing they had not already chosen to skip: the
+        // unread run stays below the restored viewport, in their forward scroll direction.
+        val ids = seedFiveRows()
+        val parked = ids.first()
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 400, localReadAnchorEventId = ids[3]),
+            FakeConnectionManager(network.id),
+            // The unread boundary is one row deep; the parked viewport is four.
+            messages = FakeMessageRepository(newerCount = 1),
+            scrollPositions = savedAt(parked, "m1", serverTime = 100),
+        )
+        vm.state.first { it.buffer != null }
+
+        val target = checkNotNull(vm.initialTarget.first { it != null })
+        assertTrue("the deeper of the two anchors wins", target.fromSavedPosition)
+        assertEquals(4, target.index)
+        assertEquals(parked, target.expectedEventId)
+    }
+
+    @Test
+    fun `unread older than the saved viewport still opens at the first unread row`() = runTest {
+        // The other side of the same rule, and the one the required E2E reopen depends on: a
+        // backfill landed unread history OLDER than where the reader parked. Restoring the parked
+        // viewport would leave that unread run above them, unseen and unreachable without scrolling
+        // backwards, so the first unread row keeps the entry and its top placement.
+        val ids = seedFiveRows()
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = ids.first()),
+            FakeConnectionManager(network.id),
+            // The unread boundary is four rows deep; the parked viewport is one.
+            messages = FakeMessageRepository(newerCount = 4),
+            scrollPositions = savedAt(ids[3], "m4", serverTime = 400),
+        )
+        vm.state.first { it.buffer != null }
+
+        val target = checkNotNull(vm.initialTarget.first { it != null })
+        assertFalse("unread deeper than the park must not be skipped past", target.fromSavedPosition)
+        assertEquals(4, target.index)
+        assertTrue(target.placeAtTop)
+    }
+
+    @Test
+    fun `a saved viewport beyond the newest load keys the Pager at itself`() = runTest {
+        // Publishing the right target is only half of a restore. A viewport parked deeper than the
+        // default newest load (initialLoadSize = 150) opens as an unloaded placeholder unless the
+        // Pager is keyed there, and reaching it by scrolling to that placeholder drives a boundary
+        // APPEND that churns the generation before the row can compose. The key used to be computed
+        // for the unread anchor ONLY, so a deep restore had to be probed for rather than loaded.
+        //
+        // What the key must be is pinned by RecentPagingAppendReproTest over the real PagingSource;
+        // this pins that the ViewModel asks for it at all, for a saved viewport.
+        val ids = db.messageDao().insertAll(
+            (1..200).map { ordinal ->
+                message(channel.id, "row$ordinal", "m$ordinal", "alice").copy(
+                    serverTime = ordinal.toLong(),
+                    dedupKey = "row$ordinal",
+                )
+            },
+        )
+        val messages = FakeMessageRepository()
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 200, localReadAnchorEventId = ids.last()),
+            FakeConnectionManager(network.id),
+            messages = messages,
+            // The oldest row: 199 newer rows sit below it.
+            scrollPositions = savedAt(ids.first(), "m1", serverTime = 1),
+        )
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messages.collect { } }
+
+        // entryAnchorPagingKey(199): the anchor shifted back by initialLoadSize - pageSize.
+        assertEquals(99, messages.firstInitialKey.await())
+    }
+
+    @Test
+    fun `a saved viewport inside the newest load leaves the Pager unkeyed`() = runTest {
+        // The negative control for the key: a shallow restore is already inside the newest-first
+        // refresh, so keying it would rebuild the generation around a row Paging was going to load
+        // anyway — and would drop the newest rows below it out of the initial window for nothing.
+        val ids = seedFiveRows()
+        val messages = FakeMessageRepository()
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 500, localReadAnchorEventId = ids.last()),
+            FakeConnectionManager(network.id),
+            messages = messages,
+            scrollPositions = savedAt(ids.first(), "m1", serverTime = 100),
+        )
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messages.collect { } }
+
+        assertNull(messages.firstInitialKey.await())
+    }
+
     private fun viewModel(
         buffer: BufferEntity,
         manager: FakeConnectionManager,
@@ -1674,10 +1818,21 @@ class ChatViewModelTest {
         val blockedResolutionStarted = CompletableDeferred<Unit>()
         private val blockedResolutionRelease = CompletableDeferred<Unit>()
 
+        /** The Pager initial key of the first generation the ViewModel created. */
+        val firstInitialKey = CompletableDeferred<Int?>()
+
         override fun messages(
             bufferId: Long,
             visibility: MessageVisibilitySpec,
         ): Flow<PagingData<MessageEntity>> = flowOf(PagingData.empty())
+        override fun messages(
+            bufferId: Long,
+            visibility: MessageVisibilitySpec,
+            initialKey: Int?,
+        ): Flow<PagingData<MessageEntity>> {
+            firstInitialKey.complete(initialKey)
+            return flowOf(PagingData.empty())
+        }
         override fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>> =
             flowOf(reactionRows.filter { it.bufferId == bufferId && it.targetMsgid in msgids })
         override suspend fun byId(id: Long): MessageEntity? =

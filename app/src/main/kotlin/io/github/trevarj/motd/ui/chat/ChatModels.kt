@@ -647,6 +647,34 @@ data class ChatPositionTarget(
     val requestToken: Long = 0,
 )
 
+/**
+ * Which anchor a normal open lands on when a room offers both a saved viewport and unread history:
+ * whichever sits DEEPER in history, i.e. the larger reversed index.
+ *
+ * The two are usually mutually exclusive — reaching the effective bottom clears the saved position,
+ * so a saved position exists only for a reader who left mid-history — and this rule decides the
+ * overlap. Choosing the older row is the property that matters, not a fixed winner: everything
+ * between the two anchors then lies BELOW the restored viewport, in the reader's forward scroll
+ * direction, so neither candidate is ever skipped past.
+ *
+ * Concretely: a viewport parked 400 rows back is not dragged forward because twenty messages arrived
+ * while its reader was on the chat list, and a backfill that lands unread history OLDER than the
+ * park still opens at the first unread row rather than stranding it above the viewport.
+ *
+ * A deep jump (notification or search) precedes both and never reaches here: it is an explicit
+ * destination, so it owns positioning outright. Ties go to the unread target, which carries the
+ * same row plus its top placement.
+ */
+internal fun preferredEntryTarget(
+    saved: ChatPositionTarget?,
+    firstUnread: ChatPositionTarget?,
+): ChatPositionTarget? = when {
+    saved == null -> firstUnread
+    firstUnread == null -> saved
+    saved.index > firstUnread.index -> saved
+    else -> firstUnread
+}
+
 /** Identity-free targets describe an insertion point, which may sit just past the last row. */
 internal fun materializableTargetIndex(
     requestedIndex: Int,
