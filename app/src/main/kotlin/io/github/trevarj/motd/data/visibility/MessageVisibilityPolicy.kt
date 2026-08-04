@@ -136,37 +136,11 @@ internal fun messagePagingQuery(
     bufferId: Long,
     spec: MessageVisibilitySpec,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
-    lowerBoundary: TimelineAnchor? = null,
-    upperBoundary: TimelineAnchor? = null,
 ): SimpleSQLiteQuery = SimpleSQLiteQuery(
     "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
-        (lowerBoundary?.let {
-            "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
-                "(m.timelineOrder = ? AND m.id >= ?)))) "
-        } ?: "") +
-        (upperBoundary?.let {
-            "AND (m.serverTime < ? OR (m.serverTime = ? AND (m.timelineOrder < ? OR " +
-                "(m.timelineOrder = ? AND m.id <= ?)))) "
-        } ?: "") +
         "AND ${MessageVisibilitySql(spec, identityRules).timeline()} " +
         "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC",
-    buildList<Any> {
-        add(bufferId)
-        lowerBoundary?.let {
-            add(it.serverTime)
-            add(it.serverTime)
-            add(it.timelineOrder)
-            add(it.timelineOrder)
-            add(it.eventId)
-        }
-        upperBoundary?.let {
-            add(it.serverTime)
-            add(it.serverTime)
-            add(it.timelineOrder)
-            add(it.timelineOrder)
-            add(it.eventId)
-        }
-    }.toTypedArray(),
+    arrayOf(bufferId),
 )
 
 internal fun countTimelineNewerQuery(
@@ -176,43 +150,12 @@ internal fun countTimelineNewerQuery(
     timelineOrder: Long,
     spec: MessageVisibilitySpec,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
-    lowerBoundary: TimelineAnchor? = null,
-    upperBoundary: TimelineAnchor? = null,
 ): SimpleSQLiteQuery = SimpleSQLiteQuery(
     "SELECT COUNT(*) FROM messages m WHERE m.bufferId = ? " +
-        (lowerBoundary?.let {
-            "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
-                "(m.timelineOrder = ? AND m.id >= ?)))) "
-        } ?: "") +
-        (upperBoundary?.let {
-            "AND (m.serverTime < ? OR (m.serverTime = ? AND (m.timelineOrder < ? OR " +
-                "(m.timelineOrder = ? AND m.id <= ?)))) "
-        } ?: "") +
         "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
         "(m.timelineOrder = ? AND m.id > ?)))) " +
         "AND ${MessageVisibilitySql(spec, identityRules).timeline()}",
-    buildList<Any> {
-        add(bufferId)
-        lowerBoundary?.let {
-            add(it.serverTime)
-            add(it.serverTime)
-            add(it.timelineOrder)
-            add(it.timelineOrder)
-            add(it.eventId)
-        }
-        upperBoundary?.let {
-            add(it.serverTime)
-            add(it.serverTime)
-            add(it.timelineOrder)
-            add(it.timelineOrder)
-            add(it.eventId)
-        }
-        add(serverTime)
-        add(serverTime)
-        add(timelineOrder)
-        add(timelineOrder)
-        add(id)
-    }.toTypedArray(),
+    arrayOf(bufferId, serverTime, serverTime, timelineOrder, timelineOrder, id),
 )
 
 /**

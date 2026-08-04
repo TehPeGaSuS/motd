@@ -492,55 +492,22 @@ class ReconnectGapPresentationTest {
     }
 
     /**
-     * **The pinned statement of this whole stage: Recent passes no lower boundary at all.**
+     * The worst gap the fixture can build — an unidentifiable newer edge tying the newest row's
+     * millisecond — is exactly the shape that emptied the whole window before `e91698a0`, back when
+     * a gap edge could become a SQL lower boundary and an anchor dominating the newest row's
+     * `(timelineOrder, id)` at the same serverTime excluded every row including that one.
      *
-     * The first half is the mechanism that made a lower boundary dangerous, kept verbatim because it
-     * is the reason the boundary is gone. A Recent lowerBoundary at or above the newest local row
-     * excludes every row including that one: the lower-bound SQL is inclusive at the anchor
-     * (`serverTime > t OR (serverTime = t AND (timelineOrder > o OR (timelineOrder = o AND id >= e)))`),
-     * so an anchor dominating the newest row's `(timelineOrder, id)` at the same serverTime leaves
-     * the window empty. It refutes the reasoning that "Recent sets only a lowerBoundary, so a live
-     * message newer than every gap can never be excluded": a boundary that lands at or above the
-     * newest row takes the whole timeline with it.
-     *
-     * The second half is what makes that unreachable rather than merely unlikely. Reached through
-     * the repository, with the worst gap the fixture can build — an unidentifiable newer edge tying
-     * the newest row's millisecond, exactly the shape that emptied the window before `e91698a0` —
-     * Recent produces NO boundary of any kind. The dangerous input still exists; there is simply no
-     * longer a code path that turns it into a clamp.
+     * There is no longer a code path that turns that input into a clamp: the queries take no
+     * boundary at all, so the compiler now enforces what this used to assert. The dangerous input
+     * still exists, so pin what it does instead — every row stays reachable, and the gap is still
+     * seen, publishing a seam. A store that had simply stopped noticing gaps would also present
+     * every row, which is why both halves are asserted together.
      */
     @Test
-    fun recentPassesNoLowerBoundaryHoweverBadTheGapEdgeIs() = runTest {
+    fun theWorstGapEdgeStillPresentsEveryRowAndPublishesASeam() = runTest {
         seedBacklog()
         val newest = checkNotNull(db.messageDao().byMsgid(bufferId, "seed260"))
 
-        suspend fun rowsUnder(lower: TimelineAnchor): List<MessageEntity> {
-            val result = db.messageDao().pagingSource(
-                messagePagingQuery(
-                    bufferId, MessageVisibilitySpec(), IrcIdentityRules(), lower, null,
-                ),
-            ).load(PagingSource.LoadParams.Refresh(null, 1_000, false))
-            return (result as PagingSource.LoadResult.Page).data
-        }
-
-        // The exclusive extreme: what an unidentifiable newer edge used to synthesize before
-        // e91698a0. Nothing survives, not even the row whose serverTime it shares.
-        val exclusive = rowsUnder(TimelineAnchor(newest.serverTime, Long.MAX_VALUE, Long.MAX_VALUE))
-        // The permissive extreme: the row at the boundary's serverTime is kept.
-        val permissive = rowsUnder(TimelineAnchor(newest.serverTime, Long.MIN_VALUE, Long.MIN_VALUE))
-        // The resolved anchor, i.e. a boundary the client CAN identify: inclusive at that row.
-        val resolved = rowsUnder(TimelineAnchor(newest.serverTime, newest.id, newest.timelineOrder))
-        println(
-            "LOWER-BOUND-PIN newest(id=${newest.id} t=${newest.serverTime} order=${newest.timelineOrder}) " +
-                "exclusive=${exclusive.size} permissive=${permissive.size} resolved=${resolved.size}",
-        )
-
-        assertEquals("MAX_VALUE lower boundary empties the window", 0, exclusive.size)
-        assertEquals("MIN_VALUE lower boundary keeps the newest row", 1, permissive.size)
-        assertEquals("a resolved boundary is inclusive at its own row", 1, resolved.size)
-
-        // Now the pin. An unidentifiable newer edge at the newest row's own millisecond is the worst
-        // case the resolver can be handed, and it produces no boundary.
         db.historyGapDao().insert(
             HistoryGapEntity(
                 roomId = bufferId,
