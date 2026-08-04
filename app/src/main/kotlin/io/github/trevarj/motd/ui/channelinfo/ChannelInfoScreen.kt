@@ -54,8 +54,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -149,7 +151,7 @@ fun ChannelInfoScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 fun ChannelInfoContent(
     state: ChannelInfoUiState,
@@ -336,7 +338,12 @@ fun ChannelInfoContent(
             onDismissRequest = {
                 if (leaveMutation !is LeaveMutationState.Submitting) showLeaveConfirm = false
             },
-            modifier = Modifier.testTag("channelinfo_leave_dialog"),
+            // An AlertDialog is its own Compose window, so the Activity root's
+            // testTagsAsResourceId does not reach it and every tag inside this dialog is invisible
+            // to uiautomator. Opt the dialog window in the same way the root does.
+            modifier = Modifier
+                .semantics { testTagsAsResourceId = true }
+                .testTag("channelinfo_leave_dialog"),
             title = { Text(stringResource(R.string.channelinfo_leave_confirm_title)) },
             text = {
                 Column {
@@ -386,7 +393,7 @@ fun ChannelInfoContent(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 internal fun TopicEditDialog(
     initial: String,
@@ -402,7 +409,11 @@ internal fun TopicEditDialog(
     }
     AlertDialog(
         onDismissRequest = { if (!submitting) onDismiss() },
-        modifier = Modifier.testTag("channelinfo_topic_edit_dialog"),
+        // Same as the leave dialog: a separate Compose window needs its own opt-in, otherwise
+        // channelinfo_topic_edit_text and _save never appear as resource ids in a uiautomator dump.
+        modifier = Modifier
+            .semantics { testTagsAsResourceId = true }
+            .testTag("channelinfo_topic_edit_dialog"),
         title = { Text(stringResource(R.string.channelinfo_topic_edit_title)) },
         text = {
             Column {
