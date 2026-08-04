@@ -211,7 +211,19 @@ private fun AgentwireScreen(
                         modifier = Modifier.fillMaxWidth().weight(1f).testTag("agentwire_timeline"),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        if (state.syncing) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                        when (val sync = state.sync) {
+                            is AgentwireSyncState.Syncing -> item {
+                                LinearProgressIndicator(Modifier.fillMaxWidth())
+                            }
+                            is AgentwireSyncState.Failed -> item {
+                                AgentwireSyncFailureCard(
+                                    sync = sync,
+                                    channel = state.channel,
+                                    onRetry = viewModel::retrySync,
+                                )
+                            }
+                            else -> Unit
+                        }
                         if (!state.connected && state.timeline.isEmpty()) item {
                             Card(Modifier.fillMaxWidth().padding(16.dp)) {
                                 Column(Modifier.padding(16.dp)) {
@@ -286,9 +298,13 @@ private fun AgentwireScreen(
 @SuppressLint("HardcodedText")
 @Composable
 private fun AgentwireStatusStrip(state: AgentwireUiState, onClick: () -> Unit) {
+    val sync = state.sync
     val status = when {
         !state.connected -> "offline"
-        state.syncing -> "syncing"
+        sync is AgentwireSyncState.NotJoined -> "not joined"
+        sync is AgentwireSyncState.Syncing ->
+            if (sync.attempt >= 3) "syncing… (attempt ${sync.attempt})" else "syncing…"
+        sync is AgentwireSyncState.Failed -> "sync failed"
         state.busy -> "running"
         state.activeSid == null -> "detached"
         else -> "ready"
@@ -305,6 +321,72 @@ private fun AgentwireStatusStrip(state: AgentwireUiState, onClick: () -> Unit) {
             Text(state.cwd ?: "No session", style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.weight(1f))
             Text("settings / sessions", style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+/**
+ * Names which of the distinguishable sync failures happened, so a stalled handshake is never just
+ * a spinner that never stops.
+ */
+@SuppressLint("HardcodedText")
+@Composable
+internal fun AgentwireSyncFailureCard(
+    sync: AgentwireSyncState.Failed,
+    channel: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val title: String
+    val body: String
+    when (val failure = sync.failure) {
+        is AgentwireSyncFailure.Timeout -> {
+            title = "Agent sync timed out"
+            body = buildString {
+                append(
+                    "No response from the agent after 30 seconds. The bridge may be offline, it " +
+                        "may not accept this channel's topic, or the channel may not be delivering " +
+                        "events to you.",
+                )
+                if (failure.counters.total > 0) {
+                    append(" While syncing, ${failure.counters.total} agent event(s) arrived but ")
+                    append("were ignored — open diagnostics for details.")
+                }
+            }
+        }
+        is AgentwireSyncFailure.Rejected -> {
+            title = "Agent sync rejected"
+            body = "The bridge rejected the sync request: ${failure.detail}"
+        }
+        is AgentwireSyncFailure.ProtocolMismatch -> {
+            title = "Incompatible agent messages"
+            body = "The agent's replies failed protocol validation: ${failure.detail}. Update motd " +
+                "and the bridge so both speak Agentwire v1 the same way."
+        }
+        is AgentwireSyncFailure.SendFailed -> {
+            title = "Cannot reach the channel"
+            body = "Sending the sync request failed: ${failure.detail}"
+        }
+    }
+    AgentwireSyncFailureBody(title, body, "Retry sync", onRetry, modifier)
+}
+
+@SuppressLint("HardcodedText")
+@Composable
+private fun AgentwireSyncFailureBody(
+    title: String,
+    body: String,
+    action: String,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(modifier.fillMaxWidth().padding(16.dp).testTag("agentwire_sync_failure_card")) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(body, style = MaterialTheme.typography.bodyMedium)
+            Button(onClick = onAction, modifier = Modifier.testTag("agentwire_sync_retry")) {
+                Text(action)
+            }
         }
     }
 }

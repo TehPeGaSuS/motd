@@ -7,6 +7,8 @@ import androidx.navigation.toRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.repo.BufferRepository
+import io.github.trevarj.motd.di.AppClock
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.agentwire.AGENTWIRE_TAG
 import io.github.trevarj.motd.irc.agentwire.AgentwireEnvelope
 import io.github.trevarj.motd.irc.agentwire.agentwireMissingCaps
@@ -39,27 +41,6 @@ import kotlinx.serialization.json.put
 
 private const val AGENTWIRE_INITIAL_HISTORY_SIZE = 20
 private const val AGENTWIRE_HISTORY_PAGE_SIZE = 50
-private const val AGENTWIRE_SYNC_RETRY_INITIAL_MS = 1_000L
-private const val AGENTWIRE_SYNC_RETRY_MAX_MS = 10_000L
-
-internal fun acceptsAgentwireEpoch(envelope: AgentwireEnvelope, currentEpoch: String?): Boolean =
-    envelope.kind == "agent.hello" || envelope.history == true || currentEpoch == null ||
-        envelope.epoch == currentEpoch
-
-internal suspend fun retryAgentwireSync(
-    isReady: () -> Boolean,
-    issue: suspend (String) -> Unit,
-    nextId: () -> String = { UUID.randomUUID().toString() },
-    pause: suspend (Long) -> Unit = { delay(it) },
-) {
-    var retryDelay = AGENTWIRE_SYNC_RETRY_INITIAL_MS
-    while (!isReady()) {
-        issue(nextId())
-        if (isReady()) return
-        pause(retryDelay)
-        retryDelay = (retryDelay * 2).coerceAtMost(AGENTWIRE_SYNC_RETRY_MAX_MS)
-    }
-}
 
 @HiltViewModel
 class AgentwireViewModel @Inject constructor(
@@ -67,15 +48,20 @@ class AgentwireViewModel @Inject constructor(
     private val prefs: AgentwirePrefs,
     private val buffers: BufferRepository,
     private val connections: ConnectionManager,
+    private val diagnostics: DiagnosticLogger,
+    clock: AppClock,
 ) : ViewModel() {
     private val route = savedStateHandle.toRoute<ChatRoute>()
     private val instance = UUID.randomUUID().toString()
     private val session = AgentwireSessionOrchestrator()
+    private val budget = AgentwireSyncBudget(clock)
     private val _state = MutableStateFlow(AgentwireUiState())
     val state: StateFlow<AgentwireUiState> = _state.asStateFlow()
     private var sessionJob: Job? = null
     private var syncJob: Job? = null
     private var client: IrcClient? = null
+    private var startedOnce = false
+    private var sendFailureStage = "transport"
     private val autoReviewConfirmedSessions = HashSet<String>()
 
     init {
@@ -116,10 +102,16 @@ class AgentwireViewModel @Inject constructor(
                         )
                     }
                     val nextClient = buffer?.let { connections.clientFor(it.networkId) }
-                    if (gate == AgentwireGate.ACTIVE && ready != null && nextClient != null && (nextClient !== client || identityChanged)) {
-                        startSession(nextClient)
-                    } else if (gate != AgentwireGate.ACTIVE || ready == null) {
-                        stopSession(disconnected = client != null)
+                    when {
+                        gate != AgentwireGate.ACTIVE || ready == null -> {
+                            stopSession(disconnected = client != null)
+                            _state.update { it.copy(sync = AgentwireSyncState.Idle) }
+                        }
+                        nextClient == null -> Unit
+                        // A new client instance or a new agent identity always re-arms a full
+                        // budget; anything else leaves a terminal failure sticky.
+                        nextClient !== client || identityChanged -> startSession(nextClient, syncTrigger(identityChanged))
+                        else -> Unit
                     }
                 }
         }
@@ -128,6 +120,17 @@ class AgentwireViewModel @Inject constructor(
     fun viewTranscript() = _state.update { it.copy(transcriptOverride = true) }
     fun returnToHarness() = _state.update { it.copy(transcriptOverride = false) }
     fun clearError() = _state.update { it.copy(error = null) }
+
+    /** User-visible re-entry into sync: re-arms a full budget over the live client. */
+    fun retrySync() {
+        val active = client
+        if (active == null) {
+            // Nothing to talk to yet; the gate collector re-arms once the connection returns.
+            _state.update { it.copy(sync = AgentwireSyncState.Idle) }
+        } else {
+            startSession(active, AgentwireSyncTrigger.RETRY)
+        }
+    }
 
     fun submit(content: String) {
         if (content.isBlank()) return
@@ -219,11 +222,23 @@ class AgentwireViewModel @Inject constructor(
         viewModelScope.launch { requestHistory(initial = false) }
     }
 
-    private fun startSession(next: IrcClient) {
+    private fun syncTrigger(identityChanged: Boolean): AgentwireSyncTrigger = when {
+        _state.value.sync is AgentwireSyncState.NotJoined -> AgentwireSyncTrigger.REJOIN
+        !startedOnce -> AgentwireSyncTrigger.OPEN
+        identityChanged -> AgentwireSyncTrigger.IDENTITY
+        else -> AgentwireSyncTrigger.OPEN
+    }
+
+    private fun startSession(next: IrcClient, trigger: AgentwireSyncTrigger) {
         stopSession(disconnected = client != null)
         client = next
+        startedOnce = true
         session.reset()
+        // Only a user-visible entry anchors the deadline; internal resyncs reuse it.
+        budget.anchor()
+        recordSyncStarted(trigger)
         _state.value = session.beginSync(_state.value)
+            .copy(sync = AgentwireSyncState.Syncing(attempt = 0, startedAtMs = budget.startedAtMs))
         sessionJob = viewModelScope.launch {
             launch { next.sequencedEvents.collect(::ingest) }
             // Let the hot-flow collector attach before sync.request is emitted.
@@ -236,10 +251,98 @@ class AgentwireViewModel @Inject constructor(
         syncJob?.cancel()
         syncJob = viewModelScope.launch {
             session.retryUntilReady(
-                state = { _state.value },
-                issue = { id -> sendActionInternal("sync.request", id = id) },
+                budget = budget,
+                isReady = { _state.value.sync !is AgentwireSyncState.Syncing },
+                issue = ::sendSyncRequest,
+                onAttempt = { attempt ->
+                    _state.update {
+                        if (it.sync is AgentwireSyncState.Syncing) {
+                            it.copy(sync = AgentwireSyncState.Syncing(attempt, budget.startedAtMs))
+                        } else {
+                            it
+                        }
+                    }
+                },
+                onTimeout = {
+                    failSync(AgentwireSyncFailure.Timeout(budget.attempts, session.ignoreCounters()))
+                },
+                onSendFailed = {
+                    failSync(AgentwireSyncFailure.SendFailed(sendFailureDetail(sendFailureStage)))
+                },
             )
         }
+    }
+
+    private suspend fun sendSyncRequest(id: String): Boolean {
+        val sent = sendActionInternal("sync.request", id = id) != null
+        if (!sent) sendFailureStage = syncSendStage()
+        return sent
+    }
+
+    /** Classifies why the write never reached the wire, for both the copy and the journal. */
+    private fun syncSendStage(): String {
+        val ready = client?.state?.value as? IrcClientState.Ready ?: return "not_ready"
+        return when {
+            agentwireMissingCaps(ready.caps).isNotEmpty() -> "caps"
+            !canSendClientTag(ready.caps, ready.isupport, AGENTWIRE_TAG) -> "client_tag"
+            else -> "transport"
+        }
+    }
+
+    /**
+     * Records the terminal phase. Called from inside the retry job, which returns immediately
+     * afterwards, so it must not cancel that job from underneath itself.
+     */
+    private fun failSync(failure: AgentwireSyncFailure) {
+        recordSyncFailed(failure)
+        _state.update { it.copy(sync = AgentwireSyncState.Failed(failure)) }
+    }
+
+    private fun recordSyncStarted(trigger: AgentwireSyncTrigger) {
+        diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "sync_started") {
+            mapOf(
+                "channel_fp" to diagnostics.fingerprint(_state.value.channel),
+                "attempt" to budget.attempts + 1,
+                "trigger" to trigger.wireName,
+            )
+        }
+    }
+
+    private fun recordSyncCompleted() {
+        diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "sync_completed") {
+            mapOf(
+                "channel_fp" to diagnostics.fingerprint(_state.value.channel),
+                "attempts" to budget.attempts,
+                "elapsed_ms" to budget.elapsedMs(),
+            )
+        }
+    }
+
+    private fun recordSyncFailed(failure: AgentwireSyncFailure) {
+        diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "sync_failed") {
+            // `reason` is a redacted field name in the journal, hence `end_reason`/`detail_class`.
+            mapOf(
+                "channel_fp" to diagnostics.fingerprint(_state.value.channel),
+                "end_reason" to failure.endReason(),
+                "attempts" to budget.attempts,
+                "elapsed_ms" to budget.elapsedMs(),
+                "detail_class" to detailClass(failure),
+            )
+        }
+    }
+
+    /** Never the message itself: only how the handshake ended. */
+    private fun detailClass(failure: AgentwireSyncFailure): String = when (failure) {
+        is AgentwireSyncFailure.Timeout -> "no_reply"
+        is AgentwireSyncFailure.Rejected -> "bridge_reply"
+        is AgentwireSyncFailure.ProtocolMismatch -> "envelope_validation"
+        is AgentwireSyncFailure.SendFailed -> sendFailureStage
+    }
+
+    /** Ends the retry job from outside it, after a definitive wire answer. */
+    private fun stopSyncRetry() {
+        syncJob?.cancel()
+        syncJob = null
     }
 
     private fun stopSession(disconnected: Boolean) {
@@ -253,7 +356,7 @@ class AgentwireViewModel @Inject constructor(
             val uncertain = _state.value.actionStatus.mapValues { (_, status) ->
                 if (status == "sent" || status == "accepted") "outcome unknown" else status
             }
-            _state.update { it.copy(syncing = false, epoch = null, botAccount = null, actionStatus = uncertain) }
+            _state.update { it.copy(epoch = null, botAccount = null, actionStatus = uncertain) }
         }
     }
 
@@ -263,15 +366,43 @@ class AgentwireViewModel @Inject constructor(
             _state.value = result.state
             return
         }
-        if (result is AgentwireDeliveryCoordinator.Result.ResyncRequired) {
+        if (result is AgentwireDeliveryCoordinator.Result.SyncRejected) {
+            // A definitive wire-level "no" ends the attempt now; retrying an unacknowledged
+            // request would only reproduce the same answer.
+            stopSyncRetry()
             _state.value = result.state
+            failSync(AgentwireSyncFailure.Rejected(result.detail))
+            return
+        }
+        if (result is AgentwireDeliveryCoordinator.Result.ProtocolMismatch) {
+            stopSyncRetry()
+            _state.value = result.state
+            failSync(AgentwireSyncFailure.ProtocolMismatch(result.detail))
+            return
+        }
+        if (result is AgentwireDeliveryCoordinator.Result.ResyncRequired) {
+            // Deliberately no budget.anchor(): an internal restart must not extend the deadline.
+            _state.value = result.state
+                .copy(sync = AgentwireSyncState.Syncing(budget.attempts, budget.startedAtMs))
+            recordSyncStarted(
+                when (result.cause) {
+                    AgentwireResyncCause.GAP -> AgentwireSyncTrigger.RESYNC_GAP
+                    AgentwireResyncCause.FRAGMENT_EXPIRY -> AgentwireSyncTrigger.RESYNC_FRAGMENT
+                },
+            )
             startSyncRetry()
             return
         }
         if (result !is AgentwireDeliveryCoordinator.Result.Updated) return
         val envelope = result.envelope
         val previousSid = _state.value.activeSid
-        _state.value = result.state
+        _state.value = if (result.syncCompleted) {
+            stopSyncRetry()
+            recordSyncCompleted()
+            result.state.copy(sync = AgentwireSyncState.Ready)
+        } else {
+            result.state
+        }
         if (envelope.kind == "session.page") {
             val next = envelope.data?.string("next")
             if (next != null) {

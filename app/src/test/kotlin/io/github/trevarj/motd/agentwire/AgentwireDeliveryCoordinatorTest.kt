@@ -64,7 +64,7 @@ class AgentwireDeliveryCoordinatorTest {
             as AgentwireDeliveryCoordinator.Result.ResyncRequired
         state = resync.state
         assertEquals("Agentwire event stream gap; resynchronizing", resync.reason)
-        assertTrue(state.syncing)
+        assertTrue(session.awaitingSync)
         assertTrue(state.timeline.isEmpty())
         assertTrue(state.requests.isEmpty())
         assertFalse(state.busy)
@@ -72,8 +72,10 @@ class AgentwireDeliveryCoordinatorTest {
 
         val requestedSyncs = mutableListOf<String>()
         var replacement: AgentwireDeliveryCoordinator.Result.Updated? = null
+        val budget = AgentwireSyncBudget({ 0L }).also { it.anchor() }
         session.retryUntilReady(
-            state = { state },
+            budget = budget,
+            isReady = { !session.awaitingSync },
             issue = { id ->
                 requestedSyncs += id
                 // A live event from the lost epoch must not revive derived state before the
@@ -84,12 +86,13 @@ class AgentwireDeliveryCoordinatorTest {
                 update(8, hello(id, "epoch-2", actions = setOf("turn.prompt")))
                 replacement = update(9, snapshot(id, "epoch-2", "session-2", busy = false))
                     as AgentwireDeliveryCoordinator.Result.Updated
+                true
             },
         )
 
         assertEquals(1, requestedSyncs.size)
         assertTrue(checkNotNull(replacement).syncCompleted)
-        assertFalse(state.syncing)
+        assertFalse(session.awaitingSync)
         assertEquals("epoch-2", state.epoch)
         assertEquals("session-2", state.activeSid)
         assertFalse(state.busy)
@@ -107,7 +110,6 @@ class AgentwireDeliveryCoordinatorTest {
             ),
         )
         var state = baseState().copy(
-            syncing = false,
             epoch = "epoch-1",
             botAccount = "agent",
             activeSid = "session-1",
@@ -136,7 +138,7 @@ class AgentwireDeliveryCoordinatorTest {
         state = result.state
 
         assertEquals("Agentwire fragment assembly expired; resynchronizing", result.reason)
-        assertTrue(state.syncing)
+        assertTrue(session.awaitingSync)
         assertTrue(state.timeline.isEmpty())
         assertFalse(state.busy)
     }

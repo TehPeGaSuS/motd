@@ -42,7 +42,7 @@ class AgentwireReducerTest {
     @Test
     fun `bootstrap snapshots establish binding settings queue and advertised actions`() {
         val reducer = AgentwireReducer()
-        var state = AgentwireUiState(syncing = true)
+        var state = AgentwireUiState()
         state = reducer.reduce(state, event("agent.hello", epoch = "epoch-1", data = buildJsonObject {
             put("epoch", "epoch-1")
             put("backend", "codex")
@@ -77,7 +77,6 @@ class AgentwireReducerTest {
         assertEquals("gpt-test", state.modelOptions.single().value)
         assertEquals(listOf("low", "high"), state.modelOptions.single().efforts)
         assertTrue(state.modelOptions.single().default)
-        assertFalse(state.syncing)
     }
 
     @Test
@@ -544,26 +543,6 @@ class AgentwireReducerTest {
     }
 
     @Test
-    fun `sync retries with fresh ids and a bounded backoff until correlated state is ready`() = runTest {
-        var ready = false
-        val sent = mutableListOf<String>()
-        val waits = mutableListOf<Long>()
-
-        retryAgentwireSync(
-            isReady = { ready },
-            issue = { sent += it },
-            nextId = { "sync-${sent.size + 1}" },
-            pause = { duration ->
-                waits += duration
-                if (sent.size == 6) ready = true
-            },
-        )
-
-        assertEquals((1..6).map { "sync-$it" }, sent)
-        assertEquals(listOf(1_000L, 2_000L, 4_000L, 8_000L, 10_000L, 10_000L), waits)
-    }
-
-    @Test
     fun `turn assistant plan tool usage and request families reduce into harness state`() {
         val reducer = AgentwireReducer()
         var state = AgentwireUiState(activeSid = "s1")
@@ -716,7 +695,7 @@ class AgentwireReducerTest {
         val reducer = AgentwireReducer()
 
         val state = reducer.reduce(
-            AgentwireUiState(syncing = true),
+            AgentwireUiState(),
             event(
                 "agent.hello",
                 epoch = "epoch-example",

@@ -19,15 +19,15 @@ private val DEVICE = stringPreferencesKey("device_v1")
 
 /** Isolated from Settings exports so restoring normal configuration cannot enable this lab. */
 @Singleton
-class AgentwirePrefs @Inject constructor(@ApplicationContext context: Context) {
+open class AgentwirePrefs @Inject constructor(@ApplicationContext context: Context) {
     private val store = context.agentwireDataStore
-    val enabled: Flow<Boolean> = store.data.map { it[ENABLED] ?: false }
+    open val enabled: Flow<Boolean> = store.data.map { it[ENABLED] ?: false }
 
-    suspend fun setEnabled(enabled: Boolean) {
+    open suspend fun setEnabled(enabled: Boolean) {
         store.edit { it[ENABLED] = enabled }
     }
 
-    suspend fun deviceId(): String {
+    open suspend fun deviceId(): String {
         store.data.first()[DEVICE]?.let { return it }
         val created = UUID.randomUUID().toString()
         store.edit { preferences ->

@@ -25,12 +25,11 @@ class AgentwireViewModelIngestTest {
             channel = "#codex",
             controllerAccount = "controller",
             backendAccount = "agent-a",
-            syncing = true,
         )
 
         val forgedHello = hello(syncId, "evil-epoch", setOf("turn.prompt"))
         state = rejected(ingestor, state, inbound("agent-b", forgedHello), syncId)
-        assertEquals("Rejected Agentwire event from untrusted account: agent-b", state.error)
+        assertEquals("Ignoring agent events from account agent-b. The channel topic trusts only agent=agent-a.", state.error)
         assertNull(state.botAccount)
         assertNull(state.epoch)
         assertTrue(state.actions.isEmpty())
@@ -43,7 +42,6 @@ class AgentwireViewModelIngestTest {
         assertEquals("epoch-a", state.epoch)
         assertEquals(setOf("turn.prompt"), state.actions)
         assertEquals("session-a", state.activeSid)
-        assertTrue(!state.syncing)
 
         val pinned = state
         state = rejected(ingestor, state, inbound("agent-b", hello(syncId, "evil-epoch", setOf("request.respond"))), syncId)
@@ -51,14 +49,13 @@ class AgentwireViewModelIngestTest {
         assertEquals(pinned.epoch, state.epoch)
         assertEquals(pinned.actions, state.actions)
         assertEquals(pinned.activeSid, state.activeSid)
-        assertEquals("Rejected Agentwire event from untrusted account: agent-b", state.error)
+        assertEquals("Ignoring agent events from account agent-b. The channel topic trusts only agent=agent-a.", state.error)
 
         // Topic metadata may deliberately rotate the backend account. A reconnect must reject
         // the former identity and only establish state from the newly provisioned one.
         ingestor.reset()
         val reconnect = state.copy(
             backendAccount = "agent-c",
-            syncing = true,
             epoch = null,
             botAccount = null,
             actions = emptySet(),
@@ -82,7 +79,7 @@ class AgentwireViewModelIngestTest {
         ingestor.reset()
         state = applied(
             ingestor,
-            AgentwireUiState(channel = "#codex", controllerAccount = "shared", backendAccount = "shared", syncing = true),
+            AgentwireUiState(channel = "#codex", controllerAccount = "shared", backendAccount = "shared"),
             inbound("shared", hello(syncId, "shared-epoch", setOf("turn.prompt"))),
             syncId,
         )

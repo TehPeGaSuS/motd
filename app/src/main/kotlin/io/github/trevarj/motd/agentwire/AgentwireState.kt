@@ -86,7 +86,8 @@ data class AgentwireUiState(
     val backend: String? = null,
     val missingCaps: Set<String> = emptySet(),
     val connected: Boolean = false,
-    val syncing: Boolean = false,
+    /** Owned by the ViewModel: the reducer never writes handshake phases. */
+    val sync: AgentwireSyncState = AgentwireSyncState.Idle,
     val epoch: String? = null,
     val botAccount: String? = null,
     val activeSid: String? = null,
@@ -157,7 +158,6 @@ class AgentwireReducer {
         val data = envelope.data ?: JsonObject(emptyMap())
         return when (envelope.kind) {
             "agent.hello" -> state.copy(
-                syncing = true,
                 epoch = envelope.epoch ?: data.string("epoch"),
                 backend = data.string("backend") ?: state.backend,
                 actions = data.stringList("actions").toSet(),
@@ -170,7 +170,6 @@ class AgentwireReducer {
                 val changed = nextSid != state.activeSid
                 if (changed) resetSessionTracking(envelope.id)
                 state.copy(
-                    syncing = false,
                     activeSid = nextSid,
                     cwd = data.obj("binding")?.string("cwd"),
                     busy = data.bool("busy") ?: false,
