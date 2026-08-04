@@ -11,7 +11,6 @@ import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
@@ -19,8 +18,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -163,11 +160,10 @@ class PendingChannelCloseCoordinatorTest {
 
         try {
             coordinator.start()
-            withContext(Dispatchers.Default) {
-                withTimeout(5_000) {
-                    connections.partAttempted.await()
-                }
-            }
+            // Await on the test scheduler. Hopping to Dispatchers.Default blocked the test thread,
+            // so the scheduler could not advance and any dispatched work deadlocked until a real
+            // five second timeout expired: green locally, flaky on a loaded CI machine.
+            connections.partAttempted.await()
             assertEquals(listOf(bufferId), connections.parts)
             assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
         } finally {
