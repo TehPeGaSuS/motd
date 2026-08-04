@@ -625,7 +625,6 @@
     <string name="network_tools_mode_args">Mode arguments</string>
     <string name="network_tools_send_mode">Send MODE</string>
     <string name="network_tools_kill_nick">Nick to kill</string>
-    <string name="network_tools_reason">Reason</string>
     <string name="network_tools_send_kill">Kill user</string>
     <string name="network_tools_rehash_server">Server, optional</string>
     <string name="network_tools_send_rehash">Rehash</string>
@@ -635,8 +634,32 @@
     <string name="network_tools_send_connect">Connect server</string>
     <string name="network_tools_squit_server">Server to disconnect</string>
     <string name="network_tools_send_squit">Disconnect server</string>
-    <string name="network_tools_confirm_title">Send %1$s?</string>
-    <string name="network_tools_confirm_message">This command can affect users or servers. Send it to %1$s?</string>
+    <string name="network_tools_ircop_header">Server operator (IRCop) tools</string>
+    <string name="network_tools_ircop_desc">For server staff only — these commands affect the whole network</string>
+    <string name="network_tools_target_self">Yourself (%1$s)</string>
+    <string name="network_tools_mode_help">User and server modes vary by network — check your network\'s documentation</string>
+    <string name="network_tools_kill_reason">Reason for kill</string>
+    <string name="network_tools_squit_reason">Reason for disconnect</string>
+    <string name="network_tools_confirm_kill_title">Kill %1$s?</string>
+    <string name="network_tools_confirm_kill_body">This disconnects %1$s from the entire network, not just a channel. They can usually reconnect right away unless a ban is also set.</string>
+    <string name="network_tools_confirm_rehash_title">Rehash the server?</string>
+    <string name="network_tools_confirm_rehash_body">Reloads the server\'s configuration. Users stay connected, but a broken configuration can take the server down.</string>
+    <string name="network_tools_confirm_connect_title">Link %1$s?</string>
+    <string name="network_tools_confirm_connect_body">Tells the server to open a new server-to-server link to %1$s. A wrong target can disrupt network routing.</string>
+    <string name="network_tools_confirm_squit_title">Disconnect %1$s?</string>
+    <string name="network_tools_confirm_squit_body">Splits the server %1$s off the network. Everyone connected through it drops until it relinks.</string>
+    <string name="network_tools_status_sent">%1$s sent</string>
+    <string name="network_tools_status_failed">%1$s failed: %2$s</string>
+    <string name="network_tools_status_not_connected">Network is not connected</string>
+    <string name="network_tools_status_missing_fields">Required fields are missing</string>
+    <string name="network_tools_status_ignore_added">Ignore added</string>
+    <string name="network_tools_status_ignore_failed">Couldn\'t add ignore: %1$s</string>
+
+    <!-- Shared moderation reason presets (kick and KILL). -->
+    <string name="moderation_reason_spam">Spam</string>
+    <string name="moderation_reason_flooding">Flooding</string>
+    <string name="moderation_reason_disruptive">Being disruptive</string>
+    <string name="moderation_reason_offtopic">Off-topic</string>
 
     <!-- Add network (WP-V2, §5.4) -->
     <string name="add_network_title">Add network</string>

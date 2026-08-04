@@ -33,8 +33,23 @@ data class NetworkToolsUiState(
     val ignores: List<NetworkIgnoreEntity> = emptyList(),
     val buffers: List<NetworkBufferToolRow> = emptyList(),
     val connected: Boolean = false,
-    val status: String? = null,
+    /** Own nick on this network, offered as the first MODE target suggestion. Null unless Ready. */
+    val selfNick: String? = null,
+    val status: NetworkToolsStatus? = null,
 )
+
+/**
+ * Outcome of the last tool action. Deliberately a sealed type rather than a message string: the
+ * ViewModel must not decide user-facing wording, so the screen maps each case to a string resource.
+ */
+sealed interface NetworkToolsStatus {
+    data object IgnoreAdded : NetworkToolsStatus
+    data class IgnoreFailed(val message: String) : NetworkToolsStatus
+    data object NotConnected : NetworkToolsStatus
+    data class CommandSent(val command: String) : NetworkToolsStatus
+    data class CommandFailed(val command: String, val message: String) : NetworkToolsStatus
+    data object MissingFields : NetworkToolsStatus
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -44,7 +59,7 @@ class NetworkToolsViewModel @Inject constructor(
     private val connectionManager: ConnectionManager,
 ) : ViewModel() {
     private val networkIdFlow = MutableStateFlow<Long?>(null)
-    private val statusFlow = MutableStateFlow<String?>(null)
+    private val statusFlow = MutableStateFlow<NetworkToolsStatus?>(null)
 
     fun init(networkId: Long) {
         networkIdFlow.value = networkId
@@ -75,25 +90,18 @@ class NetworkToolsViewModel @Inject constructor(
                 buffersFlow,
                 connectionManager.connectionStates,
             ) { networkId, network, ignores, buffers, states ->
+                val ready = states[networkId] as? IrcClientState.Ready
                 NetworkToolsUiState(
                     networkId = networkId ?: 0,
                     network = network,
                     ignores = ignores,
                     buffers = buffers,
-                    connected = states[networkId] is IrcClientState.Ready,
+                    connected = ready != null,
+                    selfNick = ready?.nick,
                 )
             },
             statusFlow,
-        ) { base, status ->
-            NetworkToolsUiState(
-                networkId = base.networkId,
-                network = base.network,
-                ignores = base.ignores,
-                buffers = base.buffers,
-                connected = base.connected,
-                status = status,
-            )
-        }.stateIn(
+        ) { base, status -> base.copy(status = status) }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = NetworkToolsUiState(),
@@ -102,8 +110,8 @@ class NetworkToolsViewModel @Inject constructor(
     fun addIgnore(pattern: String) = viewModelScope.launch {
         val networkId = state.value.networkId.takeIf { it != 0L } ?: return@launch
         toolsRepository.addIgnore(networkId, pattern)
-            .onSuccess { statusFlow.value = "Ignore added" }
-            .onFailure { statusFlow.value = it.message ?: "Ignore failed" }
+            .onSuccess { statusFlow.value = NetworkToolsStatus.IgnoreAdded }
+            .onFailure { statusFlow.value = NetworkToolsStatus.IgnoreFailed(it.message.orEmpty()) }
     }
 
     fun setIgnoreEnabled(id: Long, enabled: Boolean) = viewModelScope.launch {
@@ -123,50 +131,43 @@ class NetworkToolsViewModel @Inject constructor(
         toolsRepository.restoreMuteBacklog(suppression)
     }
 
-    fun oper(username: String, password: String) =
-        send(IrcMessage(command = "OPER", params = listOf(username.trim(), password)))
+    fun oper(username: String, password: String) = send(operMessage(username, password))
 
-    fun kill(nick: String, reason: String) =
-        send(IrcMessage(command = "KILL", params = listOf(nick.trim(), reason.trim())))
+    fun kill(nick: String, reason: String) = send(killMessage(nick, reason))
 
-    fun mode(target: String, modes: String, args: String) =
-        send(IrcMessage(command = "MODE", params = listOf(target.trim(), modes.trim()) + splitArgs(args)))
+    fun mode(target: String, modes: String, args: String) = send(modeMessage(target, modes, args))
 
-    fun rehash(server: String) =
-        send(IrcMessage(command = "REHASH", params = listOfNotNull(server.trim().takeIf(String::isNotBlank))))
+    fun rehash(server: String) = send(rehashMessage(server))
 
     fun connectServer(server: String, port: String, remote: String) =
-        send(
-            IrcMessage(
-                command = "CONNECT",
-                params = listOfNotNull(
-                    server.trim(),
-                    port.trim().takeIf(String::isNotBlank),
-                    remote.trim().takeIf(String::isNotBlank),
-                ),
-            ),
-        )
+        send(connectMessage(server, port, remote))
 
-    fun squit(server: String, reason: String) =
-        send(IrcMessage(command = "SQUIT", params = listOf(server.trim(), reason.trim())))
+    fun squit(server: String, reason: String) = send(squitMessage(server, reason))
 
-    private fun send(message: IrcMessage) = viewModelScope.launch {
+    /**
+     * Send a message the screen already built and previewed, so the confirmed line and the sent
+     * line are the same object.
+     */
+    fun send(message: IrcMessage) = viewModelScope.launch {
         val networkId = state.value.networkId.takeIf { it != 0L } ?: return@launch
         val client = connectionManager.clientFor(networkId)
         if (client == null) {
-            statusFlow.value = "Network is not connected"
+            statusFlow.value = NetworkToolsStatus.NotConnected
             return@launch
         }
         val validation = runCatching { message.serialize() }.exceptionOrNull()
-        if (validation != null || message.params.any(String::isBlank)) {
-            statusFlow.value = validation?.message ?: "Required fields are missing"
+        if (validation != null) {
+            statusFlow.value = NetworkToolsStatus.CommandFailed(message.command, validation.message.orEmpty())
+            return@launch
+        }
+        if (message.params.any(String::isBlank)) {
+            statusFlow.value = NetworkToolsStatus.MissingFields
             return@launch
         }
         runCatching { client.send(message) }
-            .onSuccess { statusFlow.value = "${message.command} sent" }
-            .onFailure { statusFlow.value = it.message ?: "${message.command} failed" }
+            .onSuccess { statusFlow.value = NetworkToolsStatus.CommandSent(message.command) }
+            .onFailure {
+                statusFlow.value = NetworkToolsStatus.CommandFailed(message.command, it.message.orEmpty())
+            }
     }
 }
-
-private fun splitArgs(raw: String): List<String> =
-    raw.split(' ').map(String::trim).filter(String::isNotBlank)
