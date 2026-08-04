@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,12 +33,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.channelinfo.BanTargetDialog
+import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.ReasonPresetChips
 import io.github.trevarj.motd.service.PresenceState
 
 /**
@@ -45,7 +52,7 @@ import io.github.trevarj.motd.service.PresenceState
  * the header shows WHOIS details when available; the moderation block appears only when
  * [canModerate] and the nick is not self (Confirmed #7). Kick/Ban open a confirm dialog.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 fun NickActionSheet(
     nick: String,
@@ -65,8 +72,14 @@ fun NickActionSheet(
     onOp: (grant: Boolean) -> Unit,
     onVoice: (grant: Boolean) -> Unit,
     onKick: (reason: String?) -> Unit,
-    onBan: () -> Unit,
+    onBan: (mask: String, alsoKick: Boolean) -> Unit,
     showMention: Boolean = true,
+    /** ISUPPORT vocabulary, for KICKLEN. Null when the network is not Ready. */
+    modeCatalog: ModeCatalog? = null,
+    /** [nick]'s address, when WHOIS or the cache knows it, for the address-scoped ban. */
+    resolvedHost: String? = null,
+    hostLoading: Boolean = false,
+    onNickSelected: (String?) -> Unit = {},
 ) {
     var kickTarget by remember { mutableStateOf(false) }
     var banTarget by remember { mutableStateOf(false) }
@@ -115,22 +128,39 @@ fun NickActionSheet(
 
     if (kickTarget) {
         var reason by remember { mutableStateOf("") }
+        val kickLen = modeCatalog?.kickLen
         AlertDialog(
             onDismissRequest = { kickTarget = false },
+            // A dialog is its own Compose window, so it needs its own testTagsAsResourceId opt-in.
+            modifier = Modifier
+                .semantics { testTagsAsResourceId = true }
+                .testTag("nick_sheet_kick_dialog"),
             title = { Text(stringResource(R.string.nick_sheet_kick_title, nick)) },
             text = {
-                OutlinedTextField(
-                    value = reason,
-                    onValueChange = { reason = it },
-                    label = { Text(stringResource(R.string.nick_sheet_kick_reason_hint)) },
-                    singleLine = true,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ReasonPresetChips(
+                        current = reason,
+                        onSelect = { reason = it },
+                        tagPrefix = "nick_sheet_kick_chip",
+                    )
+                    OutlinedTextField(
+                        value = reason,
+                        // Trim to the server's advertised KICKLEN so the reason is not silently cut.
+                        onValueChange = { if (kickLen == null || it.length <= kickLen) reason = it },
+                        label = { Text(stringResource(R.string.nick_sheet_kick_reason_hint)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("nick_sheet_kick_reason"),
+                    )
+                }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    kickTarget = false
-                    onKick(reason.ifBlank { null })
-                }) { Text(stringResource(R.string.nick_sheet_kick)) }
+                TextButton(
+                    onClick = {
+                        kickTarget = false
+                        onKick(reason.ifBlank { null })
+                    },
+                    modifier = Modifier.testTag("nick_sheet_kick_confirm"),
+                ) { Text(stringResource(R.string.nick_sheet_kick)) }
             },
             dismissButton = {
                 TextButton(onClick = { kickTarget = false }) { Text(stringResource(R.string.action_cancel)) }
@@ -138,17 +168,23 @@ fun NickActionSheet(
         )
     }
 
+    // The old dialog had a title and no body: it never said the ban persists, and never showed the
+    // nick!*@* mask a nick change trivially evades. The shared picker states both.
     if (banTarget) {
-        AlertDialog(
-            onDismissRequest = { banTarget = false },
-            title = { Text(stringResource(R.string.nick_sheet_ban_title, nick)) },
-            confirmButton = {
-                TextButton(onClick = { banTarget = false; onBan() }) {
-                    Text(stringResource(R.string.nick_sheet_ban))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { banTarget = false }) { Text(stringResource(R.string.action_cancel)) }
+        BanTargetDialog(
+            dialogTag = "nick_sheet_ban_dialog",
+            // Naming the target beats the generic "Ban someone" when the sheet already has a nick.
+            title = stringResource(R.string.nick_sheet_ban_title, nick),
+            members = listOf(nick),
+            resolvedHost = resolvedHost,
+            hostLoading = hostLoading,
+            onNickSelected = onNickSelected,
+            preselectedNick = nick,
+            onDismiss = { banTarget = false; onNickSelected(null) },
+            onBan = { _, mask, alsoKick ->
+                banTarget = false
+                onNickSelected(null)
+                onBan(mask, alsoKick)
             },
         )
     }

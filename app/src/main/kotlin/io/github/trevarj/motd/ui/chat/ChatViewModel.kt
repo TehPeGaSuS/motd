@@ -1171,6 +1171,18 @@ class ChatViewModel @Inject constructor(
             ?.send(IrcMessage(command = "MODE", params = listOf(channel, "+b", io.github.trevarj.motd.ui.channelinfo.banMask(nick))))
     }
 
+    /** Ban an explicit [mask] built by the nick sheet's picker, optionally kicking [nick] too. */
+    fun banWithMask(nick: String?, mask: String, alsoKick: Boolean) = viewModelScope.launch {
+        val nid = state.value.buffer?.networkId ?: return@launch
+        val channel = state.value.buffer?.ircTarget ?: return@launch
+        val trimmed = mask.trim().takeIf(String::isNotBlank) ?: return@launch
+        val client = connectionManager.clientFor(nid) ?: return@launch
+        client.send(IrcMessage(command = "MODE", params = listOf(channel, "+b", trimmed)))
+        if (alsoKick && !nick.isNullOrBlank()) {
+            client.send(IrcMessage(command = "KICK", params = listOf(channel, nick)))
+        }
+    }
+
     /** Toggle [nick]'s friend/fool membership (reuses SettingsRepository semantics). */
     fun toggleFriend(nick: String) = viewModelScope.launch {
         val settings = settingsRepository.settings.firstOrNull() ?: return@launch

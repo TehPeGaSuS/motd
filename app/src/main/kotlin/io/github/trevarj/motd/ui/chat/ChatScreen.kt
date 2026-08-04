@@ -176,6 +176,7 @@ import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistorySyncStatus
+import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AutocompletePanel
@@ -548,8 +549,15 @@ fun ChatScreen(
             onOp = { grant -> viewModel.setMemberMode(sheet.nick, 'o', grant) },
             onVoice = { grant -> viewModel.setMemberMode(sheet.nick, 'v', grant) },
             onKick = { reason -> viewModel.dismissNickSheet(); viewModel.kick(sheet.nick, reason) },
-            onBan = { viewModel.dismissNickSheet(); viewModel.ban(sheet.nick) },
+            onBan = { mask, alsoKick ->
+                viewModel.dismissNickSheet()
+                viewModel.banWithMask(sheet.nick, mask, alsoKick)
+            },
             showMention = state.buffer?.type == BufferType.CHANNEL,
+            modeCatalog = (state.connState as? IrcClientState.Ready)?.isupport?.let(ModeCatalog::from),
+            // The sheet already runs a WHOIS on open, so its host is the address to offer here.
+            resolvedHost = sheet.details?.host,
+            hostLoading = sheet.whois == null,
         )
     }
 }

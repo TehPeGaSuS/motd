@@ -27,14 +27,12 @@ import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -105,6 +103,33 @@ fun ChannelInfoScreen(
         hostState = snackbarHostState,
         onUndo = viewModel::undoMuteBacklogSuppression,
     )
+    val resolvedHost by viewModel.resolvedHost.collectAsStateWithLifecycle()
+    val resolvingHost by viewModel.resolvingHost.collectAsStateWithLifecycle()
+
+    // Operator feedback. The ViewModel reports what happened; the wording lives here, resolved in
+    // composition so it follows configuration changes. The sequence number makes two identical
+    // events in a row still show two snackbars.
+    var toolFeedback by remember { mutableStateOf<Pair<Long, ChannelToolEvent>?>(null) }
+    LaunchedEffect(viewModel) {
+        var seq = 0L
+        viewModel.toolEvents.collect { toolFeedback = ++seq to it }
+    }
+    val toolMessage = when (val event = toolFeedback?.second) {
+        null -> null
+        ChannelToolEvent.NotConnected -> stringResource(R.string.channelinfo_tool_not_connected)
+        is ChannelToolEvent.Sent -> when (event.summary) {
+            ChannelToolSummary.MODE -> stringResource(R.string.channelinfo_tool_sent_mode)
+            ChannelToolSummary.INVITE ->
+                stringResource(R.string.channelinfo_tool_sent_invite, event.arg.orEmpty())
+            ChannelToolSummary.BAN ->
+                stringResource(R.string.channelinfo_tool_sent_ban, event.arg.orEmpty())
+            ChannelToolSummary.UNBAN -> stringResource(R.string.channelinfo_tool_sent_unban)
+            ChannelToolSummary.EXCEPTION -> stringResource(R.string.channelinfo_tool_sent_exception)
+        }
+    }
+    LaunchedEffect(toolFeedback?.first) {
+        snackbarHostState.showSnackbar(toolMessage ?: return@LaunchedEffect)
+    }
 
     ChannelInfoContent(
         state = state,
@@ -120,8 +145,15 @@ fun ChannelInfoScreen(
         topicMutation = topicMutation,
         onBeginTopicEdit = viewModel::beginTopicEdit,
         onInvite = viewModel::invite,
-        onSetBanMask = viewModel::setBanMask,
         onSetChannelMode = viewModel::setChannelMode,
+        onFlagMode = viewModel::setFlagMode,
+        onSetKey = viewModel::setKey,
+        onSetLimit = viewModel::setLimit,
+        onSetListMask = viewModel::setListMask,
+        onBanWithMask = viewModel::banWithMask,
+        resolvedHost = resolvedHost,
+        hostLoading = resolvingHost,
+        onNickSelected = viewModel::resolveHostFor,
         onRetryMembers = viewModel::retryMembers,
         onQueryChange = viewModel::setQuery,
     )
@@ -146,7 +178,14 @@ fun ChannelInfoScreen(
             onOp = { grant -> viewModel.setMemberMode(sheet.nick, 'o', grant) },
             onVoice = { grant -> viewModel.setMemberMode(sheet.nick, 'v', grant) },
             onKick = { reason -> viewModel.dismissNickSheet(); viewModel.kick(sheet.nick, reason) },
-            onBan = { viewModel.dismissNickSheet(); viewModel.ban(sheet.nick) },
+            onBan = { mask, alsoKick ->
+                viewModel.dismissNickSheet()
+                viewModel.banWithMask(sheet.nick, mask, alsoKick)
+            },
+            modeCatalog = state.modeCatalog,
+            resolvedHost = resolvedHost,
+            hostLoading = resolvingHost,
+            onNickSelected = viewModel::resolveHostFor,
         )
     }
 }
@@ -167,8 +206,15 @@ fun ChannelInfoContent(
     topicMutation: TopicMutationState = TopicMutationState.Idle,
     onBeginTopicEdit: () -> Unit = {},
     onInvite: (String) -> Unit = {},
-    onSetBanMask: (String, Boolean) -> Unit = { _, _ -> },
     onSetChannelMode: (String, String) -> Unit = { _, _ -> },
+    onFlagMode: (Char, Boolean) -> Unit = { _, _ -> },
+    onSetKey: (String?) -> Unit = {},
+    onSetLimit: (Int?) -> Unit = {},
+    onSetListMask: (Char, String, Boolean) -> Unit = { _, _, _ -> },
+    onBanWithMask: (String?, String, Boolean) -> Unit = { _, _, _ -> },
+    resolvedHost: String? = null,
+    hostLoading: Boolean = false,
+    onNickSelected: (String?) -> Unit = {},
     onRetryMembers: () -> Unit = {},
     onQueryChange: (String) -> Unit = {},
 ) {
@@ -223,11 +269,22 @@ fun ChannelInfoContent(
                     },
                 )
             }
+            // Non-ops get no section at all rather than a wall of disabled controls; the gate
+            // resolves after the roster loads, so it can appear a moment after the screen does.
             if (state.canModerate && buffer?.type == BufferType.CHANNEL) {
                 item(key = "channel-tools") {
-                    ChannelManagementTools(
+                    ChannelControlsSection(
+                        catalog = state.modeCatalog,
+                        members = state.sections.flatMap { section -> section.members.map { it.nick } },
+                        resolvedHost = resolvedHost,
+                        hostLoading = hostLoading,
+                        onNickSelected = onNickSelected,
+                        onFlagMode = onFlagMode,
                         onInvite = onInvite,
-                        onSetBanMask = onSetBanMask,
+                        onSetKey = onSetKey,
+                        onSetLimit = onSetLimit,
+                        onSetListMask = onSetListMask,
+                        onBanWithMask = onBanWithMask,
                         onSetChannelMode = onSetChannelMode,
                     )
                 }
@@ -609,76 +666,6 @@ private fun ActionItem(
     ) {
         Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
         Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 4.dp))
-    }
-}
-
-@Composable
-private fun ChannelManagementTools(
-    onInvite: (String) -> Unit,
-    onSetBanMask: (String, Boolean) -> Unit,
-    onSetChannelMode: (String, String) -> Unit,
-) {
-    var inviteNick by remember { mutableStateOf("") }
-    var banMask by remember { mutableStateOf("") }
-    var modes by remember { mutableStateOf("") }
-    var modeArgs by remember { mutableStateOf("") }
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.channelinfo_operator_tools),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.SemiBold,
-        )
-        OutlinedTextField(
-            value = inviteNick,
-            onValueChange = { inviteNick = it },
-            label = { Text(stringResource(R.string.channelinfo_invite_nick)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().testTag("channelinfo_invite_nick"),
-        )
-        Button(
-            onClick = { onInvite(inviteNick); inviteNick = "" },
-            enabled = inviteNick.isNotBlank(),
-        ) { Text(stringResource(R.string.channelinfo_invite)) }
-        OutlinedTextField(
-            value = banMask,
-            onValueChange = { banMask = it },
-            label = { Text(stringResource(R.string.channelinfo_ban_mask)) },
-            supportingText = { Text(stringResource(R.string.network_tools_ignore_help)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().testTag("channelinfo_ban_mask"),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = { onSetBanMask(banMask, true) },
-                enabled = banMask.isNotBlank(),
-            ) { Text(stringResource(R.string.channelinfo_set_ban)) }
-            OutlinedButton(
-                onClick = { onSetBanMask(banMask, false); banMask = "" },
-                enabled = banMask.isNotBlank(),
-            ) { Text(stringResource(R.string.channelinfo_remove_ban)) }
-        }
-        OutlinedTextField(
-            value = modes,
-            onValueChange = { modes = it },
-            label = { Text(stringResource(R.string.network_tools_modes)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().testTag("channelinfo_modes"),
-        )
-        OutlinedTextField(
-            value = modeArgs,
-            onValueChange = { modeArgs = it },
-            label = { Text(stringResource(R.string.network_tools_mode_args)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedButton(
-            onClick = { onSetChannelMode(modes, modeArgs); modes = ""; modeArgs = "" },
-            enabled = modes.isNotBlank(),
-        ) { Text(stringResource(R.string.network_tools_send_mode)) }
     }
 }
 

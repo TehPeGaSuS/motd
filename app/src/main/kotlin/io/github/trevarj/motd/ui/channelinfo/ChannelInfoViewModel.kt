@@ -62,6 +62,30 @@ data class ChannelInfoUiState(
     // while disconnected. Surfaced subtly in Channel Info rather than the chat header.
     val lagMs: Long? = null,
     val connected: Boolean = false,
+    /**
+     * ISUPPORT-derived mode vocabulary for this network, null until the connection is Ready. It
+     * says which modes the server *advertises*, never which modes are currently set: nothing in
+     * the app parses 324/367, so no control built on this may claim current channel state.
+     */
+    val modeCatalog: ModeCatalog? = null,
+)
+
+/** What a channel tool did, for the screen to phrase. The ViewModel owns no user-facing wording. */
+enum class ChannelToolSummary { MODE, INVITE, BAN, UNBAN, EXCEPTION }
+
+/** One-shot feedback for an operator action, collected into the Channel Info snackbar. */
+sealed interface ChannelToolEvent {
+    data class Sent(val summary: ChannelToolSummary, val arg: String? = null) : ChannelToolEvent
+
+    /** The network has no live client, so nothing was written. Never fail silently. */
+    data object NotConnected : ChannelToolEvent
+}
+
+/** Per-network runtime facts folded into one value so the state combine stays within its arity. */
+internal data class NetworkRuntime(
+    val lagMs: Long?,
+    val connected: Boolean,
+    val isupport: Map<String, String>?,
 )
 
 /** Local write acceptance, distinct from a later server echo or numeric rejection. */
@@ -168,15 +192,17 @@ class ChannelInfoViewModel @Inject constructor(
         DerivedRoster(lastSpoke, query, settings.friends, settings.fools, identityRules)
     }
 
-    // Network latency + Ready flag for this channel's network (#34). Pairs so a single 5-arg
-    // combine can carry both into [state] without exceeding the combine arity limit.
-    private val networkLagFlow = bufferFlow.flatMapLatest { buffer ->
+    // Latency, Ready flag and the live ISUPPORT snapshot for this channel's network. Reading
+    // ISUPPORT from Ready (rather than a clientFor snapshot) makes every server-derived control
+    // recompute on each 005 batch, and re-emits on connect/disconnect so the op gate follows too.
+    private val networkRuntimeFlow = bufferFlow.flatMapLatest { buffer ->
         if (buffer == null) {
-            flowOf<Pair<Long?, Boolean>>(null to false)
+            flowOf(NetworkRuntime(null, connected = false, isupport = null))
         } else {
             connectionManager.lagStates
                 .combine(connectionManager.connectionStates) { lags, states ->
-                    lags[buffer.networkId] to (states[buffer.networkId] is IrcClientState.Ready)
+                    val ready = states[buffer.networkId] as? IrcClientState.Ready
+                    NetworkRuntime(lags[buffer.networkId], ready != null, ready?.isupport)
                 }
         }
     }
@@ -187,10 +213,13 @@ class ChannelInfoViewModel @Inject constructor(
             membersFlow,
             derivedRosterFlow,
             connectionManager.rosterStates,
-            networkLagFlow,
-        ) { buffer, members, derived, rosterStates, networkLag ->
-            val (lagMs, connected) = networkLag
-            val order = prefixOrderForBuffer(buffer)
+            networkRuntimeFlow,
+        ) { buffer, members, derived, rosterStates, runtime ->
+            val modeCatalog = runtime.isupport?.let(ModeCatalog::from)
+            // Prefer the reactive catalog's PREFIX over the clientFor snapshot when Ready.
+            val order = modeCatalog
+                ?.let { catalog -> prefixOrderFrom(catalog.prefixRoles.map { it.mode to it.glyph }) }
+                ?: prefixOrderForBuffer(buffer)
             val identityRules = derived.identityRules
             val lookup: (MemberEntity) -> Long? = { derived.lastSpoke[identityRules.normalize(it.nick)] }
             val sections: List<MemberSection>
@@ -224,8 +253,9 @@ class ChannelInfoViewModel @Inject constructor(
                 canModerate = viewerCanModerate(buffer, members, order),
                 query = derived.query,
                 searchResults = searchResults,
-                lagMs = lagMs,
-                connected = connected,
+                lagMs = runtime.lagMs,
+                connected = runtime.connected,
+                modeCatalog = modeCatalog,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -383,53 +413,185 @@ class ChannelInfoViewModel @Inject constructor(
 
     // --- moderation executors (plans/16 §5.8) ---
 
-    /** MODE <channel> +o/-o/+v/-v <nick>. */
-    fun setMemberMode(nick: String, mode: Char, grant: Boolean) = viewModelScope.launch {
+    private val _toolEvents = MutableSharedFlow<ChannelToolEvent>(extraBufferCapacity = 4)
+    val toolEvents: SharedFlow<ChannelToolEvent> = _toolEvents.asSharedFlow()
+
+    /**
+     * Single write path for every operator action: resolves the live client, reports
+     * [ChannelToolEvent.NotConnected] instead of silently doing nothing when there isn't one, and
+     * emits a [summary] the screen turns into snackbar copy.
+     */
+    private fun dispatch(
+        summary: ChannelToolSummary,
+        arg: String? = null,
+        build: (target: String) -> List<IrcMessage>,
+    ) = viewModelScope.launch {
         val buffer = state.value.buffer ?: return@launch
-        val flag = (if (grant) "+" else "-") + mode
-        connectionManager.clientFor(buffer.networkId)
-            ?.send(IrcMessage(command = "MODE", params = listOf(buffer.ircTarget, flag, nick)))
+        val messages = build(buffer.ircTarget).takeIf { it.isNotEmpty() } ?: return@launch
+        val client = connectionManager.clientFor(buffer.networkId)
+        if (client == null) {
+            _toolEvents.emit(ChannelToolEvent.NotConnected)
+            return@launch
+        }
+        messages.forEach { client.send(it) }
+        _toolEvents.emit(ChannelToolEvent.Sent(summary, arg))
+    }
+
+    private fun modeMessage(target: String, flag: String, vararg args: String) =
+        IrcMessage(command = "MODE", params = listOf(target, flag) + args)
+
+    /** MODE <channel> +o/-o/+v/-v <nick>. */
+    fun setMemberMode(nick: String, mode: Char, grant: Boolean) =
+        dispatch(ChannelToolSummary.MODE) { target ->
+            listOf(modeMessage(target, (if (grant) "+" else "-") + mode, nick))
+        }
+
+    /** MODE <channel> +x/-x for an argument-less flag mode. */
+    fun setFlagMode(letter: Char, enable: Boolean) =
+        dispatch(ChannelToolSummary.MODE) { target ->
+            listOf(modeMessage(target, (if (enable) "+" else "-") + letter))
+        }
+
+    /**
+     * MODE <channel> +k <key>, or -k * to clear it. RFC 2812 wants the current key as the argument
+     * when unsetting and the app never learns it (no 324 handling), so it sends the wildcard every
+     * server in practice accepts.
+     */
+    fun setKey(key: String?) = dispatch(ChannelToolSummary.MODE) { target ->
+        val trimmed = key?.trim()
+        if (trimmed.isNullOrBlank()) {
+            listOf(modeMessage(target, "-k", "*"))
+        } else {
+            listOf(modeMessage(target, "+k", trimmed))
+        }
+    }
+
+    /** MODE <channel> +l <n>, or -l to remove the cap. Unsetting takes no argument. */
+    fun setLimit(limit: Int?) = dispatch(ChannelToolSummary.MODE) { target ->
+        if (limit == null || limit < 1) {
+            listOf(modeMessage(target, "-l"))
+        } else {
+            listOf(modeMessage(target, "+l", limit.toString()))
+        }
     }
 
     /** KICK <channel> <nick> [:reason]. */
-    fun kick(nick: String, reason: String?) = viewModelScope.launch {
-        val buffer = state.value.buffer ?: return@launch
+    fun kick(nick: String, reason: String?) = dispatch(ChannelToolSummary.MODE) { target ->
         val params = if (reason.isNullOrBlank()) {
-            listOf(buffer.ircTarget, nick)
+            listOf(target, nick)
         } else {
-            listOf(buffer.ircTarget, nick, reason)
+            listOf(target, nick, reason)
         }
-        connectionManager.clientFor(buffer.networkId)?.send(IrcMessage(command = "KICK", params = params))
+        listOf(IrcMessage(command = "KICK", params = params))
     }
 
-    /** MODE <channel> +b <banMask(nick)>. */
-    fun ban(nick: String) = viewModelScope.launch {
-        val buffer = state.value.buffer ?: return@launch
-        connectionManager.clientFor(buffer.networkId)
-            ?.send(IrcMessage(command = "MODE", params = listOf(buffer.ircTarget, "+b", banMask(nick))))
+    /** MODE <channel> +b <banMask(nick)>. Kept for /ban parity with the command parser. */
+    fun ban(nick: String) = dispatch(ChannelToolSummary.BAN, arg = nick) { target ->
+        listOf(modeMessage(target, "+b", banMask(nick)))
     }
 
-    fun setBanMask(mask: String, grant: Boolean) = viewModelScope.launch {
-        val buffer = state.value.buffer ?: return@launch
-        val trimmed = mask.trim().takeIf(String::isNotBlank) ?: return@launch
-        val flag = if (grant) "+b" else "-b"
-        connectionManager.clientFor(buffer.networkId)
-            ?.send(IrcMessage(command = "MODE", params = listOf(buffer.ircTarget, flag, trimmed)))
+    /** Ban [mask], optionally kicking [nick] out in the same action. */
+    fun banWithMask(nick: String?, mask: String, alsoKick: Boolean) {
+        val trimmed = mask.trim().takeIf(String::isNotBlank) ?: return
+        dispatch(ChannelToolSummary.BAN, arg = trimmed) { target ->
+            buildList {
+                add(modeMessage(target, "+b", trimmed))
+                if (alsoKick && !nick.isNullOrBlank()) {
+                    add(IrcMessage(command = "KICK", params = listOf(target, nick)))
+                }
+            }
+        }
     }
 
-    fun invite(nick: String) = viewModelScope.launch {
-        val buffer = state.value.buffer ?: return@launch
-        val trimmed = nick.trim().takeIf(String::isNotBlank) ?: return@launch
-        connectionManager.clientFor(buffer.networkId)
-            ?.send(IrcMessage(command = "INVITE", params = listOf(trimmed, buffer.ircTarget)))
+    /**
+     * MODE <channel> +/-<letter> <mask> for a list mode. [letter] comes from the catalog (EXCEPTS
+     * and INVEX advertise their own letter) rather than being hardcoded to e/I.
+     */
+    fun setListMask(letter: Char, mask: String, grant: Boolean) {
+        val trimmed = mask.trim().takeIf(String::isNotBlank) ?: return
+        val summary = when {
+            letter != 'b' -> ChannelToolSummary.EXCEPTION
+            grant -> ChannelToolSummary.BAN
+            else -> ChannelToolSummary.UNBAN
+        }
+        dispatch(summary, arg = trimmed) { target ->
+            listOf(modeMessage(target, (if (grant) "+" else "-") + letter, trimmed))
+        }
     }
 
-    fun setChannelMode(modes: String, args: String) = viewModelScope.launch {
-        val buffer = state.value.buffer ?: return@launch
-        val trimmedModes = modes.trim().takeIf(String::isNotBlank) ?: return@launch
-        val params = listOf(buffer.ircTarget, trimmedModes) +
-            args.split(' ').map(String::trim).filter(String::isNotBlank)
-        connectionManager.clientFor(buffer.networkId)?.send(IrcMessage(command = "MODE", params = params))
+    fun setBanMask(mask: String, grant: Boolean) = setListMask('b', mask, grant)
+
+    fun invite(nick: String) {
+        val trimmed = nick.trim().takeIf(String::isNotBlank) ?: return
+        dispatch(ChannelToolSummary.INVITE, arg = trimmed) { target ->
+            listOf(IrcMessage(command = "INVITE", params = listOf(trimmed, target)))
+        }
+    }
+
+    fun setChannelMode(modes: String, args: String) {
+        val trimmedModes = modes.trim().takeIf(String::isNotBlank) ?: return
+        dispatch(ChannelToolSummary.MODE) { target ->
+            val params = listOf(target, trimmedModes) +
+                args.split(' ').map(String::trim).filter(String::isNotBlank)
+            listOf(IrcMessage(command = "MODE", params = params))
+        }
+    }
+
+    // --- ban-target host resolution ---
+
+    private val _resolvedHost = MutableStateFlow<String?>(null)
+
+    /** Address for the ban picker's currently selected nick, null until one is known. */
+    val resolvedHost: StateFlow<String?> = _resolvedHost
+
+    private val _resolvingHost = MutableStateFlow(false)
+
+    /** True while a lookup is in flight, so the picker can say "looking up" instead of "unknown". */
+    val resolvingHost: StateFlow<Boolean> = _resolvingHost
+    private var hostJob: Job? = null
+    private var hostNick: String? = null
+
+    /** Point the host lookup at [nick]; null clears it (dialog closed or custom mask selected). */
+    fun resolveHostFor(nick: String?) {
+        if (hostNick == nick) return
+        hostJob?.cancel()
+        hostNick = nick
+        _resolvedHost.value = null
+        _resolvingHost.value = nick != null
+        if (nick == null) return
+        hostJob = viewModelScope.launch {
+            val host = resolveHost(nick)
+            // A newer selection has already taken over; don't clobber its result.
+            if (hostNick == nick) {
+                _resolvedHost.value = host
+                _resolvingHost.value = false
+            }
+        }
+    }
+
+    /**
+     * Address for [nick], cheapest source first: the WHOIS already on screen, then the cached
+     * `user@host` in Room, then a labeled WHOIS. Null when none of them knows.
+     */
+    private suspend fun resolveHost(nick: String): String? {
+        val networkId = state.value.buffer?.networkId ?: return null
+        val client = connectionManager.clientFor(networkId)
+        val normalize: (String) -> String =
+            { client?.isupport?.normalize(it) ?: state.value.identityRules.normalize(it) }
+        _nickSheet.value
+            ?.takeIf { normalize(it.nick) == normalize(nick) }
+            ?.details?.host?.takeIf(String::isNotBlank)
+            ?.let { return it }
+        hostFromUserHost(userDao.byNick(networkId, normalize(nick))?.hostmask)?.let { return it }
+        if (client == null || !client.hasCap("labeled-response")) return null
+        val lines = try {
+            client.sendLabeled(IrcMessage(command = "WHOIS", params = listOf(nick)))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return null
+        }
+        return parseWhois(lines)?.host?.takeIf(String::isNotBlank)
     }
 
     /** Reset a previous local result before opening the editor again. */

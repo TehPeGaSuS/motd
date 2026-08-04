@@ -255,6 +255,7 @@
     <string name="network_settings_discard">Discard</string>
     <string name="action_delete">Delete</string>
     <string name="action_cancel">Cancel</string>
+    <string name="action_add">Add</string>
     <string name="action_save">Save</string>
     <string name="action_edit">Edit</string>
     <string name="action_refresh">Refresh</string>
@@ -844,12 +845,75 @@
     <string name="channelinfo_topic_edit_hint">Channel topic</string>
     <string name="channelinfo_topic_edit_save">Save</string>
     <string name="channelinfo_topic_edit_failed">Couldn\'t send topic. Try again.</string>
-    <string name="channelinfo_operator_tools">Operator tools</string>
     <string name="channelinfo_invite_nick">Nick to invite</string>
     <string name="channelinfo_invite">Invite</string>
-    <string name="channelinfo_ban_mask">Ban mask</string>
-    <string name="channelinfo_set_ban">Set ban</string>
     <string name="channelinfo_remove_ban">Remove ban</string>
+
+    <!-- Channel operator controls. Flag modes are actions, not switches: nothing parses 324, so
+         the app cannot know which modes a channel currently has. -->
+    <string name="channelinfo_controls_title">Channel controls</string>
+    <string name="channelinfo_group_join">Who can join</string>
+    <string name="channelinfo_group_conversation">Conversation</string>
+    <string name="channelinfo_group_bans">Bans</string>
+    <string name="channelinfo_group_advanced">Advanced</string>
+    <string name="channelinfo_mode_on">On</string>
+    <string name="channelinfo_mode_off">Off</string>
+    <string name="channelinfo_invite_row">Invite someone</string>
+    <string name="channelinfo_invite_row_desc">Ask someone to join this channel</string>
+    <string name="channelinfo_mode_invite_only">Invite only</string>
+    <string name="channelinfo_mode_invite_only_desc">Only people with an invite can join</string>
+    <string name="channelinfo_mode_moderated">Moderated</string>
+    <string name="channelinfo_mode_moderated_desc">Only ops and voiced members can send messages</string>
+    <string name="channelinfo_mode_no_external">Members-only messages</string>
+    <string name="channelinfo_mode_no_external_desc">Block messages from people who aren\'t in the channel</string>
+    <string name="channelinfo_mode_topic_lock">Topic lock</string>
+    <string name="channelinfo_mode_topic_lock_desc">Only ops can change the topic</string>
+    <string name="channelinfo_mode_secret">Hidden channel</string>
+    <string name="channelinfo_mode_secret_desc">Hide this channel from the network\'s public channel list</string>
+    <string name="channelinfo_key_row">Join password</string>
+    <string name="channelinfo_key_row_desc">People must enter a password to join</string>
+    <string name="channelinfo_key_set">Set…</string>
+    <string name="channelinfo_key_remove">Remove</string>
+    <string name="channelinfo_key_dialog_title">Set join password</string>
+    <string name="channelinfo_key_hint">Password</string>
+    <string name="channelinfo_key_rule">No spaces or commas</string>
+    <string name="channelinfo_key_confirm">Set password</string>
+    <string name="channelinfo_limit_row">Member limit</string>
+    <string name="channelinfo_limit_row_desc">Cap how many people can be in the channel</string>
+    <string name="channelinfo_limit_dialog_title">Set member limit</string>
+    <string name="channelinfo_limit_hint">Limit</string>
+    <string name="channelinfo_limit_confirm">Set limit</string>
+    <string name="channelinfo_bans_row">Manage bans</string>
+    <string name="channelinfo_ban_dialog_title">Ban someone</string>
+    <string name="channelinfo_ban_who">Who</string>
+    <string name="channelinfo_ban_scope_nick">Just this nickname</string>
+    <string name="channelinfo_ban_scope_nick_desc">Stops working if they change their nickname</string>
+    <string name="channelinfo_ban_scope_host">Their address</string>
+    <string name="channelinfo_ban_scope_host_desc">Keeps working if they change their nickname</string>
+    <string name="channelinfo_ban_scope_host_loading">Looking up their address…</string>
+    <string name="channelinfo_ban_scope_host_unknown">Their address isn\'t known right now</string>
+    <string name="channelinfo_ban_scope_custom">Custom mask</string>
+    <string name="channelinfo_ban_mask_hint">Mask</string>
+    <string name="channelinfo_ban_mask_help">Format: nickname!user@host — * matches anything</string>
+    <string name="channelinfo_ban_mask_examples">Examples: alice!*@*, *!*@host.example.net</string>
+    <string name="channelinfo_ban_also_kick">Also kick them out now</string>
+    <string name="channelinfo_ban_persists">Bans stay until an op removes them.</string>
+    <string name="channelinfo_excepts_row">Ban exceptions</string>
+    <string name="channelinfo_excepts_dialog_title">Add ban exception</string>
+    <string name="channelinfo_excepts_desc">Lets someone join even if a ban matches them</string>
+    <string name="channelinfo_invex_row">Invite exceptions</string>
+    <string name="channelinfo_invex_dialog_title">Add invite exception</string>
+    <string name="channelinfo_invex_desc">Lets someone join without an invite while the channel is invite-only</string>
+    <string name="channelinfo_custom_mode_row">Custom mode</string>
+    <string name="channelinfo_custom_mode_desc">Modes vary by network. Anything not listed above depends on this server — check its documentation.</string>
+    <string name="channelinfo_custom_mode_needs_value">+%1$s needs a value</string>
+    <string name="channelinfo_custom_mode_unknown">%1$s isn\'t advertised by this network</string>
+    <string name="channelinfo_tool_sent_mode">Change sent</string>
+    <string name="channelinfo_tool_sent_invite">Invite sent to %1$s</string>
+    <string name="channelinfo_tool_sent_ban">Ban set on %1$s</string>
+    <string name="channelinfo_tool_sent_unban">Ban removed</string>
+    <string name="channelinfo_tool_sent_exception">Exception added</string>
+    <string name="channelinfo_tool_not_connected">Not connected — try again when this network is back online</string>
 
     <!-- Delete chat/buffer from the chat list (swipe-to-dismiss + long-press menu). Appended at
          end to avoid a same-file clobber with the parallel webpush-strings agent. -->
