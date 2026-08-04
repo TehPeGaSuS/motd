@@ -221,7 +221,10 @@ class MotdNotificationsFoolTest {
             false,
             chat("other", "before merge"),
         )
-        assertEquals(listOf(loserId.toInt()), manager.activeNotifications.map { it.id })
+        assertEquals(
+            listOf(MotdNotifications.messageNotificationId(loserId)),
+            manager.activeNotifications.map { it.id },
+        )
 
         BufferStore(db, notifications).mergeRooms(bufferId, loserId)
 
@@ -248,7 +251,10 @@ class MotdNotificationsFoolTest {
             eventId,
             afterMerge,
         )
-        assertEquals(listOf(bufferId.toInt()), manager.activeNotifications.map { it.id })
+        assertEquals(
+            listOf(MotdNotifications.messageNotificationId(bufferId)),
+            manager.activeNotifications.map { it.id },
+        )
 
         notifications.onRead(
             bufferId,

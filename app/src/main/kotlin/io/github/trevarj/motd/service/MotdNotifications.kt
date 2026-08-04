@@ -81,13 +81,15 @@ class MotdNotifications @Inject constructor(
 
     private val manager = NotificationManagerCompat.from(context)
 
-    // Per-buffer message history for MessagingStyle threading (notificationId = bufferId).
+    // Per-buffer message history for MessagingStyle threading (keyed by bufferId; the posted
+    // notification id is messageNotificationId(bufferId)).
     private val history = HashMap<Long, NotificationCompat.MessagingStyle>()
     private val historyKeys = HashMap<Long, MutableList<NotificationMessageKey>>()
 
     init {
         ensureChannels()
         applicationScope?.launch {
+            retireLegacyMessageNotifications()
             // Only the v9→v10 migration writes this marker. Fresh/empty databases must not infer
             // that another process instance's notifications are obsolete.
             runCatching {
@@ -102,6 +104,27 @@ class MotdNotifications @Inject constructor(
             }
             retireCommittedRoomMerges()
             recoverCanonicalNotifications()
+        }
+    }
+
+    /**
+     * Retire message notifications posted by a build that used the raw `bufferId` as the
+     * notification id. The new code only ever cancels ids in the [messageNotificationId] namespace,
+     * so an upgrade would otherwise strand those old notifications forever. A notification on a
+     * message/mention channel whose id is outside the namespace cannot have been posted by this
+     * build, which makes the sweep unconditional, idempotent, and harmless on a fresh install: it
+     * never inspects, and therefore never retires, the pinned status notification.
+     */
+    internal fun retireLegacyMessageNotifications() {
+        runCatching {
+            manager.activeNotifications
+                .filter { it.notification.channelId in MESSAGE_CHANNELS && !isMessageNotificationId(it.id) }
+                .forEach { legacy ->
+                    manager.cancel(legacy.id)
+                    diagnostics.record("notifications", "legacy_message_id_retired") {
+                        mapOf("notification_id" to legacy.id, "channel" to legacy.notification.channelId)
+                    }
+                }
         }
     }
 
@@ -448,7 +471,7 @@ class MotdNotifications @Inject constructor(
                 context, android.Manifest.permission.POST_NOTIFICATIONS,
             ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         if (canPost) {
-            manager.notify(bufferId.toInt(), notification)
+            manager.notify(messageNotificationId(bufferId), notification)
         }
         diagnostics.record("notifications", "message_post_finished") {
             mapOf(
@@ -478,7 +501,7 @@ class MotdNotifications @Inject constructor(
         }
         val activeIds = runCatching {
             manager.activeNotifications
-                .firstOrNull { it.id == bufferId.toInt() }
+                .firstOrNull { it.id == messageNotificationId(bufferId) }
                 ?.notification
                 ?.extras
                 ?.getLongArray(EXTRA_NOTIFICATION_EVENT_IDS)
@@ -493,7 +516,7 @@ class MotdNotifications @Inject constructor(
             history.remove(bufferId)
             historyKeys.remove(bufferId)
         }
-        manager.cancel(bufferId.toInt())
+        manager.cancel(messageNotificationId(bufferId))
         diagnostics.record("notifications", "message_notification_cleared") {
             mapOf(
                 "buffer_id" to bufferId,
@@ -508,7 +531,7 @@ class MotdNotifications @Inject constructor(
             history.remove(loserId)
             historyKeys.remove(loserId)
         }
-        manager.cancel(loserId.toInt())
+        manager.cancel(messageNotificationId(loserId))
         diagnostics.record("notifications", "room_notification_retired") {
             mapOf("winner_id" to winnerId, "loser_id" to loserId)
         }
@@ -630,6 +653,7 @@ class MotdNotifications @Inject constructor(
         }
     }
 
+
     private suspend fun effectiveLocalReadAnchor(buffer: RoomEntity): TimelineAnchor? {
         val local = buffer.localReadAnchorTime?.let { serverTime ->
             val eventId = buffer.localReadAnchorEventId ?: 0L
@@ -649,6 +673,7 @@ class MotdNotifications @Inject constructor(
         const val CHANNEL_INVITATIONS = "invitations"
         const val CHANNEL_TRANSFERS = "transfers"
         private const val MAX_NOTIFICATION_MESSAGES = 25
+        private val MESSAGE_CHANNELS = setOf(CHANNEL_MESSAGES, CHANNEL_MENTIONS)
         private val RESETTABLE_CHANNELS = setOf(
             CHANNEL_MESSAGES,
             CHANNEL_MENTIONS,
@@ -667,11 +692,28 @@ class MotdNotifications @Inject constructor(
         const val EXTRA_EVENT_ID = "notif_event_id"
         const val EXTRA_INVITE_MESSAGE_ID = "notif_invite_message_id"
 
+        /**
+         * Message notifications are keyed by buffer, and a raw `bufferId.toInt()` collided with
+         * [IrcForegroundService.STATUS_ID]: the conversation that happens to own buffer id 1
+         * overwrote and then cancelled the pinned foreground-service notification. Namespace the id
+         * like the invitation/transfer ids so it can never alias the status id or either of those
+         * ranges (invitations occupy `0x40000000..0x7fffffff`, transfers `0x50000000..0x5fffffff`).
+         */
+        internal fun messageNotificationId(bufferId: Long): Int =
+            MESSAGE_ID_NAMESPACE or (bufferId xor (bufferId ushr 32)).toInt().and(0x0fffffff)
+
+        /** True only for ids minted by [messageNotificationId]; used to retire legacy raw ids. */
+        internal fun isMessageNotificationId(id: Int): Boolean =
+            (id and NAMESPACE_MASK) == MESSAGE_ID_NAMESPACE
+
         internal fun invitationNotificationId(messageId: Long): Int =
             0x40000000 or (messageId xor (messageId ushr 32)).toInt().and(0x3fffffff)
 
         internal fun transferNotificationId(messageId: Long): Int =
             0x50000000 or (messageId xor (messageId ushr 32)).toInt().and(0x0fffffff)
+
+        private const val MESSAGE_ID_NAMESPACE = 0x10000000
+        private const val NAMESPACE_MASK = -0x10000000 // 0xf0000000
     }
 }
 
