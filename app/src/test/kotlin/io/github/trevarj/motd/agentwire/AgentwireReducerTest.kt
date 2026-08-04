@@ -711,6 +711,105 @@ class AgentwireReducerTest {
         assertEquals("uncertain", state.actionStatus["a1"])
     }
 
+    @Test
+    fun `claude backend hello advertises delivery only and offers no model picker`() {
+        val reducer = AgentwireReducer()
+
+        val state = reducer.reduce(
+            AgentwireUiState(syncing = true),
+            event(
+                "agent.hello",
+                epoch = "epoch-example",
+                data = buildJsonObject {
+                    put("protocol", "agentwire-irc-v1")
+                    put("backend", "claude")
+                    put("epoch", "epoch-example")
+                    put("settings", JsonArray(listOf(JsonPrimitive("delivery"))))
+                },
+            ),
+        )
+
+        assertEquals("claude", state.backend)
+        assertEquals(setOf("delivery"), state.supportedSettings)
+        assertTrue(state.modelOptions.isEmpty())
+    }
+
+    @Test
+    fun `a claude turn renders narration tools plan and answer as distinct timeline cards`() {
+        val reducer = AgentwireReducer()
+        var state: AgentwireUiState = AgentwireUiState(activeSid = "s1")
+
+        state = reducer.reduce(state, event("turn.started", sid = "s1", tid = "t1"))
+        state = reducer.reduce(
+            state,
+            event("user.prompt", sid = "s1", tid = "t1", iid = "p1", data = buildJsonObject {
+                put("content", "why does the test fail?")
+            }),
+        )
+        // Text emitted next to a tool call arrives as progress carrying the assistant message id.
+        state = reducer.reduce(
+            state,
+            event("plan.updated", sid = "s1", tid = "t1", iid = "msg_1", data = buildJsonObject {
+                put("summary", "Checking the failing test first.")
+            }),
+        )
+        state = reducer.reduce(
+            state,
+            event("tool.started", sid = "s1", tid = "t1", iid = "toolu_1", data = buildJsonObject {
+                put("kind", "shell"); put("id", "toolu_1")
+                put("label", "$ pytest -q"); put("input", "pytest -q")
+            }),
+        )
+        state = reducer.reduce(
+            state,
+            event("tool.completed", sid = "s1", tid = "t1", iid = "toolu_1", data = buildJsonObject {
+                put("kind", "shell"); put("id", "toolu_1"); put("success", true)
+                put("label", "$ pytest -q"); put("input", "pytest -q")
+                put("output", "1 failed"); put("status", "completed")
+            }),
+        )
+        // TodoWrite plan updates carry no iid, so successive writes replace one plan card.
+        listOf(1 to true, 2 to false).forEach { (completed, running) ->
+            state = reducer.reduce(
+                state,
+                event("plan.updated", sid = "s1", tid = "t1", data = buildJsonObject {
+                    put("summary", if (running) "plan: Fixing it" else "Plan completed")
+                    put("plan", true); put("running", running)
+                    put("status", if (running) "inProgress" else "completed")
+                    put("completedSteps", completed); put("totalSteps", 2)
+                }),
+            )
+        }
+        state = reducer.reduce(
+            state,
+            event("assistant.completed", sid = "s1", tid = "t1", data = buildJsonObject {
+                put("content", "The assertion is inverted.")
+            }),
+        )
+        state = reducer.reduce(state, event("turn.completed", sid = "s1", tid = "t1"))
+
+        assertFalse(state.busy)
+        // turn.started and turn.completed share one stable id, so the turn card is replaced
+        // in place rather than bracketing the transcript.
+        assertEquals(
+            listOf("turn.completed", "user.prompt", "plan.updated", "tool.completed", "plan.updated", "assistant.completed"),
+            state.timeline.map { it.kind },
+        )
+        assertEquals(true, state.timeline.first().success)
+        // The started and completed tool events collapse onto one card keyed by iid.
+        val tool = state.timeline.single { it.kind == "tool.completed" }
+        assertEquals("$ pytest -q", tool.title)
+        assertEquals(true, tool.success)
+        assertTrue(tool.body!!.contains("Command\npytest -q"))
+        assertTrue(tool.body!!.contains("Output\n1 failed"))
+        val plans = state.timeline.filter { it.kind == "plan.updated" }
+        assertEquals(2, plans.size)
+        assertEquals("Checking the failing test first.", plans.first().body)
+        assertEquals("Plan completed\n\n2 of 2 steps complete", plans.last().body)
+        assertFalse(plans.last().running)
+        assertEquals("The assertion is inverted.", state.timeline.single { it.kind == "assistant.completed" }.body)
+    }
+
     private fun queue(id: String, content: String, position: Int) = buildJsonObject {
         put("iid", id); put("content", content); put("position", position); put("sid", "s1")
     }

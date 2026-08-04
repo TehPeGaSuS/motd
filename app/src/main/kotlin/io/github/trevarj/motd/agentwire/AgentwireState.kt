@@ -516,7 +516,8 @@ private fun restoredSessionTimeline(
     if (outputs.isEmpty() && activity.isEmpty()) {
         val status = when (data.string("status")) {
             "waiting" -> "Waiting for your input."
-            "running" -> "Codex is currently working."
+            // Every backend reaches this branch, so the copy must not name one.
+            "running" -> "The agent is currently working."
             "ready" -> "Session is ready for a prompt."
             else -> "Session attached."
         }

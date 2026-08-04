@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.irc.agentwire
 
 import java.security.MessageDigest
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -32,11 +33,30 @@ class AgentwireProtocolTest {
 
     @Test
     fun `canonical fixtures validate and re-encode byte for byte`() {
-        listOf("hello.json", "prompt-action.json").forEach { name ->
+        listOf("hello.json", "prompt-action.json", "claude-hello.json").forEach { name ->
             val fixture = resource("agentwire/fixtures/$name").trimEnd()
             val envelope = (decodeAgentwireValue(fixture).getOrThrow() as AgentwireValue.Envelope).value
             assertEquals(fixture, encodeAgentwireEnvelope(envelope))
         }
+    }
+
+    @Test
+    fun `claude backend activates like any other and its hello decodes unchanged`() {
+        val topic = parseAgentwireTopic(resource("agentwire/fixtures/trusted-claude-topic.txt").trimEnd())
+
+        assertEquals("claude", topic?.backend)
+        assertEquals("trev", topic?.account)
+        assertEquals("agentwire", topic?.agentAccount)
+        // The backend name is opaque to the client: only the topic's shape is validated.
+        assertEquals("opencode", parseAgentwireTopic("agentwire:v1;account=trev;agent=a;backend=opencode")?.backend)
+        assertEquals("claude", parseAgentwireTopic("agentwire:v1;backend=claude;account=trev;agent=a")?.backend)
+        // Agentwire's own canonical claude topic still omits the agent account this client requires.
+        assertNull(parseAgentwireTopic(resource("agentwire/fixtures/claude-topic.txt").trimEnd()))
+
+        val hello = resource("agentwire/fixtures/claude-hello.json").trimEnd()
+        val envelope = (decodeAgentwireValue(hello).getOrThrow() as AgentwireValue.Envelope).value
+        assertEquals("agent.hello", envelope.kind)
+        assertEquals("claude", envelope.data?.get("backend")?.let { (it as JsonPrimitive).content })
     }
 
     @Test
