@@ -220,6 +220,9 @@ class MotdNotifications @Inject constructor(
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_TRANSFERS, "File transfers", NotificationManager.IMPORTANCE_HIGH),
         )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_SEND_FAILURES, "Failed sends", NotificationManager.IMPORTANCE_HIGH),
+        )
     }
 
     // -- status notification (foreground service) --
@@ -653,6 +656,69 @@ class MotdNotifications @Inject constructor(
         }
     }
 
+    // -- failed notification replies --
+
+    /**
+     * A rejected send never reached a durable row, so — unlike an echo timeout, which leaves a
+     * `failed` timeline event with a retry affordance — there is nothing in the timeline to retry
+     * from and the RemoteInput UI has already reported success. Mirror the in-app contract
+     * (`ChatViewModel.submit` keeps the composer draft and raises a rejection snackbar): the caller
+     * preserves the text in the buffer's composer draft, and this notification shows exactly what
+     * was not sent, why, and offers a one-tap retry.
+     */
+    suspend fun onReplyFailed(bufferId: Long, text: String, reason: SendRejectionReason) {
+        val buffer = runCatching { db.bufferDao().observeById(bufferId) }.getOrNull()
+        val title = buffer?.displayName?.let { "Not sent to $it" } ?: "Message not sent"
+        val retryIntent = PendingIntent.getBroadcast(
+            context,
+            sendFailureNotificationId(bufferId),
+            Intent(context, ReplyReceiver::class.java)
+                .setAction(ReplyReceiver.ACTION_RETRY_REPLY)
+                .putExtra(ReplyReceiver.EXTRA_BUFFER_ID, bufferId)
+                .putExtra(ReplyReceiver.EXTRA_REPLY_TEXT, text),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        // Tapping opens the conversation, where the preserved draft is waiting in the composer.
+        val contentIntent = PendingIntent.getActivity(
+            context,
+            sendFailureNotificationId(bufferId) + 1,
+            Intent(context, MainActivity::class.java)
+                .setAction(ACTION_OPEN_BUFFER)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(EXTRA_BUFFER_ID, bufferId),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val body = "${sendRejectionText(reason)}\n$text"
+        val notification = NotificationCompat.Builder(context, CHANNEL_SEND_FAILURES)
+            .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setCategory(NotificationCompat.CATEGORY_ERROR)
+            .setAutoCancel(true)
+            .setContentIntent(contentIntent)
+            .addAction(android.R.drawable.ic_menu_send, "Retry", retryIntent)
+            .build()
+        val canPost = android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (canPost) manager.notify(sendFailureNotificationId(bufferId), notification)
+        diagnostics.record("notifications", "reply_failure_post_finished") {
+            mapOf(
+                "buffer_id" to bufferId,
+                "reason" to reason.name,
+                "body_fp" to diagnostics.fingerprint(text),
+                "permission" to canPost,
+            )
+        }
+    }
+
+    /** Retire the failure notice once the same text is finally accepted. */
+    fun onReplyFailureResolved(bufferId: Long) {
+        manager.cancel(sendFailureNotificationId(bufferId))
+    }
 
     private suspend fun effectiveLocalReadAnchor(buffer: RoomEntity): TimelineAnchor? {
         val local = buffer.localReadAnchorTime?.let { serverTime ->
@@ -672,6 +738,7 @@ class MotdNotifications @Inject constructor(
         const val CHANNEL_MENTIONS = "mentions"
         const val CHANNEL_INVITATIONS = "invitations"
         const val CHANNEL_TRANSFERS = "transfers"
+        const val CHANNEL_SEND_FAILURES = "send_failures"
         private const val MAX_NOTIFICATION_MESSAGES = 25
         private val MESSAGE_CHANNELS = setOf(CHANNEL_MESSAGES, CHANNEL_MENTIONS)
         private val RESETTABLE_CHANNELS = setOf(
@@ -679,6 +746,7 @@ class MotdNotifications @Inject constructor(
             CHANNEL_MENTIONS,
             CHANNEL_INVITATIONS,
             CHANNEL_TRANSFERS,
+            CHANNEL_SEND_FAILURES,
         )
         private const val V10_NOTIFICATION_RESET = "v10_notification_reset"
         private const val MAX_RECOVERY_NOTIFICATIONS = 200
@@ -712,6 +780,10 @@ class MotdNotifications @Inject constructor(
         internal fun transferNotificationId(messageId: Long): Int =
             0x50000000 or (messageId xor (messageId ushr 32)).toInt().and(0x0fffffff)
 
+        /** Failure notices are keyed by buffer too, and must not alias any other range. */
+        internal fun sendFailureNotificationId(bufferId: Long): Int =
+            0x20000000 or (bufferId xor (bufferId ushr 32)).toInt().and(0x0fffffff)
+
         private const val MESSAGE_ID_NAMESPACE = 0x10000000
         private const val NAMESPACE_MASK = -0x10000000 // 0xf0000000
     }
@@ -725,6 +797,20 @@ internal fun statusNotificationText(
     starting -> "Keeping chats connected"
     reconnecting -> "Reconnecting…"
     else -> "Connected to $connectedCount networks"
+}
+
+/**
+ * User-facing reason for a rejected send, worded like the in-app snackbars
+ * (`chat_send_rejected`, `chat_not_in_channel`).
+ */
+internal fun sendRejectionText(reason: SendRejectionReason): String = when (reason) {
+    SendRejectionReason.NOT_IN_CHANNEL -> "You're not in this channel"
+    SendRejectionReason.BUFFER_NOT_FOUND -> "This conversation is no longer available"
+    SendRejectionReason.UNSUPPORTED_BUFFER -> "This conversation can't receive messages"
+    SendRejectionReason.INVALID_CONTENT,
+    SendRejectionReason.EVENT_NOT_RETRYABLE,
+    SendRejectionReason.PERSISTENCE_FAILED,
+    -> "Couldn't save this message"
 }
 
 /** Stable identity for one notification entry, independent of live/push delivery provenance. */
