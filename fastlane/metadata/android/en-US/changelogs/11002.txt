@@ -1,0 +1,1 @@
+Fixed unsteady chat wallpaper rendering and jumpy message motion.

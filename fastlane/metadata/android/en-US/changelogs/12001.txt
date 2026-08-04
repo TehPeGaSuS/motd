@@ -1,0 +1,2 @@
+- Fixed multiline messages from history arriving split into fragments.
+- Fixed the launcher icon being cropped outside the icon safe zone.

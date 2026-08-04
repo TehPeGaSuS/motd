@@ -1,0 +1,5 @@
+- Added an invitation inbox that collects channel invitations in the chat list.
+- Fixed unread placement and history sync flicker when opening a conversation.
+- Read markers now advance only for messages actually shown on screen.
+- Fixed popular channel browsing failing to load.
+- Added an experimental agent harness, off by default.

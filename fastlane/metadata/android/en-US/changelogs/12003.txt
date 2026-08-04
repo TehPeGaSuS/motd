@@ -1,0 +1,5 @@
+- Added the complete Modus theme family and a refreshed tonal look.
+- Added an adaptive chat workspace with restyled conversation and chat lists.
+- Improved history catch-up with visible sync progress that no longer blocks chats.
+- Fixed channel lists stalling after a request timed out.
+- Voice recording now needs a hold, so quick taps no longer start a recording.

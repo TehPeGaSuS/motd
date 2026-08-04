@@ -1,0 +1,5 @@
+- Added voice messages with inline audio playback and a compact player.
+- Added archived conversations with pull-to-reveal and multi-select actions.
+- Added settings backup and restore, plus network operator moderation tools.
+- Improved themes with paired palettes and follow-system dark/light switching.
+- Conversations now open at your first unread message, and the scroll button walks unread mentions.

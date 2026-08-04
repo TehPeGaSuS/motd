@@ -1,0 +1,4 @@
+- Added a soju file host backend for attachment uploads.
+- Improved audio with buffered streams, queued chat sounds, and a larger scrubber target.
+- Fixed archived chats not appearing immediately or reverting after archiving.
+- Clarified the settings hierarchy and backup form controls.

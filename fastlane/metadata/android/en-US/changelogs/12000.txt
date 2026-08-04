@@ -1,0 +1,4 @@
+- Added DCC file transfers with durable progress and clear failure handling.
+- Added rich media previews for links shared in chat.
+- Added support for IRCv3 multiline messages.
+- Guided setup can now be skipped during onboarding.

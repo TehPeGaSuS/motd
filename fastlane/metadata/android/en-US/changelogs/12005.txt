@@ -1,0 +1,5 @@
+- Missing history now loads as you scroll toward it, with visible seams where a gap remains.
+- Conversations reopen where you left off and hold the unread divider in place.
+- Fixed message notifications replacing one another.
+- A reply rejected from a notification is kept as a draft with a retry action instead of being lost.
+- Repaired conversations whose history had been marked permanently unrecoverable.
