@@ -26,6 +26,7 @@ class ConnectionRegistryTest {
         var starts = 0
         var stops = 0
         var probes = 0
+        var wakes = 0
 
         override fun start() {
             starts++
@@ -38,7 +39,7 @@ class ConnectionRegistryTest {
         }
 
         override suspend fun stopAndJoin() = stop()
-        override fun onNetworkAvailable() = Unit
+        override fun onNetworkAvailable() { wakes++ }
         override fun onNetworkLost() = Unit
         override fun probe() { probes++ }
     }
@@ -285,6 +286,53 @@ class ConnectionRegistryTest {
         runCurrent()
 
         assertEquals(1, created.single().probes)
+    }
+
+    /**
+     * App-foreground recovery: `reconnectStale` wakes actors that are mid-backoff so a bouncer that
+     * came back while the device stayed online is redialled on the next foreground instead of
+     * waiting out the remaining exponential delay. The wake must stay narrow so it cannot become a
+     * wake-everything reconnect storm: a healthy Ready socket is probed, never redialled, and a
+     * dead (fatal/cert-parked) actor is left for reconcile to rebuild.
+     */
+    @Test
+    fun foregroundWake_targetsBackingOffActors_andSparesReadyAndDeadOnes() = runTest {
+        val created = mutableMapOf<Long, FakeActor>()
+        val registry = ConnectionRegistry(
+            backgroundScope,
+            actorFactory = { row, _ -> FakeActor().also { created[row.id] = it } },
+            isConfigurationFailure = { false },
+        )
+        val retrying = network(id = 1)
+        val ready = network(id = 2)
+        val dead = network(id = 3)
+        val rows = listOf(retrying to "fp1", ready to "fp2", dead to "fp3")
+        registry.beginStart()
+        registry.reconcile(rows, setOf(retrying.id, ready.id, dead.id), emptySet())
+
+        // The backing-off actor publishes Connecting while it serves the retry delay.
+        registry.actorState(
+            retrying.id,
+            registry.snapshot.value.actors.getValue(retrying.id).generation,
+            "fp1",
+            IrcClientState.Connecting,
+        )
+        registry.actorState(
+            ready.id,
+            registry.snapshot.value.actors.getValue(ready.id).generation,
+            "fp2",
+            IrcClientState.Ready("me", emptySet(), emptyMap()),
+        )
+        // A fatal/cert-parked actor's loop has returned; only reconcile may rebuild it.
+        created.getValue(dead.id).isAlive = false
+        runCurrent()
+
+        registry.wakeNonReady()
+        runCurrent()
+
+        assertEquals(1, created.getValue(retrying.id).wakes)
+        assertEquals(0, created.getValue(ready.id).wakes)
+        assertEquals(0, created.getValue(dead.id).wakes)
     }
 
     @Test

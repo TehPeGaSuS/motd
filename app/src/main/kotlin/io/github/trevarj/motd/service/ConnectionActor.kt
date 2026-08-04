@@ -154,7 +154,11 @@ class ConnectionActor(
         connection = null
     }
 
-    /** Network available again: skip the remaining backoff delay and retry immediately. */
+    /**
+     * Skip the remaining backoff delay and retry immediately. Named for its original caller (the
+     * connectivity callback), but it is the actor's general "a retry is worth trying now" entry:
+     * app-foreground recovery raises it too via `ConnectionRegistry.wakeNonReady()`.
+     */
     override fun onNetworkAvailable() { retryNow.trySend(Unit) }
 
     /** Network lost: fast-fail the current connect attempt so backoff starts promptly. */
@@ -409,10 +413,16 @@ class ConnectionActor(
     }
 
     /**
-     * Wait for the backoff delay, waking early when the network becomes available. Returns true if
-     * it woke on that signal rather than serving the full delay. Note the signal is Android
-     * connectivity: a server that returns while the device stayed online does not raise it, so the
-     * loop serves the whole delay in that case.
+     * Wait for the backoff delay, waking early on [onNetworkAvailable]. Returns true if it woke on
+     * that signal rather than serving the full delay.
+     *
+     * [onNetworkAvailable] is the single wake entry, but it is not only raised by Android
+     * connectivity: `ConnectionRegistry` also raises it for every non-Ready actor on
+     * `wakeNonReady()`, which `ConnectionManagerImpl.reconnectStale()` calls on every app-foreground
+     * transition. So a bouncer that returns while the device stayed online is redialled as soon as
+     * the user next foregrounds motd, and an explicit user connect bypasses the wait entirely by
+     * rebuilding the actor. Absent any of those, the delay is served in full, which is deliberate:
+     * it is what keeps a genuinely-down server from being hammered.
      */
     private suspend fun waitBeforeRetry(delayMs: Long): Boolean {
         while (retryNow.tryReceive().isSuccess) { /* drain stale signals */ }

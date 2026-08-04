@@ -212,6 +212,49 @@ class ConnectionActorTest {
         actor.stop()
     }
 
+    /**
+     * The protective half of the wake contract: with no wake signal at all, a server that is
+     * genuinely down must keep escalating to the 90s cap and must not redial early. Pins the
+     * anti-storm behavior that [networkAvailable_skipsRemainingBackoff] deliberately bypasses.
+     */
+    @Test
+    fun sustainedOutage_escalatesToCappedBackoff_andNeverRedialsEarly() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val conns = ArrayDeque<FakeConnection>()
+        val actor = ConnectionActor(
+            networkId = 1, scope = scope,
+            connectionFactory = { FakeConnection().also { conns.addLast(it) } },
+            onState = { _, _ -> }, onEvent = { _, _ -> }, onReady = {},
+            random = { 0.5 }, // jitter 1.0, so the delay is exactly the nominal schedule
+        )
+        actor.start()
+        scope.testScheduler.runCurrent()
+        assertEquals(1, conns.size)
+
+        // Attempts 0..5 double from the 2s base. Each one is served in full.
+        listOf(2_000L, 4_000L, 8_000L, 16_000L, 32_000L, 64_000L).forEachIndexed { index, delayMs ->
+            conns.last().transition(IrcClientState.Disconnected)
+            scope.testScheduler.runCurrent()
+            assertEquals(index + 1, conns.size)
+            scope.testScheduler.advanceTimeBy(delayMs + 1)
+            scope.testScheduler.runCurrent()
+            assertEquals(index + 2, conns.size)
+        }
+
+        // Attempt 6 would be 128s; the cap holds it at 90s and the actor serves all of it.
+        val beforeCap = conns.size
+        conns.last().transition(IrcClientState.Disconnected)
+        scope.testScheduler.runCurrent()
+        scope.testScheduler.advanceTimeBy(89_000)
+        scope.testScheduler.runCurrent()
+        assertEquals(beforeCap, conns.size)
+        scope.testScheduler.advanceTimeBy(1_500)
+        scope.testScheduler.runCurrent()
+        assertEquals(beforeCap + 1, conns.size)
+        actor.stop()
+    }
+
     @Test
     fun connectionLeavingReady_cancelsConnectionOwnedSetup() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
