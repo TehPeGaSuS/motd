@@ -28,9 +28,9 @@ data class TimelineSeam(
  *
  * ## Why the seam takes the WINDOW lower-bound projection
  *
- * A seam's position is `newer.asInclusiveLowerBound()` — the same role [windowBounds] feeds into
- * the presented window's inclusive lower boundary — and deliberately NOT
- * [GapEdgeAnchor.asFocusNewerPosition].
+ * A seam's position is `newer.asInclusiveLowerBound()` — the projection that answers "which rows sit
+ * at or after this gap", which is the role the retired window clamp took for its inclusive lower
+ * boundary — and deliberately NOT [GapEdgeAnchor.asFocusNewerPosition].
  *
  * Both roles ask the identical question of the identical edge: *which rows sit at or after this
  * gap?* The window answers by clamping and the seam answers by drawing a line, but the cut lands in

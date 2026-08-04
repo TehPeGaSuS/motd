@@ -97,7 +97,6 @@ class MessageVisibilityReader @Inject constructor(
         after: TimelineAnchor,
         maxCount: Int,
         spec: MessageVisibilitySpec,
-        bounds: MessageWindowBounds = MessageWindowBounds(),
     ): Int {
         if (beforeIndex <= 0 || maxCount <= 0) return 0
         val context = visibilityContext(bufferId)
@@ -109,7 +108,6 @@ class MessageVisibilityReader @Inject constructor(
                 maxCount,
                 spec,
                 context.identityRules,
-                bounds,
             ),
         )
     }
@@ -118,11 +116,10 @@ class MessageVisibilityReader @Inject constructor(
         bufferId: Long,
         after: TimelineAnchor,
         spec: MessageVisibilitySpec,
-        bounds: MessageWindowBounds = MessageWindowBounds(),
     ): TimelineAnchor? {
         val context = visibilityContext(bufferId)
         return db.messageDao().rawMessage(
-            firstVisibleUnreadQuery(context.roomId, after, spec, context.identityRules, bounds),
+            firstVisibleUnreadQuery(context.roomId, after, spec, context.identityRules),
         )
             ?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
     }
@@ -154,7 +151,6 @@ class MessageVisibilityReader @Inject constructor(
         beforeIndex: Int,
         after: TimelineAnchor,
         spec: MessageVisibilitySpec,
-        bounds: MessageWindowBounds = MessageWindowBounds(),
     ): VisibleMessageAnchor? {
         if (beforeIndex <= 0) return null
         val context = visibilityContext(bufferId)
@@ -165,7 +161,6 @@ class MessageVisibilityReader @Inject constructor(
                 after,
                 spec,
                 context.identityRules,
-                bounds,
             ),
         )?.let { VisibleMessageAnchor(it.id, it.msgid, it.serverTime, it.timelineOrder) }
     }

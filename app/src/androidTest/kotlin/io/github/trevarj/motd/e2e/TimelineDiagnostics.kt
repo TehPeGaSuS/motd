@@ -39,8 +39,8 @@ private const val COMPOSED_ROW_LIMIT = 60
  * The required gate's newest-row wait can only report "the row never appeared", which is true of
  * every competing explanation at once. This captures the four independent states that disagree in
  * different ways per hypothesis — what Paging presents, what the Paging key map resolves, what Room
- * holds, and what the history window bounds admit — so the next red run names the cause instead of
- * restating the symptom.
+ * holds, and where the room's history gaps resolve to — so the next red run names the cause instead
+ * of restating the symptom.
  *
  * Two invariants make this safe to run inside a required journey:
  *
@@ -197,8 +197,8 @@ internal class TimelineDiagnostics(
 
     /**
      * Room's own answer, re-read fresh: the target row, the newest rows around it, the room's
-     * history gaps, the window bounds those gaps produce, and the exact row set the production
-     * paging query would present under them.
+     * history gaps with both role projections of each newer edge, and the exact row set the
+     * production paging query would present.
      */
     private fun roomSnapshot(targetKey: Long): JSONObject {
         val out = JSONObject()

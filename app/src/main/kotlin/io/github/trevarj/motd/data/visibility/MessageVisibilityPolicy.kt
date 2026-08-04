@@ -227,53 +227,28 @@ internal fun countVisibleUnreadInTimelinePrefixQuery(
     maxCount: Int,
     spec: MessageVisibilitySpec,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
-    bounds: MessageWindowBounds = MessageWindowBounds(),
 ): SimpleSQLiteQuery {
     val visibility = MessageVisibilitySql(spec, identityRules)
-    val lower = bounds.lowerBoundary
-    val upper = bounds.upperBoundary
     return SimpleSQLiteQuery(
         "SELECT COUNT(*) FROM (" +
             "SELECT 1 FROM (" +
             "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
-            (lower?.let {
-                "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
-                    "(m.timelineOrder = ? AND m.id >= ?)))) "
-            } ?: "") +
-            (upper?.let {
-                "AND (m.serverTime < ? OR (m.serverTime = ? AND (m.timelineOrder < ? OR " +
-                    "(m.timelineOrder = ? AND m.id <= ?)))) "
-            } ?: "") +
             "AND ${visibility.timeline()} ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT ?" +
             ") AS viewport WHERE (viewport.serverTime > ? OR " +
             "(viewport.serverTime = ? AND (viewport.timelineOrder > ? OR " +
             "(viewport.timelineOrder = ? AND viewport.id > ?)))) " +
             "AND ${visibility.visibleUnread("viewport")} LIMIT ?" +
             ") AS capped",
-        buildList<Any?> {
-            add(bufferId)
-            lower?.let {
-                add(it.serverTime)
-                add(it.serverTime)
-                add(it.timelineOrder)
-                add(it.timelineOrder)
-                add(it.eventId)
-            }
-            upper?.let {
-                add(it.serverTime)
-                add(it.serverTime)
-                add(it.timelineOrder)
-                add(it.timelineOrder)
-                add(it.eventId)
-            }
-            add(beforeIndex.coerceAtLeast(0))
-            add(after.serverTime)
-            add(after.serverTime)
-            add(after.timelineOrder)
-            add(after.timelineOrder)
-            add(after.eventId)
-            add(maxCount.coerceAtLeast(0))
-        }.toTypedArray(),
+        arrayOf<Any>(
+            bufferId,
+            beforeIndex.coerceAtLeast(0),
+            after.serverTime,
+            after.serverTime,
+            after.timelineOrder,
+            after.timelineOrder,
+            after.eventId,
+            maxCount.coerceAtLeast(0),
+        ),
     )
 }
 
@@ -282,41 +257,21 @@ internal fun firstVisibleUnreadQuery(
     after: TimelineAnchor,
     spec: MessageVisibilitySpec,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
-    bounds: MessageWindowBounds = MessageWindowBounds(),
-): SimpleSQLiteQuery {
-    val lower = bounds.lowerBoundary
-    val upper = bounds.upperBoundary
-    val args = mutableListOf<Any>(
+): SimpleSQLiteQuery = SimpleSQLiteQuery(
+    "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
+        "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
+        "(m.timelineOrder = ? AND m.id > ?)))) " +
+        "AND ${MessageVisibilitySql(spec, identityRules).visibleUnread()} " +
+        "ORDER BY m.serverTime ASC, m.timelineOrder ASC, m.id ASC LIMIT 1",
+    arrayOf<Any>(
         bufferId,
         after.serverTime,
         after.serverTime,
         after.timelineOrder,
         after.timelineOrder,
         after.eventId,
-    )
-    lower?.let {
-        args.addAll(listOf(it.serverTime, it.serverTime, it.timelineOrder, it.timelineOrder, it.eventId))
-    }
-    upper?.let {
-        args.addAll(listOf(it.serverTime, it.serverTime, it.timelineOrder, it.timelineOrder, it.eventId))
-    }
-    return SimpleSQLiteQuery(
-        "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
-            "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
-            "(m.timelineOrder = ? AND m.id > ?)))) " +
-            (lower?.let {
-                "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
-                    "(m.timelineOrder = ? AND m.id >= ?)))) "
-            } ?: "") +
-            (upper?.let {
-                "AND (m.serverTime < ? OR (m.serverTime = ? AND (m.timelineOrder < ? OR " +
-                    "(m.timelineOrder = ? AND m.id <= ?)))) "
-            } ?: "") +
-            "AND ${MessageVisibilitySql(spec, identityRules).visibleUnread()} " +
-            "ORDER BY m.serverTime ASC, m.timelineOrder ASC, m.id ASC LIMIT 1",
-        args.toTypedArray(),
-    )
-}
+    ),
+)
 
 /**
  * Oldest unread nick mention among the newest [beforeIndex] visible-timeline rows: the nearest
@@ -330,22 +285,11 @@ internal fun nearestUnreadMentionInPrefixQuery(
     after: TimelineAnchor,
     spec: MessageVisibilitySpec,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
-    bounds: MessageWindowBounds = MessageWindowBounds(),
 ): SimpleSQLiteQuery {
     val visibility = MessageVisibilitySql(spec, identityRules)
-    val lower = bounds.lowerBoundary
-    val upper = bounds.upperBoundary
     return SimpleSQLiteQuery(
         "SELECT viewport.* FROM (" +
             "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
-            (lower?.let {
-                "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
-                    "(m.timelineOrder = ? AND m.id >= ?)))) "
-            } ?: "") +
-            (upper?.let {
-                "AND (m.serverTime < ? OR (m.serverTime = ? AND (m.timelineOrder < ? OR " +
-                    "(m.timelineOrder = ? AND m.id <= ?)))) "
-            } ?: "") +
             "AND ${visibility.timeline()} ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT ?" +
             ") AS viewport WHERE (viewport.serverTime > ? OR " +
             "(viewport.serverTime = ? AND (viewport.timelineOrder > ? OR " +
@@ -353,29 +297,15 @@ internal fun nearestUnreadMentionInPrefixQuery(
             "AND ${visibility.visibleUnread("viewport")} " +
             "AND viewport.hasMention = 1 " +
             "ORDER BY viewport.serverTime ASC, viewport.timelineOrder ASC, viewport.id ASC LIMIT 1",
-        buildList<Any?> {
-            add(bufferId)
-            lower?.let {
-                add(it.serverTime)
-                add(it.serverTime)
-                add(it.timelineOrder)
-                add(it.timelineOrder)
-                add(it.eventId)
-            }
-            upper?.let {
-                add(it.serverTime)
-                add(it.serverTime)
-                add(it.timelineOrder)
-                add(it.timelineOrder)
-                add(it.eventId)
-            }
-            add(beforeIndex.coerceAtLeast(0))
-            add(after.serverTime)
-            add(after.serverTime)
-            add(after.timelineOrder)
-            add(after.timelineOrder)
-            add(after.eventId)
-        }.toTypedArray(),
+        arrayOf<Any>(
+            bufferId,
+            beforeIndex.coerceAtLeast(0),
+            after.serverTime,
+            after.serverTime,
+            after.timelineOrder,
+            after.timelineOrder,
+            after.eventId,
+        ),
     )
 }
 
@@ -405,7 +335,3 @@ private const val TRUE = "1"
 private const val HEX = "0123456789abcdef"
 private val JOIN_PART_QUIT_KIND_SQL = JOIN_PART_QUIT_KINDS.joinToString(",") { "'${it.name}'" }
 private val CONVERSATION_KIND_SQL = CONVERSATION_KINDS.joinToString(",") { "'${it.name}'" }
-data class MessageWindowBounds(
-    val lowerBoundary: TimelineAnchor? = null,
-    val upperBoundary: TimelineAnchor? = null,
-)
