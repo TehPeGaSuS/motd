@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -23,6 +25,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -65,8 +68,9 @@ fun SearchScreen(
     // Legacy plain-open (bufferId only). Kept until R3 rewires NavGraph to onOpenHit; onOpenHit
     // defaults to delegating here so the current NavGraph call site stays source-compatible.
     onOpenBuffer: (Long) -> Unit = {},
-    // Deep-jump carries canonical local identity so msgidless repeated events remain exact.
-    onOpenHit: (bufferId: Long, msgid: String?, serverTime: Long, eventId: Long) -> Unit =
+    // Deep-jump carries canonical local identity so msgidless repeated events remain exact. A
+    // server hit has no local row at all, so eventId is nullable and null for those.
+    onOpenHit: (bufferId: Long, msgid: String?, serverTime: Long, eventId: Long?) -> Unit =
         { b, _, _, _ -> onOpenBuffer(b) },
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
@@ -77,6 +81,7 @@ fun SearchScreen(
         state = state,
         onQueryChange = viewModel::onQueryChange,
         onScopeChange = viewModel::onScopeChange,
+        onServerSearchSubmit = viewModel::onServerSearchSubmit,
         onBack = onBack,
         onOpenHit = { hit ->
             onOpenHit(
@@ -86,6 +91,7 @@ fun SearchScreen(
                 hit.message.id,
             )
         },
+        onOpenServerHit = { hit -> onOpenHit(hit.bufferId, hit.msgid, hit.serverTime, null) },
     )
 }
 
@@ -97,6 +103,8 @@ fun SearchContent(
     onScopeChange: (SearchScope) -> Unit,
     onBack: () -> Unit,
     onOpenHit: (SearchHit) -> Unit,
+    onServerSearchSubmit: () -> Unit = {},
+    onOpenServerHit: (ServerHitUi) -> Unit = {},
 ) {
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -158,6 +166,12 @@ fun SearchContent(
                         },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        // The wire round trip is submit-driven only; local search stays debounced.
+                        keyboardActions = KeyboardActions(
+                            onSearch = {
+                                if (visibleState.scope == SearchScope.SERVER) onServerSearchSubmit()
+                            },
+                        ),
                         colors = TextFieldDefaults.colors(
                             focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                             unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
@@ -187,6 +201,14 @@ fun SearchContent(
                         onClick = { onScopeChange(SearchScope.CURRENT) },
                         label = { Text(stringResource(R.string.search_chip_current)) },
                     )
+                    if (visibleState.serverSearchAvailable) {
+                        FilterChip(
+                            selected = visibleState.scope == SearchScope.SERVER,
+                            onClick = { onScopeChange(SearchScope.SERVER) },
+                            label = { Text(stringResource(R.string.search_chip_server)) },
+                            modifier = Modifier.testTag("search_scope_server"),
+                        )
+                    }
                 }
             }
 
@@ -202,6 +224,13 @@ fun SearchContent(
             }
 
             when {
+                visibleState.scope == SearchScope.SERVER -> ServerSearchSection(
+                    server = visibleState.server,
+                    query = parseSearchQuery(visibleState.rawQuery).text,
+                    onRetry = onServerSearchSubmit,
+                    onOpenHit = onOpenServerHit,
+                )
+
                 visibleState.rawQuery.isBlank() -> EmptyState(
                     icon = Icons.Outlined.SearchOff,
                     title = stringResource(R.string.search_prompt_title),
@@ -243,6 +272,8 @@ internal fun clearedSearchText(): TextFieldValue = TextFieldValue("")
  */
 @StringRes
 private fun coverageNotice(state: SearchUiState): Int? = when {
+    // The server scope searches a different corpus and states its own caveat with its results.
+    state.scope == SearchScope.SERVER -> null
     state.scope == SearchScope.ALL -> R.string.search_coverage_all
     state.coverage is SearchCoverage.BufferComplete -> null
     else -> R.string.search_coverage_partial
@@ -294,34 +325,147 @@ private fun SearchResults(
 }
 
 @Composable
-private fun SearchHitRow(hit: SearchHit, query: String, onClick: () -> Unit) {
+private fun SearchHitRow(hit: SearchHit, query: String, onClick: () -> Unit) = SearchRow(
+    sender = hit.message.sender,
+    text = hit.message.text,
+    serverTime = hit.message.serverTime,
+    query = query,
+    // Per-hit handle (sender+text can repeat); msgid when present, else the local row id.
+    tag = "search_result_${hit.message.msgid ?: hit.message.id}",
+    onClick = onClick,
+)
+
+@Composable
+private fun ServerHitRow(hit: ServerHitUi, query: String, onClick: () -> Unit) = SearchRow(
+    sender = hit.sender,
+    text = hit.text,
+    serverTime = hit.serverTime,
+    query = query,
+    tag = "search_result_${hit.msgid ?: hit.serverTime}",
+    onClick = onClick,
+)
+
+/** Shared visual row for a local or a server hit. */
+@Composable
+private fun SearchRow(
+    sender: String,
+    text: String,
+    serverTime: Long,
+    query: String,
+    tag: String,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            // Per-hit handle (sender+text can repeat); msgid when present, else the local row id.
-            .testTag("search_result_${hit.message.msgid ?: hit.message.id}")
+            .testTag(tag)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = hit.message.sender,
+                text = sender,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = highlightSnippet(hit.message.text, query),
+                text = highlightSnippet(text, query),
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 3,
             )
         }
-        Text(
-            text = relativeChatTime(hit.message.serverTime),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.align(Alignment.Top),
+        // A server hit without a time tag carries 0; render nothing rather than the epoch.
+        if (serverTime > 0) {
+            Text(
+                text = relativeChatTime(serverTime),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.Top),
+            )
+        }
+    }
+}
+
+/** Server-scope content: prompt, progress, failure with retry, or the transient hit list. */
+@Composable
+private fun ServerSearchSection(
+    server: ServerSearchState,
+    query: String,
+    onRetry: () -> Unit,
+    onOpenHit: (ServerHitUi) -> Unit,
+) {
+    when (server) {
+        ServerSearchState.Idle -> EmptyState(
+            icon = Icons.Outlined.SearchOff,
+            title = stringResource(R.string.search_server_prompt_title),
+            message = stringResource(R.string.search_server_prompt_message),
         )
+
+        ServerSearchState.Searching -> LinearProgressIndicator(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("search_loading"),
+        )
+
+        is ServerSearchState.Failed -> Column(modifier = Modifier.fillMaxWidth()) {
+            EmptyState(
+                icon = Icons.Outlined.SearchOff,
+                title = stringResource(R.string.search_server_error_title),
+                message = stringResource(
+                    when (server.error) {
+                        ServerSearchError.REJECTED -> R.string.search_server_error_rejected
+                        ServerSearchError.UNAVAILABLE -> R.string.search_server_error_unavailable
+                    },
+                ),
+            )
+            TextButton(
+                onClick = onRetry,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .testTag("search_server_retry"),
+            ) {
+                Text(stringResource(R.string.search_server_retry))
+            }
+        }
+
+        is ServerSearchState.Results -> if (server.hits.isEmpty()) {
+            EmptyState(
+                icon = Icons.Outlined.SearchOff,
+                title = stringResource(R.string.search_server_empty_title),
+                message = stringResource(R.string.search_server_empty_message),
+            )
+        } else {
+            Text(
+                text = stringResource(R.string.search_server_notice),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .testTag("search_coverage_notice"),
+            )
+            LazyColumn(modifier = Modifier.fillMaxSize().testTag("search_results")) {
+                itemsIndexed(
+                    server.hits,
+                    // Msgid-less hits share a timestamp only by accident; the index keeps keys unique.
+                    key = { index, hit -> hit.msgid ?: "t-${hit.serverTime}-$index" },
+                ) { _, hit ->
+                    ServerHitRow(hit = hit, query = query, onClick = { onOpenHit(hit) })
+                }
+                if (server.truncated) {
+                    item(key = "truncated_footer") {
+                        Text(
+                            text = stringResource(R.string.search_server_truncated),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .testTag("search_truncated_footer"),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

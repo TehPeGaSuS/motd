@@ -276,6 +276,17 @@
     <string name="search_coverage_all">Searching messages saved on this device, not the full server history.</string>
     <string name="search_coverage_partial">Parts of this conversation aren\'t saved on this device, so some messages can\'t be found.</string>
     <string name="search_truncated">Showing the 200 most recent matches. Refine the query to find older messages.</string>
+    <string name="search_chip_server">On server</string>
+    <string name="search_server_prompt_title">Search the server</string>
+    <string name="search_server_prompt_message">Press the search key to search this conversation\'s full history on the server.</string>
+    <string name="search_server_notice">Server matching may differ from device search. Partial words may not match.</string>
+    <string name="search_server_empty_title">No matches on the server</string>
+    <string name="search_server_empty_message">The server found nothing for this query in this conversation.</string>
+    <string name="search_server_error_title">Server search failed</string>
+    <string name="search_server_error_rejected">The server rejected this search.</string>
+    <string name="search_server_error_unavailable">Server search failed. Check the connection and try again.</string>
+    <string name="search_server_retry">Retry</string>
+    <string name="search_server_truncated">The server limits results to 100 matches. Narrow the query to see the rest.</string>
     <string name="search_prompt_title">Search your history</string>
     <string name="search_prompt_message">Type to search. Use from:nick to filter by sender.</string>
 

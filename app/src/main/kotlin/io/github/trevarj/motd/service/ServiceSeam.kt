@@ -3,6 +3,8 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.ext.SearchRequest
+import io.github.trevarj.motd.irc.ext.SearchResultMessage
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.TimelineEventId
@@ -187,6 +189,20 @@ interface ConnectionManager {
      * they opt into an accepted write.
      */
     suspend fun setChannelTopic(bufferId: Long, topic: String): Boolean = false
+
+    /** True when this network's live client can run a server-side soju SEARCH right now. */
+    fun serverSearchAvailable(networkId: Long): Boolean = clientFor(networkId)?.searchAvailable == true
+
+    /**
+     * Run one server-side SEARCH, or return null when the network has no live client.
+     *
+     * Results are transient protocol data: they are deliberately NOT routed through
+     * [io.github.trevarj.motd.data.sync.EventProcessor] and never persisted, because a hit says
+     * nothing about which intervals of history this device holds. Context comes from the existing
+     * CHATHISTORY AROUND jump path instead.
+     */
+    suspend fun searchMessages(networkId: Long, request: SearchRequest): List<SearchResultMessage>? =
+        clientFor(networkId)?.search(request)
 
     /** Find-or-create a QUERY buffer for a DM (name Isupport-normalized); returns bufferId. */
     suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long

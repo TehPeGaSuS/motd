@@ -4,15 +4,35 @@ import app.cash.turbine.ReceiveTurbine
 import app.cash.turbine.test
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import io.github.trevarj.motd.data.db.BufferEntity
+import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.ChatListRow
+import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LocalSearchResult
 import io.github.trevarj.motd.data.repo.SearchCoverage
 import io.github.trevarj.motd.data.repo.SearchRepository
+import io.github.trevarj.motd.irc.client.IrcClient
+import io.github.trevarj.motd.irc.client.IrcCommandException
+import io.github.trevarj.motd.irc.client.IrcTimeoutException
+import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.ext.SOJU_SEARCH_MAX_LIMIT
+import io.github.trevarj.motd.irc.ext.SearchRequest as IrcSearchRequest
+import io.github.trevarj.motd.irc.ext.SearchResultKind
+import io.github.trevarj.motd.irc.ext.SearchResultMessage
+import io.github.trevarj.motd.service.CertPrompt
+import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.SendAcceptance
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -42,6 +62,12 @@ class SearchViewModelTest {
             if (predicate(item)) return item
         }
     }
+
+    private fun viewModel(
+        repo: SearchRepository,
+        buffers: BufferRepository = FakeBufferRepository(),
+        connections: ConnectionManager = FakeConnectionManager(),
+    ) = SearchViewModel(repo, buffers, connections)
 
     private fun hit(bufferId: Long, text: String, sender: String = "alice") = SearchHit(
         message = MessageEntity(
@@ -93,10 +119,349 @@ class SearchViewModelTest {
         }
     }
 
+    private fun buffer(
+        id: Long = BUFFER_ID,
+        type: BufferType = BufferType.CHANNEL,
+    ) = BufferEntity(
+        id = id,
+        networkId = NETWORK_ID,
+        name = "#kotlin",
+        displayName = "#kotlin",
+        type = type,
+    )
+
+    private class FakeBufferRepository(initial: BufferEntity? = null) : BufferRepository {
+        val buffers = MutableStateFlow(initial)
+        override fun observeChatList(): Flow<List<ChatListRow>> = flowOf(emptyList())
+        override fun observeBuffer(id: Long): Flow<BufferEntity?> = buffers
+        override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = flowOf(emptyList())
+        override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
+        override suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? = null
+        override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean = true
+        override suspend fun deleteBuffer(id: Long) = Unit
+    }
+
+    /** Interface defaults keep this to the abstract surface plus the two search seams. */
+    private class FakeConnectionManager(
+        available: Boolean = false,
+        private val result: List<SearchResultMessage>? = emptyList(),
+        private val failure: Throwable? = null,
+    ) : ConnectionManager {
+        override val connectionStates = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
+        val searchAvailable = MutableStateFlow(available)
+        val requests = mutableListOf<IrcSearchRequest>()
+
+        override fun serverSearchAvailable(networkId: Long): Boolean = searchAvailable.value
+
+        override suspend fun searchMessages(
+            networkId: Long,
+            request: IrcSearchRequest,
+        ): List<SearchResultMessage>? {
+            requests += request
+            failure?.let { throw it }
+            return result
+        }
+
+        private var tick = 0L
+
+        /** Any distinct connection-state emission re-triggers the availability recomputation. */
+        fun publishAvailability(value: Boolean) {
+            searchAvailable.value = value
+            connectionStates.value = mapOf(++tick to IrcClientState.Connecting)
+        }
+
+        override fun clientFor(networkId: Long): IrcClient? = null
+        override suspend fun startAll() = Unit
+        override suspend fun stopAll() = Unit
+        override suspend fun connect(networkId: Long) = Unit
+        override suspend fun disconnect(networkId: Long) = Unit
+        override suspend fun reconnectStale() = Unit
+        override suspend fun sendMessage(bufferId: Long, text: String, replyToEventId: Long?) =
+            SendAcceptance.Accepted(emptyList())
+        override suspend fun sendTyping(bufferId: Long, state: String) = Unit
+        override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) = Unit
+        override suspend fun joinChannel(networkId: Long, channel: String) = Unit
+        override suspend fun partChannel(bufferId: Long, reason: String?) = Unit
+        override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 0
+        override suspend fun ensureServerBuffer(networkId: Long): Long = 0
+        override suspend fun markRead(bufferId: Long, anchor: TimelineAnchor) = Unit
+        override suspend fun evaluatePushMode() = Unit
+        override val certPrompts = MutableStateFlow<List<CertPrompt>>(emptyList())
+        override suspend fun trustCert(prompt: CertPrompt) = Unit
+        override fun dismissCertPrompt(prompt: CertPrompt) = Unit
+    }
+
+    private fun serverHit(
+        text: String,
+        serverTime: Long?,
+        msgid: String?,
+        sender: String = "alice",
+    ) = SearchResultMessage(
+        target = "#kotlin",
+        sender = sender,
+        text = text,
+        kind = SearchResultKind.PRIVMSG,
+        serverTime = serverTime,
+        msgid = msgid,
+    )
+
+    private fun serverViewModel(
+        connections: FakeConnectionManager,
+        buffers: FakeBufferRepository = FakeBufferRepository(buffer()),
+    ): SearchViewModel =
+        viewModel(FakeSearchRepository(emptyList()), buffers, connections).also { it.init(BUFFER_ID) }
+
+    /**
+     * Settles on live availability, then enters SERVER scope with [query] typed.
+     *
+     * The ViewModel's own coroutines run outside the test scheduler (viewModelScope carries no
+     * dispatcher in a plain JVM test), so every step waits on an observed state rather than on
+     * `runCurrent()`.
+     */
+    private suspend fun ReceiveTurbine<SearchUiState>.enterServerScope(
+        vm: SearchViewModel,
+        query: String = "coroutine",
+    ) {
+        awaitStateWhere { it.serverSearchAvailable }
+        vm.onScopeChange(SearchScope.SERVER)
+        vm.onQueryChange(query)
+        awaitStateWhere { it.scope == SearchScope.SERVER && it.rawQuery == query }
+    }
+
+    @Test
+    fun serverChipRequiresAnAvailableClientAndBufferScope() = runTest {
+        val connections = FakeConnectionManager(available = true)
+        val buffers = FakeBufferRepository(buffer())
+
+        // No buffer scope at all: there is no conversation for the server to search.
+        val global = viewModel(FakeSearchRepository(emptyList()), buffers, connections)
+        global.init(null)
+        global.state.test {
+            val settled = awaitStateWhere { it.coverage != null }
+            assertTrue(!settled.hasBufferScope)
+            assertTrue("no buffer scope means no server chip", !settled.serverSearchAvailable)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        val scoped = serverViewModel(connections, buffers)
+        scoped.state.test {
+            assertTrue(awaitStateWhere { it.serverSearchAvailable }.hasBufferScope)
+
+            // The per-network SERVER buffer is not a conversation either.
+            buffers.buffers.value = buffer(type = BufferType.SERVER)
+            assertTrue(!awaitStateWhere { !it.serverSearchAvailable }.serverSearchAvailable)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun serverSubmitMapsSortsAndFlagsTruncation() = runTest {
+        val ascending = (1..100).map { i ->
+            serverHit("hit $i", serverTime = 1_000L + i, msgid = "m$i")
+        }
+        val connections = FakeConnectionManager(available = true, result = ascending)
+        val vm = serverViewModel(connections)
+
+        vm.state.test {
+            enterServerScope(vm)
+            vm.onServerSearchSubmit()
+            val results = awaitStateWhere { it.server is ServerSearchState.Results }
+                .server as ServerSearchState.Results
+
+            assertEquals(100, results.hits.size)
+            assertEquals("hit 100", results.hits.first().text)
+            assertEquals("hit 1", results.hits.last().text)
+            assertTrue("soju's 100-result cap must be disclosed", results.truncated)
+            assertEquals(BUFFER_ID, results.hits.first().bufferId)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun serverSubmitSendsParsedFromAndTextAttributes() = runTest {
+        val connections = FakeConnectionManager(available = true)
+        val vm = serverViewModel(connections)
+
+        vm.state.test {
+            enterServerScope(vm, query = "coroutine builder from:alice")
+            vm.onServerSearchSubmit()
+            awaitStateWhere { it.server is ServerSearchState.Results }
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        val request = connections.requests.single()
+        assertEquals("#kotlin", request.target)
+        assertEquals("coroutine builder", request.text)
+        assertEquals("alice", request.from)
+        assertEquals(SOJU_SEARCH_MAX_LIMIT, request.limit)
+    }
+
+    @Test
+    fun serverFailMapsToRejected() = runTest {
+        val connections = FakeConnectionManager(
+            available = true,
+            failure = IrcCommandException("SEARCH", "INVALID_PARAMS", "bad query"),
+        )
+        val vm = serverViewModel(connections)
+
+        vm.state.test {
+            enterServerScope(vm)
+            vm.onServerSearchSubmit()
+            val failed = awaitStateWhere { it.server is ServerSearchState.Failed }
+                .server as ServerSearchState.Failed
+            assertEquals(ServerSearchError.REJECTED, failed.error)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun serverTimeoutMapsToUnavailable() = runTest {
+        val connections = FakeConnectionManager(available = true, failure = IrcTimeoutException("motd-1"))
+        val vm = serverViewModel(connections)
+
+        vm.state.test {
+            enterServerScope(vm)
+            vm.onServerSearchSubmit()
+            val failed = awaitStateWhere { it.server is ServerSearchState.Failed }
+                .server as ServerSearchState.Failed
+            assertEquals(ServerSearchError.UNAVAILABLE, failed.error)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun nullClientMapsToUnavailable() = runTest {
+        // Availability was true when the chip rendered; the client vanished before the request.
+        val connections = FakeConnectionManager(available = true, result = null)
+        val vm = serverViewModel(connections)
+
+        vm.state.test {
+            enterServerScope(vm)
+            vm.onServerSearchSubmit()
+            val failed = awaitStateWhere { it.server is ServerSearchState.Failed }
+                .server as ServerSearchState.Failed
+            assertEquals(ServerSearchError.UNAVAILABLE, failed.error)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun editingTheQueryResetsServerResults() = runTest {
+        val connections = FakeConnectionManager(
+            available = true,
+            result = listOf(serverHit("stale", serverTime = 1_000, msgid = "m1")),
+        )
+        val vm = serverViewModel(connections)
+
+        vm.state.test {
+            enterServerScope(vm)
+            vm.onServerSearchSubmit()
+            awaitStateWhere { it.server is ServerSearchState.Results }
+
+            vm.onQueryChange("coroutines")
+            // Results describe the previous query; keeping them would misattribute them.
+            awaitStateWhere { it.server is ServerSearchState.Idle }
+            assertEquals("typing must not fire a wire request", 1, connections.requests.size)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun leavingServerScopeResetsServerResults() = runTest {
+        val connections = FakeConnectionManager(
+            available = true,
+            result = listOf(serverHit("stale", serverTime = 1_000, msgid = "m1")),
+        )
+        val vm = serverViewModel(connections)
+
+        vm.state.test {
+            enterServerScope(vm)
+            vm.onServerSearchSubmit()
+            awaitStateWhere { it.server is ServerSearchState.Results }
+
+            vm.onScopeChange(SearchScope.CURRENT)
+            val local = awaitStateWhere { it.scope == SearchScope.CURRENT }
+            assertEquals(ServerSearchState.Idle, local.server)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun availabilityLossWhileInServerScopeFallsBackToCurrent() = runTest {
+        val connections = FakeConnectionManager(
+            available = true,
+            result = listOf(serverHit("stale", serverTime = 1_000, msgid = "m1")),
+        )
+        val vm = serverViewModel(connections)
+
+        vm.state.test {
+            enterServerScope(vm)
+            vm.onServerSearchSubmit()
+            awaitStateWhere { it.server is ServerSearchState.Results }
+
+            connections.publishAvailability(false)
+            val fallen = awaitStateWhere { it.scope == SearchScope.CURRENT && !it.serverSearchAvailable }
+            assertEquals(ServerSearchState.Idle, fallen.server)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun hitsWithoutTimeOrMsgidAreDropped() = runTest {
+        val connections = FakeConnectionManager(
+            available = true,
+            result = listOf(
+                serverHit("jumpable", serverTime = 2_000, msgid = "m1"),
+                // Nothing to resolve a jump target from, so it is not a usable result.
+                serverHit("unjumpable", serverTime = null, msgid = null),
+            ),
+        )
+        val vm = serverViewModel(connections)
+
+        vm.state.test {
+            enterServerScope(vm)
+            vm.onServerSearchSubmit()
+            val results = awaitStateWhere { it.server is ServerSearchState.Results }
+                .server as ServerSearchState.Results
+            assertEquals(listOf("jumpable"), results.hits.map { it.text })
+            assertTrue("a short page is not truncated", !results.truncated)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun msgidOnlyHitsAreKeptWithZeroTime() = runTest {
+        val connections = FakeConnectionManager(
+            available = true,
+            result = listOf(
+                serverHit("no time tag", serverTime = null, msgid = "m-old"),
+                serverHit("timed", serverTime = 5_000, msgid = "m-new"),
+            ),
+        )
+        val vm = serverViewModel(connections)
+
+        vm.state.test {
+            enterServerScope(vm)
+            vm.onServerSearchSubmit()
+            val results = awaitStateWhere { it.server is ServerSearchState.Results }
+                .server as ServerSearchState.Results
+            // Newest-first ordering sinks the untimed hit to the bottom; it still jumps by msgid.
+            assertEquals(listOf("timed", "no time tag"), results.hits.map { it.text })
+            assertEquals(0L, results.hits.last().serverTime)
+            assertEquals("m-old", results.hits.last().msgid)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    private companion object {
+        const val BUFFER_ID = 7L
+        const val NETWORK_ID = 3L
+    }
+
     @Test
     fun blank_query_emits_empty_results_without_hitting_the_repo() = runTest {
         val repo = FakeSearchRepository(emptyList())
-        val vm = SearchViewModel(repo)
+        val vm = viewModel(repo)
 
         vm.state.test {
             assertEquals(SearchUiState(), awaitItem()) // initial
@@ -111,7 +476,7 @@ class SearchViewModelTest {
     @Test
     fun rapid_typing_is_debounced_into_a_single_db_query() = runTest {
         val repo = FakeSearchRepository(listOf(hit(1, "coroutine builder")))
-        val vm = SearchViewModel(repo)
+        val vm = viewModel(repo)
 
         vm.state.test {
             awaitItem() // initial
@@ -168,7 +533,7 @@ class SearchViewModelTest {
     fun query_change_immediately_clears_old_results_and_ignores_late_results() = runTest {
         val repo = ControlledSearchRepository()
         repo.emit("alpha", null, listOf(hit(1, "alpha result")))
-        val vm = SearchViewModel(repo)
+        val vm = viewModel(repo)
 
         vm.state.test {
             awaitItem()
@@ -211,7 +576,7 @@ class SearchViewModelTest {
     @Test
     fun scope_change_immediately_clears_old_results_and_ignores_late_scope_results() = runTest {
         val repo = ControlledSearchRepository()
-        val vm = SearchViewModel(repo)
+        val vm = viewModel(repo)
 
         vm.state.test {
             awaitItem()
@@ -261,7 +626,7 @@ class SearchViewModelTest {
             emptyList(),
             coverage = SearchCoverage.BufferPartial(openGaps = 2, historyComplete = false),
         )
-        val vm = SearchViewModel(repo)
+        val vm = viewModel(repo)
 
         vm.state.test {
             vm.init(bufferId = 7L)
@@ -281,7 +646,7 @@ class SearchViewModelTest {
             truncated = true,
             coverage = SearchCoverage.BufferComplete,
         )
-        val vm = SearchViewModel(repo)
+        val vm = viewModel(repo)
 
         vm.state.test {
             vm.onQueryChange("coroutine")
@@ -300,7 +665,7 @@ class SearchViewModelTest {
             listOf(hit(1, "coroutine builder", sender = "alice"), hit(2, "coroutines", sender = "bob")),
             truncated = true,
         )
-        val vm = SearchViewModel(repo)
+        val vm = viewModel(repo)
 
         vm.state.test {
             vm.onQueryChange("coroutine from:bob")
@@ -317,7 +682,7 @@ class SearchViewModelTest {
     fun clear_immediately_removes_results_and_ignores_late_results() = runTest {
         val repo = ControlledSearchRepository()
         repo.emit("alpha", null, listOf(hit(1, "alpha result")))
-        val vm = SearchViewModel(repo)
+        val vm = viewModel(repo)
 
         vm.state.test {
             awaitItem()
