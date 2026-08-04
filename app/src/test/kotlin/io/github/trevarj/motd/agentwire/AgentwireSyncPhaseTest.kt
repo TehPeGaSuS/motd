@@ -138,15 +138,46 @@ class AgentwireSyncPhaseTest {
             assertTrue(viewModel.state.value.sync is AgentwireSyncState.Failed)
         }
 
-    private fun TestScope.viewModel(client: IrcClient, joined: Boolean = true): AgentwireViewModel =
-        AgentwireViewModel(
-            savedStateHandle = SavedStateHandle(mapOf("bufferId" to BUFFER_ID)),
-            prefs = FakeAgentwirePrefs(),
-            buffers = FakeBufferRepository(buffer(joined)),
-            connections = FakeConnections(client),
-            diagnostics = DiagnosticLogger.Noop,
-            clock = AppClock { testScheduler.currentTime },
-        )
+    @Test
+    fun `an unjoined channel starts no session and sends nothing until the join lands`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val buffers = FakeBufferRepository(buffer(joined = false))
+            val connections = FakeConnections(client)
+            val viewModel = viewModel(connections, buffers)
+            advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
+            runCurrent()
+
+            assertEquals(AgentwireSyncState.NotJoined, viewModel.state.value.sync)
+            assertEquals(emptyList<String>(), syncRequests(transport))
+
+            viewModel.joinAgentwireChannel()
+            runCurrent()
+            assertEquals(listOf(NETWORK_ID to CHANNEL), connections.joins)
+
+            // EventProcessor confirms the self-JOIN; the gate collector must take it from here.
+            buffers.buffers.value = buffer(joined = true)
+            advanceTimeBy(10)
+            runCurrent()
+            assertTrue(viewModel.state.value.sync is AgentwireSyncState.Syncing)
+            assertTrue("the handshake starts only once the channel is joined", syncRequests(transport).isNotEmpty())
+        }
+
+    private fun TestScope.viewModel(
+        connections: FakeConnections,
+        buffers: FakeBufferRepository,
+    ): AgentwireViewModel = AgentwireViewModel(
+        savedStateHandle = SavedStateHandle(mapOf("bufferId" to BUFFER_ID)),
+        prefs = FakeAgentwirePrefs(),
+        buffers = buffers,
+        connections = connections,
+        diagnostics = DiagnosticLogger.Noop,
+        clock = AppClock { testScheduler.currentTime },
+    )
+
+    private fun TestScope.viewModel(client: IrcClient): AgentwireViewModel =
+        viewModel(FakeConnections(client), FakeBufferRepository(buffer(joined = true)))
 
     private fun buffer(joined: Boolean) = BufferEntity(
         id = BUFFER_ID,
@@ -222,7 +253,7 @@ class AgentwireSyncPhaseTest {
         override suspend fun deviceId(): String = "device-under-test"
     }
 
-    private class FakeBufferRepository(private val buffer: BufferEntity) : BufferRepository {
+    private class FakeBufferRepository(buffer: BufferEntity) : BufferRepository {
         val buffers = MutableStateFlow<BufferEntity?>(buffer)
         override fun observeChatList(): Flow<List<ChatListRow>> = flowOf(emptyList())
         override fun observeBuffer(id: Long): Flow<BufferEntity?> = buffers

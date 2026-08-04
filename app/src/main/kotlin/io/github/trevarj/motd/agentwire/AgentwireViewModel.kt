@@ -62,6 +62,7 @@ class AgentwireViewModel @Inject constructor(
     private var client: IrcClient? = null
     private var startedOnce = false
     private var sendFailureStage = "transport"
+    private var joinTarget: Pair<Long, String>? = null
     private val autoReviewConfirmedSessions = HashSet<String>()
 
     init {
@@ -101,11 +102,18 @@ class AgentwireViewModel @Inject constructor(
                             connected = ready != null,
                         )
                     }
+                    joinTarget = buffer?.let { it.networkId to it.name }
                     val nextClient = buffer?.let { connections.clientFor(it.networkId) }
                     when {
                         gate != AgentwireGate.ACTIVE || ready == null -> {
                             stopSession(disconnected = client != null)
                             _state.update { it.copy(sync = AgentwireSyncState.Idle) }
+                        }
+                        // Nothing the agent sends can reach a channel we are not in, so start no
+                        // session and send nothing until the membership exists.
+                        buffer?.joined != true -> {
+                            stopSession(disconnected = client != null)
+                            _state.update { it.copy(sync = AgentwireSyncState.NotJoined) }
                         }
                         nextClient == null -> Unit
                         // A new client instance or a new agent identity always re-arms a full
@@ -120,6 +128,20 @@ class AgentwireViewModel @Inject constructor(
     fun viewTranscript() = _state.update { it.copy(transcriptOverride = true) }
     fun returnToHarness() = _state.update { it.copy(transcriptOverride = false) }
     fun clearError() = _state.update { it.copy(error = null) }
+
+    /**
+     * Joins the channel the agent publishes through. Delegated through [ConnectionManager]: the
+     * ViewModel never talks to a connection directly. The combine collector starts the session on
+     * its own once the join is confirmed.
+     */
+    fun joinAgentwireChannel() {
+        val (networkId, channel) = joinTarget ?: return
+        viewModelScope.launch {
+            runCatching { connections.joinChannel(networkId, channel) }.onFailure { failure ->
+                _state.update { it.copy(error = failure.message ?: "Unable to join $channel") }
+            }
+        }
+    }
 
     /** User-visible re-entry into sync: re-arms a full budget over the live client. */
     fun retrySync() {

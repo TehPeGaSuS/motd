@@ -222,6 +222,9 @@ private fun AgentwireScreen(
                                     onRetry = viewModel::retrySync,
                                 )
                             }
+                            is AgentwireSyncState.NotJoined -> item {
+                                AgentwireNotJoinedCard(state.channel, viewModel::joinAgentwireChannel)
+                            }
                             else -> Unit
                         }
                         if (!state.connected && state.timeline.isEmpty()) item {
@@ -370,6 +373,22 @@ internal fun AgentwireSyncFailureCard(
     }
     AgentwireSyncFailureBody(title, body, "Retry sync", onRetry, modifier)
 }
+
+/** The gate is active but this device is not in the channel, so no handshake is even attempted. */
+@SuppressLint("HardcodedText")
+@Composable
+internal fun AgentwireNotJoinedCard(
+    channel: String,
+    onJoin: () -> Unit,
+    modifier: Modifier = Modifier,
+) = AgentwireSyncFailureBody(
+    title = "Not in this channel",
+    body = "Agent events flow through $channel, but you are not joined to it, so nothing the " +
+        "agent sends can reach you.",
+    action = "Join and sync",
+    onAction = onJoin,
+    modifier = modifier,
+)
 
 @SuppressLint("HardcodedText")
 @Composable
