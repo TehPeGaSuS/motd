@@ -676,6 +676,22 @@ scroll_forward_to_tag() {
   [ -n "$(bounds_of_tag "$tag")" ]
 }
 
+# scroll_forward_to_text "<text>" [tries] — the text-addressed twin of scroll_forward_to_tag, for
+# controls below the fold that expose no stable tag. Channel Info's action row is the case that
+# forced this: Pin and Leave are ActionItem labels with no testTag, so a probe that only looks at
+# the first screenful reports them absent on any device where the row sits below the fold.
+scroll_forward_to_text() {
+  local text="$1" tries="${2:-6}" i
+  for i in $(seq 1 "$tries"); do
+    dump || true
+    [ -n "$(bounds_of_text "$text")" ] && return 0
+    adb_shell input swipe 540 1650 540 650 300
+    sleep 1
+  done
+  dump || true
+  [ -n "$(bounds_of_text "$text")" ]
+}
+
 # --- crash detection -------------------------------------------------------
 
 # clear_crash — clear the logcat crash + main buffers to establish a baseline.

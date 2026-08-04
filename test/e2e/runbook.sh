@@ -139,15 +139,29 @@ capture_topic_from_dump() {
 # A draft field also exposes its text to uiautomator, so visible-text polling would falsely turn
 # a failed write into an apparent echo. Require both a closed editor and the Room-backed header.
 wait_for_topic_echo() {
-  local expected="$1" timeout="${2:-12}" waited=0 actual
+  local expected="$1" timeout="${2:-12}" waited=0 actual editor=unknown last=""
   while [ "$waited" -lt "$timeout" ]; do
-    if dump && [ -z "$(bounds_of_tag channelinfo_topic_edit_dialog)" ]; then
-      actual="$(capture_topic_from_dump || true)"
-      [ "$actual" = "$expected" ] && return 0
+    if dump; then
+      if [ -n "$(bounds_of_tag channelinfo_topic_edit_dialog)" ]; then
+        editor=open
+      else
+        editor=closed
+        actual="$(capture_topic_from_dump || true)"
+        last="$actual"
+        [ "$actual" = "$expected" ] && return 0
+      fi
     fi
     sleep 1
     waited=$((waited + 1))
   done
+  # Report which of the two conditions actually held. This guard was vacuous for weeks: dialog
+  # windows exported no test tags, so "editor closed" was always true and the draft field's own
+  # text could pass as an echo. A bare `return 1` hid that; naming the state cannot.
+  case "$editor" in
+    open) note "topic echo timed out with the editor still open" ;;
+    closed) note "topic echo timed out; header read \"${last}\", expected \"${expected}\"" ;;
+    *) note "topic echo timed out without a usable dump" ;;
+  esac
   return 1
 }
 
@@ -788,7 +802,9 @@ phase_d() {
   # 36. Stop the fixture before confirming Leave. A refused local write must keep the
   # confirmation open with retry feedback; it must not imply that the channel was parted.
   step "Confirmed offline Leave keeps Channel Info open with retry feedback"
-  if [ -n "$(bounds_of_text "Leave")" ]; then
+  # The action row sits below the member list, so it is off-screen on a tall channel. Scroll to it
+  # before deciding the control is missing; Pin above it reported "not present" for the same reason.
+  if scroll_forward_to_text "Leave" 6; then
     _reconnect_restore_armed=true
     if reconnect_stack stop-soju; then
       # The listener close is asynchronous at the app boundary. The required assertion below is
