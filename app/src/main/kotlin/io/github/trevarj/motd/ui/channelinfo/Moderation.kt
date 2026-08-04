@@ -20,3 +20,30 @@ fun canModerate(ownPrefixes: String, prefixOrder: String): Boolean {
 
 /** Ban mask for [nick]: the simple `nick!*@*` form used by the /ban command and ban action. */
 fun banMask(nick: String): String = "$nick!*@*"
+
+/**
+ * Ban mask for an address: `*!*@host`. Survives a nick change, which the [banMask] form does not,
+ * so it is the scope offered whenever a WHOIS/cached host is actually known.
+ */
+fun hostMask(host: String): String = "*!*@$host"
+
+/** How the ban/exception target picker turns a selection into a mask. */
+enum class BanScope { NICK, HOST, CUSTOM }
+
+/**
+ * The exact mask a ban/exception dialog will send, so the preview and the wire cannot diverge.
+ * Blank means "nothing to send yet" (no member chosen, address not resolved, empty custom text).
+ */
+fun composeBanMask(scope: BanScope, nick: String?, host: String?, custom: String): String =
+    when (scope) {
+        BanScope.NICK -> nick?.trim()?.takeIf(String::isNotBlank)?.let(::banMask).orEmpty()
+        BanScope.HOST -> host?.trim()?.takeIf(String::isNotBlank)?.let(::hostMask).orEmpty()
+        BanScope.CUSTOM -> custom.trim()
+    }
+
+/**
+ * Host portion of a cached `user@host` hostmask, or null when it carries no host.
+ * Used as the second lookup step before falling back to a labeled WHOIS.
+ */
+fun hostFromUserHost(userHost: String?): String? =
+    userHost?.substringAfter('@', "")?.trim()?.takeIf { it.isNotBlank() && it != userHost.trim() }
