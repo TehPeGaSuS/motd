@@ -135,8 +135,30 @@ fun interface ChatHistoryMediatorFactory {
     fun create(bufferId: Long): RemoteMediator<Int, MessageEntity>
 }
 
+/** Local FTS results plus the honesty metadata the screen must disclose. */
+data class LocalSearchResult(
+    val hits: List<SearchHit>,
+    /** True when the raw FTS page hit the DAO's 200-row cap, measured BEFORE visibility filtering. */
+    val truncated: Boolean,
+)
+
+/** What the searched corpus actually covers, per scope. */
+sealed interface SearchCoverage {
+    /** The all-buffers scope can only ever promise "whatever this device persisted". */
+    data object DeviceOnly : SearchCoverage
+
+    /** Every message this conversation ever had is on this device. */
+    data object BufferComplete : SearchCoverage
+
+    /** Known holes: [openGaps] recorded intervals, plus whether the oldest edge is reached. */
+    data class BufferPartial(val openGaps: Int, val historyComplete: Boolean) : SearchCoverage
+}
+
 interface SearchRepository {
-    fun search(query: String, bufferId: Long?): Flow<List<SearchHit>>
+    fun search(query: String, bufferId: Long?): Flow<LocalSearchResult>
+
+    /** Coverage for the given scope; null bufferId means the all-buffers scope. */
+    fun coverage(bufferId: Long?): Flow<SearchCoverage>
 }
 
 /**

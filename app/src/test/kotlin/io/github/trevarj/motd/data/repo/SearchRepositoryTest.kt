@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.data.repo
 
+import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkIdentityEntity
@@ -42,7 +43,7 @@ class SearchRepositoryTest {
     fun setUp() = runTest {
         db = inMemoryDb()
         settings = FakeSettingsRepository()
-        repo = SearchRepositoryImpl(db.bufferDao(), db.messageDao(), settings)
+        repo = SearchRepositoryImpl(db.bufferDao(), db.messageDao(), db.historyGapDao(), settings)
         val nid = db.networkDao().insert(network())
         b1 = db.bufferDao().insert(buffer(nid, "#one"))
         b2 = db.bufferDao().insert(buffer(nid, "#two"))
@@ -60,7 +61,7 @@ class SearchRepositoryTest {
 
     @Test
     fun rawPrefixInput_matchesAcrossBuffers_excludesSystemKinds() = runTest {
-        val hits = repo.search("hel", null).first()
+        val hits = repo.search("hel", null).first().hits
         // JOIN row excluded → only the two chat messages match.
         assertEquals(2, hits.size)
         assertTrue(hits.all { it.message.kind == MessageKind.PRIVMSG })
@@ -68,7 +69,7 @@ class SearchRepositoryTest {
 
     @Test
     fun bufferScopedSearch_restrictsResults() = runTest {
-        val hits = repo.search("hello", b2).first()
+        val hits = repo.search("hello", b2).first().hits
         assertEquals(1, hits.size)
         assertEquals("hello there", hits.single().message.text)
     }
@@ -77,7 +78,7 @@ class SearchRepositoryTest {
     fun bufferScopedSearch_resolvesLosingRoomRedirect() = runTest {
         BufferStore(db).mergeRooms(b1, b2)
 
-        val hits = repo.search("there", b2).first()
+        val hits = repo.search("there", b2).first().hits
 
         assertEquals(1, hits.size)
         assertEquals("hello there", hits.single().message.text)
@@ -86,7 +87,7 @@ class SearchRepositoryTest {
 
     @Test
     fun operatorOnlyInput_returnsEmptyWithoutTouchingDb() = runTest {
-        assertEquals(0, repo.search("***", null).first().size)
+        assertEquals(0, repo.search("***", null).first().hits.size)
     }
 
     @Test
@@ -95,10 +96,10 @@ class SearchRepositoryTest {
             listOf(message(b1, "hello fool", sender = "alice", serverTime = 4, dedupKey = "fool")),
         )
         settings.state.value = Settings(fools = setOf("alice"), foolsMode = FoolsMode.COLLAPSE)
-        assertTrue(repo.search("fool", null).first().isNotEmpty())
+        assertTrue(repo.search("fool", null).first().hits.isNotEmpty())
 
         settings.state.value = settings.state.value.copy(foolsMode = FoolsMode.HIDE)
-        assertTrue(repo.search("fool", null).first().isEmpty())
+        assertTrue(repo.search("fool", null).first().hits.isEmpty())
     }
 
     @Test
@@ -136,10 +137,88 @@ class SearchRepositoryTest {
             foolsMode = FoolsMode.HIDE,
         )
 
-        val hits = repo.search("network", null).first()
+        val hits = repo.search("network", null).first().hits
 
         assertEquals(listOf("listener^"), hits.map { it.message.sender })
         assertEquals("rfc1459-strict", hits.single().caseMapping)
+    }
+
+    @Test
+    fun searchFlagsTruncationAtTheRawDaoCap() = runTest {
+        insertMatches(b1, "capped", count = SearchRepositoryImpl.LOCAL_SEARCH_LIMIT + 1)
+        insertMatches(b1, "brimmed", count = SearchRepositoryImpl.LOCAL_SEARCH_LIMIT - 1)
+
+        val capped = repo.search("capped", b1).first()
+        assertTrue("a full page must disclose truncation", capped.truncated)
+        assertEquals(SearchRepositoryImpl.LOCAL_SEARCH_LIMIT, capped.hits.size)
+
+        val underCap = repo.search("brimmed", b1).first()
+        assertEquals(SearchRepositoryImpl.LOCAL_SEARCH_LIMIT - 1, underCap.hits.size)
+        assertTrue("an unfilled page is not truncated", !underCap.truncated)
+    }
+
+    @Test
+    fun truncationIsMeasuredBeforeVisibilityFiltering() = runTest {
+        insertMatches(b1, "capped", count = SearchRepositoryImpl.LOCAL_SEARCH_LIMIT, sender = "fool")
+        settings.state.value = Settings(fools = setOf("fool"), foolsMode = FoolsMode.HIDE)
+
+        val result = repo.search("capped", b1).first()
+
+        assertTrue("every hit is hidden", result.hits.isEmpty())
+        assertTrue("the SQL page still hit the cap", result.truncated)
+    }
+
+    @Test
+    fun coverageIsDeviceOnlyForAllBuffers() = runTest {
+        assertEquals(SearchCoverage.DeviceOnly, repo.coverage(null).first())
+    }
+
+    @Test
+    fun coverageIsCompleteForGaplessCompleteBuffer() = runTest {
+        db.bufferDao().markHistoryComplete(b1)
+
+        assertEquals(SearchCoverage.BufferComplete, repo.coverage(b1).first())
+    }
+
+    @Test
+    fun coverageReportsOpenGaps() = runTest {
+        db.bufferDao().markHistoryComplete(b1)
+        db.historyGapDao().insert(
+            HistoryGapEntity(roomId = b1, olderMsgid = "o", olderServerTime = 1, newerMsgid = "n", newerServerTime = 2),
+        )
+
+        assertEquals(SearchCoverage.BufferPartial(openGaps = 1, historyComplete = true), repo.coverage(b1).first())
+        // A buffer that never reached its oldest edge is partial even without a recorded gap.
+        assertEquals(SearchCoverage.BufferPartial(openGaps = 0, historyComplete = false), repo.coverage(b2).first())
+    }
+
+    @Test
+    fun coverageFollowsBufferRedirect() = runTest {
+        db.historyGapDao().insert(
+            HistoryGapEntity(roomId = b1, olderMsgid = "o", olderServerTime = 1, newerMsgid = "n", newerServerTime = 2),
+        )
+        BufferStore(db).mergeRooms(b1, b2)
+
+        // Asking with the losing id must describe the winning room's corpus, like search() does.
+        val viaLoser = repo.coverage(b2).first()
+        assertEquals(repo.coverage(b1).first(), viaLoser)
+        assertEquals(
+            db.historyGapDao().forRoom(b1).size,
+            (viaLoser as SearchCoverage.BufferPartial).openGaps,
+        )
+    }
+
+    @Test
+    fun coverageNeverOverclaimsForAnUnknownBuffer() = runTest {
+        assertEquals(SearchCoverage.BufferPartial(openGaps = 0, historyComplete = false), repo.coverage(9_999L).first())
+    }
+
+    private suspend fun insertMatches(bufferId: Long, token: String, count: Int, sender: String = "alice") {
+        db.messageDao().insertAll(
+            (1..count).map { i ->
+                message(bufferId, "$token $i", sender = sender, serverTime = 1_000L + i, dedupKey = "$token-$i")
+            },
+        )
     }
 
     private class FakeSettingsRepository : SettingsRepository {

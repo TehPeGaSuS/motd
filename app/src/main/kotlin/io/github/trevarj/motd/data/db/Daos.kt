@@ -1789,6 +1789,10 @@ interface HistoryGapDao {
     @Query("SELECT * FROM history_gaps WHERE roomId = :roomId ORDER BY olderServerTime")
     fun observeForRoom(roomId: RoomId): Flow<List<HistoryGapEntity>>
 
+    /** Live count of recorded missing intervals for one canonical room. */
+    @Query("SELECT COUNT(*) FROM history_gaps WHERE roomId = :roomId")
+    fun observeCount(roomId: RoomId): Flow<Int>
+
     @Insert
     suspend fun insert(gap: HistoryGapEntity): Long
 

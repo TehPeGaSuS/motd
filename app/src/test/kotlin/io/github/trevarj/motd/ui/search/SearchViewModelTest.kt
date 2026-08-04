@@ -1,11 +1,14 @@
 package io.github.trevarj.motd.ui.search
 
+import app.cash.turbine.ReceiveTurbine
 import app.cash.turbine.test
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.data.repo.LocalSearchResult
+import io.github.trevarj.motd.data.repo.SearchCoverage
 import io.github.trevarj.motd.data.repo.SearchRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -27,6 +30,19 @@ import java.util.concurrent.atomic.AtomicInteger
 @OptIn(ExperimentalCoroutinesApi::class)
 class SearchViewModelTest {
 
+    /**
+     * Await the first state matching [predicate]. Blank keys now emit a coverage frame of their
+     * own, so tests settle on the key under test instead of counting emissions.
+     */
+    private suspend fun ReceiveTurbine<SearchUiState>.awaitStateWhere(
+        predicate: (SearchUiState) -> Boolean,
+    ): SearchUiState {
+        while (true) {
+            val item = awaitItem()
+            if (predicate(item)) return item
+        }
+    }
+
     private fun hit(bufferId: Long, text: String, sender: String = "alice") = SearchHit(
         message = MessageEntity(
             id = bufferId, bufferId = bufferId, serverTime = 1_000L,
@@ -39,28 +55,37 @@ class SearchViewModelTest {
     private class FakeSearchRepository(
         private val result: List<SearchHit>,
         val calls: AtomicInteger = AtomicInteger(0),
+        private val truncated: Boolean = false,
+        private val coverage: SearchCoverage = SearchCoverage.DeviceOnly,
     ) : SearchRepository {
-        override fun search(query: String, bufferId: Long?): Flow<List<SearchHit>> {
+        override fun search(query: String, bufferId: Long?): Flow<LocalSearchResult> {
             calls.incrementAndGet()
-            return flowOf(result)
+            return flowOf(LocalSearchResult(result, truncated))
         }
+
+        override fun coverage(bufferId: Long?): Flow<SearchCoverage> = flowOf(coverage)
     }
 
     private data class SearchRequest(val query: String, val bufferId: Long?)
 
     /** A keyed, replaying source lets tests deliver results after its collector was cancelled. */
-    private class ControlledSearchRepository : SearchRepository {
-        private val flows = mutableMapOf<SearchRequest, MutableSharedFlow<List<SearchHit>>>()
+    private class ControlledSearchRepository(
+        private val coverageByScope: Map<Long?, SearchCoverage> = emptyMap(),
+    ) : SearchRepository {
+        private val flows = mutableMapOf<SearchRequest, MutableSharedFlow<LocalSearchResult>>()
         val calls = mutableListOf<SearchRequest>()
 
-        override fun search(query: String, bufferId: Long?): Flow<List<SearchHit>> {
+        override fun search(query: String, bufferId: Long?): Flow<LocalSearchResult> {
             val request = SearchRequest(query, bufferId)
             calls += request
             return flowFor(request)
         }
 
-        fun emit(query: String, bufferId: Long?, hits: List<SearchHit>) {
-            check(flowFor(SearchRequest(query, bufferId)).tryEmit(hits))
+        override fun coverage(bufferId: Long?): Flow<SearchCoverage> =
+            flowOf(coverageByScope[bufferId] ?: SearchCoverage.DeviceOnly)
+
+        fun emit(query: String, bufferId: Long?, hits: List<SearchHit>, truncated: Boolean = false) {
+            check(flowFor(SearchRequest(query, bufferId)).tryEmit(LocalSearchResult(hits, truncated)))
         }
 
         private fun flowFor(request: SearchRequest) = flows.getOrPut(request) {
@@ -192,10 +217,12 @@ class SearchViewModelTest {
             awaitItem()
             vm.init(bufferId = 7L)
             runCurrent()
-            awaitItem() // blank, current-buffer scope
+            // The blank state now also carries coverage, so settle on the key under test rather
+            // than counting frames.
+            awaitStateWhere { it.hasBufferScope && it.scope == SearchScope.CURRENT }
             vm.onScopeChange(SearchScope.ALL)
             runCurrent()
-            awaitItem() // blank, global scope
+            awaitStateWhere { it.scope == SearchScope.ALL } // blank, global scope
 
             repo.emit("alpha", null, listOf(hit(1, "global alpha result")))
             vm.onQueryChange("alpha")
@@ -229,6 +256,64 @@ class SearchViewModelTest {
     }
 
     @Test
+    fun blank_state_discloses_coverage_before_the_first_keystroke() = runTest {
+        val repo = FakeSearchRepository(
+            emptyList(),
+            coverage = SearchCoverage.BufferPartial(openGaps = 2, historyComplete = false),
+        )
+        val vm = SearchViewModel(repo)
+
+        vm.state.test {
+            vm.init(bufferId = 7L)
+            runCurrent()
+            val blank = awaitStateWhere { it.hasBufferScope }
+            assertEquals(SearchCoverage.BufferPartial(2, false), blank.coverage)
+            assertTrue("no query ran", blank.groups.isEmpty())
+            assertEquals("the disclosure must not require a DB search", 0, repo.calls.get())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun results_carry_coverage_and_the_raw_page_truncation_flag() = runTest {
+        val repo = FakeSearchRepository(
+            listOf(hit(1, "coroutine builder")),
+            truncated = true,
+            coverage = SearchCoverage.BufferComplete,
+        )
+        val vm = SearchViewModel(repo)
+
+        vm.state.test {
+            vm.onQueryChange("coroutine")
+            runCurrent()
+            advanceTimeBy(300)
+            val results = awaitStateWhere { it.groups.isNotEmpty() }
+            assertEquals(SearchCoverage.BufferComplete, results.coverage)
+            assertTrue("the DAO cap must surface in state", results.truncated)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun truncation_survives_the_client_side_from_filter() = runTest {
+        val repo = FakeSearchRepository(
+            listOf(hit(1, "coroutine builder", sender = "alice"), hit(2, "coroutines", sender = "bob")),
+            truncated = true,
+        )
+        val vm = SearchViewModel(repo)
+
+        vm.state.test {
+            vm.onQueryChange("coroutine from:bob")
+            runCurrent()
+            advanceTimeBy(300)
+            val results = awaitStateWhere { it.groups.isNotEmpty() }
+            assertEquals("bob", results.groups.single().hits.single().message.sender)
+            assertTrue("filtering fewer rows does not un-truncate the page", results.truncated)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun clear_immediately_removes_results_and_ignores_late_results() = runTest {
         val repo = ControlledSearchRepository()
         repo.emit("alpha", null, listOf(hit(1, "alpha result")))
@@ -245,7 +330,7 @@ class SearchViewModelTest {
 
             vm.onQueryChange("")
             runCurrent()
-            assertEquals(SearchUiState(), awaitItem())
+            assertEquals(SearchUiState(coverage = SearchCoverage.DeviceOnly), awaitItem())
 
             repo.emit("alpha", null, listOf(hit(1, "late alpha result")))
             runCurrent()

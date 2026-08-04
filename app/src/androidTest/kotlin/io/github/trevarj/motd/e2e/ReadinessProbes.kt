@@ -125,7 +125,7 @@ class MessageLifecycleProbe(
     ): MessageEntity =
         try {
             withTimeout(timeoutMs) {
-                search.search(query, bufferId).first { hits ->
+                search.search(query, bufferId).map { it.hits }.first { hits ->
                     hits.count { hit ->
                         (!requireSelf || hit.message.isSelf) && matches(hit.message) && hit.message.msgid != null &&
                             hit.message.pendingLabel == null && !hit.message.failed
@@ -159,7 +159,7 @@ class MessageRunProbe(
         timeoutMs: Long = 45_000,
     ): List<MessageEntity> = try {
         withTimeout(timeoutMs) {
-            search.search(token, bufferId).first { hits ->
+            search.search(token, bufferId).map { it.hits }.first { hits ->
                 val rows = hits.map { it.message }.filter { it.text.startsWith("$token row") }
                 rows.any { it.text == requiredText }
             }.map { it.message }
@@ -209,7 +209,7 @@ class MessageRunProbe(
         var snapshots = 0
         return try {
             withTimeout(timeoutMs) {
-                search.search(token, bufferId)
+                search.search(token, bufferId).map { it.hits }
                     .map { hits ->
                         hits.map { it.message }.filter { it.text.startsWith("$token row") }
                     }
@@ -262,7 +262,7 @@ class MessageRunProbe(
     ): List<MessageEntity> =
         try {
             withTimeout(timeoutMs) {
-                search.search(token, bufferId).first { hits ->
+                search.search(token, bufferId).map { it.hits }.first { hits ->
                     val messages = hits.map { it.message }
                     val rows = messages.filter { it.text.startsWith("$token row") }
                     val extras = messages

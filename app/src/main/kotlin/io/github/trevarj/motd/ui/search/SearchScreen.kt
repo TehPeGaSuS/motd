@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.search
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -51,6 +52,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.data.repo.SearchCoverage
 import io.github.trevarj.motd.ui.chatlist.relativeChatTime
 import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -113,6 +115,8 @@ fun SearchContent(
         state.copy(
             rawQuery = text.text,
             groups = emptyList(),
+            // The cap belongs to the results being dropped for this frame, not to the new query.
+            truncated = false,
             searching = !isEmptySearchQuery(text.text),
         )
     }
@@ -186,6 +190,17 @@ fun SearchContent(
                 }
             }
 
+            coverageNotice(visibleState)?.let { notice ->
+                Text(
+                    text = stringResource(notice),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .testTag("search_coverage_notice"),
+                )
+            }
+
             when {
                 visibleState.rawQuery.isBlank() -> EmptyState(
                     icon = Icons.Outlined.SearchOff,
@@ -202,12 +217,13 @@ fun SearchContent(
                 visibleState.groups.isEmpty() -> EmptyState(
                     icon = Icons.Outlined.SearchOff,
                     title = stringResource(R.string.search_empty_title),
-                    message = stringResource(R.string.search_empty_message),
+                    message = stringResource(emptyMessage(visibleState)),
                 )
 
                 else -> SearchResults(
                     groups = visibleState.groups,
                     query = parseSearchQuery(visibleState.rawQuery).text,
+                    truncated = visibleState.truncated,
                     onOpenHit = onOpenHit,
                 )
             }
@@ -218,10 +234,33 @@ fun SearchContent(
 /** Clear the visible IME value, including any selection or active composition. */
 internal fun clearedSearchText(): TextFieldValue = TextFieldValue("")
 
+/**
+ * The standing disclosure about what was searched, or null when the scope needs no caveat.
+ *
+ * The all-buffers scope always spans a device-only corpus. A buffer scope only stays quiet when
+ * coverage is positively known complete; unknown coverage is disclosed like partial coverage so a
+ * not-yet-loaded state never reads as a completeness promise.
+ */
+@StringRes
+private fun coverageNotice(state: SearchUiState): Int? = when {
+    state.scope == SearchScope.ALL -> R.string.search_coverage_all
+    state.coverage is SearchCoverage.BufferComplete -> null
+    else -> R.string.search_coverage_partial
+}
+
+/** Empty-result copy that names the corpus that was actually searched. */
+@StringRes
+private fun emptyMessage(state: SearchUiState): Int = when {
+    state.scope == SearchScope.ALL -> R.string.search_empty_message_all
+    state.coverage is SearchCoverage.BufferComplete -> R.string.search_empty_message_buffer_complete
+    else -> R.string.search_empty_message_buffer_partial
+}
+
 @Composable
 private fun SearchResults(
     groups: List<SearchGroup>,
     query: String,
+    truncated: Boolean,
     onOpenHit: (SearchHit) -> Unit,
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize().testTag("search_results")) {
@@ -237,6 +276,18 @@ private fun SearchResults(
             }
             items(group.hits, key = { it.message.id }) { hit ->
                 SearchHitRow(hit = hit, query = query, onClick = { onOpenHit(hit) })
+            }
+        }
+        if (truncated) {
+            item(key = "truncated_footer") {
+                Text(
+                    text = stringResource(R.string.search_truncated),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .testTag("search_truncated_footer"),
+                )
             }
         }
     }

@@ -269,8 +269,13 @@
     <string name="search_clear">Clear search</string>
     <string name="search_chip_all">All buffers</string>
     <string name="search_chip_current">This buffer</string>
-    <string name="search_empty_title">No results</string>
-    <string name="search_empty_message">Try a different query or filter.</string>
+    <string name="search_empty_title">No matches on this device</string>
+    <string name="search_empty_message_all">Only messages saved on this device are searched. Try a different query.</string>
+    <string name="search_empty_message_buffer_complete">This conversation\'s full history is on this device. Try a different query.</string>
+    <string name="search_empty_message_buffer_partial">Only the parts of this conversation saved on this device are searched. Try a different query.</string>
+    <string name="search_coverage_all">Searching messages saved on this device, not the full server history.</string>
+    <string name="search_coverage_partial">Parts of this conversation aren\'t saved on this device, so some messages can\'t be found.</string>
+    <string name="search_truncated">Showing the 200 most recent matches. Refine the query to find older messages.</string>
     <string name="search_prompt_title">Search your history</string>
     <string name="search_prompt_message">Type to search. Use from:nick to filter by sender.</string>
 
