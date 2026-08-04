@@ -12,9 +12,8 @@ import io.github.trevarj.motd.data.history.GapAnchorResolver
 import io.github.trevarj.motd.data.history.NO_APPEND_PROGRESS
 import io.github.trevarj.motd.data.history.PageProgress
 import io.github.trevarj.motd.data.history.Pageability
-import io.github.trevarj.motd.data.history.focusedOlderGap
+import io.github.trevarj.motd.data.history.newestPageableGap
 import io.github.trevarj.motd.data.history.olderPageability
-import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -47,7 +46,7 @@ import kotlinx.coroutines.sync.Mutex
  * Everything else is deliberately NOT restated here. The boundary ladder, the unrecoverable/
  * server-proven-empty classifications, the anti-livelock no-progress rule, and the timestamp-only
  * `advancedFrom` asymmetry all come from [olderPageability]; gap selection comes from
- * [focusedOlderGap] over [GapAnchorResolver]; the wire request, msgid→timestamp fallback,
+ * [newestPageableGap] over [GapAnchorResolver]; the wire request, msgid→timestamp fallback,
  * per-network serialization, and the persist through the sole IRC→Room writer all come from
  * [HistoryPageLoader]. This class contributes exactly three things the mediator's Paging-driven
  * entry got for free: a demand source, a per-room single flight, and a page budget.
@@ -83,8 +82,8 @@ class HistoryGapFillCoordinator @Inject constructor(
         /** A tapped divider names its gap outright. */
         data class ById(val gapId: Long) : GapSelection
 
-        /** Autopilot: whichever gap older paging would work on under [focus]. */
-        data class Focused(val focus: HistoryWindowFocus) : GapSelection
+        /** Autopilot: the newest seam in the room, from [newestPageableGap]. */
+        data object Newest : GapSelection
     }
 
     /**
@@ -117,8 +116,8 @@ class HistoryGapFillCoordinator @Inject constructor(
             }
     }
 
-    // Resolves stored gap edges against the local store so focus selection ranks gaps by real
-    // timeline positions — the same projection the mediator and the repository's window geometry use.
+    // Resolves stored gap edges against the local store so selection ranks gaps by real timeline
+    // positions — the same projection the timeline's seams are placed with.
     private val gapAnchors = GapAnchorResolver(messageDao)
 
     // Guards overlapping fills of the SAME room. The wire itself is already serialized per network
@@ -135,11 +134,9 @@ class HistoryGapFillCoordinator @Inject constructor(
     suspend fun fillGap(roomId: RoomId, gapId: Long): GapFill =
         fill(roomId, GapSelection.ById(gapId), historyFor(roomId))
 
-    /** Fill whichever gap older paging would work on under [focus]. */
-    suspend fun fillFocusedGap(
-        roomId: RoomId,
-        focus: HistoryWindowFocus = HistoryWindowFocus.Recent,
-    ): GapFill = fill(roomId, GapSelection.Focused(focus), historyFor(roomId))
+    /** Fill the newest seam in the room — the reconnect catch-up gap when there is one. */
+    suspend fun fillNewestGap(roomId: RoomId): GapFill =
+        fill(roomId, GapSelection.Newest, historyFor(roomId))
 
     internal suspend fun fill(
         roomId: RoomId,
@@ -272,13 +269,12 @@ class HistoryGapFillCoordinator @Inject constructor(
         }
     }
 
-    /** Pin the gap for the whole fill: a tap names its own, the autopilot ranks by focus. */
+    /** Pin the gap for the whole fill: a tap names its own, the autopilot takes the newest. */
     private suspend fun selectGapId(roomId: RoomId, selection: GapSelection): Long? {
         val gaps = historyGapDao.forRoom(roomId)
         return when (selection) {
             is GapSelection.ById -> gaps.firstOrNull { it.id == selection.gapId }?.id
-            is GapSelection.Focused ->
-                focusedOlderGap(selection.focus, gapAnchors.resolve(roomId, gaps))?.gap?.id
+            GapSelection.Newest -> newestPageableGap(gapAnchors.resolve(roomId, gaps))?.gap?.id
         }
     }
 

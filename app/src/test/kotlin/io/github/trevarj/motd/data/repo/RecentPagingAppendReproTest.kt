@@ -210,10 +210,10 @@ class RecentPagingAppendReproTest {
 
     private fun repository(history: ChatHistoryRemoteMediator.HistorySource) = MessageRepositoryImpl(
         db.bufferDao(), db.networkIdentityDao(), db.messageDao(), db.reactionDao(),
-        ChatHistoryMediatorFactory { roomId, focus ->
+        ChatHistoryMediatorFactory { roomId ->
             ChatHistoryRemoteMediator(
                 roomId, db.bufferDao(), db.messageDao(), processor, history, 50,
-                db.historyCursorDao(), db.historyGapDao(), focus, loader,
+                db.historyCursorDao(), db.historyGapDao(), loader,
             )
         },
         db.historyGapDao(),
@@ -235,7 +235,7 @@ class RecentPagingAppendReproTest {
      */
     private suspend fun runAutopilot(history: BoundaryScriptedHistory) = coordinator().fill(
         bufferId,
-        HistoryGapFillCoordinator.GapSelection.Focused(HistoryWindowFocus.Recent),
+        HistoryGapFillCoordinator.GapSelection.Newest,
         history,
         pageSize = 50,
     )
@@ -251,7 +251,7 @@ class RecentPagingAppendReproTest {
     ): List<String?> {
         val differ = differ()
         val job = launch(UnconfinedTestDispatcher(testScheduler)) {
-            repository.messages(bufferId, MessageVisibilitySpec(), HistoryWindowFocus.Recent)
+            repository.messages(bufferId, MessageVisibilitySpec())
                 .collectLatest { differ.submitData(it) }
         }
         repeat(10) {
@@ -370,7 +370,7 @@ class RecentPagingAppendReproTest {
             }
             val mediator = ChatHistoryRemoteMediator(
                 bufferId, db.bufferDao(), db.messageDao(), processor, history, 50,
-                db.historyCursorDao(), db.historyGapDao(), HistoryWindowFocus.Recent, loader,
+                db.historyCursorDao(), db.historyGapDao(), loader,
             )
 
             // Paging's APPEND takes the wire first and is held there; the autopilot arms while it is
@@ -572,7 +572,7 @@ class RecentPagingAppendReproTest {
             )
             val messages = keyFlow
                 .flatMapLatest { key ->
-                    repository.messages(bufferId, MessageVisibilitySpec(), HistoryWindowFocus.Recent, key)
+                    repository.messages(bufferId, MessageVisibilitySpec(), key)
                 }
                 .cachedIn(cacheScope)
             val differ = differ()
@@ -611,7 +611,7 @@ class RecentPagingAppendReproTest {
     ): Pair<MessageEntity?, MessageEntity?> {
         val differ = differ()
         val job = launch(UnconfinedTestDispatcher(testScheduler)) {
-            repository.messages(bufferId, MessageVisibilitySpec(), HistoryWindowFocus.Recent, initialKey)
+            repository.messages(bufferId, MessageVisibilitySpec(), initialKey)
                 .collectLatest { differ.submitData(it) }
         }
         advanceUntilIdle()

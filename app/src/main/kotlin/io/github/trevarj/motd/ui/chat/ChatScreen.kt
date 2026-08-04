@@ -377,8 +377,6 @@ fun ChatScreen(
     val nickSheet by viewModel.nickSheet.collectAsStateWithLifecycle()
     val uiEvents by viewModel.uiEvents.collectAsStateWithLifecycle()
     val historySyncStatus by viewModel.historySyncStatus.collectAsStateWithLifecycle()
-    val activeHistoryWindow by viewModel.activeHistoryWindow.collectAsStateWithLifecycle()
-    val hasNewerHistoryIsland by viewModel.hasNewerHistoryIsland.collectAsStateWithLifecycle()
     val timelineSeams by viewModel.timelineSeams.collectAsStateWithLifecycle()
     val isServerBuffer = state.buffer?.type == BufferType.SERVER
     val titleTarget = chatTitleTarget(state.buffer?.type)
@@ -476,13 +474,11 @@ fun ChatScreen(
         jumpTarget = jumpTarget,
         initialTarget = initialTarget,
         entryState = entryState,
-        activeHistoryWindow = activeHistoryWindow,
-        hasNewerHistoryIsland = hasNewerHistoryIsland,
         timelineSeams = timelineSeams,
         onLoadGap = viewModel::fillGap,
         onJumpHandled = viewModel::onJumpHandled,
         onInitialPositionHandled = viewModel::onInitialPositionHandled,
-        onFocusRecentHistory = viewModel::focusRecentHistory,
+        onJumpToNewest = viewModel::jumpToNewest,
         onFocusRecentMention = viewModel::focusRecentMention,
         onInitialPositionUnresolved = viewModel::onInitialPositionUnresolved,
         onScrollPositionChanged = viewModel::saveScrollPosition,
@@ -633,15 +629,13 @@ fun ChatContent(
     jumpTarget: ChatPositionTarget? = null,
     initialTarget: ChatPositionTarget? = null,
     entryState: EntryPositionState = EntryPositionState.Pending,
-    activeHistoryWindow: ActiveHistoryWindow = ActiveHistoryWindow(),
-    hasNewerHistoryIsland: Boolean = false,
     // Stored history gaps, rendered as in-row seams by MessageList. Independent of the active
     // window: the seam list describes the gaps, the window decides which rows are on screen.
     timelineSeams: TimelineSeamState = TimelineSeamState(),
     onLoadGap: (Long) -> Unit = {},
     onJumpHandled: (Long) -> Unit = {},
     onInitialPositionHandled: () -> Unit = {},
-    onFocusRecentHistory: () -> Unit = {},
+    onJumpToNewest: () -> Unit = {},
     onFocusRecentMention: (ChatPositionTarget) -> Unit = {},
     onInitialPositionUnresolved: () -> Unit = {},
     onScrollPositionChanged: (ChatScrollPosition) -> Unit = {},
@@ -1124,18 +1118,15 @@ fun ChatContent(
         }
     }
 
-    // The save/dispose effects below outlive a window flip, so read the island flag through the
-    // latest composition rather than the value captured when the collector started.
-    val latestHasNewerHistoryIsland by rememberUpdatedState(hasNewerHistoryIsland)
-
     fun saveCurrentScrollPosition() {
         if (!initialPositionSettled) return
         val index = listState.firstVisibleItemIndex
-        // Clearing the saved position means "resume at the live bottom next time". Inside a bounded
-        // island the window's index 0 is only the island's bottom, so clearing there would silently
-        // discard the user's place in history; save the anchor instead.
-        if (!latestHasNewerHistoryIsland &&
-            isAtEffectiveBottom(
+        // Clearing the saved position means "resume at the live bottom next time", so only a
+        // provable bottom may clear it. [isAtEffectiveBottom] is that proof: a viewport parked in
+        // history — a deep jump's destination, say — has unloaded rows below it and therefore does
+        // not qualify, so its place is saved rather than silently discarded. The bounded-island
+        // exception this used to carry is gone with the islands themselves.
+        if (isAtEffectiveBottom(
                 firstVisibleIndex = index,
                 firstVisibleOffset = listState.firstVisibleItemScrollOffset,
                 itemCount = items.itemCount,
@@ -1367,8 +1358,9 @@ fun ChatContent(
         ChatTitleTarget.NONE -> null
     }
     // Mark read on new-message-while-at-bottom only (plans/07/15 #2): syncing while scrolled up
-    // reading history would clear unread on other clients and destroy the local unread UX. The
-    // bottom of a bounded older island is not the bottom of the conversation, so it never acks.
+    // reading history would clear unread on other clients and destroy the local unread UX. What
+    // "at bottom" is allowed to mean is therefore load-bearing, and `atBottom` is the only thing
+    // standing between a viewport parked in history and a room-wide MARKREAD: see isAtEffectiveBottom.
     //
     // viewportReadEnabled is a key here, so the pause/resume flip restarts the effect. Arrivals
     // while paused correctly do not acknowledge, but the restart used to acknowledge them anyway
@@ -1383,7 +1375,6 @@ fun ChatContent(
         atBottom,
         initialPositionSettled,
         viewportReadEnabled,
-        hasNewerHistoryIsland,
     ) {
         if (!viewportReadEnabled) {
             pausedSinceLastRun.value = true
@@ -1398,7 +1389,6 @@ fun ChatContent(
         ) ?: return@LaunchedEffect
         val ackable = shouldMarkReadFromViewport(
             atBottom = atBottom,
-            hasNewerHistoryIsland = hasNewerHistoryIsland,
             initialPositionSettled = initialPositionSettled,
             viewportReadEnabled = viewportReadEnabled,
         )
@@ -1704,13 +1694,12 @@ fun ChatContent(
                         listState = listState,
                         readMarker = readMarkerLive,
                         visibilityPolicy = visibilityPolicy,
-                        activeHistoryWindow = activeHistoryWindow,
                         countUnreadBelowViewport = countUnreadBelowViewport,
                         nearestUnreadMentionBelow = nearestUnreadMentionBelow,
-                        visible = shouldShowNewestFab(atBottom, hasNewerHistoryIsland, autoScrolling),
+                        visible = shouldShowNewestFab(atBottom, autoScrolling),
                         onJumpMention = onFocusRecentMention,
                         onJumpNewest = {
-                            onFocusRecentHistory()
+                            onJumpToNewest()
                             scope.launch { scrollToNewest(animate = true, reason = "jump_fab") }
                         },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
@@ -2488,7 +2477,6 @@ private fun ViewportScrollToBottomFab(
     listState: androidx.compose.foundation.lazy.LazyListState,
     readMarker: io.github.trevarj.motd.data.db.TimelineAnchor?,
     visibilityPolicy: MessageVisibilityPolicy,
-    activeHistoryWindow: ActiveHistoryWindow,
     countUnreadBelowViewport: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int,
     nearestUnreadMentionBelow: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> ChatPositionTarget?,
     visible: Boolean,
@@ -2501,11 +2489,11 @@ private fun ViewportScrollToBottomFab(
     }
     val latestCounter by rememberUpdatedState(countUnreadBelowViewport)
     val latestMentionJump by rememberUpdatedState(nearestUnreadMentionBelow)
-    var unread by remember(readMarker, visibilityPolicy, activeHistoryWindow) { mutableIntStateOf(0) }
-    var mentionTarget by remember(readMarker, visibilityPolicy, activeHistoryWindow) {
+    var unread by remember(readMarker, visibilityPolicy) { mutableIntStateOf(0) }
+    var mentionTarget by remember(readMarker, visibilityPolicy) {
         mutableStateOf<ChatPositionTarget?>(null)
     }
-    LaunchedEffect(firstVisible, readMarker, visibilityPolicy, activeHistoryWindow) {
+    LaunchedEffect(firstVisible, readMarker, visibilityPolicy) {
         if (readMarker == null || firstVisible <= 0) {
             unread = 0
             mentionTarget = null

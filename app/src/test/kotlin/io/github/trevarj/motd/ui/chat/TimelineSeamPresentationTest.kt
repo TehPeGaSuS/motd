@@ -9,17 +9,14 @@ import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
-import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
-import io.github.trevarj.motd.data.visibility.MessageWindowBounds
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.ui.components.HistoryGapState
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -29,15 +26,15 @@ import org.robolectric.RobolectricTestRunner
 
 /**
  * The seam pipeline end to end — repository → ViewModel state → [rowSeam] → divider — over a real
- * store, a real paging query, and the real repository bounds.
+ * store and the real paging query.
  *
- * This file used to assert the opposite. While Recent clamped the window AT the gap, the row
- * adjacent to a seam had no materialized older neighbor, `seamAbove` abstained on the undecidable
- * slot, and NOTHING could render however correctly it was wired. Recent is unbounded now, so those
- * cases invert: the seam is drawn, once, between the two islands.
+ * This file used to assert the opposite. While the window clamped AT the gap, the row adjacent to a
+ * seam had no materialized older neighbor, `seamAbove` abstained on the undecidable slot, and
+ * NOTHING could render however correctly it was wired. The timeline is unbounded now, so those cases
+ * invert: the seam is drawn, once, between the two islands.
  *
- * Deliberately kept: the Around case still renders no seam, because that window is still clamped.
- * It is the live statement of what the abstention rule does, not leftover dark coverage.
+ * Deliberately kept: a slice with nothing materialized above it renders no seam. That is the live
+ * statement of the abstention rule, not leftover dark coverage.
  */
 @RunWith(RobolectricTestRunner::class)
 @OptIn(androidx.paging.ExperimentalPagingApi::class)
@@ -94,21 +91,14 @@ class TimelineSeamPresentationTest {
         networkIdentityDao = db.networkIdentityDao(),
         messageDao = db.messageDao(),
         reactionDao = db.reactionDao(),
-        mediatorFactory = ChatHistoryMediatorFactory { _, _ -> error("paging not exercised") },
+        mediatorFactory = ChatHistoryMediatorFactory { _ -> error("paging not exercised") },
         historyGapDao = db.historyGapDao(),
     )
 
-    /** Materialize a window exactly as the timeline does (reverse layout: index 0 = newest). */
-    private suspend fun loadWindow(bounds: MessageWindowBounds): List<MessageEntity> =
+    /** Materialize the timeline exactly as the screen does (reverse layout: index 0 = newest). */
+    private suspend fun loadWindow(): List<MessageEntity> =
         (
-            db.messageDao().pagingSource(
-                messagePagingQuery(
-                    roomId,
-                    spec,
-                    lowerBoundary = bounds.lowerBoundary,
-                    upperBoundary = bounds.upperBoundary,
-                ),
-            ).load(
+            db.messageDao().pagingSource(messagePagingQuery(roomId, spec)).load(
                 PagingSource.LoadParams.Refresh(key = null, loadSize = 50, placeholdersEnabled = true),
             ) as PagingSource.LoadResult.Page<Int, MessageEntity>
             ).data
@@ -141,17 +131,14 @@ class TimelineSeamPresentationTest {
         assertTrue("a fillable gap must publish a recoverable seam", seam.recoverable)
     }
 
-    // --- lit: the seam renders in the real Recent window -------------------------------------------
+    // --- lit: the seam renders in the real timeline ------------------------------------------------
 
     @Test
-    fun `the recent window renders the seam between the two islands`() = runTest {
-        val bounds = repository().historyWindowBounds(roomId, HistoryWindowFocus.Recent)
-        // The inversion, stated at its cause: Recent passes no boundary at all, so the far side of
-        // the gap is materialized and the seam has a decidable slot. A lower boundary here would put
-        // this file straight back to rendering nothing.
-        assertNull("Recent must pass no lower boundary", bounds.lowerBoundary)
-        assertNull("Recent must pass no upper boundary", bounds.upperBoundary)
-        val rows = loadWindow(bounds)
+    fun `the timeline renders the seam between the two islands`() = runTest {
+        // The inversion, stated at its cause: the presented query carries no boundary at all, so the
+        // far side of the gap is materialized and the seam has a decidable slot. Reintroducing a
+        // boundary anywhere upstream puts this file straight back to rendering nothing.
+        val rows = loadWindow()
         assertEquals(listOf("new-2", "new-1", "old-2", "old-1"), rows.map { it.text })
 
         val rendered = renderedSeams(rows, seamState())
@@ -171,14 +158,12 @@ class TimelineSeamPresentationTest {
     }
 
     @Test
-    fun `a deep-jump island renders no seam`() = runTest {
-        // A notification/search/permalink jump below the gap: the window is capped by the gap's
-        // older edge, so the seam sits above everything the island materialized.
-        val focus = HistoryWindowFocus.Around(serverTime = 1_000, eventId = older1, timelineOrder = older1)
-        val bounds = repository().historyWindowBounds(roomId, focus)
-        assertNotNull("the Around window must be capped by the gap", bounds.upperBoundary)
-
-        val rows = loadWindow(bounds)
+    fun `a deep-jump viewport parked below the gap renders no seam of its own`() = runTest {
+        // A notification/search/permalink jump below the gap. The timeline is one list, so the jump
+        // is a global index into it and the rows the viewport materializes around that index all sit
+        // on the older side of the seam. Modelled the way Paging presents it: the far pages are gone
+        // (maxSize), so the slice starts at the older island with nothing materialized above it.
+        val rows = loadWindow().takeLast(2)
         assertEquals(listOf("old-2", "old-1"), rows.map { it.text })
 
         assertEquals(emptyList<Pair<String, RowSeam>>(), renderedSeams(rows, seamState()))
@@ -187,8 +172,7 @@ class TimelineSeamPresentationTest {
     @Test
     fun `no rendered slot is added or moved by the seam wiring`() = runTest {
         val repository = repository()
-        val bounds = repository.historyWindowBounds(roomId, HistoryWindowFocus.Recent)
-        val rows = loadWindow(bounds)
+        val rows = loadWindow()
 
         // A seam is drawn INSIDE its row's composition, never as its own list item, so the
         // "countNewerThan == list index" contract ChatJumpResolver depends on is untouched: every
@@ -197,7 +181,7 @@ class TimelineSeamPresentationTest {
             assertEquals(
                 "row ${row.text} must keep its jump index",
                 index,
-                repository.countNewerThan(roomId, row.serverTime, row.id, spec, HistoryWindowFocus.Recent),
+                repository.countNewerThan(roomId, row.serverTime, row.id, spec),
             )
         }
     }
@@ -206,7 +190,7 @@ class TimelineSeamPresentationTest {
 
     @Test
     fun `a fill in flight renders that seam as loading`() = runTest {
-        val rows = loadWindow(MessageWindowBounds())
+        val rows = loadWindow()
         val gapId = seamState().seams.single().gapId
 
         val rendered = renderedSeams(rows, seamState(filling = setOf(gapId))).single()
@@ -218,7 +202,7 @@ class TimelineSeamPresentationTest {
 
     @Test
     fun `an unrelated fill leaves this seam tappable`() = runTest {
-        val rows = loadWindow(MessageWindowBounds())
+        val rows = loadWindow()
         val gapId = seamState().seams.single().gapId
 
         val rendered = renderedSeams(rows, seamState(filling = setOf(gapId + 1))).single()
@@ -230,7 +214,7 @@ class TimelineSeamPresentationTest {
     fun `an unrecoverable gap renders the permanent seam`() = runTest {
         val stored = db.historyGapDao().forRoom(roomId).single()
         db.historyGapDao().update(stored.copy(recoverable = false))
-        val rows = loadWindow(MessageWindowBounds())
+        val rows = loadWindow()
 
         // Still a seam: suppressing it is what used to hide the user's own stored history behind a
         // break that can never close. It simply stops offering a fill.
@@ -243,7 +227,7 @@ class TimelineSeamPresentationTest {
     fun `an unrecoverable gap ignores a stale in-flight id`() = runTest {
         val stored = db.historyGapDao().forRoom(roomId).single()
         db.historyGapDao().update(stored.copy(recoverable = false))
-        val rows = loadWindow(MessageWindowBounds())
+        val rows = loadWindow()
 
         val rendered = renderedSeams(rows, seamState(filling = setOf(stored.id))).single()
 
@@ -253,7 +237,7 @@ class TimelineSeamPresentationTest {
     @Test
     fun `a closed gap removes its seam`() = runTest {
         db.historyGapDao().delete(db.historyGapDao().forRoom(roomId).single().id)
-        val rows = loadWindow(MessageWindowBounds())
+        val rows = loadWindow()
 
         val state = seamState()
         assertTrue("a filled gap publishes no seam", state.seams.isEmpty())

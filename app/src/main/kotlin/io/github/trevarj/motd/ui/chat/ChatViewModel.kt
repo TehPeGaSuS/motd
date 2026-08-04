@@ -29,7 +29,6 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
-import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.data.repo.entryAnchorPagingKey
 import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
 import io.github.trevarj.motd.data.repo.NoopNetworkIgnoreRepository
@@ -218,6 +217,10 @@ class ChatViewModel @Inject constructor(
     private val route: ChatRoute = savedStateHandle.toRoute<ChatRoute>()
     val bufferId: Long = route.bufferId
 
+    /** This screen was opened by a deep link/notification tap rather than by a plain room open. */
+    private val routeHasDeepJump: Boolean =
+        route.jumpToTime > 0 || route.jumpToEventId != null || route.jumpToMsgid != null
+
     // Behavioral filter (JPQ visibility + fools HIDE). Distinct so unrelated settings edits don't
     // re-emit the paging stream (plans/13 §2.5). ChatState is untouched — the screen collects
     // [settings] separately (mirrors R1 keeping the 5-ary combine stable).
@@ -232,22 +235,12 @@ class ChatViewModel @Inject constructor(
     private val filterSpec = filterSpecs
         .stateIn(viewModelScope, SharingStarted.Eagerly, MessageVisibilitySpec())
 
-    // Only ever Recent or Around now: scroll-driven Paging owns older-history fetches, so there is no
-    // per-gesture focus churn.
-    private val historyWindowFocus = MutableStateFlow<HistoryWindowFocus>(HistoryWindowFocus.Recent)
-
-    val activeHistoryWindow: StateFlow<ActiveHistoryWindow> = historyWindowFocus.flatMapLatest { focus ->
-        messageRepository.observeHistoryWindowBounds(bufferId, focus).map { bounds ->
-            ActiveHistoryWindow(focus, bounds)
-        }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, ActiveHistoryWindow())
-
     /**
      * The room's history seams, joined with the gaps a fill is running for.
      *
-     * Not keyed on [historyWindowFocus]: a seam's position comes from the gap itself, so the list is
-     * the same under Recent and Around. Which seams land in a rendered slot is decided per row by
-     * [rowSeam] against the neighbors Paging actually materialized.
+     * A seam's position comes from the gap itself, so this list does not depend on where the
+     * viewport is. Which seams land in a rendered slot is decided per row by [rowSeam] against the
+     * neighbors Paging actually materialized.
      */
     val timelineSeams: StateFlow<TimelineSeamState> = combine(
         messageRepository.observeTimelineSeams(bufferId),
@@ -300,50 +293,43 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** A focused older island keeps an explicit escape to the independently loaded recent island. */
-    val hasNewerHistoryIsland: StateFlow<Boolean> = activeHistoryWindow.map { window ->
-        window.focus is HistoryWindowFocus.Around && window.bounds.upperBoundary != null
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
     /** Every visibility change cancels the old generation and creates a positionally exact Pager. */
     val messages: Flow<PagingData<MessageEntity>> =
-        combine(filterSpecs, historyWindowFocus) { spec, focus -> spec to focus }
-            .flatMapLatest { (spec, focus) ->
+        filterSpecs
+            .flatMapLatest { spec ->
                 flow {
                     // Resolve the open-at-first-unread anchor BEFORE creating the Pager so a deep
                     // entry collects ONE generation keyed from birth. Keying the already-collected
                     // stream by swapping in a second Pager mid-presentation parks the new
                     // generation's first page behind the cachedIn handoff, which left the reopened
                     // timeline stuck on the stale generation with refresh loading (blank reopen).
-                    emitAll(
-                        messageRepository.messages(bufferId, spec, focus, entryPagingKey(spec, focus)),
-                    )
+                    emitAll(messageRepository.messages(bufferId, spec, entryPagingKey(spec)))
                 }
             }.cachedIn(viewModelScope)
 
     /**
      * Pager initial key for the one-shot open-at-first-unread entry, resolved from the same durable
-     * state the entry pipeline reads: the oldest visible unread row inside the current Recent
-     * bounds. Null unless a pending Recent entry sits beyond the default newest load, so first-open
-     * backfill, escapes, mentions, and Around deep jumps all keep their unkeyed newest-first load.
+     * state the entry pipeline reads: the room's oldest visible unread row. Null unless a pending
+     * entry sits beyond the default newest load, so first-open backfill, escapes and mentions keep
+     * their unkeyed newest-first load. A deep jump is excluded outright: its destination is the
+     * jump target, not the read marker, and it reaches that row by requesting the placeholder inside
+     * this SAME generation rather than by rebuilding the Pager around it.
      * The entry pipeline still positions precisely; a marker that converges after this snapshot at
      * worst yields an unkeyed-style placeholder scroll, never a wrong position.
      */
-    private suspend fun entryPagingKey(spec: MessageVisibilitySpec, focus: HistoryWindowFocus): Int? {
-        if (focus !is HistoryWindowFocus.Recent) return null
+    private suspend fun entryPagingKey(spec: MessageVisibilitySpec): Int? {
+        if (routeHasDeepJump) return null
         if (_entryState.value !is EntryPositionState.Pending) return null
         return try {
             val room = bufferRepository.observeBuffer(bufferId).firstOrNull() ?: return null
             val marker = visibilityReader.effectiveLocalReadAnchor(room) ?: return null
-            val bounds = messageRepository.historyWindowBounds(bufferId, focus)
-            val firstUnread = visibilityReader.firstVisibleUnreadAnchor(bufferId, marker, spec, bounds)
+            val firstUnread = visibilityReader.firstVisibleUnreadAnchor(bufferId, marker, spec)
                 ?: return null
             val index = messageRepository.countNewerThan(
                 bufferId,
                 firstUnread.serverTime,
                 firstUnread.eventId,
                 spec,
-                focus,
             )
             entryAnchorPagingKey(index)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -698,30 +684,24 @@ class ChatViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     suspend fun countUnreadBelowViewport(firstVisibleIndex: Int, marker: TimelineAnchor): Int =
-        messageRepository.historyWindowBounds(bufferId, historyWindowFocus.value).let { bounds ->
-            visibilityReader.countVisibleUnreadInTimelinePrefix(
-                bufferId = bufferId,
-                beforeIndex = firstVisibleIndex,
-                after = marker,
-                maxCount = 100,
-                spec = filterSpec.value,
-                bounds = bounds,
-            )
-        }
+        visibilityReader.countVisibleUnreadInTimelinePrefix(
+            bufferId = bufferId,
+            beforeIndex = firstVisibleIndex,
+            after = marker,
+            maxCount = 100,
+            spec = filterSpec.value,
+        )
 
-    /** Exact nearest unread mention below the viewport; its index is valid in the current island. */
+    /** Exact nearest unread mention below the viewport, as a global timeline index. */
     suspend fun nearestUnreadMentionBelow(
         firstVisibleIndex: Int,
         marker: TimelineAnchor,
     ): ChatPositionTarget? {
-        val focus = historyWindowFocus.value
-        val bounds = messageRepository.historyWindowBounds(bufferId, focus)
         val target = visibilityReader.nearestUnreadMentionBelow(
             bufferId = bufferId,
             beforeIndex = firstVisibleIndex,
             after = marker,
             spec = filterSpec.value,
-            bounds = bounds,
         ) ?: return null
         return ChatPositionTarget(
             index = messageRepository.countNewerThan(
@@ -729,7 +709,6 @@ class ChatViewModel @Inject constructor(
                 target.serverTime,
                 target.id,
                 filterSpec.value,
-                focus,
             ),
             expectedEventId = target.id,
             expectedMsgid = target.msgid,
@@ -1367,13 +1346,7 @@ class ChatViewModel @Inject constructor(
             }
         },
         countNewer = { targetBufferId, serverTime, id ->
-            messageRepository.countNewerThan(
-                targetBufferId,
-                serverTime,
-                id,
-                filterSpecs.first(),
-                historyWindowFocus.value,
-            )
+            messageRepository.countNewerThan(targetBufferId, serverTime, id, filterSpecs.first())
         },
     )
 
@@ -1408,13 +1381,7 @@ class ChatViewModel @Inject constructor(
     private var initialReresolveUsed = false
 
     init {
-        val hasDeepJump = jumpTime > 0 || jumpEventId != null || jumpMsgid != null
-        if (hasDeepJump && jumpTime > 0) {
-            historyWindowFocus.value = HistoryWindowFocus.Around(
-                jumpTime,
-                eventId = jumpEventId ?: Long.MIN_VALUE,
-            )
-        }
+        val hasDeepJump = routeHasDeepJump
         // `jump_consumed` only prevents duplicate work after a completed jump. If Android kills
         // the process while the first resolve/scroll is in flight, the restored handle has it set
         // but neither terminal entry-position state; re-publish the target/failure for the new UI.
@@ -1447,15 +1414,11 @@ class ChatViewModel @Inject constructor(
             val realMarker: TimelineAnchor? = entryBuffer?.let {
                 visibilityReader.effectiveLocalReadAnchor(it)
             }
-            val recentBounds = messageRepository.historyWindowBounds(
-                bufferId,
-                HistoryWindowFocus.Recent,
-            )
-            // Recent is unbounded now, so this resolves against every retained row. That is the same
-            // answer the old bounded call gave: a window bound could only ever hide rows the client
-            // already holds, and a gap's far side is by definition rows it does not.
+            // The timeline is unbounded, so this resolves against every retained row. That is the
+            // same answer the old bounded call gave: a window bound could only ever hide rows the
+            // client already holds, and a gap's far side is by definition rows it does not.
             val firstUnread = realMarker?.let {
-                visibilityReader.firstVisibleUnreadAnchor(bufferId, it, entrySpec, recentBounds)
+                visibilityReader.firstVisibleUnreadAnchor(bufferId, it, entrySpec)
             }
             val unreadRow = entryBuffer?.let { room ->
                 bufferRepository.observeChatList().first()
@@ -1479,8 +1442,7 @@ class ChatViewModel @Inject constructor(
                 _unreadEntrySnapshot.value = frozen
                 persistUnreadEntrySnapshot(frozen)
             }
-            // A normal open remains on Recent and lands on its oldest loaded unread row. Only an
-            // explicit deep link may select Around; older traversal is authorized by user scroll.
+            // A normal open lands on the oldest loaded unread row; a deep link owns its own target.
             if (!hasDeepJump && _entryState.value !is EntryPositionState.Settled) {
                 val entryAnchor = firstUnread ?: realMarker
                 _initialTarget.value = when {
@@ -1510,13 +1472,7 @@ class ChatViewModel @Inject constructor(
         spec: MessageVisibilitySpec,
         requireExactIdentity: Boolean,
     ): ChatPositionTarget {
-        val index = messageRepository.countNewerThan(
-            bufferId,
-            anchor.serverTime,
-            anchor.eventId,
-            spec,
-            historyWindowFocus.value,
-        )
+        val index = messageRepository.countNewerThan(bufferId, anchor.serverTime, anchor.eventId, spec)
         // A deep anchor (past the default newest load) is materialized by the Pager's initialKey:
         // the messages flow resolves the same anchor via entryPagingKey BEFORE the first
         // generation, so this target only needs the index. See entryPagingKey.
@@ -1629,29 +1585,13 @@ class ChatViewModel @Inject constructor(
         )) {
             is ChatJumpResolver.Result.Resolved -> {
                 if (activeJumpRequest?.token != request.token) return
-                var target = r.target
-                target.serverTime.takeIf { it > 0 }?.let { serverTime ->
-                    val resolvedRow = target.expectedEventId?.let { messageRepository.byId(it) }
-                    val focus = HistoryWindowFocus.Around(
-                        serverTime,
-                        eventId = resolvedRow?.id ?: target.expectedEventId ?: Long.MIN_VALUE,
-                        timelineOrder = resolvedRow?.timelineOrder
-                            ?: target.expectedEventId
-                            ?: Long.MIN_VALUE,
-                    )
-                    historyWindowFocus.value = focus
-                    target.expectedEventId?.let { eventId ->
-                        target = target.copy(
-                            index = messageRepository.countNewerThan(
-                                bufferId,
-                                serverTime,
-                                eventId,
-                                filterSpecs.first(),
-                                focus,
-                            ),
-                        )
-                    }
-                }
+                // A deep jump is a GLOBAL index into the one unbounded timeline. The resolver
+                // already counted it that way, so nothing is recomputed here: the Pager generation
+                // the screen is holding is the generation that owns this index, and the screen
+                // reaches the row by requesting the placeholder at it. Rebuilding a narrow window
+                // around the target is what used to make its index 0 something other than the room's
+                // newest row, which is precisely what the viewport mark-read gate must never see.
+                val target = r.target
                 // Force a distinct emission so the screen's LaunchedEffect(jumpTarget) always
                 // re-runs, even when the re-resolved index equals the previous one (plans/15 #12).
                 _jumpTarget.value = null
@@ -1682,25 +1622,27 @@ class ChatViewModel @Inject constructor(
         transitionEntry(EntryPositionState.Settled)
     }
 
-    /** The newest FAB is an explicit request to abandon an older focused island immediately. */
-    fun focusRecentHistory() {
+    /**
+     * The newest FAB is an explicit request to go to the live bottom right now.
+     *
+     * The scroll itself belongs to the screen; what this does is abandon every one-shot positioning
+     * operation that would otherwise fight it — an unresolved deep jump, a pending entry target —
+     * and settle entry so read state is no longer gated on a position the user just overrode.
+     */
+    fun jumpToNewest() {
         jumpResolveJob?.cancel()
         jumpResolveJob = null
         activeJumpRequest = null
         _jumpTarget.value = null
         _initialTarget.value = null
-        // Settling entry first means a focus flip back to Recent re-resolves entryPagingKey as
-        // null: the escape lands on the live newest window, never a stale entry anchor.
         transitionEntry(EntryPositionState.Settled)
-        historyWindowFocus.value = HistoryWindowFocus.Recent
     }
 
-    /** Re-resolve an exact mention inside the island where its viewport index was computed. */
+    /** Re-resolve an exact mention against the live timeline before scrolling to it. */
     fun focusRecentMention(target: ChatPositionTarget) {
         jumpResolveJob?.cancel()
         _jumpTarget.value = null
         activeJumpRequest = null
-        val focus = historyWindowFocus.value
         val eventId = target.expectedEventId ?: return
         val request = JumpRequest(
             token = ++nextJumpToken,
@@ -1717,7 +1659,6 @@ class ChatViewModel @Inject constructor(
                 row.serverTime,
                 row.id,
                 filterSpecs.first(),
-                focus,
             )
             if (activeJumpRequest?.token != request.token) return@launch
             _jumpTarget.value = target.copy(

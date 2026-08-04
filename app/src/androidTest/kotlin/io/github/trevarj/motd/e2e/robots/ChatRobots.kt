@@ -316,6 +316,18 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
             ?.rowCount
             ?: 0
 
+    /**
+     * The scroll-to-bottom FAB is shown, i.e. the app does NOT consider this viewport the bottom of
+     * the conversation.
+     *
+     * That is the only externally observable statement of `isAtEffectiveBottom`, and it is the same
+     * predicate the viewport mark-read effect gates on: whatever this reports as the bottom is what
+     * the app will broadcast a room-wide MARKREAD for.
+     */
+    fun assertNotAtConversationBottom(timeoutMs: Long = 20_000) {
+        awaitTag("chat_scroll_to_bottom_fab", timeoutMs)
+    }
+
     fun scrollToBottom() {
         awaitTag("chat_scroll_to_bottom_fab")
         rule.onNodeWithTag("chat_scroll_to_bottom_fab", useUnmergedTree = true).performClick()

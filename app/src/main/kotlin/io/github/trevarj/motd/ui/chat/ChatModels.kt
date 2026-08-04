@@ -9,11 +9,9 @@ import io.github.trevarj.motd.data.visibility.JOIN_PART_QUIT_KINDS
 import io.github.trevarj.motd.data.visibility.CONVERSATION_KINDS
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
-import io.github.trevarj.motd.data.visibility.MessageWindowBounds
 import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.history.seamAbove
 import io.github.trevarj.motd.data.prefs.LayoutDensity
-import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -36,12 +34,6 @@ val JPQ_KINDS: Set<MessageKind> = JOIN_PART_QUIT_KINDS
  * Behavioral filter spec derived from observed Settings and passed into each repository Pager.
  */
 typealias MessageFilterSpec = MessageVisibilitySpec
-
-/** Identity of the active paging island; bounds changes invalidate viewport-derived state. */
-data class ActiveHistoryWindow(
-    val focus: HistoryWindowFocus = HistoryWindowFocus.Recent,
-    val bounds: MessageWindowBounds = MessageWindowBounds(),
-)
 
 /**
  * Every seam the room currently has, plus the gaps a fill is running for.
@@ -443,7 +435,23 @@ fun newestEffectiveMessageId(
     peek(index)?.takeIf(policy::effectiveBottom)?.id
 }
 
-/** Reverse-list bottom with any raw tail ignored by policy treated as already settled. */
+/**
+ * Reverse-list bottom with any raw tail ignored by policy treated as already settled.
+ *
+ * "Ignored" means MATERIALIZED AND IGNORED. Every index below the viewport must be readable and
+ * must be a row this [policy] does not treat as the effective bottom; an unloaded placeholder
+ * (`peek == null`) blocks the bottom outright. This is the whole safety property of the predicate,
+ * because its consumer acknowledges the ROOM's newest anchor: unknown is not "already read", and
+ * skipping nulls would let a viewport parked deep in history — with the newest pages dropped by
+ * `maxSize` and therefore null underneath it — claim the conversation's bottom and upload a
+ * MARKREAD for messages that were never displayed. A deep jump lands in exactly that state.
+ *
+ * Live following is untouched by the stricter rule. A user genuinely at the bottom sits at index 0,
+ * so [belowViewport] is empty and the loop cannot reject anything; a user sitting above a short
+ * ignored tail is within Paging's prefetch window, so those rows are loaded. Anything further than
+ * that errs toward "not at the bottom", which only ever withholds an acknowledgement, shows the
+ * newest FAB, and saves a scroll position.
+ */
 fun isAtEffectiveBottom(
     firstVisibleIndex: Int,
     firstVisibleOffset: Int,
@@ -454,9 +462,11 @@ fun isAtEffectiveBottom(
     if (firstVisibleOffset > AUTOSCROLL_BOTTOM_TOLERANCE_PX) return false
     val belowViewport = minOf(firstVisibleIndex, itemCount)
     if (belowViewport > MAX_PLACEHOLDER_PROBES) return false
-    return (0 until belowViewport).none { index ->
-        peek(index)?.let(policy::effectiveBottom) == true
+    for (index in 0 until belowViewport) {
+        val row = peek(index) ?: return false
+        if (policy.effectiveBottom(row)) return false
     }
+    return true
 }
 
 /** Prefer an eligible row at or older than the viewport; used to avoid saving fool anchors. */
@@ -523,27 +533,29 @@ internal fun materializedTargetVisibleIndex(
 
 internal fun shouldShowNewestFab(
     atBottom: Boolean,
-    hasNewerHistoryIsland: Boolean,
     autoScrolling: Boolean,
-): Boolean = (!atBottom || hasNewerHistoryIsland) && !autoScrolling
+): Boolean = !atBottom && !autoScrolling
 
 /**
- * Viewport acknowledgement is only honest when the window's bottom is the conversation's bottom.
+ * Viewport acknowledgement is only honest when the viewport's bottom is the conversation's bottom.
  *
- * The mark-read effect reads at-bottom from the CURRENT paging window but acknowledges the room's
- * newest stored row, and those are different rows inside a bounded [HistoryWindowFocus.Around]
- * island: any deep jump that lands below a retained history gap gets an upper boundary that
- * deliberately excludes newer rows, so index 0 is the island's bottom, not the room's. Advancing the
- * durable anchor there marks messages read that were never displayed and uploads a MARKREAD that
- * clears unread on every other client. [hasNewerHistoryIsland] is derived from the same window
- * bounds the PagingSource is built from, so it flips in lockstep with the island it describes.
+ * The mark-read effect reads at-bottom from the CURRENT paging snapshot but acknowledges the room's
+ * newest stored row, so everything rests on [atBottom] meaning "there is provably nothing unseen
+ * below me". It used to carry a second gate for the one case where those two disagreed: a bounded
+ * deep-jump island, whose index 0 was the island's bottom rather than the room's, so reaching it
+ * marked newer messages read and uploaded a MARKREAD to every other client.
+ *
+ * Bounded islands are retired — the timeline is one unbounded list — and that gate is deliberately
+ * NOT replaced by a constant. The same disagreement now appears as unloaded rows below the viewport,
+ * and it is [isAtEffectiveBottom] that rules them out: a null placeholder below the viewport is not
+ * a row the user has seen, so it blocks the bottom. Weakening that predicate re-opens this defect,
+ * with no second gate left to catch it.
  */
 internal fun shouldMarkReadFromViewport(
     atBottom: Boolean,
-    hasNewerHistoryIsland: Boolean,
     initialPositionSettled: Boolean,
     viewportReadEnabled: Boolean,
-): Boolean = viewportReadEnabled && initialPositionSettled && atBottom && !hasNewerHistoryIsland
+): Boolean = viewportReadEnabled && initialPositionSettled && atBottom
 
 /**
  * Newest row the timeline has actually placed on screen, or null while that cannot be proven.
@@ -585,8 +597,7 @@ internal fun renderedBottomAnchor(
  * be driven by arrival rather than by display, uploading a MARKREAD for a backlog the user never
  * saw. Clamping that one run to [renderedNewest] lets a resume confirm only rows the timeline
  * actually put on screen. It cannot over-acknowledge either: the clamp only ever moves the anchor
- * older, so every gate [shouldMarkReadFromViewport] applies (the bounded-island one included) still
- * decides whether anything is acknowledged at all.
+ * older, so [shouldMarkReadFromViewport] still decides whether anything is acknowledged at all.
  */
 internal fun viewportMarkReadAnchor(
     rawNewest: TimelineAnchor?,

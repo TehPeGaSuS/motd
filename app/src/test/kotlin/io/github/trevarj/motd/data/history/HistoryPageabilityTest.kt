@@ -9,8 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Every terminal branch of [olderPageability] and [newerPageability], plus the [advancedFrom]
- * asymmetry in both directions.
+ * Every terminal branch of [olderPageability], plus the [advancedFrom] asymmetry.
  *
  * The `End(reason)` strings are a diagnostics contract (`end_reason`), so they are asserted as
  * literals here rather than referenced through a constant: a rename must break this file.
@@ -257,80 +256,6 @@ class HistoryPageabilityTest {
         assertEquals(Pageability.SeedLatest, result)
     }
 
-    // --- newer direction ------------------------------------------------------------------------
-
-    @Test
-    fun newerEndsWhenNoFocusedGapExists() {
-        // Covers both "Recent focus selects nothing" before a fetch and "the page closed the gap"
-        // after one; either way there is no interval left to catch up on.
-        assertEquals(Pageability.End("newer_gap_closed"), newerPageability(null, progress = null))
-        assertEquals(
-            Pageability.End("newer_gap_closed"),
-            newerPageability(null, PageProgress(ref("older", 100), insertedCount = 4)),
-        )
-    }
-
-    @Test
-    fun newerEndsOnAnUnrecoverableGapWithTheSamePrePostSplitAsTheOlderDirection() {
-        assertEquals(
-            Pageability.End("unrecoverable_focused_gap"),
-            newerPageability(gap(recoverable = false), progress = null),
-        )
-        assertEquals(
-            Pageability.End("exhausted_focused_gap"),
-            newerPageability(gap(recoverable = false), PageProgress(ref("older", 100), insertedCount = 0)),
-        )
-    }
-
-    @Test
-    fun newerPagesAfterTheFocusedGapsOlderEdge() {
-        assertEquals(
-            Pageability.Page(ref("older", 100), focusedGapId = 7),
-            newerPageability(gap(), progress = null),
-        )
-    }
-
-    @Test
-    fun newerEndsWhenNothingLandedAndTheBoundaryDidNotMove() {
-        val result = newerPageability(
-            gap(),
-            PageProgress(previous = ref("older", 100), insertedCount = 0),
-        )
-
-        assertEquals(Pageability.End("no_prepend_progress"), result)
-    }
-
-    @Test
-    fun newerContinuesWhenRowsLandedEvenThoughTheBoundaryDidNotMove() {
-        val result = newerPageability(
-            gap(),
-            PageProgress(previous = ref("older", 100), insertedCount = 2),
-        )
-
-        assertEquals(Pageability.Page(ref("older", 100), focusedGapId = 7), result)
-    }
-
-    @Test
-    fun newerContinuesWhenTheBoundaryAdvancedEvenThoughNothingLanded() {
-        val result = newerPageability(
-            gap(olderMsgid = null, olderServerTime = 150),
-            PageProgress(previous = ref(null, 100), insertedCount = 0),
-        )
-
-        assertEquals(Pageability.Page(ref(null, 150), focusedGapId = 7), result)
-    }
-
-    @Test
-    fun newerNeverSeedsTheNewestPage() {
-        // Unlike the older direction, a missing boundary is never a reason to pull LATEST: without a
-        // gap edge there is no interval to catch up on at all.
-        listOf(null, gap(), gap(recoverable = false)).forEach { focused ->
-            listOf(null, PageProgress(ref("older", 100), 0), PageProgress(null, 3)).forEach { progress ->
-                assertNotEquals(Pageability.SeedLatest, newerPageability(focused, progress))
-            }
-        }
-    }
-
     // --- advancedFrom: the asymmetry -------------------------------------------------------------
 
     @Test
@@ -374,34 +299,22 @@ class HistoryPageabilityTest {
     }
 
     @Test
-    fun theMsgidStripAsymmetryHoldsInBothPagingDirections() {
-        // Same wire event, both directions: the boundary keeps its timestamp and loses its msgid, so
-        // neither direction may call it progress.
-        val strippedOlder = older(
+    fun theMsgidStripAsymmetryHoldsForAGapDirectedPage() {
+        // The boundary keeps its timestamp and loses its msgid, which is what a timestamp-only wire
+        // does to a persisted reference. Both requests would be byte-identical, so it is not progress.
+        val stripped = older(
             focusedGap = gap(newerMsgid = null, newerServerTime = 500),
             progress = PageProgress(previous = ref("newer", 500), insertedCount = 0),
         )
-        val strippedNewer = newerPageability(
-            gap(olderMsgid = null, olderServerTime = 100),
-            PageProgress(previous = ref("older", 100), insertedCount = 0),
-        )
 
-        assertEquals(Pageability.End("no_append_progress"), strippedOlder)
-        assertEquals(Pageability.End("no_prepend_progress"), strippedNewer)
+        assertEquals(Pageability.End("no_append_progress"), stripped)
 
-        // The mirror image — a msgid APPEARING at the same timestamp — keeps both directions alive.
+        // The mirror image — a msgid APPEARING at the same timestamp — keeps the direction alive.
         assertEquals(
             Pageability.Page(ref("newer", 500), focusedGapId = 7),
             older(
                 focusedGap = gap(newerMsgid = "newer", newerServerTime = 500),
                 progress = PageProgress(previous = ref(null, 500), insertedCount = 0),
-            ),
-        )
-        assertEquals(
-            Pageability.Page(ref("older", 100), focusedGapId = 7),
-            newerPageability(
-                gap(olderMsgid = "older", olderServerTime = 100),
-                PageProgress(previous = ref(null, 100), insertedCount = 0),
             ),
         )
     }

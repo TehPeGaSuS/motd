@@ -18,8 +18,6 @@ import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.history.GapEdgeAnchor
 import io.github.trevarj.motd.data.history.ResolvedGap
-import io.github.trevarj.motd.data.history.windowBounds
-import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import java.io.File
@@ -222,8 +220,7 @@ internal class TimelineDiagnostics(
             out.put("newestRows", newest)
             val gaps = readGaps(db, roomId)
             out.put("gaps", guarded { gapRows(db, roomId, gaps) })
-            out.put("bounds", guarded { boundsSnapshot(db, roomId, gaps, targetKey) })
-            out.put("pagingQuery", guarded { pagingQuerySnapshot(db, roomId, gaps, targetKey) })
+            out.put("pagingQuery", guarded { pagingQuerySnapshot(db, roomId, targetKey) })
         }
         return out
     }
@@ -345,57 +342,14 @@ internal class TimelineDiagnostics(
                     put("newerServerTime", resolved.gap.newerServerTime)
                     putNullable("newerEventId", resolved.gap.newerEventId)
                     putNullable("newerTimelineOrder", resolved.gap.newerTimelineOrder)
-                    // Resolved edges are what the window is actually built from, projected through
-                    // the bound role each one feeds: a synthetic MAX/MIN eventId here is the
-                    // signature of an unidentifiable boundary.
-                    put("resolvedOlder", resolved.older.asInclusiveUpperBound().json())
+                    // The newer edge is where the seam is CUT, projected through the same role the
+                    // timeline places it with: a synthetic MIN eventId here is the signature of an
+                    // unidentifiable boundary, and it is why a seam can sit under a whole
+                    // equal-timestamp cohort.
                     put("resolvedNewer", resolved.newer.asInclusiveLowerBound().json())
-                },
-            )
-        }
-        return out
-    }
-
-    /**
-     * The window the Pager generation is bounded by.
-     *
-     * The rule itself is the production [windowBounds]; only the per-edge resolution is
-     * mirrored here (see [resolveBoundary]) because it needs DAO lookups this read-only connection
-     * has to perform itself. `Recent` is the focus a chat-list entry opens under; the `Around`
-     * variant anchored at the target is recorded alongside it so a jump-focused generation is
-     * distinguishable from a Recent one without the live focus being observable.
-     */
-    private fun boundsSnapshot(
-        db: SQLiteDatabase,
-        roomId: Long,
-        gaps: List<HistoryGapEntity>,
-        targetKey: Long,
-    ): JSONObject {
-        val resolved = resolve(db, roomId, gaps)
-        val out = JSONObject()
-        // The live focus lives in the chat ViewModel and is not reachable from the E2E seams, so
-        // both candidate windows are recorded instead of guessing which generation is attached.
-        out.put("focusObservable", false)
-        out.put("gapCount", resolved.size)
-        windowBounds(HistoryWindowFocus.Recent, resolved).let { bounds ->
-            out.put(
-                "recent",
-                JSONObject().apply {
-                    putNullable("lowerBoundary", bounds.lowerBoundary?.json())
-                    putNullable("upperBoundary", bounds.upperBoundary?.json())
-                },
-            )
-        }
-        anchorOf(db, targetKey)?.let { anchor ->
-            val around = windowBounds(
-                HistoryWindowFocus.Around(anchor.serverTime, anchor.eventId, anchor.timelineOrder),
-                resolved,
-            )
-            out.put(
-                "aroundTarget",
-                JSONObject().apply {
-                    putNullable("lowerBoundary", around.lowerBoundary?.json())
-                    putNullable("upperBoundary", around.upperBoundary?.json())
+                    // How the same edge ranks for a hands-free fill — deliberately the opposite
+                    // sentinel, so a report where the two disagree is reporting a TimeOnly edge.
+                    put("selectionNewer", resolved.newer.asFocusNewerPosition().json())
                 },
             )
         }
@@ -405,28 +359,22 @@ internal class TimelineDiagnostics(
     /**
      * The production paging query, executed verbatim against the read-only connection.
      *
-     * This is the row set the `PagingSource` would return for the Recent window, so comparing it
-     * with the presented list separates "the source never offered the row" (bounds or visibility
-     * excluded it) from "the source offered it and Paging did not present it".
+     * This is the row set the `PagingSource` would return, so comparing it with the presented list
+     * separates "the source never offered the row" (visibility excluded it) from "the source offered
+     * it and Paging did not present it". There is exactly one such query: the timeline is unbounded
+     * and no window is derived from the room's gaps, so a row missing here is missing from the store
+     * or filtered by the spec, never clamped away.
      */
     private fun pagingQuerySnapshot(
         db: SQLiteDatabase,
         roomId: Long,
-        gaps: List<HistoryGapEntity>,
         targetKey: Long,
     ): JSONObject {
-        val bounds = windowBounds(HistoryWindowFocus.Recent, resolve(db, roomId, gaps))
         // Default spec and identity rules: the required journeys never change the join/part/quit
         // or fools settings, and an empty fools set makes identity normalization inert.
-        val query = messagePagingQuery(
-            bufferId = roomId,
-            spec = MessageVisibilitySpec(),
-            lowerBoundary = bounds.lowerBoundary,
-            upperBoundary = bounds.upperBoundary,
-        )
+        val query = messagePagingQuery(bufferId = roomId, spec = MessageVisibilitySpec())
         val args = query.stringArgs()
         val out = JSONObject()
-        out.put("focus", "RECENT")
         out.put("argCount", query.argCount)
         out.put(
             "sourceCount",
@@ -487,12 +435,6 @@ internal class TimelineDiagnostics(
             "SELECT serverTime, id, timelineOrder FROM messages WHERE bufferId = ? AND id = COALESCE(" +
                 "(SELECT canonicalEventId FROM event_redirects WHERE losingEventId = ?), ?) LIMIT 1",
             arrayOf(roomId.toString(), eventId.toString(), eventId.toString()),
-        ).use { it.anchorOrNull() }
-
-    private fun anchorOf(db: SQLiteDatabase, eventId: Long): TimelineAnchor? =
-        db.rawQuery(
-            "SELECT serverTime, id, timelineOrder FROM messages WHERE id = ? LIMIT 1",
-            arrayOf(eventId.toString()),
         ).use { it.anchorOrNull() }
 
     private fun Cursor.anchorOrNull(): TimelineAnchor? =

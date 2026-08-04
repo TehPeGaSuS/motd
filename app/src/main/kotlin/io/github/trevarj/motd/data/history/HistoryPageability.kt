@@ -53,7 +53,8 @@ const val NO_APPEND_PROGRESS = "no_append_progress"
  * after, with [progress], to decide terminality. The post-page call re-reads the focused gap and
  * the cursor so a boundary that actually receded can be told apart from one that did not.
  *
- * @param focusedGap the gap older paging is working on, from [focusedOlderGap]; re-read after a page
+ * @param focusedGap the gap this fill is pinned to, from [newestPageableGap] or a tapped divider;
+ *   null for the mediator's ungapped bottom-of-timeline ladder. Re-read after a page
  * @param historyComplete the buffer's server-proven start-of-history flag
  * @param cursorOldest the stored protocol cursor's oldest boundary, if one exists
  * @param oldestLocalRow the oldest retained row's boundary, if the store is non-empty
@@ -145,33 +146,6 @@ internal fun olderOf(a: ChatHistoryReference?, b: ChatHistoryReference?): ChatHi
     val aTime = a.serverTime ?: return b
     val bTime = b.serverTime ?: return a
     return if (bTime < aTime) b else a
-}
-
-/**
- * Newer-direction (PREPEND / CHATHISTORY AFTER) pageability.
- *
- * Newer paging exists only to close a focused unread/deep-link gap toward the recent window, so the
- * gap IS the direction: no gap means nothing to fetch. There is no seed path — without a gap edge
- * there is no interval to catch up on.
- *
- * @param focusedGap the gap newer paging is working on, from [focusedNewerGap]; re-read after a page
- * @param progress non-null only on the post-page call
- */
-fun newerPageability(focusedGap: HistoryGapEntity?, progress: PageProgress?): Pageability {
-    if (focusedGap == null) return Pageability.End("newer_gap_closed")
-    if (!focusedGap.recoverable) {
-        return Pageability.End(
-            if (progress == null) "unrecoverable_focused_gap" else "exhausted_focused_gap",
-        )
-    }
-    // The gap's older edge is what a newer page is requested AFTER; each persisted page pushes it
-    // up until the gap closes.
-    val boundary = ChatHistoryReference(focusedGap.olderMsgid, focusedGap.olderServerTime)
-    if (progress != null && progress.insertedCount == 0 && !boundary.advancedFrom(progress.previous)) {
-        // Anti-livelock guard, mirroring the older direction.
-        return Pageability.End("no_prepend_progress")
-    }
-    return Pageability.Page(boundary, focusedGap.id)
 }
 
 /**

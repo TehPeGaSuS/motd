@@ -401,16 +401,31 @@ class RequiredHeadlessE2eTest {
             )
         }
         // The notification deep jump is a cold cross-activity entry: a new route, a fresh Pager
-        // generation keyed around a row ~260 messages deep, target materialization, and the entry
-        // scroll must all complete before the row is displayed. Budget it like the suite's other
-        // navigation/network-scale waits (20-45s) rather than the generic 10s component wait,
-        // which is a slow-hosted-emulator flake edge for this step.
+        // generation, a placeholder request at a GLOBAL index ~260 rows deep in the one unbounded
+        // timeline, its materialization, and the entry scroll must all complete before the row is
+        // displayed. Budget it like the suite's other navigation/network-scale waits (20-45s) rather
+        // than the generic 10s component wait, which is a slow-hosted-emulator flake edge here.
         //
         // Headroom, not a fix: the app's own materialization cap is TARGET_MATERIALIZATION_TIMEOUT_MS
         // (30s), so a 30s test budget ties with the production deadline and loses by construction
         // whenever the deep jump legitimately needs its full cap. 45s leaves the app room to finish
         // and still fails loudly if it never does.
         timeline.assertMessageVisible(firstUnread.tag(), timeoutMs = 45_000)
+        // The deep jump no longer builds a narrow window around its target; it parks the viewport a
+        // few hundred indices into the ONE unbounded list. This asserts the app still knows that is
+        // not the bottom of the conversation — the FAB is the only externally observable statement
+        // of `isAtEffectiveBottom`, which is the same predicate the viewport mark-read effect gates
+        // on, i.e. the gate that decides whether a room-wide MARKREAD reaches every other client.
+        //
+        // Scope, stated honestly because it was measured: this room holds ~265 rows and `maxSize` is
+        // 500, so Paging can retain the WHOLE room and the rows below this viewport are materialized.
+        // The assertion therefore pins "a deep-jump viewport is not the bottom" and NOT the
+        // placeholder rule that makes that true in a room too large to retain — a deliberately
+        // reverted predicate still passes here. That rule is pinned where it can actually fail, on a
+        // 400-row store with real placeholders: see `BoundedIslandMarkReadTest` and `ChatModelsTest`,
+        // both of which do fail against the reverted predicate. Growing this fixture past `maxSize`
+        // would move the pinned 199/200 row counts above, so the split is intentional.
+        timeline.assertNotAtConversationBottom()
         scenario.scenario?.onActivity { it.recreate() }
         // Activity recreation replays the same deep entry from scratch on the same cold budget.
         timeline.assertMessageVisible(firstUnread.tag(), timeoutMs = 45_000)

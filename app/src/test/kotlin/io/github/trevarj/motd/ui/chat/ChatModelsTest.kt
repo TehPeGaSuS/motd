@@ -398,6 +398,38 @@ class ChatModelsTest {
         assertFalse(isAtEffectiveBottom(1, 0, rows.size, rows::getOrNull, policy))
     }
 
+    @Test fun `an unloaded row below the viewport blocks the effective bottom`() {
+        // Unknown is not "already read". This is the whole safety property: the consumer of this
+        // predicate acknowledges the ROOM's newest anchor, so a placeholder below the viewport —
+        // what a deep jump leaves behind once maxSize drops the newest pages — must not be skipped
+        // the way a materialized-but-ignored row is.
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec())
+        val parked: (Int) -> MessageEntity? = { index -> message(id = 300L - index).takeIf { index >= 200 } }
+
+        assertFalse(isAtEffectiveBottom(200, 0, 400, parked, policy))
+        // One materialized ignored row, then nothing: the ignorable tail must not paper over the
+        // placeholders under it either.
+        val foolPolicy = MessageVisibilityPolicy(
+            MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.COLLAPSE),
+        )
+        val foolThenPlaceholders: (Int) -> MessageEntity? = { index ->
+            message(id = 3, sender = "fool").takeIf { index == 0 }
+        }
+        assertFalse(isAtEffectiveBottom(3, 0, 10, foolThenPlaceholders, foolPolicy))
+    }
+
+    @Test fun `a viewport genuinely at the bottom probes nothing and still follows`() {
+        // Auto-follow is unaffected by the stricter rule: index 0 is the bottom, so there is no row
+        // below the viewport to be unknown about. A `peek` that would throw proves nothing is read.
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec())
+        val never: (Int) -> MessageEntity? = { error("a bottom viewport must not probe below itself") }
+
+        assertTrue(isAtEffectiveBottom(0, 0, 400, never, policy))
+        // Still bottom within the autoscroll slack, and still not probing.
+        assertTrue(isAtEffectiveBottom(0, AUTOSCROLL_BOTTOM_TOLERANCE_PX, 400, never, policy))
+        assertFalse(isAtEffectiveBottom(0, AUTOSCROLL_BOTTOM_TOLERANCE_PX + 1, 400, never, policy))
+    }
+
     @Test fun `placeholder-aware helpers never scan a 50k unloaded timeline`() {
         var probes = 0
         val peek: (Int) -> MessageEntity? = {
@@ -742,42 +774,29 @@ class ChatModelsTest {
     }
 
     @Test
-    fun `focused one-row island shows newest escape even at its local bottom`() {
-        assertTrue(
-            shouldShowNewestFab(
-                atBottom = true,
-                hasNewerHistoryIsland = true,
-                autoScrolling = false,
-            ),
-        )
-        assertFalse(shouldShowNewestFab(true, false, false))
-        assertFalse(shouldShowNewestFab(true, true, true))
+    fun `the newest escape is shown exactly when the viewport is not at the bottom`() {
+        assertTrue(shouldShowNewestFab(atBottom = false, autoScrolling = false))
+        assertFalse(shouldShowNewestFab(atBottom = true, autoScrolling = false))
+        // A programmatic scroll in flight is already heading there; the FAB would flicker.
+        assertFalse(shouldShowNewestFab(atBottom = false, autoScrolling = true))
     }
 
     @Test
-    fun `viewport acknowledgement requires the conversation bottom, not the island bottom`() {
-        // The one behavior change: a bounded older island never acknowledges, even at its bottom.
-        assertFalse(
-            shouldMarkReadFromViewport(
-                atBottom = true,
-                hasNewerHistoryIsland = true,
-                initialPositionSettled = true,
-                viewportReadEnabled = true,
-            ),
-        )
-        // Unbounded window at bottom still acknowledges exactly as before.
+    fun `viewport acknowledgement rests entirely on at-bottom`() {
+        // There is no second gate any more, which is exactly why isAtEffectiveBottom has to mean
+        // "nothing unseen below me" rather than "nothing seen-and-meaningful below me". See
+        // BoundedIslandMarkReadTest for the predicate side of this contract.
         assertTrue(
             shouldMarkReadFromViewport(
                 atBottom = true,
-                hasNewerHistoryIsland = false,
                 initialPositionSettled = true,
                 viewportReadEnabled = true,
             ),
         )
         // Every pre-existing precondition still gates on its own.
-        assertFalse(shouldMarkReadFromViewport(false, false, true, true))
-        assertFalse(shouldMarkReadFromViewport(true, false, false, true))
-        assertFalse(shouldMarkReadFromViewport(true, false, true, false))
+        assertFalse(shouldMarkReadFromViewport(false, true, true))
+        assertFalse(shouldMarkReadFromViewport(true, false, true))
+        assertFalse(shouldMarkReadFromViewport(true, true, false))
     }
 
     @Test

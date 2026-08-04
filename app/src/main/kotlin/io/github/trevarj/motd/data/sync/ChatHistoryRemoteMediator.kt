@@ -13,16 +13,11 @@ import io.github.trevarj.motd.data.db.HistoryCursorEntity
 import io.github.trevarj.motd.data.db.HistoryGapDao
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.ircTarget
-import io.github.trevarj.motd.data.history.GapAnchorResolver
 import io.github.trevarj.motd.data.history.PageProgress
 import io.github.trevarj.motd.data.history.Pageability
-import io.github.trevarj.motd.data.history.focusedNewerGap
-import io.github.trevarj.motd.data.history.focusedOlderGap
-import io.github.trevarj.motd.data.history.newerPageability
 import io.github.trevarj.motd.data.history.olderPageability
 import io.github.trevarj.motd.data.history.openGapFloor
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
-import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -37,27 +32,28 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 
 /**
- * CHATHISTORY-backed directional paging. The list is DESC (newest first): APPEND fetches older
- * messages via BEFORE, while a focused unread/deep-link island uses PREPEND + AFTER toward recent.
+ * CHATHISTORY-backed older paging. The list is DESC (newest first), so APPEND fetches older messages
+ * via BEFORE. This is the bottom-of-timeline ladder and nothing else.
  *
  * REFRESH → if the buffer is empty and the network advertises chathistory, pull LATEST once.
  * APPEND  → older boundary; stop when historyComplete/no cap; when the buffer is empty (no oldest
  *           boundary yet) pull LATEST once to backfill on first open; otherwise BEFORE the oldest
  *           protocol page boundary. Completed empty pages and explicit end markers persist the
- *           confirmed start-of-history state through EventProcessor. Under Recent focus this is the
- *           bottom-of-timeline ladder only — interior history gaps belong to
+ *           confirmed start-of-history state through EventProcessor. Interior history gaps belong to
  *           [HistoryGapFillCoordinator], and the request is clamped strictly below every open gap so
- *           the two can never name the same interval; see [appendFocusedGap] and [appendGapFloor].
+ *           the two can never name the same interval; see [appendGapFloor].
+ * PREPEND → ends immediately. The timeline is unbounded and painted newest-first, so there is never
+ *           an interval above the presented rows for it to fetch: live events supply newer messages,
+ *           and a gap ABOVE a row is an interior seam the coordinator owns.
  *
- * Paging treats `endOfPaginationReached` as PERMANENT for a direction, so both directional loads
- * report it only when paging is genuinely finished (gap closed/unrecoverable, history complete, or a
- * page that made no progress) — never merely because the loader had to stop at one ambiguous
- * equal-timestamp page edge. See [appendResult].
+ * Paging treats `endOfPaginationReached` as PERMANENT for a direction, so APPEND reports it only
+ * when older paging is genuinely finished (history complete, or a page that made no progress) —
+ * never merely because the loader had to stop at one ambiguous equal-timestamp page edge. See
+ * [appendResult].
  *
  * Every entry uses SKIP_INITIAL_REFRESH so the cached DB paints without network I/O; Paging3 then
  * drives REFRESH (empty-store LATEST seed, otherwise no-op) and scroll-triggered APPEND for older
- * history. Under Recent focus, PREPEND ends immediately because live events supply newer messages.
- * The loader owns availability, page-limit derivation, and all fetch concurrency.
+ * history. The loader owns availability, page-limit derivation, and all fetch concurrency.
  */
 @OptIn(ExperimentalPagingApi::class)
 class ChatHistoryRemoteMediator(
@@ -69,7 +65,6 @@ class ChatHistoryRemoteMediator(
     private val pageSize: Int = 50,
     private val historyCursorDao: HistoryCursorDao? = null,
     private val historyGapDao: HistoryGapDao? = null,
-    private val focus: HistoryWindowFocus = HistoryWindowFocus.Recent,
     // Owns the fetch/persist/concurrency primitives. Defaulted so the existing positional test
     // construction stays valid; production always injects the shared singleton via the factory.
     private val loader: HistoryPageLoader = HistoryPageLoader(processor),
@@ -91,15 +86,10 @@ class ChatHistoryRemoteMediator(
         override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse
     }
 
-    // Resolves stored gap edges against the local store so focus selection ranks gaps by real
-    // timeline positions. Shared with the repository's window geometry, which projects the SAME
-    // edges through the opposite (non-clamping) role — see GapEdgeAnchor.
-    private val gapAnchors = GapAnchorResolver(messageDao)
-
     override suspend fun initialize(): InitializeAction =
-        // Local cache is authoritative for normal entry and deep-link initial paint; the Around page
-        // is pre-fetched by ChatJumpResolver. Paging drives REFRESH/APPEND explicitly afterward, and
-        // the loader owns availability + concurrency for each fetch it performs.
+        // Local cache is authoritative for normal entry and deep-link initial paint; a deep jump's
+        // AROUND page is pre-fetched by ChatJumpResolver. Paging drives REFRESH/APPEND explicitly
+        // afterward, and the loader owns availability + concurrency for each fetch it performs.
         InitializeAction.SKIP_INITIAL_REFRESH
 
     override suspend fun load(loadType: LoadType, state: PagingState<Int, MessageEntity>): MediatorResult {
@@ -118,7 +108,8 @@ class ChatHistoryRemoteMediator(
             // per-buffer lock is needed here.
             when (loadType) {
                 LoadType.REFRESH -> refresh(networkId, buffer.id, buffer.ircTarget)
-                LoadType.PREPEND -> prepend(networkId, buffer.id, buffer.ircTarget)
+                // Nothing above the newest row is ever fetched here; see the class doc.
+                LoadType.PREPEND -> MediatorResult.Success(endOfPaginationReached = true)
                 LoadType.APPEND -> append(
                     networkId,
                     buffer.id,
@@ -198,10 +189,9 @@ class ChatHistoryRemoteMediator(
         historyComplete: Boolean,
     ): MediatorResult {
         val gaps = historyGapDao?.forRoom(roomId).orEmpty()
-        val focusedGap = appendFocusedGap(roomId, gaps)
         val cursor = historyCursorDao?.byRoom(roomId)
         val pageability = olderPageability(
-            focusedGap = focusedGap,
+            focusedGap = null,
             historyComplete = historyComplete,
             cursorOldest = cursor?.let { ChatHistoryReference(it.oldestMsgid, it.oldestServerTime) },
             oldestLocalRow = messageDao.oldestBoundary(roomId)
@@ -212,7 +202,7 @@ class ChatHistoryRemoteMediator(
         return when (pageability) {
             is Pageability.End -> endLoad(LoadType.APPEND, pageability.reason)
             Pageability.SeedLatest -> {
-                recordAppendBoundary(roomId, gaps, focusedGap, cursor, boundary = null)
+                recordAppendBoundary(roomId, gaps, cursor, boundary = null)
                 // Empty local store hit the end boundary on first open. With SKIP_INITIAL_REFRESH the
                 // REFRESH backfill never fires, so seed the newest page here via LATEST. If the server
                 // has history the inserted rows re-run the PagingSource; a later APPEND pages older.
@@ -226,7 +216,7 @@ class ChatHistoryRemoteMediator(
                 ).appendResult(roomId, previous = null)
             }
             is Pageability.Page -> {
-                recordAppendBoundary(roomId, gaps, focusedGap, cursor, pageability.boundary)
+                recordAppendBoundary(roomId, gaps, cursor, pageability.boundary)
                 loader.loadPage(
                     networkId,
                     roomId,
@@ -242,9 +232,9 @@ class ChatHistoryRemoteMediator(
     }
 
     /**
-     * The gap older paging is working on, or null when APPEND is not gap-directed.
+     * The floor that keeps this APPEND out of the coordinator's territory, or null when it has none.
      *
-     * Recent is deliberately NOT gap-directed. Its window is unbounded, so the local PagingSource
+     * APPEND is deliberately NOT gap-directed. The timeline is unbounded, so the local PagingSource
      * only runs dry at the true oldest retained row — never at an interior seam — and the APPEND
      * Paging asks for is therefore always a request for backlog BELOW the bottom of the timeline.
      * Aiming it at a gap made it answer a question nobody asked, and one consequence was a real
@@ -252,20 +242,6 @@ class ChatHistoryRemoteMediator(
      * finished, so scrolling to the bottom of the list could never fetch another page. Interior
      * seams are owned by [HistoryGapFillCoordinator], which is driven by taps and by the autopilot
      * rather than by Paging running out of rows.
-     *
-     * [HistoryWindowFocus.Around] keeps the gap direction: that window IS clamped at a gap, so
-     * running out of local rows there really does mean "the gap below this island".
-     */
-    private suspend fun appendFocusedGap(
-        roomId: Long,
-        gaps: List<HistoryGapEntity>,
-    ): HistoryGapEntity? = when (focus) {
-        HistoryWindowFocus.Recent -> null
-        is HistoryWindowFocus.Around -> focusedOlderGap(focus, gapAnchors.resolve(roomId, gaps))?.gap
-    }
-
-    /**
-     * The floor that keeps this APPEND out of the coordinator's territory, or null when it has none.
      *
      * The split between the two demand sources has to be STRUCTURAL, not incidental, because on an
      * unbounded timeline the two ladders otherwise coincide at open: the coordinator pages BEFORE the
@@ -275,20 +251,15 @@ class ChatHistoryRemoteMediator(
      *
      * The rule is a partition of the timeline rather than an ordering: **the coordinator owns every
      * interval an open gap covers, and the mediator owns everything strictly below all of them.**
-     * [openGapFloor] supplies the boundary that expresses it. Around focus is exempt because it is
-     * already gap-directed — it IS the coordinator's counterpart for a clamped island, not a
-     * competitor for the same interval.
+     * [openGapFloor] supplies the boundary that expresses it.
      */
-    private fun appendGapFloor(gaps: List<HistoryGapEntity>): ChatHistoryReference? = when (focus) {
-        HistoryWindowFocus.Recent -> openGapFloor(gaps)
-        is HistoryWindowFocus.Around -> null
-    }
+    private fun appendGapFloor(gaps: List<HistoryGapEntity>): ChatHistoryReference? =
+        openGapFloor(gaps)
 
-    /** The APPEND decision point: which gap was selected and which boundary the request carries. */
+    /** The APPEND decision point: the gap state it was taken against and the boundary it carries. */
     private fun recordAppendBoundary(
         roomId: Long,
         gaps: List<HistoryGapEntity>,
-        focusedGap: HistoryGapEntity?,
         cursor: HistoryCursorEntity?,
         boundary: ChatHistoryReference?,
     ) {
@@ -296,8 +267,6 @@ class ChatHistoryRemoteMediator(
             mapOf(
                 "room_id" to roomId,
                 "gap_count" to gaps.size,
-                "focused_gap_id" to focusedGap?.id,
-                "focused_gap_recoverable" to focusedGap?.recoverable,
                 "has_cursor" to (cursor != null),
                 "boundary_has_msgid" to (boundary?.msgid != null),
                 "boundary_server_time" to boundary?.serverTime,
@@ -314,11 +283,11 @@ class ChatHistoryRemoteMediator(
      * permanently terminal for the direction, so reporting the second fact kills older backfill after
      * a single page on a timestamp-only wire (soju advertises `MSGREFTYPES=timestamp`), where every
      * saturated page trips it. Terminate only when older paging is genuinely finished:
-     *  - the focused older gap became server-proven unrecoverable (Around focus only — Recent has no
-     *    focused gap, so an unrecoverable seam elsewhere in the room can no longer end this
-     *    direction), or
-     *  - history is complete and no focused gap remains, or
+     *  - history is complete, or
      *  - the page made no progress at all.
+     *
+     * An unrecoverable seam elsewhere in the room deliberately cannot end this direction: this
+     * ladder is never pointed at a gap (see [appendGapFloor]).
      * Otherwise the boundary moved (or rows landed), so the next APPEND issues a different request
      * and the ambiguity that stopped this page no longer applies.
      */
@@ -331,7 +300,6 @@ class ChatHistoryRemoteMediator(
         // focused gap, receded the cursor, or proven history complete, and every one of those facts
         // is an input to terminality. The decision itself is pure, so the reads stay here in the open.
         val gaps = historyGapDao?.forRoom(roomId).orEmpty()
-        val remaining = appendFocusedGap(roomId, gaps)
         val gapFloor = appendGapFloor(gaps)
         val historyComplete = bufferDao.observeById(roomId)?.historyComplete == true
         val cursorOldest = historyCursorDao?.byRoom(roomId)
@@ -342,9 +310,9 @@ class ChatHistoryRemoteMediator(
         // this page earned one. Only the second is progress-aware; the first supplies the boundary
         // the anti-livelock diagnostic reports.
         val ladder =
-            olderPageability(remaining, historyComplete, cursorOldest, oldestLocalRow, null, gapFloor)
+            olderPageability(null, historyComplete, cursorOldest, oldestLocalRow, null, gapFloor)
         val verdict = olderPageability(
-            remaining,
+            null,
             historyComplete,
             cursorOldest,
             oldestLocalRow,
@@ -380,49 +348,6 @@ class ChatHistoryRemoteMediator(
                 "boundary_server_time" to next?.boundary?.serverTime,
             ),
         )
-    }
-
-    /** Grow an unread/deep-link segment toward the recent window. */
-    private suspend fun prepend(
-        networkId: Long,
-        roomId: Long,
-        target: String,
-    ): MediatorResult {
-        val focusedGap = focusedNewerGap(
-            focus,
-            gapAnchors.resolve(roomId, historyGapDao?.forRoom(roomId).orEmpty()),
-        )?.gap
-        // Newer paging never seeds, so anything but Page is terminal. These two pre-fetch terminals
-        // (no gap under this focus, or one already proven empty) have never emitted a diagnostic, so
-        // the End reason is deliberately dropped here rather than recorded.
-        val start = newerPageability(focusedGap, progress = null) as? Pageability.Page
-            ?: return MediatorResult.Success(endOfPaginationReached = true)
-        val result = loader.loadPage(
-            networkId,
-            roomId,
-            target,
-            HistoryPageLoader.Direction.NEWER,
-            history,
-            pageSize,
-            gapId = start.focusedGapId,
-            boundary = start.boundary,
-        )
-        val page = result as? HistoryPageLoader.PageResult.Loaded ?: return result.toMediatorResult()
-        // The focused newer gap shrank as this page was persisted; re-read it and apply the same
-        // progress rule APPEND uses. A saturated timestamp-only catch-up page trips the loader's
-        // cannotSafelyPageAfter guard, which says "not from this cursor", not "no newer history";
-        // reporting it to Paging would permanently terminate PREPEND, leaving the reconnect gap open
-        // and everything newer than it outside the Around window forever.
-        val remaining = focusedNewerGap(
-            focus,
-            gapAnchors.resolve(roomId, historyGapDao?.forRoom(roomId).orEmpty()),
-        )?.gap
-        val ladder = newerPageability(remaining, progress = null)
-        val verdict = newerPageability(
-            remaining,
-            PageProgress(previous = start.boundary, insertedCount = page.insertedCount),
-        )
-        return verdict.toMediatorResult(LoadType.PREPEND, ladder, page)
     }
 
     /** Map a loader outcome onto this direction's Paging result. */
@@ -527,10 +452,7 @@ class ChatHistoryMediatorFactoryImpl @Inject constructor(
     private val historyGapDao: HistoryGapDao,
     private val diagnostics: DiagnosticLogger,
 ) : ChatHistoryMediatorFactory {
-    override fun create(
-        bufferId: Long,
-        focus: HistoryWindowFocus,
-    ): RemoteMediator<Int, MessageEntity> =
+    override fun create(bufferId: Long): RemoteMediator<Int, MessageEntity> =
         ChatHistoryRemoteMediator(
             bufferId,
             bufferDao,
@@ -539,7 +461,6 @@ class ChatHistoryMediatorFactoryImpl @Inject constructor(
             historyFor(bufferId),
             historyCursorDao = historyCursorDao,
             historyGapDao = historyGapDao,
-            focus = focus,
             loader = loader,
             diagnostics = diagnostics,
         )

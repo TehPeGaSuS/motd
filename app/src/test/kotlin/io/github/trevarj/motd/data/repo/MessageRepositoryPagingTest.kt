@@ -25,7 +25,6 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -55,7 +54,7 @@ class MessageRepositoryPagingTest {
         db.networkIdentityDao(),
         db.messageDao(),
         db.reactionDao(),
-        ChatHistoryMediatorFactory { _, _ -> error("paging is driven by the source directly here") },
+        ChatHistoryMediatorFactory { _ -> error("paging is driven by the source directly here") },
         db.historyGapDao(),
     )
 
@@ -70,19 +69,17 @@ class MessageRepositoryPagingTest {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
-    fun recentFocusAttachesMediatorWithCanonicalRoomId() = runTest {
-        // Scroll-driven paging attaches the mediator unconditionally, including Recent focus, so the
-        // first Paging collection builds it with the canonical room id resolved from the context.
+    fun pagingAttachesMediatorWithCanonicalRoomId() = runTest {
+        // Scroll-driven paging attaches the mediator unconditionally, so the first Paging collection
+        // builds it with the canonical room id resolved from the context.
         var mediatorRoomId: Long? = null
-        var mediatorFocus: HistoryWindowFocus? = null
         val repository = MessageRepositoryImpl(
             db.bufferDao(),
             db.networkIdentityDao(),
             db.messageDao(),
             db.reactionDao(),
-            ChatHistoryMediatorFactory { roomId, focus ->
+            ChatHistoryMediatorFactory { roomId ->
                 mediatorRoomId = roomId
-                mediatorFocus = focus
                 object : RemoteMediator<Int, MessageEntity>() {
                     override suspend fun load(
                         loadType: LoadType,
@@ -93,10 +90,9 @@ class MessageRepositoryPagingTest {
             db.historyGapDao(),
         )
 
-        repository.messages(bufferId, MessageVisibilitySpec(), HistoryWindowFocus.Recent).first()
+        repository.messages(bufferId, MessageVisibilitySpec()).first()
 
         assertEquals(bufferId, mediatorRoomId)
-        assertEquals(HistoryWindowFocus.Recent, mediatorFocus)
     }
 
     @Test
@@ -107,8 +103,8 @@ class MessageRepositoryPagingTest {
         // intact, and the user's own history — was excluded from the presented window with nothing
         // on screen to say so.
         //
-        // Recent passes no boundary now, so BOTH rows are presented and the break between them is
-        // rendered instead of applied: exactly one seam, in the newer row's slot.
+        // Nothing derives a boundary from a gap now, so BOTH rows are presented and the break between
+        // them is rendered instead of applied: exactly one seam, in the newer row's slot.
         val olderId = db.messageDao().insertAll(
             listOf(message(bufferId, "older", "alice", 100, "older", msgid = "older")),
         ).single()
@@ -131,16 +127,10 @@ class MessageRepositoryPagingTest {
             ),
         )
         val repository = repository()
-        val bounds = repository.historyWindowBounds(bufferId, HistoryWindowFocus.Recent)
-        assertNull("an equal-timestamp gap must not clamp the Recent window", bounds.lowerBoundary)
-
+        // Exactly the query the shipped Pager builds: no boundary is derived from the gap at all,
+        // which is what keeps the older equal-timestamp row on screen.
         val page = db.messageDao().pagingSource(
-            messagePagingQuery(
-                bufferId,
-                MessageVisibilitySpec(),
-                lowerBoundary = bounds.lowerBoundary,
-                upperBoundary = bounds.upperBoundary,
-            ),
+            messagePagingQuery(bufferId, MessageVisibilitySpec()),
         ).load(
             PagingSource.LoadParams.Refresh(null, 50, false),
         ).requirePage()

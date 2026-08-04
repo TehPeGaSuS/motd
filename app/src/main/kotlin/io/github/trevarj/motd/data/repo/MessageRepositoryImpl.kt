@@ -15,15 +15,12 @@ import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.history.GapAnchorResolver
 import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.history.timelineSeams
-import io.github.trevarj.motd.data.history.windowBounds
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
-import io.github.trevarj.motd.data.visibility.MessageWindowBounds
 import io.github.trevarj.motd.data.visibility.countTimelineNewerQuery
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.firstOrNull
@@ -49,23 +46,15 @@ class MessageRepositoryImpl @Inject constructor(
     override fun messages(
         bufferId: Long,
         visibility: MessageVisibilitySpec,
-    ): Flow<PagingData<MessageEntity>> = messages(bufferId, visibility, HistoryWindowFocus.Recent)
+    ): Flow<PagingData<MessageEntity>> = messages(bufferId, visibility, initialKey = null)
 
     @OptIn(ExperimentalPagingApi::class)
     override fun messages(
         bufferId: Long,
         visibility: MessageVisibilitySpec,
-        focus: HistoryWindowFocus,
-    ): Flow<PagingData<MessageEntity>> = messages(bufferId, visibility, focus, initialKey = null)
-
-    @OptIn(ExperimentalPagingApi::class)
-    override fun messages(
-        bufferId: Long,
-        visibility: MessageVisibilitySpec,
-        focus: HistoryWindowFocus,
         initialKey: Int?,
     ): Flow<PagingData<MessageEntity>> =
-        pagingContextFlow(bufferId, focus).flatMapLatest { context ->
+        pagingContextFlow(bufferId).flatMapLatest { context ->
                 Pager(
                     config = MESSAGE_PAGING_CONFIG,
                     // Seed the first source load from the caller-computed key so a deep
@@ -75,18 +64,16 @@ class MessageRepositoryImpl @Inject constructor(
                     // a transiently smaller window cannot key past its own bounds).
                     initialKey = initialKey?.coerceAtLeast(0),
                     // Scroll-driven paging: the mediator is always attached so Paging3 APPEND drives
-                    // older history under Recent focus and AFTER/BEFORE gap fill under Around. The
-                    // canonical id comes from pagingContextFlow, so a durable redirect still paints
-                    // and pages the winner room.
-                    remoteMediator = mediatorFactory.create(context.roomId, focus),
+                    // older history at the bottom of the timeline; interior seams belong to the gap
+                    // fill coordinator. The canonical id comes from pagingContextFlow, so a durable
+                    // redirect still paints and pages the winner room.
+                    remoteMediator = mediatorFactory.create(context.roomId),
                     pagingSourceFactory = {
                         messageDao.pagingSource(
                             messagePagingQuery(
                                 context.roomId,
                                 visibility,
                                 context.identityRules,
-                                context.bounds.lowerBoundary,
-                                context.bounds.upperBoundary,
                             ),
                         )
                     },
@@ -120,22 +107,8 @@ class MessageRepositoryImpl @Inject constructor(
         serverTime: Long,
         id: Long,
         visibility: MessageVisibilitySpec,
-    ): Int = countNewerThan(
-        bufferId,
-        serverTime,
-        id,
-        visibility,
-        HistoryWindowFocus.Recent,
-    )
-
-    override suspend fun countNewerThan(
-        bufferId: Long,
-        serverTime: Long,
-        id: Long,
-        visibility: MessageVisibilitySpec,
-        focus: HistoryWindowFocus,
     ): Int {
-        val context = resolvePagingContext(bufferId, focus)
+        val context = resolvePagingContext(bufferId)
         val timelineOrder = messageDao.byCanonicalId(id)?.timelineOrder ?: id
         return messageDao.rawCount(
             countTimelineNewerQuery(
@@ -145,29 +118,16 @@ class MessageRepositoryImpl @Inject constructor(
                 timelineOrder,
                 visibility,
                 context.identityRules,
-                context.bounds.lowerBoundary,
-                context.bounds.upperBoundary,
             ),
         )
     }
 
     override suspend fun deleteMessage(id: Long) = messageDao.deleteWithAnchorFallback(id)
 
-    override suspend fun historyWindowBounds(
-        bufferId: Long,
-        focus: HistoryWindowFocus,
-    ): MessageWindowBounds = resolvePagingContext(bufferId, focus).bounds
-
-    override fun observeHistoryWindowBounds(
-        bufferId: Long,
-        focus: HistoryWindowFocus,
-    ): Flow<MessageWindowBounds> = pagingContextFlow(bufferId, focus).map { it.bounds }
-
-    // Same three steps the paging context takes for its window bounds — observe the room's stored
-    // gaps, resolve both edges against the local store, project them — but through the seam
-    // projection instead of the bound one. Deliberately NOT derived from pagingContextFlow: seams do
-    // not depend on focus, and a per-focus flow would re-emit an identical seam list on every window
-    // change while missing gaps outside the current island, which are exactly the ones a seam marks.
+    // Observe the room's stored gaps and resolve both edges against the local store, then project
+    // them through the seam role. Deliberately NOT derived from pagingContextFlow: that flow exists
+    // to key a Pager generation, and a seam list must not re-emit identically every time an
+    // unrelated identity or room field changes underneath it.
     override fun observeTimelineSeams(bufferId: Long): Flow<List<TimelineSeam>> =
         bufferDao.observe(bufferId).flatMapLatest { room ->
             if (room == null) {
@@ -182,36 +142,23 @@ class MessageRepositoryImpl @Inject constructor(
         .map { it?.id ?: bufferId }
         .distinctUntilChanged()
 
-    private fun pagingContextFlow(bufferId: Long, focus: HistoryWindowFocus): Flow<PagingContext> =
+    private fun pagingContextFlow(bufferId: Long): Flow<PagingContext> =
         bufferDao.observe(bufferId).flatMapLatest { room ->
             if (room == null) {
-                flowOf(PagingContext(bufferId, IrcIdentityRules(), MessageWindowBounds()))
+                flowOf(PagingContext(bufferId, IrcIdentityRules()))
             } else {
-                networkIdentityDao.observe(room.networkId)
-                    .combine(historyGapDao.observeForRoom(room.id)) { identity, gaps -> identity to gaps }
-                    .map { (identity, gaps) ->
-                        PagingContext(
-                            room.id,
-                            identity?.identityRules ?: IrcIdentityRules(),
-                            windowBounds(focus, gapAnchors.resolve(room.id, gaps)),
-                        )
-                    }
+                networkIdentityDao.observe(room.networkId).map { identity ->
+                    PagingContext(room.id, identity?.identityRules ?: IrcIdentityRules())
+                }
             }
         }.distinctUntilChanged()
 
-    private suspend fun resolvePagingContext(
-        bufferId: Long,
-        focus: HistoryWindowFocus,
-    ): PagingContext {
+    private suspend fun resolvePagingContext(bufferId: Long): PagingContext {
         val room = bufferDao.observeById(bufferId)
-            ?: return PagingContext(bufferId, IrcIdentityRules(), MessageWindowBounds())
+            ?: return PagingContext(bufferId, IrcIdentityRules())
         val identityRules = networkIdentityDao.byNetwork(room.networkId)?.identityRules
             ?: IrcIdentityRules()
-        return PagingContext(
-            room.id,
-            identityRules,
-            windowBounds(focus, gapAnchors.resolve(room.id, historyGapDao.forRoom(room.id))),
-        )
+        return PagingContext(room.id, identityRules)
     }
 
     private suspend fun resolveRoomId(bufferId: Long): Long =
@@ -220,7 +167,6 @@ class MessageRepositoryImpl @Inject constructor(
     private data class PagingContext(
         val roomId: Long,
         val identityRules: IrcIdentityRules,
-        val bounds: MessageWindowBounds,
     )
 }
 

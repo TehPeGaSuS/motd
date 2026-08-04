@@ -35,7 +35,6 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.repo.BufferRepository
-import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
@@ -1048,13 +1047,13 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `cold ready entry anchors after connection catchup publishes the recent island`() = runTest {
+    fun `cold ready entry waits for connection catchup before anchoring`() = runTest {
+        // The ordering property: entry must not resolve against a store that catch-up has not
+        // finished writing. It anchors on the OLDEST visible unread row, which on an unbounded
+        // timeline is the whole room's oldest unread — the catch-up page can only move it older.
         val markerId = db.messageDao().insertAll(
             listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
         ).single()
-        db.messageDao().insertAll(
-            listOf(message(channel.id, "stale unread", "m101", "alice").copy(serverTime = 101)),
-        )
         val manager = FakeConnectionManager(
             networkId = network.id,
             state = IrcClientState.Ready("me", emptySet(), emptyMap()),
@@ -1072,18 +1071,19 @@ class ChatViewModelTest {
 
         assertNull(vm.initialTarget.value)
 
-        val recentId = db.messageDao().insertAll(
-            listOf(message(channel.id, "recent unread", "m900", "alice").copy(serverTime = 900)),
+        // Catch-up delivers the unread backlog only now.
+        val caughtUpId = db.messageDao().insertAll(
+            listOf(message(channel.id, "caught up", "m101", "alice").copy(serverTime = 101)),
         ).single()
-        messages.observedBounds.value = io.github.trevarj.motd.data.visibility.MessageWindowBounds(
-            lowerBoundary = TimelineAnchor(900, recentId),
+        db.messageDao().insertAll(
+            listOf(message(channel.id, "recent unread", "m900", "alice").copy(serverTime = 900)),
         )
-        messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(recentId))
+        messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(caughtUpId))
         manager.finishHistoryCatchUp(network.id)
 
         val target = checkNotNull(vm.initialTarget.first { it != null })
-        assertEquals(recentId, target.expectedEventId)
-        assertEquals(900L, target.serverTime)
+        assertEquals(caughtUpId, target.expectedEventId)
+        assertEquals(101L, target.serverTime)
     }
 
     @Test
@@ -1273,16 +1273,12 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `mention FAB re-resolves its exact row without leaving the source island`() = runTest {
+    fun `mention FAB re-resolves its exact row against the live timeline`() = runTest {
         val mention = message(channel.id, "hello me", "mention", "alice", id = 42).copy(
             serverTime = 500,
             timelineOrder = 42,
         )
-        val messages = FakeMessageRepository(
-            events = listOf(mention),
-            newerCount = 17,
-            recentNewerCount = 3,
-        )
+        val messages = FakeMessageRepository(events = listOf(mention), newerCount = 3)
         val vm = viewModel(
             channel.copy(localUnreadFloorTime = 100),
             FakeConnectionManager(network.id),
@@ -1305,11 +1301,14 @@ class ChatViewModelTest {
         assertEquals(3, target.index)
         assertEquals(mention.id, target.expectedEventId)
         assertEquals(mention.msgid, target.expectedMsgid)
-        assertEquals(HistoryWindowFocus.Recent, messages.countedFocuses.last())
     }
 
     @Test
-    fun `newest escape reacts when a newer gap appears beside the focused island`() = runTest {
+    fun `a deep jump publishes a global index and the newest escape abandons it`() = runTest {
+        // The deep jump lands in the ONE unbounded timeline: its index is the repository's global
+        // count of strictly-newer rows, and no narrower generation is created around it. That is
+        // what keeps index 0 of the presented list the room's newest row, which the viewport
+        // mark-read gate now depends on entirely.
         val mention = message(channel.id, "hello me", "mention", "alice", id = 42).copy(
             serverTime = 500,
             timelineOrder = 42,
@@ -1323,29 +1322,20 @@ class ChatViewModelTest {
             jumpToEventId = mention.id,
         )
         vm.state.first { it.buffer != null }
-        vm.activeHistoryWindow.first { it.focus is HistoryWindowFocus.Around }
-        val collected = mutableListOf<Boolean>()
-        val collection = backgroundScope.launch {
-            vm.hasNewerHistoryIsland.collect(collected::add)
-        }
-        runCurrent()
-        assertFalse(vm.hasNewerHistoryIsland.value)
 
-        messages.observedBounds.value = io.github.trevarj.motd.data.visibility.MessageWindowBounds(
-            upperBoundary = TimelineAnchor(900, 90, 90),
-        )
+        val target = checkNotNull(vm.jumpTarget.first { it != null })
+        assertEquals(17, target.index)
+        assertEquals(mention.id, target.expectedEventId)
+        assertEquals(EntryPositionState.Pending, vm.entryState.value)
+
+        // The newest FAB abandons the pending jump outright and releases the read gate, so the
+        // screen's own scroll-to-newest is not fought by a one-shot positioning operation.
+        vm.jumpToNewest()
         runCurrent()
 
-        assertTrue(vm.hasNewerHistoryIsland.value)
-        assertEquals(
-            TimelineAnchor(900, 90, 90),
-            vm.activeHistoryWindow.value.bounds.upperBoundary,
-        )
-        assertTrue(collected.last())
-        vm.focusRecentHistory()
-        runCurrent()
-        assertEquals(HistoryWindowFocus.Recent, vm.activeHistoryWindow.value.focus)
-        collection.cancel()
+        assertNull(vm.jumpTarget.value)
+        assertNull(vm.initialTarget.value)
+        assertEquals(EntryPositionState.Settled, vm.entryState.value)
     }
 
     @Test
@@ -1673,18 +1663,13 @@ class ChatViewModelTest {
     private class FakeMessageRepository(
         private val events: List<MessageEntity> = emptyList(),
         private val newerCount: Int = 0,
-        private val recentNewerCount: Int = newerCount,
-        private val windowBounds: io.github.trevarj.motd.data.visibility.MessageWindowBounds =
-            io.github.trevarj.motd.data.visibility.MessageWindowBounds(),
     ) : MessageRepository {
         val msgid = MutableStateFlow<String?>(null)
         val deletedIds = mutableListOf<Long>()
         val requestedMsgids = mutableListOf<String>()
         var resolvedByMsgid: MessageEntity? = null
         var resolvedById: MessageEntity? = null
-        val countedFocuses = mutableListOf<HistoryWindowFocus>()
         var reactionRows: List<ReactionEntity> = emptyList()
-        val observedBounds = MutableStateFlow(windowBounds)
         var blockedMsgid: String? = null
         val blockedResolutionStarted = CompletableDeferred<Unit>()
         private val blockedResolutionRelease = CompletableDeferred<Unit>()
@@ -1714,25 +1699,7 @@ class ChatViewModelTest {
             id: Long,
             visibility: MessageVisibilitySpec,
         ): Int = newerCount
-        override suspend fun countNewerThan(
-            bufferId: Long,
-            serverTime: Long,
-            id: Long,
-            visibility: MessageVisibilitySpec,
-            focus: HistoryWindowFocus,
-        ): Int {
-            countedFocuses += focus
-            return if (focus is HistoryWindowFocus.Around) newerCount else recentNewerCount
-        }
-        override suspend fun historyWindowBounds(
-            bufferId: Long,
-            focus: HistoryWindowFocus,
-        ) = observedBounds.value
         override suspend fun deleteMessage(id: Long) { deletedIds += id }
-        override fun observeHistoryWindowBounds(
-            bufferId: Long,
-            focus: HistoryWindowFocus,
-        ) = observedBounds
     }
 
     private class RecordingTransport : IrcTransport {

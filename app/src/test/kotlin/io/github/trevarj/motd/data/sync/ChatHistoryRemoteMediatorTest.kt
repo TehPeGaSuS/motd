@@ -16,7 +16,6 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
-import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
@@ -142,11 +141,7 @@ class ChatHistoryRemoteMediatorTest {
         }
     }
 
-    private fun mediator(
-        history: FakeHistory,
-        pageSize: Int = 50,
-        focus: HistoryWindowFocus = HistoryWindowFocus.Recent,
-    ) =
+    private fun mediator(history: FakeHistory, pageSize: Int = 50) =
         ChatHistoryRemoteMediator(
             bufferId,
             db.bufferDao(),
@@ -156,7 +151,6 @@ class ChatHistoryRemoteMediatorTest {
             pageSize,
             db.historyCursorDao(),
             db.historyGapDao(),
-            focus,
         )
 
     private fun emptyState() = PagingState<Int, MessageEntity>(
@@ -388,105 +382,23 @@ class ChatHistoryRemoteMediatorTest {
     }
 
     @Test
-    fun recentPrependEndsPagination() = runTest {
-        // Under Recent focus live events supply newer messages, so PREPEND ends immediately.
-        processor.process(networkId, chatMsg("seed", 500))
+    fun prependEndsPaginationEvenWithAnOpenGapAboveTheOldestRow() = runTest {
+        // PREPEND is retired outright, and this is where that has to hold: the timeline is unbounded
+        // and painted newest-first, so nothing above the presented rows is ever missing. Live events
+        // supply newer messages, and an interior seam — including the recoverable reconnect gap
+        // seeded here, which the old focused PREPEND would have fetched AFTER — belongs to
+        // HistoryGapFillCoordinator. Not one wire request may leave this direction.
+        processor.process(networkId, chatMsg("old", 100))
+        processor.process(networkId, chatMsg("recent", 900))
+        db.historyGapDao().insert(HistoryGapEntity(0, bufferId, "old", 100, "recent", 900))
         val history = FakeHistory()
 
         val result = load(mediator(history), LoadType.PREPEND)
 
         assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
         assertTrue(history.calls.isEmpty())
-    }
-
-    @Test
-    fun unreadFocusedPrependPagesAfterAndShrinksOnlyTheNewerGap() = runTest {
-        processor.process(networkId, chatMsg("old", 100))
-        processor.process(networkId, chatMsg("recent", 900))
-        db.historyGapDao().insert(
-            HistoryGapEntity(
-                roomId = bufferId,
-                olderMsgid = "old",
-                olderServerTime = 100,
-                newerMsgid = "recent",
-                newerServerTime = 900,
-            ),
-        )
-        val history = FakeHistory(
-            responseFor = { request ->
-                if (request.subcommand == ChatHistoryRequest.Subcommand.AFTER) {
-                    messages(listOf(chatMsg("next-1", 101), chatMsg("next-50", 150)))
-                } else {
-                    null
-                }
-            },
-        )
-
-        val result = load(
-            mediator(history, focus = HistoryWindowFocus.Around(100)),
-            LoadType.PREPEND,
-        )
-
-        assertFalse((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
-        assertEquals(listOf(ChatHistoryRequest.Subcommand.AFTER), history.calls)
-        assertEquals("msgid=old", history.requests.single().bound1)
-        val gap = db.historyGapDao().forRoom(bufferId).single()
-        assertEquals(150L, gap.olderServerTime)
-        assertEquals(900L, gap.newerServerTime)
-    }
-
-    @Test
-    fun unreadFocusedTerminalAfterStopsAndRetainsAnIncompleteExhaustedGap() = runTest {
-        processor.process(networkId, chatMsg("old", 100))
-        processor.process(networkId, chatMsg("recent", 900))
-        db.historyGapDao().insert(
-            HistoryGapEntity(0, bufferId, "old", 100, "recent", 900),
-        )
-        val history = FakeHistory(
-            responseFor = { request ->
-                messages(emptyList(), endOfHistory = true)
-                    .takeIf { request.subcommand == ChatHistoryRequest.Subcommand.AFTER }
-            },
-        )
-
-        val result = load(
-            mediator(history, focus = HistoryWindowFocus.Around(100)),
-            LoadType.PREPEND,
-        )
-
-        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
-        assertFalse(db.historyGapDao().forRoom(bufferId).single().recoverable)
-
-        val reopened = load(
-            mediator(history, focus = HistoryWindowFocus.Around(100)),
-            LoadType.PREPEND,
-        )
-        assertTrue((reopened as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
-        assertEquals(1, history.requests.size)
-    }
-
-    @Test
-    fun unreadFocusedNonAdvancingAfterStopsWithoutLooping() = runTest {
-        processor.process(networkId, chatMsg("old", 100))
-        processor.process(networkId, chatMsg("recent", 900))
-        db.historyGapDao().insert(
-            HistoryGapEntity(0, bufferId, "old", 100, "recent", 900),
-        )
-        val history = FakeHistory(
-            responseFor = { request ->
-                messages(listOf(chatMsg("old", 100)))
-                    .takeIf { request.subcommand == ChatHistoryRequest.Subcommand.AFTER }
-            },
-        )
-
-        val result = load(
-            mediator(history, focus = HistoryWindowFocus.Around(100)),
-            LoadType.PREPEND,
-        )
-
-        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
-        assertEquals(1, history.requests.size)
-        assertEquals("old", db.historyGapDao().forRoom(bufferId).single().olderMsgid)
+        // The gap is untouched: the direction ended without claiming or consuming it.
+        assertTrue(db.historyGapDao().forRoom(bufferId).single().recoverable)
     }
 
     @Test
@@ -598,32 +510,6 @@ class ChatHistoryRemoteMediatorTest {
         load(mediator(history), LoadType.APPEND)
 
         assertEquals("msgid=pruned", history.requests.single().bound1)
-    }
-
-    @Test
-    fun aroundAppendKeepsItsGapDirectionAndIsNotClampedBelowIt() = runTest {
-        // The exemption. Around focus IS gap-directed: it is the clamped-island counterpart of the
-        // coordinator, not a second claimant on the same interval, so clamping it below its own gap
-        // would fetch the one interval it is not there for.
-        processor.process(networkId, chatMsg("marker", 100))
-        processor.process(networkId, chatMsg("catchup-oldest", 212))
-        db.historyGapDao().insert(
-            HistoryGapEntity(
-                roomId = bufferId,
-                olderMsgid = "marker",
-                olderServerTime = 100,
-                newerMsgid = "catchup-oldest",
-                newerServerTime = 212,
-            ),
-        )
-        val history = FakeHistory(before = ArrayDeque(listOf(listOf(chatMsg("inside-gap", 150)))))
-
-        load(
-            mediator(history, focus = HistoryWindowFocus.Around(260)),
-            LoadType.APPEND,
-        )
-
-        assertEquals("msgid=catchup-oldest", history.requests.single().bound1)
     }
 
     @Test
@@ -883,109 +769,6 @@ class ChatHistoryRemoteMediatorTest {
     }
 
     @Test
-    fun timestampOnlySaturatedAppendKeepsPagingUntilHistoryIsExhausted() = runTest {
-        // Hosted-CI wire: soju advertises MSGREFTYPES=timestamp, so every advertised boundary is a
-        // bare timestamp and every SATURATED page trips the loader's cannotSafelyPageBefore guard.
-        // That guard means "not safe from THIS cursor", never "no older history"; Paging treats
-        // endOfPaginationReached as permanently terminal for APPEND, so reporting it would end older
-        // backfill after page one. While the focused gap's edge keeps receding, APPEND must report
-        // more.
-        //
-        // Around focus, because that is where the mediator's gap-directed older cascade still lives:
-        // Recent no longer selects a gap at all (see appendFocusedGap), and its own saturated
-        // cursor-ladder equivalent is `saturatedTimestampOnlyBeforeKeepsPagingFromTheRecededBoundary`
-        // and `freshTimestampOnlyBufferBackfillsPastTheSeedPage`. The scripted wire, the ladder and
-        // the assertions are otherwise unchanged.
-        processor.process(networkId, chatMsg("marker", 10))
-        processor.process(networkId, chatMsg("row212", 212))
-        db.historyGapDao().insert(
-            HistoryGapEntity(
-                roomId = bufferId,
-                olderMsgid = null,
-                olderServerTime = 10,
-                newerMsgid = null,
-                newerServerTime = 212,
-            ),
-        )
-        val history = FakeHistory(
-            before = ArrayDeque(
-                listOf(
-                    listOf(chatMsg("row200", 200), chatMsg("row210", 210)),
-                    listOf(chatMsg("row180", 180), chatMsg("row190", 190)),
-                    listOf(chatMsg("row5", 5), chatMsg("row8", 8)),
-                    emptyList(),
-                ),
-            ),
-            referenceTypes = setOf(HistoryReferenceType.TIMESTAMP),
-        )
-        val mediator = mediator(history, pageSize = 2, focus = HistoryWindowFocus.Around(300))
-
-        val ends = (1..4).map {
-            (load(mediator, LoadType.APPEND) as RemoteMediator.MediatorResult.Success)
-                .endOfPaginationReached
-        }
-
-        // Three saturated timestamp-only pages keep paging; only the server's empty page ends it.
-        assertEquals(listOf(false, false, false, true), ends)
-        assertEquals(
-            listOf(
-                "timestamp=1970-01-01T00:00:00.212Z",
-                "timestamp=1970-01-01T00:00:00.200Z",
-                "timestamp=1970-01-01T00:00:00.180Z",
-                "timestamp=1970-01-01T00:00:00.005Z",
-            ),
-            history.requests.map { it.bound1 },
-        )
-        assertEquals(8, rowCount())
-        assertTrue(db.historyGapDao().forRoom(bufferId).isEmpty())
-        assertTrue(db.bufferDao().observeById(bufferId)!!.historyComplete)
-    }
-
-    @Test
-    fun timestampOnlyAppendThatCannotAdvanceItsBoundaryStopsInsteadOfLooping() = runTest {
-        // Anti-livelock guard for the progress rule: the server echoes only the boundary row, so
-        // nothing is persisted and the gap's newer edge stays at 212 (only its msgid is stripped by
-        // the timestamp-only advertisement). The next BEFORE would repeat this request verbatim, so
-        // APPEND must report terminal instead of having Paging hammer the wire. Terminality is
-        // idempotent: a real Pager stops after the first result, and a repeated load never claims
-        // "more" nor persists anything.
-        //
-        // Around focus for the same reason as the sibling above: this is the gap-directed cascade,
-        // which Recent no longer runs. Recent's own no-progress stop is
-        // `unchangedBeforeBoundaryStopsTheMediatorWithoutClaimingCompletion`.
-        processor.process(networkId, chatMsg("marker", 10))
-        processor.process(networkId, chatMsg("row212", 212))
-        db.historyGapDao().insert(
-            HistoryGapEntity(
-                roomId = bufferId,
-                olderMsgid = null,
-                olderServerTime = 10,
-                newerMsgid = "row212",
-                newerServerTime = 212,
-            ),
-        )
-        val history = FakeHistory(
-            responseFor = { request ->
-                messages(listOf(chatMsg("row212", 212)))
-                    .takeIf { request.subcommand == ChatHistoryRequest.Subcommand.BEFORE }
-            },
-            referenceTypes = setOf(HistoryReferenceType.TIMESTAMP),
-        )
-        val mediator = mediator(history, pageSize = 2, focus = HistoryWindowFocus.Around(300))
-
-        val first = load(mediator, LoadType.APPEND)
-        val second = load(mediator, LoadType.APPEND)
-
-        assertTrue((first as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
-        assertTrue((second as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
-        assertEquals(2, rowCount())
-        assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
-        val gap = db.historyGapDao().forRoom(bufferId).single()
-        assertTrue(gap.recoverable)
-        assertEquals(212L, gap.newerServerTime)
-    }
-
-    @Test
     fun saturatedMsgidAppendLadderIsUnchanged() = runTest {
         // The msgid wire never trips the saturation guard, so this pins that the progress rule keeps
         // the existing one-page-per-load backfill ladder byte-for-byte.
@@ -1016,20 +799,18 @@ class ChatHistoryRemoteMediatorTest {
     }
 
     @Test
-    fun anUnrecoverableGapEndsTheGapDirectionButNotRecentAppend() = runTest {
-        // THE SPLIT, and the defect this stage fixes, in one place.
+    fun anUnrecoverableGapDoesNotEndTheBottomOfTimelineAppend() = runTest {
+        // THE SPLIT, and the defect the unbounded timeline had to fix, in one place.
         //
         // `recoverable = false` means the server proved THAT INTERVAL empty. It says nothing about
-        // history older than the whole timeline. A gap-directed Recent APPEND read it as "this
-        // direction is finished", and Paging treats `endOfPaginationReached` as PERMANENT, so a
-        // single expired seam anywhere in the room made the bottom of the list unpageable for the
-        // rest of the session — with the far side of that seam now visible above it, which is how
-        // the user reaches the bottom in the first place.
+        // history older than the whole timeline. A gap-directed APPEND read it as "this direction is
+        // finished", and Paging treats `endOfPaginationReached` as PERMANENT, so a single expired
+        // seam anywhere in the room made the bottom of the list unpageable for the rest of the
+        // session — with the far side of that seam now visible above it, which is how the user
+        // reaches the bottom in the first place.
         //
-        // The classification itself is not wrong and is not being weakened: it still ends the
-        // direction that really is asking about that interval. Around focus IS clamped at the gap,
-        // so running out of local rows there does mean "the gap below this island", and interior
-        // seams under Recent belong to HistoryGapFillCoordinator, which inherits the same rule (see
+        // The classification itself is not wrong and is not being weakened: it still ends the driver
+        // that really is asking about that interval, which is HistoryGapFillCoordinator (see
         // HistoryGapFillCoordinatorTest.unrecoverableGapNeverTouchesTheWire).
         processor.process(networkId, chatMsg("marker", 10))
         processor.process(networkId, chatMsg("row212", 212))
@@ -1044,18 +825,8 @@ class ChatHistoryRemoteMediatorTest {
             ),
         )
 
-        // Still End, and still without touching the wire, for the focus whose window the gap bounds.
-        val gapDirection = FakeHistory(before = ArrayDeque(listOf(listOf(chatMsg("never", 5)))))
-        val focused = load(
-            mediator(gapDirection, focus = HistoryWindowFocus.Around(300)),
-            LoadType.APPEND,
-        )
-        assertTrue((focused as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
-        assertTrue("an unrecoverable focused gap issues no request", gapDirection.requests.isEmpty())
-        assertEquals(2, rowCount())
-
-        // No longer End for Recent: it pages BELOW the oldest retained row, from the ladder that has
-        // nothing to do with the seam.
+        // The mediator pages BELOW the oldest retained row, from the ladder that has nothing to do
+        // with the seam, so an expired seam cannot terminate it.
         val bottom = FakeHistory(before = ArrayDeque(listOf(listOf(chatMsg("row5", 5)))))
         val recent = load(mediator(bottom), LoadType.APPEND)
 
@@ -1067,57 +838,6 @@ class ChatHistoryRemoteMediatorTest {
         val gap = db.historyGapDao().forRoom(bufferId).single()
         assertFalse(gap.recoverable)
         assertEquals(212L, gap.newerServerTime)
-    }
-
-    @Test
-    fun timestampOnlySaturatedPrependKeepsClosingTheReconnectGap() = runTest {
-        // Reconnect shape under a focused (Around) window: a recoverable catch-up gap sits between
-        // the last pre-disconnect row and the newest island. cannotSafelyPageAfter carries the same
-        // timestamp-saturation clause as its BEFORE twin, so on a timestamp-only wire every full
-        // catch-up page would permanently terminate PREPEND — leaving the gap open, and with it the
-        // Around window's upper boundary, so nothing newer than the gap can ever be presented.
-        processor.process(networkId, chatMsg("old", 100))
-        processor.process(networkId, chatMsg("recent", 900))
-        db.historyGapDao().insert(
-            HistoryGapEntity(
-                roomId = bufferId,
-                olderMsgid = "old",
-                olderServerTime = 100,
-                newerMsgid = "recent",
-                newerServerTime = 900,
-            ),
-        )
-        val pages = ArrayDeque(
-            listOf(
-                listOf(chatMsg("n1", 110), chatMsg("n2", 120)),
-                listOf(chatMsg("n3", 130), chatMsg("n4", 140)),
-                listOf(chatMsg("n5", 150), chatMsg("n6", 910)),
-            ),
-        )
-        val history = FakeHistory(
-            responseFor = { request ->
-                if (request.subcommand == ChatHistoryRequest.Subcommand.AFTER) {
-                    messages(pages.removeFirstOrNull() ?: emptyList())
-                } else {
-                    null
-                }
-            },
-            referenceTypes = setOf(HistoryReferenceType.TIMESTAMP),
-        )
-        val mediator = mediator(history, pageSize = 2, focus = HistoryWindowFocus.Around(100))
-
-        val ends = (1..4).map {
-            (load(mediator, LoadType.PREPEND) as RemoteMediator.MediatorResult.Success)
-                .endOfPaginationReached
-        }
-
-        // The two saturated AFTER pages keep the newer direction alive; the third crosses the gap's
-        // newer edge and closes it, which is the one honest reason to end PREPEND. The fourth load
-        // finds no gap and never touches the wire.
-        assertEquals(listOf(false, false, true, true), ends)
-        assertEquals(3, history.requests.size)
-        assertTrue(db.historyGapDao().forRoom(bufferId).isEmpty())
-        assertEquals(8, rowCount())
     }
 
     @Test
@@ -1206,7 +926,6 @@ class ChatHistoryRemoteMediatorTest {
             50,
             db.historyCursorDao(),
             db.historyGapDao(),
-            HistoryWindowFocus.Recent,
         )
 
         listOf(LoadType.REFRESH, LoadType.PREPEND, LoadType.APPEND).forEach { type ->
@@ -1279,33 +998,7 @@ class ChatHistoryRemoteMediatorTest {
         assertFalse(db.historyCursorDao().byRoom(bufferId)!!.historyComplete)
     }
 
-    // `pinnedCurrentBehavior_recentAppendSelectsTheUnidentifiableEqualTimeGapEdge` moved verbatim to
-    // HistoryGapFillCoordinatorTest: Recent APPEND no longer selects a gap at all, and the gap
-    // selection it pinned is now the coordinator's.
-
-    @Test
-    fun pinnedCurrentBehavior_focusedPrependSelectsTheUnidentifiableEqualTimeGapEdge() = runTest {
-        // PINNED CURRENT BEHAVIOR, mirror of the test above. focusedNewerGap ranks gaps by
-        // gapOlderAnchor, whose last-resort fallback is TimelineAnchor(t, MIN, MIN), and takes the
-        // MINIMUM edge at or after the focus anchor. Two gaps share olderServerTime 500: the MIN
-        // sentinel again makes the unidentifiable one win, so PREPEND pages AFTER its bare timestamp
-        // rather than after the retained row's msgid.
-        processor.process(networkId, chatMsg("oldAnchor", 500))
-        processor.process(networkId, chatMsg("recent", 900))
-        db.historyGapDao().insert(HistoryGapEntity(0, bufferId, "oldAnchor", 500, "recent", 900))
-        db.historyGapDao().insert(HistoryGapEntity(0, bufferId, null, 500, null, 950))
-        val history = FakeHistory(
-            responseFor = { request ->
-                messages(listOf(chatMsg("next", 600)))
-                    .takeIf { request.subcommand == ChatHistoryRequest.Subcommand.AFTER }
-            },
-        )
-
-        load(mediator(history, focus = HistoryWindowFocus.Around(500)), LoadType.PREPEND)
-
-        assertEquals(
-            "timestamp=1970-01-01T00:00:00.500Z",
-            history.requests.first().bound1,
-        )
-    }
+    // The two equal-time gap-edge selection pins moved verbatim to HistoryGapFillCoordinatorTest:
+    // this mediator never selects a gap in either direction any more, and gap selection is the
+    // coordinator's.
 }

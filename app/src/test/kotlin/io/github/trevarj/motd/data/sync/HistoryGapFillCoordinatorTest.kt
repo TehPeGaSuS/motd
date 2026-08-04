@@ -16,7 +16,6 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
-import io.github.trevarj.motd.data.repo.HistoryWindowFocus
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -49,21 +48,19 @@ import org.robolectric.RobolectricTestRunner
 /**
  * Coverage for [HistoryGapFillCoordinator], the demand-driven interior gap fill.
  *
- * The crux is [boundaryLadderMatchesTheMediatorsGapCascade]: the coordinator exists because Paging3
- * can no longer deliver APPEND demand at an interior seam, NOT because the cascade itself changed.
- * That test drives the same scripted wire through the mediator and through the coordinator on two
- * independent stores and asserts they issue the identical boundary ladder and stop for the identical
- * recorded reason.
+ * The coordinator OWNS the gap direction outright. Paging3 only asks a RemoteMediator to APPEND when
+ * the local source runs dry, and on an unbounded timeline that happens past the oldest retained row
+ * and nowhere else — never at an interior seam. So this is the only driver of a gap-scoped older
+ * cascade left, and [gapCascadeWalksItsPinnedBoundaryLadder] states the ladder it walks and the
+ * classification it stops on as literals rather than by comparison with anything.
  *
- * The mediator side of that comparison runs under [HistoryWindowFocus.Around], because that is now
- * the only focus whose APPEND is gap-directed: Recent presents an unbounded timeline, so its APPEND
- * is the bottom-of-list backlog ladder and never the seam's — pinned by
- * [recentMediatorAppendPagesTheGlobalLadderInsteadOfTheGapTheCoordinatorOwns], which is the same
- * fixture with the focus swapped.
+ * [mediatorAppendPagesTheGlobalLadderInsteadOfTheGapTheCoordinatorOwns] is the other half of that
+ * ownership: the same fixture, driven through the mediator, asks for backlog below the whole
+ * timeline and leaves the seam untouched.
  *
  * The gap-selection and gap-boundary pins that used to live in `ChatHistoryRemoteMediatorTest`
- * against Recent APPEND moved here with their fixtures and their reasoning intact; they describe the
- * gap direction, and the gap direction is this class's.
+ * moved here with their fixtures and their reasoning intact; they describe the gap direction, and
+ * the gap direction is this class's.
  *
  * Everything else here covers what the coordinator adds on top: the per-gap page budget, the
  * per-room single flight, and the divider's in-flight state.
@@ -82,34 +79,22 @@ class HistoryGapFillCoordinatorTest {
     }
 
     // =============================================================================================
-    // Boundary-ladder equivalence with the mediator's gap cascade.
+    // The gap-scoped older cascade.
     // =============================================================================================
 
     @Test
-    fun boundaryLadderMatchesTheMediatorsGapCascade() = runTest {
+    fun gapCascadeWalksItsPinnedBoundaryLadder() = runTest {
         scenarios().forEach { scenario ->
-            val viaMediator = mediatorLadder(scenario)
-            val viaCoordinator = coordinatorLadder(scenario)
+            val walked = coordinatorLadder(scenario)
 
-            assertEquals(
-                "${scenario.name}: boundary ladder",
-                viaMediator.boundaries,
-                viaCoordinator.boundaries,
-            )
-            assertEquals("${scenario.name}: end reason", viaMediator.endReason, viaCoordinator.endReason)
-            assertEquals("${scenario.name}: rows persisted", viaMediator.rows, viaCoordinator.rows)
-            // Agreement alone would also be satisfied by two drivers that both did nothing, so the
-            // ladder each one actually walked is pinned outright.
-            assertEquals("${scenario.name}: mediator ladder", scenario.boundaries, viaMediator.boundaries)
-            assertEquals("${scenario.name}: mediator stop", scenario.endReason, viaMediator.endReason)
+            assertEquals("${scenario.name}: boundary ladder", scenario.boundaries, walked.boundaries)
+            assertEquals("${scenario.name}: end reason", scenario.endReason, walked.endReason)
         }
     }
 
     /**
-     * Wire scripts whose older cascade terminates on a GAP-SCOPED verdict, so both drivers are
-     * answering the same question. A ladder that ends by closing its gap is deliberately absent:
-     * there the mediator keeps paging older on the global cursor (its own bottom-of-timeline job)
-     * while the coordinator stops, which is the one documented divergence — see
+     * Wire scripts whose older cascade terminates on a GAP-SCOPED verdict. A ladder that ends by
+     * closing its gap is covered separately — see
      * [aPageThatClosesTheGapEndsTheFillInsteadOfSpendingTheBudgetElsewhere].
      */
     private fun scenarios(): List<Scenario> = listOf(
@@ -202,25 +187,6 @@ class HistoryGapFillCoordinatorTest {
         ),
     )
 
-    /** Drive the mediator's APPEND until Paging is told the direction is finished. */
-    private suspend fun mediatorLadder(scenario: Scenario): Ladder {
-        val fixture = newFixture()
-        scenario.seed(fixture)
-        val history = FakeHistory(scenario.script(), scenario.referenceTypes)
-        val mediator = fixture.mediator(history, scenario.pageSize)
-        repeat(MAX_LADDER_STEPS) {
-            val result = mediator.load(LoadType.APPEND, emptyPagingState())
-            assertTrue(
-                "${scenario.name}: mediator load failed",
-                result is RemoteMediator.MediatorResult.Success,
-            )
-            if ((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached) {
-                return fixture.ladder(history, fixture.diagnostics.lastEndReason("mediator_load_ended"))
-            }
-        }
-        error("${scenario.name}: mediator never finished the direction")
-    }
-
     /** Drive the coordinator's fill, re-tapping while the only thing stopping it is the budget. */
     private suspend fun coordinatorLadder(scenario: Scenario): Ladder {
         val fixture = newFixture()
@@ -237,11 +203,11 @@ class HistoryGapFillCoordinatorTest {
     }
 
     @Test
-    fun recentMediatorAppendPagesTheGlobalLadderInsteadOfTheGapTheCoordinatorOwns() = runTest {
-        // The other half of the equivalence above, and the reason it is stated against Around focus.
-        // Same fixture, same wire, Recent focus: the mediator does not walk the gap ladder at all.
-        // Its window is unbounded, so the APPEND Paging asks for is a request for backlog below the
-        // OLDEST retained row — here `marker`, on the far side of the seam that is now visible.
+    fun mediatorAppendPagesTheGlobalLadderInsteadOfTheGapTheCoordinatorOwns() = runTest {
+        // The other half of the ownership. Same fixture, same wire, driven through the mediator: it
+        // does not walk the gap ladder at all. The timeline is unbounded, so the APPEND Paging asks
+        // for is a request for backlog below the OLDEST retained row — here `marker`, on the far side
+        // of the seam that is now visible.
         val scenario = scenarios().first()
         val fixture = newFixture()
         scenario.seed(fixture)
@@ -252,7 +218,7 @@ class HistoryGapFillCoordinatorTest {
             pageScript(ScriptedPage(listOf(chatMsg("row5", 5)))),
             scenario.referenceTypes,
         )
-        val mediator = fixture.mediator(history, scenario.pageSize, HistoryWindowFocus.Recent)
+        val mediator = fixture.mediator(history, scenario.pageSize)
 
         mediator.load(LoadType.APPEND, emptyPagingState())
 
@@ -710,8 +676,7 @@ class HistoryGapFillCoordinatorTest {
 
     private fun byId(gapId: Long) = HistoryGapFillCoordinator.GapSelection.ById(gapId)
 
-    private fun focused(focus: HistoryWindowFocus = HistoryWindowFocus.Recent) =
-        HistoryGapFillCoordinator.GapSelection.Focused(focus)
+    private fun focused() = HistoryGapFillCoordinator.GapSelection.Newest
 
     private suspend fun rowCount(fixture: Fixture): Int =
         fixture.db.messageDao().countForBuffer(fixture.roomId)
@@ -776,14 +741,7 @@ class HistoryGapFillCoordinatorTest {
             diagnostics,
         )
 
-        fun mediator(
-            history: FakeHistory,
-            pageSize: Int,
-            // Around, because the mediator's gap-directed older cascade lives only there now. Every
-            // fixture in this file puts its gap's newer edge well below this anchor, so the gap is
-            // the selected one for as long as it exists.
-            focus: HistoryWindowFocus = HistoryWindowFocus.Around(FOCUS_ANCHOR_TIME),
-        ) = ChatHistoryRemoteMediator(
+        fun mediator(history: FakeHistory, pageSize: Int) = ChatHistoryRemoteMediator(
             bufferId = roomId,
             bufferDao = db.bufferDao(),
             messageDao = db.messageDao(),
@@ -792,7 +750,6 @@ class HistoryGapFillCoordinatorTest {
             pageSize = pageSize,
             historyCursorDao = db.historyCursorDao(),
             historyGapDao = db.historyGapDao(),
-            focus = focus,
             loader = loader,
             diagnostics = diagnostics,
         )
