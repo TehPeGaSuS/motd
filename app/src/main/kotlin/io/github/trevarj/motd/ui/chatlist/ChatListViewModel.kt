@@ -109,6 +109,11 @@ class ChatListViewModel @Inject constructor(
 
     // Scope selection survives config changes; null = unified list (default).
     private val selection = MutableStateFlow(savedStateHandle.get<Long?>(KEY_SELECTED))
+
+    // Manual drawer order the user is arranging or that Room has not published back yet. Null means
+    // "stored order is authoritative"; see [pendingNetworkOrder] and [commitNetworkOrder].
+    private val pendingOrder = MutableStateFlow<List<Long>?>(null)
+    private val selectionAndOrder = selection.combine(pendingOrder, ::Pair)
     private val archiveOverrides = MutableStateFlow<Map<Long, Boolean>>(emptyMap())
     private val chatListRows = bufferRepository.observeChatList()
         .onEach { rows ->
@@ -131,14 +136,22 @@ class ChatListViewModel @Inject constructor(
                 connection to presence
             },
             settingsAndOnboarding,
-            selection,
-        ) { listData, networks, connectionAndPresence, settingsAndOnboarding, selected ->
+            selectionAndOrder,
+        ) { listData, networks, connectionAndPresence, settingsAndOnboarding, selectionAndOrder ->
             val (rows, invitationEvents) = listData
             val (connection, presence) = connectionAndPresence
             val (settings, onboardingComplete) = settingsAndOnboarding
+            val (selected, pending) = selectionAndOrder
             // If the selected network was deleted, fall back to the unified list.
             val validSelection = selected?.takeIf { id -> networks.any { it.id == id } }
             if (validSelection != selected) setSelection(validSelection)
+
+            val storedDrawerRows = buildDrawerRows(networks, rows.filterNot(ChatListRow::archived), connection)
+            // Room has published the pending order: drop it so stored state is authoritative again.
+            // compareAndSet, because a further move may have landed while this emission was built.
+            if (pending != null && drawerOrderIds(storedDrawerRows) == pending) {
+                pendingOrder.compareAndSet(pending, null)
+            }
 
             val scopedRows = scopeRows(rows, validSelection, networks)
             val (activeRows, archivedRows) = partitionArchivedRows(scopedRows)
@@ -164,7 +177,7 @@ class ChatListViewModel @Inject constructor(
                 friends = settings.friends,
                 fools = settings.fools,
                 selectedNetworkId = validSelection,
-                drawerRows = buildDrawerRows(networks, rows.filterNot(ChatListRow::archived), connection),
+                drawerRows = applyDrawerOrder(storedDrawerRows, pending),
                 allUnread = rows.filterNot { it.muted || it.archived }.sumOf { it.unreadCount },
                 allMentions = rows.filterNot { it.muted || it.archived }.sumOf { it.mentionCount },
             )
@@ -257,6 +270,57 @@ class ChatListViewModel @Inject constructor(
 
     /** Scope the list to [networkId] (root includes children); null clears the scope. */
     fun selectNetwork(networkId: Long?) = setSelection(networkId)
+
+    // -- Manual drawer order (see DrawerReorder.kt for the pure move rules) --
+    //
+    // Persistence timing: a completed intent is written once, immediately. The move actions are one
+    // intent each, so they persist as they happen. A drag is a single intent that is only known when
+    // the finger lifts, so its intermediate positions stay in [pendingOrder] and the whole drag is
+    // written once by [commitNetworkOrder] — a write per crossed row would persist arrangements the
+    // user was only passing through, and a write per frame would be absurd. Every drag termination
+    // commits (drop, cancel, drawer dismissed mid-drag), so the only order that can be lost is one
+    // whose gesture never finished.
+
+    /** Move a drawer entry one position within its sibling list and persist immediately. */
+    fun moveNetwork(networkId: Long, delta: Int) {
+        val moved = movedRows(networkId, delta) ?: return
+        persistNetworkOrder(drawerOrderIds(moved))
+    }
+
+    /**
+     * Drag step: reorder in memory only; [commitNetworkOrder] writes the result. Returns the new
+     * arrangement (null when the move is not possible) so the drag can measure its next step against
+     * the order this call just established, without waiting for a recomposition.
+     */
+    fun previewNetworkMove(networkId: Long, delta: Int): List<DrawerRow>? {
+        val moved = movedRows(networkId, delta) ?: return null
+        pendingOrder.value = drawerOrderIds(moved)
+        return moved
+    }
+
+    /** Persist whatever the drawer is currently showing; a no-op when nothing is pending. */
+    fun commitNetworkOrder() {
+        val pending = pendingOrder.value ?: return
+        // What the user is looking at, which is the pending arrangement plus anything that arrived
+        // while the drag was in progress — not the id list captured at the last step.
+        persistNetworkOrder(drawerOrderIds(applyDrawerOrder(state.value.drawerRows, pending)))
+    }
+
+    /** Rows after moving [networkId] by [delta], or null when the move is not possible. */
+    private fun movedRows(networkId: Long, delta: Int): List<DrawerRow>? {
+        // Layer the pending order over the published state: consecutive drag steps must not race a
+        // recomposition, and a step computed from a stale arrangement would move the wrong row.
+        val rows = applyDrawerOrder(state.value.drawerRows, pendingOrder.value)
+        if (!canMoveDrawerRow(rows, networkId, delta)) return null
+        return moveDrawerRow(rows, networkId, delta)
+    }
+
+    private fun persistNetworkOrder(order: List<Long>) {
+        // Keep showing the new arrangement until Room publishes it, so the drawer never flickers
+        // back through the old order between the write and its invalidation.
+        pendingOrder.value = order
+        viewModelScope.launch { networkRepository.reorderNetworks(order) }
+    }
 
     fun connect(networkId: Long) = viewModelScope.launch { connectionManager.connect(networkId) }
 

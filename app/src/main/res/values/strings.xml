@@ -587,6 +587,8 @@
     <string name="drawer_connect">Connect</string>
     <string name="drawer_disconnect">Disconnect</string>
     <string name="drawer_reconnect">Reconnect now</string>
+    <string name="drawer_move_up">Move up</string>
+    <string name="drawer_move_down">Move down</string>
     <string name="drawer_server_messages">Server messages</string>
     <string name="drawer_network_settings">Network settings</string>
     <string name="drawer_state_connecting">Connecting…</string>

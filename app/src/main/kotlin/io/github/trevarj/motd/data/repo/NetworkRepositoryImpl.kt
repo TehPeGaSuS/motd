@@ -32,10 +32,23 @@ class NetworkRepositoryImpl @Inject constructor(
     override suspend fun addNetwork(n: NetworkEntity): Long = addMutex.withLock {
         val key = networkIdentityKey(n)
         networkDao.allNow().firstOrNull { networkIdentityKey(it) == key }?.let { return it.id }
-        networkDao.insert(n)
+        // Appended, never inserted at an arbitrary position: a new network belongs at the end of
+        // whatever manual drawer order the user has already arranged.
+        networkDao.insertLast(n)
     }
 
-    override suspend fun updateNetwork(n: NetworkEntity) = networkDao.update(n)
+    /**
+     * Update every field except the manual drawer position, which only [reorderNetworks] owns. The
+     * settings form rebuilds a [NetworkEntity] from scratch (see `buildNetworkEntity`), so a saved
+     * edit carries the default `ordering = 0` and would otherwise jump that network to the top of
+     * the drawer.
+     */
+    override suspend fun updateNetwork(n: NetworkEntity) {
+        val stored = networkDao.byId(n.id)?.ordering ?: n.ordering
+        networkDao.update(n.copy(ordering = stored))
+    }
+
+    override suspend fun reorderNetworks(orderedIds: List<Long>) = networkDao.applyOrder(orderedIds)
 
     override suspend fun deleteNetwork(id: Long) {
         networkDao.deleteLocalTree(id).forEach { deletedId ->

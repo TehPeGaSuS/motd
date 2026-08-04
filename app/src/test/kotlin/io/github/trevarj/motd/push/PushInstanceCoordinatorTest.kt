@@ -128,6 +128,9 @@ class PushInstanceCoordinatorTest {
         override suspend fun deleteUsersForNetworks(networkIds: List<Long>) = Unit
         override suspend fun deleteNetworkRows(networkIds: List<Long>) = Unit
         override suspend fun allNow(): List<NetworkEntity> = flow.value
+        override suspend fun maxOrdering(): Int = flow.value.maxOfOrNull { it.ordering } ?: -1
+        override suspend fun idsInOrder(): List<Long> = flow.value.map { it.id }
+        override suspend fun setOrdering(id: Long, ordering: Int) = Unit
     }
 
     private fun net(id: Long, autoConnect: Boolean = true) = NetworkEntity(

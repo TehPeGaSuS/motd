@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.chatlist
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,12 +12,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.DoneAll
@@ -31,7 +34,10 @@ import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,16 +45,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import kotlin.math.abs
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.AvatarStyle
@@ -84,7 +97,34 @@ fun ServerDrawerContent(
     onToggleOffline: () -> Unit,
     onOpenSettings: () -> Unit,
     onMarkAllRead: () -> Unit,
+    // Manual ordering. onMoveNetwork is one finished intent (persisted immediately);
+    // onPreviewNetworkMove is one drag step and returns the resulting rows, or null when the entry
+    // has no sibling that way; onCommitNetworkOrder persists whatever the drag arrived at.
+    onMoveNetwork: (Long, Int) -> Unit = { _, _ -> },
+    onPreviewNetworkMove: (Long, Int) -> List<DrawerRow>? = { _, _ -> null },
+    onCommitNetworkOrder: () -> Unit = {},
 ) {
+    // Measured extent of each drawer entry, so a drag knows how far a swap actually moves it.
+    val rowHeights = remember { mutableStateMapOf<Long, Int>() }
+    var draggedNetworkId by remember { mutableStateOf<Long?>(null) }
+    // Travel of the dragged entry away from its current slot. Each swap subtracts the distance the
+    // layout just moved it, so the entry stays under the finger across a swap.
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    // Arrangement as of the last accepted drag step; the published rows may lag a step behind.
+    var draggedRows by remember { mutableStateOf(drawerRows) }
+
+    fun endDrag() {
+        draggedNetworkId = null
+        dragOffset = 0f
+        // Commit on any termination, drop or cancel alike: the rows the user is looking at have
+        // already moved, so silently reverting them would be the surprising outcome.
+        onCommitNetworkOrder()
+    }
+
+    // Leaving the screen mid-drag cancels the pointer stream without a cancel event, so flush any
+    // arrangement the drag reached rather than letting it die with the composition.
+    DisposableEffect(Unit) { onDispose { onCommitNetworkOrder() } }
+
     ModalDrawerSheet {
         Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
             // Compact brand header: the lockup is deliberately smaller than a navigation row so
@@ -116,15 +156,53 @@ fun ServerDrawerContent(
             )
 
             // 2. One entry per network (children indented under their soju root).
+            val dragUnit = draggedNetworkId?.let { drawerDragUnit(draggedRows, it) }.orEmpty()
             for (row in drawerRows) {
+                val dragging = row.networkId in dragUnit
                 DrawerNetworkItem(
                     row = row,
                     selected = selectedNetworkId == row.networkId,
+                    dragging = dragging,
+                    canMoveUp = canMoveDrawerRow(drawerRows, row.networkId, -1),
+                    canMoveDown = canMoveDrawerRow(drawerRows, row.networkId, 1),
                     onSelect = { onSelectNetwork(row.networkId) },
                     onConnect = { onConnect(row.networkId) },
                     onDisconnect = { onDisconnect(row.networkId) },
                     onServerMessages = { onServerMessages(row.networkId) },
                     onOpenNetworkSettings = { onOpenNetworkSettings(row.networkId) },
+                    onMove = { delta -> onMoveNetwork(row.networkId, delta) },
+                    onDragStart = {
+                        draggedNetworkId = row.networkId
+                        dragOffset = 0f
+                        draggedRows = drawerRows
+                    },
+                    onDrag = { delta ->
+                        dragOffset += delta
+                        // Swap once the entry has travelled past the midpoint of the neighbour it is
+                        // heading towards, then keep going: one fast frame can cross several rows.
+                        while (true) {
+                            val direction = if (dragOffset > 0f) 1 else -1
+                            // An unmeasured neighbour reports 0; treating that as swappable would
+                            // spin here, so only a real extent can move the entry.
+                            val shift = drawerMoveShift(draggedRows, rowHeights, row.networkId, direction)
+                                ?.takeIf { it > 0 } ?: break
+                            if (abs(dragOffset) <= shift / 2f) break
+                            draggedRows = onPreviewNetworkMove(row.networkId, direction) ?: break
+                            dragOffset -= direction * shift
+                        }
+                    },
+                    onDragEnd = ::endDrag,
+                    modifier = Modifier
+                        .onSizeChanged { rowHeights[row.networkId] = it.height }
+                        .then(
+                            // The dragged entry (a soju root carries its children) follows the
+                            // finger and draws above the rows it is passing.
+                            if (dragging) {
+                                Modifier.zIndex(1f).graphicsLayer { translationY = dragOffset }
+                            } else {
+                                Modifier
+                            },
+                        ),
                 )
             }
 
@@ -233,74 +311,148 @@ private fun DrawerNetworkItem(
     onDisconnect: () -> Unit,
     onServerMessages: () -> Unit,
     onOpenNetworkSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+    dragging: Boolean = false,
+    canMoveUp: Boolean = false,
+    canMoveDown: Boolean = false,
+    onMove: (Int) -> Unit = {},
+    onDragStart: () -> Unit = {},
+    onDrag: (Float) -> Unit = {},
+    onDragEnd: () -> Unit = {},
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    val background =
-        if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
+    val background = when {
+        // Lifted while dragging so the entry reads as picked up rather than merely selected.
+        dragging -> MaterialTheme.colorScheme.surfaceContainerHighest
+        selected -> MaterialTheme.colorScheme.secondaryContainer
+        else -> Color.Transparent
+    }
+    val moveUpLabel = stringResource(R.string.drawer_move_up)
+    val moveDownLabel = stringResource(R.string.drawer_move_down)
+    // The drag handle is decorative inside this merged row, so the move actions live on the row
+    // itself: TalkBack reaches them from the network it is already focused on, and a user who
+    // cannot hold and drag never needs the handle at all.
+    val moveActions = buildList {
+        if (canMoveUp) add(CustomAccessibilityAction(moveUpLabel) { onMove(-1); true })
+        if (canMoveDown) add(CustomAccessibilityAction(moveDownLabel) { onMove(1); true })
+    }
 
-    Box {
+    Box(modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                // Per-network handle so the harness targets a specific drawer row.
-                .testTag("drawer_network_row_${row.networkId}")
                 .padding(horizontal = 12.dp, vertical = 2.dp)
                 // Selected row gets the M3 pill background.
-                .background(background, RoundedCornerShape(28.dp))
-                .combinedClickable(onClick = onSelect, onLongClick = { menuOpen = true })
-                // Children indent one level under their soju root.
-                .padding(start = (16 + row.depth * 16).dp, top = 8.dp, bottom = 8.dp, end = 16.dp)
-                .heightIn(min = 40.dp),
+                .background(background, RoundedCornerShape(28.dp)),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (LocalAvatarStyle.current == AvatarStyle.IRC_SPRITE) {
-                val connected = row.state is IrcClientState.Ready
-                val statusDescription = stringResource(
-                    if (connected) R.string.drawer_state_connected
-                    else R.string.drawer_state_disconnected,
-                )
-                IrcNetworkBadge(
-                    name = row.name,
-                    networkId = row.networkId,
-                    status = if (connected) {
-                        LocalMotdSemanticColors.current.success
-                    } else {
-                        MaterialTheme.colorScheme.outlineVariant
-                    },
-                    size = 32.dp,
-                    modifier = Modifier
-                        .testTag("drawer_network_icon_${row.networkId}")
-                        .semantics {
-                            stateDescription = statusDescription
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    // Per-network handle so the harness targets a specific drawer row.
+                    .testTag("drawer_network_row_${row.networkId}")
+                    // The drag handle sits outside this clickable area on purpose: pressing and
+                    // holding it must not race the row's own long-press menu.
+                    .combinedClickable(onClick = onSelect, onLongClick = { menuOpen = true })
+                    .semantics { if (moveActions.isNotEmpty()) customActions = moveActions }
+                    // Children indent one level under their soju root.
+                    .padding(start = (16 + row.depth * 16).dp, top = 8.dp, bottom = 8.dp, end = 16.dp)
+                    .heightIn(min = 40.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (LocalAvatarStyle.current == AvatarStyle.IRC_SPRITE) {
+                    val connected = row.state is IrcClientState.Ready
+                    val statusDescription = stringResource(
+                        if (connected) R.string.drawer_state_connected
+                        else R.string.drawer_state_disconnected,
+                    )
+                    IrcNetworkBadge(
+                        name = row.name,
+                        networkId = row.networkId,
+                        status = if (connected) {
+                            LocalMotdSemanticColors.current.success
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant
                         },
-                )
+                        size = 32.dp,
+                        modifier = Modifier
+                            .testTag("drawer_network_icon_${row.networkId}")
+                            .semantics {
+                                stateDescription = statusDescription
+                            },
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = row.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = subtitleFor(row.state, row.nick),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (row.state is IrcClientState.Failed) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (row.mentions > 0) MentionBadge(row.mentions, lowerBound = row.mentionsIncomplete)
+                if (row.unread > 0) UnreadBadge(row.unread, lowerBound = row.unreadIncomplete)
             }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = row.name,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = subtitleFor(row.state, row.nick),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (row.state is IrcClientState.Failed) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+
+            // A lone network, or a lone child under its root, has nowhere to go: no dead affordance.
+            if (canMoveUp || canMoveDown) {
+                Box(
+                    modifier = Modifier
+                        .padding(end = 8.dp)
+                        .size(40.dp)
+                        .testTag("drawer_network_drag_handle_${row.networkId}")
+                        .pointerInput(row.networkId) {
+                            detectDragGestures(
+                                onDragStart = { onDragStart() },
+                                onDragEnd = onDragEnd,
+                                onDragCancel = onDragEnd,
+                                onDrag = { change, amount ->
+                                    // Consume so neither the drawer's scroll nor its swipe-to-close
+                                    // can take the gesture away mid-reorder.
+                                    change.consume()
+                                    onDrag(amount.y)
+                                },
+                            )
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.DragHandle,
+                        // Decorative: the row above carries the equivalent move actions.
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            if (row.mentions > 0) MentionBadge(row.mentions, lowerBound = row.mentionsIncomplete)
-            if (row.unread > 0) UnreadBadge(row.unread, lowerBound = row.unreadIncomplete)
         }
 
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            // Visible, tappable alternative to dragging — no long hold, no fine motor control.
+            if (canMoveUp) {
+                DropdownMenuItem(
+                    text = { Text(moveUpLabel) },
+                    onClick = { onMove(-1); menuOpen = false },
+                )
+            }
+            if (canMoveDown) {
+                DropdownMenuItem(
+                    text = { Text(moveDownLabel) },
+                    onClick = { onMove(1); menuOpen = false },
+                )
+            }
             val live = row.state.let { it !is IrcClientState.Disconnected && it !is IrcClientState.Failed }
             if (live) {
                 DropdownMenuItem(

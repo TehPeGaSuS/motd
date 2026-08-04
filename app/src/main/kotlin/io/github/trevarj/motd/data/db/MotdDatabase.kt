@@ -33,7 +33,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 23,
+    version = 24,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -708,6 +708,43 @@ val MIGRATION_21_22 = object : Migration(21, 22) {
 val MIGRATION_22_23 = object : Migration(22, 23) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("UPDATE history_gaps SET recoverable = 1 WHERE recoverable = 0")
+    }
+}
+
+/**
+ * v23 -> v24 turns the drawer's network order into stored, user-owned state. `networks.ordering`
+ * has existed since v1 and `NetworkDao` always sorted by it, but nothing ever assigned a value: every
+ * row stayed at 0, so the visible order was SQLite's arbitrary resolution of an all-ties sort (in
+ * practice rowid order). Manual reordering needs real values, so this data-only migration freezes the
+ * order each existing database already displays — `(ordering, id)` ascending — into distinct
+ * sequential positions. Nothing is deleted and no row moves: after the migration `ORDER BY ordering,
+ * id` reproduces the pre-migration list exactly, and a user who never reorders sees no change.
+ */
+val MIGRATION_23_24 = object : Migration(23, 24) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Rank into a temp table first. A correlated UPDATE reading the table it rewrites would
+        // count against its own partially applied writes and produce duplicate positions.
+        db.execSQL(
+            """CREATE TEMP TABLE migration_23_24_network_order(
+                   id INTEGER PRIMARY KEY NOT NULL,
+                   position INTEGER NOT NULL
+               )""",
+        )
+        db.execSQL(
+            """INSERT INTO migration_23_24_network_order(id, position)
+               SELECT n.id, (
+                   SELECT COUNT(*) FROM networks other
+                   WHERE other.ordering < n.ordering
+                      OR (other.ordering = n.ordering AND other.id < n.id)
+               ) FROM networks n""",
+        )
+        // Every networks row has exactly one ranked entry, so no row can be left with a NULL.
+        db.execSQL(
+            """UPDATE networks SET ordering = (
+                   SELECT position FROM migration_23_24_network_order WHERE id = networks.id
+               )""",
+        )
+        db.execSQL("DROP TABLE migration_23_24_network_order")
     }
 }
 

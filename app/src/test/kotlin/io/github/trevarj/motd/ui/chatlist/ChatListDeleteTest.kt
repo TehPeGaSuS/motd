@@ -75,6 +75,7 @@ class ChatListDeleteTest {
         override suspend fun addNetwork(n: NetworkEntity): Long = 0
         override suspend fun updateNetwork(n: NetworkEntity) = Unit
         override suspend fun deleteNetwork(id: Long) = Unit
+        override suspend fun reorderNetworks(orderedIds: List<Long>) = Unit
         override suspend fun networkById(id: Long): NetworkEntity? = null
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = emptyList()
     }

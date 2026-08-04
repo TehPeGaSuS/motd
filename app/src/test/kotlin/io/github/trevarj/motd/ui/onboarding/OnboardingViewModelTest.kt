@@ -49,6 +49,7 @@ class OnboardingViewModelTest {
         override suspend fun addNetwork(n: NetworkEntity): Long = ids.incrementAndGet().also { rows[it] = n.copy(id = it) }
         override suspend fun updateNetwork(n: NetworkEntity) { rows[n.id] = n }
         override suspend fun deleteNetwork(id: Long) { rows.remove(id) }
+        override suspend fun reorderNetworks(orderedIds: List<Long>) = Unit
         override suspend fun networkById(id: Long) = rows[id]
         override suspend fun childrenOf(rootId: Long) = rows.values.filter { it.parentId == rootId }
     }

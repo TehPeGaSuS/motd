@@ -73,6 +73,11 @@ data class NetworkEntity(
     val initialAwayMessage: String? = null,
     val clientCertAlias: String? = null,
     val autoConnect: Boolean = true,
+    /**
+     * Manual drawer position, owned by the user (drag or the row's move actions). Distinct and
+     * gap-free after any reorder; `NetworkDao.insertLast` appends new rows. The default only applies
+     * to rows built in tests/imports — every insert through the repository is ranked.
+     */
     val ordering: Int = 0,
     // Opt-in IRC-over-WebSocket endpoint (plans/19 §3.3). When set (e.g. wss://bnc.example.com:443/)
     // the connection tunnels over a WebSocket to blend with HTTPS; null uses the TCP/TLS transport.

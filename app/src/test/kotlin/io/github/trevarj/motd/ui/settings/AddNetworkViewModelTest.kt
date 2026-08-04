@@ -54,6 +54,7 @@ class AddNetworkViewModelTest {
         }
         override suspend fun updateNetwork(n: NetworkEntity) { networks[n.id] = n }
         override suspend fun deleteNetwork(id: Long) { networks.remove(id) }
+        override suspend fun reorderNetworks(orderedIds: List<Long>) = Unit
         override suspend fun networkById(id: Long) = networks[id]
         override suspend fun childrenOf(rootId: Long) = networks.values.filter { it.parentId == rootId }
     }

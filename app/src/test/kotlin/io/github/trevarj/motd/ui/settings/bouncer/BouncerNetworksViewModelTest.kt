@@ -64,6 +64,7 @@ class BouncerNetworksViewModelTest {
             override suspend fun addNetwork(n: NetworkEntity) = error("unused")
             override suspend fun updateNetwork(n: NetworkEntity) = error("unused")
             override suspend fun deleteNetwork(id: Long) = error("unused")
+            override suspend fun reorderNetworks(orderedIds: List<Long>) = error("unused")
             override suspend fun networkById(id: Long): NetworkEntity {
                 lookupStarted.complete(Unit)
                 releaseLookup.await()

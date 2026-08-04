@@ -90,6 +90,11 @@ class AllMigrationsTest {
                 assertEquals(6697, cursor.getInt(2))
                 assertEquals("me", cursor.getString(3))
             }
+            // The v1 row is ranked into the manual drawer order rather than left at the default.
+            sqlite.query("SELECT ordering FROM networks WHERE id = 1").use { cursor ->
+                check(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
             listOf(
                 "buffers",
                 "messages",
@@ -166,6 +171,7 @@ class AllMigrationsTest {
             MIGRATION_20_21,
             MIGRATION_21_22,
             MIGRATION_22_23,
+            MIGRATION_23_24,
         )
     }
 }

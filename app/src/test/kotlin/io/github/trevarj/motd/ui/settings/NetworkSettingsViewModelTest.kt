@@ -62,6 +62,7 @@ class NetworkSettingsViewModelTest {
                 networks.values.filter { it.parentId == id }.map { it.id }.forEach(networks::remove)
             }
         }
+        override suspend fun reorderNetworks(orderedIds: List<Long>) = Unit
         override suspend fun networkById(id: Long): NetworkEntity? = networks[id]
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> =
             networks.values.filter { it.parentId == rootId }
@@ -405,6 +406,7 @@ class NetworkSettingsViewModelTest {
             override suspend fun addNetwork(n: NetworkEntity) = error("unused")
             override suspend fun updateNetwork(n: NetworkEntity) = error("unused")
             override suspend fun deleteNetwork(id: Long) = error("unused")
+            override suspend fun reorderNetworks(orderedIds: List<Long>) = error("unused")
             override suspend fun networkById(id: Long): NetworkEntity {
                 lookupStarted.complete(Unit)
                 releaseLookup.await()

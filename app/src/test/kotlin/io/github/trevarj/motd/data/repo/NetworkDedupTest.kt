@@ -49,6 +49,14 @@ class NetworkDedupTest {
             networkIds.forEach(rows::remove)
         }
 
+        override suspend fun maxOrdering(): Int = rows.values.maxOfOrNull { it.ordering } ?: -1
+        override suspend fun idsInOrder(): List<Long> = rows.values
+            .sortedWith(compareBy(NetworkEntity::ordering, NetworkEntity::id))
+            .map { it.id }
+        override suspend fun setOrdering(id: Long, ordering: Int) {
+            rows[id]?.let { rows[id] = it.copy(ordering = ordering) }
+        }
+
         override fun observeAll(): Flow<List<NetworkEntity>> = flowOf(rows.values.toList())
         override suspend fun connectable(): List<NetworkEntity> = rows.values.filter { it.autoConnect }
         override suspend fun update(n: NetworkEntity) { rows[n.id] = n }

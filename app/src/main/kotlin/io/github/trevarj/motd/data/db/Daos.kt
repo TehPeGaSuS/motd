@@ -18,7 +18,10 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface NetworkDao {
-    @Query("SELECT * FROM networks ORDER BY ordering")
+    // `ordering` is the user's manual drawer order (see NetworkDao.applyOrder). `id` is only a
+    // tiebreak for rows that have not been ranked yet — a merge import can reuse a position — so the
+    // list is never at the mercy of SQLite's arbitrary resolution of an all-ties sort.
+    @Query("SELECT * FROM networks ORDER BY ordering, id")
     fun observeAll(): Flow<List<NetworkEntity>>
 
     @Query("SELECT * FROM networks WHERE autoConnect = 1")
@@ -32,6 +35,37 @@ interface NetworkDao {
 
     @Update
     suspend fun update(n: NetworkEntity)
+
+    @Query("SELECT COALESCE(MAX(ordering), -1) FROM networks")
+    suspend fun maxOrdering(): Int
+
+    @Query("SELECT id FROM networks ORDER BY ordering, id")
+    suspend fun idsInOrder(): List<Long>
+
+    @Query("UPDATE networks SET ordering = :ordering WHERE id = :id")
+    suspend fun setOrdering(id: Long, ordering: Int)
+
+    /**
+     * Insert [n] at the end of the manual order. New networks must land somewhere deterministic;
+     * keeping the entity default (0) would drop every newly added network at the *top* of the
+     * drawer once real positions exist.
+     */
+    @Transaction
+    suspend fun insertLast(n: NetworkEntity): Long = insert(n.copy(ordering = maxOrdering() + 1))
+
+    /**
+     * Renumber the whole table so [orderedIds] becomes the stored order, in one transaction so a
+     * reorder is all-or-nothing. Unknown ids are ignored and rows missing from [orderedIds] keep
+     * their relative order after the listed ones — the drawer omits a child whose parent row is
+     * gone, and an invisible row must not be able to renumber the visible ones.
+     */
+    @Transaction
+    suspend fun applyOrder(orderedIds: List<Long>) {
+        val known = idsInOrder()
+        val requested = orderedIds.filterTo(LinkedHashSet(), known::contains)
+        val full = requested + known.filterNot(requested::contains)
+        full.forEachIndexed { index, id -> setOrdering(id, index) }
+    }
 
     @Query("UPDATE networks SET host = :host, port = :port, nick = :nick WHERE id = :id")
     suspend fun updateBouncerConnection(id: Long, host: String, port: Int, nick: String)

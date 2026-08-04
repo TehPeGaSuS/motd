@@ -25,6 +25,14 @@ interface NetworkRepository {
     suspend fun updateNetwork(n: NetworkEntity)
     suspend fun deleteNetwork(id: Long)
 
+    /**
+     * Persist the user's manual drawer order. [orderedIds] is the complete flattened order (each
+     * bouncer root immediately followed by its children); ids the caller does not know about keep
+     * their relative order at the end. This is user-preference state, not IRC-derived state, so it
+     * is written here rather than through EventProcessor.
+     */
+    suspend fun reorderNetworks(orderedIds: List<Long>)
+
     // Round 5 (plans/16): point reads for the network-management screens.
     /** Point read (drives NetworkSettings/Bouncer screens; delegates to NetworkDao.byId). */
     suspend fun networkById(id: Long): NetworkEntity?
