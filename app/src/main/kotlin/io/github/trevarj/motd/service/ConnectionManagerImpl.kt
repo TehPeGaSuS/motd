@@ -850,6 +850,17 @@ class ConnectionManagerImpl @Inject constructor(
             onCertUntrusted = { id, ex ->
                 registry.runIfCurrent(id, generation) { publishCertPrompt(id, ex) }
             },
+            onBackoff = { phase, attempt, delayMs ->
+                diagnostics.record("connections", "reconnect_backoff") {
+                    mapOf(
+                        "network_id" to row.id,
+                        "phase" to phase,
+                        "attempt" to attempt,
+                        "delay_ms" to delayMs,
+                        "capped" to (delayMs >= ConnectionActor.CAP_MS),
+                    )
+                }
+            },
         )
     }
 

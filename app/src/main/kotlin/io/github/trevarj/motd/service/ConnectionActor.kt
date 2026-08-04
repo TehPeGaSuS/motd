@@ -106,6 +106,13 @@ class ConnectionActor(
     private val pendingCertFailure: suspend () -> CertUntrustedException? = { null },
     /** Publishes a cert prompt for this network when a cert failure parks the actor. */
     private val onCertUntrusted: suspend (Long, CertUntrustedException) -> Unit = { _, _ -> },
+    /**
+     * Reports the reconnect schedule so a journal can show what the loop actually did. Called with
+     * `scheduled` when a delay is chosen and `elapsed`/`woke_early` when the wait ends, so a reader
+     * can tell a slow recovery apart from one that never woke. Defaulted to a no-op: the loop stays
+     * deterministic under virtual time and the existing tests construct the actor unchanged.
+     */
+    private val onBackoff: (phase: String, attempt: Int, delayMs: Long) -> Unit = { _, _, _ -> },
 ) : ConnectionLifecycleActor {
     @Volatile override var connection: ManagedConnection? = null
         private set
@@ -219,8 +226,11 @@ class ConnectionActor(
                     // does not retain a stale SOCKS/tunnel error until the next dial begins.
                     onState(networkId, IrcClientState.Connecting)
                     val delayMs = backoffDelayMs(attempt)
+                    onBackoff("scheduled", attempt, delayMs)
+                    val scheduledFor = attempt
                     attempt++
-                    waitBeforeRetry(delayMs)
+                    val wokeEarly = waitBeforeRetry(delayMs)
+                    onBackoff(if (wokeEarly) "woke_early" else "elapsed", scheduledFor, delayMs)
                 }
             }
         }
@@ -398,18 +408,25 @@ class ConnectionActor(
         }
     }
 
-    /** Wait for the backoff delay, waking early when the network becomes available. */
-    private suspend fun waitBeforeRetry(delayMs: Long) {
+    /**
+     * Wait for the backoff delay, waking early when the network becomes available. Returns true if
+     * it woke on that signal rather than serving the full delay. Note the signal is Android
+     * connectivity: a server that returns while the device stayed online does not raise it, so the
+     * loop serves the whole delay in that case.
+     */
+    private suspend fun waitBeforeRetry(delayMs: Long): Boolean {
         while (retryNow.tryReceive().isSuccess) { /* drain stale signals */ }
         val timer = CoroutineScope(currentCoroutineContext()).launch { delay(delayMs) }
+        var wokeEarly = false
         try {
             select {
-                retryNow.onReceive { }
+                retryNow.onReceive { wokeEarly = true }
                 timer.onJoin { }
             }
         } finally {
             timer.cancelAndJoin()
         }
+        return wokeEarly
     }
 
     /** delay = min(cap, base * 2^attempt) * jitter(0.7..1.3). */
