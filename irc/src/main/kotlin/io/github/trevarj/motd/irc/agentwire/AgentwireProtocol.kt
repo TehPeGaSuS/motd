@@ -80,8 +80,12 @@ fun parseAgentwireTopic(topic: String): AgentwireTopic? {
     val account = fields["account"]?.takeIf(String::isNotEmpty) ?: return null
     val agentAccount = fields["agent"]?.takeIf(String::isNotEmpty) ?: return null
     val backend = fields["backend"]?.takeIf(String::isNotEmpty) ?: return null
-    // The controller is authorized to issue actions, while this separate identity publishes
-    // backend state. Keep both fields even when a deployment intentionally uses one account.
+    // Three different questions: `backend` names the engine (codex/opencode/claude), while
+    // `account` and `agent` are IRC account names, never engine names. `account` is the
+    // controller authorized to issue actions; `agent` is the bot account whose messages we
+    // trust as authoritative backend state ("agent=claude" would be an account literally
+    // named claude). Both fields stay required even when a deployment intentionally uses one
+    // account for both roles.
     return AgentwireTopic(account, agentAccount, backend, fields, title)
 }
 
