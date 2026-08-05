@@ -961,13 +961,6 @@ interface MessageDao {
     @Query("SELECT COUNT(*) FROM messages WHERE bufferId = :bufferId")
     suspend fun countForBuffer(bufferId: Long): Int
 
-    @Query(
-        """SELECT COUNT(*) FROM messages m
-           JOIN buffers b ON b.id = m.bufferId
-           WHERE b.networkId = :networkId""",
-    )
-    suspend fun countForNetwork(networkId: Long): Int
-
     @Query("SELECT EXISTS(SELECT 1 FROM messages WHERE bufferId = :bufferId AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION'))")
     suspend fun hasStoredChat(bufferId: Long): Boolean
 

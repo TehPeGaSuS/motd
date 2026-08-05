@@ -66,6 +66,12 @@ data class ReplannedOutgoingPlan(
 
 internal data class PersistedHistoryPage(val roomId: RoomId, val inserted: Int)
 
+/** Committed canonical order and freshly inserted row count of one playback batch. */
+internal data class PlaybackCommit(
+    val order: List<TimelineEventId> = emptyList(),
+    val inserted: Int = 0,
+)
+
 internal data class HistoryPageWrite(
     val request: ChatHistoryRequest,
     val response: ChatHistoryResponse.Messages,
@@ -645,7 +651,7 @@ class EventProcessor @Inject constructor(
         origin: EventOrigin,
         expectedRoomId: RoomId? = null,
         placement: IrcEvent.PlaybackPlacement,
-    ): List<TimelineEventId> {
+    ): PlaybackCommit {
         // All events for one target are applied in a single Room transaction (idempotent by
         // dedupKey). They are historical replay, never live arrivals: persist them without posting
         // notifications even when a previously-missing row is a DM or mention.
@@ -672,6 +678,7 @@ class EventProcessor @Inject constructor(
             )
         }
         var committedOrder = emptyList<TimelineEventId>()
+        var insertedCount = 0
         try {
             db.withTransaction {
                 activeHistoryChatRoutes[networkId] = ArrayDeque()
@@ -714,6 +721,7 @@ class EventProcessor @Inject constructor(
                 activeHistoryInsertedIds[networkId] = mutableSetOf()
                 for (ev in events) processEvent(networkId, ev, origin, target)
                 committedOrder = activeHistoryCanonicalOrder[networkId].orEmpty().toList()
+                insertedCount = activeHistoryInsertedIds[networkId].orEmpty().size
                 canonicalTimeline.reconcilePlaybackOrder(
                     orderedEventIds = committedOrder,
                     insertedEventIds = activeHistoryInsertedIds[networkId].orEmpty(),
@@ -737,7 +745,7 @@ class EventProcessor @Inject constructor(
                 "source" to origin.name,
             )
         }
-        return committedOrder
+        return PlaybackCommit(committedOrder, insertedCount)
     }
 
     /**
@@ -809,18 +817,12 @@ class EventProcessor @Inject constructor(
         historyGapId: Long? = null,
     ): PersistedHistoryPage = sequencer.withNetwork(networkId) {
         val persisted = db.withTransaction {
-            val messageCountBefore = messageDao.countForNetwork(networkId)
-            val canonicalRoomId = persistHistoryPageInTransaction(
+            persistHistoryPageInTransaction(
                 networkId,
                 request,
                 response,
                 expectedRoomId,
                 historyGapId,
-            )
-            PersistedHistoryPage(
-                roomId = canonicalRoomId,
-                inserted = (messageDao.countForNetwork(networkId) - messageCountBefore)
-                    .coerceAtLeast(0),
             )
         }
         bufferStore.drainCommittedRoomMerges()
@@ -835,22 +837,20 @@ class EventProcessor @Inject constructor(
     ): PersistedHistoryPage = sequencer.withNetwork(networkId) {
         require(pages.isNotEmpty()) { "history page batch is empty" }
         val persisted = db.withTransaction {
-            val messageCountBefore = messageDao.countForNetwork(networkId)
             var canonicalRoomId = expectedRoomId
+            var inserted = 0
             pages.forEach { page ->
-                canonicalRoomId = persistHistoryPageInTransaction(
+                val persistedPage = persistHistoryPageInTransaction(
                     networkId,
                     page.request,
                     page.response,
                     canonicalRoomId,
                     page.historyGapId,
                 )
+                canonicalRoomId = persistedPage.roomId
+                inserted += persistedPage.inserted
             }
-            PersistedHistoryPage(
-                roomId = canonicalRoomId,
-                inserted = (messageDao.countForNetwork(networkId) - messageCountBefore)
-                    .coerceAtLeast(0),
-            )
+            PersistedHistoryPage(roomId = canonicalRoomId, inserted = inserted)
         }
         bufferStore.drainCommittedRoomMerges()
         persisted
@@ -862,7 +862,7 @@ class EventProcessor @Inject constructor(
         response: ChatHistoryResponse.Messages,
         expectedRoomId: RoomId?,
         historyGapId: Long?,
-    ): RoomId {
+    ): PersistedHistoryPage {
         require(request.subcommand != ChatHistoryRequest.Subcommand.TARGETS) {
             "TARGETS is not a message page"
         }
@@ -898,7 +898,7 @@ class EventProcessor @Inject constructor(
             },
         )
 
-        val pageEventIds = if (response.events.isNotEmpty()) {
+        val pageCommit = if (response.events.isNotEmpty()) {
             activeProtocolPageCursorWrites += networkId
             try {
                 onPlaybackBatch(
@@ -924,7 +924,7 @@ class EventProcessor @Inject constructor(
                 activeProtocolPageCursorWrites -= networkId
             }
         } else {
-            emptyList()
+            PlaybackCommit()
         }
 
         val canonicalRoomId = bufferDao.canonicalId(initialCanonicalId) ?: initialCanonicalId
@@ -975,13 +975,13 @@ class EventProcessor @Inject constructor(
             previousNewestAnchor = previousNewestAnchor,
             previousOldest = previousOldest,
             previousOldestAnchor = previousOldestAnchor,
-            pageRows = pageEventIds.mapNotNull { messageDao.byCanonicalId(it) }
+            pageRows = pageCommit.order.mapNotNull { messageDao.byCanonicalId(it) }
                 .filter { it.bufferId == canonicalRoomId },
             historyGapId = historyGapId,
         )
         bufferDao.setOldestFetchedTime(canonicalRoomId, oldest?.serverTime)
         if (complete) bufferDao.markHistoryComplete(canonicalRoomId)
-        return canonicalRoomId
+        return PersistedHistoryPage(canonicalRoomId, pageCommit.inserted)
     }
 
     /**
@@ -3402,10 +3402,10 @@ private fun newerBoundary(
  * remaining suppression rules (muted buffer, foregrounded buffer) and posts MessagingStyle.
  */
 interface MessageNotifier {
-    // suspend so implementations read Room / DataStore with plain suspend calls (which dispatch
-    // off the main thread). The events collector runs on Dispatchers.Main, so a blocking read here
-    // (runBlocking { suspend Room query }) deadlocks/crashes the main thread — same class of bug as
-    // the findSelfEchoCandidate fix. Callers are already in suspend context.
+    // suspend so implementations read Room / DataStore with plain suspend calls. The events
+    // collector runs on the application Default scope; a blocking read here
+    // (runBlocking { suspend Room query }) can still deadlock against Room's executors — same
+    // class of bug as the findSelfEchoCandidate fix. Callers are already in suspend context.
     suspend fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage)
 
     /** Canonical-id-aware notification hook. Legacy/test implementations inherit the old hook. */
