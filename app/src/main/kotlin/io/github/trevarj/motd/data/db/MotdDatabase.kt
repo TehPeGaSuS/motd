@@ -26,6 +26,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HistoryCursorEntity::class,
         HistoryGapEntity::class,
         NetworkHistoryCursorEntity::class,
+        HistoryBackfillCursorEntity::class,
         ConnectionGenerationEntity::class,
         AppStateEntity::class,
         ReactionEntity::class,
@@ -33,7 +34,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 24,
+    version = 25,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -51,6 +52,7 @@ abstract class MotdDatabase : RoomDatabase() {
     abstract fun canonicalTimelineDao(): CanonicalTimelineDao
     abstract fun roomAliasDao(): RoomAliasDao
     abstract fun historyCursorDao(): HistoryCursorDao
+    abstract fun historyBackfillCursorDao(): HistoryBackfillCursorDao
     abstract fun historyGapDao(): HistoryGapDao
     abstract fun connectionGenerationDao(): ConnectionGenerationDao
     abstract fun appStateDao(): AppStateDao
@@ -745,6 +747,27 @@ val MIGRATION_23_24 = object : Migration(23, 24) {
                )""",
         )
         db.execSQL("DROP TABLE migration_23_24_network_order")
+    }
+}
+
+/**
+ * v24 -> v25: add the durable resume cursor for the paced background TARGETS backfill (initial
+ * sync now enumerates only a recent window; the remainder trickles in behind this cursor).
+ * Additive table; existing networks without a row simply have no backfill scheduled until their
+ * first post-upgrade initial sync seeds one.
+ */
+val MIGRATION_24_25 = object : Migration(24, 25) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `history_backfill_cursors` (
+                   `networkId` INTEGER NOT NULL,
+                   `upperBound` INTEGER NOT NULL,
+                   `complete` INTEGER NOT NULL DEFAULT 0,
+                   PRIMARY KEY(`networkId`),
+                   FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`)
+                       ON UPDATE NO ACTION ON DELETE CASCADE
+               )""",
+        )
     }
 }
 

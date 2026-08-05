@@ -2,6 +2,7 @@ package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.HistoryBackfillCursorEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.data.db.ircTarget
@@ -32,6 +33,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -87,9 +89,19 @@ internal fun initialSyncStatusIfCurrent(
     current
 }
 
+/** Whole-network reconnect catch-up progress for list-level UI. */
+data class HistorySyncProgress(val synced: Int, val total: Int)
+
+private val EMPTY_SYNC_PROGRESS: MutableStateFlow<Map<Long, HistorySyncProgress>> =
+    MutableStateFlow(emptyMap())
+
 /** Chat-facing boundary for lifecycle-driven history reconciliation. */
 interface HistoryResyncController {
     fun syncStatus(bufferId: Long): Flow<HistorySyncStatus>
+
+    /** Per-network catch-up progress; empty while no reconnect pass is seeding targets. */
+    val networkSyncProgress: kotlinx.coroutines.flow.StateFlow<Map<Long, HistorySyncProgress>>
+        get() = EMPTY_SYNC_PROGRESS
 
     suspend fun reconcileBuffer(
         buffer: BufferEntity,
@@ -131,6 +143,10 @@ class HistoryResyncCoordinator @Inject constructor(
     // loader's per-network lock. Defaulted so tests keep the four-argument construction.
     private val loader: HistoryPageLoader = HistoryPageLoader(processor),
 ) : HistoryResyncController {
+    private val _networkSyncProgress = MutableStateFlow<Map<Long, HistorySyncProgress>>(emptyMap())
+    override val networkSyncProgress: kotlinx.coroutines.flow.StateFlow<Map<Long, HistorySyncProgress>> =
+        _networkSyncProgress
+
     // Reuses the loader's transport seam so a source can drive both the coordinator's orchestration
     // and the loader's fetch primitives directly, and adds the discovery/classification metadata the
     // reconnect pass needs (target normalization, channel detection, and a per-connection flight id).
@@ -306,6 +322,8 @@ class HistoryResyncCoordinator @Inject constructor(
         openBuffers: List<Pair<Long, String>>,
         client: IrcClient,
         isCurrent: () -> Boolean,
+        // null means "everything": the first pass enumerates from epoch and leaves no backfill.
+        initialLookbackMs: Long? = INITIAL_SYNC_LOOKBACK_MS,
     ): HistoryResyncState {
         if (!client.targetClassificationReady.value) {
             withTimeoutOrNull(TARGET_CLASSIFICATION_WAIT_TIMEOUT_MS) {
@@ -313,7 +331,113 @@ class HistoryResyncCoordinator @Inject constructor(
             }
         }
         if (!isCurrent()) return staleConnection()
-        return resyncNetwork(networkId, openBuffers, ClientHistorySource(client), isCurrent)
+        return resyncNetwork(
+            networkId,
+            openBuffers,
+            ClientHistorySource(client),
+            isCurrent,
+            initialLookbackMs,
+        )
+    }
+
+    suspend fun backfillTargets(networkId: Long, client: IrcClient, isCurrent: () -> Boolean) {
+        if (!client.targetClassificationReady.value) {
+            withTimeoutOrNull(TARGET_CLASSIFICATION_WAIT_TIMEOUT_MS) {
+                client.targetClassificationReady.first { it }
+            } ?: return
+        }
+        if (!isCurrent()) return
+        backfillTargets(networkId, ClientHistorySource(client), isCurrent)
+    }
+
+    /**
+     * Paced background enumeration of targets older than the initial-sync window. Resumes from the
+     * durable per-network cursor, seeds every discovered target with the same single newest page
+     * the reconnect pass uses, and never touches the reconnect watermark or publishes per-buffer
+     * status. A transport failure or a superseded connection simply leaves the cursor where it
+     * last advanced; the next Ready session resumes from there.
+     */
+    internal suspend fun backfillTargets(
+        networkId: Long,
+        source: HistorySource,
+        isCurrent: () -> Boolean,
+    ) {
+        val cursorDao = db.historyBackfillCursorDao()
+        val cursor = cursorDao.byNetwork(networkId) ?: return
+        if (cursor.complete) return
+        if (cursor.upperBound <= Instant.EPOCH.toEpochMilli()) {
+            cursorDao.markComplete(networkId)
+            return
+        }
+        if (source.availability() !is HistoryAvailability.Ready) return
+        if (!source.canClassifyTargets()) return
+        diagnostics.record("history", "backfill_started") {
+            mapOf("network_id" to networkId, "upper_bound" to cursor.upperBound)
+        }
+        val discovery = try {
+            discoverTargets(
+                networkId = networkId,
+                source = source,
+                upper = cursor.upperBound,
+                lower = Instant.EPOCH.toEpochMilli(),
+                onPageEnd = { page, nextUpper ->
+                    // Seed before persisting the boundary: a killed process may re-enumerate a
+                    // page (target dedup absorbs that) but can never skip one unseeded.
+                    seedBackfillPage(networkId, page, source, isCurrent)
+                    cursorDao.advance(networkId, nextUpper)
+                },
+                betweenPages = {
+                    if (!isCurrent()) throw StaleConnectionException()
+                    delay(BACKFILL_TARGETS_PACE_MS)
+                },
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: StaleConnectionException) {
+            return
+        } catch (error: Exception) {
+            diagnostics.record("history", "backfill_failed") {
+                mapOf(
+                    "network_id" to networkId,
+                    "error_fp" to diagnostics.fingerprint(error.message),
+                )
+            }
+            return
+        }
+        // The terminal page gets no onPageEnd; this final sweep seeds it, and targets already
+        // seeded earlier skip cheaply on their stored room cursor.
+        try {
+            seedBackfillPage(networkId, discovery.targets, source, isCurrent)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return
+        }
+        if (discovery.status == WorkStatus.Complete) cursorDao.markComplete(networkId)
+        diagnostics.record("history", "backfill_finished") {
+            mapOf(
+                "network_id" to networkId,
+                "targets" to discovery.targets.size,
+                "complete" to (discovery.status == WorkStatus.Complete),
+            )
+        }
+    }
+
+    private suspend fun seedBackfillPage(
+        networkId: Long,
+        page: List<ChatHistoryTarget>,
+        source: HistorySource,
+        isCurrent: () -> Boolean,
+    ) {
+        if (page.isEmpty()) return
+        syncTargets(
+            networkId = networkId,
+            targets = mergeSyncTargets(emptyList(), page, source),
+            source = source,
+            isCurrent = isCurrent,
+            hasDiscoveryWatermark = true,
+            paceBetweenTargetsMs = BACKFILL_SEED_PACE_MS,
+        )
     }
 
     internal suspend fun resyncNetwork(
@@ -321,6 +445,7 @@ class HistoryResyncCoordinator @Inject constructor(
         openBuffers: List<Pair<Long, String>>,
         source: HistorySource,
         isCurrent: () -> Boolean = { true },
+        initialLookbackMs: Long? = INITIAL_SYNC_LOOKBACK_MS,
     ): HistoryResyncState = coalesced(
         RequestSpec(
             RequestKey(networkId, null),
@@ -343,10 +468,25 @@ class HistoryResyncCoordinator @Inject constructor(
         // clock bounds discovery but is never persisted; only completed server response metadata
         // can advance the dedicated whole-network cursor.
         val previousSync = syncPrefs.lastSuccessfulSync(networkId)
-        val lower = (previousSync ?: Instant.EPOCH.toEpochMilli())
+        // First sync: bound discovery to the user's chosen window instead of epoch. A large bouncer
+        // account advertises years of targets, and eagerly enumerating and seeding all of them froze
+        // onboarding. Everything older trickles in behind the durable backfill cursor instead. A
+        // null lookback is the explicit "everything" choice: enumerate from epoch in this one pass.
+        val firstSyncLower = initialLookbackMs
+            ?.let { Instant.now().toEpochMilli() - it }
+            ?: Instant.EPOCH.toEpochMilli()
+        val lower = (previousSync ?: firstSyncLower)
             .minus(TARGETS_FUZZ_MS)
             .coerceAtLeast(Instant.EPOCH.toEpochMilli())
         val upper = Instant.now().toEpochMilli() + TARGETS_FUZZ_MS
+        if (previousSync == null && initialLookbackMs != null) {
+            // +1 because TARGETS BETWEEN excludes both selectors: the backfill interval must
+            // include a target advertised exactly at this pass's lower boundary. An unbounded first
+            // pass reaches epoch itself, so there is nothing older left to seed a cursor for.
+            db.historyBackfillCursorDao().seed(
+                HistoryBackfillCursorEntity(networkId = networkId, upperBound = lower + 1),
+            )
+        }
         val result = try {
             val discovery = if (source.canClassifyTargets()) {
                 discoverTargets(networkId, source, upper, lower)
@@ -360,14 +500,27 @@ class HistoryResyncCoordinator @Inject constructor(
                     highWater = null,
                 )
             }
-            val targetPass = syncTargets(
-                networkId = networkId,
-                targets = mergeSyncTargets(openBuffers, discovery.targets, source),
-                source = source,
-                isCurrent = isCurrent,
-                hasDiscoveryWatermark = previousSync != null,
-                syncGenerations = syncGenerations,
-            )
+            val mergedTargets = mergeSyncTargets(openBuffers, discovery.targets, source)
+            val targetPass = try {
+                _networkSyncProgress.update {
+                    it + (networkId to HistorySyncProgress(0, mergedTargets.size))
+                }
+                syncTargets(
+                    networkId = networkId,
+                    targets = mergedTargets,
+                    source = source,
+                    isCurrent = isCurrent,
+                    hasDiscoveryWatermark = previousSync != null,
+                    syncGenerations = syncGenerations,
+                    onProgress = { synced, total ->
+                        _networkSyncProgress.update {
+                            it + (networkId to HistorySyncProgress(synced, total))
+                        }
+                    },
+                )
+            } finally {
+                _networkSyncProgress.update { it - networkId }
+            }
             val inserted = targetPass.inserted
             val status = discovery.status.merge(targetPass.status)
             val highWater = maxHighWater(
@@ -421,6 +574,10 @@ class HistoryResyncCoordinator @Inject constructor(
         source: HistorySource,
         upper: Long,
         lower: Long,
+        // Backfill hooks: [onPageEnd] runs after a page's boundary advances (seed-then-persist so a
+        // killed process never skips enumerated targets), [betweenPages] paces the next request.
+        onPageEnd: (suspend (page: List<ChatHistoryTarget>, nextUpper: Long) -> Unit)? = null,
+        betweenPages: (suspend () -> Unit)? = null,
     ): TargetDiscovery {
         val limit = source.pageLimit().coerceAtLeast(1)
         val targets = LinkedHashMap<String, ChatHistoryTarget>()
@@ -475,10 +632,12 @@ class HistoryResyncCoordinator @Inject constructor(
                     )
                     pageUpper = oldest
                     previousTie = null
+                    onPageEnd?.invoke(page, pageUpper)
                     if (requestsInChunk >= chunkLimit) {
                         requestsInChunk = 0
                         yield()
                     }
+                    betweenPages?.invoke()
                     continue
                 }
                 return TargetDiscovery(
@@ -507,6 +666,7 @@ class HistoryResyncCoordinator @Inject constructor(
                 )
             }
             pageUpper = nextUpper
+            onPageEnd?.invoke(page, pageUpper)
             if (requestsInChunk >= chunkLimit) {
                 diagnostics.record("history", "targets_sync_continued") {
                     mapOf("targets" to targets.size, "high_water" to highWater)
@@ -514,6 +674,7 @@ class HistoryResyncCoordinator @Inject constructor(
                 requestsInChunk = 0
                 yield()
             }
+            betweenPages?.invoke()
         }
     }
 
@@ -593,6 +754,8 @@ class HistoryResyncCoordinator @Inject constructor(
         isCurrent: () -> Boolean,
         hasDiscoveryWatermark: Boolean,
         syncGenerations: Map<Long, Long> = emptyMap(),
+        paceBetweenTargetsMs: Long = 0,
+        onProgress: (suspend (synced: Int, total: Int) -> Unit)? = null,
     ): TargetPass {
         when (source.availability()) {
             HistoryAvailability.Unsupported -> error("History support disappeared during reconciliation")
@@ -604,21 +767,34 @@ class HistoryResyncCoordinator @Inject constructor(
         var status: WorkStatus = WorkStatus.Complete
         var highWater: Long? = null
         var retryRecommended = false
-        for (targetSpec in targets) {
+        for ((targetIndex, targetSpec) in targets.withIndex()) {
             if (!isCurrent()) throw StaleConnectionException()
+            onProgress?.invoke(targetIndex, targets.size)
             val target = targetSpec.name
             val canonicalRoomId = targetSpec.knownBufferId ?: if (source.isChannelTarget(target)) {
                 continue
             } else {
                 processor.ensureHistoryQuery(networkId, target, source.normalizeTarget(target))
             }
+            val roomCursor = db.historyCursorDao().byRoom(canonicalRoomId)
             if (
                 hasDiscoveryWatermark &&
                 targetSpec.latestMessageTime == null &&
-                db.historyCursorDao().byRoom(canonicalRoomId) != null
+                roomCursor != null
             ) {
                 continue
             }
+            // The advertised newest is already stored: nothing new to fetch regardless of the
+            // watermark. This keeps first-run retries and the paced backfill from re-requesting a
+            // page for every target they have already seeded.
+            val advertisedLatest = targetSpec.latestMessageTime
+            if (
+                advertisedLatest != null &&
+                roomCursor?.newestServerTime?.let { it >= advertisedLatest } == true
+            ) {
+                continue
+            }
+            if (paceBetweenTargetsMs > 0) delay(paceBetweenTargetsMs)
             val syncGeneration = syncGenerations[canonicalRoomId]
             if (syncGeneration != null) {
                 publishSyncStatus(canonicalRoomId, syncGeneration, HistorySyncStatus.Syncing)
@@ -1046,7 +1222,7 @@ class HistoryResyncCoordinator @Inject constructor(
     private fun historyUnavailable(): HistoryResyncState.Failed =
         HistoryResyncState.Failed("History support is still negotiating or the connection is offline")
 
-    private companion object {
+    internal companion object {
         const val PAGE_LIMIT = 100
         const val RECENT_PAGE_SIZE = 50
         const val REQUEST_TIMEOUT_MS = 35_000L
@@ -1054,5 +1230,12 @@ class HistoryResyncCoordinator @Inject constructor(
         const val TARGETS_FUZZ_MS = 10_000L
         const val TARGET_CLASSIFICATION_WAIT_TIMEOUT_MS = 10_000L
         const val TARGETS_REQUEST_LIMIT = 100
+
+        /** First-sync TARGETS window; everything older belongs to the paced backfill. */
+        const val INITIAL_SYNC_LOOKBACK_MS = 30L * 24 * 60 * 60 * 1_000
+        /** Delay between backfill TARGETS requests. */
+        const val BACKFILL_TARGETS_PACE_MS = 2_000L
+        /** Delay before each backfill per-target newest-page seed. */
+        const val BACKFILL_SEED_PACE_MS = 500L
     }
 }

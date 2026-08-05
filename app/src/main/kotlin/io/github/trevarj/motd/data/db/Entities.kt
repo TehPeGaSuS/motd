@@ -523,6 +523,27 @@ data class NetworkHistoryCursorEntity(
     @ColumnInfo(defaultValue = "0") val serverDerived: Boolean = false,
 )
 
+/**
+ * Resume cursor for the paced background TARGETS backfill: the interval [epoch, upperBound) has
+ * not been enumerated yet. Independent of [NetworkHistoryCursorEntity] so the reconnect watermark's
+ * INSERT OR REPLACE can never clobber backfill progress.
+ */
+@Entity(
+    tableName = "history_backfill_cursors",
+    foreignKeys = [ForeignKey(
+        entity = NetworkEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["networkId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+)
+data class HistoryBackfillCursorEntity(
+    @PrimaryKey val networkId: Long,
+    /** Exclusive newest bound of the not-yet-enumerated interval; only ever walks toward epoch. */
+    val upperBound: Long,
+    @ColumnInfo(defaultValue = "0") val complete: Boolean = false,
+)
+
 /** Monotonic process-independent connection identity used to scope outgoing label aliases. */
 @Entity(
     tableName = "connection_generations",

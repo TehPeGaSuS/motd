@@ -1312,6 +1312,13 @@ class ConnectionManagerImpl @Inject constructor(
                 if (isCurrent() && clientFor(row.id) === client) {
                     registry.historyCatchUpFinished(row.id, generation)
                 }
+                // Only after the user-facing catch-up gate releases: trickle in targets older than
+                // the initial-sync window. Cancelled with this Ready session; resumes durably.
+                if (isCurrent() && clientFor(row.id) === client) {
+                    historyResyncCoordinator.backfillTargets(row.id, client) {
+                        clientFor(row.id) === client
+                    }
+                }
             }
             launch {
                 // A bouncer child publishes its post-BIND CAP ACK after the first Ready snapshot.
@@ -1377,6 +1384,10 @@ class ConnectionManagerImpl @Inject constructor(
                         }
                         if (shouldRetryIncompleteCatchUp(result)) {
                             if (clientFor(networkId) !== client) return
+                            if (attempt >= CATCH_UP_MAX_ATTEMPTS) {
+                                Log.w(TAG, "CHATHISTORY catch-up gave up after $attempt attempts for network $networkId")
+                                return
+                            }
                             val retryMs = catchUpRetryDelayMs(attempt++)
                             Log.w(
                                 TAG,
@@ -1398,6 +1409,10 @@ class ConnectionManagerImpl @Inject constructor(
                         )
                     }
                     if (clientFor(networkId) !== client) return
+                    if (attempt >= CATCH_UP_MAX_ATTEMPTS) {
+                        Log.w(TAG, "CHATHISTORY catch-up gave up after $attempt attempts for network $networkId")
+                        return
+                    }
                     val retryMs = catchUpRetryDelayMs(attempt++)
                     Log.w(TAG, "CHATHISTORY catch-up failed for network $networkId; retrying in ${retryMs}ms: ${result.reason}")
                     delay(retryMs)
@@ -2123,6 +2138,13 @@ internal fun wantedNetworkUsesEmbeddedReality(
 
 internal fun catchUpRetryDelayMs(attempt: Int): Long =
     (2_000L * (1L shl attempt.coerceIn(0, 4))).coerceAtMost(30_000L)
+
+/**
+ * Whole-network catch-up retries are bounded: each attempt re-runs full TARGETS discovery, so an
+ * account soju 0.10.x can never prove complete would otherwise re-enumerate forever. Per-buffer
+ * sync status keeps the manual retry affordance after the cap.
+ */
+internal const val CATCH_UP_MAX_ATTEMPTS = 5
 
 internal fun shouldRetryIncompleteCatchUp(result: HistoryResyncState.Failed): Boolean =
     result is HistoryResyncState.Incomplete && result.retryRecommended

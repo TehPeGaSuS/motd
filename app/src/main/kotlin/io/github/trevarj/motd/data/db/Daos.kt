@@ -1860,6 +1860,26 @@ interface HistoryCursorDao {
 }
 
 @Dao
+interface HistoryBackfillCursorDao {
+    @Query("SELECT * FROM history_backfill_cursors WHERE networkId = :networkId")
+    suspend fun byNetwork(networkId: Long): HistoryBackfillCursorEntity?
+
+    /** First-sync seeding only: an existing cursor (earlier progress) always wins. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun seed(cursor: HistoryBackfillCursorEntity)
+
+    /** Monotonic toward epoch; a replayed older page can never move the cursor back up. */
+    @Query(
+        """UPDATE history_backfill_cursors SET upperBound = :upperBound
+           WHERE networkId = :networkId AND upperBound > :upperBound AND complete = 0""",
+    )
+    suspend fun advance(networkId: Long, upperBound: Long)
+
+    @Query("UPDATE history_backfill_cursors SET complete = 1 WHERE networkId = :networkId")
+    suspend fun markComplete(networkId: Long)
+}
+
+@Dao
 interface HistoryGapDao {
     @Query("SELECT * FROM history_gaps WHERE roomId = :roomId ORDER BY olderServerTime")
     suspend fun forRoom(roomId: RoomId): List<HistoryGapEntity>

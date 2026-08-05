@@ -52,6 +52,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -682,7 +683,8 @@ class HistoryResyncCoordinatorTest {
             }
         }
 
-        val result = coordinator.resyncNetwork(networkId, emptyList(), source)
+        // Everything-depth: this test pins the epoch-window request shape.
+        val result = coordinator.resyncNetwork(networkId, emptyList(), source, initialLookbackMs = null)
 
         assertEquals(HistoryResyncState.Updated(1), result)
         val targets = source.requests.first { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS }
@@ -725,7 +727,8 @@ class HistoryResyncCoordinatorTest {
             }
         }
 
-        val result = coordinator.resyncNetwork(networkId, emptyList(), source)
+        // Everything-depth: exhaustion paging below the fixtures' small timestamps needs epoch.
+        val result = coordinator.resyncNetwork(networkId, emptyList(), source, initialLookbackMs = null)
 
         assertEquals(HistoryResyncState.Updated(3), result)
         assertEquals(
@@ -1304,7 +1307,11 @@ class HistoryResyncCoordinatorTest {
             }
         }
 
-        assertEquals(HistoryResyncState.Updated(2), coordinator.resyncNetwork(networkId, emptyList(), source))
+        assertEquals(
+            HistoryResyncState.Updated(2),
+            // Everything-depth: overlap stepping through the fixtures' timestamps needs epoch.
+            coordinator.resyncNetwork(networkId, emptyList(), source, initialLookbackMs = null),
+        )
         assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
         assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
         assertEquals(300L, syncPrefs.lastSuccessfulSync(networkId))
@@ -1329,7 +1336,11 @@ class HistoryResyncCoordinatorTest {
             }
         }
 
-        assertTrue(coordinator.resyncNetwork(networkId, emptyList(), source) is HistoryResyncState.Incomplete)
+        assertTrue(
+            // Everything-depth: the 0.10 short-tie walk below the fixture timestamps needs epoch.
+            coordinator.resyncNetwork(networkId, emptyList(), source, initialLookbackMs = null)
+                is HistoryResyncState.Incomplete,
+        )
         assertEquals(4, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
         assertEquals(3, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
         assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
@@ -1347,7 +1358,8 @@ class HistoryResyncCoordinatorTest {
             }
         }
 
-        val result = coordinator.resyncNetwork(networkId, emptyList(), source)
+        // Everything-depth: saturating the tie takes a second page, which needs the epoch window.
+        val result = coordinator.resyncNetwork(networkId, emptyList(), source, initialLookbackMs = null)
 
         assertTrue(result is HistoryResyncState.Incomplete)
         assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
@@ -1567,7 +1579,8 @@ class HistoryResyncCoordinatorTest {
             }
         }
 
-        val result = coordinator.resyncNetwork(networkId, emptyList(), source)
+        // Everything-depth: chunk-cap continuation below the fixture timestamps needs epoch.
+        val result = coordinator.resyncNetwork(networkId, emptyList(), source, initialLookbackMs = null)
 
         assertEquals(HistoryResyncState.Updated(2), result)
         assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
@@ -1634,5 +1647,146 @@ class HistoryResyncCoordinatorTest {
                 ),
             ),
         )
+    }
+
+    private fun String.timestampBoundMillis(): Long =
+        java.time.Instant.parse(removePrefix("timestamp=")).toEpochMilli()
+
+    @Test
+    fun firstSyncBoundsDiscoveryWindowAndSeedsBackfillCursor() = runTest {
+        val source = FakeSource { FakeResponse(endOfHistory = true) }
+        coordinator.resyncNetwork(networkId, emptyList(), source)
+
+        val targetsRequest = source.requests
+            .single { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS }
+        val lower = requireNotNull(targetsRequest.bound2).timestampBoundMillis()
+        val expected = System.currentTimeMillis() - HistoryResyncCoordinator.INITIAL_SYNC_LOOKBACK_MS
+        // The first pass enumerates a bounded recent window, never epoch.
+        assertTrue(lower > 0)
+        assertTrue(kotlin.math.abs(lower - expected) < 60_000)
+
+        val cursor = requireNotNull(db.historyBackfillCursorDao().byNetwork(networkId))
+        assertFalse(cursor.complete)
+        assertEquals(lower + 1, cursor.upperBound)
+    }
+
+    @Test
+    fun everythingDepthEnumeratesFromEpochWithoutBackfillCursor() = runTest {
+        val source = FakeSource { FakeResponse(endOfHistory = true) }
+        coordinator.resyncNetwork(networkId, emptyList(), source, initialLookbackMs = null)
+
+        val targetsRequest = source.requests
+            .single { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS }
+        assertEquals(0L, requireNotNull(targetsRequest.bound2).timestampBoundMillis())
+        // The unbounded pass already reached epoch, so nothing older remains to backfill.
+        assertNull(db.historyBackfillCursorDao().byNetwork(networkId))
+    }
+
+    @Test
+    fun resyncSkipsTargetWhoseAdvertisedLatestIsAlreadyStored() = runTest {
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 400L), endOfHistory = true)
+                else -> FakeResponse(events = listOf(message("m1", 400)), endOfHistory = true)
+            }
+        }
+        coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+        assertTrue(source.requests.any { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
+
+        // Clear the watermark: the stored room cursor alone must suppress the refetch, exactly the
+        // first-run retry and backfill situation.
+        syncPrefs.clear(networkId)
+        source.requests.clear()
+        coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+        assertTrue(source.requests.none { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
+    }
+
+    @Test
+    fun firstHistorySeedStartsRead() = runTest {
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("bob" to 400L), endOfHistory = true)
+                else -> FakeResponse(
+                    events = listOf(directMessage("d1", 300), directMessage("d2", 400)),
+                    endOfHistory = true,
+                )
+            }
+        }
+        coordinator.resyncNetwork(networkId, emptyList(), source)
+
+        // Imported backlog predating the app must not badge...
+        val row = db.bufferDao().observeChatList().first().single { it.displayName == "bob" }
+        assertEquals(0, row.unreadCount)
+
+        // ...while genuinely new live activity still does.
+        processor.process(networkId, directMessage("live-1", 500))
+        val after = db.bufferDao().observeChatList().first().single { it.displayName == "bob" }
+        assertEquals(1, after.unreadCount)
+    }
+
+    @Test
+    fun backfillSeedsDiscoveredTargetsAndCompletes() = runTest {
+        db.historyBackfillCursorDao().seed(
+            io.github.trevarj.motd.data.db.HistoryBackfillCursorEntity(networkId, upperBound = 1_000),
+        )
+        val source = FakeSource { request ->
+            when {
+                request.subcommand == ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("old-friend" to 500L), endOfHistory = true)
+                request.target == "old-friend" -> FakeResponse(
+                    events = listOf(directMessage("old1", 500, peer = "old-friend")),
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+        coordinator.backfillTargets(networkId, source) { true }
+
+        val targetsRequest = source.requests
+            .first { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS }
+        assertEquals(1_000L, requireNotNull(targetsRequest.bound1).timestampBoundMillis())
+        val buffer = requireNotNull(db.bufferDao().byName(networkId, "old-friend"))
+        assertEquals(1, db.messageDao().countForBuffer(buffer.id))
+        assertTrue(requireNotNull(db.historyBackfillCursorDao().byNetwork(networkId)).complete)
+        // Backfill never advances the reconnect watermark.
+        assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
+    fun backfillPersistsProgressAndResumesAfterTransportFailure() = runTest {
+        db.historyBackfillCursorDao().seed(
+            io.github.trevarj.motd.data.db.HistoryBackfillCursorEntity(networkId, upperBound = 1_000),
+        )
+        var cutOnce = true
+        val source = FakeSource(pageLimit = 1) { request ->
+            when {
+                request.subcommand == ChatHistoryRequest.Subcommand.TARGETS -> {
+                    val upper = requireNotNull(request.bound1).timestampBoundMillis()
+                    when {
+                        upper >= 1_000 -> FakeResponse(targets = listOf("dm-a" to 900L))
+                        cutOnce -> {
+                            cutOnce = false
+                            throw IOException("connection cut")
+                        }
+                        else -> FakeResponse(targets = listOf("dm-b" to 800L), endOfHistory = true)
+                    }
+                }
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        // First run enumerates one page, seeds it, persists the boundary, then dies on the wire.
+        coordinator.backfillTargets(networkId, source) { true }
+        val interrupted = requireNotNull(db.historyBackfillCursorDao().byNetwork(networkId))
+        assertFalse(interrupted.complete)
+        assertEquals(901, interrupted.upperBound)
+        assertTrue(db.bufferDao().byName(networkId, "dm-a") != null)
+
+        // The next session resumes below the persisted boundary instead of restarting.
+        coordinator.backfillTargets(networkId, source) { true }
+        assertTrue(requireNotNull(db.historyBackfillCursorDao().byNetwork(networkId)).complete)
+        assertTrue(db.bufferDao().byName(networkId, "dm-b") != null)
     }
 }
