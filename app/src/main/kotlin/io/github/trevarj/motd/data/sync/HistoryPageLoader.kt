@@ -617,6 +617,13 @@ class HistoryPageLoader @Inject constructor(
         /** IRCv3 error code for "this msgid selector type is not accepted"; shared with callers. */
         internal const val INVALID_MSGREFTYPE = "INVALID_MSGREFTYPE"
 
+        /**
+         * IRCv3 error code for "this target has no retrievable history". It is scoped to the one
+         * refused target and is permanent for the connection, so callers must not retry it or let
+         * it fail a whole-network pass. Services such as ChanServ/NickServ commonly answer this.
+         */
+        internal const val INVALID_TARGET = "INVALID_TARGET"
+
         private const val REQUEST_TIMEOUT_MS = 35_000L
     }
 }

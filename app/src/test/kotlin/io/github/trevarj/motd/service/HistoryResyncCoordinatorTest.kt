@@ -1484,6 +1484,64 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun serviceTargetRefusingHistoryDoesNotFailTheNetworkPassOrStrandARetryBanner() = runTest {
+        // A service nick answers FAIL CHATHISTORY INVALID_TARGET permanently. That refusal is
+        // scoped to this one target: the rest of the network must still sync, the refused buffer
+        // must not offer an unrecoverable retry, and the watermark must advance so reconnect
+        // catch-up stops reissuing the same doomed request every 30s.
+        val serviceBufferId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "ChanServ",
+                displayName = "ChanServ",
+                type = BufferType.QUERY,
+            ),
+        )
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
+                    targets = listOf("ChanServ" to 2_000L, "#chan" to 2_000L),
+                    endOfHistory = true,
+                )
+                ChatHistoryRequest.Subcommand.LATEST -> if (request.target == "ChanServ") {
+                    throw IrcCommandException(
+                        "CHATHISTORY",
+                        HistoryPageLoader.INVALID_TARGET,
+                        "Messages could not be retrieved",
+                    )
+                } else {
+                    FakeResponse(
+                        events = listOf(message("chan-latest", 2_000L)),
+                        endOfHistory = true,
+                    )
+                }
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        val result = coordinator.resyncNetwork(
+            networkId,
+            listOf(serviceBufferId to "ChanServ", bufferId to "#chan"),
+            source,
+        )
+
+        // The refused target must not poison the whole-network verdict.
+        assertEquals(HistoryResyncState.Updated(1), result)
+        // The healthy target still syncs even though the refused one came first.
+        assertTrue(
+            source.requests.any {
+                it.subcommand == ChatHistoryRequest.Subcommand.LATEST && it.target == "#chan"
+            },
+        )
+        assertEquals(listOf("chan-latest"), rows().map { it.msgid })
+        // No "Couldn't sync messages" banner on the refused buffer, and none on the healthy one.
+        assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(serviceBufferId).first())
+        assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
+        // Watermark advanced, so the catch-up loop terminates instead of retrying forever.
+        assertEquals(2_000L, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
     fun automaticNetworkResyncContinuesPastTargetsRequestCap() = runTest {
         db.bufferDao().deleteBuffer(bufferId)
         coordinator.targetsRequestLimit = 1

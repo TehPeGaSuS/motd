@@ -623,14 +623,35 @@ class HistoryResyncCoordinator @Inject constructor(
             if (syncGeneration != null) {
                 publishSyncStatus(canonicalRoomId, syncGeneration, HistorySyncStatus.Syncing)
             }
-            val targetResult = syncRecentTarget(
-                networkId = networkId,
-                bufferId = canonicalRoomId,
-                target = target,
-                source = source,
-                isCurrent = isCurrent,
-                discoveredLatestMessageTime = targetSpec.latestMessageTime,
-            )
+            val targetResult = try {
+                syncRecentTarget(
+                    networkId = networkId,
+                    bufferId = canonicalRoomId,
+                    target = target,
+                    source = source,
+                    isCurrent = isCurrent,
+                    discoveredLatestMessageTime = targetSpec.latestMessageTime,
+                )
+            } catch (refused: IrcCommandException) {
+                // A target-scoped permanent refusal (services such as ChanServ typically answer
+                // FAIL CHATHISTORY INVALID_TARGET) must not abort the pass: letting it escape
+                // skipped every remaining target, marked every open buffer Failed, and left an
+                // unrecoverable retry banner because the next attempt reissues the same request.
+                if (refused.code != HistoryPageLoader.INVALID_TARGET) throw refused
+                diagnostics.record("history", "target_history_refused") {
+                    mapOf(
+                        "network_id" to networkId,
+                        "room_id" to canonicalRoomId,
+                        "target_fp" to diagnostics.fingerprint(source.normalizeTarget(target)),
+                        "code" to refused.code,
+                    )
+                }
+                if (syncGeneration != null) {
+                    // The server will never serve this target; a retry affordance would be a lie.
+                    finishSyncStatus(canonicalRoomId, syncGeneration, HistorySyncStatus.Idle)
+                }
+                continue
+            }
             inserted += targetResult.inserted
             // TARGETS describes the newest server event, which may be a JOIN or an event that is
             // intentionally filtered/rerouted during ingestion. Count either a durable local event
