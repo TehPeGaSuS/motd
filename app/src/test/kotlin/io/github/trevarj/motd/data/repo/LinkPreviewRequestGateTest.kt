@@ -1,7 +1,13 @@
 package io.github.trevarj.motd.data.repo
 
+import io.github.trevarj.motd.audio.MediaRouteResolver
+import io.github.trevarj.motd.audio.NetworkMediaRoute
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -40,13 +46,24 @@ class LinkPreviewRequestGateTest {
         server.shutdown()
     }
 
+    // MockWebServer serves cleartext on loopback, which production destination policy forbids;
+    // these tests cover the request pipeline, so the policy alone is relaxed.
+    private fun repository(scope: CoroutineScope, dispatcher: CoroutineDispatcher) =
+        LinkPreviewRepositoryImpl(
+            prefs,
+            directResolver,
+            LinkPreviewFetchPolicy(enforceDestinationPolicy = false),
+            scope,
+            dispatcher,
+        )
+
     @Test
     fun disabled_gate_skips_network_and_cached_metadata() = runTest {
-        val repository = LinkPreviewRepositoryImpl(prefs, this, StandardTestDispatcher(testScheduler))
+        val repository = repository(this, StandardTestDispatcher(testScheduler))
         val url = server.url("/article").toString()
         prefs.setShowLinkPreviews(false)
 
-        assertNull(repository.preview(url))
+        assertNull(repository.preview(url, NETWORK_ID))
         assertEquals(0, server.requestCount)
 
         server.enqueue(
@@ -55,8 +72,8 @@ class LinkPreviewRequestGateTest {
                 .setBody("<meta property=\"og:title\" content=\"Example\">")
         )
         prefs.setShowLinkPreviews(true)
-        assertNotNull(repository.preview(url))
-        assertNotNull(repository.cachedPreview(url)?.preview)
+        assertNotNull(repository.preview(url, NETWORK_ID))
+        assertNotNull(repository.cachedPreview(url, NETWORK_ID)?.preview)
         assertEquals(1, server.requestCount)
         assertEquals(
             "motd-Android (https://github.com/trevarj/motd)",
@@ -64,13 +81,13 @@ class LinkPreviewRequestGateTest {
         )
 
         prefs.setShowLinkPreviews(false)
-        assertNull(repository.preview(url))
+        assertNull(repository.preview(url, NETWORK_ID))
         assertEquals(1, server.requestCount)
     }
 
     @Test
     fun completed_file_result_is_distinct_from_a_cache_miss() = runTest {
-        val repository = LinkPreviewRepositoryImpl(prefs, this, StandardTestDispatcher(testScheduler))
+        val repository = repository(this, StandardTestDispatcher(testScheduler))
         val url = server.url("/binary").toString()
         server.enqueue(
             MockResponse()
@@ -78,16 +95,16 @@ class LinkPreviewRequestGateTest {
                 .setBody("not html"),
         )
 
-        assertNull(repository.cachedPreview(url))
-        assertEquals(LinkPreviewKind.FILE, repository.preview(url)?.kind)
-        assertNotNull(repository.cachedPreview(url))
-        assertEquals(LinkPreviewKind.FILE, repository.cachedPreview(url)?.preview?.kind)
+        assertNull(repository.cachedPreview(url, NETWORK_ID))
+        assertEquals(LinkPreviewKind.FILE, repository.preview(url, NETWORK_ID)?.kind)
+        assertNotNull(repository.cachedPreview(url, NETWORK_ID))
+        assertEquals(LinkPreviewKind.FILE, repository.cachedPreview(url, NETWORK_ID)?.preview?.kind)
         assertEquals(1, server.requestCount)
     }
 
     @Test
     fun cancellation_interrupts_an_active_http_request() = runBlocking {
-        val repository = LinkPreviewRepositoryImpl(prefs, this, Dispatchers.IO)
+        val repository = repository(this, Dispatchers.IO)
         server.enqueue(
             MockResponse()
                 .setHeader("Content-Type", "text/html")
@@ -95,7 +112,7 @@ class LinkPreviewRequestGateTest {
                 .throttleBody(1, 200, TimeUnit.MILLISECONDS),
         )
 
-        val request = launch { repository.preview(server.url("/slow").toString()) }
+        val request = launch { repository.preview(server.url("/slow").toString(), NETWORK_ID) }
         withTimeout(2_000) {
             while (server.requestCount == 0) delay(10)
         }
@@ -108,7 +125,7 @@ class LinkPreviewRequestGateTest {
 
     @Test
     fun text_preview_honors_declared_charset_and_16kib_cap() = runTest {
-        val repository = LinkPreviewRepositoryImpl(prefs, this, StandardTestDispatcher(testScheduler))
+        val repository = repository(this, StandardTestDispatcher(testScheduler))
         server.enqueue(
             MockResponse()
                 .setHeader("Content-Type", "text/plain; charset=ISO-8859-1")
@@ -125,9 +142,35 @@ class LinkPreviewRequestGateTest {
                 .setBody("\u0000".repeat(16 * 1024) + "must-not-be-read"),
         )
 
-        assertEquals("caf\u00e9", repository.preview(server.url("/latin1").toString())?.description)
-        assertEquals(2_048, repository.preview(server.url("/large").toString())?.description?.length)
-        assertNull(repository.preview(server.url("/beyond-cap").toString()))
+        assertEquals("caf\u00e9", repository.preview(server.url("/latin1").toString(), NETWORK_ID)?.description)
+        assertEquals(2_048, repository.preview(server.url("/large").toString(), NETWORK_ID)?.description?.length)
+        assertNull(repository.preview(server.url("/beyond-cap").toString(), NETWORK_ID))
+    }
+
+    // A resolver whose routes are direct (no proxy, no proxy error) for any requested network.
+    private val directResolver = MediaRouteResolver { networkId ->
+        NetworkMediaRoute(
+            networkId = networkId,
+            endpoint = testNetworkEntity(networkId),
+            proxy = null,
+            proxyError = null,
+            authorizationHeader = null,
+        )
+    }
+
+    private companion object {
+        const val NETWORK_ID = 7L
+
+        fun testNetworkEntity(networkId: Long) = NetworkEntity(
+            id = networkId,
+            name = "test",
+            role = NetworkRole.DIRECT,
+            host = "irc.example.test",
+            port = 6697,
+            nick = "nick",
+            username = "user",
+            realname = "real",
+        )
     }
 
     private class FakeContentPreviewPrefs : ContentPreviewPrefs {

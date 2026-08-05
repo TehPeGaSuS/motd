@@ -81,7 +81,7 @@ fun ChatContentPreviewBody(
         nickNormalizer = { it.lowercase() },
         onSubmit = {}, onTyping = {}, onSetReply = {}, onReact = { _, _ -> }, onRetry = {},
         memberNicks = listOf("alice", "bob", "carol"),
-        loadPreview = { null },
+        loadPreview = { _, _ -> null },
         conversationFontScalePercent = conversationFontScalePercent,
     )
 }

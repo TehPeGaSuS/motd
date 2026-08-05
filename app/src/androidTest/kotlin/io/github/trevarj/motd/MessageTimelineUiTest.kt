@@ -166,7 +166,7 @@ class MessageTimelineUiTest {
                     onReact = { _, _ -> },
                     onImageClick = {},
                     onRetry = {},
-                    loadPreview = { null },
+                    loadPreview = { _, _ -> null },
                     richContentReady = false,
                     showImages = false,
                     showLinkPreviews = false,

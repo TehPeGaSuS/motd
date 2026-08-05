@@ -29,6 +29,7 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.BufferRepositoryImpl
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
+import io.github.trevarj.motd.data.repo.LinkPreviewFetchPolicy
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.LinkPreviewRepositoryImpl
 import io.github.trevarj.motd.data.repo.MessageRepository
@@ -72,6 +73,9 @@ import io.github.trevarj.motd.audio.AudioMetadataRepository
 import io.github.trevarj.motd.audio.AudioMetadataRepositoryImpl
 import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.audio.AudioPlaybackControllerImpl
+import io.github.trevarj.motd.audio.DirectMediaPolicy
+import io.github.trevarj.motd.audio.MediaRouteResolver
+import io.github.trevarj.motd.audio.NetworkMediaRouteProvider
 import io.github.trevarj.motd.audio.VoiceMessageSender
 import io.github.trevarj.motd.audio.VoiceMessageSenderImpl
 import io.github.trevarj.motd.audio.VoicePrefs
@@ -190,6 +194,14 @@ internal abstract class AppModule {
     @Binds @Singleton
     abstract fun audioMetadataRepository(impl: AudioMetadataRepositoryImpl): AudioMetadataRepository
 
+    /** Proxy-aware route lookup for HTTP fetch repositories (link previews, audio metadata). */
+    @Binds @Singleton
+    abstract fun mediaRouteResolver(impl: NetworkMediaRouteProvider): MediaRouteResolver
+
+    /** Whether the global Coil/ExoPlayer stacks may fetch directly for one network's content. */
+    @Binds @Singleton
+    abstract fun directMediaPolicy(impl: NetworkMediaRouteProvider): DirectMediaPolicy
+
     @Binds @Singleton
     abstract fun audioPlaybackController(impl: AudioPlaybackControllerImpl): AudioPlaybackController
 
@@ -258,6 +270,11 @@ internal abstract class AppModule {
     abstract fun pushHealthStore(impl: DataStorePushHealthStore): PushHealthStore
 
     companion object {
+        /** Production link-preview fetch limits; tests construct relaxed policies directly. */
+        @Provides
+        @Singleton
+        fun linkPreviewFetchPolicy(): LinkPreviewFetchPolicy = LinkPreviewFetchPolicy()
+
         /**
          * The timeline's narrow view of the gap-fill coordinator. Adapted rather than bound,
          * because the coordinator is a concrete collaborator of the sync layer and stays that way;

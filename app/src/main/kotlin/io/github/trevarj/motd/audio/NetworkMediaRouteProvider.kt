@@ -3,6 +3,7 @@ package io.github.trevarj.motd.audio
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.service.PinningTrustManager
 import io.github.trevarj.motd.service.LocalSocksProvider
@@ -54,13 +55,27 @@ data class NetworkMediaRoute(
     override fun close() = release()
 }
 
+/** Narrow seam over [NetworkMediaRouteProvider] so HTTP repositories are testable without Room. */
+fun interface MediaRouteResolver {
+    suspend fun routeForNetwork(networkId: Long): NetworkMediaRoute?
+}
+
+/**
+ * Whether the app-global fetch stacks (the process Coil loader, ExoPlayer) may load network content
+ * for one network. Those stacks cannot be routed per-network, so any obfuscated transport answers
+ * false and the UI must withhold that content instead of fetching it directly.
+ */
+fun interface DirectMediaPolicy {
+    suspend fun directMediaAllowed(networkId: Long): Boolean
+}
+
 @Singleton
 class NetworkMediaRouteProvider @Inject constructor(
     private val db: MotdDatabase,
     private val localSocksProvider: LocalSocksProvider,
     private val certTrustStore: CertTrustStore,
-) {
-    suspend fun routeForNetwork(networkId: Long): NetworkMediaRoute? {
+) : MediaRouteResolver, DirectMediaPolicy {
+    override suspend fun routeForNetwork(networkId: Long): NetworkMediaRoute? {
         val row = db.networkDao().byId(networkId) ?: return null
         val endpoint = if (row.role == NetworkRole.BOUNCER_CHILD) {
             row.parentId?.let { db.networkDao().byId(it) } ?: row
@@ -79,6 +94,18 @@ class NetworkMediaRouteProvider @Inject constructor(
             endpointPinnedSha256 = certTrustStore.pinnedFor(endpoint.host, endpoint.port),
             release = resolved.release,
         )
+    }
+
+    override suspend fun directMediaAllowed(networkId: Long): Boolean {
+        val row = db.networkDao().byId(networkId) ?: return false
+        // A bouncer child shares its physical endpoint (and therefore its transport policy) with
+        // the bouncer root, exactly as routeForNetwork does above.
+        val endpoint = if (row.role == NetworkRole.BOUNCER_CHILD) {
+            row.parentId?.let { db.networkDao().byId(it) } ?: row
+        } else {
+            row
+        }
+        return endpoint.obfsMode == null || endpoint.obfsMode == ObfsMode.NONE
     }
 }
 

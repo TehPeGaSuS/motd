@@ -25,7 +25,8 @@ class OgParserTest {
         assertEquals("The Title", p.title)
         assertEquals("A description here", p.description)
         assertEquals("https://example.com/img.png", p.imageUrl)
-        assertEquals("Example Site", p.siteName)
+        // Provenance is the fetched host; the self-declared og:site_name is not trusted.
+        assertEquals("example.com", p.siteName)
         assertEquals(url, p.url)
         assertEquals(LinkPreviewKind.WEB, p.kind)
     }
@@ -172,6 +173,76 @@ class OgParserTest {
         assertNull(preview.imageUrl)
         assertNull(LinkPreviewRepositoryImpl.parseWikipediaSummary(url, "not json"))
         assertNull(LinkPreviewRepositoryImpl.parseWikipediaSummary(url, "{}"))
+    }
+
+    @Test
+    fun site_name_is_the_fetched_host_never_the_self_declared_brand() {
+        val preview = LinkPreviewRepositoryImpl.parseOgTags(
+            "https://evil.example/login",
+            """<meta property="og:title" content="Sign in"><meta property="og:site_name" content="GitHub">""",
+        )!!
+        assertEquals("evil.example", preview.siteName)
+    }
+
+    @Test
+    fun og_fields_are_sanitized_and_capped() {
+        val spoofedTitle = "paypal.com\u202Emoc.live\u0000"
+        val html = "<meta property=\"og:title\" content=\"$spoofedTitle\">" +
+            // Kept inside the 64 KB head-scan window; oversized fields are covered separately.
+            "<meta property=\"og:description\" content=\"" + "a".repeat(10_000) + "\">"
+        val preview = LinkPreviewRepositoryImpl.parseOgTags(url, html)!!
+
+        // RTL-override FORMAT and CONTROL code points are stripped, exactly as the TEXT path does.
+        assertEquals("paypal.commoc.live", preview.title)
+        // A count-based LRU cache means each entry must be small; the sanitizer caps retention.
+        assertEquals(2_048, preview.description?.length)
+    }
+
+    @Test
+    fun og_image_requires_an_http_scheme() {
+        for (bad in listOf("file:///etc/passwd", "content://media/external/images/1", "javascript:alert(1)")) {
+            val preview = LinkPreviewRepositoryImpl.parseOgTags(
+                url,
+                """<meta property="og:title" content="t"><meta property="og:image" content="$bad">""",
+            )!!
+            assertNull(preview.imageUrl)
+        }
+        val ok = LinkPreviewRepositoryImpl.parseOgTags(
+            url,
+            """<meta property="og:image" content="https://example.com/i.png">""",
+        )!!
+        assertEquals("https://example.com/i.png", ok.imageUrl)
+    }
+
+    @Test
+    fun metadata_outside_the_head_region_is_ignored() {
+        // OG tags after </head> are body content and must not be scanned.
+        assertNull(
+            LinkPreviewRepositoryImpl.parseOgTags(
+                url,
+                """<html><head></head><body><meta property="og:title" content="Injected"></body></html>""",
+            ),
+        )
+        // Metadata beyond the 64 KB scan cap is likewise out of reach for the regexes.
+        assertNull(
+            LinkPreviewRepositoryImpl.parseOgTags(
+                url,
+                "<html><head>" + " ".repeat(70 * 1024) + """<meta property="og:title" content="Late">""",
+            ),
+        )
+    }
+
+    @Test
+    fun title_extraction_is_linear_and_stops_at_markup() {
+        // An unterminated <title> over a large body must fail fast instead of backtracking.
+        val started = System.nanoTime()
+        assertNull(LinkPreviewRepositoryImpl.parseOgTags(url, "<title>" + "a ".repeat(30_000)))
+        assertTrue((System.nanoTime() - started) < 2_000_000_000L)
+
+        // The strict pattern captures plain text only; a title containing markup is no preview
+        // rather than a backtracking hazard.
+        assertEquals("safe", LinkPreviewRepositoryImpl.parseOgTags(url, "<title>safe</title>")?.title)
+        assertNull(LinkPreviewRepositoryImpl.parseOgTags(url, "<title>safe <b>rest</b></title>"))
     }
 
     @Test

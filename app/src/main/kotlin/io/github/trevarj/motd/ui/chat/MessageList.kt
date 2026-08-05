@@ -241,12 +241,12 @@ fun MessageList(
     conversationName: String? = null,
     directMessage: Boolean = false,
     canRetry: (MessageEntity) -> Boolean = { true },
-    loadPreview: suspend (String) -> LinkPreview?,
+    loadPreview: suspend (String, Long?) -> LinkPreview?,
     richContentReady: Boolean,
     showImages: Boolean,
     showLinkPreviews: Boolean,
     onOpenLink: (String) -> Unit,
-    cachedPreview: (String) -> CachedLinkPreview? = { null },
+    cachedPreview: (String, Long?) -> CachedLinkPreview? = { _, _ -> null },
     loadAudioMetadata: suspend (String, Long?) -> AudioMetadata? = { _, _ -> null },
     cachedAudioMetadata: (String) -> CachedAudioMetadata? = { null },
     audioPlaybackState: AudioPlaybackState = AudioPlaybackState(),
@@ -1011,11 +1011,11 @@ private fun MessageRow(
     onRetry: (MessageEntity) -> Unit,
     canRetry: Boolean,
     onDelete: (MessageEntity) -> Unit,
-    loadPreview: suspend (String) -> LinkPreview?,
+    loadPreview: suspend (String, Long?) -> LinkPreview?,
     showImages: Boolean,
     showLinkPreviews: Boolean,
     canStartNewRichContentWork: Boolean,
-    cachedPreview: (String) -> CachedLinkPreview?,
+    cachedPreview: (String, Long?) -> CachedLinkPreview?,
     loadAudioMetadata: suspend (String, Long?) -> AudioMetadata?,
     cachedAudioMetadata: (String) -> CachedAudioMetadata?,
     audioPlaybackState: AudioPlaybackState,
@@ -1149,27 +1149,29 @@ private fun MessageRow(
     // A cached completion is rendered synchronously even while scrolling. A cache miss waits for
     // idle, then joins the repository's process-owned single-flight fetch. Null is a completed
     // negative result, not a loading state, so recycling does not restart a skeleton indefinitely.
-    val initialCachedPreview = linkUrl?.let(cachedPreview)
-    var previewState by remember(msg.id, linkUrl) {
+    // Keyed on networkId like the audio HEAD effect: the network identity selects the proxy route,
+    // and a fetch made before it is known resolves negatively (fail closed) until it appears.
+    val initialCachedPreview = linkUrl?.let { cachedPreview(it, networkId) }
+    var previewState by remember(msg.id, linkUrl, networkId) {
         mutableStateOf<PreviewState>(initialCachedPreview?.let { PreviewState.Done(it.preview) } ?: PreviewState.Idle)
     }
     val latestCachedPreview by rememberUpdatedState(cachedPreview)
-    LaunchedEffect(msg.id, linkUrl) {
+    LaunchedEffect(msg.id, linkUrl, networkId) {
         val url = linkUrl ?: return@LaunchedEffect
         if (previewState !is PreviewState.Idle) return@LaunchedEffect
-        latestCachedPreview(url)?.let {
+        latestCachedPreview(url, networkId)?.let {
             previewState = PreviewState.Done(it.preview)
             return@LaunchedEffect
         }
         snapshotFlow { latestCanStartNewRichContentWork }.first { it }
         if (previewState !is PreviewState.Idle) return@LaunchedEffect
-        latestCachedPreview(url)?.let {
+        latestCachedPreview(url, networkId)?.let {
             previewState = PreviewState.Done(it.preview)
             return@LaunchedEffect
         }
         previewState = PreviewState.Loading
         val preview = try {
-            loadPreview(url)
+            loadPreview(url, networkId)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {

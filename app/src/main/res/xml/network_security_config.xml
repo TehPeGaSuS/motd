@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Explicit cleartext denial for every HTTP stack (previews, Coil, ExoPlayer, uploads).
+     targetSdk already implies this; pinning it here keeps the guarantee across SDK bumps.
+     Raw IRC sockets in :irc are unaffected — this policy governs HTTP(S) clients only. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
