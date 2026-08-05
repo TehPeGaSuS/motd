@@ -1,0 +1,542 @@
+{
+  "steps": [
+    {
+      "kind": "agent.hello",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": false,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": null,
+        "tid": null,
+        "tools": {}
+      },
+      "tag": "{\"at\":1785400000001,\"data\":{\"actions\":[\"sync.request\",\"workspace.list.request\",\"session.list.request\",\"history.request\",\"session.create\",\"session.attach\",\"session.detach\",\"settings.update\",\"turn.prompt\",\"turn.steer\",\"turn.cancel\",\"queue.edit\",\"queue.move\",\"queue.delete\",\"queue.clear\",\"request.respond\",\"request.skip\"],\"backend\":\"claude\",\"capabilities\":[\"history\",\"queues\",\"requests\",\"sessions\",\"settings\",\"steering\",\"sync\",\"turns\",\"workspaces\"],\"epoch\":\"epoch-conformance\",\"limits\":{\"contentBytes\":65536,\"historyBytes\":524288,\"historyDays\":30,\"historyEvents\":200,\"queueItems\":10},\"protocol\":\"agentwire-irc-v1\",\"settings\":[\"delivery\"]},\"epoch\":\"epoch-conformance\",\"id\":\"00000001-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"agent.hello\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "channel.snapshot",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": false,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": null,
+        "tools": {}
+      },
+      "tag": "{\"at\":1785400000002,\"data\":{\"active\":true,\"backend\":\"claude\",\"binding\":{\"cwd\":\"/home/trev/Workspace/motd\",\"sid\":\"sess-conformance\"},\"busy\":false,\"queue\":[],\"requests\":[],\"settings\":{\"delivery\":\"queue\"},\"tid\":null},\"epoch\":\"epoch-conformance\",\"id\":\"00000002-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"channel.snapshot\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "workspace.page",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": false,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": null,
+        "tools": {}
+      },
+      "tag": "{\"at\":1785400000003,\"data\":{\"cursor\":null,\"items\":[{\"hasChildren\":true,\"name\":\"Workspace\",\"path\":\"/home/trev/Workspace\"}],\"next\":null,\"parent\":null},\"epoch\":\"epoch-conformance\",\"id\":\"00000003-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"workspace.page\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "session.page",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": false,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": null,
+        "tools": {}
+      },
+      "tag": "{\"at\":1785400000004,\"data\":{\"cursor\":null,\"cwd\":null,\"items\":[{\"busy\":false,\"cwd\":\"/home/trev/Workspace/motd\",\"flags\":[],\"sid\":\"sess-conformance\",\"tuiAttached\":false}],\"next\":null,\"scope\":\"live\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000004-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"session.page\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "binding.changed",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": false,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": null,
+        "tools": {}
+      },
+      "tag": "{\"at\":1785400000005,\"data\":{\"cwd\":\"/home/trev/Workspace/motd\",\"sid\":\"sess-conformance\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000005-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"binding.changed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "session.snapshot",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": false,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": null,
+        "tools": {}
+      },
+      "tag": "{\"at\":1785400000006,\"data\":{\"busy\":false,\"cwd\":\"/home/trev/Workspace/motd\",\"flags\":[],\"recentOutputs\":[],\"status\":\"ready\",\"tuiAttached\":false},\"epoch\":\"epoch-conformance\",\"id\":\"00000006-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"session.snapshot\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "turn.started",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": "turn-1",
+        "tools": {}
+      },
+      "tag": "{\"at\":1785400000007,\"epoch\":\"epoch-conformance\",\"id\":\"00000007-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"turn.started\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "user.prompt",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": "turn-1",
+        "tools": {}
+      },
+      "tag": "{\"at\":1785400000008,\"data\":{\"content\":\"why does the test fail?\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000008-0000-4000-8000-000000000000\",\"iid\":\"prompt-1\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"user.prompt\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "plan.updated",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": {
+          "completedSteps": 0,
+          "plan": true,
+          "running": true,
+          "status": "inProgress",
+          "summary": "Read the failing test",
+          "totalSteps": 2
+        },
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": "turn-1",
+        "tools": {}
+      },
+      "tag": "{\"at\":1785400000009,\"data\":{\"completedSteps\":0,\"plan\":true,\"running\":true,\"status\":\"inProgress\",\"summary\":\"Read the failing test\",\"totalSteps\":2},\"epoch\":\"epoch-conformance\",\"id\":\"00000009-0000-4000-8000-000000000000\",\"iid\":\"plan-1\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"plan.updated\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "tool.started",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": {
+          "completedSteps": 0,
+          "plan": true,
+          "running": true,
+          "status": "inProgress",
+          "summary": "Read the failing test",
+          "totalSteps": 2
+        },
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": "turn-1",
+        "tools": {
+          "call-1": {
+            "input": "AgentwireStateTest.kt",
+            "kind": "file read",
+            "label": "file read"
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000010,\"data\":{\"input\":\"AgentwireStateTest.kt\",\"kind\":\"file read\",\"label\":\"file read\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000010-0000-4000-8000-000000000000\",\"iid\":\"call-1\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.started\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "tool.completed",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": {
+          "completedSteps": 0,
+          "plan": true,
+          "running": true,
+          "status": "inProgress",
+          "summary": "Read the failing test",
+          "totalSteps": 2
+        },
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": "turn-1",
+        "tools": {
+          "call-1": {
+            "durationMs": 12,
+            "kind": "file read",
+            "label": "file read",
+            "output": "assertEquals(expected, actual)",
+            "success": true
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000011,\"data\":{\"durationMs\":12,\"kind\":\"file read\",\"label\":\"file read\",\"output\":\"assertEquals(expected, actual)\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000011-0000-4000-8000-000000000000\",\"iid\":\"call-1\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "request.opened",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": {
+          "completedSteps": 0,
+          "plan": true,
+          "running": true,
+          "status": "inProgress",
+          "summary": "Read the failing test",
+          "totalSteps": 2
+        },
+        "queue": [],
+        "requests": {
+          "req-1": {
+            "canSkip": true,
+            "inactive": false,
+            "questions": [
+              {
+                "custom": false,
+                "header": "Scope",
+                "id": "q1",
+                "multiple": false,
+                "options": [
+                  "test",
+                  "code"
+                ],
+                "prompt": "Fix the test or the code?"
+              }
+            ],
+            "type": "question"
+          }
+        },
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": "turn-1",
+        "tools": {
+          "call-1": {
+            "durationMs": 12,
+            "kind": "file read",
+            "label": "file read",
+            "output": "assertEquals(expected, actual)",
+            "success": true
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000012,\"data\":{\"canSkip\":true,\"inactive\":false,\"questions\":[{\"custom\":false,\"header\":\"Scope\",\"id\":\"q1\",\"multiple\":false,\"options\":[\"test\",\"code\"],\"prompt\":\"Fix the test or the code?\"}],\"type\":\"question\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000012-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"request.opened\",\"rid\":\"req-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "request.resolved",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": {
+          "completedSteps": 0,
+          "plan": true,
+          "running": true,
+          "status": "inProgress",
+          "summary": "Read the failing test",
+          "totalSteps": 2
+        },
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": "turn-1",
+        "tools": {
+          "call-1": {
+            "durationMs": 12,
+            "kind": "file read",
+            "label": "file read",
+            "output": "assertEquals(expected, actual)",
+            "success": true
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000013,\"epoch\":\"epoch-conformance\",\"id\":\"00000013-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"request.resolved\",\"rid\":\"req-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "plan.updated",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": {
+          "completedSteps": 2,
+          "plan": true,
+          "running": false,
+          "status": "completed",
+          "summary": "Read the failing test",
+          "totalSteps": 2
+        },
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": "turn-1",
+        "tools": {
+          "call-1": {
+            "durationMs": 12,
+            "kind": "file read",
+            "label": "file read",
+            "output": "assertEquals(expected, actual)",
+            "success": true
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000014,\"data\":{\"completedSteps\":2,\"plan\":true,\"running\":false,\"status\":\"completed\",\"summary\":\"Read the failing test\",\"totalSteps\":2},\"epoch\":\"epoch-conformance\",\"id\":\"00000014-0000-4000-8000-000000000000\",\"iid\":\"plan-1\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"plan.updated\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "assistant.completed",
+      "state": {
+        "active": true,
+        "assistant": [
+          {
+            "content": "The assertion arguments are inverted.",
+            "iid": "msg-1"
+          }
+        ],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": {
+          "completedSteps": 2,
+          "plan": true,
+          "running": false,
+          "status": "completed",
+          "summary": "Read the failing test",
+          "totalSteps": 2
+        },
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": "turn-1",
+        "tools": {
+          "call-1": {
+            "durationMs": 12,
+            "kind": "file read",
+            "label": "file read",
+            "output": "assertEquals(expected, actual)",
+            "success": true
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000015,\"data\":{\"content\":\"The assertion arguments are inverted.\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000015-0000-4000-8000-000000000000\",\"iid\":\"msg-1\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"assistant.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "usage.updated",
+      "state": {
+        "active": true,
+        "assistant": [
+          {
+            "content": "The assertion arguments are inverted.",
+            "iid": "msg-1"
+          }
+        ],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": {
+          "completedSteps": 2,
+          "plan": true,
+          "running": false,
+          "status": "completed",
+          "summary": "Read the failing test",
+          "totalSteps": 2
+        },
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": "turn-1",
+        "tools": {
+          "call-1": {
+            "durationMs": 12,
+            "kind": "file read",
+            "label": "file read",
+            "output": "assertEquals(expected, actual)",
+            "success": true
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000016,\"data\":{\"inputTokens\":1200,\"outputTokens\":340},\"epoch\":\"epoch-conformance\",\"id\":\"00000016-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"usage.updated\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "turn.completed",
+      "state": {
+        "active": true,
+        "assistant": [
+          {
+            "content": "The assertion arguments are inverted.",
+            "iid": "msg-1"
+          }
+        ],
+        "backend": "claude",
+        "busy": false,
+        "epoch": "epoch-conformance",
+        "plan": {
+          "completedSteps": 2,
+          "plan": true,
+          "running": false,
+          "status": "completed",
+          "summary": "Read the failing test",
+          "totalSteps": 2
+        },
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": null,
+        "tools": {
+          "call-1": {
+            "durationMs": 12,
+            "kind": "file read",
+            "label": "file read",
+            "output": "assertEquals(expected, actual)",
+            "success": true
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000017,\"epoch\":\"epoch-conformance\",\"id\":\"00000017-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"turn.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "session.status",
+      "state": {
+        "active": true,
+        "assistant": [
+          {
+            "content": "The assertion arguments are inverted.",
+            "iid": "msg-1"
+          }
+        ],
+        "backend": "claude",
+        "busy": false,
+        "epoch": "epoch-conformance",
+        "plan": {
+          "completedSteps": 2,
+          "plan": true,
+          "running": false,
+          "status": "completed",
+          "summary": "Read the failing test",
+          "totalSteps": 2
+        },
+        "queue": [],
+        "requests": {},
+        "settings": {
+          "delivery": "queue"
+        },
+        "sid": "sess-conformance",
+        "tid": null,
+        "tools": {
+          "call-1": {
+            "durationMs": 12,
+            "kind": "file read",
+            "label": "file read",
+            "output": "assertEquals(expected, actual)",
+            "success": true
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000018,\"data\":{\"busy\":false,\"status\":\"ready\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000018-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"session.status\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+    }
+  ],
+  "topic": "agentwire:v1;account=trev;agent=agentwire;backend=claude | motd conformance"
+}
