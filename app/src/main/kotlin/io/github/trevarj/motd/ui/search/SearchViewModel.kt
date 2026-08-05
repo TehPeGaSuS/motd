@@ -309,7 +309,16 @@ class SearchViewModel @Inject constructor(
 
     val state: StateFlow<SearchUiState> =
         combine(localState, serverSection) { local, server ->
-            local.copy(serverSearchAvailable = server.available, server = server.state)
+            local.copy(
+                serverSearchAvailable = server.available,
+                // Leaving the server scope is two writes — the key, then the cancel — and they
+                // reach this combine separately, so a state pairing a local scope with the
+                // previous scope's hits is observable in between. Deriving the section from the
+                // scope makes that pairing impossible to represent rather than merely unlikely,
+                // which is also what keeps the reset assertion from depending on which
+                // intermediate values survive StateFlow conflation.
+                server = if (local.scope == SearchScope.SERVER) server.state else ServerSearchState.Idle,
+            )
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),

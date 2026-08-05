@@ -537,26 +537,24 @@ class SearchViewModelTest {
 
         vm.state.test {
             awaitItem()
+            // Settle on the key under test rather than counting emissions: a StateFlow conflates,
+            // so the loading frame between a query change and its results is not guaranteed to be
+            // observed. What this test protects is the pairing of query and results, which holds
+            // whichever intermediate states survive.
             vm.onQueryChange("alpha")
-            runCurrent()
-            val alphaLoading = awaitItem()
-            assertEquals("alpha", alphaLoading.rawQuery)
-            assertTrue(alphaLoading.searching)
-            assertTrue(alphaLoading.groups.isEmpty())
-
             advanceTimeBy(250)
             runCurrent()
-            val alphaResults = awaitItem()
-            assertEquals("alpha", alphaResults.rawQuery)
+            val alphaResults = awaitStateWhere { it.rawQuery == "alpha" && it.groups.isNotEmpty() }
             assertEquals(1, alphaResults.groups.size)
 
+            // Changing the query drops the previous answer at once: no state may show the new
+            // query alongside the old query's hits.
             vm.onQueryChange("beta")
             runCurrent()
-            val betaLoading = awaitItem()
-            assertEquals("beta", betaLoading.rawQuery)
-            assertTrue(betaLoading.searching)
+            val betaLoading = awaitStateWhere { it.rawQuery == "beta" }
             assertTrue(betaLoading.groups.isEmpty())
 
+            // A late answer for the abandoned query must not surface at all.
             repo.emit("alpha", null, listOf(hit(1, "late alpha result")))
             runCurrent()
             expectNoEvents()
@@ -565,8 +563,7 @@ class SearchViewModelTest {
             runCurrent()
             repo.emit("beta", null, listOf(hit(2, "beta result")))
             runCurrent()
-            val betaResults = awaitItem()
-            assertEquals("beta", betaResults.rawQuery)
+            val betaResults = awaitStateWhere { it.rawQuery == "beta" && it.groups.isNotEmpty() }
             assertTrue(!betaResults.searching)
             assertEquals("beta result", betaResults.groups.single().hits.single().message.text)
             cancelAndIgnoreRemainingEvents()
