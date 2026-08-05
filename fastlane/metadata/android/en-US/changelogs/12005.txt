@@ -1,7 +1,8 @@
 - Mentions and direct messages alert with your channel's sound.
 - Reorder networks in the drawer by hand.
 - Search a conversation's history on the server, and see what is device-only.
-- Missing history loads as you scroll toward it, with seams where gaps remain.
-- Conversations reopen where you left off, or at the newest message if you were there.
+- Older history loads as you scroll; seams mark the gaps.
+- Conversations reopen where you left off reading.
 - A conversation with no server history no longer stalls the others.
-- A reply rejected from a notification is kept as a draft you can retry.
+- A reply rejected from a notification is kept as a draft to retry.
+- Link previews now load through the network's proxy.
