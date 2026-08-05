@@ -464,10 +464,14 @@ class SearchViewModelTest {
         val vm = viewModel(repo)
 
         vm.state.test {
-            assertEquals(SearchUiState(), awaitItem()) // initial
+            awaitItem()
             vm.onQueryChange("   ")
             runCurrent()
-            assertTrue("blank query yields no result groups", awaitItem().groups.isEmpty())
+            // Settle on the key under test: a blank key emits a coverage frame of its own, and a
+            // StateFlow conflates, so neither the pristine initial value nor the frame that
+            // follows it is guaranteed to be observed as its own emission.
+            val blank = awaitStateWhere { it.rawQuery == "   " }
+            assertTrue("blank query yields no result groups", blank.groups.isEmpty())
             assertEquals("blank query must not query the DB", 0, repo.calls.get())
             cancelAndIgnoreRemainingEvents()
         }
@@ -481,30 +485,32 @@ class SearchViewModelTest {
         vm.state.test {
             awaitItem() // initial
 
-            // Simulate keystrokes faster than the debounce window.
+            // Simulate keystrokes faster than the debounce window. Each key is settled on rather
+            // than counted: a StateFlow conflates, so an intermediate keystroke's frame is not
+            // guaranteed to be observed on its own. What this test protects is the debounce —
+            // that no repository call happens until typing pauses — not the emission count.
             vm.onQueryChange("c")
             runCurrent()
-            assertEquals("c", awaitItem().rawQuery)
+            awaitStateWhere { it.rawQuery == "c" }
             advanceTimeBy(50)
             vm.onQueryChange("co")
             runCurrent()
-            assertEquals("co", awaitItem().rawQuery)
+            awaitStateWhere { it.rawQuery == "co" }
             advanceTimeBy(50)
             vm.onQueryChange("cor")
             runCurrent()
-            assertEquals("cor", awaitItem().rawQuery)
+            awaitStateWhere { it.rawQuery == "cor" }
             advanceTimeBy(50)
             vm.onQueryChange("coroutine")
             runCurrent()
-            val loading = awaitItem()
-            assertEquals("coroutine", loading.rawQuery)
+            val loading = awaitStateWhere { it.rawQuery == "coroutine" }
             assertTrue(loading.searching)
             // Not yet past the debounce window: no query should have fired.
             assertEquals("no DB hit before the typing pause", 0, repo.calls.get())
 
             // Past the debounce window: exactly one query fires and results arrive.
             advanceTimeBy(300)
-            val results = awaitItem()
+            val results = awaitStateWhere { it.rawQuery == "coroutine" && it.groups.isNotEmpty() }
             assertEquals("rapid typing collapses to one DB query", 1, repo.calls.get())
             assertEquals("coroutine", results.rawQuery)
             assertEquals(1, results.groups.size)
