@@ -7,6 +7,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.RawQuery
+import androidx.room.SkipQueryVerification
 import androidx.room.Transaction
 import androidx.room.Update
 import io.github.trevarj.motd.data.prefs.LayoutDensity
@@ -1455,6 +1456,17 @@ interface CanonicalTimelineDao {
 
     @Insert
     suspend fun insertEvent(event: TimelineEventEntity): TimelineEventId
+
+    /**
+     * The id AUTOINCREMENT will assign to the next messages row, so ingest can insert a row born
+     * with timelineOrder = id. The FTS sync triggers run on every UPDATE, so the previous
+     * insert-then-update re-tokenized messages_fts twice per message. sqlite_sequence never reuses
+     * deleted ids (event_redirects depends on that) and explicit inserts advance it exactly like
+     * generated ones; the table itself exists because messages requires a buffers row first.
+     */
+    @SkipQueryVerification
+    @Query("SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'messages'), 0) + 1")
+    suspend fun nextTimelineEventId(): TimelineEventId
 
     @Update
     suspend fun updateEvent(event: TimelineEventEntity)

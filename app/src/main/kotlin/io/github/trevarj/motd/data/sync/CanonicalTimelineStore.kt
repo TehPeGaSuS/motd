@@ -457,9 +457,9 @@ class CanonicalTimelineStore @Inject constructor(
         val initial: TimelineEventEntity
         val inserted: Boolean
         if (candidate == null) {
-            val eventId = dao.insertEvent(incoming)
+            val eventId = dao.nextTimelineEventId()
             initial = incoming.copy(id = eventId, timelineOrder = eventId)
-            dao.updateEvent(initial)
+            dao.insertEvent(initial)
             inserted = true
         } else {
             initial = candidate
