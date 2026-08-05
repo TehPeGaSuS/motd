@@ -24,7 +24,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -59,6 +61,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
@@ -442,6 +445,7 @@ fun ChatListContent(
                         states = state.connection,
                         networkName = { id -> state.networks.firstOrNull { it.id == id }?.name },
                     )
+                    HistorySyncProgressLine(state.syncProgress)
 
                     // Active-scope chip: keeps the filter discoverable/escapable without the drawer.
                     if (state.selectedNetworkId != null) {
@@ -609,6 +613,43 @@ internal fun shouldOpenOnboarding(state: ChatListState): Boolean =
     !state.loading && state.networks.isEmpty() && !state.onboardingComplete
 
 @OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HistorySyncProgressLine(progress: io.github.trevarj.motd.service.HistorySyncProgress?) {
+    // Grace before showing: a small account finishes catch-up in well under a second, and a line
+    // that flashes in and out reads as glitchy rather than informative.
+    var graceElapsed by remember(progress != null) { mutableStateOf(false) }
+    LaunchedEffect(progress != null) {
+        if (progress != null) {
+            delay(600)
+            graceElapsed = true
+        }
+    }
+    if (progress == null || !graceElapsed) return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .testTag("chatlist_history_sync_progress"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(14.dp),
+            strokeWidth = 2.dp,
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = pluralStringResource(
+                R.plurals.chatlist_history_sync_progress,
+                progress.total,
+                progress.synced,
+                progress.total,
+            ),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 private fun ScopeChip(name: String, onClear: () -> Unit) {
     Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {

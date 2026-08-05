@@ -1085,6 +1085,10 @@
 
     <!-- Badge content-descriptions carry the real (uncapped) count for the e2e harness. The
          visible badge text caps at "99+" / "@". -->
+    <plurals name="chatlist_history_sync_progress">
+        <item quantity="one">Syncing history (%1$d of %2$d chat)</item>
+        <item quantity="other">Syncing history (%1$d of %2$d chats)</item>
+    </plurals>
     <plurals name="badge_unread">
         <item quantity="one">%1$d unread</item>
         <item quantity="other">%1$d unread</item>

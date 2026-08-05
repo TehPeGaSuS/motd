@@ -23,6 +23,9 @@ import io.github.trevarj.motd.service.BufferReadMarker
 import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ChannelCloseCoordinator
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.HistoryResyncController
+import io.github.trevarj.motd.service.HistoryResyncState
+import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import kotlinx.coroutines.Dispatchers
@@ -156,6 +159,19 @@ class ChatListReorderTest {
         bufferRepository = FakeBufferRepository(),
         networkRepository = repository,
         connectionManager = FakeConnectionManager(),
+        historyResync = object : HistoryResyncController {
+            override fun syncStatus(bufferId: Long) = flowOf<HistorySyncStatus>(HistorySyncStatus.Idle)
+            override suspend fun reconcileBuffer(
+                buffer: BufferEntity,
+                client: IrcClient,
+                isCurrent: () -> Boolean,
+            ) = HistoryResyncState.Idle
+            override suspend fun reconcilePendingMessage(
+                buffer: BufferEntity,
+                client: IrcClient,
+                isCurrent: () -> Boolean,
+            ) = HistoryResyncState.Idle
+        },
         channelCloseCoordinator = object : ChannelCloseCoordinator {
             override fun start() = Unit
             override suspend fun requestClose(bufferId: Long) = Unit
