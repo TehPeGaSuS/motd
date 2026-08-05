@@ -369,6 +369,7 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
             settingsRepository.setChatWallpaper(it.chatWallpaper)
             settingsRepository.setShowComposerEmoji(it.showComposerEmoji)
             settingsRepository.setChatSoundsEnabled(it.chatSoundsEnabled)
+            settingsRepository.setHistorySyncDepth(it.historySyncDepth)
         }
         settings.appearance?.let {
             appearancePrefs.setTheme(it.theme)

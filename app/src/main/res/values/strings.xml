@@ -94,6 +94,12 @@
     <string name="onboarding_connect_add_network">Add network</string>
     <string name="onboarding_connect_add_name">Network name</string>
     <string name="onboarding_connect_add_host">Host</string>
+    <string name="onboarding_history_depth_title">History to sync</string>
+    <string name="onboarding_history_depth_hint">Older messages load as you scroll.</string>
+    <string name="onboarding_history_depth_week">Last 7 days</string>
+    <string name="onboarding_history_depth_month">Last 30 days (recommended)</string>
+    <string name="onboarding_history_depth_quarter">Last 90 days</string>
+    <string name="onboarding_history_depth_everything">Everything</string>
 
     <!-- Settings (WP8) -->
     <string name="settings_title">Settings</string>

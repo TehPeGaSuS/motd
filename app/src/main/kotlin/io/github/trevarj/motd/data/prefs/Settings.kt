@@ -29,6 +29,18 @@ internal fun nickColorPaletteFromPreference(saved: String?): NickColorPalette = 
     else -> NickColorPalette.THEME
 }
 
+/**
+ * How far back the first history sync of a network enumerates. A bounded window keeps onboarding
+ * responsive on a large bouncer account; EVERYTHING enumerates from epoch in one pass, so nothing
+ * is left for the paced backfill.
+ */
+enum class HistorySyncDepth(val lookbackMs: Long?) {
+    WEEK(7L * 24 * 60 * 60 * 1_000),
+    MONTH(30L * 24 * 60 * 60 * 1_000),
+    QUARTER(90L * 24 * 60 * 60 * 1_000),
+    EVERYTHING(null),
+}
+
 /** Which visual style to use for nick avatars. IRC sprites are the default for new users. */
 enum class AvatarStyle { MONOGRAM, INITIALS, IRC_SPRITE }
 
@@ -71,6 +83,8 @@ data class Settings(
     val showComposerEmoji: Boolean = true,
     /** Play subtle send/receive sounds for the currently open foreground chat. */
     val chatSoundsEnabled: Boolean = true,
+    /** Window the first history sync of a network enumerates; chosen during soju onboarding. */
+    val historySyncDepth: HistorySyncDepth = HistorySyncDepth.MONTH,
 )
 
 /** Canonical key for friends/fools/override lookups: trimmed + lowercased.
@@ -111,6 +125,7 @@ interface SettingsRepository {
     suspend fun setChatWallpaper(w: ChatWallpaper)
     suspend fun setShowComposerEmoji(show: Boolean)
     suspend fun setChatSoundsEnabled(enabled: Boolean)
+    suspend fun setHistorySyncDepth(d: HistorySyncDepth)
 }
 
 /** Webpush endpoint + client keypair persistence (DataStore). Implemented by WP4 alongside

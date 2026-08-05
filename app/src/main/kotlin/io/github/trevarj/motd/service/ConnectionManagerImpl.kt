@@ -1359,11 +1359,14 @@ class ConnectionManagerImpl @Inject constructor(
         var attempt = 0
         while (clientFor(networkId) === client) {
             val buffers = openBuffers(networkId)
+            // Read per attempt: the user can change the depth between a failure and its retry.
+            val initialLookbackMs = settings.settings.first().historySyncDepth.lookbackMs
             when (val result = historyResyncCoordinator.resyncNetwork(
                 networkId = networkId,
                 openBuffers = buffers,
                 client = client,
                 isCurrent = { clientFor(networkId) === client },
+                initialLookbackMs = initialLookbackMs,
             )) {
                 is HistoryResyncState.Failed -> {
                     if (result is HistoryResyncState.Incomplete && result.awaitsTargetClassification) {

@@ -4,6 +4,7 @@ import io.github.trevarj.motd.bouncer.BouncerKind
 import io.github.trevarj.motd.bouncer.SojuLoginForm
 import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.HistorySyncDepth
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import org.junit.Assert.assertEquals
@@ -464,6 +465,18 @@ class OnboardingReducerTest {
         )
         assertTrue(added.bouncerAdd is BouncerAddState.Success)
         assertEquals("9", added.bouncerNetworks.single().netId)
+    }
+
+    @Test
+    fun `history sync depth defaults to a month and follows the selection`() {
+        assertEquals(HistorySyncDepth.MONTH, OnboardingState().historySyncDepth)
+        val s = reduce(
+            OnboardingState(step = OnboardingStep.CONNECT),
+            OnboardingAction.SelectHistorySyncDepth(HistorySyncDepth.EVERYTHING),
+        )
+        assertEquals(HistorySyncDepth.EVERYTHING, s.historySyncDepth)
+        // The selection is inert for the rest of the wizard.
+        assertEquals(OnboardingStep.CONNECT, s.step)
     }
 
     @Test

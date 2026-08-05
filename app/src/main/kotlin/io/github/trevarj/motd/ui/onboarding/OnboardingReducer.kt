@@ -4,6 +4,7 @@ import io.github.trevarj.motd.bouncer.BouncerKind
 import io.github.trevarj.motd.bouncer.SojuLoginForm
 import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.HistorySyncDepth
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.settings.addnetwork.applyNetworkPreset
@@ -153,6 +154,8 @@ data class OnboardingState(
     val bouncerListAttempt: Long = 0L,
     val bouncerAdd: BouncerAddState = BouncerAddState.Idle,
     val bouncerAddDraft: BouncerAddDraft = BouncerAddDraft(),
+    /** How much history the imported soju networks fetch on their first sync. */
+    val historySyncDepth: HistorySyncDepth = HistorySyncDepth.MONTH,
     val error: String? = null,
 ) {
     val isBouncer: Boolean get() = choice == ConnectionChoice.BOUNCER
@@ -242,6 +245,7 @@ sealed interface OnboardingAction {
         val rows: List<BouncerNetworkRow>,
     ) : OnboardingAction
     data class ToggleBouncerNetwork(val netId: String) : OnboardingAction
+    data class SelectHistorySyncDepth(val depth: HistorySyncDepth) : OnboardingAction
     data class EditBouncerAddDraft(val draft: BouncerAddDraft) : OnboardingAction
     data class BouncerAddSubmitting(val networkId: Long, val sessionGeneration: Long) : OnboardingAction
     data class BouncerAdded(
@@ -399,6 +403,8 @@ fun onboardingReducer(state: OnboardingState, action: OnboardingAction): Onboard
                     if (it.netId == action.netId) it.copy(selected = !it.selected) else it
                 },
             )
+
+        is OnboardingAction.SelectHistorySyncDepth -> state.copy(historySyncDepth = action.depth)
 
         is OnboardingAction.EditBouncerAddDraft -> state.copy(
             bouncerAddDraft = action.draft,

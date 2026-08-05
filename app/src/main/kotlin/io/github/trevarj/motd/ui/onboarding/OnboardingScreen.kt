@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -37,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -51,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -62,6 +65,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.bouncer.BouncerKind
 import io.github.trevarj.motd.bouncer.SojuLoginForm
 import io.github.trevarj.motd.bouncer.ZncLoginForm
+import io.github.trevarj.motd.data.prefs.HistorySyncDepth
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.settings.BouncerLoginFields
 import io.github.trevarj.motd.ui.settings.NetworkForm
@@ -95,6 +99,7 @@ fun OnboardingScreen(
         onToggleBouncer = viewModel::toggleBouncerNetwork,
         onBouncerAddDraftChange = viewModel::editBouncerAddDraft,
         onAddBouncer = viewModel::addBouncerNetwork,
+        onSelectHistoryDepth = viewModel::selectHistorySyncDepth,
         onFinish = { viewModel.finish(onDone) },
         onConfirmPlaintext = viewModel::confirmPlaintext,
         onDismissPlaintext = viewModel::dismissPlaintextWarning,
@@ -119,6 +124,7 @@ fun OnboardingContent(
     onToggleBouncer: (String) -> Unit,
     onBouncerAddDraftChange: (BouncerAddDraft) -> Unit,
     onAddBouncer: () -> Unit,
+    onSelectHistoryDepth: (HistorySyncDepth) -> Unit,
     onFinish: () -> Unit,
     onConfirmPlaintext: () -> Unit,
     onDismissPlaintext: () -> Unit,
@@ -156,6 +162,7 @@ fun OnboardingContent(
                     onToggleBouncer,
                     onBouncerAddDraftChange,
                     onAddBouncer,
+                    onSelectHistoryDepth,
                 )
                 OnboardingStep.FINISH -> FinishPage()
             }
@@ -425,6 +432,7 @@ private fun ConnectPage(
     onToggleBouncer: (String) -> Unit,
     onBouncerAddDraftChange: (BouncerAddDraft) -> Unit,
     onAddBouncer: () -> Unit,
+    onSelectHistoryDepth: (HistorySyncDepth) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -474,6 +482,7 @@ private fun ConnectPage(
                 onToggleBouncer,
                 onBouncerAddDraftChange,
                 onAddBouncer,
+                onSelectHistoryDepth,
             )
         }
     }
@@ -520,6 +529,7 @@ private fun BouncerNetworksSection(
     onToggleBouncer: (String) -> Unit,
     onDraftChange: (BouncerAddDraft) -> Unit,
     onAddBouncer: () -> Unit,
+    onSelectHistoryDepth: (HistorySyncDepth) -> Unit,
 ) {
     Text(
         stringResource(R.string.onboarding_connect_networks_title),
@@ -620,6 +630,57 @@ private fun BouncerNetworksSection(
         )
         else Text(stringResource(R.string.onboarding_connect_add_network))
     }
+
+    HistorySyncDepthSection(selected = state.historySyncDepth, onSelect = onSelectHistoryDepth)
+}
+
+/**
+ * First-sync window for the imported networks. A shorter window keeps the initial catch-up quick on
+ * a bouncer with years of backlog; "Everything" enumerates the whole account in one pass.
+ */
+@Composable
+private fun HistorySyncDepthSection(
+    selected: HistorySyncDepth,
+    onSelect: (HistorySyncDepth) -> Unit,
+) {
+    Text(
+        stringResource(R.string.onboarding_history_depth_title),
+        style = MaterialTheme.typography.titleSmall,
+        modifier = Modifier.padding(top = 12.dp),
+    )
+    Text(
+        stringResource(R.string.onboarding_history_depth_hint),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Column(Modifier.selectableGroup()) {
+        HistorySyncDepth.entries.forEach { depth ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .selectable(
+                        selected = depth == selected,
+                        onClick = { onSelect(depth) },
+                        role = Role.RadioButton,
+                    )
+                    .testTag("onboarding_history_depth_${depth.name.lowercase()}")
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                RadioButton(selected = depth == selected, onClick = null)
+                Text(historySyncDepthLabel(depth))
+            }
+        }
+    }
+}
+
+@Composable
+private fun historySyncDepthLabel(depth: HistorySyncDepth): String = when (depth) {
+    HistorySyncDepth.WEEK -> stringResource(R.string.onboarding_history_depth_week)
+    HistorySyncDepth.MONTH -> stringResource(R.string.onboarding_history_depth_month)
+    HistorySyncDepth.QUARTER -> stringResource(R.string.onboarding_history_depth_quarter)
+    HistorySyncDepth.EVERYTHING -> stringResource(R.string.onboarding_history_depth_everything)
 }
 
 @Composable
@@ -674,7 +735,7 @@ private fun OnboardingChoicePreview() {
                 state = OnboardingState(step = OnboardingStep.CHOICE, choice = ConnectionChoice.NETWORK),
                 onNext = {}, onBack = {}, onSkip = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
                 onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
-                onRetryBouncerDiscovery = {}, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onFinish = {},
+                onRetryBouncerDiscovery = {}, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onSelectHistoryDepth = {}, onFinish = {},
                 onConfirmPlaintext = {}, onDismissPlaintext = {},
             )
         }
@@ -701,7 +762,7 @@ private fun OnboardingConnectPreview() {
                 ),
                 onNext = {}, onBack = {}, onSkip = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
                 onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
-                onRetryBouncerDiscovery = {}, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onFinish = {},
+                onRetryBouncerDiscovery = {}, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onSelectHistoryDepth = {}, onFinish = {},
                 onConfirmPlaintext = {}, onDismissPlaintext = {},
             )
         }

@@ -86,7 +86,7 @@ class OnboardingBouncerUiTest {
                     state = state,
                     onNext = {}, onBack = {}, onSkip = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
                     onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
-                    onRetryBouncerDiscovery = {}, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onFinish = {},
+                    onRetryBouncerDiscovery = {}, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onSelectHistoryDepth = {}, onFinish = {},
                     onConfirmPlaintext = {}, onDismissPlaintext = {},
                 )
             }
@@ -115,7 +115,7 @@ class OnboardingBouncerUiTest {
                     state = baseState(discovery, draft, add),
                     onNext = {}, onBack = {}, onSkip = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
                     onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
-                    onRetryBouncerDiscovery = onRetryDiscovery, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onFinish = {},
+                    onRetryBouncerDiscovery = onRetryDiscovery, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onSelectHistoryDepth = {}, onFinish = {},
                     onConfirmPlaintext = {}, onDismissPlaintext = {},
                 )
             }

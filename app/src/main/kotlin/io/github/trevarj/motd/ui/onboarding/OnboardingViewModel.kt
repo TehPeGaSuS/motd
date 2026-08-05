@@ -7,9 +7,11 @@ import io.github.trevarj.motd.bouncer.BouncerKind
 import io.github.trevarj.motd.bouncer.SojuLoginForm
 import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.HistorySyncDepth
 import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
@@ -40,6 +42,7 @@ class OnboardingViewModel @Inject constructor(
     private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
     private val onboardingPrefs: OnboardingPrefs,
     private val bouncerOperations: OnboardingBouncerOperations,
+    private val settingsRepository: SettingsRepository,
     private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
 ) : ViewModel() {
 
@@ -90,6 +93,8 @@ class OnboardingViewModel @Inject constructor(
     fun editZncLogin(login: ZncLoginForm) = dispatch(OnboardingAction.EditZncLogin(login))
     fun toggleBouncerNetwork(netId: String) = dispatch(OnboardingAction.ToggleBouncerNetwork(netId))
     fun editBouncerAddDraft(draft: BouncerAddDraft) = dispatch(OnboardingAction.EditBouncerAddDraft(draft))
+    fun selectHistorySyncDepth(depth: HistorySyncDepth) =
+        dispatch(OnboardingAction.SelectHistorySyncDepth(depth))
 
     fun confirmPlaintext() {
         dispatch(OnboardingAction.ConfirmPlaintext)
@@ -316,6 +321,9 @@ class OnboardingViewModel @Inject constructor(
         val rootId = s.networkId
         if (s.isZnc && rootId != null) bouncerKindPrefs.markZnc(rootId)
         if (s.isSoju && rootId != null) {
+            // Persist before connecting: each child's first catch-up reads this depth, so writing it
+            // afterwards would let the imported networks start on the previous window.
+            settingsRepository.setHistorySyncDepth(s.historySyncDepth)
             // Explicitly import only selected rows. Then connect each imported child: a plain
             // reconcile will not rebuild a child actor that parked on a transient failure during
             // onboarding, but connect() force-rebuilds it, so the freshly imported network connects

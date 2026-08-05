@@ -109,6 +109,7 @@ class PushInstanceCoordinatorTest {
         override suspend fun setChatWallpaper(w: io.github.trevarj.motd.data.prefs.ChatWallpaper) = Unit
         override suspend fun setShowComposerEmoji(show: Boolean) = Unit
         override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
+        override suspend fun setHistorySyncDepth(d: io.github.trevarj.motd.data.prefs.HistorySyncDepth) = Unit
     }
 
     private class FakeNetworkDao(nets: List<NetworkEntity>) : NetworkDao {

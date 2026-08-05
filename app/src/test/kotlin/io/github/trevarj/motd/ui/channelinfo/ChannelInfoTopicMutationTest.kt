@@ -275,6 +275,7 @@ class ChannelInfoTopicMutationTest {
         override suspend fun setChatWallpaper(w: ChatWallpaper) = Unit
         override suspend fun setShowComposerEmoji(show: Boolean) = Unit
         override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
+        override suspend fun setHistorySyncDepth(d: io.github.trevarj.motd.data.prefs.HistorySyncDepth) = Unit
     }
 
     private companion object { const val BUFFER_ID = 1L }

@@ -2,8 +2,17 @@ package io.github.trevarj.motd.ui.onboarding
 
 import io.github.trevarj.motd.bouncer.SojuLoginForm
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.ChatWallpaper
+import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.HistorySyncDepth
+import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
+import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.client.BouncerNetwork
 import io.github.trevarj.motd.irc.client.IrcClient
@@ -12,6 +21,7 @@ import io.github.trevarj.motd.irc.client.IrcDisconnectedException
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.SendAcceptance
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
@@ -54,14 +64,14 @@ class OnboardingViewModelTest {
         override suspend fun childrenOf(rootId: Long) = rows.values.filter { it.parentId == rootId }
     }
 
-    private class FakeConnectionManager : ConnectionManager {
+    private class FakeConnectionManager(private val log: MutableList<String>? = null) : ConnectionManager {
         override val connectionStates = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
         override fun clientFor(networkId: Long): IrcClient? = null
         fun connecting(id: Long) { connectionStates.value += id to IrcClientState.Connecting }
         fun ready(id: Long) { connectionStates.value += id to IrcClientState.Ready("motd", emptySet(), emptyMap()) }
         override suspend fun startAll() = Unit
         override suspend fun stopAll() = Unit
-        override suspend fun connect(networkId: Long) = Unit
+        override suspend fun connect(networkId: Long) { log?.add("connect:$networkId") }
         override suspend fun disconnect(networkId: Long) = Unit
         override suspend fun reconnectStale() = Unit
         override suspend fun sendMessage(bufferId: Long, text: String, replyToEventId: Long?) = SendAcceptance.Accepted(emptyList())
@@ -117,12 +127,45 @@ class OnboardingViewModelTest {
         override suspend fun markCompleted() = Unit
     }
 
+    /** Records the persisted depth and the ordering against child connects. */
+    private class FakeSettingsRepository(private val log: MutableList<String>? = null) : SettingsRepository {
+        var historySyncDepth: HistorySyncDepth? = null
+        override val settings = MutableStateFlow(Settings())
+        override suspend fun setThemeMode(m: ThemeMode) = Unit
+        override suspend fun setDynamicColor(enabled: Boolean) = Unit
+        override suspend fun setDeliveryMode(m: DeliveryMode) = Unit
+        override suspend fun setLayoutDensity(d: LayoutDensity) = Unit
+        override suspend fun setNickColorsEnabled(enabled: Boolean) = Unit
+        override suspend fun setNickColorPalette(p: NickColorPalette) = Unit
+        override suspend fun setNickColorOverride(nick: String, hue: Int?) = Unit
+        override suspend fun setFriend(nick: String, isFriend: Boolean) = Unit
+        override suspend fun setFool(nick: String, isFool: Boolean) = Unit
+        override suspend fun setFoolsMode(m: FoolsMode) = Unit
+        override suspend fun setShowJoinPartQuit(show: Boolean) = Unit
+        override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
+        override suspend fun setChatWallpaper(w: ChatWallpaper) = Unit
+        override suspend fun setShowComposerEmoji(show: Boolean) = Unit
+        override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
+        override suspend fun setHistorySyncDepth(d: HistorySyncDepth) {
+            historySyncDepth = d
+            log?.add("depth:${d.name}")
+        }
+    }
+
     private suspend fun TestScope.readyBouncer(
         operations: FakeBouncerOperations,
         repository: FakeNetworkRepository = FakeNetworkRepository(),
         connections: FakeConnectionManager = FakeConnectionManager(),
+        settings: FakeSettingsRepository = FakeSettingsRepository(),
     ): OnboardingViewModel {
-        val vm = OnboardingViewModel(repository, connections, FakePresetPrefs, FakeOnboardingPrefs, operations)
+        val vm = OnboardingViewModel(
+            repository,
+            connections,
+            FakePresetPrefs,
+            FakeOnboardingPrefs,
+            operations,
+            settings,
+        )
         vm.next()
         vm.chooseConnection(ConnectionChoice.BOUNCER)
         vm.next()
@@ -260,6 +303,34 @@ class OnboardingViewModelTest {
         operations.snapshots.value = mapOf("stale" to mapOf("name" to "Stale"))
         runCurrent()
         assertEquals("new", vm.state.value.bouncerNetworks.single().netId)
+    }
+
+    @Test
+    fun `finish persists the chosen history depth before connecting the imported children`() = runTest {
+        val log = mutableListOf<String>()
+        val operations = FakeBouncerOperations()
+        operations.snapshots.value = mapOf("libera" to mapOf("name" to "Libera"))
+        operations.listResponse.complete(listOf(BouncerNetwork("libera", mapOf("name" to "Libera"))))
+        val settings = FakeSettingsRepository(log)
+        val vm = readyBouncer(
+            operations,
+            connections = FakeConnectionManager(log),
+            settings = settings,
+        )
+        runCurrent()
+        vm.selectHistorySyncDepth(HistorySyncDepth.EVERYTHING)
+        vm.toggleBouncerNetwork("libera")
+        vm.next()
+
+        vm.finish {}
+        runCurrent()
+
+        assertEquals(HistorySyncDepth.EVERYTHING, settings.historySyncDepth)
+        // The root's own connect happened during the connect test; the depth must land before the
+        // child connect that triggers its first catch-up.
+        val depthIndex = log.indexOf("depth:EVERYTHING")
+        assertTrue(log.toString(), depthIndex >= 0)
+        assertTrue(log.toString(), log.drop(depthIndex).any { it.startsWith("connect:") })
     }
 
     @Test
