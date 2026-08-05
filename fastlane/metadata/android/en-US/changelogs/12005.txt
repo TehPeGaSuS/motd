@@ -1,6 +1,7 @@
-- Mentions and direct messages now alert with your channel's sound, not silently.
+- Mentions and direct messages alert with your channel's sound.
 - Reorder networks in the drawer by hand.
-- Search a conversation's full history on the server, and see when only part of it is on your device.
-- Missing history loads as you scroll toward it, with seams where a gap remains.
-- Conversations reopen where you left off, holding the unread divider.
-- A reply rejected from a notification is kept as a draft with a retry action.
+- Search a conversation's history on the server, and see what is device-only.
+- Missing history loads as you scroll toward it, with seams where gaps remain.
+- Conversations reopen where you left off, or at the newest message if you were there.
+- A conversation with no server history no longer stalls the others.
+- A reply rejected from a notification is kept as a draft you can retry.
