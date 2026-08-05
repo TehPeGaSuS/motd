@@ -1,7 +1,6 @@
 package io.github.trevarj.motd.service
 
-import io.github.trevarj.motd.data.db.BufferType
-import io.github.trevarj.motd.data.db.ChatListRow
+import io.github.trevarj.motd.data.db.MonitorQueryRow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -92,18 +91,10 @@ class MonitorPresenceTest {
         assertEquals(PresenceState.ONLINE, states[renamed])
     }
 
-    private fun query(nick: String, pinned: Boolean, activity: Long) = ChatListRow(
-        bufferId = activity,
+    private fun query(nick: String, pinned: Boolean, activity: Long) = MonitorQueryRow(
         networkId = 1,
-        networkName = "network",
         displayName = nick,
-        type = BufferType.QUERY,
         pinned = pinned,
-        muted = false,
-        lastMessageText = null,
-        lastMessageSender = null,
         lastMessageTime = activity,
-        unreadCount = 0,
-        mentionCount = 0,
     )
 }

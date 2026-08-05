@@ -1,6 +1,6 @@
 package io.github.trevarj.motd.service
 
-import io.github.trevarj.motd.data.db.ChatListRow
+import io.github.trevarj.motd.data.db.MonitorQueryRow
 
 internal data class MonitorSelection(
     val selected: List<String>,
@@ -9,7 +9,7 @@ internal data class MonitorSelection(
 
 internal fun selectMonitorTargets(
     friends: Set<String>,
-    queryRows: List<ChatListRow>,
+    queryRows: List<MonitorQueryRow>,
     limit: Int?,
     normalize: (String) -> String,
 ): MonitorSelection {
@@ -19,7 +19,7 @@ internal fun selectMonitorTargets(
         .filter { seen.add(normalize(it)) }
     val queryTargets = queryRows
         .sortedWith(
-            compareByDescending<ChatListRow> { it.pinned }
+            compareByDescending<MonitorQueryRow> { it.pinned }
                 .thenByDescending { it.lastMessageTime ?: Long.MIN_VALUE }
                 .thenBy { normalize(it.displayName) },
         )

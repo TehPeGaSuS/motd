@@ -298,13 +298,15 @@ class MessageVisibilityReader @Inject constructor(
         ),
     )
 
+    // Capped like observeChatList's counts (badge renders 999+): a huge unread backlog must not
+    // turn every chat-list resolution into a full-buffer scan.
     private suspend fun chatListCount(
         bufferId: Long,
         visibility: String,
         mentionsOnly: Boolean,
     ): Int = db.messageDao().rawCount(
         SimpleSQLiteQuery(
-            "SELECT COUNT(*) FROM buffers b JOIN messages m ON m.bufferId = b.id " +
+            "SELECT COUNT(*) FROM (SELECT 1 FROM buffers b JOIN messages m ON m.bufferId = b.id " +
                 "WHERE b.id = ? AND (" +
                 "m.serverTime > MAX(COALESCE(b.localReadAnchorTime, 0), " +
                 "COALESCE(b.localUnreadFloorTime, 0)) OR (" +
@@ -315,7 +317,8 @@ class MessageVisibilityReader @Inject constructor(
                 "OR (m.timelineOrder = COALESCE((SELECT timelineOrder FROM messages " +
                 "WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0)) " +
                 "AND m.id > COALESCE(b.localReadAnchorEventId, 0))))) " +
-                "AND $visibility" + if (mentionsOnly) " AND m.hasMention = 1" else "",
+                "AND $visibility" + (if (mentionsOnly) " AND m.hasMention = 1" else "") +
+                " LIMIT 1000)",
             arrayOf(bufferId),
         ),
     )

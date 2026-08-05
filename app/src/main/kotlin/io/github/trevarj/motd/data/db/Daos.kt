@@ -162,6 +162,8 @@ interface BufferDao {
     // Chat-list projection: each non-SERVER buffer joins one newest preview-eligible message by
     // identity. JOIN/PART/QUIT are timeline-only events and never become previews or activity.
     // Unread/mention counts remain chat kinds only; self messages never count as unread.
+    // Counts are capped at 1000 (the badge renders 999+) so a buffer holding a huge unread
+    // backlog cannot turn every invalidation into a full-buffer scan.
     // Sort: pinned first, then latest preview activity DESC (nulls last).
     @Transaction
     @Query(
@@ -180,7 +182,7 @@ interface BufferDao {
             lm.text AS lastMessageText,
             lm.sender AS lastMessageSender,
             lm.serverTime AS lastMessageTime,
-            (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id
+            (SELECT COUNT(*) FROM (SELECT 1 FROM messages m WHERE m.bufferId = b.id
                 AND (
                     m.serverTime > MAX(COALESCE(b.localReadAnchorTime, 0), COALESCE(b.localUnreadFloorTime, 0))
                     OR (
@@ -199,8 +201,8 @@ interface BufferDao {
                 AND (
                     m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
                     OR (m.kind = 'DCC_TRANSFER' AND m.eventPayload IS NOT NULL)
-                )) AS unreadCount,
-            (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id
+                ) LIMIT 1000)) AS unreadCount,
+            (SELECT COUNT(*) FROM (SELECT 1 FROM messages m WHERE m.bufferId = b.id
                 AND (
                     m.serverTime > MAX(COALESCE(b.localReadAnchorTime, 0), COALESCE(b.localUnreadFloorTime, 0))
                     OR (
@@ -217,7 +219,7 @@ interface BufferDao {
                 )
                 AND m.isSelf = 0
                 AND m.hasMention = 1
-                AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')) AS mentionCount,
+                AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION') LIMIT 1000)) AS mentionCount,
             EXISTS(SELECT 1 FROM history_gaps g WHERE g.roomId = b.id
                 AND (g.newerServerTime > MAX(COALESCE(b.localReadAnchorTime, 0),
                     COALESCE(b.localUnreadFloorTime, 0)) OR
@@ -270,6 +272,24 @@ interface BufferDao {
         """
     )
     fun observeChatList(): Flow<List<ChatListRow>>
+
+    // MONITOR reconciliation needs only query-buffer identity and recency. The always-on service
+    // collector re-runs its projection on every messages invalidation, so it must not pay the
+    // chat-list COUNT subqueries; keep the visibility WHERE clause aligned with observeChatList.
+    @Query(
+        """SELECT b.networkId AS networkId,
+                  b.displayName AS displayName,
+                  b.pinned AS pinned,
+                  (SELECT m.serverTime FROM messages m
+                   WHERE m.bufferId = b.id
+                     AND m.kind NOT IN ('JOIN', 'PART', 'QUIT', 'NETSPLIT', 'NETJOIN')
+                   ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC
+                   LIMIT 1) AS lastMessageTime
+           FROM buffers b
+           WHERE b.type = 'QUERY' AND b.dismissed = 0
+             AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL""",
+    )
+    fun observeMonitorQueryRows(): Flow<List<MonitorQueryRow>>
 
     @Query(
         """SELECT canonical.* FROM buffers requested
@@ -668,6 +688,14 @@ data class ChatListRow(
     val archived: Boolean = false,
     val unreadCountIncomplete: Boolean = false,
     val mentionCountIncomplete: Boolean = false,
+)
+
+/** Minimal query-buffer projection for MONITOR target selection. */
+data class MonitorQueryRow(
+    val networkId: Long,
+    val displayName: String,
+    val pinned: Boolean,
+    val lastMessageTime: Long?,
 )
 
 /** Canonical invitation projection for the chat-list inbox. Payload decoding stays above Room. */

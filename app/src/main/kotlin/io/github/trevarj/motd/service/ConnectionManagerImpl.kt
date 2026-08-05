@@ -68,6 +68,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -551,7 +552,12 @@ class ConnectionManagerImpl @Inject constructor(
                 }
             }
             val monitorDesiredJob = scope.launch {
-                combine(settings.settings, bufferDao.observeChatList()) { currentSettings, rows ->
+                // distinctUntilChanged: every messages write invalidates the projection, but the
+                // desired MONITOR set only changes when the rows themselves do.
+                combine(
+                    settings.settings,
+                    bufferDao.observeMonitorQueryRows().distinctUntilChanged(),
+                ) { currentSettings, rows ->
                     currentSettings.friends to rows
                 }.collect { (friends, rows) ->
                     registry.snapshot.value.actors.keys.forEach { networkId ->
@@ -923,7 +929,7 @@ class ConnectionManagerImpl @Inject constructor(
                             networkId,
                             client,
                             settings.settings.first().friends,
-                            bufferDao.observeChatList().first(),
+                            bufferDao.observeMonitorQueryRows().first(),
                             fresh = true,
                         )
                     }
@@ -956,7 +962,7 @@ class ConnectionManagerImpl @Inject constructor(
                             networkId,
                             client,
                             currentSettings.friends,
-                            bufferDao.observeChatList().first(),
+                            bufferDao.observeMonitorQueryRows().first(),
                             fresh = false,
                         )
                     }
@@ -999,7 +1005,7 @@ class ConnectionManagerImpl @Inject constructor(
         networkId: Long,
         client: IrcClient,
         friends: Set<String>,
-        rows: List<io.github.trevarj.motd.data.db.ChatListRow>,
+        rows: List<io.github.trevarj.motd.data.db.MonitorQueryRow>,
         fresh: Boolean,
     ) {
         if (networksById[networkId]?.role == NetworkRole.BOUNCER_ROOT) return
@@ -1007,7 +1013,7 @@ class ConnectionManagerImpl @Inject constructor(
         val support = monitorSupport(ready.isupport)
         val selection = selectMonitorTargets(
             friends = friends,
-            queryRows = rows.filter { it.networkId == networkId && it.type == BufferType.QUERY },
+            queryRows = rows.filter { it.networkId == networkId },
             limit = (support as? MonitorSupport.Limited)?.limit,
             normalize = client.isupport::normalize,
         )
@@ -1218,7 +1224,7 @@ class ConnectionManagerImpl @Inject constructor(
             row.id,
             client,
             settings.settings.first().friends,
-            bufferDao.observeChatList().first(),
+            bufferDao.observeMonitorQueryRows().first(),
             fresh = true,
         )
         if (!isCurrent()) return
