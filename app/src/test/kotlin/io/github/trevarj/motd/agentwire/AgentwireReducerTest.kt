@@ -793,6 +793,45 @@ class AgentwireReducerTest {
         put("iid", id); put("content", content); put("position", position); put("sid", "s1")
     }
 
+    @Test
+    fun `streamed deltas follow their own assistant item across a tool call`() {
+        val reducer = AgentwireReducer()
+        var state: AgentwireUiState = AgentwireUiState(activeSid = "s1")
+
+        state = reducer.reduce(state, event("turn.started", sid = "s1", tid = "t1"))
+        state = reducer.reduce(
+            state,
+            event("assistant.delta", sid = "s1", tid = "t1", iid = "msg_1", data = buildJsonObject {
+                put("content", "Reading ")
+            }),
+        )
+        state = reducer.reduce(
+            state,
+            event("assistant.delta", sid = "s1", tid = "t1", iid = "msg_1", data = buildJsonObject {
+                put("content", "the test.")
+            }),
+        )
+        // A tool call splits the turn; what follows is a second assistant message, not more of
+        // the first. Keying deltas on the turn alone would append it to "Reading the test."
+        state = reducer.reduce(
+            state,
+            event("tool.completed", sid = "s1", tid = "t1", iid = "call_1", data = buildJsonObject {
+                put("label", "file read")
+            }),
+        )
+        state = reducer.reduce(
+            state,
+            event("assistant.delta", sid = "s1", tid = "t1", iid = "msg_2", data = buildJsonObject {
+                put("content", "The assertion is inverted.")
+            }),
+        )
+
+        val assistants = state.timeline.filter { it.kind.startsWith("assistant.") }
+        assertEquals(2, assistants.size)
+        assertEquals("Reading the test.", assistants[0].body)
+        assertEquals("The assertion is inverted.", assistants[1].body)
+    }
+
     private fun event(
         kind: String,
         sid: String? = null,

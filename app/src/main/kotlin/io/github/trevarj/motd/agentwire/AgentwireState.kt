@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.agentwire
 
 import io.github.trevarj.motd.irc.agentwire.AgentwireEnvelope
+import io.github.trevarj.motd.irc.agentwire.AgentwireTopicParse
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -10,7 +11,12 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 
-enum class AgentwireGate { LOADING, ORDINARY, BLOCKED, ACTIVE }
+/**
+ * [INVALID_TOPIC] exists so a channel that was *meant* to run an agent never renders as a plain
+ * channel. Collapsing it into [ORDINARY] is what makes a mis-set topic indistinguishable from a
+ * client that does nothing at all.
+ */
+enum class AgentwireGate { LOADING, ORDINARY, INVALID_TOPIC, BLOCKED, ACTIVE }
 
 private val SESSION_OWNED_KINDS = setOf(
     "session.snapshot", "session.status", "user.prompt", "turn.started", "turn.completed",
@@ -84,6 +90,8 @@ data class AgentwireUiState(
     val controllerAccount: String? = null,
     val backendAccount: String? = null,
     val backend: String? = null,
+    /** Set only when the topic carries the marker but cannot activate; drives [AgentwireGate.INVALID_TOPIC]. */
+    val topicDefect: AgentwireTopicParse.Invalid? = null,
     val missingCaps: Set<String> = emptySet(),
     val connected: Boolean = false,
     /** Owned by the ViewModel: the reducer never writes handshake phases. */
@@ -119,6 +127,19 @@ data class AgentwireUiState(
     val autoReviewConfirmed: Boolean = false,
 )
 
+/**
+ * Replay-dedup capacity. A history page is bounded at 200 events, so this covers many pages of
+ * overlap while keeping a channel that stays open for days from growing the set without bound.
+ */
+private const val AGENTWIRE_SEEN_LIMIT = 4_096
+
+/** Records [id], evicting in insertion order past [AGENTWIRE_SEEN_LIMIT]. False means a duplicate. */
+private fun LinkedHashSet<String>.remember(id: String): Boolean {
+    if (!add(id)) return false
+    while (size > AGENTWIRE_SEEN_LIMIT) remove(first())
+    return true
+}
+
 class AgentwireReducer {
     private val seen = LinkedHashSet<String>()
     private val revisions = HashMap<String, Long>()
@@ -138,7 +159,7 @@ class AgentwireReducer {
             ) {
                 return state
             }
-            if (!seen.add("${envelope.sid}:${envelope.id}")) return state
+            if (!seen.remember("${envelope.sid}:${envelope.id}")) return state
             val anchored = state.copy(
                 historyBeforeAt = state.historyBeforeAt?.let { minOf(it, envelope.at) } ?: envelope.at,
             )
@@ -147,7 +168,7 @@ class AgentwireReducer {
         if (envelope.kind in SESSION_OWNED_KINDS && envelope.sid != null && envelope.sid != state.activeSid) {
             return state
         }
-        if (!seen.add(envelope.id)) return state
+        if (!seen.remember(envelope.id)) return state
         val entityKey = listOfNotNull(envelope.kind.substringBeforeLast('.'), envelope.sid, envelope.iid, envelope.rid)
             .joinToString(":")
         envelope.rev?.let { rev ->
@@ -613,7 +634,15 @@ private fun List<AgentwireTimelineItem>.stopPlan(turnId: String?): List<Agentwir
 
 private fun List<AgentwireTimelineItem>.appendDelta(envelope: AgentwireEnvelope): List<AgentwireTimelineItem> {
     val delta = envelope.data?.string("content").orEmpty()
-    val existing = indexOfLast { it.tid == envelope.tid && it.kind.startsWith("assistant.") }
+    // A turn can hold several assistant blocks separated by tool calls, so a delta belongs to its
+    // own item, not to whichever assistant card happens to be last. Matching on the turn alone
+    // concatenates a later block onto an earlier one. Only a backend that sends no `iid` at all
+    // falls back to the turn, because then the turn is the finest identity on offer.
+    val existing = if (envelope.iid != null) {
+        indexOfLast { it.backendItemId == envelope.iid && it.kind.startsWith("assistant.") }
+    } else {
+        indexOfLast { it.tid == envelope.tid && it.kind.startsWith("assistant.") }
+    }
     if (existing < 0) return upsert(envelope.timelineItem(running = true))
     return toMutableList().also { items ->
         val prior = items[existing]

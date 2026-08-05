@@ -11,8 +11,9 @@ import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.agentwire.AGENTWIRE_TAG
 import io.github.trevarj.motd.irc.agentwire.AgentwireEnvelope
+import io.github.trevarj.motd.irc.agentwire.AgentwireTopicParse
 import io.github.trevarj.motd.irc.agentwire.agentwireMissingCaps
-import io.github.trevarj.motd.irc.agentwire.parseAgentwireTopic
+import io.github.trevarj.motd.irc.agentwire.parseAgentwireTopicResult
 import io.github.trevarj.motd.irc.agentwire.readablePreview
 import io.github.trevarj.motd.irc.agentwire.sendAgentwire
 import io.github.trevarj.motd.irc.client.IrcClient
@@ -75,7 +76,11 @@ class AgentwireViewModel @Inject constructor(
                 connections.connectionStates,
             ) { enabled, buffer, states -> Triple(enabled, buffer, buffer?.let { states[it.networkId] }) }
                 .collect { (enabled, buffer, connection) ->
-                    val topic = buffer?.topic?.let(::parseAgentwireTopic)
+                    val parse = buffer?.topic?.let(::parseAgentwireTopicResult)
+                    val topic = (parse as? AgentwireTopicParse.Valid)?.topic
+                    // Only a marker that is present and broken is reportable. A channel with no
+                    // marker is an ordinary channel, not a failure, and must stay silent.
+                    val defect = (parse as? AgentwireTopicParse.Invalid)?.takeIf { enabled }
                     val ready = connection as? IrcClientState.Ready
                     val missing = ready?.let {
                         agentwireMissingCaps(it.caps) + if (canSendClientTag(it.caps, it.isupport, AGENTWIRE_TAG)) {
@@ -85,9 +90,29 @@ class AgentwireViewModel @Inject constructor(
                         }
                     }.orEmpty()
                     val gate = when {
-                        !enabled || buffer?.type != BufferType.CHANNEL || topic == null -> AgentwireGate.ORDINARY
+                        !enabled || buffer?.type != BufferType.CHANNEL -> AgentwireGate.ORDINARY
+                        defect != null -> AgentwireGate.INVALID_TOPIC
+                        topic == null -> AgentwireGate.ORDINARY
                         ready != null && missing.isNotEmpty() -> AgentwireGate.BLOCKED
                         else -> AgentwireGate.ACTIVE
+                    }
+                    // Every gate transition is recorded, because the two outcomes that render as
+                    // an ordinary channel leave no other trace of having been attempted.
+                    if (gate != _state.value.gate) {
+                        diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "gate") {
+                            buildMap {
+                                put("channel_fp", diagnostics.fingerprint(buffer?.displayName))
+                                put("gate", gate.name.lowercase())
+                                defect?.let {
+                                    put("topic_defect", it.defect.name.lowercase())
+                                    if (it.fields.isNotEmpty()) put("topic_fields", it.fields.joinToString(","))
+                                }
+                                // A usable marker the user cannot see because the lab is off is
+                                // the last silent outcome; naming it makes "nothing happened"
+                                // answerable from a diagnostic export alone.
+                                if (!enabled && parse is AgentwireTopicParse.Valid) put("lab_disabled", true)
+                            }
+                        }
                     }
                     val identityChanged = _state.value.channel != buffer?.displayName.orEmpty() ||
                         _state.value.controllerAccount != topic?.account ||
@@ -100,6 +125,7 @@ class AgentwireViewModel @Inject constructor(
                             controllerAccount = topic?.account,
                             backendAccount = topic?.agentAccount,
                             backend = topic?.backend,
+                            topicDefect = defect,
                             missingCaps = missing,
                             connected = ready != null,
                         )

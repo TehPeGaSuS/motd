@@ -62,32 +62,85 @@ data class AgentwireTopic(
     val title: String?,
 )
 
-fun parseAgentwireTopic(topic: String): AgentwireTopic? {
-    if (!topic.startsWith(AGENTWIRE_TOPIC_PREFIX)) return null
+/** Why a topic carrying the Agentwire marker still cannot activate the channel. */
+enum class AgentwireTopicDefect {
+    /** One or more of `account=`, `agent=`, or `backend=` is absent or empty. */
+    MISSING_FIELD,
+
+    /** A `;`-separated parameter is not a `key=value` pair. */
+    MALFORMED_PARAMETER,
+    DUPLICATE_PARAMETER,
+
+    /** A percent-escape was truncated or decoded to something that is not UTF-8. */
+    INVALID_ENCODING,
+}
+
+/**
+ * The three outcomes of reading a channel topic, kept apart because they need different answers.
+ *
+ * A channel with no marker is an ordinary channel and must stay silent. A channel whose marker is
+ * broken was *meant* to run an agent, and collapsing it into the same "no" is what makes a
+ * mis-set topic look like a client that does nothing at all.
+ */
+sealed interface AgentwireTopicParse {
+    /** No Agentwire marker: an ordinary channel, not a failure. */
+    data object NotMarked : AgentwireTopicParse
+
+    /** [fields] names the offending parameters so the defect is actionable, never just "invalid". */
+    data class Invalid(
+        val defect: AgentwireTopicDefect,
+        val fields: List<String> = emptyList(),
+    ) : AgentwireTopicParse
+
+    data class Valid(val topic: AgentwireTopic) : AgentwireTopicParse
+}
+
+fun parseAgentwireTopicResult(topic: String): AgentwireTopicParse {
+    if (!topic.startsWith(AGENTWIRE_TOPIC_PREFIX)) return AgentwireTopicParse.NotMarked
     val machine = topic.substringBefore(" | ")
     val title = topic.substringAfter(" | ", missingDelimiterValue = "").ifEmpty { null }
     val fields = LinkedHashMap<String, String>()
-    for (part in machine.removePrefix("agentwire:v1;").split(';')) {
+    for (part in machine.removePrefix(AGENTWIRE_TOPIC_PREFIX).split(';')) {
         if (part.isEmpty()) continue
         val separator = part.indexOf('=')
-        if (separator <= 0) return null
+        if (separator <= 0) {
+            return AgentwireTopicParse.Invalid(AgentwireTopicDefect.MALFORMED_PARAMETER)
+        }
         val key = part.substring(0, separator)
         val raw = part.substring(separator + 1)
-        val value = percentDecode(raw) ?: return null
-        if (key in fields) return null
+        val value = percentDecode(raw)
+            ?: return AgentwireTopicParse.Invalid(AgentwireTopicDefect.INVALID_ENCODING, listOf(key))
+        if (key in fields) {
+            return AgentwireTopicParse.Invalid(AgentwireTopicDefect.DUPLICATE_PARAMETER, listOf(key))
+        }
         fields[key] = value
     }
-    val account = fields["account"]?.takeIf(String::isNotEmpty) ?: return null
-    val agentAccount = fields["agent"]?.takeIf(String::isNotEmpty) ?: return null
-    val backend = fields["backend"]?.takeIf(String::isNotEmpty) ?: return null
     // Three different questions: `backend` names the engine (codex/opencode/claude), while
     // `account` and `agent` are IRC account names, never engine names. `account` is the
     // controller authorized to issue actions; `agent` is the bot account whose messages we
     // trust as authoritative backend state ("agent=claude" would be an account literally
     // named claude). Both fields stay required even when a deployment intentionally uses one
     // account for both roles.
-    return AgentwireTopic(account, agentAccount, backend, fields, title)
+    //
+    // All three are case-folded exactly as the bridge folds them, so the two implementations
+    // cannot disagree about what a topic means. Backend is the one that bites: a topic reading
+    // "backend=Claude" would otherwise activate here while suspending the bridge, and the user
+    // would watch an endless sync with no visible cause. Accounts are already compared
+    // case-insensitively downstream, so folding them only normalizes what gets displayed.
+    val account = fields["account"].orEmpty().lowercase()
+    val agentAccount = fields["agent"].orEmpty().lowercase()
+    val backend = fields["backend"].orEmpty().lowercase()
+    val missing = listOf("account" to account, "agent" to agentAccount, "backend" to backend)
+        .filter { it.second.isEmpty() }
+        .map { it.first }
+    if (missing.isNotEmpty()) {
+        return AgentwireTopicParse.Invalid(AgentwireTopicDefect.MISSING_FIELD, missing)
+    }
+    return AgentwireTopicParse.Valid(AgentwireTopic(account, agentAccount, backend, fields, title))
 }
+
+fun parseAgentwireTopic(topic: String): AgentwireTopic? =
+    (parseAgentwireTopicResult(topic) as? AgentwireTopicParse.Valid)?.topic
 
 private fun percentDecode(value: String): String? = runCatching {
     val bytes = ByteArrayOutputStream(value.length)

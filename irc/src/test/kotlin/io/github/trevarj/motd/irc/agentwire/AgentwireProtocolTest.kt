@@ -32,6 +32,48 @@ class AgentwireProtocolTest {
     }
 
     @Test
+    fun `a broken marker stays distinguishable from an ordinary topic`() {
+        // An ordinary channel is not a failure and must never be reported as one.
+        assertEquals(AgentwireTopicParse.NotMarked, parseAgentwireTopicResult("Welcome to the channel"))
+        assertEquals(
+            AgentwireTopicParse.NotMarked,
+            parseAgentwireTopicResult("Welcome agentwire:v1;account=trev;agent=agentwire;backend=codex"),
+        )
+        // The upgrade that made `agent=` required names the one field to add, not all three.
+        assertEquals(
+            AgentwireTopicParse.Invalid(AgentwireTopicDefect.MISSING_FIELD, listOf("agent")),
+            parseAgentwireTopicResult(resource("agentwire/fixtures/claude-topic.txt").trimEnd()),
+        )
+        assertEquals(
+            AgentwireTopicParse.Invalid(AgentwireTopicDefect.MISSING_FIELD, listOf("agent", "backend")),
+            parseAgentwireTopicResult("agentwire:v1;account=trev"),
+        )
+        assertEquals(
+            AgentwireTopicParse.Invalid(AgentwireTopicDefect.INVALID_ENCODING, listOf("account")),
+            parseAgentwireTopicResult("agentwire:v1;account=%ZZ;agent=agentwire;backend=codex"),
+        )
+        assertEquals(
+            AgentwireTopicParse.Invalid(AgentwireTopicDefect.DUPLICATE_PARAMETER, listOf("account")),
+            parseAgentwireTopicResult("agentwire:v1;account=trev;account=other;agent=agentwire;backend=codex"),
+        )
+        assertEquals(
+            AgentwireTopicParse.Invalid(AgentwireTopicDefect.MALFORMED_PARAMETER),
+            parseAgentwireTopicResult("agentwire:v1;account"),
+        )
+    }
+
+    @Test
+    fun `provisioned identities fold exactly as the bridge folds them`() {
+        // "backend=Claude" would otherwise activate here while suspending the bridge.
+        val topic = parseAgentwireTopic("agentwire:v1;account=Trev;agent=Agentwire;backend=Claude | Work")
+
+        assertEquals("trev", topic?.account)
+        assertEquals("agentwire", topic?.agentAccount)
+        assertEquals("claude", topic?.backend)
+        assertEquals("Work", topic?.title)
+    }
+
+    @Test
     fun `canonical fixtures validate and re-encode byte for byte`() {
         listOf("hello.json", "prompt-action.json", "claude-hello.json").forEach { name ->
             val fixture = resource("agentwire/fixtures/$name").trimEnd()

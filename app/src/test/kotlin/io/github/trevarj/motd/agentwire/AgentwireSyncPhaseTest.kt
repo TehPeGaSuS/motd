@@ -16,6 +16,7 @@ import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.agentwire.AGENTWIRE_REQUIRED_CAPS
 import io.github.trevarj.motd.irc.agentwire.AGENTWIRE_TAG
 import io.github.trevarj.motd.irc.agentwire.AgentwireEnvelope
+import io.github.trevarj.motd.irc.agentwire.AgentwireTopicDefect
 import io.github.trevarj.motd.irc.agentwire.AgentwireValue
 import io.github.trevarj.motd.irc.agentwire.decodeAgentwireValue
 import io.github.trevarj.motd.irc.agentwire.encodeAgentwireEnvelope
@@ -206,13 +207,84 @@ class AgentwireSyncPhaseTest {
         )
     }
 
+    @Test
+    fun `a marked topic missing agent names the defect instead of rendering ordinary chat`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val diagnostics = RecordingDiagnostics()
+            // Exactly the shape of a topic written before `agent=` became required.
+            val buffers = FakeBufferRepository(
+                buffer(joined = true, topic = "agentwire:v1;account=controller;backend=claude | Claude"),
+            )
+            val viewModel = viewModel(FakeConnections(client), buffers, diagnostics)
+            advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
+            runCurrent()
+
+            val state = viewModel.state.value
+            assertEquals(AgentwireGate.INVALID_TOPIC, state.gate)
+            assertEquals(AgentwireTopicDefect.MISSING_FIELD, state.topicDefect?.defect)
+            assertEquals(listOf("agent"), state.topicDefect?.fields)
+            assertEquals(
+                "a channel that cannot activate must not open a handshake",
+                emptyList<String>(),
+                syncRequests(transport),
+            )
+            val gate = diagnostics.records.last { it.event == "gate" }
+            assertEquals("invalid_topic", gate.fields["gate"])
+            assertEquals("missing_field", gate.fields["topic_defect"])
+            assertEquals("agent", gate.fields["topic_fields"])
+        }
+
+    @Test
+    fun `an unmarked channel stays ordinary and reports no defect`() = runTest(dispatcher) {
+        val transport = RecordingTransport()
+        val client = readyClient(transport)
+        val diagnostics = RecordingDiagnostics()
+        val buffers = FakeBufferRepository(buffer(joined = true, topic = "Welcome to the channel"))
+        val viewModel = viewModel(FakeConnections(client), buffers, diagnostics)
+        advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
+        runCurrent()
+
+        assertEquals(AgentwireGate.ORDINARY, viewModel.state.value.gate)
+        assertEquals(null, viewModel.state.value.topicDefect)
+        assertEquals(emptyList<String>(), syncRequests(transport))
+        // An ordinary channel is not a failure and must never be reported as one.
+        val gate = diagnostics.records.last { it.event == "gate" }
+        assertEquals(null, gate.fields["topic_defect"])
+        assertEquals(null, gate.fields["lab_disabled"])
+    }
+
+    @Test
+    fun `a usable marker with the lab disabled records why nothing activated`() = runTest(dispatcher) {
+        val transport = RecordingTransport()
+        val client = readyClient(transport)
+        val diagnostics = RecordingDiagnostics()
+        val viewModel = viewModel(
+            FakeConnections(client),
+            FakeBufferRepository(buffer(joined = true)),
+            diagnostics,
+            lab = false,
+        )
+        advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
+        runCurrent()
+
+        // The lab being off is a choice, so the channel still renders as ordinary chat; the
+        // journal is what makes "I set everything up and nothing happened" answerable.
+        assertEquals(AgentwireGate.ORDINARY, viewModel.state.value.gate)
+        assertEquals(emptyList<String>(), syncRequests(transport))
+        val gate = diagnostics.records.last { it.event == "gate" }
+        assertEquals(true, gate.fields["lab_disabled"])
+    }
+
     private fun TestScope.viewModel(
         connections: FakeConnections,
         buffers: FakeBufferRepository,
         diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
+        lab: Boolean = true,
     ): AgentwireViewModel = AgentwireViewModel(
         savedStateHandle = SavedStateHandle(mapOf("bufferId" to BUFFER_ID)),
-        prefs = FakeAgentwirePrefs(),
+        prefs = FakeAgentwirePrefs(lab),
         buffers = buffers,
         connections = connections,
         diagnostics = diagnostics,
@@ -222,13 +294,16 @@ class AgentwireSyncPhaseTest {
     private fun TestScope.viewModel(client: IrcClient): AgentwireViewModel =
         viewModel(FakeConnections(client), FakeBufferRepository(buffer(joined = true)))
 
-    private fun buffer(joined: Boolean) = BufferEntity(
+    private fun buffer(
+        joined: Boolean,
+        topic: String = "agentwire:v1;account=controller;agent=$BACKEND_ACCOUNT;backend=claude | Claude",
+    ) = BufferEntity(
         id = BUFFER_ID,
         networkId = NETWORK_ID,
         name = CHANNEL,
         displayName = CHANNEL,
         type = BufferType.CHANNEL,
-        topic = "agentwire:v1;account=controller;agent=$BACKEND_ACCOUNT;backend=claude | Claude",
+        topic = topic,
         joined = joined,
     )
 
@@ -315,8 +390,9 @@ class AgentwireSyncPhaseTest {
         override suspend fun exportTo(output: OutputStream) = Unit
     }
 
-    private class FakeAgentwirePrefs : AgentwirePrefs(ApplicationProvider.getApplicationContext<Context>()) {
-        override val enabled: Flow<Boolean> = flowOf(true)
+    private class FakeAgentwirePrefs(lab: Boolean = true) :
+        AgentwirePrefs(ApplicationProvider.getApplicationContext<Context>()) {
+        override val enabled: Flow<Boolean> = flowOf(lab)
         override suspend fun setEnabled(enabled: Boolean) = Unit
         override suspend fun deviceId(): String = "device-under-test"
     }

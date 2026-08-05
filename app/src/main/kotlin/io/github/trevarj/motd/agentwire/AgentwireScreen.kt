@@ -69,6 +69,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.trevarj.motd.irc.agentwire.AgentwireTopicDefect
 import io.github.trevarj.motd.ui.components.Composer
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -203,7 +204,9 @@ private fun AgentwireScreen(
                 .navigationBarsPadding()
                 .imePadding(),
         ) {
-            if (state.gate == AgentwireGate.BLOCKED) {
+            if (state.gate == AgentwireGate.INVALID_TOPIC) {
+                AgentwireInvalidTopic(state)
+            } else if (state.gate == AgentwireGate.BLOCKED) {
                 AgentwireBlocked(state)
             } else {
                 Column(Modifier.fillMaxSize()) {
@@ -407,6 +410,65 @@ private fun AgentwireSyncFailureBody(
                 Text(action)
             }
         }
+    }
+}
+
+/** Names the one defect keeping a marked channel from activating, and the shape that would fix it. */
+@SuppressLint("HardcodedText")
+@Composable
+internal fun AgentwireInvalidTopic(state: AgentwireUiState, modifier: Modifier = Modifier) {
+    val defect = state.topicDefect ?: return
+    val named = defect.fields.joinToString(", ")
+    val explanation = when (defect.defect) {
+        AgentwireTopicDefect.MISSING_FIELD ->
+            "The topic does not set ${defect.fields.joinToString(", ") { "$it=" }}."
+        AgentwireTopicDefect.MALFORMED_PARAMETER ->
+            "One of the topic's parameters is not a key=value pair."
+        AgentwireTopicDefect.DUPLICATE_PARAMETER ->
+            "The topic sets $named more than once."
+        AgentwireTopicDefect.INVALID_ENCODING ->
+            "The value of $named is not valid percent-encoded UTF-8."
+    }
+    Column(
+        modifier
+            .fillMaxSize()
+            .padding(24.dp)
+            .testTag("agentwire_invalid_topic"),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text("This channel's agent topic needs a fix", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "The topic starts with the Agentwire marker, so this channel was meant to run an " +
+                "agent. It cannot start until the marker is complete.",
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(explanation, style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(12.dp))
+        Text("A complete marker looks like:", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(4.dp))
+        SelectionContainer {
+            Text(
+                "agentwire:v1;account=<owner>;agent=<bot>;backend=<engine> | Title",
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "account= and agent= are IRC account names, never engine names: account= is the " +
+                "account the bridge takes orders from, and agent= is the account whose messages " +
+                "this client trusts. Only backend= names the engine.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "The bridge also announces a corrected topic as a notice in this channel. Open " +
+                "\"View IRC transcript\" from the menu to read it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -667,7 +729,19 @@ private fun AgentwireRequestCard(
     Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("agentwire_request_${request.rid}")) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(if (request.type == "approval") "Approval required" else "Question", fontWeight = FontWeight.Bold)
-            if (request.redacted) Text("Sensitive details were redacted. Review carefully.", color = MaterialTheme.colorScheme.error)
+            if (request.redacted) {
+                // An approval stays answerable while redacted; a question does not, and saying so
+                // is the difference between a considered limit and a card with a missing button.
+                Text(
+                    if (request.type == "approval") {
+                        "Sensitive details were redacted. Review carefully."
+                    } else {
+                        "Sensitive details were redacted, so this question cannot be answered here. " +
+                            "Skip it, or answer it where the session is running."
+                    },
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             request.summary?.let { Text(it) }
             if (request.inactive) Text("This request belongs to an inactive session: ${request.sid}")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
