@@ -216,7 +216,6 @@ fun ChatListScreen(
         onOpenChannelList = onOpenChannelList,
         onMarkAllRead = viewModel::markCurrentScopeRead,
         onMoveNetwork = viewModel::moveNetwork,
-        onPreviewNetworkMove = viewModel::previewNetworkMove,
         onCommitNetworkOrder = viewModel::commitNetworkOrder,
         selectedBufferId = selectedBufferId,
     )
@@ -264,8 +263,7 @@ fun ChatListContent(
     onMarkAllRead: () -> Unit = {},
     // Manual drawer order (see DrawerReorder.kt); defaulted so previews and tests stay terse.
     onMoveNetwork: (Long, Int) -> Unit = { _, _ -> },
-    onPreviewNetworkMove: (Long, Int) -> List<DrawerRow>? = { _, _ -> null },
-    onCommitNetworkOrder: () -> Unit = {},
+    onCommitNetworkOrder: (List<Long>) -> Unit = {},
     selectedBufferId: Long? = null,
 ) {
     var archiveMode by rememberSaveable { mutableStateOf(false) }
@@ -344,7 +342,6 @@ fun ChatListContent(
                     showMarkAllReadDialog = true
                 },
                 onMoveNetwork = onMoveNetwork,
-                onPreviewNetworkMove = onPreviewNetworkMove,
                 onCommitNetworkOrder = onCommitNetworkOrder,
             )
         },

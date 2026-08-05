@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import kotlin.math.abs
+
 /**
  * Manual drawer ordering. Pure list algebra over [DrawerRow]s — no Compose or Android types — so
  * every move, boundary, and no-op is unit-testable without a device.
@@ -125,6 +127,53 @@ fun drawerMoveShift(
     val neighbour = owner.children.getOrNull(childIndex + delta) ?: return null
     return heights[neighbour.networkId] ?: 0
 }
+
+/**
+ * Arrangement a live drag is showing: the reordered rows plus the signed extent, in pixels, of the
+ * neighbours the dragged unit has swapped past, so its on-screen translation is
+ * `dragTotal - passedExtent`.
+ */
+data class DrawerDragPlacement(val rows: List<DrawerRow>, val passedExtent: Int)
+
+/**
+ * Where a drag that has travelled [dragTotal] pixels from [startRows] puts [networkId]: walk
+ * sibling by sibling in the drag's direction, swapping only while the travel is past the midpoint
+ * of the next neighbour's extent.
+ *
+ * Deliberately a pure recompute from the drag's start arrangement rather than an incremental step
+ * per pointer event: an idempotent function of (start rows, heights, total travel) cannot loop,
+ * cannot drift when a frame is dropped, and cannot disagree with what the gesture already showed.
+ * An unmeasured neighbour (extent 0) stops the walk — "not yet swappable", never a free swap.
+ */
+fun drawerDragPlacement(
+    startRows: List<DrawerRow>,
+    heights: Map<Long, Int>,
+    networkId: Long,
+    dragTotal: Float,
+): DrawerDragPlacement {
+    val direction = if (dragTotal >= 0f) 1 else -1
+    var rows = startRows
+    var passed = 0
+    while (true) {
+        val extent = drawerMoveShift(rows, heights, networkId, direction)?.takeIf { it > 0 } ?: break
+        if (abs(dragTotal) <= passed + extent / 2f) break
+        val moved = moveDrawerRow(rows, networkId, direction)
+        if (moved == rows) break // no sibling that way after all; never spin on a refused move
+        rows = moved
+        passed += extent
+    }
+    return DrawerDragPlacement(rows, direction * passed)
+}
+
+/**
+ * True when [storedRows] already display in the [pending] arrangement, so the pending overlay can
+ * be dropped. Deliberately "already display in", not "identical id lists": Room can publish rows
+ * that differ from what the pending order predicted — a network deleted or added between the write
+ * and its invalidation — and an overlay that no longer changes anything must still settle, or the
+ * drawer stays pinned to a stale arrangement forever.
+ */
+fun drawerOrderSettled(storedRows: List<DrawerRow>, pending: List<Long>?): Boolean =
+    applyDrawerOrder(storedRows, pending) == storedRows
 
 private fun <T> List<T>.moved(from: Int, to: Int): List<T> =
     toMutableList().apply { add(to, removeAt(from)) }

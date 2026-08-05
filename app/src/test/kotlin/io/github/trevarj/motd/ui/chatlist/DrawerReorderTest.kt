@@ -138,6 +138,83 @@ class DrawerReorderTest {
         assertEquals(0, drawerMoveShift(tree, emptyMap(), networkId = 1, delta = 1))
     }
 
+    // libera 60, soju 60(oftc 50, ergo 50) => group extent 160, hackint 70.
+    private val heights = mapOf(1L to 60, 2L to 60, 3L to 50, 4L to 50, 5L to 70)
+
+    @Test
+    fun `drag placement swaps only past the neighbour's midpoint`() {
+        // libera downward towards the soju group (extent 160): nothing until past 80.
+        val before = drawerDragPlacement(tree, heights, networkId = 1, dragTotal = 80f)
+        assertEquals(tree, before.rows)
+        assertEquals(0, before.passedExtent)
+
+        val after = drawerDragPlacement(tree, heights, networkId = 1, dragTotal = 81f)
+        assertEquals(listOf(2L, 3L, 4L, 1L, 5L), ids(after.rows))
+        assertEquals(160, after.passedExtent)
+
+        // A child swaps past its sibling's own extent only (ergo up past oftc, midpoint 25).
+        val child = drawerDragPlacement(tree, heights, networkId = 4, dragTotal = -26f)
+        assertEquals(listOf(1L, 2L, 4L, 3L, 5L), ids(child.rows))
+        assertEquals(-50, child.passedExtent)
+    }
+
+    @Test
+    fun `drag placement crosses several siblings in one recompute`() {
+        // libera down past soju (threshold 80) and then past hackint (threshold 160 + 35).
+        val far = drawerDragPlacement(tree, heights, networkId = 1, dragTotal = 300f)
+        assertEquals(listOf(2L, 3L, 4L, 5L, 1L), ids(far.rows))
+        assertEquals(230, far.passedExtent)
+    }
+
+    @Test
+    fun `drag placement is a pure function of the total travel`() {
+        // Same travel twice gives the same answer; travelling back gives the start back. This is
+        // what makes a lost frame or a repeated event harmless: no incremental state to corrupt.
+        val once = drawerDragPlacement(tree, heights, networkId = 5, dragTotal = -100f)
+        val again = drawerDragPlacement(tree, heights, networkId = 5, dragTotal = -100f)
+        assertEquals(once, again)
+        assertEquals(listOf(1L, 5L, 2L, 3L, 4L), ids(once.rows))
+
+        val home = drawerDragPlacement(tree, heights, networkId = 5, dragTotal = 0f)
+        assertEquals(tree, home.rows)
+        assertEquals(0, home.passedExtent)
+    }
+
+    @Test
+    fun `drag placement always terminates at a boundary or an unmeasured neighbour`() {
+        // Absurd travel upward from the top: no sibling that way, nothing moves, no spin.
+        val stuckTop = drawerDragPlacement(tree, heights, networkId = 1, dragTotal = -100_000f)
+        assertEquals(tree, stuckTop.rows)
+        assertEquals(0, stuckTop.passedExtent)
+
+        // Absurd travel upward from the bottom stops at the top of the list.
+        val toTop = drawerDragPlacement(tree, heights, networkId = 5, dragTotal = -100_000f)
+        assertEquals(listOf(5L, 1L, 2L, 3L, 4L), ids(toTop.rows))
+        assertEquals(-(160 + 60), toTop.passedExtent)
+
+        // An unmeasured neighbour (extent 0) is "not yet swappable", never a free swap.
+        val unmeasured = drawerDragPlacement(tree, emptyMap(), networkId = 1, dragTotal = 100_000f)
+        assertEquals(tree, unmeasured.rows)
+        assertEquals(0, unmeasured.passedExtent)
+    }
+
+    @Test
+    fun `an order settles once the stored rows display it`() {
+        assertTrue(drawerOrderSettled(tree, null))
+        assertTrue(drawerOrderSettled(tree, listOf(1L, 2L, 3L, 4L, 5L)))
+        assertFalse(drawerOrderSettled(tree, listOf(5L, 1L, 2L, 3L, 4L)))
+        assertFalse(drawerOrderSettled(tree, listOf(1L, 2L, 4L, 3L, 5L)))
+    }
+
+    @Test
+    fun `an order settles even when the rows differ from what it predicted`() {
+        // The write listed a network that was deleted before Room published: the surviving rows
+        // already display the requested relative order, so the overlay must drop.
+        assertTrue(drawerOrderSettled(tree, listOf(9L, 1L, 2L, 3L, 4L, 5L)))
+        // Rows the order never ranked (newcomers) already sort last: also settled.
+        assertTrue(drawerOrderSettled(tree, listOf(1L, 2L, 3L, 4L)))
+    }
+
     @Test
     fun `grouping and flattening round-trip the drawer list`() {
         val groups = drawerGroups(tree)

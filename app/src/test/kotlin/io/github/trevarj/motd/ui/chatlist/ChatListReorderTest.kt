@@ -54,12 +54,16 @@ class ChatListReorderTest {
     private class FakeNetworkRepository(initial: List<NetworkEntity>) : NetworkRepository {
         val networks = MutableStateFlow(initial)
         val writes = mutableListOf<List<Long>>()
+        var failWrites = false
 
         override fun observeNetworks(): Flow<List<NetworkEntity>> = networks
         override suspend fun addNetwork(n: NetworkEntity): Long = 0
         override suspend fun updateNetwork(n: NetworkEntity) = Unit
         override suspend fun deleteNetwork(id: Long) = Unit
-        override suspend fun reorderNetworks(orderedIds: List<Long>) { writes += orderedIds }
+        override suspend fun reorderNetworks(orderedIds: List<Long>) {
+            if (failWrites) throw IllegalStateException("disk full")
+            writes += orderedIds
+        }
         override suspend fun networkById(id: Long): NetworkEntity? = null
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = emptyList()
 
@@ -212,57 +216,77 @@ class ChatListReorderTest {
     }
 
     @Test
-    fun `a drag writes once when it ends, not once per row it crosses`() = runTest {
+    fun `a finished drag writes its arrangement once and shows it before Room agrees`() = runTest {
         val repository = FakeNetworkRepository(networks)
         val viewModel = vm(repository)
         val collection = collecting(viewModel)
 
-        // Drag hackint to the top: two steps past libera and past the whole soju group.
-        assertEquals(listOf(1L, 2L, 3L, 4L, 5L), order(viewModel))
-        val afterFirst = viewModel.previewNetworkMove(networkId = 5, delta = -1)
-        assertEquals(listOf(1L, 5L, 2L, 3L, 4L), afterFirst?.map(DrawerRow::networkId))
-        viewModel.previewNetworkMove(networkId = 5, delta = -1)
-        runCurrent()
-
-        // Steps the finger only passed through are never persisted.
-        assertEquals(emptyList<List<Long>>(), repository.writes)
-        assertEquals(listOf(5L, 1L, 2L, 3L, 4L), order(viewModel))
-
-        viewModel.commitNetworkOrder()
+        // The drag lived in the composable; the ViewModel sees only the arrangement it ended on.
+        viewModel.commitNetworkOrder(listOf(5L, 1L, 2L, 3L, 4L))
         runCurrent()
 
         assertEquals(listOf(listOf(5L, 1L, 2L, 3L, 4L)), repository.writes)
-        collection.cancel()
-    }
+        assertEquals(listOf(5L, 1L, 2L, 3L, 4L), order(viewModel))
 
-    @Test
-    fun `consecutive drag steps compose without waiting for a recomposition`() = runTest {
-        val repository = FakeNetworkRepository(networks)
-        val viewModel = vm(repository)
-        val collection = collecting(viewModel)
-
-        // No runCurrent between the steps: one fast frame can cross several rows, and each step must
-        // build on the previous one rather than on the last published state.
-        viewModel.previewNetworkMove(networkId = 5, delta = -1)
-        val afterSecond = viewModel.previewNetworkMove(networkId = 5, delta = -1)
+        repository.publishLastWrite()
         runCurrent()
 
-        assertEquals(listOf(5L, 1L, 2L, 3L, 4L), afterSecond?.map(DrawerRow::networkId))
         assertEquals(listOf(5L, 1L, 2L, 3L, 4L), order(viewModel))
         collection.cancel()
     }
 
     @Test
-    fun `a drag that ends without a move commits nothing`() = runTest {
+    fun `a drag that ends where it started commits nothing`() = runTest {
         val repository = FakeNetworkRepository(networks)
         val viewModel = vm(repository)
         val collection = collecting(viewModel)
 
-        // Picked the row up, never crossed a neighbour, let go.
-        viewModel.commitNetworkOrder()
+        // Picked the row up, wobbled, and dropped it back into place: not an intent to reorder.
+        viewModel.commitNetworkOrder(listOf(1L, 2L, 3L, 4L, 5L))
         runCurrent()
 
         assertEquals(emptyList<List<Long>>(), repository.writes)
+        collection.cancel()
+    }
+
+    @Test
+    fun `the pending order clears even when Room publishes rows that differ from the prediction`() = runTest {
+        val repository = FakeNetworkRepository(networks)
+        val viewModel = vm(repository)
+        val collection = collecting(viewModel)
+
+        viewModel.commitNetworkOrder(listOf(5L, 1L, 2L, 3L, 4L))
+        runCurrent()
+
+        // hackint is deleted before Room can publish the reorder: the published rows will never
+        // equal the id list the write predicted.
+        repository.networks.value = repository.networks.value.filterNot { it.id == 5L }
+        runCurrent()
+        assertEquals(listOf(1L, 2L, 3L, 4L), order(viewModel))
+
+        // The overlay must have settled: a later stored-order change (say, another device) shows
+        // through untouched instead of being re-ranked by a stale pending order forever.
+        val byId = repository.networks.value.associateBy { it.id }
+        repository.networks.value = listOf(byId[2L]!!, byId[3L]!!, byId[4L]!!, byId[1L]!!)
+        runCurrent()
+
+        assertEquals(listOf(2L, 3L, 4L, 1L), order(viewModel))
+        collection.cancel()
+    }
+
+    @Test
+    fun `a failed write drops the optimistic order instead of pinning it`() = runTest {
+        val repository = FakeNetworkRepository(networks)
+        repository.failWrites = true
+        val viewModel = vm(repository)
+        val collection = collecting(viewModel)
+
+        viewModel.commitNetworkOrder(listOf(5L, 1L, 2L, 3L, 4L))
+        runCurrent()
+
+        // Nothing was persisted, so the stored order is the truth again.
+        assertEquals(emptyList<List<Long>>(), repository.writes)
+        assertEquals(listOf(1L, 2L, 3L, 4L, 5L), order(viewModel))
         collection.cancel()
     }
 
@@ -281,23 +305,21 @@ class ChatListReorderTest {
     }
 
     @Test
-    fun `a network added mid-drag does not disturb the pending order`() = runTest {
+    fun `a network added mid-drag joins the committed order at the end`() = runTest {
         val repository = FakeNetworkRepository(networks)
         val viewModel = vm(repository)
         val collection = collecting(viewModel)
 
-        viewModel.previewNetworkMove(networkId = 5, delta = -1)
-        runCurrent()
+        // The drag started before "ergo2" existed, so the arrangement it ends on omits id 6. The
+        // commit layers that arrangement onto the live rows: the newcomer keeps its place at the
+        // end rather than being dropped from the write or stranded away from its siblings.
         repository.networks.value = repository.networks.value + net(6, "ergo2")
         runCurrent()
-
-        // The newcomer lands at the end; the arrangement under the finger is untouched.
-        assertEquals(listOf(1L, 5L, 2L, 3L, 4L, 6L), order(viewModel))
-
-        viewModel.commitNetworkOrder()
+        viewModel.commitNetworkOrder(listOf(1L, 5L, 2L, 3L, 4L))
         runCurrent()
 
         assertEquals(listOf(listOf(1L, 5L, 2L, 3L, 4L, 6L)), repository.writes)
+        assertEquals(listOf(1L, 5L, 2L, 3L, 4L, 6L), order(viewModel))
         collection.cancel()
     }
 }

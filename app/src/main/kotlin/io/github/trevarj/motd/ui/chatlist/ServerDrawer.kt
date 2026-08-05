@@ -36,10 +36,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,7 +64,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import kotlin.math.abs
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.AvatarStyle
@@ -98,32 +100,43 @@ fun ServerDrawerContent(
     onOpenSettings: () -> Unit,
     onMarkAllRead: () -> Unit,
     // Manual ordering. onMoveNetwork is one finished intent (persisted immediately);
-    // onPreviewNetworkMove is one drag step and returns the resulting rows, or null when the entry
-    // has no sibling that way; onCommitNetworkOrder persists whatever the drag arrived at.
+    // onCommitNetworkOrder receives the arrangement a drag terminated on, exactly once per drag.
     onMoveNetwork: (Long, Int) -> Unit = { _, _ -> },
-    onPreviewNetworkMove: (Long, Int) -> List<DrawerRow>? = { _, _ -> null },
-    onCommitNetworkOrder: () -> Unit = {},
+    onCommitNetworkOrder: (List<Long>) -> Unit = {},
 ) {
+    // A drag lives entirely in this composable: nothing leaves it until the gesture terminates, so
+    // no ViewModel round trip can reorder the list (and restart pointer input) under the finger.
     // Measured extent of each drawer entry, so a drag knows how far a swap actually moves it.
     val rowHeights = remember { mutableStateMapOf<Long, Int>() }
     var draggedNetworkId by remember { mutableStateOf<Long?>(null) }
-    // Travel of the dragged entry away from its current slot. Each swap subtracts the distance the
-    // layout just moved it, so the entry stays under the finger across a swap.
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-    // Arrangement as of the last accepted drag step; the published rows may lag a step behind.
-    var draggedRows by remember { mutableStateOf(drawerRows) }
+    // The arrangement the drag started from; every placement is recomputed from it (idempotent in
+    // the total travel), never stepped incrementally against a moving target.
+    var dragStartRows by remember { mutableStateOf<List<DrawerRow>?>(null) }
+    // The arrangement the drag is currently showing, as an id overlay for [applyDrawerOrder].
+    var dragOrderIds by remember { mutableStateOf<List<Long>?>(null) }
+    // Raw finger travel and the extent already swapped past. Read only inside graphicsLayer, so
+    // per-pixel movement never recomposes the drawer; written in the same snapshot as dragOrderIds,
+    // so an order change can never render a frame ahead of the translation compensating for it.
+    var dragTotal by remember { mutableFloatStateOf(0f) }
+    var dragPassedExtent by remember { mutableIntStateOf(0) }
 
     fun endDrag() {
+        val committed = dragOrderIds
         draggedNetworkId = null
-        dragOffset = 0f
+        dragStartRows = null
+        dragOrderIds = null
+        dragTotal = 0f
+        dragPassedExtent = 0
         // Commit on any termination, drop or cancel alike: the rows the user is looking at have
         // already moved, so silently reverting them would be the surprising outcome.
-        onCommitNetworkOrder()
+        committed?.let(onCommitNetworkOrder)
     }
 
     // Leaving the screen mid-drag cancels the pointer stream without a cancel event, so flush any
     // arrangement the drag reached rather than letting it die with the composition.
-    DisposableEffect(Unit) { onDispose { onCommitNetworkOrder() } }
+    val latestCommit by rememberUpdatedState(onCommitNetworkOrder)
+    val latestDragOrder by rememberUpdatedState(dragOrderIds)
+    DisposableEffect(Unit) { onDispose { latestDragOrder?.let(latestCommit) } }
 
     ModalDrawerSheet {
         Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
@@ -155,55 +168,65 @@ fun ServerDrawerContent(
                 onClearFilter = { onSelectNetwork(null) },
             )
 
-            // 2. One entry per network (children indented under their soju root).
-            val dragUnit = draggedNetworkId?.let { drawerDragUnit(draggedRows, it) }.orEmpty()
-            for (row in drawerRows) {
-                val dragging = row.networkId in dragUnit
-                DrawerNetworkItem(
-                    row = row,
-                    selected = selectedNetworkId == row.networkId,
-                    dragging = dragging,
-                    canMoveUp = canMoveDrawerRow(drawerRows, row.networkId, -1),
-                    canMoveDown = canMoveDrawerRow(drawerRows, row.networkId, 1),
-                    onSelect = { onSelectNetwork(row.networkId) },
-                    onConnect = { onConnect(row.networkId) },
-                    onDisconnect = { onDisconnect(row.networkId) },
-                    onServerMessages = { onServerMessages(row.networkId) },
-                    onOpenNetworkSettings = { onOpenNetworkSettings(row.networkId) },
-                    onMove = { delta -> onMoveNetwork(row.networkId, delta) },
-                    onDragStart = {
-                        draggedNetworkId = row.networkId
-                        dragOffset = 0f
-                        draggedRows = drawerRows
-                    },
-                    onDrag = { delta ->
-                        dragOffset += delta
-                        // Swap once the entry has travelled past the midpoint of the neighbour it is
-                        // heading towards, then keep going: one fast frame can cross several rows.
-                        while (true) {
-                            val direction = if (dragOffset > 0f) 1 else -1
-                            // An unmeasured neighbour reports 0; treating that as swappable would
-                            // spin here, so only a real extent can move the entry.
-                            val shift = drawerMoveShift(draggedRows, rowHeights, row.networkId, direction)
-                                ?.takeIf { it > 0 } ?: break
-                            if (abs(dragOffset) <= shift / 2f) break
-                            draggedRows = onPreviewNetworkMove(row.networkId, direction) ?: break
-                            dragOffset -= direction * shift
-                        }
-                    },
-                    onDragEnd = ::endDrag,
-                    modifier = Modifier
-                        .onSizeChanged { rowHeights[row.networkId] = it.height }
-                        .then(
-                            // The dragged entry (a soju root carries its children) follows the
-                            // finger and draws above the rows it is passing.
-                            if (dragging) {
-                                Modifier.zIndex(1f).graphicsLayer { translationY = dragOffset }
-                            } else {
-                                Modifier
-                            },
-                        ),
-                )
+            // 2. One entry per network (children indented under their soju root). While a drag is
+            // live its local order overlays the published rows, so fresh unread/connection state
+            // keeps flowing into rows the drag has already moved.
+            val displayRows = dragOrderIds?.let { applyDrawerOrder(drawerRows, it) } ?: drawerRows
+            val dragUnit = draggedNetworkId?.let { drawerDragUnit(displayRows, it) }.orEmpty()
+            for (row in displayRows) {
+                // Keyed identity: when a swap reorders this list, each row's node (including the
+                // active pointer-input coroutine on its drag handle) moves with the row instead of
+                // being positionally rebound to a different network — an unkeyed reorder restarts
+                // pointerInput mid-gesture and strands the drag with no end/cancel callback.
+                key(row.networkId) {
+                    val dragging = row.networkId in dragUnit
+                    DrawerNetworkItem(
+                        row = row,
+                        selected = selectedNetworkId == row.networkId,
+                        dragging = dragging,
+                        canMoveUp = canMoveDrawerRow(displayRows, row.networkId, -1),
+                        canMoveDown = canMoveDrawerRow(displayRows, row.networkId, 1),
+                        onSelect = { onSelectNetwork(row.networkId) },
+                        onConnect = { onConnect(row.networkId) },
+                        onDisconnect = { onDisconnect(row.networkId) },
+                        onServerMessages = { onServerMessages(row.networkId) },
+                        onOpenNetworkSettings = { onOpenNetworkSettings(row.networkId) },
+                        onMove = { delta -> onMoveNetwork(row.networkId, delta) },
+                        onDragStart = {
+                            draggedNetworkId = row.networkId
+                            dragStartRows = displayRows
+                            dragOrderIds = drawerOrderIds(displayRows)
+                            dragTotal = 0f
+                            dragPassedExtent = 0
+                        },
+                        onDrag = { delta ->
+                            val start = dragStartRows
+                            if (start != null) {
+                                dragTotal += delta
+                                val placement =
+                                    drawerDragPlacement(start, rowHeights, row.networkId, dragTotal)
+                                dragPassedExtent = placement.passedExtent
+                                val ids = drawerOrderIds(placement.rows)
+                                if (ids != dragOrderIds) dragOrderIds = ids
+                            }
+                        },
+                        onDragEnd = ::endDrag,
+                        modifier = Modifier
+                            .onSizeChanged { rowHeights[row.networkId] = it.height }
+                            .then(
+                                // The dragged entry (a soju root carries its children) follows the
+                                // finger and draws above the rows it is passing. Translation is
+                                // finger travel minus the extent the swaps already moved it.
+                                if (dragging) {
+                                    Modifier.zIndex(1f).graphicsLayer {
+                                        translationY = dragTotal - dragPassedExtent
+                                    }
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                    )
+                }
             }
 
             if (scopedUnreadCount > 0) {
@@ -409,6 +432,12 @@ private fun DrawerNetworkItem(
 
             // A lone network, or a lone child under its root, has nowhere to go: no dead affordance.
             if (canMoveUp || canMoveDown) {
+                // pointerInput's block never re-runs on recomposition, so it would keep invoking
+                // the lambdas captured when it first ran; route through rememberUpdatedState so the
+                // gesture always drives the current composition's handlers.
+                val currentOnDragStart by rememberUpdatedState(onDragStart)
+                val currentOnDrag by rememberUpdatedState(onDrag)
+                val currentOnDragEnd by rememberUpdatedState(onDragEnd)
                 Box(
                     modifier = Modifier
                         .padding(end = 8.dp)
@@ -416,14 +445,14 @@ private fun DrawerNetworkItem(
                         .testTag("drawer_network_drag_handle_${row.networkId}")
                         .pointerInput(row.networkId) {
                             detectDragGestures(
-                                onDragStart = { onDragStart() },
-                                onDragEnd = onDragEnd,
-                                onDragCancel = onDragEnd,
+                                onDragStart = { currentOnDragStart() },
+                                onDragEnd = { currentOnDragEnd() },
+                                onDragCancel = { currentOnDragEnd() },
                                 onDrag = { change, amount ->
                                     // Consume so neither the drawer's scroll nor its swipe-to-close
                                     // can take the gesture away mid-reorder.
                                     change.consume()
-                                    onDrag(amount.y)
+                                    currentOnDrag(amount.y)
                                 },
                             )
                         },

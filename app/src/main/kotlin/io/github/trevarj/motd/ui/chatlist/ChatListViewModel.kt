@@ -147,9 +147,12 @@ class ChatListViewModel @Inject constructor(
             if (validSelection != selected) setSelection(validSelection)
 
             val storedDrawerRows = buildDrawerRows(networks, rows.filterNot(ChatListRow::archived), connection)
-            // Room has published the pending order: drop it so stored state is authoritative again.
-            // compareAndSet, because a further move may have landed while this emission was built.
-            if (pending != null && drawerOrderIds(storedDrawerRows) == pending) {
+            // The stored rows already display the pending arrangement: drop the overlay so stored
+            // state is authoritative again. The settled check tolerates rows that differ from what
+            // the write predicted (a network deleted or added in between) — the overlay must always
+            // clear eventually, or the drawer is pinned to a stale order forever. compareAndSet,
+            // because a further move may have landed while this emission was built.
+            if (pending != null && drawerOrderSettled(storedDrawerRows, pending)) {
                 pendingOrder.compareAndSet(pending, null)
             }
 
@@ -274,12 +277,11 @@ class ChatListViewModel @Inject constructor(
     // -- Manual drawer order (see DrawerReorder.kt for the pure move rules) --
     //
     // Persistence timing: a completed intent is written once, immediately. The move actions are one
-    // intent each, so they persist as they happen. A drag is a single intent that is only known when
-    // the finger lifts, so its intermediate positions stay in [pendingOrder] and the whole drag is
-    // written once by [commitNetworkOrder] — a write per crossed row would persist arrangements the
-    // user was only passing through, and a write per frame would be absurd. Every drag termination
-    // commits (drop, cancel, drawer dismissed mid-drag), so the only order that can be lost is one
-    // whose gesture never finished.
+    // intent each, so they persist as they happen. A drag lives entirely in the composable while the
+    // finger is down and arrives here once, as the finished arrangement, on any termination (drop,
+    // cancel, drawer dismissed mid-drag) — a write per crossed row would persist arrangements the
+    // user was only passing through. So the only order that can be lost is one whose gesture never
+    // finished.
 
     /** Move a drawer entry one position within its sibling list and persist immediately. */
     fun moveNetwork(networkId: Long, delta: Int) {
@@ -288,22 +290,16 @@ class ChatListViewModel @Inject constructor(
     }
 
     /**
-     * Drag step: reorder in memory only; [commitNetworkOrder] writes the result. Returns the new
-     * arrangement (null when the move is not possible) so the drag can measure its next step against
-     * the order this call just established, without waiting for a recomposition.
+     * Persist the arrangement a finished drag is showing. [orderIds] is layered onto the live rows
+     * before writing, so a network that appeared mid-drag keeps its place and a deleted id drops
+     * out. An arrangement the drawer already shows writes nothing — a drag that only wobbled in
+     * place, or returned everything to where it started, is not an intent to reorder.
      */
-    fun previewNetworkMove(networkId: Long, delta: Int): List<DrawerRow>? {
-        val moved = movedRows(networkId, delta) ?: return null
-        pendingOrder.value = drawerOrderIds(moved)
-        return moved
-    }
-
-    /** Persist whatever the drawer is currently showing; a no-op when nothing is pending. */
-    fun commitNetworkOrder() {
-        val pending = pendingOrder.value ?: return
-        // What the user is looking at, which is the pending arrangement plus anything that arrived
-        // while the drag was in progress — not the id list captured at the last step.
-        persistNetworkOrder(drawerOrderIds(applyDrawerOrder(state.value.drawerRows, pending)))
+    fun commitNetworkOrder(orderIds: List<Long>) {
+        val current = applyDrawerOrder(state.value.drawerRows, pendingOrder.value)
+        val order = drawerOrderIds(applyDrawerOrder(current, orderIds))
+        if (order == drawerOrderIds(current)) return
+        persistNetworkOrder(order)
     }
 
     /** Rows after moving [networkId] by [delta], or null when the move is not possible. */
@@ -319,7 +315,12 @@ class ChatListViewModel @Inject constructor(
         // Keep showing the new arrangement until Room publishes it, so the drawer never flickers
         // back through the old order between the write and its invalidation.
         pendingOrder.value = order
-        viewModelScope.launch { networkRepository.reorderNetworks(order) }
+        viewModelScope.launch {
+            runCatching { networkRepository.reorderNetworks(order) }
+                // A failed write will never be published back; drop the overlay rather than pin
+                // the drawer to an arrangement the database never accepted (archiveOverrides idiom).
+                .onFailure { pendingOrder.compareAndSet(order, null) }
+        }
     }
 
     fun connect(networkId: Long) = viewModelScope.launch { connectionManager.connect(networkId) }
