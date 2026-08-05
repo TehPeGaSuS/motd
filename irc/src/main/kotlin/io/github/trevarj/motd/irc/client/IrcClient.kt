@@ -202,6 +202,8 @@ class IrcClient(
     private val labels = LabelCorrelator()
     private val unlabeledChatHistory = UnlabeledChatHistoryCorrelator()
     private val unlabeledChatHistoryLock = Mutex()
+    private val unlabeledSearch = UnlabeledSearchCorrelator()
+    private val unlabeledSearchLock = Mutex()
     private val unlabeledChannelListLock = Mutex()
     private var unlabeledChannelListDrain: Job? = null
     private val outboundLock = Mutex()
@@ -256,6 +258,7 @@ class IrcClient(
         criticalEventChannel.cancel(CancellationException("client stopped"))
         labels.failAll(CancellationException("client stopped"))
         unlabeledChatHistory.failAll(CancellationException("client stopped"))
+        unlabeledSearch.failAll(CancellationException("client stopped"))
         cancelWhoxRequests("client stopped")
         batches.reset()
         val t = transport
@@ -390,9 +393,11 @@ class IrcClient(
             if (currentCoroutineContext().isActive) {
                 labels.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
                 unlabeledChatHistory.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
+                unlabeledSearch.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
             } else {
                 labels.failAll(CancellationException("connection closed"))
                 unlabeledChatHistory.failAll(CancellationException("connection closed"))
+                unlabeledSearch.failAll(CancellationException("connection closed"))
             }
             cancelWhoxRequests("connection closed")
             batches.reset()
@@ -448,8 +453,9 @@ class IrcClient(
     ) {
         // Labeled responses are consumed by the correlator (incl. their batch contents).
         if (labels.route(msg)) return
-        // soju does not support labeled-response, but its CHATHISTORY replies remain batched.
+        // Released soju lacks labeled-response, but its CHATHISTORY/SEARCH replies remain batched.
         if (unlabeledChatHistory.route(msg)) return
+        if (unlabeledSearch.route(msg)) return
 
         // Runtime CAP NEW/DEL.
         if (msg.command == "CAP") {
@@ -916,13 +922,13 @@ class IrcClient(
     }
 
     /**
-     * True when this connection can run server-side SEARCH: Ready, `soju.im/search` acked, and
-     * labeled-response available. SEARCH results are correlated by label only — there is no
-     * unlabeled fallback, because nothing else distinguishes them from ordinary traffic.
+     * True when this connection can run server-side SEARCH: Ready with `soju.im/search` acked.
+     * `labeled-response` is NOT required — released soju (through 0.10.x) advertises
+     * `soju.im/search` without it, and unlabelled responses are correlated by their
+     * `soju.im/search` batch type instead (serialized one at a time, like CHATHISTORY).
      */
     val searchAvailable: Boolean
-        get() = _state.value is IrcClientState.Ready &&
-            hasCap("soju.im/search") && hasCap("labeled-response")
+        get() = _state.value is IrcClientState.Ready && hasCap("soju.im/search")
 
     /**
      * Run one soju SEARCH and return its hits in server (ascending) order.
@@ -938,9 +944,14 @@ class IrcClient(
      */
     suspend fun search(req: SearchRequest): List<SearchResultMessage> {
         check(searchAvailable) { "SEARCH is unavailable on this connection" }
-        // Buffering under the label keeps the result PRIVMSGs out of the normal event flow, the
-        // same property `chathistory` relies on.
-        val response = sendLabeledResponse(SearchCommands.search(req))
+        // Buffering under the correlator keeps the result PRIVMSGs out of the normal event flow,
+        // the same property `chathistory` relies on.
+        val msg = SearchCommands.search(req)
+        val response = if (hasCap("labeled-response")) {
+            sendLabeledResponse(msg)
+        } else {
+            sendUnlabeledSearch(msg)
+        }
         val root = response.rootBatch
             ?: if (response.messages.isEmpty()) {
                 // Tolerated: a zero-result SEARCH may complete without ever opening a batch.
@@ -948,17 +959,53 @@ class IrcClient(
             } else {
                 throw IrcProtocolException("SEARCH", "response did not contain a complete root batch")
             }
+        // Two accepted shapes: released soju sends a bare `soju.im/search` root, while soju master
+        // (post-70c4ded) wraps that batch in an outer `labeled-response` batch. Rejecting the
+        // wrapper would turn a server upgrade into a silent protocol failure.
+        val rootType = root.params.getOrNull(1).orEmpty()
+        val labeledWrapper = rootType.equals("labeled-response", ignoreCase = true)
         if (
             root.command != "BATCH" ||
-            !root.params.getOrNull(1).orEmpty().equals("soju.im/search", ignoreCase = true)
+            !(labeledWrapper || rootType.equals("soju.im/search", ignoreCase = true))
         ) {
-            throw IrcProtocolException(
-                "SEARCH",
-                "unexpected batch type ${root.params.getOrNull(1).orEmpty()}",
-            )
+            throw IrcProtocolException("SEARCH", "unexpected batch type $rootType")
+        }
+        if (labeledWrapper) {
+            // Every batch opened inside the wrapper must itself be the search batch.
+            val wrongInner = response.messages.firstOrNull {
+                it.command == "BATCH" &&
+                    it.params.firstOrNull()?.startsWith("+") == true &&
+                    !it.params.getOrNull(1).orEmpty().equals("soju.im/search", ignoreCase = true)
+            }
+            if (wrongInner != null) {
+                throw IrcProtocolException(
+                    "SEARCH",
+                    "unexpected batch type ${wrongInner.params.getOrNull(1).orEmpty()}",
+                )
+            }
         }
         return response.messages.mapNotNull(::parseSearchResult)
     }
+
+    /**
+     * SEARCH without `labeled-response`: register the type-correlated collector before writing so
+     * the reply batch cannot race past dispatch, and serialize requests because an unlabelled
+     * `soju.im/search` batch carries no other request identity.
+     */
+    private suspend fun sendUnlabeledSearch(message: IrcMessage): CorrelatedResponse =
+        unlabeledSearchLock.withLock {
+            val t = transport ?: throw IrcDisconnectedException("SEARCH", null)
+            val deferred = CompletableDeferred<CorrelatedResponse>()
+            unlabeledSearch.register(deferred)
+            try {
+                sendSerialized(t, message)
+                withTimeout(LABEL_TIMEOUT_MS) { deferred.await() }
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                throw IrcTimeoutException("SEARCH")
+            } finally {
+                unlabeledSearch.clear(deferred)
+            }
+        }
 
     /** Rebuild nested response framing so one multiline history item remains one logical event. */
     private fun mapCorrelatedHistory(

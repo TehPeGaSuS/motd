@@ -389,3 +389,147 @@ internal class UnlabeledChatHistoryCorrelator {
         current.deferred.completeExceptionally(IrcProtocolException("CHATHISTORY", detail))
     }
 }
+
+/**
+ * Correlates one SEARCH response on servers such as released soju (0.10.x) that advertise
+ * `soju.im/search` without `labeled-response`. The reply is still a `soju.im/search` batch, so the
+ * caller registers before writing and this collector claims the next batch of that exact type
+ * before the normal event path can surface its result PRIVMSGs as live traffic.
+ *
+ * The owning [IrcClient] serializes unlabelled SEARCH requests, because an unlabelled batch
+ * carries no other request identity.
+ */
+internal class UnlabeledSearchCorrelator {
+    private class Pending(
+        val deferred: CompletableDeferred<CorrelatedResponse>,
+    ) {
+        var rootRef: String? = null
+        var rootBatch: IrcMessage? = null
+        val refs = mutableSetOf<String>()
+        val nestedParents = mutableMapOf<String, String>()
+        val buffered = mutableListOf<IrcMessage>()
+    }
+
+    private var pending: Pending? = null
+
+    @Synchronized
+    fun register(deferred: CompletableDeferred<CorrelatedResponse>) {
+        check(pending == null) { "an unlabelled SEARCH request is already pending" }
+        pending = Pending(deferred)
+    }
+
+    @Synchronized
+    fun clear(deferred: CompletableDeferred<CorrelatedResponse>) {
+        if (pending?.deferred === deferred) pending = null
+    }
+
+    @Synchronized
+    fun failAll(cause: Throwable) {
+        pending?.deferred?.completeExceptionally(cause)
+        pending = null
+    }
+
+    @Synchronized
+    fun failAllDisconnected(reason: String?) {
+        pending?.deferred?.completeExceptionally(IrcDisconnectedException("SEARCH", reason))
+        pending = null
+    }
+
+    /** Returns true only for the registered request's batch or failure response. */
+    @Synchronized
+    fun route(msg: IrcMessage): Boolean {
+        val current = pending ?: return false
+        if (isSearchFailure(msg)) {
+            finishFailure(current, msg)
+            return true
+        }
+
+        if (msg.command == "BATCH") {
+            val refToken = msg.params.firstOrNull().orEmpty()
+            when {
+                refToken.startsWith("+") -> {
+                    val ref = refToken.substring(1)
+                    if (current.rootRef == null) {
+                        // Correlate by batch type: only a `soju.im/search` root belongs to us.
+                        if (!isSearchBatch(msg)) return false
+                        if (ref.isEmpty()) {
+                            failProtocol(current, "root batch used an empty reference")
+                            return true
+                        }
+                        current.rootRef = ref
+                        current.rootBatch = msg
+                        current.refs += ref
+                        return true
+                    }
+                    if (msg.tags["batch"]?.let(current.refs::contains) == true) {
+                        if (ref.isEmpty() || ref in current.refs) {
+                            failProtocol(current, "nested batch reused an open or empty reference")
+                            return true
+                        }
+                        current.refs += ref
+                        current.nestedParents[ref] = msg.tags.getValue("batch")
+                        current.buffered += msg
+                        return true
+                    }
+                }
+                refToken.startsWith("-") -> {
+                    val ref = refToken.substring(1)
+                    if (ref !in current.refs) return false
+                    if (current.nestedParents.values.any { it == ref }) {
+                        failProtocol(current, "nested batch closed before its child batch")
+                        return true
+                    }
+                    if (ref != current.rootRef) current.buffered += msg
+                    current.refs -= ref
+                    current.nestedParents.remove(ref)
+                    if (ref == current.rootRef) {
+                        if (current.refs.isNotEmpty()) {
+                            failProtocol(current, "root batch closed before all nested batches")
+                            return true
+                        }
+                        pending = null
+                        current.deferred.complete(
+                            CorrelatedResponse(current.buffered.toList(), current.rootBatch),
+                        )
+                    }
+                    return true
+                }
+                else -> if (msg.tags["batch"]?.let(current.refs::contains) == true) {
+                    failProtocol(current, "batch content contained malformed framing")
+                    return true
+                }
+            }
+        }
+
+        if (msg.tags["batch"]?.let(current.refs::contains) == true) {
+            current.buffered += msg
+            return true
+        }
+        return false
+    }
+
+    private fun isSearchBatch(msg: IrcMessage): Boolean =
+        msg.params.getOrNull(1).orEmpty().equals("soju.im/search", ignoreCase = true)
+
+    private fun isSearchFailure(msg: IrcMessage): Boolean =
+        msg.command == "FAIL" &&
+            msg.params.firstOrNull()?.equals("SEARCH", ignoreCase = true) == true
+
+    private fun finishFailure(current: Pending, msg: IrcMessage) {
+        pending = null
+        current.deferred.completeExceptionally(
+            IrcCommandException(
+                ircCommand = msg.params.firstOrNull() ?: "SEARCH",
+                code = msg.params.getOrNull(1) ?: "FAIL",
+                text = msg.params.lastOrNull().orEmpty(),
+            ),
+        )
+    }
+
+    private fun failProtocol(current: Pending, detail: String) {
+        pending = null
+        current.refs.clear()
+        current.nestedParents.clear()
+        current.deferred.completeExceptionally(IrcProtocolException("SEARCH", detail))
+    }
+}

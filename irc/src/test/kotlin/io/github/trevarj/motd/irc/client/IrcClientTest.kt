@@ -1492,8 +1492,22 @@ class IrcClientTest {
         assertEquals("#motd", marker.target)
     }
 
-    /** Caps a soju connection needs for server-side SEARCH; correlation is label-only. */
+    /** SEARCH with labeled-response available (unreleased soju master); correlation is by label. */
     private val searchCaps = "message-tags server-time batch labeled-response soju.im/search"
+
+    /**
+     * The CAP LS a real released soju (0.10.x) advertises: `soju.im/search` is present but
+     * `labeled-response` is NOT — that cap exists only in unreleased soju master. Fixtures built
+     * from this set exercise the wire the feature actually ships against.
+     */
+    private val sojuReleaseLs =
+        "draft/pre-away draft/no-implicit-names cap-notify soju.im/search message-tags batch " +
+            "draft/chathistory extended-join draft/message-redaction invite-notify " +
+            "soju.im/no-implicit-names sasl=PLAIN multi-prefix soju.im/account-required " +
+            "account-notify chghost server-time draft/metadata-2=before-connect account-tag " +
+            "away-notify soju.im/webpush draft/read-marker soju.im/bouncer-networks " +
+            "soju.im/read soju.im/bouncer-networks-notify extended-monitor setname " +
+            "echo-message draft/extended-monitor"
 
     @Test
     fun `soju search cap is requested when advertised`() = runTest {
@@ -1621,5 +1635,135 @@ class IrcClientTest {
         ft.feed("@label=$unbatchedLabel ACK")
         runCurrent()
         assertEquals(emptyList<SearchResultMessage>(), unbatched.await())
+    }
+
+    @Test
+    fun `search is available on released soju caps without labeled-response`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredWithCaps(ft, sojuReleaseLs)
+
+        assertFalse(client.hasCap("labeled-response"))
+        assertTrue(client.hasCap("soju.im/search"))
+        assertTrue(
+            "SEARCH must be available on released soju, which never offers labeled-response",
+            client.searchAvailable,
+        )
+    }
+
+    @Test
+    fun `unlabeled search round trip assembles the soju search batch`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredWithCaps(ft, sojuReleaseLs)
+        assertTrue(client.searchAvailable)
+
+        val result = clientScope().async {
+            client.search(SearchRequest(target = "#motd", text = "coroutine", from = "alice"))
+        }
+        runCurrent()
+
+        val sent = ft.sent.last { it.contains("SEARCH") }
+        assertTrue(sent, sent.contains("in=#motd;text=coroutine;from=alice;limit=100"))
+        assertFalse("no label without labeled-response", sent.contains("label="))
+        // soju 0.10.x: a bare soju.im/search batch, no label tag anywhere.
+        ft.feed("BATCH +s soju.im/search")
+        ft.feed(
+            "@batch=s;time=2026-07-14T19:00:00.000Z;msgid=older " +
+                ":alice!u@h PRIVMSG #motd :older coroutine hit",
+        )
+        ft.feed(
+            "@batch=s;time=2026-07-14T19:05:00.000Z;msgid=newer " +
+                ":alice!u@h PRIVMSG #motd :ACTION mentions coroutines",
+        )
+        ft.feed("BATCH -s")
+        runCurrent()
+
+        val hits = result.await()
+        assertEquals(listOf("older", "newer"), hits.map { it.msgid })
+        assertEquals(listOf(SearchResultKind.PRIVMSG, SearchResultKind.ACTION), hits.map { it.kind })
+        assertEquals("mentions coroutines", hits[1].text)
+    }
+
+    @Test
+    fun `unlabeled search results stay out of the live event stream`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredWithCaps(ft, sojuReleaseLs)
+
+        val collected = mutableListOf<IrcEvent>()
+        val job = launch { client.broadcastEvents.toList(collected) }
+        runCurrent()
+        val result = clientScope().async { client.search(SearchRequest(target = "#motd", text = "x")) }
+        runCurrent()
+        ft.feed("BATCH +s soju.im/search")
+        ft.feed("@batch=s :alice!u@h PRIVMSG #motd :a buffered hit")
+        ft.feed("BATCH -s")
+        runCurrent()
+        job.cancel()
+
+        assertEquals(1, result.await().size)
+        assertTrue(
+            "search hits must not surface as live chat events",
+            collected.filterIsInstance<IrcEvent.ChatMessage>().isEmpty(),
+        )
+    }
+
+    @Test
+    fun `unlabeled search FAIL completes with the server code`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredWithCaps(ft, sojuReleaseLs)
+
+        val result = clientScope().async {
+            runCatching { client.search(SearchRequest(target = "#motd", text = "x")) }
+        }
+        runCurrent()
+        ft.feed(":srv FAIL SEARCH INTERNAL_ERROR :search failed")
+        runCurrent()
+
+        val error = result.await().exceptionOrNull()
+        assertTrue(error.toString(), error is IrcCommandException)
+        assertEquals("SEARCH", (error as IrcCommandException).ircCommand)
+        assertEquals("INTERNAL_ERROR", error.code)
+    }
+
+    @Test
+    fun `search accepts the soju master labeled-response wrapper batch`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredWithCaps(ft, searchCaps)
+
+        val result = clientScope().async { client.search(SearchRequest(target = "#motd", text = "x")) }
+        runCurrent()
+        val label = responseLabel(ft.sent.last { it.contains("SEARCH") })
+        // soju master (post-70c4ded): the search batch arrives nested in a labeled-response batch.
+        ft.feed("@label=$label BATCH +outer labeled-response")
+        ft.feed("@batch=outer BATCH +inner soju.im/search")
+        ft.feed(
+            "@batch=inner;time=2026-07-14T19:00:00.000Z;msgid=hit " +
+                ":alice!u@h PRIVMSG #motd :a wrapped hit",
+        )
+        ft.feed("@batch=outer BATCH -inner")
+        ft.feed("BATCH -outer")
+        runCurrent()
+
+        val hits = result.await()
+        assertEquals(listOf("hit"), hits.map { it.msgid })
+        assertEquals("a wrapped hit", hits[0].text)
+    }
+
+    @Test
+    fun `search rejects a labeled-response wrapper holding the wrong batch type`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredWithCaps(ft, searchCaps)
+
+        val result = clientScope().async {
+            runCatching { client.search(SearchRequest(target = "#motd", text = "x")) }
+        }
+        runCurrent()
+        val label = responseLabel(ft.sent.last { it.contains("SEARCH") })
+        ft.feed("@label=$label BATCH +outer labeled-response")
+        ft.feed("@batch=outer BATCH +inner chathistory #motd")
+        ft.feed("@batch=outer BATCH -inner")
+        ft.feed("BATCH -outer")
+        runCurrent()
+
+        assertTrue(result.await().exceptionOrNull() is IrcProtocolException)
     }
 }
