@@ -385,6 +385,9 @@ fun ChatScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val hiddenFoolsRevealed by viewModel.hiddenFoolsRevealed.collectAsStateWithLifecycle()
     val contentPreviews by viewModel.contentPreviews.collectAsStateWithLifecycle()
+    // The global Coil/ExoPlayer stacks fetch directly and cannot honor a per-network proxy, so
+    // media rendered through them is withheld entirely on proxied networks (fail closed).
+    val directMediaAllowed by viewModel.directMediaAllowed.collectAsStateWithLifecycle()
     val audioPlaybackState by viewModel.audioPlaybackState.collectAsStateWithLifecycle()
     val audioWaveforms by viewModel.audioWaveforms.collectAsStateWithLifecycle()
     val audioCacheStatuses by viewModel.audioCacheStatuses.collectAsStateWithLifecycle()
@@ -412,7 +415,7 @@ fun ChatScreen(
         conversationFontScalePercent = appearance.conversationFontScalePercent,
         showComposerEmoji = settings.showComposerEmoji,
         visibleReplyPrefix = replyConfig.visibleChannelPrefix,
-        showImages = contentPreviews.showImages,
+        showImages = contentPreviews.showImages && directMediaAllowed,
         showLinkPreviews = contentPreviews.showLinkPreviews,
         reactionChips = reactionChipsForMessage,
         replyPreview = viewModel::replyPreview,
@@ -501,6 +504,7 @@ fun ChatScreen(
         onInitialPositionUnresolved = viewModel::onInitialPositionUnresolved,
         onScrollPositionChanged = viewModel::saveScrollPosition,
         onClearScrollPosition = viewModel::clearScrollPosition,
+        onForgetScrollPosition = viewModel::forgetScrollPosition,
         onFurthestDisplayedChanged = viewModel::recordFurthestDisplayed,
         onVisibleMsgidsChanged = viewModel::setVisibleMsgids,
         onNeedMembers = viewModel::ensureMembersObserved,
@@ -581,8 +585,8 @@ fun ChatContent(
     // be queued rather than silently dropped; the VM defers the send until the msgid lands.
     onReact: (MessageEntity, String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
-    loadPreview: suspend (String) -> io.github.trevarj.motd.data.repo.LinkPreview?,
-    cachedPreview: (String) -> io.github.trevarj.motd.data.repo.CachedLinkPreview? = { null },
+    loadPreview: suspend (String, Long?) -> io.github.trevarj.motd.data.repo.LinkPreview?,
+    cachedPreview: (String, Long?) -> io.github.trevarj.motd.data.repo.CachedLinkPreview? = { _, _ -> null },
     loadAudioMetadata: suspend (String, Long?) -> AudioMetadata? = { _, _ -> null },
     cachedAudioMetadata: (String) -> CachedAudioMetadata? = { null },
     audioPlaybackState: AudioPlaybackState = AudioPlaybackState(),
@@ -667,6 +671,8 @@ fun ChatContent(
     onInitialPositionUnresolved: () -> Unit = {},
     onScrollPositionChanged: (ChatScrollPosition) -> Unit = {},
     onClearScrollPosition: () -> Unit = {},
+    // Indeterminate snapshot at save time: drop the saved viewport WITHOUT asserting a bottom park.
+    onForgetScrollPosition: () -> Unit = {},
     // Deepest row this visit put on screen. Local-only entry input; never read state, never wire.
     onFurthestDisplayedChanged: (io.github.trevarj.motd.data.db.TimelineAnchor) -> Unit = {},
     onVisibleMsgidsChanged: (List<String>) -> Unit = {},
@@ -1157,47 +1163,40 @@ fun ChatContent(
     fun saveCurrentScrollPosition() {
         if (!initialPositionSettled) return
         val index = listState.firstVisibleItemIndex
-        // Clearing the saved position means "resume at the live bottom next time", so only a
-        // provable bottom may clear it. [isAtEffectiveBottom] is that proof: a viewport parked in
-        // history — a deep jump's destination, say — has unloaded rows below it and therefore does
-        // not qualify, so its place is saved rather than silently discarded. The bounded-island
-        // exception this used to carry is gone with the islands themselves.
-        if (isAtEffectiveBottom(
-                firstVisibleIndex = index,
-                firstVisibleOffset = listState.firstVisibleItemScrollOffset,
-                itemCount = items.itemCount,
-                peek = items::peek,
-                policy = visibilityPolicy,
-            )
-        ) {
-            onClearScrollPosition()
-            return
-        }
-        // Paging can replace the outgoing buffer's snapshot with the incoming empty QUERY snapshot
-        // between itemCount/index reads and onDispose. Treat that transition as no anchor to save;
-        // never index the stale snapshot (the previous direct peek crashed DM navigation).
-        val (anchorIndex, row) = nearestAnchorRow(
+        // Clearing the saved position ASSERTS "resume at the live bottom next time", so only a
+        // provable bottom may clear it — [isAtEffectiveBottom] is that proof, and a viewport parked
+        // in history (a deep jump's destination, say) has unloaded rows below it so it does not
+        // qualify. An indeterminate snapshot — empty because Paging swapped in the incoming
+        // buffer's QUERY snapshot before onDispose (the previous direct peek crashed DM
+        // navigation), or one with no anchorable row in probe reach — proves neither a bottom nor
+        // a place to save, so it only forgets; see [scrollPositionOutcome].
+        when (val outcome = scrollPositionOutcome(
             firstVisibleIndex = index,
+            firstVisibleOffset = listState.firstVisibleItemScrollOffset,
             itemCount = items.itemCount,
             peek = items::peek,
             policy = visibilityPolicy,
-        ) ?: run {
-            onClearScrollPosition()
-            return
+        )) {
+            ScrollPositionOutcome.ParkAtBottom -> onClearScrollPosition()
+            ScrollPositionOutcome.Forget -> onForgetScrollPosition()
+            is ScrollPositionOutcome.Save -> {
+                AutoFollowTrace.record("position_saved", traceBufferId, traceSessionId) {
+                    "index=$index anchor_index=${outcome.anchorIndex} " +
+                        "offset=${listState.firstVisibleItemScrollOffset} " +
+                        "row=${outcome.row.id} at_bottom=false following=${autoFollow.following}"
+                }
+                onScrollPositionChanged(
+                    ChatScrollPosition(
+                        index = outcome.anchorIndex,
+                        offset = listState.firstVisibleItemScrollOffset
+                            .takeIf { outcome.anchorIndex == index } ?: 0,
+                        msgid = outcome.row.msgid,
+                        serverTime = outcome.row.serverTime,
+                        rowId = outcome.row.id,
+                    ),
+                )
+            }
         }
-        AutoFollowTrace.record("position_saved", traceBufferId, traceSessionId) {
-            "index=$index anchor_index=$anchorIndex offset=${listState.firstVisibleItemScrollOffset} " +
-                "row=${row.id} at_bottom=false following=${autoFollow.following}"
-        }
-        onScrollPositionChanged(
-            ChatScrollPosition(
-                index = anchorIndex,
-                offset = listState.firstVisibleItemScrollOffset.takeIf { anchorIndex == index } ?: 0,
-                msgid = row.msgid,
-                serverTime = row.serverTime,
-                rowId = row.id,
-            ),
-        )
     }
 
     // The previous collector allocated and wrote to the position cache for nearly every pixel of a

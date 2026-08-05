@@ -450,6 +450,36 @@ class ChatModelsTest {
         assertTrue(probes <= MAX_PLACEHOLDER_PROBES * 2)
     }
 
+    @Test fun `an indeterminate save-time snapshot forgets the viewport instead of asserting a bottom park`() {
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec())
+        val rows = listOf(message(id = 3), message(id = 2), message(id = 1))
+
+        // The provable cases keep their meaning: a bottom viewport parks, mid-history saves.
+        assertEquals(
+            ScrollPositionOutcome.ParkAtBottom,
+            scrollPositionOutcome(0, 0, rows.size, rows::getOrNull, policy),
+        )
+        assertEquals(
+            ScrollPositionOutcome.Save(1, rows[1]),
+            scrollPositionOutcome(1, 0, rows.size, rows::getOrNull, policy),
+        )
+
+        // Paging swapped in the incoming buffer's empty QUERY snapshot before onDispose. With
+        // itemCount == 0 the effective-bottom loop has nothing below the viewport to reject, so
+        // without the explicit guard this would vacuously "prove" a bottom park for a reader who
+        // may have been parked deep in the outgoing buffer's history. It must only forget.
+        val never: (Int) -> MessageEntity? = { error("an empty snapshot must not be probed") }
+        assertEquals(ScrollPositionOutcome.Forget, scrollPositionOutcome(5, 0, 0, never, policy))
+
+        // Non-empty snapshot with nothing anchorable in probe reach: proves "no anchor was found",
+        // not "the reader was at the bottom".
+        val placeholders: (Int) -> MessageEntity? = { null }
+        assertEquals(
+            ScrollPositionOutcome.Forget,
+            scrollPositionOutcome(25_000, 0, 50_000, placeholders, policy),
+        )
+    }
+
     @Test fun `normal entry scrolls newest only when retained state is off bottom`() {
         assertFalse(shouldScrollToInitialTarget(ChatPositionTarget(index = 0), atBottom = true))
         assertTrue(shouldScrollToInitialTarget(ChatPositionTarget(index = 0), atBottom = false))

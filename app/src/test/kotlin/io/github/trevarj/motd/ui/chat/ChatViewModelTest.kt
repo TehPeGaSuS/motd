@@ -48,6 +48,7 @@ import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioMetadataRepository
 import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.audio.AudioPlaybackState
+import io.github.trevarj.motd.audio.DirectMediaPolicy
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcClientConfig
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -1088,6 +1089,55 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `entry positioning is bounded when history catch-up overruns its window`() = runTest {
+        // The catch-up gate holds `historyCatchUpPending` across its WHOLE retry loop (exponential
+        // backoff up to 30s per attempt), and while entry waits on it the screen keeps auto-follow,
+        // the newest FAB, and read-marker gating disarmed — captured live as a 42-second dead
+        // window. The wait is therefore bounded: within the window the gate behaves exactly as the
+        // test above pins, and once it expires entry anchors on local data the way an offline
+        // network already does.
+        val markerId = db.messageDao().insertAll(
+            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
+        ).single()
+        val unreadId = db.messageDao().insertAll(
+            listOf(message(channel.id, "local unread", "m101", "alice").copy(serverTime = 101)),
+        ).single()
+        val manager = FakeConnectionManager(
+            networkId = network.id,
+            state = IrcClientState.Ready("me", emptySet(), emptyMap()),
+            client = testClient(),
+            historyPending = setOf(network.id),
+        )
+        val messages = FakeMessageRepository()
+        messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(unreadId))
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
+            manager,
+            messages = messages,
+        )
+        vm.state.first { it.buffer != null }
+        runCurrent()
+
+        // Within the bounded window the gate holds: no target resolves against un-caught-up data.
+        assertNull(vm.initialTarget.value)
+
+        // Catch-up never finishes. The bound expires and entry proceeds on the local store,
+        // anchoring the divider at the locally known first unread row.
+        advanceTimeBy(ENTRY_HISTORY_READY_TIMEOUT_MS)
+        val target = checkNotNull(vm.initialTarget.first { it != null })
+        assertEquals(unreadId, target.expectedEventId)
+        assertEquals(101L, target.serverTime)
+
+        // The screen settles that target; catch-up completing later must not republish a stale
+        // divider target and yank the viewport away from wherever the reader now is.
+        vm.onInitialPositionHandled()
+        manager.finishHistoryCatchUp(network.id)
+        advanceUntilIdle()
+        assertNull(vm.initialTarget.value)
+        assertEquals(EntryPositionState.Settled, vm.entryState.value)
+    }
+
+    @Test
     fun `synthetic mute floor fallback uses positional entry without impossible identity`() = runTest {
         val messages = FakeMessageRepository(newerCount = 1)
         val vm = viewModel(
@@ -1445,6 +1495,56 @@ class ChatViewModelTest {
         assertEquals(0, checkNotNull(vm.initialTarget.first { it != null }).index)
     }
 
+    @Test
+    fun `sending while entry waits on history catch-up settles entry so the timeline can follow`() = runTest {
+        // The entry target is gated on the network's history catch-up (entryHistoryReady), which
+        // can run for tens of seconds after a reconnect. The screen keeps its entire auto-follow
+        // machinery disarmed until entry settles, so a message sent inside that window echoed into
+        // a timeline that did not follow it: the viewport stayed keyed to the previous newest row.
+        // A send is an explicit trip to the live bottom (the screen scrolls there as part of the
+        // same gesture), so it must abandon the pending entry exactly as the newest FAB does.
+        val markerId = db.messageDao().insertAll(
+            listOf(message(channel.id, "marker", null, "alice").copy(serverTime = 100, dedupKey = "marker")),
+        ).single()
+        db.messageDao().insertAll(
+            (1..5).map { ordinal ->
+                message(channel.id, "unread-$ordinal", "unread-$ordinal", "alice").copy(
+                    serverTime = 1_000L + ordinal,
+                    dedupKey = "unread-$ordinal",
+                )
+            },
+        )
+        val manager = FakeConnectionManager(network.id, historyPending = setOf(network.id))
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
+            manager,
+        )
+        vm.state.first { it.buffer != null }
+        // runCurrent, not advanceUntilIdle: the entry wait is now bounded, and advancing virtual
+        // time to idle would expire ENTRY_HISTORY_READY_TIMEOUT_MS and publish the local-data
+        // target before the send this test is about.
+        runCurrent()
+
+        // Catch-up has not finished and the bounded wait has not expired: entry is still pending
+        // and no target has been published.
+        assertEquals(EntryPositionState.Pending, vm.entryState.value)
+        assertNull(vm.initialTarget.value)
+
+        vm.saveDraft("hello there")
+        vm.submit("hello there", {}, {}).join()
+
+        // The author is at the live bottom now; entry settles so the follow machinery arms and
+        // the echoed row is classified as a live arrival instead of landing above a dead gate.
+        assertEquals(EntryPositionState.Settled, vm.entryState.value)
+        assertEquals(listOf(SentMessage(channel.id, "hello there", null)), manager.messages)
+
+        // When catch-up completes, the abandoned divider target must not fire and yank the
+        // viewport away from the message that was just sent.
+        manager.finishHistoryCatchUp(network.id)
+        advanceUntilIdle()
+        assertNull(vm.initialTarget.value)
+    }
+
     /** Five rows, oldest first, at serverTime 100..500. Index 0 is the newest. */
     private suspend fun seedFiveRows(): List<Long> = db.messageDao().insertAll(
         (1..5).map { ordinal ->
@@ -1698,6 +1798,27 @@ class ChatViewModelTest {
         assertNull(messages.firstInitialKey.await())
     }
 
+    @Test
+    fun direct_media_starts_closed_and_opens_only_for_unproxied_networks() = runTest {
+        // Fail closed while the network row is unknown; open once the policy confirms no proxy.
+        val vm = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            directMediaPolicy = DirectMediaPolicy { it == network.id },
+        )
+        assertFalse(vm.directMediaAllowed.value)
+        advanceUntilIdle()
+        assertTrue(vm.directMediaAllowed.value)
+
+        val proxiedVm = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            directMediaPolicy = DirectMediaPolicy { false },
+        )
+        advanceUntilIdle()
+        assertFalse(proxiedVm.directMediaAllowed.value)
+    }
+
     private fun viewModel(
         buffer: BufferEntity,
         manager: FakeConnectionManager,
@@ -1718,6 +1839,7 @@ class ChatViewModelTest {
         restoredState: Map<String, Any> = emptyMap(),
         // Injectable so a test can observe the write-through entry-position keys after transitions.
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
+        directMediaPolicy: DirectMediaPolicy = DirectMediaPolicy { false },
     ): ChatViewModel {
         val eventSink: IrcEventSink = processor
         val routeState = mutableMapOf<String, Any>("bufferId" to routeBufferId)
@@ -1737,7 +1859,7 @@ class ChatViewModelTest {
             typingTracker = FakeTypingTracker(),
             foregroundBufferTracker = foreground,
             linkPreviewRepository = object : LinkPreviewRepository {
-                override suspend fun preview(url: String): LinkPreview? = null
+                override suspend fun preview(url: String, networkId: Long?): LinkPreview? = null
             },
             draftStore = ComposerDraftStore(db),
             scrollPositionStore = scrollPositions,
@@ -1750,6 +1872,7 @@ class ChatViewModelTest {
             contentPreviewPrefs = FakeContentPreviewPrefs(),
             audioMetadataRepository = FakeAudioMetadataRepository(),
             audioPlaybackController = FakeAudioPlaybackController(),
+            directMediaPolicy = directMediaPolicy,
         )
     }
 

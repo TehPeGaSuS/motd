@@ -622,6 +622,51 @@ fun nearestAnchorRow(
     return null
 }
 
+/**
+ * What leaving the timeline should record about the viewport. The distinction that matters is
+ * between the two "nothing to save" cases: [ParkAtBottom] ASSERTS the reader left at the live
+ * bottom (see [ChatScrollPositionStore.markParkedAtBottom] — the next entry goes to the newest
+ * row), while [Forget] only states that this snapshot proves nothing and the saved viewport is
+ * dropped without any claim about where the reader was.
+ */
+internal sealed interface ScrollPositionOutcome {
+    /** The viewport provably rests at the effective bottom; record the bottom park. */
+    data object ParkAtBottom : ScrollPositionOutcome
+
+    /** A resolvable anchor row; save it as the viewport to restore. */
+    data class Save(val anchorIndex: Int, val row: MessageEntity) : ScrollPositionOutcome
+
+    /** Indeterminate snapshot: forget the saved viewport without asserting anything. */
+    data object Forget : ScrollPositionOutcome
+}
+
+/**
+ * Classify the viewport at save time (scroll settle / dispose).
+ *
+ * An empty snapshot is [ScrollPositionOutcome.Forget], and it must be ruled out BEFORE the bottom
+ * probe: Paging can swap the outgoing buffer's snapshot for the incoming buffer's empty QUERY
+ * snapshot between the caller's index reads and onDispose, and against `itemCount == 0` the
+ * effective-bottom loop has nothing below the viewport to reject, so it would vacuously "prove" a
+ * bottom the reader may never have been at. The same reasoning covers [nearestAnchorRow] returning
+ * null on a non-empty snapshot (nothing but placeholders in probe reach): that path only proves no
+ * anchor was found, not a bottom park, so it forgets rather than claims.
+ */
+internal fun scrollPositionOutcome(
+    firstVisibleIndex: Int,
+    firstVisibleOffset: Int,
+    itemCount: Int,
+    peek: (Int) -> MessageEntity?,
+    policy: MessageVisibilityPolicy,
+): ScrollPositionOutcome {
+    if (itemCount <= 0) return ScrollPositionOutcome.Forget
+    if (isAtEffectiveBottom(firstVisibleIndex, firstVisibleOffset, itemCount, peek, policy)) {
+        return ScrollPositionOutcome.ParkAtBottom
+    }
+    val (anchorIndex, row) = nearestAnchorRow(firstVisibleIndex, itemCount, peek, policy)
+        ?: return ScrollPositionOutcome.Forget
+    return ScrollPositionOutcome.Save(anchorIndex, row)
+}
+
 /** One exact destination model shared by deep links and saved positions. */
 data class ChatPositionTarget(
     val index: Int,

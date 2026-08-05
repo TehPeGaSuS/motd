@@ -13,6 +13,7 @@ import io.github.trevarj.motd.audio.AudioMetadataRepository
 import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.audio.CachedAudioMetadata
+import io.github.trevarj.motd.audio.DirectMediaPolicy
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.DccTransferDao
@@ -80,6 +81,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
@@ -93,6 +95,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import javax.inject.Inject
@@ -208,6 +211,9 @@ class ChatViewModel @Inject constructor(
     // consumer is the composable, not this class; Noop default for hand-built call sites, as
     // gapFiller above.
     val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
+    // Fail-closed default for hand-built call sites: the global image/video stacks cannot be
+    // routed through a network proxy, so unknown transport policy means no direct media fetches.
+    private val directMediaPolicy: DirectMediaPolicy = DirectMediaPolicy { false },
     contentPreviewPrefs: ContentPreviewPrefs,
 ) : ViewModel() {
     val contentPreviews: StateFlow<ContentPreviewConfig> = contentPreviewPrefs.config
@@ -479,6 +485,17 @@ class ChatViewModel @Inject constructor(
     private val buffer: StateFlow<BufferEntity?> = bufferRepository.observeBuffer(bufferId)
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /**
+     * Whether the app-global image/video stacks (Coil, ExoPlayer) may fetch network content for
+     * this buffer. Starts false so a proxied network cannot leak a direct fetch during the initial
+     * lookup; flips once the network row confirms it uses no obfuscated transport.
+     */
+    val directMediaAllowed: StateFlow<Boolean> = buffer
+        .mapNotNull { it?.networkId }
+        .distinctUntilChanged()
+        .map { networkId -> directMediaPolicy.directMediaAllowed(networkId) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     /** The database remains authoritative: a completed write is reflected only after Room emits. */
     val conversationLayout: StateFlow<ConversationLayoutState> = combine(
@@ -961,11 +978,11 @@ class ChatViewModel @Inject constructor(
         connectionManager.joinChannel(currentBuffer.networkId, currentBuffer.ircTarget)
     }
 
-    suspend fun linkPreview(url: String): LinkPreview? =
-        if (contentPreviews.value.showLinkPreviews) linkPreviewRepository.preview(url) else null
+    suspend fun linkPreview(url: String, networkId: Long?): LinkPreview? =
+        if (contentPreviews.value.showLinkPreviews) linkPreviewRepository.preview(url, networkId) else null
 
-    fun cachedLinkPreview(url: String) =
-        if (contentPreviews.value.showLinkPreviews) linkPreviewRepository.cachedPreview(url) else null
+    fun cachedLinkPreview(url: String, networkId: Long?) =
+        if (contentPreviews.value.showLinkPreviews) linkPreviewRepository.cachedPreview(url, networkId) else null
 
     suspend fun audioMetadata(url: String, networkId: Long?): AudioMetadata? =
         if (contentPreviews.value.showLinkPreviews) audioMetadataRepository.metadata(url, networkId) else null
@@ -1014,6 +1031,15 @@ class ChatViewModel @Inject constructor(
         when (val cmd = parseCommand(raw)) {
             is ChatCommand.None -> Unit
             is ChatCommand.Message -> {
+                // Sending parks the author at the live bottom: the screen scrolls there as part of
+                // the same gesture. Entry positioning can still be pending here — its target waits
+                // on history catch-up (entryHistoryReady, bounded by
+                // ENTRY_HISTORY_READY_TIMEOUT_MS) — and while it is pending the screen keeps the
+                // whole auto-follow machinery disarmed, so the echoed message would land with the
+                // viewport anchored one row above it. Abandon the stale one-shot positioning
+                // exactly as the newest FAB does; a divider entry is moot for a reader already
+                // conversing at the bottom.
+                jumpToNewest()
                 val roomId = operationalBufferId.value
                 val submission = prepareDraftSubmission(raw) ?: return@launch
                 try {
@@ -1513,8 +1539,20 @@ class ChatViewModel @Inject constructor(
             val entrySpec = MessageVisibilitySpec.from(settingsRepository.settings.first())
             val initialEntryBuffer = bufferRepository.observeBuffer(bufferId).firstOrNull()
             if (!hasDeepJump && initialEntryBuffer != null && initialEntryBuffer.type != BufferType.SERVER) {
-                connectionManager.connectionActivity.first { activity ->
-                    entryHistoryReady(activity, initialEntryBuffer.networkId)
+                // Wait for history catch-up so the divider anchors on caught-up data — but only for
+                // a bounded window. `historyCatchUpPending` is held across catch-up's entire retry
+                // loop (exponential backoff up to 30s per attempt), and while entry stays pending
+                // the screen keeps its whole follow machinery disarmed: no auto-follow at the live
+                // bottom, no newest FAB, no read-marker advancement — captured live as a 42-second
+                // dead window. When the window expires, entry proceeds against local data, which is
+                // exactly how an offline network already enters (entryHistoryReady is true when
+                // Disconnected), and the once-per-target re-resolve repairs an index that late
+                // history shifts. The bound also caps how stale a divider target can be when it
+                // finally fires: at most this many milliseconds after open, not a minute later.
+                withTimeoutOrNull(ENTRY_HISTORY_READY_TIMEOUT_MS) {
+                    connectionManager.connectionActivity.first { activity ->
+                        entryHistoryReady(activity, initialEntryBuffer.networkId)
+                    }
                 }
             }
             // Read the buffer again after catch-up because read-marker convergence runs before the
@@ -1828,6 +1866,15 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
+     * The save-time snapshot was indeterminate (e.g. Paging swapped in an empty QUERY snapshot
+     * during navigation, or no anchorable row was in reach): drop the saved viewport without
+     * asserting a bottom park. See [ScrollPositionOutcome.Forget].
+     */
+    fun forgetScrollPosition() {
+        scrollPositionStore.remove(operationalBufferId.value)
+    }
+
+    /**
      * The timeline put this row on screen. Local-only: it decides where a REOPEN lands and nothing
      * else. It is not read state, is never persisted, and never leaves the device — see
      * [ChatScrollPositionStore]. The outbound `MARKREAD` path is [markRead] alone, and it is
@@ -2042,6 +2089,15 @@ internal fun needsDeepJumpResolution(
     jumpConsumed: Boolean,
     entryState: EntryPositionState,
 ): Boolean = hasDeepJump && (!jumpConsumed || entryState is EntryPositionState.Pending)
+
+/**
+ * Upper bound on how long normal entry waits for [entryHistoryReady] before positioning against
+ * local data. Long enough for a healthy catch-up (typically one CHATHISTORY pass, low seconds) and
+ * a first 2s-backoff retry; short enough that a struggling catch-up cannot keep the screen's
+ * follow/FAB/read machinery disarmed for its whole retry loop. The fallback is the already-shipped
+ * offline entry behavior, not a new mode.
+ */
+internal const val ENTRY_HISTORY_READY_TIMEOUT_MS = 8_000L
 
 internal fun entryHistoryReady(
     activity: io.github.trevarj.motd.service.ConnectionActivitySnapshot,
