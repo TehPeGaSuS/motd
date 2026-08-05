@@ -1,0 +1,5 @@
+- Importing a large bouncer account no longer bogs down the phone: the first sync grabs recent history quickly and older conversations trickle in quietly behind it.
+- Choose how much history to sync when importing a soju account (7, 30, or 90 days, or everything).
+- Imported backlog starts read; only new activity is badged.
+- Unread badges stay bounded on huge backlogs.
+- The chat list shows history sync progress after reconnecting.
