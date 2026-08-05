@@ -809,10 +809,7 @@ class ConnectionManagerImpl @Inject constructor(
                         put("network_id", id)
                         put("state", state::class.simpleName)
                         when (state) {
-                            is IrcClientState.Ready -> {
-                                put("caps", state.caps.sorted().joinToString(","))
-                                put("isupport_keys", state.isupport.keys.sorted().joinToString(","))
-                            }
+                            is IrcClientState.Ready -> putAll(readyStateDiagnosticFields(state))
                             is IrcClientState.Failed -> {
                                 put("fatal", state.fatal)
                                 put("error_fp", diagnostics.fingerprint(state.reason))
@@ -2082,6 +2079,27 @@ internal fun shouldApplyDozePushHandoff(
     deviceIdle: Boolean,
     deliveryMode: DeliveryMode,
 ): Boolean = !appForeground && deviceIdle && deliveryMode == DeliveryMode.UNIFIED_PUSH
+
+/**
+ * Diagnostic fields for a Ready connection (`connections`/`state_changed`). The `caps` value is
+ * clipped to the diagnostic sanitizer's 256-char budget, so a long soju cap list silently loses
+ * its tail; the boolean gates that decide feature availability are therefore derived here as
+ * their own fields. Cap names are compared with any `=value` suffix stripped, matching
+ * [io.github.trevarj.motd.irc.client.IrcClient.hasCap].
+ */
+internal fun readyStateDiagnosticFields(state: IrcClientState.Ready): Map<String, Any?> {
+    val capNames = state.caps.mapTo(mutableSetOf()) { it.substringBefore('=') }
+    return mapOf(
+        "caps" to state.caps.sorted().joinToString(","),
+        "isupport_keys" to state.isupport.keys.sorted().joinToString(","),
+        "caps_count" to state.caps.size,
+        "cap_labeled_response" to ("labeled-response" in capNames),
+        "cap_soju_search" to ("soju.im/search" in capNames),
+        "cap_chathistory" to ("draft/chathistory" in capNames),
+        // Mirrors IrcClient.searchAvailable: the state is already Ready, so the cap decides.
+        "search_available" to ("soju.im/search" in capNames),
+    )
+}
 
 internal fun wantedNetworkUsesEmbeddedReality(
     networkId: Long,
