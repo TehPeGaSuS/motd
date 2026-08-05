@@ -22,17 +22,36 @@ import javax.inject.Singleton
 class ChatScrollPositionStore @Inject constructor() {
     private val positions = java.util.concurrent.ConcurrentHashMap<Long, ChatScrollPosition>()
     private val displayed = java.util.concurrent.ConcurrentHashMap<Long, TimelineAnchor>()
+    private val bottomParks = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
 
     fun get(bufferId: Long): ChatScrollPosition? = positions[bufferId]
 
     fun put(bufferId: Long, position: ChatScrollPosition) {
         positions[bufferId] = position
+        bottomParks.remove(bufferId)
     }
 
     /** Forgets the saved viewport ONLY. What the reader has already seen does not become untrue. */
     fun remove(bufferId: Long) {
         positions.remove(bufferId)
+        bottomParks.remove(bufferId)
     }
+
+    /**
+     * Records that the reader left this room at the live bottom.
+     *
+     * Absence of a saved viewport cannot carry this on its own, because it is also what a room
+     * nobody has opened yet looks like, and those two want opposite entries: a first open with
+     * unread history belongs at the divider, while a reader who was following the conversation
+     * belongs back at the newest row. Leaving at the bottom used to only clear the viewport, so
+     * entry fell through to the unread anchor and parked the follower behind a divider.
+     */
+    fun markParkedAtBottom(bufferId: Long) {
+        positions.remove(bufferId)
+        bottomParks += bufferId
+    }
+
+    fun isParkedAtBottom(bufferId: Long): Boolean = bufferId in bottomParks
 
     /** Deepest (oldest) row this process has put on screen for the room, or null if none has. */
     fun furthestDisplayed(bufferId: Long): TimelineAnchor? = displayed[bufferId]

@@ -1402,6 +1402,49 @@ class ChatViewModelTest {
         assertEquals(37, positions.get(channel.id)?.offset)
     }
 
+    @Test
+    fun `leaving at the bottom returns to the bottom even when unread arrived while away`() = runTest {
+        // Same shape as the divider-entry case above, which resolves the unread anchor to index
+        // 515 — so this asserts the park BEATS a deep unread anchor, not merely that both agree.
+        val markerId = db.messageDao().insertAll(
+            listOf(message(channel.id, "marker", null, "alice").copy(serverTime = 100, dedupKey = "marker")),
+        ).single()
+        val historyIds = db.messageDao().insertAll(
+            (1..513).map { ordinal ->
+                message(channel.id, "history-$ordinal", null, "alice").copy(
+                    serverTime = 100L + ordinal,
+                    dedupKey = "history-$ordinal",
+                )
+            },
+        )
+        db.messageDao().insertAll(
+            (1..3).map { ordinal ->
+                message(channel.id, "live-$ordinal", "live-$ordinal", "alice").copy(
+                    serverTime = 1_000L + ordinal,
+                    dedupKey = "live-$ordinal",
+                )
+            },
+        )
+        // The reader was following the conversation when they navigated away, which clears the
+        // saved viewport and records the park. Absence alone used to be indistinguishable from a
+        // room nobody has opened, so entry fell through to the unread anchor and stranded the
+        // follower behind a divider covering messages that arrived while they were away.
+        val positions = ChatScrollPositionStore().apply { markParkedAtBottom(channel.id) }
+
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
+            FakeConnectionManager(network.id),
+            messages = FakeMessageRepository(
+                events = listOf(checkNotNull(db.messageDao().byCanonicalId(historyIds.first()))),
+                newerCount = 515,
+            ),
+            scrollPositions = positions,
+        )
+        vm.state.first { it.buffer != null }
+
+        assertEquals(0, checkNotNull(vm.initialTarget.first { it != null }).index)
+    }
+
     /** Five rows, oldest first, at serverTime 100..500. Index 0 is the newest. */
     private suspend fun seedFiveRows(): List<Long> = db.messageDao().insertAll(
         (1..5).map { ordinal ->

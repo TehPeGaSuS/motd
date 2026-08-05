@@ -377,6 +377,8 @@ class ChatViewModel @Inject constructor(
     private suspend fun entryPagingKey(spec: MessageVisibilitySpec): Int? {
         if (routeHasDeepJump) return null
         if (_entryState.value !is EntryPositionState.Pending) return null
+        // Returning to the live bottom is exactly the unkeyed newest-first load.
+        if (parkedAtBottom()) return null
         return try {
             // Non-destructive on this path: it runs before catch-up has finished writing, and a
             // saved anchor that cannot be resolved YET is not a saved anchor that is gone.
@@ -403,6 +405,16 @@ class ChatViewModel @Inject constructor(
      * in one coordinate system. The identity-resolving overload is deliberate: a coalesced
      * watermark row follows its winner rather than counting against a retired event id.
      */
+    /**
+     * True when the reader left this room at the live bottom, using the same room-with-buffer
+     * fallback keying as the rest of the viewport memory.
+     */
+    private fun parkedAtBottom(): Boolean {
+        val roomId = operationalBufferId.value
+        return scrollPositionStore.isParkedAtBottom(roomId) ||
+            (bufferId != roomId && scrollPositionStore.isParkedAtBottom(bufferId))
+    }
+
     private suspend fun furthestDisplayedEntryIndex(spec: MessageVisibilitySpec): Int? {
         val roomId = operationalBufferId.value
         val seen = scrollPositionStore.furthestDisplayed(roomId)
@@ -1554,18 +1566,26 @@ class ChatViewModel @Inject constructor(
             // `countTimelineNewer` are both `countTimelineNewerQuery` over this room and spec —
             // pinned by MessageRepositoryPagingTest so neither can grow a predicate the other lacks.
             if (!hasDeepJump && _entryState.value !is EntryPositionState.Settled) {
-                val unreadTarget = firstUnread?.let {
-                    readMarkerEntryTarget(it, entrySpec, requireExactIdentity = true)
-                }
-                _initialTarget.value = preferredEntryTarget(
-                    saved = restoredScrollPosition(entrySpec),
-                    firstUnread = unreadTarget,
-                    furthestDisplayedIndex = furthestDisplayedEntryIndex(entrySpec),
-                )
-                    ?: realMarker?.let {
-                        readMarkerEntryTarget(it, entrySpec, requireExactIdentity = false)
+                _initialTarget.value = if (parkedAtBottom()) {
+                    // A reader who left at the live bottom was following the conversation, so they
+                    // return to it. This precedes both anchors AND the read-marker fallback: every
+                    // room anyone has read has a marker, so consulting it here would divert the
+                    // follower behind a divider exactly as the unread anchor used to.
+                    ChatPositionTarget(index = 0)
+                } else {
+                    val unreadTarget = firstUnread?.let {
+                        readMarkerEntryTarget(it, entrySpec, requireExactIdentity = true)
                     }
-                    ?: ChatPositionTarget(index = 0)
+                    preferredEntryTarget(
+                        saved = restoredScrollPosition(entrySpec),
+                        firstUnread = unreadTarget,
+                        furthestDisplayedIndex = furthestDisplayedEntryIndex(entrySpec),
+                    )
+                        ?: realMarker?.let {
+                            readMarkerEntryTarget(it, entrySpec, requireExactIdentity = false)
+                        }
+                        ?: ChatPositionTarget(index = 0)
+                }
             }
         }
         viewModelScope.launch {
@@ -1799,8 +1819,12 @@ class ChatViewModel @Inject constructor(
         scrollPositionStore.put(operationalBufferId.value, position)
     }
 
+    /**
+     * Called only from a provable bottom, so it states where entry should land rather than merely
+     * forgetting where it was. See [ChatScrollPositionStore.markParkedAtBottom].
+     */
     fun clearScrollPosition() {
-        scrollPositionStore.remove(operationalBufferId.value)
+        scrollPositionStore.markParkedAtBottom(operationalBufferId.value)
     }
 
     /**
