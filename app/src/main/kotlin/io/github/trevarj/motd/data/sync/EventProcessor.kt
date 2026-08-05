@@ -981,6 +981,11 @@ class EventProcessor @Inject constructor(
         )
         bufferDao.setOldestFetchedTime(canonicalRoomId, oldest?.serverTime)
         if (complete) bufferDao.markHistoryComplete(canonicalRoomId)
+        // History seeded into a room that held no durable content starts read: backlog predating
+        // the app must not badge. A marker or anchor that already exists wins inside the DAO guard.
+        if (previousNewest == null) {
+            newest?.serverTime?.let { bufferDao.seedHistoryUnreadFloor(canonicalRoomId, it) }
+        }
         return PersistedHistoryPage(canonicalRoomId, pageCommit.inserted)
     }
 

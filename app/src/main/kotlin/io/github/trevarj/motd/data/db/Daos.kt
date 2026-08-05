@@ -477,6 +477,17 @@ interface BufferDao {
     )
     suspend fun advanceLocalUnreadFloor(id: Long, timestamp: Long)
 
+    /**
+     * Backlog imported into a room with no prior durable content starts read: seed the floor once,
+     * losing to any existing local anchor, floor, or server-derived marker already applied.
+     */
+    @Query(
+        """UPDATE buffers SET localUnreadFloorTime = :floorTime
+           WHERE id = :id AND localUnreadFloorTime IS NULL
+             AND localReadAnchorTime IS NULL AND localReadAnchorEventId IS NULL""",
+    )
+    suspend fun seedHistoryUnreadFloor(id: RoomId, floorTime: Long)
+
     /** Put the local floor back where [setMuted] found it; the undo half of unmute suppression. */
     @Query("UPDATE buffers SET localUnreadFloorTime = :timestamp WHERE id = :id")
     suspend fun restoreLocalUnreadFloor(id: Long, timestamp: Long?)
