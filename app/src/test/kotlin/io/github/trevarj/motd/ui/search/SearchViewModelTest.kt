@@ -691,16 +691,21 @@ class SearchViewModelTest {
 
         vm.state.test {
             awaitItem()
+            // Settle on the keys under test rather than counting emissions: a StateFlow conflates,
+            // so neither the loading frame nor any intermediate between it and the results is
+            // guaranteed to be observed — or skipped — consistently.
             vm.onQueryChange("alpha")
             runCurrent()
-            awaitItem() // alpha loading
             advanceTimeBy(250)
             runCurrent()
-            assertEquals(1, awaitItem().groups.size)
+            assertEquals(1, awaitStateWhere { it.groups.isNotEmpty() }.groups.size)
 
             vm.onQueryChange("")
             runCurrent()
-            assertEquals(SearchUiState(coverage = SearchCoverage.DeviceOnly), awaitItem())
+            assertEquals(
+                SearchUiState(coverage = SearchCoverage.DeviceOnly),
+                awaitStateWhere { it.groups.isEmpty() },
+            )
 
             repo.emit("alpha", null, listOf(hit(1, "late alpha result")))
             runCurrent()
