@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.attachment
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -131,6 +132,40 @@ class AttachmentModelsTest {
             expiry = "7d",
         )
         assertEquals(emptyList<Pair<String, String>>(), multipart0x0Fields(normalizedConfig(config)))
+    }
+
+    @Test fun acceptPostMatchingToleratesParametersAndUnknownTypes() {
+        // A sent type with parameters must match its bare Accept-Post entry (the text-file report).
+        assertTrue("text/plain, image/jpeg".acceptsMime("text/plain; charset=utf-8"))
+        assertTrue("image/*, video/*".acceptsMime("image/jpeg"))
+        assertTrue("*/*".acceptsMime("application/zip"))
+        // Wildcard or unspecified sent types cannot be judged against a concrete list.
+        assertTrue("image/png, image/jpeg".acceptsMime("image/*"))
+        assertTrue("image/png".acceptsMime("application/octet-stream"))
+        // A genuinely excluded concrete type still reads as a mismatch (for the failure hint).
+        assertFalse("image/png; q=1, video/mp4".acceptsMime("image/jpeg"))
+    }
+
+    @Test fun sojuFailureMessageCarriesServerBodyAndAcceptPostHint() {
+        assertEquals(
+            "Soju file host upload failed (HTTP 415): unsupported charset.",
+            sojuUploadFailureMessage(415, "unsupported charset", null, "image/jpeg"),
+        )
+        assertEquals(
+            "Soju file host upload failed (HTTP 415). The server says it accepts: image/png.",
+            sojuUploadFailureMessage(415, "", "image/png", "image/jpeg"),
+        )
+        // No hint when the advertised list covers the sent type.
+        assertEquals(
+            "Soju file host upload failed (HTTP 500).",
+            sojuUploadFailureMessage(500, "", "image/*", "image/jpeg"),
+        )
+    }
+
+    @Test fun unknownAttachmentMimeFallsBackToFilenameExtension() {
+        assertEquals("image/jpeg", guessMimeType("Photo.JPG"))
+        assertEquals("text/plain", guessMimeType("notes.txt"))
+        assertEquals("application/octet-stream", guessMimeType("blob"))
     }
 
     @Test fun compatibleBackendsStillSendSecretAndExpiry() {

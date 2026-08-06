@@ -176,7 +176,7 @@ class AttachmentUploaderImpl @Inject constructor(
             ?: throw UploadException("No route for this network.")
         if (route.proxyError != null) throw UploadException(route.proxyError)
         return route.use {
-            probeSojuFileHost(route, endpoint, source.mimeType())
+            val acceptPost = probeAcceptPost(route, endpoint)
             val connection = route.open(endpoint, authenticated = true).apply {
                 requestMethod = "POST"
                 doOutput = true
@@ -194,14 +194,22 @@ class AttachmentUploaderImpl @Inject constructor(
                 val code = connection.responseCode
                 val location = connection.getHeaderField("Location")
                 if (code != HttpURLConnection.HTTP_CREATED || location.isNullOrBlank()) {
-                    throw UploadException("Soju file host upload failed (HTTP $code).")
+                    throw UploadException(
+                        sojuUploadFailureMessage(code, readBodySnippet(connection), acceptPost, source.mimeType()),
+                    )
                 }
                 UploadProgress.Complete(record(source, config.copy(endpoint = endpoint), resolveSojuLocation(endpoint, location)))
             }
         }
     }
 
-    private fun probeSojuFileHost(route: NetworkMediaRoute, endpoint: String, mimeType: String) {
+    /**
+     * Best-effort OPTIONS probe for the server's advertised Accept-Post types. The filehost spec
+     * makes Accept-Post advisory (soju itself never sends it), and enforcing it client-side
+     * rejected uploads real servers accept — the POST response is the only authority. The
+     * advertised list is kept solely to explain a later POST failure.
+     */
+    private fun probeAcceptPost(route: NetworkMediaRoute, endpoint: String): String? = runCatching {
         val connection = route.open(endpoint, authenticated = true).apply {
             requestMethod = "OPTIONS"
             connectTimeout = CONNECT_TIMEOUT_MS
@@ -210,18 +218,18 @@ class AttachmentUploaderImpl @Inject constructor(
             setRequestProperty("User-Agent", USER_AGENT)
         }
         try {
-            val code = connection.responseCode
-            if (code !in 200..299 && code != HttpURLConnection.HTTP_NO_CONTENT) {
-                throw UploadException("Soju file host probe failed (HTTP $code).")
-            }
-            val acceptPost = connection.getHeaderField("Accept-Post")
-            if (!acceptPost.isNullOrBlank() && !acceptPost.acceptsMime(mimeType)) {
-                throw UploadException("Soju file host does not accept $mimeType.")
-            }
+            connection.responseCode
+            // Accept-Post may legally be split across several header lines; merge them all.
+            connection.headerFields.entries
+                .filter { (key, _) -> key?.equals("Accept-Post", ignoreCase = true) == true }
+                .flatMap { it.value.orEmpty() }
+                .filter(String::isNotBlank)
+                .joinToString(",")
+                .takeIf(String::isNotBlank)
         } finally {
             connection.disconnect()
         }
-    }
+    }.getOrNull()
 
     private suspend fun uploadMultipart(
         source: AttachmentSource,
@@ -311,14 +319,32 @@ internal fun resolveSojuLocation(endpoint: String, location: String): String {
 private fun String.sanitizeHeader(): String =
     replace("\\", "_").replace("\"", "_").replace("\r", "_").replace("\n", "_")
 
-private fun String.acceptsMime(mimeType: String): Boolean {
-    val requested = mimeType.lowercase(Locale.ROOT)
+internal fun String.acceptsMime(mimeType: String): Boolean {
+    // The sent type may carry parameters ("text/plain; charset=utf-8") and may be a wildcard or
+    // octet-stream when the content resolver cannot name it — neither reads as a server rejection.
+    val requested = mimeType.substringBefore(';').trim().lowercase(Locale.ROOT)
+    if (requested.isEmpty() || requested == "application/octet-stream" || requested.endsWith("/*")) return true
     return split(',').map { it.substringBefore(';').trim().lowercase(Locale.ROOT) }.any { accepted ->
         accepted == "*/*" ||
             accepted == requested ||
             accepted.endsWith("/*") && requested.startsWith(accepted.removeSuffix("*"))
     }
 }
+
+internal fun sojuUploadFailureMessage(code: Int, body: String, acceptPost: String?, mimeType: String): String {
+    val detail = body.takeIf(String::isNotBlank)?.let { ": ${it.take(160)}" }.orEmpty()
+    val hint = acceptPost?.takeIf { !it.acceptsMime(mimeType) }
+        ?.let { " The server says it accepts: $it." }.orEmpty()
+    return "Soju file host upload failed (HTTP $code)$detail.$hint"
+}
+
+private fun readBodySnippet(connection: HttpURLConnection): String = runCatching {
+    (connection.errorStream ?: connection.inputStream)?.bufferedReader()?.use { reader ->
+        val buffer = CharArray(1024)
+        val count = reader.read(buffer)
+        if (count > 0) String(buffer, 0, count) else ""
+    }
+}.getOrNull()?.trim().orEmpty()
 
 /** Extra multipart fields for the 0x0-compatible upload path. x0.at ignores secret/expires, so it
  * sends only the file field; other 0x0-compatible backends forward the secret-url and expiry prefs. */
@@ -405,10 +431,16 @@ private fun AttachmentSource.displayName() = when (this) {
 }
 private fun AttachmentSource.mimeType() = when (this) {
     is AttachmentSource.Text -> "text/plain; charset=utf-8"
-    is AttachmentSource.Document -> mimeType ?: "application/octet-stream"
-    is AttachmentSource.Photo -> mimeType ?: "image/*"
+    is AttachmentSource.Document -> mimeType ?: guessMimeType(name)
+    // Some providers return no type for a picked photo; a filename-derived concrete type beats
+    // "image/*", which is invalid as a request Content-Type and unmatchable against accept lists.
+    is AttachmentSource.Photo -> mimeType ?: guessMimeType(name)
     is AttachmentSource.LocalFile -> mimeType
 }
+
+internal fun guessMimeType(name: String): String =
+    java.net.URLConnection.guessContentTypeFromName(name.lowercase(Locale.ROOT))
+        ?: "application/octet-stream"
 private fun AttachmentSource.sizeOrNull() = when (this) {
     is AttachmentSource.Text -> text.toByteArray(StandardCharsets.UTF_8).size.toLong()
     is AttachmentSource.Document -> size
