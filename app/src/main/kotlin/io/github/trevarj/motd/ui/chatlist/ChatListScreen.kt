@@ -81,6 +81,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -90,6 +93,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -667,11 +671,97 @@ private fun ScopeChip(name: String, onClear: () -> Unit) {
     }
 }
 
-/** Chat-list rows fade for inserts/removals but snap when activity changes their position. */
+/** Signals that move the chat list between "reorders are watched" and "reorders are replayed". */
+internal enum class ChatListPlacementSignal {
+    /** The pane's own destination reached RESUMED: on screen, on top, and being drawn. */
+    PaneResumed,
+
+    /** The pane left RESUMED: navigated away from, backgrounded, or covered mid-transition. */
+    PaneHidden,
+
+    /** A frame was rendered while resumed, so whatever data was pending has already landed. */
+    FrameRendered,
+}
+
+/**
+ * Whether a chat-list row that changes position should spring there or simply appear there.
+ *
+ * Composition outlives visibility: the pane stays composed across Home/recents and across the
+ * navigation transition that covers it, and `collectAsStateWithLifecycle` parks collection while
+ * it is away. Every reorder accumulated in that window therefore arrives as a single catch-up
+ * snapshot the moment collection restarts. Animating that snapshot replays minutes of unseen
+ * activity as one shuffle, which is the stale reorder this gate exists to suppress.
+ */
+internal data class ChatListPlacementGate(
+    val visible: Boolean = false,
+    val rendered: Boolean = false,
+) {
+    /** Only a resumed pane that has already drawn its catch-up snapshot may animate placement. */
+    val animatesPlacement: Boolean get() = visible && rendered
+}
+
+internal fun reduceChatListPlacement(
+    gate: ChatListPlacementGate,
+    signal: ChatListPlacementSignal,
+): ChatListPlacementGate = when (signal) {
+    // Re-entering visibility always re-arms from scratch, so the catch-up snapshot snaps again.
+    ChatListPlacementSignal.PaneResumed ->
+        if (gate.visible) gate else ChatListPlacementGate(visible = true, rendered = false)
+    ChatListPlacementSignal.PaneHidden -> ChatListPlacementGate(visible = false, rendered = false)
+    // Frames rendered while hidden prove nothing about what the user saw.
+    ChatListPlacementSignal.FrameRendered ->
+        if (gate.visible) gate.copy(rendered = true) else gate
+}
+
+/**
+ * Chat-list rows fade for inserts/removals and spring to their new position when activity
+ * re-sorts them under a watching user. Keys are stable buffer ids, so a row springs even when the
+ * move crosses a pinned/friends/recent/fools boundary. Reorders the user could not have seen are
+ * applied without placement animation; see [ChatListPlacementGate].
+ */
 internal object ChatListItemMotion {
     val fadeInSpec: FiniteAnimationSpec<Float> = MotdMotion.microFadeIn
     val fadeOutSpec: FiniteAnimationSpec<Float> = MotdMotion.microFadeOut
-    val placementSpec: FiniteAnimationSpec<IntOffset>? = null
+
+    /** The spec every row-level `animateItem` reads; null means "move without animating". */
+    fun placementSpec(gate: ChatListPlacementGate): FiniteAnimationSpec<IntOffset>? =
+        if (gate.animatesPlacement) MotdMotion.rowPlacement else null
+
+    /**
+     * Tracks the pane's own destination lifecycle rather than treating "still composed" as
+     * visible, mirroring the chat screen's foreground gate. Arming is deferred by two frame
+     * boundaries: the first carries the restarted flow's catch-up snapshot through layout
+     * unanimated, the second leaves a frame of slack for a snapshot that lands a beat later.
+     * Without a frame clock (pane composed but never drawn) the gate simply stays closed, which
+     * is the safe direction.
+     */
+    @Composable
+    fun rememberPlacementSpec(): FiniteAnimationSpec<IntOffset>? {
+        val lifecycleOwner = LocalLifecycleOwner.current
+        var gate by remember(lifecycleOwner) { mutableStateOf(ChatListPlacementGate()) }
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                val signal = when (event) {
+                    Lifecycle.Event.ON_RESUME -> ChatListPlacementSignal.PaneResumed
+                    Lifecycle.Event.ON_PAUSE,
+                    Lifecycle.Event.ON_STOP,
+                    Lifecycle.Event.ON_DESTROY,
+                    -> ChatListPlacementSignal.PaneHidden
+                    else -> null
+                }
+                if (signal != null) gate = reduceChatListPlacement(gate, signal)
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+        LaunchedEffect(gate.visible) {
+            if (!gate.visible) return@LaunchedEffect
+            withFrameNanos { }
+            withFrameNanos { }
+            gate = reduceChatListPlacement(gate, ChatListPlacementSignal.FrameRendered)
+        }
+        return placementSpec(gate)
+    }
 }
 
 @Composable
@@ -708,6 +798,8 @@ private fun ChatList(
     // Fools section is collapsed by default; state is local to the screen (accepted, plans/13).
     var foolsExpanded by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    // Resolved once so every row in every section shares one placement decision per frame.
+    val placementSpec = ChatListItemMotion.rememberPlacementSpec()
     val scope = rememberCoroutineScope()
     val actionableInvitationCount = invitations.count(ChatListInvitation::actionable)
     val hasActiveRows = rows.isNotEmpty() || actionableInvitationCount > 0
@@ -936,7 +1028,7 @@ private fun ChatList(
                             modifier = Modifier.animateItem(
                                 fadeInSpec = ChatListItemMotion.fadeInSpec,
                                 fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                placementSpec = ChatListItemMotion.placementSpec,
+                                placementSpec = placementSpec,
                             ),
                         )
                     }
@@ -968,7 +1060,7 @@ private fun ChatList(
                         modifier = Modifier.animateItem(
                             fadeInSpec = ChatListItemMotion.fadeInSpec,
                             fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                            placementSpec = ChatListItemMotion.placementSpec,
+                            placementSpec = placementSpec,
                         ),
                     )
                 }
@@ -993,7 +1085,7 @@ private fun ChatList(
                             modifier = Modifier.animateItem(
                                 fadeInSpec = ChatListItemMotion.fadeInSpec,
                                 fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                placementSpec = ChatListItemMotion.placementSpec,
+                                placementSpec = placementSpec,
                             ),
                         )
                     }
@@ -1020,7 +1112,7 @@ private fun ChatList(
                         modifier = Modifier.animateItem(
                             fadeInSpec = ChatListItemMotion.fadeInSpec,
                             fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                            placementSpec = ChatListItemMotion.placementSpec,
+                            placementSpec = placementSpec,
                         ),
                     )
                 }
@@ -1042,7 +1134,7 @@ private fun ChatList(
                                     .animateItem(
                                         fadeInSpec = ChatListItemMotion.fadeInSpec,
                                         fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                        placementSpec = ChatListItemMotion.placementSpec,
+                                        placementSpec = placementSpec,
                                     ),
                             ) {
                                 SelectableChatListRow(
