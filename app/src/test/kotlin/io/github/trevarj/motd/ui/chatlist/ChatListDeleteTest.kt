@@ -98,7 +98,7 @@ class ChatListDeleteTest {
             io.github.trevarj.motd.service.SendAcceptance.Accepted(emptyList())
         override suspend fun sendTyping(bufferId: Long, state: String) = Unit
         override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) = Unit
-        override suspend fun joinChannel(networkId: Long, channel: String) = Unit
+        override suspend fun joinChannel(networkId: Long, channel: String, key: String?) = Unit
         override suspend fun partChannel(bufferId: Long, reason: String?) { ops += "part:$bufferId" }
         override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 0
         override suspend fun ensureServerBuffer(networkId: Long): Long = 0

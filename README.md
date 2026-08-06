@@ -47,7 +47,7 @@ nix develop -c ./test/e2e/headless.sh showcase
 | Feature | Description |
 |---|---|
 | Chat UI | Unified chat list with unread/mention badges; grouped bubbles, day separators, event pills, inline images, and OG link previews. |
-| Composer | Nick autocomplete, replies (`+draft/reply`), reactions (`+draft/react`), typing (`+typing`), and slash commands (`/msg`, `/query`, `/join`, `/me`). |
+| Composer | Nick autocomplete, replies (`+draft/reply`), reactions (`+draft/react`), typing (`+typing`), and slash commands (`/msg`, `/join` with keys, `/mode`, `/notice`, `/ctcp`, `/invite`, and more; unknown commands and `/raw` go straight to the server). |
 | Search | FTS4 full-text search over history, global or scoped to one buffer, with deep-jump to the matched message. |
 | Scrollback | Paging 3 backed by a `draft/chathistory` RemoteMediator; local-only fallback on plain networks. |
 | Read state | `draft/read-marker` (MARKREAD) sync through a single `ConnectionManager` entry point. |

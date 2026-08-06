@@ -101,6 +101,9 @@ import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import javax.inject.Inject
 
+/** CTCP wraps its request text in this delimiter inside an ordinary PRIVMSG. */
+private const val CTCP_DELIMITER = "\u0001"
+
 private const val MAX_REPLY_PREVIEW_CACHE = 128
 private const val MAX_REACTION_WINDOW_MSGIDS = 500
 
@@ -1096,8 +1099,18 @@ class ChatViewModel @Inject constructor(
                     releaseDraftSubmission(submission.snapshot)
                 }
             }
-            is ChatCommand.Join -> networkId?.let { connectionManager.joinChannel(it, cmd.channel) }
+            is ChatCommand.Join -> networkId?.let {
+                connectionManager.joinChannel(it, cmd.channels, cmd.keys)
+            }
             is ChatCommand.Part -> connectionManager.partChannel(operationalBufferId.value, cmd.reason)
+            // Part then rejoin the same channel. The PART is issued through the buffer seam so the
+            // conversation's membership state follows it exactly as a plain `/part` would.
+            is ChatCommand.Hop -> networkId?.let { nid ->
+                val channel = state.value.buffer?.takeIf { it.type == BufferType.CHANNEL }?.ircTarget
+                    ?: return@let
+                connectionManager.partChannel(operationalBufferId.value, cmd.reason)
+                connectionManager.joinChannel(nid, channel)
+            }
             is ChatCommand.Msg -> networkId?.let { nid ->
                 val target = connectionManager.ensureQueryBuffer(nid, cmd.nick)
                 val submission = prepareDraftSubmission(raw) ?: return@let
@@ -1128,6 +1141,55 @@ class ChatViewModel @Inject constructor(
             is ChatCommand.Away -> networkId?.let { nid ->
                 connectionManager.clientFor(nid)
                     ?.send(IrcMessage(command = "AWAY", params = listOfNotNull(cmd.message)))
+            }
+            is ChatCommand.Notice -> networkId?.let { nid ->
+                connectionManager.clientFor(nid)
+                    ?.send(IrcMessage(command = "NOTICE", params = listOf(cmd.target, cmd.text)))
+            }
+            is ChatCommand.SetName -> networkId?.let { nid ->
+                connectionManager.clientFor(nid)
+                    ?.send(IrcMessage(command = "SETNAME", params = listOf(cmd.realname)))
+            }
+            // An omitted target addresses the conversation itself, so `/mode +m` works in a channel
+            // and `/mode` alone queries the modes already set.
+            is ChatCommand.Mode -> networkId?.let { nid ->
+                val target = cmd.target ?: state.value.buffer?.ircTarget ?: return@let
+                // MODE's flags and their arguments are separate parameters. Passing them as one
+                // string would serialize to a single trailing param (`MODE #c :+o alice`), which a
+                // server reads as one nonsensical mode token.
+                val modeParams = cmd.modes?.split(' ')?.filter { it.isNotEmpty() }.orEmpty()
+                connectionManager.clientFor(nid)?.send(
+                    IrcMessage(command = "MODE", params = listOf(target) + modeParams),
+                )
+            }
+            is ChatCommand.Invite -> networkId?.let { nid ->
+                val channel = cmd.channel
+                    ?: state.value.buffer?.takeIf { it.type == BufferType.CHANNEL }?.ircTarget
+                    ?: return@let
+                connectionManager.clientFor(nid)
+                    ?.send(IrcMessage(command = "INVITE", params = listOf(cmd.nick, channel)))
+            }
+            is ChatCommand.Knock -> networkId?.let { nid ->
+                connectionManager.clientFor(nid)?.send(
+                    IrcMessage(
+                        command = "KNOCK",
+                        params = listOfNotNull(cmd.channel, cmd.reason),
+                    ),
+                )
+            }
+            // A CTCP request is a PRIVMSG whose text is wrapped in the 0x01 delimiter; any
+            // reply arrives as a NOTICE and lands in that nick's query buffer.
+            is ChatCommand.Ctcp -> networkId?.let { nid ->
+                connectionManager.clientFor(nid)?.send(
+                    IrcMessage(
+                        command = "PRIVMSG",
+                        params = listOf(cmd.nick, "$CTCP_DELIMITER${cmd.request}$CTCP_DELIMITER"),
+                    ),
+                )
+            }
+            is ChatCommand.Motd -> networkId?.let { nid ->
+                connectionManager.clientFor(nid)
+                    ?.send(IrcMessage(command = "MOTD", params = listOfNotNull(cmd.server)))
             }
             is ChatCommand.Whois -> openNickSheet(cmd.nick)
             is ChatCommand.ChannelList -> networkId?.let(onOpenChannelList)

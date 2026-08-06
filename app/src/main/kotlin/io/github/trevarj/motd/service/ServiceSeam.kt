@@ -153,7 +153,11 @@ interface ConnectionManager {
         SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
     suspend fun sendTyping(bufferId: Long, state: String)
     suspend fun sendReact(bufferId: Long, msgid: String, emoji: String)
-    suspend fun joinChannel(networkId: Long, channel: String)
+    /**
+     * JOIN [channel], optionally with [key]. Both stay in their comma-joined wire form so a
+     * multi-channel `/join #a,#b key-a,key-b` keeps JOIN's positional channel/key pairing.
+     */
+    suspend fun joinChannel(networkId: Long, channel: String, key: String? = null)
 
     /** Atomically claim a persisted invitation, connect if needed, then send exactly one JOIN. */
     suspend fun acceptInvite(messageId: Long) = Unit

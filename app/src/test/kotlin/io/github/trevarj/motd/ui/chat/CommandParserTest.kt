@@ -30,7 +30,24 @@ class CommandParserTest {
 
     @Test fun join_parses_channel() {
         assertEquals(ChatCommand.Join("#kotlin"), parseCommand("/join #kotlin"))
-        assertEquals(ChatCommand.Join("#kotlin"), parseCommand("/join #kotlin extra"))
+        assertEquals(ChatCommand.Join("#kotlin"), parseCommand("/JOIN #kotlin"))
+    }
+
+    /** Regression: the key used to be dropped, so a keyed channel could never be joined. */
+    @Test fun join_keeps_the_channel_key() {
+        assertEquals(ChatCommand.Join("#kotlin", "hunter2"), parseCommand("/join #kotlin hunter2"))
+    }
+
+    @Test fun join_keeps_multi_channel_and_multi_key_pairing() {
+        assertEquals(
+            ChatCommand.Join("#a,#b", "key-a,key-b"),
+            parseCommand("/join #a,#b key-a,key-b"),
+        )
+        assertEquals(ChatCommand.Join("#a,#b"), parseCommand("/join #a,#b"))
+    }
+
+    @Test fun join_alias() {
+        assertEquals(ChatCommand.Join("#kotlin"), parseCommand("/j #kotlin"))
     }
 
     @Test fun join_without_channel_is_none() {
@@ -65,11 +82,12 @@ class CommandParserTest {
 
     @Test fun unknown_command_becomes_raw_line_without_slash() {
         assertEquals(ChatCommand.RawLine("names"), parseCommand("/names"))
-        assertEquals(ChatCommand.RawLine("mode #c +m"), parseCommand("/mode #c +m"))
+        assertEquals(ChatCommand.RawLine("links"), parseCommand("/links"))
     }
 
     @Test fun command_case_is_insensitive() {
         assertEquals(ChatCommand.Join("#c"), parseCommand("/JOIN #c"))
+        assertEquals(ChatCommand.Mode(null, "+m"), parseCommand("/MODE +m"))
     }
 
     @Test fun bare_slash_is_none() {
@@ -115,5 +133,91 @@ class CommandParserTest {
         listOf("/away", "/whois", "/list", "/kick", "/ban").forEach {
             assertTrue("$it should be a hint", it in COMMAND_HINTS)
         }
+    }
+
+    // --- Halloy parity (#51): first-class commands beyond raw passthrough ---
+
+    @Test fun mode_without_arguments_queries_the_current_buffer() {
+        assertEquals(ChatCommand.Mode(null, null), parseCommand("/mode"))
+    }
+
+    @Test fun mode_treats_a_leading_sign_as_modes_for_the_current_buffer() {
+        assertEquals(ChatCommand.Mode(null, "+m"), parseCommand("/mode +m"))
+        assertEquals(ChatCommand.Mode(null, "+o alice"), parseCommand("/mode +o alice"))
+        assertEquals(ChatCommand.Mode(null, "-o alice"), parseCommand("/mode -o alice"))
+    }
+
+    @Test fun mode_takes_an_explicit_target_when_one_is_given() {
+        assertEquals(ChatCommand.Mode("#chan", "+o alice"), parseCommand("/mode #chan +o alice"))
+        assertEquals(ChatCommand.Mode("#chan", null), parseCommand("/mode #chan"))
+        assertEquals(ChatCommand.Mode("alice", "+i"), parseCommand("/m alice +i"))
+    }
+
+    @Test fun notice_needs_target_and_text() {
+        assertEquals(ChatCommand.Notice("#chan", "heads up"), parseCommand("/notice #chan heads up"))
+        assertEquals(ChatCommand.None, parseCommand("/notice #chan"))
+        assertEquals(ChatCommand.None, parseCommand("/notice"))
+    }
+
+    @Test fun ctcp_keeps_the_request_and_its_arguments() {
+        assertEquals(ChatCommand.Ctcp("alice", "PING 12345"), parseCommand("/ctcp alice PING 12345"))
+        assertEquals(ChatCommand.Ctcp("alice", "VERSION"), parseCommand("/ctcp alice VERSION"))
+        assertEquals(ChatCommand.None, parseCommand("/ctcp alice"))
+    }
+
+    @Test fun invite_defaults_the_channel_to_the_current_buffer() {
+        assertEquals(ChatCommand.Invite("bob", null), parseCommand("/invite bob"))
+        assertEquals(ChatCommand.Invite("bob", "#chan"), parseCommand("/invite bob #chan"))
+        assertEquals(ChatCommand.None, parseCommand("/invite"))
+    }
+
+    @Test fun knock_reason_optional() {
+        assertEquals(ChatCommand.Knock("#secret", null), parseCommand("/knock #secret"))
+        assertEquals(ChatCommand.Knock("#secret", "let me in"), parseCommand("/knock #secret let me in"))
+        assertEquals(ChatCommand.None, parseCommand("/knock"))
+    }
+
+    @Test fun setname_keeps_the_whole_realname() {
+        assertEquals(ChatCommand.SetName("Ada Lovelace"), parseCommand("/setname Ada Lovelace"))
+        assertEquals(ChatCommand.None, parseCommand("/setname"))
+    }
+
+    @Test fun motd_server_optional() {
+        assertEquals(ChatCommand.Motd(null), parseCommand("/motd"))
+        assertEquals(ChatCommand.Motd("irc.example"), parseCommand("/motd irc.example"))
+    }
+
+    @Test fun hop_reason_optional() {
+        assertEquals(ChatCommand.Hop(null), parseCommand("/hop"))
+        assertEquals(ChatCommand.Hop("brb"), parseCommand("/rejoin brb"))
+    }
+
+    /** `/raw` reaches the server even when the line's first word collides with a handled command. */
+    @Test fun raw_sends_the_rest_verbatim() {
+        assertEquals(ChatCommand.RawLine("JOIN #chan key"), parseCommand("/raw JOIN #chan key"))
+        assertEquals(ChatCommand.RawLine("PRIVMSG a :hi"), parseCommand("/quote PRIVMSG a :hi"))
+        assertEquals(ChatCommand.None, parseCommand("/raw"))
+    }
+
+    @Test fun aliases_resolve_to_their_command() {
+        assertEquals(ChatCommand.Message("/me waves"), parseCommand("/describe waves"))
+        assertEquals(ChatCommand.Part("bye"), parseCommand("/leave bye"))
+        assertEquals(ChatCommand.Topic("hello"), parseCommand("/t hello"))
+    }
+
+    @Test fun hint_list_includes_the_new_commands() {
+        listOf("/mode", "/notice", "/ctcp", "/invite", "/knock", "/setname", "/motd", "/hop", "/raw")
+            .forEach { assertTrue("$it should be a hint", it in COMMAND_HINTS) }
+    }
+
+    @Test fun channel_only_hints_are_withheld_outside_a_channel() {
+        val queryHints = commandHintsFor(isChannel = false)
+        listOf("/topic", "/kick", "/ban", "/invite", "/hop", "/part").forEach {
+            assertTrue("$it should be channel-only", it !in queryHints)
+        }
+        listOf("/msg", "/join", "/whois", "/mode", "/raw").forEach {
+            assertTrue("$it should always be offered", it in queryHints)
+        }
+        assertEquals(COMMAND_HINTS, commandHintsFor(isChannel = true))
     }
 }

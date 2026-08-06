@@ -7,6 +7,7 @@ import androidx.paging.PagingData
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
+import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.DccTransferEntity
@@ -546,6 +547,114 @@ class ChatViewModelTest {
         assertTrue(transport.sent.none { '\u0000' in it })
         client.stop()
         runCurrent()
+    }
+
+    /** #51: the composer's new first-class commands, checked on the wire rather than at the parser. */
+    @Test
+    fun `new slash commands reach the wire with buffer-derived targets`() = runTest {
+        val transport = RecordingTransport()
+        val client = testClient(transport)
+        client.start()
+        runCurrent()
+        transport.sent.clear()
+        val vm = viewModel(channel, FakeConnectionManager(network.id, client = client))
+        vm.state.first { it.buffer != null }
+
+        vm.submit("/mode +m", {}, {})
+        vm.submit("/mode #other +o alice", {}, {})
+        vm.submit("/notice #chan heads up", {}, {})
+        vm.submit("/invite bob", {}, {})
+        vm.submit("/knock #secret let me in", {}, {})
+        vm.submit("/setname Ada Lovelace", {}, {})
+        vm.submit("/motd", {}, {})
+        vm.submit("/raw LINKS", {}, {})
+        runCurrent()
+
+        val sent = transport.sent.map { IrcMessage.parse(it) }
+        assertEquals(
+            listOf("MODE", "MODE", "NOTICE", "INVITE", "KNOCK", "SETNAME", "MOTD", "LINKS"),
+            sent.map { it.command },
+        )
+        // An omitted target resolves to this conversation; an explicit one is respected.
+        assertEquals(listOf(channel.ircTarget, "+m"), sent[0].params)
+        assertEquals(listOf("#other", "+o", "alice"), sent[1].params)
+        assertEquals(listOf("#chan", "heads up"), sent[2].params)
+        assertEquals(listOf("bob", channel.ircTarget), sent[3].params)
+        assertEquals(listOf("#secret", "let me in"), sent[4].params)
+        assertEquals(listOf("Ada Lovelace"), sent[5].params)
+        assertEquals(emptyList<String>(), sent[6].params)
+
+        client.stop()
+        runCurrent()
+    }
+
+    @Test
+    fun `ctcp wraps its request in the delimiter`() = runTest {
+        val transport = RecordingTransport()
+        val client = testClient(transport)
+        client.start()
+        runCurrent()
+        transport.sent.clear()
+        val vm = viewModel(channel, FakeConnectionManager(network.id, client = client))
+        vm.state.first { it.buffer != null }
+
+        vm.submit("/ctcp alice PING 12345", {}, {})
+        runCurrent()
+
+        val sent = IrcMessage.parse(transport.sent.single())
+        assertEquals("PRIVMSG", sent.command)
+        assertEquals(listOf("alice", "PING 12345"), sent.params)
+
+        client.stop()
+        runCurrent()
+    }
+
+    /** Regression for the dropped-key bug: `/join #chan key` must carry the key to JOIN. */
+    @Test
+    fun `join forwards channel keys to the connection manager`() = runTest {
+        val manager = FakeConnectionManager(network.id)
+        val vm = viewModel(channel, manager)
+        vm.state.first { it.buffer != null }
+
+        vm.submit("/join #keyed hunter2", {}, {})
+        vm.submit("/join #a,#b key-a,key-b", {}, {})
+        vm.submit("/join #plain", {}, {})
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(
+                Triple(network.id, "#keyed", "hunter2"),
+                Triple(network.id, "#a,#b", "key-a,key-b"),
+                Triple(network.id, "#plain", null),
+            ),
+            manager.joins,
+        )
+    }
+
+    @Test
+    fun `hop parts the current channel then rejoins it`() = runTest {
+        val manager = FakeConnectionManager(network.id)
+        val vm = viewModel(channel, manager)
+        vm.state.first { it.buffer != null }
+
+        vm.submit("/hop brb", {}, {})
+        advanceUntilIdle()
+
+        assertEquals(listOf(channel.id to "brb"), manager.parts)
+        assertEquals(listOf(Triple(network.id, channel.ircTarget, null)), manager.joins)
+    }
+
+    @Test
+    fun `hop outside a channel does nothing`() = runTest {
+        val manager = FakeConnectionManager(network.id)
+        val vm = viewModel(query, manager)
+        vm.state.first { it.buffer != null }
+
+        vm.submit("/hop", {}, {})
+        advanceUntilIdle()
+
+        assertTrue(manager.parts.isEmpty())
+        assertTrue(manager.joins.isEmpty())
     }
 
     @Test
@@ -2007,6 +2116,8 @@ class ChatViewModelTest {
         val reactions = mutableListOf<SentReaction>()
         val typing = mutableListOf<Pair<Long, String>>()
         val sentLines = mutableListOf<String>()
+        val joins = mutableListOf<Triple<Long, String, String?>>()
+        val parts = mutableListOf<Pair<Long, String?>>()
         val readMarkers = mutableListOf<Pair<Long, TimelineAnchor>>()
         val messageStarted = CompletableDeferred<Unit>()
         val typingSent = CompletableDeferred<Unit>()
@@ -2073,8 +2184,12 @@ class ChatViewModelTest {
             if (reactionError) error("reaction rejected")
             reactions += SentReaction(bufferId, msgid, emoji)
         }
-        override suspend fun joinChannel(networkId: Long, channel: String) = Unit
-        override suspend fun partChannel(bufferId: Long, reason: String?) = Unit
+        override suspend fun joinChannel(networkId: Long, channel: String, key: String?) {
+            joins += Triple(networkId, channel, key)
+        }
+        override suspend fun partChannel(bufferId: Long, reason: String?) {
+            parts += bufferId to reason
+        }
         override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 2L
         override suspend fun ensureServerBuffer(networkId: Long): Long = 3L
         override suspend fun markRead(bufferId: Long, anchor: TimelineAnchor) {

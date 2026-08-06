@@ -1986,8 +1986,15 @@ fun ChatContent(
                     )
                 }
 
-                val completions = remember(composerText, memberNicks, recentSpeakers) {
-                    autocompleteFor(composerText, memberNicks, recentSpeakers, nickNormalizer)
+                val isChannelBuffer = state.buffer?.type == BufferType.CHANNEL
+                val completions = remember(composerText, memberNicks, recentSpeakers, isChannelBuffer) {
+                    autocompleteFor(
+                        composerText,
+                        memberNicks,
+                        recentSpeakers,
+                        nickNormalizer,
+                        isChannel = isChannelBuffer,
+                    )
                 }
                 val needsMemberCompletion = remember(composerText) {
                     composerNeedsMemberNicks(composerText)

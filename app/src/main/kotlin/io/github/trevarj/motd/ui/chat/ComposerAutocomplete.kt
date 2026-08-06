@@ -9,13 +9,17 @@ data class Completion(val display: String, val isCommand: Boolean)
 /**
  * Compute completions for the current composer [value]: `/`-command hints when the line starts with
  * a single `/` command token, otherwise nick completions for the token under the cursor. Pure glue
- * over [rankNickCompletions] and [COMMAND_HINTS]; the ranking itself is unit-tested separately.
+ * over [rankNickCompletions] and [commandHintsFor]; the ranking itself is unit-tested separately.
+ *
+ * [isChannel] narrows the hints to what the current conversation can actually act on, so a query
+ * never offers `/kick` or `/topic`.
  */
 fun autocompleteFor(
     value: TextFieldValue,
     members: List<String>,
     recentSpeakers: List<String>,
     normalize: (String) -> String,
+    isChannel: Boolean = true,
 ): List<Completion> {
     val text = value.text
     val cursor = value.selection.end
@@ -23,7 +27,9 @@ fun autocompleteFor(
     // Command hints: a leading "/word" with no space yet.
     if (text.startsWith("/") && !text.startsWith("//") && !text.contains(' ')) {
         val prefix = text.lowercase()
-        return COMMAND_HINTS.filter { it.startsWith(prefix) }.map { Completion(it, isCommand = true) }
+        return commandHintsFor(isChannel)
+            .filter { it.startsWith(prefix) }
+            .map { Completion(it, isCommand = true) }
     }
 
     val token = nickTokenAt(text, cursor) ?: return emptyList()

@@ -204,7 +204,7 @@ class PendingChannelCloseCoordinatorTest {
             SendAcceptance.Accepted(emptyList())
         override suspend fun sendTyping(bufferId: Long, state: String) = Unit
         override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) = Unit
-        override suspend fun joinChannel(networkId: Long, channel: String) = Unit
+        override suspend fun joinChannel(networkId: Long, channel: String, key: String?) = Unit
         override suspend fun partChannel(bufferId: Long, reason: String?) {
             parts += bufferId
             if (failPart) error("send failed")

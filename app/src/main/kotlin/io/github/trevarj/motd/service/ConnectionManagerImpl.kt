@@ -1826,9 +1826,14 @@ class ConnectionManagerImpl @Inject constructor(
         }
     }
 
-    override suspend fun joinChannel(networkId: Long, channel: String) {
+    override suspend fun joinChannel(networkId: Long, channel: String, key: String?) {
         val client = clientFor(networkId) ?: return
-        client.send(io.github.trevarj.motd.irc.proto.IrcMessage(command = "JOIN", params = listOf(channel)))
+        client.send(
+            io.github.trevarj.motd.irc.proto.IrcMessage(
+                command = "JOIN",
+                params = listOfNotNull(channel, key?.takeIf { it.isNotBlank() }),
+            ),
+        )
     }
 
     override suspend fun acceptInvite(messageId: Long) {
