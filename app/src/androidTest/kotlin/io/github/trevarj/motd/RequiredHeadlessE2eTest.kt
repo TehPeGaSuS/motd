@@ -467,7 +467,7 @@ class RequiredHeadlessE2eTest {
         SettingsRobot(compose).apply {
             returnToRoot()
             chat()
-            assertDisplayed("settings_switch_show_jpq")
+            assertDisplayed("settings_presence_mode_smart")
             returnToRoot()
             networks()
         }

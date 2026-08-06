@@ -41,6 +41,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 /**
  * Query pipeline: every logical query/scope key immediately clears stale rows and publishes
@@ -138,6 +139,7 @@ class SearchViewModelTest {
         override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
         override suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? = null
         override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean = true
+        override suspend fun setPresenceModeOverride(id: Long, mode: PresenceMode?): Boolean = true
         override suspend fun deleteBuffer(id: Long) = Unit
     }
 

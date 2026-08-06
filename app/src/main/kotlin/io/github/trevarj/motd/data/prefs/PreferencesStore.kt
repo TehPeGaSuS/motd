@@ -46,7 +46,9 @@ internal object PrefKeys {
     val FRIEND_NICKS = stringPreferencesKey("friend_nicks")
     val FOOL_NICKS = stringPreferencesKey("fool_nicks")
     val FOOLS_MODE = stringPreferencesKey("fools_mode")
+    /** Superseded by [PRESENCE_MODE]; still read so an existing hide/show choice is honored. */
     val SHOW_JOIN_PART_QUIT = stringPreferencesKey("show_join_part_quit")
+    val PRESENCE_MODE = stringPreferencesKey("presence_mode")
     val AVATAR_STYLE = stringPreferencesKey("avatar_style")
     val CHAT_WALLPAPER = stringPreferencesKey("chat_wallpaper")
     val SHOW_COMPOSER_EMOJI = stringPreferencesKey("show_composer_emoji")
@@ -113,7 +115,10 @@ class DataStoreSettingsRepository @Inject constructor(
             fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]),
             foolsMode = prefs[PrefKeys.FOOLS_MODE]?.let { runCatching { FoolsMode.valueOf(it) }.getOrNull() }
                 ?: FoolsMode.COLLAPSE,
-            showJoinPartQuit = prefs[PrefKeys.SHOW_JOIN_PART_QUIT]?.toBooleanStrictOrNull() ?: true,
+            presenceMode = presenceModeFromPreference(
+                prefs[PrefKeys.PRESENCE_MODE],
+                prefs[PrefKeys.SHOW_JOIN_PART_QUIT],
+            ),
             avatarStyle = avatarStyleFromPreference(prefs[PrefKeys.AVATAR_STYLE]),
             chatWallpaper = prefs[PrefKeys.CHAT_WALLPAPER]?.let { runCatching { ChatWallpaper.valueOf(it) }.getOrNull() }
                 ?: ChatWallpaper.NONE,
@@ -233,8 +238,12 @@ class DataStoreSettingsRepository @Inject constructor(
         store.edit { it[PrefKeys.FOOLS_MODE] = m.name }
     }
 
-    override suspend fun setShowJoinPartQuit(show: Boolean) {
-        store.edit { it[PrefKeys.SHOW_JOIN_PART_QUIT] = show.toString() }
+    /** Drops the superseded boolean so a later downgrade-then-upgrade cannot resurrect it. */
+    override suspend fun setPresenceMode(m: PresenceMode) {
+        store.edit {
+            it[PrefKeys.PRESENCE_MODE] = m.name
+            it.remove(PrefKeys.SHOW_JOIN_PART_QUIT)
+        }
     }
 
     override suspend fun setAvatarStyle(style: AvatarStyle) {

@@ -1022,14 +1022,14 @@ phase_f() {
   adb_shell input keyevent 4           # back to Settings root
   assert_no_crash
 
-  # 50. Chat category: join/part, friends, and fools.
-  step "Show join/part toggle"
+  # 50. Chat category: presence events, friends, and fools.
+  step "Presence event mode"
   scroll_forward_to_tag settings_category_chat 4 || true
   tap_tag settings_category_chat
   wait_for_text "Chat" 6 || true
-  tap_tag settings_switch_show_jpq
-  tap_tag settings_switch_show_jpq      # restore
-  ok "toggled show join/part"
+  tap_tag settings_presence_mode_all
+  tap_tag settings_presence_mode_smart  # restore the default
+  ok "cycled presence event mode"
   assert_no_crash
 
   step "Friends manage screen"

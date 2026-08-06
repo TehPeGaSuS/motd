@@ -25,6 +25,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 class PushInstanceCoordinatorTest {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -104,7 +105,7 @@ class PushInstanceCoordinatorTest {
         override suspend fun setFriend(nick: String, isFriend: Boolean) = Unit
         override suspend fun setFool(nick: String, isFool: Boolean) = Unit
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
-        override suspend fun setShowJoinPartQuit(show: Boolean) = Unit
+        override suspend fun setPresenceMode(m: PresenceMode) = Unit
         override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
         override suspend fun setChatWallpaper(w: io.github.trevarj.motd.data.prefs.ChatWallpaper) = Unit
         override suspend fun setShowComposerEmoji(show: Boolean) = Unit

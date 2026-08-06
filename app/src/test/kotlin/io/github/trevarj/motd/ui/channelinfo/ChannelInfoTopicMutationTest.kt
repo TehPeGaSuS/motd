@@ -48,6 +48,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -213,6 +214,7 @@ class ChannelInfoTopicMutationTest {
         override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
         override suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? = null
         override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean = true
+        override suspend fun setPresenceModeOverride(id: Long, mode: PresenceMode?): Boolean = true
         override suspend fun deleteBuffer(id: Long) = Unit
     }
 
@@ -270,7 +272,7 @@ class ChannelInfoTopicMutationTest {
         override suspend fun setFriend(nick: String, isFriend: Boolean) = Unit
         override suspend fun setFool(nick: String, isFool: Boolean) = Unit
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
-        override suspend fun setShowJoinPartQuit(show: Boolean) = Unit
+        override suspend fun setPresenceMode(m: PresenceMode) = Unit
         override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
         override suspend fun setChatWallpaper(w: ChatWallpaper) = Unit
         override suspend fun setShowComposerEmoji(show: Boolean) = Unit

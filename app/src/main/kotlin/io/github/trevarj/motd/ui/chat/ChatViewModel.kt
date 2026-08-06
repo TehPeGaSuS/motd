@@ -35,6 +35,7 @@ import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
 import io.github.trevarj.motd.data.repo.NoopNetworkIgnoreRepository
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
@@ -117,6 +118,7 @@ data class ChatState(
     val connState: IrcClientState? = null,
     val presence: Map<PresenceKey, PresenceState> = emptyMap(),
     val conversationLayout: ConversationLayoutState = ConversationLayoutState(),
+    val conversationPresence: ConversationPresenceState = ConversationPresenceState(),
     // True for a CHANNEL buffer we are no longer a member of (server-confirmed or reflected self-PART).
     // Drives the "You're not in #channel — Rejoin" banner and disables the composer.
     val parted: Boolean = false,
@@ -239,10 +241,15 @@ class ChatViewModel @Inject constructor(
     private val _hiddenFoolsRevealed = MutableStateFlow(false)
     val hiddenFoolsRevealed: StateFlow<Boolean> = _hiddenFoolsRevealed.asStateFlow()
 
-    private val filterSpecs = settingsRepository.settings
-        .combine(_hiddenFoolsRevealed) { settings, revealHiddenFools ->
-            MessageVisibilitySpec.from(settings).copy(revealHiddenFools = revealHiddenFools)
-        }
+    // The conversation's own presence choice participates in the paging spec: it changes which rows
+    // the PagingSource emits, so switching it re-queries exactly like a global settings change does.
+    private val filterSpecs = combine(
+        settingsRepository.settings,
+        _hiddenFoolsRevealed,
+        bufferRepository.observeBuffer(bufferId).map { it?.presenceModeOverride }.distinctUntilChanged(),
+    ) { settings, revealHiddenFools, presenceOverride ->
+        MessageVisibilitySpec.from(settings, presenceOverride).copy(revealHiddenFools = revealHiddenFools)
+    }
         .distinctUntilChanged()
     private val filterSpec = filterSpecs
         .stateIn(viewModelScope, SharingStarted.Eagerly, MessageVisibilitySpec())
@@ -508,6 +515,17 @@ class ChatViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ConversationLayoutState())
 
+    /** Presence-event presentation for this conversation; null override inherits the global mode. */
+    val conversationPresence: StateFlow<ConversationPresenceState> = combine(
+        buffer,
+        settingsRepository.settings,
+    ) { room, settings ->
+        ConversationPresenceState(
+            global = settings.presenceMode,
+            override = room?.presenceModeOverride,
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ConversationPresenceState())
+
     /** The route id may be a durable redirect; all live screen behavior uses the winner id. */
     private val operationalBufferId: StateFlow<Long> = buffer
         .map { it?.id ?: bufferId }
@@ -622,6 +640,8 @@ class ChatViewModel @Inject constructor(
         )
     }.combine(conversationLayout) { current, layout ->
         current.copy(conversationLayout = layout)
+    }.combine(conversationPresence) { current, presence ->
+        current.copy(conversationPresence = presence)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatState())
 
     /** Persist to the canonical id captured at the time of selection; Room then drives the UI. */
@@ -635,6 +655,19 @@ class ChatViewModel @Inject constructor(
             false
         }
         if (!written) uiEventQueue.enqueue(ChatUiEvent.ConversationLayoutWriteFailed)
+    }
+
+    /** Persist to the canonical id captured at the time of selection; Room then drives the UI. */
+    fun setPresenceModeOverride(override: PresenceMode?) = viewModelScope.launch {
+        val requestedId = operationalBufferId.value
+        val written = try {
+            bufferRepository.setPresenceModeOverride(requestedId, override)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            false
+        }
+        if (!written) uiEventQueue.enqueue(ChatUiEvent.PresenceModeWriteFailed)
     }
 
     /**
@@ -1536,8 +1569,13 @@ class ChatViewModel @Inject constructor(
         // never trip the "new messages" divider or the scroll-down badge, since you have read what
         // you just sent. Null (no real marker, or nothing unread from others) hides both.
         viewModelScope.launch {
-            val entrySpec = MessageVisibilitySpec.from(settingsRepository.settings.first())
             val initialEntryBuffer = bufferRepository.observeBuffer(bufferId).firstOrNull()
+            // Must match the paging spec exactly, presence override included, or the entry index it
+            // resolves would count rows the PagingSource never emits.
+            val entrySpec = MessageVisibilitySpec.from(
+                settingsRepository.settings.first(),
+                initialEntryBuffer?.presenceModeOverride,
+            )
             if (!hasDeepJump && initialEntryBuffer != null && initialEntryBuffer.type != BufferType.SERVER) {
                 // Wait for history catch-up so the divider anchors on caught-up data — but only for
                 // a bounded window. `historyCatchUpPending` is held across catch-up's entire retry

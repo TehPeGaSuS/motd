@@ -11,6 +11,7 @@ import androidx.room.SkipQueryVerification
 import androidx.room.Transaction
 import androidx.room.Update
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.flow.Flow
 
@@ -430,6 +431,17 @@ interface BufferDao {
            )""",
     )
     suspend fun setLayoutDensityOverride(requestedId: RoomId, layout: LayoutDensity?): Int
+
+    /** Write via a stale redirect shell to its current canonical conversation. */
+    @Query(
+        """UPDATE buffers SET presenceModeOverride = :mode
+           WHERE id = (
+               SELECT COALESCE(redirectToRoomId, id)
+               FROM buffers
+               WHERE id = :requestedId
+           )""",
+    )
+    suspend fun setPresenceModeOverride(requestedId: RoomId, mode: PresenceMode?): Int
 
     @Query(
         """UPDATE buffers SET

@@ -8,6 +8,7 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 /** Pure timeline-filter behavior (plans/13 §2.4/§2.5): JPQ visibility, fools HIDE, exemptions. */
 class MessageFilterTest {
@@ -45,30 +46,42 @@ class MessageFilterTest {
         assertFalse(isFoolMessage(msg(sender = "bob"), fools = setOf("alice")))
     }
 
-    // --- keepMessage: JPQ ---
+    // --- keepMessage: presence events ---
 
-    @Test fun `JPQ kept when showJoinPartQuit is true`() {
-        val spec = MessageFilterSpec(showJoinPartQuit = true)
+    @Test fun `presence rows kept when the mode shows everything`() {
+        val spec = MessageFilterSpec(presenceMode = PresenceMode.ALL)
         assertTrue(keepMessage(msg(kind = MessageKind.JOIN), spec))
         assertTrue(keepMessage(msg(kind = MessageKind.PART), spec))
         assertTrue(keepMessage(msg(kind = MessageKind.QUIT), spec))
+        assertTrue(keepMessage(msg(kind = MessageKind.NICK), spec))
         assertTrue(keepMessage(msg(kind = MessageKind.NETSPLIT), spec))
         assertTrue(keepMessage(msg(kind = MessageKind.NETJOIN), spec))
     }
 
-    @Test fun `JPQ dropped when showJoinPartQuit is false`() {
-        val spec = MessageFilterSpec(showJoinPartQuit = false)
+    @Test fun `presence rows dropped when the mode hides them`() {
+        val spec = MessageFilterSpec(presenceMode = PresenceMode.HIDDEN)
         assertFalse(keepMessage(msg(kind = MessageKind.JOIN), spec))
         assertFalse(keepMessage(msg(kind = MessageKind.PART), spec))
         assertFalse(keepMessage(msg(kind = MessageKind.QUIT), spec))
+        assertFalse(keepMessage(msg(kind = MessageKind.NICK), spec))
         assertFalse(keepMessage(msg(kind = MessageKind.NETSPLIT), spec))
         assertFalse(keepMessage(msg(kind = MessageKind.NETJOIN), spec))
     }
 
-    @Test fun `non-JPQ system kinds always kept regardless of showJoinPartQuit`() {
-        val spec = MessageFilterSpec(showJoinPartQuit = false)
-        assertTrue(keepMessage(msg(kind = MessageKind.KICK), spec))
+    /**
+     * SMART is resolved in SQL, so a row that reached an in-memory consumer already passed it; the
+     * entity-only predicate must not second-guess that and hide a row that is on screen.
+     */
+    @Test fun `smart keeps presence rows in memory because SQL already decided`() {
+        val spec = MessageFilterSpec(presenceMode = PresenceMode.SMART)
+        assertTrue(keepMessage(msg(kind = MessageKind.JOIN), spec))
         assertTrue(keepMessage(msg(kind = MessageKind.NICK), spec))
+        assertTrue(keepMessage(msg(kind = MessageKind.QUIT), spec))
+    }
+
+    @Test fun `non-presence system kinds always kept regardless of the mode`() {
+        val spec = MessageFilterSpec(presenceMode = PresenceMode.HIDDEN)
+        assertTrue(keepMessage(msg(kind = MessageKind.KICK), spec))
         assertTrue(keepMessage(msg(kind = MessageKind.MODE), spec))
         assertTrue(keepMessage(msg(kind = MessageKind.TOPIC), spec))
     }

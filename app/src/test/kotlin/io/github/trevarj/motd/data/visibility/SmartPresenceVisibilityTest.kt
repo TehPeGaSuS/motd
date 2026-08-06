@@ -1,0 +1,172 @@
+package io.github.trevarj.motd.data.visibility
+
+import androidx.paging.PagingSource
+import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.buffer
+import io.github.trevarj.motd.data.db.inMemoryDb
+import io.github.trevarj.motd.data.db.message
+import io.github.trevarj.motd.data.db.network
+import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_WINDOW_MS
+import kotlinx.coroutines.test.runTest
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+
+/**
+ * The smart presence rule lives in SQL because it depends on neighboring rows, so it is exercised
+ * against a real database through the same paging query the timeline uses.
+ */
+@RunWith(RobolectricTestRunner::class)
+class SmartPresenceVisibilityTest {
+    private lateinit var db: MotdDatabase
+    private var bufferId = 0L
+    private var otherBufferId = 0L
+    private var nextKey = 0
+
+    private val base = 1_700_000_000_000L
+
+    @Before
+    fun setUp() = runTest {
+        db = inMemoryDb()
+        val networkId = db.networkDao().insert(network())
+        bufferId = db.bufferDao().insert(buffer(networkId, "#smart"))
+        otherBufferId = db.bufferDao().insert(buffer(networkId, "#other"))
+    }
+
+    @After
+    fun tearDown() = db.close()
+
+    private suspend fun insert(
+        kind: MessageKind,
+        sender: String,
+        atOffsetMs: Long,
+        isSelf: Boolean = false,
+        room: Long = bufferId,
+    ) {
+        db.messageDao().insertAll(
+            listOf(
+                message(
+                    bufferId = room,
+                    text = "${kind.name} $sender",
+                    sender = sender,
+                    serverTime = base + atOffsetMs,
+                    dedupKey = "key-${nextKey++}",
+                    kind = kind,
+                    isSelf = isSelf,
+                ),
+            ),
+        )
+    }
+
+    private suspend fun visibleRows(mode: PresenceMode): List<MessageEntity> {
+        val source = db.messageDao().pagingSource(
+            messagePagingQuery(bufferId, MessageVisibilitySpec(presenceMode = mode)),
+        )
+        val page = source.load(
+            PagingSource.LoadParams.Refresh(null, 100, false),
+        ) as PagingSource.LoadResult.Page
+        return page.data
+    }
+
+    private suspend fun visibleKinds(mode: PresenceMode): List<Pair<MessageKind, String>> =
+        visibleRows(mode).map { it.kind to it.sender }
+
+    @Test
+    fun `smart keeps presence rows for a user who spoke inside the window`() = runTest {
+        insert(MessageKind.PRIVMSG, "alice", 0)
+        insert(MessageKind.QUIT, "alice", SMART_PRESENCE_WINDOW_MS - 1)
+
+        assertEquals(
+            listOf(MessageKind.QUIT to "alice", MessageKind.PRIVMSG to "alice"),
+            visibleKinds(PresenceMode.SMART),
+        )
+    }
+
+    @Test
+    fun `smart drops presence rows for a user who never spoke`() = runTest {
+        insert(MessageKind.PRIVMSG, "alice", 0)
+        insert(MessageKind.JOIN, "lurker", 1_000)
+        insert(MessageKind.PART, "lurker", 2_000)
+        insert(MessageKind.NICK, "lurker", 3_000)
+
+        assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.SMART))
+    }
+
+    @Test
+    fun `smart drops presence rows once the speech falls outside the window`() = runTest {
+        insert(MessageKind.PRIVMSG, "alice", 0)
+        insert(MessageKind.QUIT, "alice", SMART_PRESENCE_WINDOW_MS + 1)
+
+        assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.SMART))
+    }
+
+    /** Backward-looking only: speaking after the event must not retroactively reveal it. */
+    @Test
+    fun `smart ignores speech that happened after the presence row`() = runTest {
+        insert(MessageKind.JOIN, "alice", 0)
+        insert(MessageKind.PRIVMSG, "alice", 1_000)
+
+        assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.SMART))
+    }
+
+    @Test
+    fun `smart covers nick changes for a participating user`() = runTest {
+        insert(MessageKind.PRIVMSG, "alice", 0)
+        insert(MessageKind.NICK, "alice", 1_000)
+        insert(MessageKind.NICK, "quietguy", 2_000)
+
+        assertEquals(
+            listOf(MessageKind.NICK to "alice", MessageKind.PRIVMSG to "alice"),
+            visibleKinds(PresenceMode.SMART),
+        )
+    }
+
+    @Test
+    fun `smart always keeps our own presence rows`() = runTest {
+        insert(MessageKind.JOIN, "me", 0, isSelf = true)
+
+        assertEquals(listOf(MessageKind.JOIN to "me"), visibleKinds(PresenceMode.SMART))
+    }
+
+    /** Aggregates carry no single actor, so only HIDDEN may remove them. */
+    @Test
+    fun `smart keeps netsplit and netjoin aggregates`() = runTest {
+        insert(MessageKind.NETSPLIT, "", 0)
+        insert(MessageKind.NETJOIN, "", 1_000)
+
+        assertEquals(2, visibleRows(PresenceMode.SMART).size)
+        assertEquals(0, visibleRows(PresenceMode.HIDDEN).size)
+    }
+
+    @Test
+    fun `speech in another room does not reveal a presence row`() = runTest {
+        insert(MessageKind.PRIVMSG, "alice", 0, room = otherBufferId)
+        insert(MessageKind.QUIT, "alice", 1_000)
+
+        assertEquals(emptyList<Pair<MessageKind, String>>(), visibleKinds(PresenceMode.SMART))
+    }
+
+    @Test
+    fun `a presence row is not its own evidence of participation`() = runTest {
+        insert(MessageKind.JOIN, "alice", 0)
+        insert(MessageKind.PART, "alice", 1_000)
+
+        assertEquals(emptyList<Pair<MessageKind, String>>(), visibleKinds(PresenceMode.SMART))
+    }
+
+    @Test
+    fun `all shows every presence row and hidden removes them`() = runTest {
+        insert(MessageKind.PRIVMSG, "alice", 0)
+        insert(MessageKind.JOIN, "lurker", 1_000)
+        insert(MessageKind.NICK, "lurker", 2_000)
+
+        assertEquals(3, visibleRows(PresenceMode.ALL).size)
+        assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.HIDDEN))
+    }
+}

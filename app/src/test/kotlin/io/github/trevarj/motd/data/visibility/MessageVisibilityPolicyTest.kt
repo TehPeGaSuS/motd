@@ -8,14 +8,15 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 class MessageVisibilityPolicyTest {
     @Test
     fun `join part quit follow timeline setting but never preview or activity`() {
-        for (kind in JOIN_PART_QUIT_KINDS) {
+        for (kind in PRESENCE_KINDS) {
             val message = message(kind = kind)
-            val shown = MessageVisibilityPolicy(MessageVisibilitySpec(showJoinPartQuit = true))
-            val hidden = MessageVisibilityPolicy(MessageVisibilitySpec(showJoinPartQuit = false))
+            val shown = MessageVisibilityPolicy(MessageVisibilitySpec(presenceMode = PresenceMode.ALL))
+            val hidden = MessageVisibilityPolicy(MessageVisibilitySpec(presenceMode = PresenceMode.HIDDEN))
 
             assertTrue(shown.timeline(message))
             assertFalse(hidden.timeline(message))

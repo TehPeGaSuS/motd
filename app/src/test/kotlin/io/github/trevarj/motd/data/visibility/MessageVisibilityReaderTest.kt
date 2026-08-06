@@ -26,6 +26,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 @RunWith(RobolectricTestRunner::class)
 class MessageVisibilityReaderTest {
@@ -126,7 +127,7 @@ class MessageVisibilityReaderTest {
                 bufferId,
                 100,
                 ids[0],
-                spec(FoolsMode.COLLAPSE, showJoinPartQuit = false),
+                spec(FoolsMode.COLLAPSE, presenceMode = PresenceMode.HIDDEN),
             ),
         )
         assertEquals(
@@ -135,7 +136,7 @@ class MessageVisibilityReaderTest {
                 bufferId,
                 100,
                 ids[0],
-                spec(FoolsMode.HIDE, showJoinPartQuit = false),
+                spec(FoolsMode.HIDE, presenceMode = PresenceMode.HIDDEN),
             ),
         )
     }
@@ -250,7 +251,7 @@ class MessageVisibilityReaderTest {
                 ),
             ),
         )
-        val spec = spec(FoolsMode.COLLAPSE, showJoinPartQuit = false)
+        val spec = spec(FoolsMode.COLLAPSE, presenceMode = PresenceMode.HIDDEN)
         val anchor = reader.resolveSavedAnchor(bufferId, null, 200, ids[1], spec)
 
         assertEquals(ids[0], anchor?.id)
@@ -434,8 +435,8 @@ class MessageVisibilityReaderTest {
         assertNull(reader.nearestUnreadMentionBelowIndex(bufferId, beforeIndex = 0, after = marker, spec = spec))
     }
 
-    private fun spec(mode: FoolsMode, showJoinPartQuit: Boolean = true) = MessageVisibilitySpec(
-        showJoinPartQuit = showJoinPartQuit,
+    private fun spec(mode: FoolsMode, presenceMode: PresenceMode = PresenceMode.ALL) = MessageVisibilitySpec(
+        presenceMode = presenceMode,
         fools = setOf("alice"),
         foolsMode = mode,
     )

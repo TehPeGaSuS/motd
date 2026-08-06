@@ -5,13 +5,13 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
-import io.github.trevarj.motd.data.visibility.JOIN_PART_QUIT_KINDS
 import io.github.trevarj.motd.data.visibility.CONVERSATION_KINDS
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.history.seamAbove
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.sync.GapFillProgress
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -27,9 +27,6 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withTimeoutOrNull
 
 // --- timeline message filtering (plans/13 §2.4/§2.5) ---
-
-/** JOIN/PART/QUIT kinds hidden when `showJoinPartQuit == false`. */
-val JPQ_KINDS: Set<MessageKind> = JOIN_PART_QUIT_KINDS
 
 /**
  * Behavioral filter spec derived from observed Settings and passed into each repository Pager.
@@ -378,8 +375,8 @@ fun isFoolMessage(
     message.matchesConfiguredActor(fools, identityRules)
 
 /**
- * Policy predicate: drops JPQ rows when hidden, and drops fool rows only in HIDE mode.
- * System-event kinds are never fool-treated (JPQ visibility governs those). COLLAPSE keeps the row
+ * Policy predicate: drops presence rows when hidden, and drops fool rows only in HIDE mode.
+ * System-event kinds are never fool-treated (presence visibility governs those). COLLAPSE keeps the row
  * so it can render as a tap-to-expand placeholder in the timeline.
  */
 fun keepMessage(
@@ -984,6 +981,7 @@ sealed interface ChatUiEvent {
     data object NotInChannel : ChatUiEvent
     data class ReplyJumpUnavailable(val request: ReplyJumpRequest) : ChatUiEvent
     data object ConversationLayoutWriteFailed : ChatUiEvent
+    data object PresenceModeWriteFailed : ChatUiEvent
 }
 
 /** Database-backed conversation layout and the global setting it may inherit. */
@@ -992,6 +990,13 @@ data class ConversationLayoutState(
     val override: LayoutDensity? = null,
 ) {
     val effective: LayoutDensity get() = override ?: global
+}
+
+data class ConversationPresenceState(
+    val global: PresenceMode = PresenceMode.SMART,
+    val override: PresenceMode? = null,
+) {
+    val effective: PresenceMode get() = override ?: global
 }
 
 data class QueuedChatUiEvent(val id: Long, val value: ChatUiEvent)

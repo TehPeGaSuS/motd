@@ -28,6 +28,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 // End-to-end: repository sanitizes raw input and drives the FTS DAO, honoring the kind filter
 // and buffer scoping.
@@ -234,7 +235,7 @@ class SearchRepositoryTest {
         override suspend fun setFriend(nick: String, isFriend: Boolean) = Unit
         override suspend fun setFool(nick: String, isFool: Boolean) = Unit
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
-        override suspend fun setShowJoinPartQuit(show: Boolean) = Unit
+        override suspend fun setPresenceMode(m: PresenceMode) = Unit
         override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
         override suspend fun setChatWallpaper(w: ChatWallpaper) = Unit
         override suspend fun setShowComposerEmoji(show: Boolean) = Unit

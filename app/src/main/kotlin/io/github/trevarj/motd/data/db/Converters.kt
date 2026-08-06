@@ -2,6 +2,7 @@ package io.github.trevarj.motd.data.db
 
 import androidx.room.TypeConverter
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 // Enum <-> String converters so enum columns store their stable `name` (matching the string
 // literals used in raw @Query predicates like kind IN ('PRIVMSG', ...)).
@@ -92,4 +93,11 @@ internal class Converters {
     @TypeConverter
     fun stringToLayoutDensity(v: String?): LayoutDensity? =
         v?.let { runCatching { LayoutDensity.valueOf(it) }.getOrNull() }
+
+    @TypeConverter
+    fun presenceModeToString(v: PresenceMode?): String? = v?.name
+
+    @TypeConverter
+    fun stringToPresenceMode(v: String?): PresenceMode? =
+        v?.let { runCatching { PresenceMode.valueOf(it) }.getOrNull() }
 }

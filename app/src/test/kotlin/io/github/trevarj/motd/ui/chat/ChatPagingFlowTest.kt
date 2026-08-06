@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatPagingFlowTest {
@@ -66,7 +67,7 @@ class ChatPagingFlowTest {
         val job = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { pages.collect() }
         runCurrent()
 
-        specs.value = MessageVisibilitySpec(showJoinPartQuit = false)
+        specs.value = MessageVisibilitySpec(presenceMode = PresenceMode.HIDDEN)
         runCurrent()
 
         assertEquals(1, cancelledGenerations)

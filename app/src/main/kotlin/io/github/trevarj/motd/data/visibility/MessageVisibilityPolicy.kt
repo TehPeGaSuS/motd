@@ -5,23 +5,38 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_WINDOW_MS
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 
-val JOIN_PART_QUIT_KINDS: Set<MessageKind> =
+/**
+ * Presence events attributable to one user. These carry that user's `normalizedActor`, which is what
+ * makes the smart test ([PresenceMode.SMART]) possible: "did this actor speak here recently".
+ */
+val ACTOR_PRESENCE_KINDS: Set<MessageKind> =
     setOf(
         MessageKind.JOIN,
         MessageKind.PART,
         MessageKind.QUIT,
-        MessageKind.NETSPLIT,
-        MessageKind.NETJOIN,
+        MessageKind.NICK,
     )
+
+/**
+ * Netsplit/netjoin rows aggregate many users into a single condensed row and carry no single actor
+ * (`normalizedActor` is empty), so the smart test cannot apply to them. They are already low-noise
+ * by construction and only [PresenceMode.HIDDEN] removes them.
+ */
+val AGGREGATE_PRESENCE_KINDS: Set<MessageKind> = setOf(MessageKind.NETSPLIT, MessageKind.NETJOIN)
+
+/** Every non-conversation row governed by [MessageVisibilitySpec.presenceMode]. */
+val PRESENCE_KINDS: Set<MessageKind> = ACTOR_PRESENCE_KINDS + AGGREGATE_PRESENCE_KINDS
 
 val CONVERSATION_KINDS: Set<MessageKind> =
     setOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)
 
 data class MessageVisibilitySpec(
-    val showJoinPartQuit: Boolean = true,
+    val presenceMode: PresenceMode = PresenceMode.SMART,
     /** Stored configured nicks; consumers normalize them with the room's IRC identity rules. */
     val fools: Set<String> = emptySet(),
     val foolsMode: FoolsMode = FoolsMode.COLLAPSE,
@@ -29,11 +44,13 @@ data class MessageVisibilitySpec(
     val revealHiddenFools: Boolean = false,
 ) {
     companion object {
-        fun from(settings: Settings): MessageVisibilitySpec = MessageVisibilitySpec(
-            showJoinPartQuit = settings.showJoinPartQuit,
-            fools = settings.fools,
-            foolsMode = settings.foolsMode,
-        )
+        /** [override] is the conversation's own presence choice; null inherits the global one. */
+        fun from(settings: Settings, override: PresenceMode? = null): MessageVisibilitySpec =
+            MessageVisibilitySpec(
+                presenceMode = override ?: settings.presenceMode,
+                fools = settings.fools,
+                foolsMode = settings.foolsMode,
+            )
     }
 }
 
@@ -53,14 +70,22 @@ class MessageVisibilityPolicy(
             !message.isSelf &&
             matchesFoolIdentity(message.senderAccount, message.normalizedActor)
 
-    /** Rows physically presented by the timeline. Collapse retains its expandable placeholder. */
+    /**
+     * Rows physically presented by the timeline. Collapse retains its expandable placeholder.
+     *
+     * The smart test is deliberately NOT re-applied here. It depends on neighboring rows, so
+     * [MessageVisibilitySql] owns it and every row an in-memory consumer can see has already passed
+     * it — re-deciding from a lone entity would hide rows that are on screen and corrupt the anchor
+     * and effective-bottom scans that run over loaded pages. In-memory, SMART therefore admits the
+     * same rows as [PresenceMode.ALL]; only [PresenceMode.HIDDEN] removes presence rows outright.
+     */
     fun timeline(message: MessageEntity): Boolean =
-        (spec.showJoinPartQuit || message.kind !in JOIN_PART_QUIT_KINDS) &&
+        (spec.presenceMode != PresenceMode.HIDDEN || message.kind !in PRESENCE_KINDS) &&
             !(spec.foolsMode == FoolsMode.HIDE && !spec.revealHiddenFools && isFool(message))
 
     /** Preview and activity use the same eligibility; fools never reorder the chat list. */
     fun preview(message: MessageEntity): Boolean =
-        message.kind !in JOIN_PART_QUIT_KINDS && !isFool(message)
+        message.kind !in PRESENCE_KINDS && !isFool(message)
 
     fun activity(message: MessageEntity): Boolean = preview(message)
 
@@ -99,13 +124,17 @@ internal class MessageVisibilitySql(
     private val defaultNotFoolPredicate = buildNotFoolPredicate()
 
     fun timeline(alias: String = "m"): String = allOf(
-        if (spec.showJoinPartQuit) TRUE else notJoinPartQuit(alias),
+        when (spec.presenceMode) {
+            PresenceMode.ALL -> TRUE
+            PresenceMode.HIDDEN -> notPresence(alias)
+            PresenceMode.SMART -> smartPresence(alias)
+        },
         if (spec.foolsMode == FoolsMode.HIDE && !spec.revealHiddenFools) notFool(alias) else TRUE,
     )
 
     fun anchor(alias: String = "m"): String = allOf(timeline(alias), notFool(alias))
 
-    fun preview(alias: String = "m"): String = allOf(notJoinPartQuit(alias), notFool(alias))
+    fun preview(alias: String = "m"): String = allOf(notPresence(alias), notFool(alias))
 
     fun visibleUnread(alias: String = "m"): String = allOf(
         "${column(alias, "kind")} IN ($CONVERSATION_KIND_SQL)",
@@ -113,8 +142,33 @@ internal class MessageVisibilitySql(
         notFool(alias),
     )
 
-    private fun notJoinPartQuit(alias: String): String =
-        "${column(alias, "kind")} NOT IN ($JOIN_PART_QUIT_KIND_SQL)"
+    private fun notPresence(alias: String): String =
+        "${column(alias, "kind")} NOT IN ($PRESENCE_KIND_SQL)"
+
+    /**
+     * Keep an actor-attributable presence row only when that actor took part in the conversation:
+     * they sent a message in the same room within [SMART_PRESENCE_WINDOW_MS] before the event.
+     * Backward-looking only, matching Halloy, so a row's visibility never changes as later messages
+     * arrive — a forward-looking window would make already-rendered rows appear and disappear.
+     *
+     * Our own presence rows are always kept: "you joined" anchors a freshly opened buffer even
+     * before anything has been said. Aggregate netsplit/netjoin rows have no single actor and are
+     * left alone here; only HIDDEN drops them.
+     *
+     * The correlated lookup is a covering seek on (bufferId, normalizedActor, serverTime).
+     */
+    private fun smartPresence(alias: String): String {
+        val kind = column(alias, "kind")
+        val serverTime = column(alias, "serverTime")
+        return "($kind NOT IN ($ACTOR_PRESENCE_KIND_SQL) " +
+            "OR ${column(alias, "isSelf")} = 1 " +
+            "OR EXISTS (SELECT 1 FROM messages spoke " +
+            "WHERE spoke.bufferId = ${column(alias, "bufferId")} " +
+            "AND spoke.normalizedActor = ${column(alias, "normalizedActor")} " +
+            "AND spoke.kind IN ($CONVERSATION_KIND_SQL) " +
+            "AND spoke.serverTime <= $serverTime " +
+            "AND spoke.serverTime >= $serverTime - $SMART_PRESENCE_WINDOW_MS))"
+    }
 
     private fun notFool(alias: String): String =
         if (alias == "m") defaultNotFoolPredicate else buildNotFoolPredicate(alias)
@@ -276,5 +330,6 @@ private fun sqlBlobLiteral(value: String): String = buildString(value.length * 2
 
 private const val TRUE = "1"
 private const val HEX = "0123456789abcdef"
-private val JOIN_PART_QUIT_KIND_SQL = JOIN_PART_QUIT_KINDS.joinToString(",") { "'${it.name}'" }
+private val PRESENCE_KIND_SQL = PRESENCE_KINDS.joinToString(",") { "'${it.name}'" }
+private val ACTOR_PRESENCE_KIND_SQL = ACTOR_PRESENCE_KINDS.joinToString(",") { "'${it.name}'" }
 private val CONVERSATION_KIND_SQL = CONVERSATION_KINDS.joinToString(",") { "'${it.name}'" }

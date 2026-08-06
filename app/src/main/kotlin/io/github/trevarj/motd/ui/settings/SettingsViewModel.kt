@@ -9,6 +9,7 @@ import io.github.trevarj.motd.audio.VoicePrefs
 import io.github.trevarj.motd.audio.VoiceRecordingQuality
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
@@ -195,8 +196,8 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.setNickColorPalette(palette)
     }
 
-    fun setShowJoinPartQuit(show: Boolean) = viewModelScope.launch {
-        settingsRepository.setShowJoinPartQuit(show)
+    fun setPresenceMode(mode: PresenceMode) = viewModelScope.launch {
+        settingsRepository.setPresenceMode(mode)
     }
 
     fun setWallpaper(selection: WallpaperSelection) = viewModelScope.launch {

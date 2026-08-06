@@ -16,6 +16,7 @@ import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 
@@ -81,6 +82,8 @@ interface BufferRepository {
     suspend fun setArchived(id: Long, archived: Boolean) = Unit
     /** Persists a nullable per-conversation override; false means the requested room disappeared. */
     suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean
+    /** Persists a nullable per-conversation presence override; false means the room disappeared. */
+    suspend fun setPresenceModeOverride(id: Long, mode: PresenceMode?): Boolean
     /** Remove local content. QUERY identity/cursor state remains as a hidden reconnect tombstone;
      *  the parting of a joined CHANNEL is handled upstream by the caller (ChatListViewModel). */
     suspend fun deleteBuffer(id: Long)

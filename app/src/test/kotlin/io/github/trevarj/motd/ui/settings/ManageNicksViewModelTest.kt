@@ -22,6 +22,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ManageNicksViewModelTest {
@@ -70,7 +71,7 @@ class ManageNicksViewModelTest {
         }
 
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
-        override suspend fun setShowJoinPartQuit(show: Boolean) = Unit
+        override suspend fun setPresenceMode(m: PresenceMode) = Unit
         override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
         override suspend fun setChatWallpaper(w: io.github.trevarj.motd.data.prefs.ChatWallpaper) = Unit
         override suspend fun setShowComposerEmoji(show: Boolean) = Unit

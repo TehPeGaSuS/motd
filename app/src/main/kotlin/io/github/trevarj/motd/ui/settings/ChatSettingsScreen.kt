@@ -32,6 +32,9 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.VoiceConfig
 import io.github.trevarj.motd.audio.VoiceRecordingQuality
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.ui.chat.presenceModeDescription
+import io.github.trevarj.motd.ui.chat.presenceModeLabel
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.Settings
@@ -74,7 +77,7 @@ fun ChatSettingsScreen(
         onOpenFriends = onOpenFriends,
         onOpenFools = onOpenFools,
         onOpenDirectConnections = onOpenDirectConnections,
-        onShowJoinPartQuit = viewModel::setShowJoinPartQuit,
+        onPresenceMode = viewModel::setPresenceMode,
         onFoolsMode = viewModel::setFoolsMode,
         onShowComposerEmoji = viewModel::setShowComposerEmoji,
         onChatSoundsEnabled = viewModel::setChatSoundsEnabled,
@@ -100,7 +103,7 @@ fun ChatSettingsContent(
     onOpenFriends: () -> Unit,
     onOpenFools: () -> Unit,
     onOpenDirectConnections: () -> Unit,
-    onShowJoinPartQuit: (Boolean) -> Unit,
+    onPresenceMode: (PresenceMode) -> Unit,
     onFoolsMode: (FoolsMode) -> Unit,
     onShowComposerEmoji: (Boolean) -> Unit,
     onChatSoundsEnabled: (Boolean) -> Unit,
@@ -116,13 +119,8 @@ fun ChatSettingsContent(
     var qualitySheetOpen by remember { mutableStateOf(false) }
     SettingsScaffold(title = stringResource(R.string.settings_chat), onBack = onBack) {
         SettingsGroup(title = stringResource(R.string.settings_messages_section)) {
-            SwitchRow(
-                title = stringResource(R.string.settings_show_jpq),
-                subtitle = stringResource(R.string.settings_show_jpq_desc),
-                checked = settings.showJoinPartQuit,
-                onCheckedChange = onShowJoinPartQuit,
-                switchTag = "settings_switch_show_jpq",
-            )
+            SubLabel(stringResource(R.string.settings_presence_title))
+            PresenceModeGroup(current = settings.presenceMode, onSelect = onPresenceMode)
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
                 title = stringResource(R.string.settings_show_images),
@@ -286,6 +284,23 @@ private fun voiceQualityDescription(quality: VoiceRecordingQuality): String = wh
     VoiceRecordingQuality.HIGH -> "Opus 64 kbps · AAC 96 kbps"
 }
 
+/** Global presence-event choice. A conversation can override it from its own overflow menu. */
+@Composable
+private fun PresenceModeGroup(current: PresenceMode, onSelect: (PresenceMode) -> Unit) {
+    Column(Modifier.selectableGroup()) {
+        PresenceMode.entries.forEach { mode ->
+            RadioRow(
+                label = stringResource(presenceModeLabel(mode)),
+                subtitle = stringResource(presenceModeDescription(mode)),
+                selected = current == mode,
+                enabled = true,
+                onClick = { onSelect(mode) },
+                modifier = Modifier.testTag("settings_presence_mode_${mode.name.lowercase()}"),
+            )
+        }
+    }
+}
+
 @Composable
 private fun FoolsModeGroup(current: FoolsMode, onSelect: (FoolsMode) -> Unit) {
     Column(Modifier.selectableGroup()) {
@@ -319,7 +334,7 @@ private fun ChatSettingsPreview() {
             voice = VoiceConfig(),
             avatars = AvatarConfig(),
             onBack = {}, onOpenFriends = {}, onOpenFools = {}, onOpenDirectConnections = {},
-            onShowJoinPartQuit = {}, onFoolsMode = {}, onShowComposerEmoji = {},
+            onPresenceMode = {}, onFoolsMode = {}, onShowComposerEmoji = {},
             onChatSoundsEnabled = {},
             onVisibleReplyPrefix = {},
             onShowImages = {}, onShowLinkPreviews = {}, onShowSharedAvatars = {},

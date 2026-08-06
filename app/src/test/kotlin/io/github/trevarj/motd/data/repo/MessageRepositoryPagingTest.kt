@@ -30,6 +30,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 @RunWith(RobolectricTestRunner::class)
 class MessageRepositoryPagingTest {
@@ -167,7 +168,7 @@ class MessageRepositoryPagingTest {
             )
         }
         val spec = MessageVisibilitySpec(
-            showJoinPartQuit = false,
+            presenceMode = PresenceMode.HIDDEN,
             fools = setOf("fool"),
             foolsMode = FoolsMode.HIDE,
         )
@@ -243,10 +244,10 @@ class MessageRepositoryPagingTest {
         }
         val specs = listOf(
             MessageVisibilitySpec(),
-            MessageVisibilitySpec(showJoinPartQuit = false),
+            MessageVisibilitySpec(presenceMode = PresenceMode.HIDDEN),
             MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.HIDE),
             MessageVisibilitySpec(
-                showJoinPartQuit = false,
+                presenceMode = PresenceMode.HIDDEN,
                 fools = setOf("fool"),
                 foolsMode = FoolsMode.COLLAPSE,
             ),
@@ -392,7 +393,7 @@ class MessageRepositoryPagingTest {
         )
         db.messageDao().insertAll(rows)
         val spec = MessageVisibilitySpec(
-            showJoinPartQuit = false,
+            presenceMode = PresenceMode.HIDDEN,
             fools = setOf("[alice", "stable-account"),
             foolsMode = FoolsMode.HIDE,
         )

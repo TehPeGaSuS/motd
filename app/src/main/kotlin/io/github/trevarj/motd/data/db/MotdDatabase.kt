@@ -34,7 +34,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 25,
+    version = 26,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -767,6 +767,20 @@ val MIGRATION_24_25 = object : Migration(24, 25) {
                    FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`)
                        ON UPDATE NO ACTION ON DELETE CASCADE
                )""",
+        )
+    }
+}
+
+/**
+ * v25 -> v26: nullable per-conversation presence-event override (null inherits the global mode),
+ * plus the actor-leading message index the smart presence filter seeks on.
+ */
+val MIGRATION_25_26 = object : Migration(25, 26) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE buffers ADD COLUMN presenceModeOverride TEXT")
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_normalizedActor_serverTime` " +
+                "ON `messages` (`bufferId`, `normalizedActor`, `serverTime`)",
         )
     }
 }

@@ -7,6 +7,7 @@ import androidx.room.Fts4
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 
 enum class NetworkRole { DIRECT, BOUNCER_ROOT, BOUNCER_CHILD }
@@ -187,6 +188,8 @@ data class RoomEntity(
     val redirectToRoomId: RoomId? = null,
     /** Null inherits the global message-layout preference for this durable conversation. */
     val layoutDensityOverride: LayoutDensity? = null,
+    /** Null inherits the global presence-event preference for this durable conversation. */
+    val presenceModeOverride: PresenceMode? = null,
 )
 
 /** Compatibility name retained while callers migrate to the canonical room vocabulary. */
@@ -251,6 +254,9 @@ data class RoomAliasEntity(
         Index(value = ["bufferId", "msgid"]),
         Index(value = ["bufferId", "replyToMsgid", "replyToEventId"]),
         Index(value = ["bufferId", "pendingLabel"]),
+        // Smart presence filtering asks "did this actor speak in this room just before the event";
+        // without an actor-leading index that lookup degrades to a serverTime range scan per row.
+        Index(value = ["bufferId", "normalizedActor", "serverTime"]),
     ],
     foreignKeys = [ForeignKey(
         entity = BufferEntity::class, parentColumns = ["id"],

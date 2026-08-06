@@ -280,6 +280,7 @@ class BufferStore @Inject constructor(
                 historyDiscardedThroughMsgid = discardedBoundary?.historyDiscardedThroughMsgid,
                 historyDiscardedThroughTime = discardedBoundary?.historyDiscardedThroughTime,
                 layoutDensityOverride = winner.layoutDensityOverride ?: loser.layoutDensityOverride,
+                presenceModeOverride = winner.presenceModeOverride ?: loser.presenceModeOverride,
             )
             val mergedHistoryGaps = historyGapsForRoomMerge(winner.id, loser.id)
             bufferDao.update(result)

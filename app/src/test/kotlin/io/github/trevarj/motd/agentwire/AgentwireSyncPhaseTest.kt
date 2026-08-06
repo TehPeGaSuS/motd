@@ -57,6 +57,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 private const val NETWORK_ID = 7L
 private const val BUFFER_ID = 11L
@@ -405,6 +406,7 @@ class AgentwireSyncPhaseTest {
         override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
         override suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? = null
         override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean = true
+        override suspend fun setPresenceModeOverride(id: Long, mode: PresenceMode?): Boolean = true
         override suspend fun deleteBuffer(id: Long) = Unit
     }
 

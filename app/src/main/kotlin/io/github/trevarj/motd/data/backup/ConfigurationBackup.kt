@@ -17,6 +17,7 @@ import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.PushProvider
 import io.github.trevarj.motd.data.prefs.PushProviderPrefs
 import io.github.trevarj.motd.data.prefs.ReplyConfig
@@ -364,7 +365,7 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
                 .forEach { nick -> settingsRepository.setFool(nick, false) }
             it.fools.forEach { nick -> settingsRepository.setFool(nick, true) }
             settingsRepository.setFoolsMode(it.foolsMode)
-            settingsRepository.setShowJoinPartQuit(it.showJoinPartQuit)
+            settingsRepository.setPresenceMode(it.restoredPresenceMode())
             settingsRepository.setAvatarStyle(it.avatarStyle)
             settingsRepository.setChatWallpaper(it.chatWallpaper)
             settingsRepository.setShowComposerEmoji(it.showComposerEmoji)
@@ -683,6 +684,18 @@ private fun PortableSelfAvatarSetting.toSelfAvatarSetting(): SelfAvatarSetting =
     PortableSelfAvatarMode.CLEARED -> SelfAvatarSetting.ExplicitlyCleared
     PortableSelfAvatarMode.SET -> url?.let(SelfAvatarSetting::Set) ?: SelfAvatarSetting.Unmanaged
 }
+
+/**
+ * Archives written before presence modes existed carry only the former `showJoinPartQuit` boolean,
+ * so an explicit hide/show choice survives a restore; anything newer already carries [presenceMode]
+ * and the legacy field is absent.
+ */
+private fun Settings.restoredPresenceMode(): PresenceMode =
+    when (showJoinPartQuit) {
+        null -> presenceMode
+        false -> PresenceMode.HIDDEN
+        true -> PresenceMode.ALL
+    }
 
 private fun ByteArray.b64(): String = Base64.getEncoder().encodeToString(this)
 private fun String.fromB64(): ByteArray = Base64.getDecoder().decode(this)

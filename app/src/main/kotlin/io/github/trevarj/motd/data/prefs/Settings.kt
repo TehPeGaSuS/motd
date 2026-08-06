@@ -21,6 +21,36 @@ enum class LayoutDensity { COMPACT, COMFORTABLE, TWO_LINE }
 enum class NickColorPalette { THEME, CLASSIC, VIVID }
 enum class FoolsMode { COLLAPSE, HIDE }
 
+/**
+ * How presence events (join/part/quit and nick changes) are presented in a conversation.
+ *
+ * [SMART] is the default: a presence row is shown only when that user actually took part in the
+ * conversation, defined as having sent a message in the same room within [SMART_PRESENCE_WINDOW_MS]
+ * before the event. Your own presence rows always survive, so "you joined" still anchors a fresh
+ * buffer. This mirrors Halloy's `server_messages.smart` and removes the bulk of large-channel noise
+ * without losing the events that carry meaning.
+ *
+ * Netsplit/netjoin rows are aggregates covering many users at once, so they are already condensed to
+ * a single row and are not subject to the smart test; only [HIDDEN] removes them.
+ */
+enum class PresenceMode { ALL, SMART, HIDDEN }
+
+/** Window a user's last message keeps their presence events visible under [PresenceMode.SMART]. */
+const val SMART_PRESENCE_WINDOW_MS: Long = 5 * 60 * 1000
+
+/**
+ * Decode the stored presence preference. Installations predating this setting carry the former
+ * `show_join_part_quit` boolean instead: an explicit `false` stays a full hide, an explicit `true`
+ * stays "show everything", and no stored choice at all adopts the new smart default.
+ */
+internal fun presenceModeFromPreference(saved: String?, legacyShowJoinPartQuit: String?): PresenceMode =
+    saved?.let { runCatching { PresenceMode.valueOf(it) }.getOrNull() }
+        ?: when (legacyShowJoinPartQuit?.toBooleanStrictOrNull()) {
+            false -> PresenceMode.HIDDEN
+            true -> PresenceMode.ALL
+            null -> PresenceMode.SMART
+        }
+
 /** Decode saved palettes, migrating both former defaults to the theme-derived default. */
 internal fun nickColorPaletteFromPreference(saved: String?): NickColorPalette = when (saved) {
     "CLASSIC" -> NickColorPalette.CLASSIC
@@ -74,7 +104,14 @@ data class Settings(
     val friends: Set<String> = emptySet(),
     val fools: Set<String> = emptySet(),
     val foolsMode: FoolsMode = FoolsMode.COLLAPSE,
-    val showJoinPartQuit: Boolean = true,
+    /** Global presence-event presentation; a conversation may override it (RoomEntity). */
+    val presenceMode: PresenceMode = PresenceMode.SMART,
+    /**
+     * Backup compatibility only, never populated at runtime. Archives written before presence modes
+     * existed carry the former boolean here; restore maps it onto [presenceMode] (see
+     * ConfigurationBackup). Newer archives omit it entirely.
+     */
+    val showJoinPartQuit: Boolean? = null,
     /** Avatar rendering style; explicit saved choices override the IRC-sprite default. */
     val avatarStyle: AvatarStyle = AvatarStyle.IRC_SPRITE,
     /** Opt-in patterned chat background; NONE preserves the existing plain theme background. */
@@ -120,7 +157,7 @@ interface SettingsRepository {
         setFool(nick, isFool)
     }
     suspend fun setFoolsMode(m: FoolsMode)
-    suspend fun setShowJoinPartQuit(show: Boolean)
+    suspend fun setPresenceMode(m: PresenceMode)
     suspend fun setAvatarStyle(style: AvatarStyle)
     suspend fun setChatWallpaper(w: ChatWallpaper)
     suspend fun setShowComposerEmoji(show: Boolean)

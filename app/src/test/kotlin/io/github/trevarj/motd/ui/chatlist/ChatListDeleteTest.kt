@@ -43,6 +43,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 /**
  * Covers durable channel-close requests, immediate local-only deletion, and the row actions that
@@ -60,6 +61,7 @@ class ChatListDeleteTest {
         override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
         override suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? = null
         override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean = true
+        override suspend fun setPresenceModeOverride(id: Long, mode: PresenceMode?): Boolean = true
         override suspend fun deleteBuffer(id: Long) { deleted += id }
     }
 
@@ -127,7 +129,7 @@ class ChatListDeleteTest {
         override suspend fun setFriend(nick: String, isFriend: Boolean) = Unit
         override suspend fun setFool(nick: String, isFool: Boolean) = Unit
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
-        override suspend fun setShowJoinPartQuit(show: Boolean) = Unit
+        override suspend fun setPresenceMode(m: PresenceMode) = Unit
         override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
         override suspend fun setChatWallpaper(w: io.github.trevarj.motd.data.prefs.ChatWallpaper) = Unit
         override suspend fun setShowComposerEmoji(show: Boolean) = Unit

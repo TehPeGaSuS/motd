@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -69,6 +70,9 @@ class BufferRepositoryImpl @Inject constructor(
 
     override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean =
         bufferDao.setLayoutDensityOverride(id, layout) == 1
+
+    override suspend fun setPresenceModeOverride(id: Long, mode: PresenceMode?): Boolean =
+        bufferDao.setPresenceModeOverride(id, mode) == 1
 
     // QUERY rows become hidden cursor shells; other types are physically removed with their graph.
     override suspend fun deleteBuffer(id: Long) = bufferDao.deleteBuffer(bufferDao.canonicalId(id) ?: id)

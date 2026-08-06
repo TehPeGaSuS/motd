@@ -410,7 +410,6 @@ fun ChatScreen(
         foolsMode = settings.foolsMode,
         hiddenFoolsRevealed = hiddenFoolsRevealed,
         onHiddenFoolsRevealedChange = viewModel::setHiddenFoolsRevealed,
-        showJoinPartQuit = settings.showJoinPartQuit,
         chatWallpaper = appearance.wallpaper,
         conversationFontScalePercent = appearance.conversationFontScalePercent,
         showComposerEmoji = settings.showComposerEmoji,
@@ -520,6 +519,7 @@ fun ChatScreen(
         historyAvailability = historyAvailability,
         conversationLayout = state.conversationLayout,
         onConversationLayoutSelected = viewModel::setConversationLayoutOverride,
+        onPresenceModeSelected = viewModel::setPresenceModeOverride,
         diagnostics = viewModel.diagnostics,
     )
 
@@ -634,7 +634,6 @@ fun ChatContent(
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
     hiddenFoolsRevealed: Boolean = false,
     onHiddenFoolsRevealedChange: (Boolean) -> Unit = {},
-    showJoinPartQuit: Boolean = true,
     chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection = io.github.trevarj.motd.data.prefs.WallpaperSelection(),
     conversationFontScalePercent: Int = io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT,
     showComposerEmoji: Boolean = true,
@@ -696,6 +695,7 @@ fun ChatContent(
     nearestUnreadMentionBelow: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> ChatPositionTarget? = { _, _ -> null },
     conversationLayout: ConversationLayoutState = ConversationLayoutState(),
     onConversationLayoutSelected: (io.github.trevarj.motd.data.prefs.LayoutDensity?) -> Unit = {},
+    onPresenceModeSelected: (io.github.trevarj.motd.data.prefs.PresenceMode?) -> Unit = {},
     // Opt-in journal for the timeline's own Paging generations. Noop by default so previews and
     // hand-built call sites need nothing; the required E2E gate arms the real one for the journey.
     diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
@@ -703,8 +703,9 @@ fun ChatContent(
     val listState = rememberLazyListState()
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
     var liveEntryIds by remember(state.buffer?.id) { mutableStateOf(emptySet<Long>()) }
+    val presenceMode = state.conversationPresence.effective
     val visibilityPolicy = remember(
-        showJoinPartQuit,
+        presenceMode,
         fools,
         foolsMode,
         hiddenFoolsRevealed,
@@ -712,7 +713,7 @@ fun ChatContent(
     ) {
         MessageVisibilityPolicy(
             MessageVisibilitySpec(
-                showJoinPartQuit,
+                presenceMode,
                 fools,
                 foolsMode,
                 revealHiddenFools = hiddenFoolsRevealed,
@@ -785,6 +786,7 @@ fun ChatContent(
     var longDraftPrompt by rememberSaveable { mutableStateOf(false) }
     var overflowOpen by rememberSaveable { mutableStateOf(false) }
     var conversationLayoutSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var presenceModeSheetOpen by rememberSaveable { mutableStateOf(false) }
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
     // Global fool expand/collapse toggle (plans/13 §2.4): when true every collapsed fool row in the
     // buffer renders expanded; per-row toggles still override individually via [expandedFools] and
@@ -877,6 +879,7 @@ fun ChatContent(
             ChatUiEvent.SendRejected -> stringResource(R.string.chat_send_rejected)
             ChatUiEvent.NotInChannel -> stringResource(R.string.chat_not_in_channel)
             ChatUiEvent.ConversationLayoutWriteFailed -> stringResource(R.string.chat_layout_write_failed)
+            ChatUiEvent.PresenceModeWriteFailed -> stringResource(R.string.chat_presence_write_failed)
             is ChatUiEvent.ReplyJumpUnavailable -> jumpNotLoaded
         }
     }
@@ -1746,6 +1749,25 @@ fun ChatContent(
                                 conversationLayoutSheetOpen = true
                             },
                         )
+                        DropdownMenuItem(
+                            modifier = Modifier.testTag("chat_presence_menu"),
+                            text = {
+                                Column {
+                                    Text(stringResource(R.string.chat_presence_title))
+                                    Text(
+                                        stringResource(
+                                            R.string.chat_presence_overflow_summary,
+                                            stringResource(presenceModeLabel(presenceMode)),
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                overflowOpen = false
+                                presenceModeSheetOpen = true
+                            },
+                        )
                         if (fools.isNotEmpty()) {
                             val foolsShown = if (foolsMode == FoolsMode.HIDE) {
                                 hiddenFoolsRevealed
@@ -2169,6 +2191,16 @@ fun ChatContent(
         )
     }
 
+    if (presenceModeSheetOpen) {
+        PresenceModeSheet(
+            state = state.conversationPresence,
+            onSelect = { override ->
+                onPresenceModeSelected(override)
+                presenceModeSheetOpen = false
+            },
+            onDismiss = { presenceModeSheetOpen = false },
+        )
+    }
     if (conversationLayoutSheetOpen) {
         ConversationLayoutSheet(
             state = conversationLayout,

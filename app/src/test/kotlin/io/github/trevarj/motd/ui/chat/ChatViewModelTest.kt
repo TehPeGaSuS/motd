@@ -106,6 +106,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import io.github.trevarj.motd.data.prefs.PresenceMode
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -410,6 +411,68 @@ class ChatViewModelTest {
         assertEquals(listOf(query.id to LayoutDensity.TWO_LINE), queryBuffers.layoutWrites)
         assertEquals(LayoutDensity.COMPACT, channelVm.state.value.conversationLayout.effective)
         assertEquals(LayoutDensity.TWO_LINE, queryVm.state.value.conversationLayout.effective)
+    }
+
+    @Test
+    fun `presence mode inherits global then persists and clears an override`() = runTest {
+        val settings = FakeSettingsRepository()
+        val buffers = FakeBufferRepository(channel)
+        val vm = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            buffers = buffers,
+            settings = settings,
+        )
+        vm.state.first { it.buffer != null }
+
+        settings.settings.value = Settings(presenceMode = PresenceMode.SMART)
+        assertEquals(
+            PresenceMode.SMART,
+            vm.state.first { it.conversationPresence.global == PresenceMode.SMART }
+                .conversationPresence.effective,
+        )
+
+        vm.setPresenceModeOverride(PresenceMode.ALL)
+        advanceUntilIdle()
+        assertEquals(listOf(channel.id to PresenceMode.ALL), buffers.presenceWrites)
+        assertEquals(
+            PresenceMode.ALL,
+            vm.state.first { it.conversationPresence.override == PresenceMode.ALL }
+                .conversationPresence.effective,
+        )
+
+        // A global change must not disturb a conversation that has made its own choice.
+        settings.settings.value = Settings(presenceMode = PresenceMode.HIDDEN)
+        assertEquals(
+            PresenceMode.ALL,
+            vm.state.first { it.conversationPresence.global == PresenceMode.HIDDEN }
+                .conversationPresence.effective,
+        )
+
+        vm.setPresenceModeOverride(null)
+        advanceUntilIdle()
+        assertEquals(
+            PresenceMode.HIDDEN,
+            vm.state.first { it.conversationPresence.override == null }
+                .conversationPresence.effective,
+        )
+    }
+
+    @Test
+    fun `presence mode write failure is surfaced without optimistic state`() = runTest {
+        val buffers = FakeBufferRepository(channel).apply { presenceWriteResult = false }
+        val vm = viewModel(channel, FakeConnectionManager(network.id), buffers = buffers)
+        vm.state.first { it.buffer != null }
+
+        vm.setPresenceModeOverride(PresenceMode.HIDDEN)
+        advanceUntilIdle()
+
+        assertEquals(listOf(channel.id to PresenceMode.HIDDEN), buffers.presenceWrites)
+        assertNull(vm.state.value.conversationPresence.override)
+        assertEquals(
+            ChatUiEvent.PresenceModeWriteFailed,
+            vm.uiEvents.first().single().value,
+        )
     }
 
     @Test
@@ -2065,6 +2128,8 @@ class ChatViewModelTest {
         private val buffer = MutableStateFlow(current)
         val layoutWrites = mutableListOf<Pair<Long, LayoutDensity?>>()
         var layoutWriteResult = true
+        val presenceWrites = mutableListOf<Pair<Long, PresenceMode?>>()
+        var presenceWriteResult = true
 
         override fun observeChatList(): Flow<List<ChatListRow>> = flowOf(emptyList())
         override fun observeBuffer(id: Long): Flow<BufferEntity?> =
@@ -2076,6 +2141,11 @@ class ChatViewModelTest {
             layoutWrites += id to layout
             if (layoutWriteResult) buffer.value = buffer.value.copy(layoutDensityOverride = layout)
             return layoutWriteResult
+        }
+        override suspend fun setPresenceModeOverride(id: Long, mode: PresenceMode?): Boolean {
+            presenceWrites += id to mode
+            if (presenceWriteResult) buffer.value = buffer.value.copy(presenceModeOverride = mode)
+            return presenceWriteResult
         }
         override suspend fun deleteBuffer(id: Long) = Unit
     }
@@ -2184,7 +2254,7 @@ class ChatViewModelTest {
             foolMutations += SocialMutation(nick, isFool, identityRules)
         }
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
-        override suspend fun setShowJoinPartQuit(show: Boolean) = Unit
+        override suspend fun setPresenceMode(m: PresenceMode) = Unit
         override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
         override suspend fun setChatWallpaper(w: ChatWallpaper) = Unit
         override suspend fun setShowComposerEmoji(show: Boolean) = Unit
