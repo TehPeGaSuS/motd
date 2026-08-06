@@ -125,6 +125,12 @@ class ChatViewModelTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         db = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
             .allowMainThreadQueries()
+            // Room work runs on the calling thread, never a pool thread. A DAO call from a runTest
+            // body must not really suspend: while the body waits on a pool thread, the scheduler
+            // is idle and advances virtual time, which fires pending timers such as the 8s entry
+            // catch-up bound mid-arrangement — a machine-speed race that only lost on CI runners.
+            .setQueryExecutor { it.run() }
+            .setTransactionExecutor { it.run() }
             .build()
         network = NetworkEntity(
             name = "test",
