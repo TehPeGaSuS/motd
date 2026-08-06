@@ -1625,9 +1625,15 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `leaving at the bottom returns to the bottom even when unread arrived while away`() = runTest {
+    fun `leaving at the bottom still enters at the divider when unread arrived while away`() = runTest {
+        // The most common flow there is: read to the bottom, leave, messages arrive, tap the room
+        // again. The park says where the reader STOPPED, which is a different question from what
+        // they have not seen, so it cannot outrank the divider: entering at the newest row buries
+        // the "N new messages" divider somewhere above the viewport, and the reader has to scroll
+        // BACKWARDS past the new messages to find out what they missed.
+        //
         // Same shape as the divider-entry case above, which resolves the unread anchor to index
-        // 515 — so this asserts the park BEATS a deep unread anchor, not merely that both agree.
+        // 515 — so this asserts the divider survives a park, not merely that both agree.
         val markerId = db.messageDao().insertAll(
             listOf(message(channel.id, "marker", null, "alice").copy(serverTime = 100, dedupKey = "marker")),
         ).single()
@@ -1648,9 +1654,7 @@ class ChatViewModelTest {
             },
         )
         // The reader was following the conversation when they navigated away, which clears the
-        // saved viewport and records the park. Absence alone used to be indistinguishable from a
-        // room nobody has opened, so entry fell through to the unread anchor and stranded the
-        // follower behind a divider covering messages that arrived while they were away.
+        // saved viewport and records the park.
         val positions = ChatScrollPositionStore().apply { markParkedAtBottom(channel.id) }
 
         val vm = viewModel(
@@ -1664,7 +1668,40 @@ class ChatViewModelTest {
         )
         vm.state.first { it.buffer != null }
 
-        assertEquals(0, checkNotNull(vm.initialTarget.first { it != null }).index)
+        val target = checkNotNull(vm.initialTarget.first { it != null })
+        // The oldest unread row, with the frozen divider drawn above it, at the top of the window.
+        assertEquals(515, target.index)
+        assertEquals(historyIds.first(), target.expectedEventId)
+        assertTrue(target.placeAtTop)
+        assertTrue(target.forceScrollOnEntry)
+        assertFalse(target.fromSavedPosition)
+        // The entry target and the frozen divider name the same row: the divider is drawn on the
+        // first row NEWER than its marker, and that marker is this row minus one.
+        val divider = checkNotNull(vm.unreadEntrySnapshot.first { it != null })
+        assertEquals(historyIds.first() - 1L, divider.marker.eventId)
+    }
+
+    @Test
+    fun `leaving at the bottom returns to the bottom when nothing is unread`() = runTest {
+        // The other half of the rule, and the whole reason the park is recorded at all: a follower
+        // who left a caught-up room comes back to the newest row rather than to the read marker.
+        // Absence of a saved viewport cannot carry that on its own — it is also what a room nobody
+        // has opened looks like, and that one falls back to the marker.
+        val ids = seedFiveRows()
+        val positions = ChatScrollPositionStore().apply { markParkedAtBottom(channel.id) }
+
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 500, localReadAnchorEventId = ids.last()),
+            FakeConnectionManager(network.id),
+            messages = realCounts(),
+            scrollPositions = positions,
+        )
+        vm.state.first { it.buffer != null }
+
+        val target = checkNotNull(vm.initialTarget.first { it != null })
+        assertEquals(0, target.index)
+        assertFalse("the newest row is a position, not a divider placement", target.placeAtTop)
+        assertNull(vm.unreadEntrySnapshot.value)
     }
 
     @Test

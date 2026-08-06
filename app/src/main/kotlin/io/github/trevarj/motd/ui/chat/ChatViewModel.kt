@@ -393,12 +393,23 @@ class ChatViewModel @Inject constructor(
     private suspend fun entryPagingKey(spec: MessageVisibilitySpec): Int? {
         if (routeHasDeepJump) return null
         if (_entryState.value !is EntryPositionState.Pending) return null
-        // Returning to the live bottom is exactly the unkeyed newest-first load.
-        if (parkedAtBottom()) return null
+        val parked = parkedAtBottom()
         return try {
             // Non-destructive on this path: it runs before catch-up has finished writing, and a
             // saved anchor that cannot be resolved YET is not a saved anchor that is gone.
-            val savedIndex = restoredScrollPosition(spec, discardUnresolved = false)?.index
+            //
+            // A park cleared the saved viewport, so a follower has exactly one possible anchor: the
+            // unread divider, which they now land on when unread arrived while they were away. That
+            // run can be arbitrarily deep, so it needs the key as much as any other deep entry.
+            // Skipping the saved lookup entirely mirrors the entry decision, which does not consult
+            // it either; with nothing unread both agree on the newest row, and preferredEntryIndex
+            // then returns null — exactly the unkeyed newest-first load a park used to short-circuit
+            // to here.
+            val savedIndex = if (parked) {
+                null
+            } else {
+                restoredScrollPosition(spec, discardUnresolved = false)?.index
+            }
             val unreadIndex = firstUnreadEntryIndex(spec)
             val anchorIndex = preferredEntryIndex(
                 savedIndex = savedIndex,
@@ -1693,6 +1704,11 @@ class ChatViewModel @Inject constructor(
             // this room was last left at — with the bare read marker as the fallback for a room
             // that offers neither. A deep link owns its own target and never reaches here.
             //
+            // Leaving at the live bottom retires the second anchor rather than the first: it is a
+            // statement about where the reader stopped, and nothing about what arrived afterwards.
+            // So a park decides only the caught-up case, and the unread divider keeps entry
+            // whenever this visit has one — see the branch below.
+            //
             // The read marker used to divert entry on its own, which made the saved viewport
             // unreachable: every room anyone has opened HAS a read anchor, so the restore branch ran
             // only for rooms that had never been read. That is the "leaving and re-entering does not
@@ -1704,16 +1720,27 @@ class ChatViewModel @Inject constructor(
             // `countTimelineNewer` are both `countTimelineNewerQuery` over this room and spec —
             // pinned by MessageRepositoryPagingTest so neither can grow a predicate the other lacks.
             if (!hasDeepJump && _entryState.value !is EntryPositionState.Settled) {
+                // The same `firstUnread` the freeze above consumed, so the target and the divider
+                // name ONE row by construction. They cannot diverge on a restored snapshot either:
+                // a restore means the process died, and the park below lives in a process-local map
+                // that dies with it, so the branch that depends on the divider only ever runs on a
+                // visit that just froze it here.
+                val unreadTarget = firstUnread?.let {
+                    readMarkerEntryTarget(it, entrySpec, requireExactIdentity = true)
+                }
                 _initialTarget.value = if (parkedAtBottom()) {
                     // A reader who left at the live bottom was following the conversation, so they
-                    // return to it. This precedes both anchors AND the read-marker fallback: every
-                    // room anyone has read has a marker, so consulting it here would divert the
-                    // follower behind a divider exactly as the unread anchor used to.
-                    ChatPositionTarget(index = 0)
+                    // return to it — but only when there is nothing unread to return to instead.
+                    // Messages that arrived while they were away are exactly what the divider
+                    // exists to announce, and entering at the newest row buries it somewhere above
+                    // the viewport, where finding out what was missed means scrolling BACKWARDS
+                    // past the very messages the divider was drawn for.
+                    //
+                    // Only the unread anchor may divert a follower, never the bare read marker:
+                    // every room anyone has read HAS a marker, so consulting it here would park
+                    // them behind a divider on a room that has nothing new at all.
+                    unreadTarget ?: ChatPositionTarget(index = 0)
                 } else {
-                    val unreadTarget = firstUnread?.let {
-                        readMarkerEntryTarget(it, entrySpec, requireExactIdentity = true)
-                    }
                     preferredEntryTarget(
                         saved = restoredScrollPosition(entrySpec),
                         firstUnread = unreadTarget,

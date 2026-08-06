@@ -622,9 +622,9 @@ fun nearestAnchorRow(
 /**
  * What leaving the timeline should record about the viewport. The distinction that matters is
  * between the two "nothing to save" cases: [ParkAtBottom] ASSERTS the reader left at the live
- * bottom (see [ChatScrollPositionStore.markParkedAtBottom] — the next entry goes to the newest
- * row), while [Forget] only states that this snapshot proves nothing and the saved viewport is
- * dropped without any claim about where the reader was.
+ * bottom (see [ChatScrollPositionStore.markParkedAtBottom] — the next entry goes to the newest row
+ * unless unread arrived in the meantime), while [Forget] only states that this snapshot proves
+ * nothing and the saved viewport is dropped without any claim about where the reader was.
  */
 internal sealed interface ScrollPositionOutcome {
     /** The viewport provably rests at the effective bottom; record the bottom park. */

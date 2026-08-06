@@ -41,10 +41,11 @@ class ChatScrollPositionStore @Inject constructor() {
      * Records that the reader left this room at the live bottom.
      *
      * Absence of a saved viewport cannot carry this on its own, because it is also what a room
-     * nobody has opened yet looks like, and those two want opposite entries: a first open with
-     * unread history belongs at the divider, while a reader who was following the conversation
-     * belongs back at the newest row. Leaving at the bottom used to only clear the viewport, so
-     * entry fell through to the unread anchor and parked the follower behind a divider.
+     * nobody has opened yet looks like, and those two want opposite entries for a room with NO
+     * unread: a first open falls back to the read marker, while a follower belongs back at the
+     * newest row. The park says which one it is, and nothing more — it is a statement about where
+     * the reader stopped, not about what arrived afterwards, so it does not survive contact with an
+     * unread divider. Entry consults it only when the room is caught up; see `ChatViewModel`.
      */
     fun markParkedAtBottom(bufferId: Long) {
         positions.remove(bufferId)
