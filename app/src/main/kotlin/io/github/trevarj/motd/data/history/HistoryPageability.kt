@@ -47,6 +47,19 @@ data class PageProgress(val previous: ChatHistoryReference?, val insertedCount: 
 const val NO_APPEND_PROGRESS = "no_append_progress"
 
 /**
+ * The older ladder stopped short of the start of history: this attempt achieved nothing and its
+ * next request would repeat verbatim, so nothing may re-issue it on its own.
+ *
+ * Carried to Paging as a retryable failure rather than as end-of-pagination, because
+ * `endOfPaginationReached` is PERMANENT for the direction — it outlives the PagingSource generation
+ * that observed it and is only cleared by rebuilding the Pager, which is why a stalled room could
+ * not be revived by scrolling and had to be left and re-entered. A failure state keeps the loaded
+ * pages and the reader's position, re-arms through `retry()`, and gives the timeline something
+ * honest to offer: an explicit "load older messages" affordance instead of silence.
+ */
+class HistoryLadderStalled : Exception("older history paging made no progress")
+
+/**
  * Older-direction (APPEND / CHATHISTORY BEFORE) pageability.
  *
  * Called twice per load with the same rules: once before fetching, to pick the boundary, and once

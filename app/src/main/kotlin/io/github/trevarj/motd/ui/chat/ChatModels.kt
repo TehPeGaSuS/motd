@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.visibility.CONVERSATION_KINDS
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.data.history.HistoryLadderStalled
 import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.history.seamAbove
 import io.github.trevarj.motd.data.prefs.LayoutDensity
@@ -1058,6 +1059,13 @@ sealed interface ChatHistoryUiState {
     /** A recoverable append error; the footer offers `items.retry()`. */
     data object Retry : ChatHistoryUiState
 
+    /**
+     * The ladder stopped short of the start of history without failing: the last page achieved
+     * nothing and nothing may re-issue it unprompted. The footer offers the reader the fetch, which
+     * re-arms the same APPEND through `items.retry()`.
+     */
+    data object LoadOlder : ChatHistoryUiState
+
     /** History is unreachable: [offline] true when disconnected/fatal, false while negotiating. */
     data class Unavailable(val offline: Boolean) : ChatHistoryUiState
 
@@ -1080,8 +1088,12 @@ internal fun chatHistoryUiState(
     if (availability == HistoryAvailability.Unsupported) return ChatHistoryUiState.Unsupported
     if (append is LoadState.Loading) return ChatHistoryUiState.Loading
     if (append is LoadState.Error) {
-        return when (availability) {
-            HistoryAvailability.NegotiatingOrOffline ->
+        return when {
+            // A stall is not a wire failure and must not be dressed as one: the request went out and
+            // was answered, it just could not move the ladder. What the reader wants there is the
+            // fetch itself, so offer it rather than an error they did not cause.
+            append.error is HistoryLadderStalled -> ChatHistoryUiState.LoadOlder
+            availability == HistoryAvailability.NegotiatingOrOffline ->
                 ChatHistoryUiState.Unavailable(offline = isHistoryOffline(connectionState))
             else -> ChatHistoryUiState.Retry
         }
@@ -1093,11 +1105,17 @@ internal fun chatHistoryUiState(
         HistoryAvailability.Unsupported -> ChatHistoryUiState.Unsupported
         HistoryAvailability.NegotiatingOrOffline ->
             ChatHistoryUiState.Unavailable(offline = isHistoryOffline(connectionState))
-        // A Ready timeline pages older on scroll. End-of-pagination without persisted completion
-        // (an unmoving boundary, say) has no affordance: the retry belongs to the wire error state,
-        // not to a footer that would claim history exists. An unrecoverable gap no longer reaches
-        // here at all — it ends nothing, it draws a seam.
-        is HistoryAvailability.Ready -> ChatHistoryUiState.Hidden
+        // This footer is an item at the far end of the timeline, so it is composed only once the
+        // reader has actually scrolled past the oldest retained row — the exact position where the
+        // ladder's APPEND fires. An armed ladder therefore shows the shimmer rather than nothing:
+        // the fetch is in flight, or it is about to be. Waiting for `LoadState.Loading` alone left
+        // the older end silent at the very moment it had something to say, because prefetch starts
+        // the page a screenful earlier and it usually lands before the reader arrives.
+        //
+        // End-of-pagination without persisted completion stays silent: the direction is finished for
+        // this Pager and a shimmer there would promise a page that is never coming.
+        is HistoryAvailability.Ready ->
+            if (append.endOfPaginationReached) ChatHistoryUiState.Hidden else ChatHistoryUiState.Loading
     }
 }
 

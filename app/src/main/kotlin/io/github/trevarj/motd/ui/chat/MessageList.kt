@@ -1424,6 +1424,7 @@ internal fun FoolCollapseChip(sender: String, tag: String, onCollapse: () -> Uni
 
 const val CHAT_HISTORY_RETRY_TAG = "chat_history_retry"
 const val CHAT_HISTORY_LOADING_TAG = "chat_history_loading"
+const val CHAT_HISTORY_LOAD_OLDER_TAG = "chat_history_load_older"
 
 /**
  * Older-end paging footer. Scroll-driven APPEND drives history automatically, so the footer only
@@ -1453,6 +1454,19 @@ fun ChatHistoryFooter(
             text = stringResource(R.string.chat_history_error),
             onRetry = onRetry,
         )
+        // Sits directly above the oldest message in the reversed list, where the reader who wants
+        // more history is already looking, and re-arms the same APPEND the ladder stopped on.
+        ChatHistoryUiState.LoadOlder -> Box(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            TextButton(
+                onClick = onRetry,
+                modifier = Modifier.heightIn(min = 48.dp).testTag(CHAT_HISTORY_LOAD_OLDER_TAG),
+            ) {
+                Text(stringResource(R.string.chat_history_load_older))
+            }
+        }
         is ChatHistoryUiState.Unavailable -> HistoryStatusText(
             if (state.offline) {
                 R.string.chat_history_footer_offline

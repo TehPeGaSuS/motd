@@ -34,7 +34,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 26,
+    version = 27,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -782,6 +782,23 @@ val MIGRATION_25_26 = object : Migration(25, 26) {
             "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_normalizedActor_serverTime` " +
                 "ON `messages` (`bufferId`, `normalizedActor`, `serverTime`)",
         )
+    }
+}
+
+/**
+ * v26 -> v27 keeps the schema and clears start-of-history claims so they are proven again.
+ *
+ * Through v26 an unbounded CHATHISTORY LATEST that delivered nothing persisted completion, which is
+ * a fact about what the target could serve at that instant rather than about where the room's
+ * history begins — and completion is durable, so such a room could never page older again once the
+ * backlog arrived. A wiped store hit it in every room at once, since every room seeds from empty.
+ * The claim is cheap to re-earn: the next time a reader reaches the bottom of a genuinely complete
+ * room, one BEFORE comes back empty and marks it again.
+ */
+val MIGRATION_26_27 = object : Migration(26, 27) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("UPDATE buffers SET historyComplete = 0")
+        db.execSQL("UPDATE history_cursors SET historyComplete = 0")
     }
 }
 

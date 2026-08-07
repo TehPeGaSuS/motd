@@ -946,11 +946,26 @@ class EventProcessor @Inject constructor(
         // lower-id room winner and can contain extents that predate this request target.
         val oldest = olderBoundary(baseOldest, response.oldest)
         val newest = newerBoundary(baseNewest, response.newest)
-        val provesStart = request.subcommand == ChatHistoryRequest.Subcommand.BEFORE ||
-            (request.subcommand == ChatHistoryRequest.Subcommand.LATEST &&
-                request.bound1 == null && request.bound2 == null)
-        val complete = provesStart &&
-            (response.endOfHistory || response.primaryMessageCount == 0)
+        // Start-of-history is DURABLE — nothing clears it, and `olderPageability` reads it as "this
+        // direction is finished, permanently" — so it may only be claimed by a page that named a row
+        // to be older than, or that delivered the history it says is whole.
+        //
+        //  - BEFORE named the boundary. "Nothing older than this retained row" stays true forever,
+        //    whether the server says it with an empty batch or with the end tag.
+        //  - An unbounded LATEST names nothing. A batch it actually DELIVERED and tagged terminal is
+        //    the whole history and proves the start. An EMPTY one proves only what the server could
+        //    serve at that instant: a channel restored a moment ago, a bouncer that has archived
+        //    nothing for it yet, a target whose history it does not retain. Branding the room on
+        //    that answer left it unable to page for good once the backlog did exist — and on a wiped
+        //    store every room takes this path, because every room seeds from empty.
+        val complete = when (request.subcommand) {
+            ChatHistoryRequest.Subcommand.BEFORE ->
+                response.endOfHistory || response.primaryMessageCount == 0
+            ChatHistoryRequest.Subcommand.LATEST ->
+                request.bound1 == null && request.bound2 == null &&
+                    response.endOfHistory && response.primaryMessageCount > 0
+            else -> false
+        }
         db.historyCursorDao().upsert(
             HistoryCursorEntity(
                 roomId = canonicalRoomId,

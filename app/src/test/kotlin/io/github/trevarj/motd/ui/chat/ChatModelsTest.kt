@@ -17,6 +17,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.ui.components.HistoryGapState
 import io.github.trevarj.motd.ui.theme.spacingFor
+import io.github.trevarj.motd.data.history.HistoryLadderStalled
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.client.IrcDisconnectedException
@@ -698,11 +699,12 @@ class ChatModelsTest {
         assertEquals(listOf("retry", "ack:8"), order)
     }
 
-    @Test fun `history footer derives the six states from append and availability`() {
+    @Test fun `history footer derives its states from append and availability`() {
         val ready = HistoryAvailability.Ready(setOf(HistoryReferenceType.MSGID), pageLimit = 50)
         val idle = LoadState.NotLoading(endOfPaginationReached = false)
         val ended = LoadState.NotLoading(endOfPaginationReached = true)
         val failed = LoadState.Error(IllegalStateException("boom"))
+        val stalled = LoadState.Error(HistoryLadderStalled())
         val connected = IrcClientState.Ready("me", emptySet(), emptyMap())
 
         fun state(
@@ -713,19 +715,28 @@ class ChatModelsTest {
             historyComplete: Boolean = false,
         ) = chatHistoryUiState(bufferType, connection, availability, append, historyComplete)
 
-        // Hidden: no/server buffer, or a Ready timeline with nothing terminal to show. A Ready
-        // end-of-pagination without persisted completion (e.g. an unrecoverable gap) is silent
-        // because scroll-driven APPEND owns any further fetch.
+        // Hidden: no/server buffer. A Ready end-of-pagination without persisted completion is silent
+        // too — the direction is finished for this Pager, so there is nothing to promise.
         assertEquals(ChatHistoryUiState.Hidden, state(null, connected, ready, idle))
         assertEquals(ChatHistoryUiState.Hidden, state(BufferType.SERVER, connected, ready, idle))
-        assertEquals(ChatHistoryUiState.Hidden, state(BufferType.CHANNEL, connected, ready, idle))
         assertEquals(ChatHistoryUiState.Hidden, state(BufferType.CHANNEL, connected, ready, ended))
 
-        // Loading: an APPEND page is in flight.
+        // Loading: an APPEND page is in flight, OR the ladder is armed and the reader has reached
+        // the footer — the position where it fires. Both are "older messages are coming", and the
+        // footer only composes at the older end, so neither may render as silence.
         assertEquals(ChatHistoryUiState.Loading, state(BufferType.CHANNEL, connected, ready, LoadState.Loading))
+        assertEquals(ChatHistoryUiState.Loading, state(BufferType.CHANNEL, connected, ready, idle))
 
         // Retry: a recoverable append error while history is advertised.
         assertEquals(ChatHistoryUiState.Retry, state(BufferType.CHANNEL, connected, ready, failed))
+
+        // LoadOlder: the ladder stalled rather than failed, so the reader is offered the fetch. It
+        // outranks the plain error mapping, and an offline connection still explains itself first.
+        assertEquals(ChatHistoryUiState.LoadOlder, state(BufferType.CHANNEL, connected, ready, stalled))
+        assertEquals(
+            ChatHistoryUiState.LoadOlder,
+            state(BufferType.CHANNEL, connected, ready, stalled, historyComplete = true),
+        )
 
         // Unavailable(offline): disconnected/fatal. Unavailable(negotiating): mid-registration,
         // whether the append is an error or merely idle.

@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_LOADING_TAG
+import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_LOAD_OLDER_TAG
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_RETRY_TAG
 import io.github.trevarj.motd.ui.chat.ChatHistoryFooter
 import io.github.trevarj.motd.ui.chat.ChatHistoryUiState
@@ -48,8 +49,27 @@ class ChatHistoryFooterUiTest {
             }
         }
 
-        // Scroll-driven APPEND surfaces the shimmer footer while an older page is in flight; there is
-        // no manual load-older affordance anymore.
+        // Scroll-driven APPEND surfaces the shimmer footer while an older page is in flight.
         compose.onNodeWithTag(CHAT_HISTORY_LOADING_TAG).assertIsDisplayed()
+    }
+
+    @Test
+    fun stalledLadderOffersLoadOlderWithStableTagAndMinimumTouchHeight() {
+        // A stalled ladder is the one stop the reader can do something about, and it sits directly
+        // above the oldest message — where they are already pulling for more.
+        var loads = 0
+        compose.setContent {
+            MotdTheme {
+                ChatHistoryFooter(
+                    state = ChatHistoryUiState.LoadOlder,
+                    onRetry = { loads++ },
+                )
+            }
+        }
+
+        compose.onNodeWithTag(CHAT_HISTORY_LOAD_OLDER_TAG)
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        assertEquals(1, loads)
     }
 }

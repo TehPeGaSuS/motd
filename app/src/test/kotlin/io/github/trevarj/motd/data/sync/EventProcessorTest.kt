@@ -3803,6 +3803,12 @@ class EventProcessorTest {
                 limit = 50,
             ),
             ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#bounded", bound1 = "msgid=x", limit = 50),
+            // An unbounded LATEST that DELIVERED nothing is the same non-proof whether or not the
+            // server tagged the empty batch terminal: it names no boundary and leaves no row, so it
+            // describes what the target could serve at that instant. Completion is durable and
+            // nothing clears it, so this answer must not brand a room that has yet to receive its
+            // backlog — a channel restored moments ago, a bouncer still to archive anything for it.
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#latest", limit = 50),
         )
 
         incompleteRequests.forEach { request ->
@@ -3811,9 +3817,9 @@ class EventProcessorTest {
             assertFalse(db.historyCursorDao().byRoom(roomId)!!.historyComplete)
         }
 
+        // BEFORE named the row it had to be older than, so an empty answer to it IS start-of-history.
         listOf(
             ChatHistoryRequest(ChatHistoryRequest.Subcommand.BEFORE, "#before", bound1 = "msgid=x", limit = 50),
-            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#latest", limit = 50),
         ).forEach { request ->
             val roomId = processor.persistHistoryPage(networkId, request, empty)
             assertTrue(db.bufferDao().observeById(roomId)!!.historyComplete)

@@ -443,6 +443,7 @@
     <string name="chat_empty_title">No messages yet</string>
     <string name="chat_empty_message">Say hello to start the conversation.</string>
     <string name="chat_history_error">Couldn\'t load older messages</string>
+    <string name="chat_history_load_older">Load older messages</string>
     <string name="chat_history_loading_messages">Loading messages…</string>
     <string name="chat_history_syncing_messages">Finding first unread…</string>
     <string name="chat_history_sync_failed_inline">Couldn\'t sync messages</string>

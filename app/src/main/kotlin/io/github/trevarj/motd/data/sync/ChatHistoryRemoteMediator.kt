@@ -13,6 +13,7 @@ import io.github.trevarj.motd.data.db.HistoryCursorEntity
 import io.github.trevarj.motd.data.db.HistoryGapDao
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.ircTarget
+import io.github.trevarj.motd.data.history.HistoryLadderStalled
 import io.github.trevarj.motd.data.history.PageProgress
 import io.github.trevarj.motd.data.history.Pageability
 import io.github.trevarj.motd.data.history.olderPageability
@@ -46,10 +47,12 @@ import kotlinx.coroutines.CancellationException
  *           an interval above the presented rows for it to fetch: live events supply newer messages,
  *           and a gap ABOVE a row is an interior seam the coordinator owns.
  *
- * Paging treats `endOfPaginationReached` as PERMANENT for a direction, so APPEND reports it only
- * when older paging is genuinely finished (history complete, or a page that made no progress) —
- * never merely because the loader had to stop at one ambiguous equal-timestamp page edge. See
- * [appendResult].
+ * Paging treats `endOfPaginationReached` as PERMANENT for a direction — it outlives the PagingSource
+ * generation that observed it — so APPEND reports it only when older paging is genuinely finished
+ * (history complete), never merely because the loader had to stop at one ambiguous equal-timestamp
+ * page edge, and never for a page that simply made no progress: that stop is retryable and is
+ * reported as [io.github.trevarj.motd.data.history.HistoryLadderStalled] so the timeline can offer
+ * the reader the fetch. See [appendResult].
  *
  * Every entry uses SKIP_INITIAL_REFRESH so the cached DB paints without network I/O; Paging3 then
  * drives REFRESH (empty-store LATEST seed, otherwise no-op) and scroll-triggered APPEND for older
@@ -282,9 +285,9 @@ class ChatHistoryRemoteMediator(
      * equal-timestamp boundary at a saturated page edge). Paging treats `endOfPaginationReached` as
      * permanently terminal for the direction, so reporting the second fact kills older backfill after
      * a single page on a timestamp-only wire (soju advertises `MSGREFTYPES=timestamp`), where every
-     * saturated page trips it. Terminate only when older paging is genuinely finished:
-     *  - history is complete, or
-     *  - the page made no progress at all.
+     * saturated page trips it. Terminate only when older paging is genuinely finished — history is
+     * complete. A page that made no progress at all stops this attempt too, but as a retryable
+     * failure rather than a terminal one; see [toMediatorResult].
      *
      * An unrecoverable seam elsewhere in the room deliberately cannot end this direction: this
      * ladder is never pointed at a gap (see [appendGapFloor]).
@@ -325,9 +328,13 @@ class ChatHistoryRemoteMediator(
     /**
      * Map a post-page [Pageability] onto this direction's Paging result.
      *
-     * Only the anti-livelock stop carries diagnostic extras, and it is the only end the boundary
-     * [ladder] did not already reach on its own: a silent permanent stop is hard to diagnose in the
-     * field, so record the page and the boundary that failed to move.
+     * The anti-livelock stop is the only end the boundary [ladder] did not reach on its own, and it
+     * is not the same kind of statement as the others: the direction is NOT finished — this attempt
+     * simply achieved nothing, and repeating it unprompted would hammer the wire. Reporting it as
+     * end-of-pagination retired the direction for the whole Pager, where no amount of scrolling
+     * could revive it and only leaving and re-entering the room did. It is a retryable failure
+     * instead, which the timeline renders as an explicit "load older" affordance. A silent stall is
+     * hard to diagnose in the field, so record the page and the boundary that failed to move.
      */
     private fun Pageability.toMediatorResult(
         loadType: LoadType,
@@ -336,18 +343,27 @@ class ChatHistoryRemoteMediator(
     ): MediatorResult {
         if (this !is Pageability.End) return MediatorResult.Success(endOfPaginationReached = false)
         if (ladder is Pageability.End) return endLoad(loadType, reason)
-        val next = ladder as? Pageability.Page
-        return endLoad(
+        // No boundary to ask from again — an empty store whose seed found nothing — so there is
+        // nothing to offer the reader either. End quietly; the room keeps no durable claim, and the
+        // next entry seeds again.
+        val next = ladder as? Pageability.Page ?: return endLoad(
             loadType,
             reason,
+            mapOf("primary_count" to page.primaryCount, "end_of_direction" to page.endOfDirection),
+        )
+        diagnostics.record("chat_history", "mediator_load_stalled") {
             mapOf(
+                "load_type" to loadType.name,
+                "room_id" to bufferId,
+                "end_reason" to reason,
                 "primary_count" to page.primaryCount,
                 "end_of_direction" to page.endOfDirection,
-                "focused_gap_id" to next?.focusedGapId,
-                "boundary_has_msgid" to (next?.boundary?.msgid != null),
-                "boundary_server_time" to next?.boundary?.serverTime,
-            ),
-        )
+                "focused_gap_id" to next.focusedGapId,
+                "boundary_has_msgid" to (next.boundary.msgid != null),
+                "boundary_server_time" to next.boundary.serverTime,
+            )
+        }
+        return MediatorResult.Error(HistoryLadderStalled())
     }
 
     /** Map a loader outcome onto this direction's Paging result. */

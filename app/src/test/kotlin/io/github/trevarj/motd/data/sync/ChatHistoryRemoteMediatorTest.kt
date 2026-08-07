@@ -16,6 +16,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.history.HistoryLadderStalled
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
@@ -302,16 +303,21 @@ class ChatHistoryRemoteMediatorTest {
     }
 
     @Test
-    fun appendOnEmptyBuffer_noServerHistory_endsPagination() = runTest {
-        // Empty local AND empty server: LATEST returns nothing → end of pagination, no rows.
+    fun appendOnEmptyBuffer_noServerHistory_endsThisLadderWithoutBrandingTheRoom() = runTest {
+        // Empty local AND empty server: LATEST returns nothing, so this ladder has nowhere to go and
+        // ends — but nothing durable is written. An unbounded LATEST names no boundary, so an empty
+        // answer reports what the server could serve at that instant (a channel restored a moment
+        // ago, a bouncer that has archived nothing for it yet), not where this room's history starts.
+        // Completion is permanent and nothing clears it, so persisting it here left the room unable
+        // to page for good once the backlog existed. The next entry simply asks again.
         val history = FakeHistory(latest = emptyList())
         val result = load(mediator(history), LoadType.APPEND)
 
         assertTrue(result is RemoteMediator.MediatorResult.Success)
         assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
         assertEquals(0, rowCount())
-        assertTrue(db.bufferDao().observeById(bufferId)!!.historyComplete)
-        assertTrue(db.historyCursorDao().byRoom(bufferId)!!.historyComplete)
+        assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+        assertFalse(db.historyCursorDao().byRoom(bufferId)!!.historyComplete)
     }
 
     @Test
@@ -749,7 +755,12 @@ class ChatHistoryRemoteMediatorTest {
     }
 
     @Test
-    fun unchangedBeforeBoundaryStopsTheMediatorWithoutClaimingCompletion() = runTest {
+    fun unchangedBeforeBoundaryStallsRetryablyWithoutClaimingCompletion() = runTest {
+        // The server answers with a row the store already holds: nothing lands, and the next request
+        // would repeat verbatim, so this attempt stops. It is NOT the end of the direction — the room
+        // still has a boundary it can ask from — and `endOfPaginationReached` is permanent for the
+        // whole Pager, so reporting one here left the reader with a timeline that only started paging
+        // again if they backed out of the room and came back. A retryable stall keeps the affordance.
         processor.process(networkId, chatMsg("seed", 500))
         val history = FakeHistory(
             responseFor = { request ->
@@ -763,9 +774,19 @@ class ChatHistoryRemoteMediatorTest {
 
         val result = load(mediator(history), LoadType.APPEND)
 
-        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertTrue(
+            (result as RemoteMediator.MediatorResult.Error).throwable is HistoryLadderStalled,
+        )
         assertEquals(1, rowCount())
         assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+
+        // Asking again is what the footer's affordance does through `retry()`, and it reaches the wire.
+        load(mediator(history), LoadType.APPEND)
+
+        assertEquals(
+            listOf(ChatHistoryRequest.Subcommand.BEFORE, ChatHistoryRequest.Subcommand.BEFORE),
+            history.calls,
+        )
     }
 
     @Test
@@ -861,7 +882,11 @@ class ChatHistoryRemoteMediatorTest {
     }
 
     @Test
-    fun nonemptyContextOnlyLatestCompletesFromZeroPrimaryCount() = runTest {
+    fun contextOnlyLatestPagesFromTheRowItLandedAndThenStopsWithoutBrandingTheRoom() = runTest {
+        // A LATEST batch that delivered rows but no PRIMARY message advertises no boundary and was
+        // never tagged terminal, so it proves nothing about where history starts. What it does leave
+        // behind is a real retained row, and that row is a boundary the next load can page BEFORE —
+        // so this seed keeps the ladder open rather than closing the room permanently.
         val contextOnly = ChatHistoryResponse.Messages(
             events = listOf(chatMsg("context", 100)),
             oldest = null,
@@ -871,9 +896,22 @@ class ChatHistoryRemoteMediatorTest {
         )
         val history = FakeHistory(responseFor = { contextOnly })
 
-        val result = load(mediator(history), LoadType.APPEND)
+        val seed = load(mediator(history), LoadType.APPEND)
 
-        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertFalse((seed as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(listOf(ChatHistoryRequest.Subcommand.LATEST), history.calls)
+        assertEquals(1, rowCount())
+        assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+
+        // The ladder now has a boundary, and the server answering that same context-only page to a
+        // BEFORE is a directional "nothing older than this row" — which IS proof of the start.
+        val next = load(mediator(history), LoadType.APPEND)
+
+        assertTrue((next as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertEquals(
+            listOf(ChatHistoryRequest.Subcommand.LATEST, ChatHistoryRequest.Subcommand.BEFORE),
+            history.calls,
+        )
         assertEquals(1, rowCount())
         assertTrue(db.bufferDao().observeById(bufferId)!!.historyComplete)
     }
