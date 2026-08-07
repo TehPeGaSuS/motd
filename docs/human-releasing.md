@@ -116,7 +116,11 @@ release APK; that is not a valid release artifact.
 - Respect the maintainer's monitoring instruction: watch CI only when asked,
   and otherwise return the release/tag reference for them to follow.
 
-## Next: update F-Droid
+## Next: F-Droid
 
-Once the GitHub release is published, update the F-Droid metadata to match. See
+motd is merged into fdroiddata, and F-Droid's `checkupdates` bot proposes the
+new build entry on its own. Nothing needs doing for a plain version bump. If the
+release changed the Gradle flavors or tasks, the NDK, Go, JDK, or SDK versions,
+the libbox manifest, the ABI set, or a scanned path, the copied recipe will not
+build and needs a hand-written entry. See
 [`human-fdroid-update.md`](human-fdroid-update.md).

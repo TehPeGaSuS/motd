@@ -9,12 +9,12 @@ exact `nix develop` commands for one activity.
   motd locally.
 - [`human-releasing.md`](human-releasing.md) — cutting a signed release tag and
   the workflow that publishes it.
-- [`human-fdroid-update.md`](human-fdroid-update.md) — bumping the F-Droid
-  metadata and updating the fdroiddata merge request after a release.
+- [`human-fdroid-update.md`](human-fdroid-update.md) — how a release reaches
+  F-Droid, and when the fdroiddata recipe needs a hand-written change.
 
 ## Packaging reference
 
-- [`fdroid.md`](fdroid.md) — the F-Droid build recipe, native libbox source
+- [`fdroid.md`](fdroid.md) — the merged fdroiddata recipe, native libbox source
   build, reproducible signing, and the FOSS boundary. The per-release update
   steps live in `human-fdroid-update.md`.
 

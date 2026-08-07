@@ -87,17 +87,17 @@ libbox artifact.
 
 ## F-Droid packaging
 
-F-Droid removes the checked-in libbox AAR before scanning, then rebuilds libbox
-from the pinned sing-box, Android-submodule, and gomobile
-sources. The build recipe and signing model are in
-[docs/fdroid.md](docs/fdroid.md); the per-release update runbook (bump the
-version, update the fdroiddata merge request) is in
+motd is packaged in fdroiddata as `io.github.trevarj.motd`. F-Droid removes the
+checked-in libbox AAR before scanning, then rebuilds libbox from the pinned
+sing-box, Android-submodule, and gomobile sources. The build recipe and signing
+model are in [docs/fdroid.md](docs/fdroid.md); what happens on each new release,
+and the cases that still need a hand-written metadata change, are in
 [docs/human-fdroid-update.md](docs/human-fdroid-update.md).
 
-F-Droid builds retain the arm64-v8a-only embedded transport. The F-Droid
-signature is independent from the GitHub release key, so switching channels
-requires uninstalling the GitHub-signed package before installing the F-Droid
-package.
+F-Droid builds retain the arm64-v8a-only embedded transport. F-Droid publishes
+the upstream-signed APK once its own source rebuild reproduces it, so a GitHub
+install and an F-Droid install share the same signing key and update each other
+without a reinstall.
 
 ## Connecting
 

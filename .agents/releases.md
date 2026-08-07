@@ -17,8 +17,9 @@ automation in `.github/workflows/release.yml` is authoritative.
    `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD`.
 6. Write `fastlane/metadata/android/en-US/changelogs/<motdVersionCode>.txt` for
    the new version code. No repo script reads `fastlane/`, so a missing file
-   fails nothing locally or in CI—it only surfaces as a blank "What's New" once
-   the F-Droid metadata advances. Keep it user-facing and under 500 characters.
+   fails nothing locally or in CI—it only surfaces as a blank "What's New" on
+   the F-Droid listing, which reads `fastlane/` straight from this repository.
+   Keep it user-facing and under 500 characters.
 
 ## Cut the release
 
@@ -48,13 +49,20 @@ the last version.
 
 ## F-Droid
 
-The fdroiddata metadata is external to this repository and is not advanced by
-the release workflow. `docs/fdroid.md` holds the recipe and
-`docs/human-fdroid-update.md` the per-release steps.
+The app is merged into fdroiddata. The metadata is external to this repository
+and is not advanced by the release workflow. `docs/fdroid.md` holds the recipe
+and `docs/human-fdroid-update.md` the per-release steps.
 
-Do not bump the fdroiddata merge request on every tag. It advances only when the
-maintainer judges a release good and stable, and only when they ask. A tag with
-green CI is not by itself grounds to update it.
+F-Droid's `checkupdates` bot proposes each new version on its own by copying the
+previous build entry. Do not clone fdroiddata, push a branch, or open or comment
+on a merge request unless the maintainer asks. A tag with green CI is not by
+itself grounds to touch fdroiddata.
+
+The one thing that does belong in this repository is the recipe drifting from
+the source tree. When a change alters the Gradle flavors or tasks, the NDK, Go,
+JDK, SDK, or build-tools versions, the libbox manifest filename, the ABI set, or
+any path listed under `rm:`, say so in the change and flag that the next
+fdroiddata entry cannot be a plain copy.
 
 ## Failure recovery
 
