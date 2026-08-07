@@ -1,0 +1,3 @@
+- Scrolling up loads older messages again after a fresh install or app-data wipe. Rooms that briefly had nothing to serve are no longer written off as fully loaded.
+- The older end of a conversation now shows its loading state properly, and offers "Load older messages" if paging stalls instead of going quiet.
+- Push delivery is UnifiedPush only. The unused Firebase/Google build variant is gone.
