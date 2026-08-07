@@ -3,22 +3,13 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/767b0d3ec98a143ad9ed7dfc0d5553510ac27133";
-    # Keep this build-only toolchain separate from the app's stable SDK shell.
-    nixpkgs-libbox.url = "github:NixOS/nixpkgs/767b0d3ec98a143ad9ed7dfc0d5553510ac27133";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, nixpkgs-libbox, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
-          inherit system;
-          config = {
-            allowUnfree = true;
-            android_sdk.accept_license = true;
-          };
-        };
-        libboxPkgs = import nixpkgs-libbox {
           inherit system;
           config = {
             allowUnfree = true;
@@ -43,7 +34,7 @@
         # libbox AAR. Keep it out of the ordinary shell so UI/JVM work does
         # not pay for the 690 MiB toolchain closure.
         nativeAndroidComposition = pkgs.androidenv.composeAndroidPackages {
-          platformVersions = [ "23" "37.0" ];
+          platformVersions = [ "37.0" ];
           buildToolsVersions = [ "36.0.0" ];
           platformToolsVersion = "35.0.2";
           includeNDK = true;
@@ -55,9 +46,11 @@
         nativeAndroidSdkRoot = "${nativeAndroidSdk}/libexec/android-sdk";
         # Opt-in, large emulator closure for the local headless E2E loop. Keeping this separate
         # avoids making every ordinary build fetch an API image and emulator runtime.
+        # This shell only runs emulator/avdmanager/adb; headless.sh shells back out to the
+        # default shell for Gradle, so no platform or build-tools beyond the AVD's API level.
         emulatorComposition = pkgs.androidenv.composeAndroidPackages {
-          platformVersions = [ "34" "37.0" ];
-          buildToolsVersions = [ "36.0.0" ];
+          platformVersions = [ "34" ];
+          buildToolsVersions = [ ];
           platformToolsVersion = "35.0.2";
           includeEmulator = true;
           includeSystemImages = true;
@@ -77,7 +70,7 @@
           GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/36.0.0/aapt2";
         };
         devShells.native = pkgs.mkShell {
-          packages = [ pkgs.jdk21 pkgs.nodejs_22 nativeAndroidSdk ];
+          packages = [ pkgs.jdk21 nativeAndroidSdk ];
           JAVA_HOME = pkgs.jdk21.home;
           ANDROID_HOME = nativeAndroidSdkRoot;
           ANDROID_SDK_ROOT = nativeAndroidSdkRoot;
@@ -110,7 +103,7 @@
           LANG = "C.UTF-8";
           LC_ALL = "C.UTF-8";
         };
-        devShells.libbox = libboxPkgs.mkShell {
+        devShells.libbox = pkgs.mkShell {
           # Deliberately omit the NDK: Nix's Android SDK composition fetches a
           # 690 MiB archive before the shell can start. build-libbox.sh accepts
           # a verified local r28 archive (or LIBBOX_NDK_HOME) instead.
@@ -118,10 +111,10 @@
           # /lib64/ld-linux-x86-64.so.2.  Guix does not provide that path, so
           # build-libbox.sh patches the verified *extracted cache* (never the
           # downloaded archive) to use these pinned Nix runtime paths.
-          packages = [ libboxPkgs.go_1_25 libboxPkgs.git libboxPkgs.gnumake libboxPkgs.unzip libboxPkgs.jdk21 libboxPkgs.patchelf libboxPkgs.zlib ];
-          JAVA_HOME = libboxPkgs.jdk21.home;
-          LIBBOX_NDK_HOST_LOADER = libboxPkgs.stdenv.cc.bintools.dynamicLinker;
-          LIBBOX_NDK_HOST_RPATH = "${libboxPkgs.zlib}/lib:${libboxPkgs.stdenv.cc.cc.lib}/lib";
+          packages = [ pkgs.go_1_25 pkgs.git pkgs.gnumake pkgs.unzip pkgs.jdk21 pkgs.patchelf pkgs.zlib ];
+          JAVA_HOME = pkgs.jdk21.home;
+          LIBBOX_NDK_HOST_LOADER = pkgs.stdenv.cc.bintools.dynamicLinker;
+          LIBBOX_NDK_HOST_RPATH = "${pkgs.zlib}/lib:${pkgs.stdenv.cc.cc.lib}/lib";
         };
       });
 }
