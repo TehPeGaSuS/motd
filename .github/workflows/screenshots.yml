@@ -1,0 +1,139 @@
+name: Showcase Screenshots
+
+# Manual refresh of the tracked public screenshots under screenshots/.
+#
+# Mirrors `./test/e2e/headless.sh showcase` on a hosted runner: it stands up the
+# showcase profile of the local soju+ergo stack (believable #guix/#debian/#emacs/
+# #rust channels and fictional nicks), boots a KVM-backed AOSP emulator, and
+# drives the production Compose screens through runbook.sh phases A and S.
+#
+# The refreshed PNGs come back as a build artifact. Committing them stays a
+# maintainer action so the assets land in a signed commit.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  showcase:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MOTD_STACK_PROFILE: showcase
+      MOTD_STACK_CHANNEL: '#guix'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # runner.temp is unavailable in job-level env, so publish the stack
+      # location once here; every later step (and the emulator script) reads it.
+      - name: Pin the showcase stack location
+        run: echo "MOTD_STACK_DIR=$RUNNER_TEMP/motd-showcase-stack" >> "$GITHUB_ENV"
+      - name: Install pinned Nix tooling
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      # --- Build the debuggable, x86-installable E2E APK ---------------------
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with: { distribution: temurin, java-version: 21 }
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - name: Assemble E2E APK
+        run: ./gradlew :app:assembleE2e --stacktrace
+
+      # --- KVM for a fast, hardware-accelerated emulator ---------------------
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # --- Showcase fixture stack -------------------------------------------
+      # No emulator exists yet, so local-stack.sh must not try to adb reverse;
+      # the capture step re-establishes the reverses once the device is up.
+      - name: Start the showcase bouncer stack
+        env:
+          MOTD_SKIP_ADB_REVERSE: "1"
+        run: ./test/e2e/local-stack.sh up
+
+      # runbook.sh sources test/e2e/.env, so the showcase identities and the
+      # A+S phase pair are supplied the same way the CI e2e job supplies its own.
+      - name: Install showcase runbook env
+        run: |
+          cat > test/e2e/.env <<'EOF'
+          MOTD_PKG=io.github.trevarj.motd.debug
+          MOTD_APK=app/build/outputs/apk/e2e/app-e2e.apk
+          MOTD_SOJU_HOST=127.0.0.1
+          MOTD_SOJU_PORT=6697
+          MOTD_SOJU_USER=motd
+          MOTD_SOJU_PASS=motdtest
+          MOTD_NICK=motdadb
+          MOTD_TEST_CHANNEL=#guix
+          MOTD_SECOND_NICK=motdadb2
+          # runbook.sh sources this file, so a multi-phase list must stay one word.
+          E2E_PHASES="a s"
+          EOF
+
+      # The PNGs are tracked, so an unguarded upload would happily publish the
+      # committed frames as if they were fresh. Clear them first and let
+      # if-no-files-found: error catch a capture that never produced anything.
+      - name: Clear the tracked screenshots before capture
+        run: rm -f screenshots/*.png
+
+      # --- Headless emulator + showcase capture ------------------------------
+      # AOSP (target: default) image — NOT google_apis — so Play Protect never
+      # interferes with the debug install / uiautomator driving.
+      - name: Capture showcase screenshots on emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            # The app dials the host stack over loopback, matching the local
+            # headless topology (and the soju cert's 127.0.0.1 SAN).
+            adb reverse tcp:6697 tcp:6697
+            adb reverse tcp:6696 tcp:6696
+            adb reverse tcp:6667 tcp:6667
+            # Phase S picks the dark Modus Vivendi app preset itself; keep the
+            # system appearance out of the way so the frames stay deterministic.
+            adb shell cmd uimode night no || true
+            # Hold the seeded companion in the showcase channels so the member
+            # list and conversation stay populated for the whole capture.
+            SEED_HOLD_SECONDS=900 ./test/e2e/local-stack.sh showcase-hold &
+            hold_pid=$!
+            trap 'kill "$hold_pid" 2>/dev/null || true' EXIT
+            adb install -r -g app/build/outputs/apk/e2e/app-e2e.apk
+            ./test/e2e/runbook.sh
+
+      - name: Upload refreshed screenshots
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: showcase-screenshots
+          path: screenshots/*.png
+          if-no-files-found: error
+
+      # Runbook dumps/logcat plus the bouncer logs — enough to tell a fixture
+      # outage apart from a genuine UI regression without a second run.
+      - name: Upload capture diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: showcase-diagnostics
+          path: |
+            test/e2e/artifacts/**
+            ${{ runner.temp }}/motd-showcase-stack/**/*.log
+          if-no-files-found: ignore
+
+      # The emulator is already gone by now, so skip the adb reverse teardown
+      # rather than resolving the Android devshell just to be told so.
+      - name: Tear down the showcase stack
+        if: always()
+        env:
+          MOTD_SKIP_ADB_REVERSE: "1"
+        run: ./test/e2e/local-stack.sh down || true

@@ -123,6 +123,19 @@ The optional `MOTD_SHOWCASE_SCREENSHOT_DIR` environment variable can point at
 another output directory. The workflow never touches a physical device or a
 release package; it uses only the wrapper's `.debug` APK and isolated emulator.
 
+### Hosted refresh
+
+`.github/workflows/screenshots.yml` (`Showcase Screenshots`, `workflow_dispatch`
+only) mirrors the same capture on a KVM-backed hosted runner: it starts the
+showcase profile of the native stack, boots an API 34 AOSP emulator, and runs
+runbook phases `a s` against the reversed loopback endpoints. It deletes the
+tracked PNGs before capturing so the `showcase-screenshots` artifact can only
+contain fresh frames, and it uploads runbook and bouncer diagnostics on failure.
+
+The job stops at the artifact. Downloading it, replacing `screenshots/*.png`,
+and committing stays a maintainer action so the public assets land in a signed
+commit.
+
 ## Native local bouncer stack
 
 The native stack runs ephemeral ergo and soju instances under
