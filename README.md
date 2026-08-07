@@ -70,15 +70,13 @@ The full build, lint, and test command reference lives in
 
 ```sh
 git submodule update --init --recursive
-nix develop -c ./gradlew :app:assembleFossDebug      # Google-free arm64 debug APK
+nix develop -c ./gradlew :app:assembleDebug      # Google-free arm64 debug APK
 ```
 
-The unfinished Google/FCM flavor is currently excluded from CI APK builds and
-releases. Its paused implementation notes remain in
-[Firebase push setup](docs/firebase-push.md).
-For Google-free push, see [ntfy and UnifiedPush setup](docs/ntfy-push.md).
+There is a single, Google-free build. Push delivery is UnifiedPush only — see
+[ntfy and UnifiedPush setup](docs/ntfy-push.md).
 
-The debug APK lands under `app/build/outputs/apk/foss/debug/`. Install it with
+The debug APK lands under `app/build/outputs/apk/debug/`. Install it with
 `adb install`. The debug build carries the `.debug` application-id suffix, so
 it can coexist with a release install.
 
@@ -89,9 +87,8 @@ libbox artifact.
 
 ## F-Droid packaging
 
-The official F-Droid build uses the `foss` flavor only. F-Droid removes the
-checked-in libbox AAR and dormant Google/Firebase sources before scanning, then
-rebuilds libbox from the pinned sing-box, Android-submodule, and gomobile
+F-Droid removes the checked-in libbox AAR before scanning, then rebuilds libbox
+from the pinned sing-box, Android-submodule, and gomobile
 sources. The build recipe and signing model are in
 [docs/fdroid.md](docs/fdroid.md); the per-release update runbook (bump the
 version, update the fdroiddata merge request) is in

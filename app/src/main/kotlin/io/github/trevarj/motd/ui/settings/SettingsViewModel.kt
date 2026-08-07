@@ -22,8 +22,6 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
-import io.github.trevarj.motd.data.prefs.PushProvider
-import io.github.trevarj.motd.data.prefs.PushProviderPrefs
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
@@ -49,7 +47,6 @@ data class SettingsUiState(
     val networks: List<NetworkEntity> = emptyList(),
     val zncNetworkIds: Set<Long> = emptySet(),
     val pushAvailability: PushAvailability = PushAvailability(),
-    val pushProvider: PushProvider = PushProvider.UNIFIED_PUSH,
     val appearance: AppearanceConfig = AppearanceConfig(),
     val reply: ReplyConfig = ReplyConfig(),
     val contentPreviews: ContentPreviewConfig = ContentPreviewConfig(),
@@ -86,7 +83,6 @@ class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val networkRepository: NetworkRepository,
     private val pushAvailability: PushAvailabilityProvider,
-    private val pushProviderPrefs: PushProviderPrefs,
     private val appearancePrefs: AppearancePrefs,
     private val replyPrefs: ReplyPrefs,
     private val contentPreviewPrefs: ContentPreviewPrefs,
@@ -123,16 +119,14 @@ class SettingsViewModel @Inject constructor(
             // Reactive: recomputes as connections reach Ready / distributors appear, so the push
             // toggle enables live once the soju bouncer advertises webpush.
             pushAvailability.availability(),
-            pushProviderPrefs.provider,
             appearanceReplyAndPreviews,
-        ) { settings, networkPrefs, availability, provider, appearanceReplyPreviews ->
+        ) { settings, networkPrefs, availability, appearanceReplyPreviews ->
             val (appearance, reply, contentPreviews, voice, avatars) = appearanceReplyPreviews
             SettingsUiState(
                 settings = settings,
                 networks = networkPrefs.networks,
                 zncNetworkIds = networkPrefs.zncNetworkIds,
                 pushAvailability = availability,
-                pushProvider = provider,
                 appearance = appearance,
                 reply = reply,
                 contentPreviews = contentPreviews,
@@ -163,11 +157,6 @@ class SettingsViewModel @Inject constructor(
 
     fun setDeliveryMode(mode: DeliveryMode) = viewModelScope.launch {
         settingsRepository.setDeliveryMode(mode)
-    }
-
-    fun setPushProvider(provider: PushProvider) = viewModelScope.launch {
-        pushProviderPrefs.setProvider(provider)
-        settingsRepository.setDeliveryMode(DeliveryMode.UNIFIED_PUSH)
     }
 
     fun selectPushDistributor(packageName: String) = viewModelScope.launch {

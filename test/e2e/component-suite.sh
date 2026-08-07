@@ -9,7 +9,7 @@ REAL_STACK_ANNOTATION=io.github.trevarj.motd.FastHeadlessE2e
 
 cd "$REPO"
 # Daemon on; --max-workers=2 because the managed device boots its own emulator.
-./gradlew headlessApi34FossE2eAndroidTest \
+./gradlew headlessApi34E2eAndroidTest \
   "-Pandroid.testInstrumentationRunnerArguments.notAnnotation=$REAL_STACK_ANNOTATION" \
   -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect \
   --stacktrace --max-workers=2

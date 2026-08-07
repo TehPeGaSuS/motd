@@ -58,7 +58,7 @@ internal object SeededFuzz {
                 block(fuzzCase)
             } catch (failure: Throwable) {
                 val replay = "MOTD_FUZZ_SEED=${request.seed.shellQuote()} MOTD_FUZZ_CASE=${request.index} " +
-                    "nix develop -c ./gradlew :app:testFossDebugUnitTest " +
+                    "nix develop -c ./gradlew :app:testDebugUnitTest " +
                     "--tests '$replayTest' --stacktrace"
                 writeFailure(target, version, fuzzCase, replay, failure)
                 throw AssertionError(
@@ -107,7 +107,7 @@ internal object SeededFuzz {
                 block(fuzzCase)
             } catch (failure: Throwable) {
                 val replay = "MOTD_FUZZ_SEED=${request.seed.shellQuote()} MOTD_FUZZ_CASE=${request.index} " +
-                    "nix develop -c ./gradlew :app:testFossDebugUnitTest " +
+                    "nix develop -c ./gradlew :app:testDebugUnitTest " +
                     "--tests '$replayTest' --stacktrace"
                 writeFailure(target, version, fuzzCase, replay, failure)
                 throw AssertionError(

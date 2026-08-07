@@ -18,8 +18,6 @@ import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.PresenceMode
-import io.github.trevarj.motd.data.prefs.PushProvider
-import io.github.trevarj.motd.data.prefs.PushProviderPrefs
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.prefs.Settings
@@ -93,7 +91,6 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
     private val voicePrefs: VoicePrefs,
     private val avatarPrefs: AvatarPrefs,
     private val bouncerKindPrefs: BouncerKindPrefs,
-    private val pushProviderPrefs: PushProviderPrefs,
 ) : ConfigurationBackupRepository {
     private val json = Json {
         encodeDefaults = true
@@ -246,7 +243,6 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
                 voice = voicePrefs.config.first(),
                 showSharedAvatars = avatarPrefs.config.first().showSharedAvatars,
                 selfAvatars = selfAvatars,
-                pushProvider = pushProviderPrefs.provider.first(),
             ),
         )
     }
@@ -390,7 +386,6 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
             voicePrefs.replace(it)
         }
         settings.showSharedAvatars?.let { avatarPrefs.setShowSharedAvatars(it) }
-        settings.pushProvider?.let { pushProviderPrefs.setProvider(it) }
     }
 
     private suspend fun applyRemappedNetworkPrefs(
@@ -495,7 +490,6 @@ private data class PortableSettings(
     val voice: VoiceConfig? = null,
     val showSharedAvatars: Boolean? = null,
     val selfAvatars: List<PortableSelfAvatar> = emptyList(),
-    val pushProvider: PushProvider? = null,
 ) {
     fun groupNames(): List<String> = buildList {
         if (general != null) add("general")
@@ -505,7 +499,6 @@ private data class PortableSettings(
         if (attachments != null) add("uploads")
         if (voice != null) add("voice")
         if (showSharedAvatars != null || selfAvatars.isNotEmpty()) add("avatars")
-        if (pushProvider != null) add("delivery")
     }
 }
 

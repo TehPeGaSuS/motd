@@ -17,18 +17,15 @@ Gradle commands below assume you are already inside this shell.
 git submodule update --init --recursive
 ```
 
-- The Google/FCM flavor is dormant. Do not run Google Gradle tasks or build a
-  Google APK unless the maintainer explicitly reactivates it.
-
 ## Build
 
 ```sh
 ./gradlew :irc:test                   # protocol tests (pure JVM)
-./gradlew :app:testFossDebugUnitTest  # app unit tests (Robolectric)
-./gradlew :app:assembleFossDebug      # Google-free arm64 debug APK
+./gradlew :app:testDebugUnitTest  # app unit tests (Robolectric)
+./gradlew :app:assembleDebug      # Google-free arm64 debug APK
 ```
 
-The debug APK lands under `app/build/outputs/apk/foss/debug/`. Install it with
+The debug APK lands under `app/build/outputs/apk/debug/`. Install it with
 `adb install`. The debug build carries the `.debug` application-id suffix, so
 it can coexist with a release install.
 
@@ -47,13 +44,13 @@ warm) for no deterministic race protection. Lint can rarely hit the
 daemon makes a re-run ~10s). CI and release wrap lint in a bounded retry.
 
 ```sh
-./gradlew :app:lintFossDebug :app:assembleFossDebug --stacktrace
+./gradlew :app:lintDebug :app:assembleDebug --stacktrace
 ```
 
 For release parity:
 
 ```sh
-./gradlew :app:lintFossRelease --stacktrace
+./gradlew :app:lintRelease --stacktrace
 ```
 
 ## Choose checks by changed surface
@@ -66,8 +63,7 @@ boundaries.
 |Documentation only                                        |`git diff --check`; verify links, commands, and referenced paths                                                      |
 |Shell harness/config                                      |`bash -n test/e2e/*.sh test/e2e/fixtures/*.sh test/e2e/hermetic/*/*.sh` plus the relevant dry run                     |
 |IRC parser/client/transport                               |`./gradlew :irc:test --stacktrace`                                                                                    |
-|Android repositories, services, preferences, or ViewModels|`./gradlew :app:testFossDebugUnitTest --stacktrace`                                                                   |
-|Firebase relay                                            |`npm ci --prefix firebase/functions --ignore-scripts`, then `npm test` and `npm audit --omit=dev` with the same prefix|
+|Android repositories, services, preferences, or ViewModels|`./gradlew :app:testDebugUnitTest --stacktrace`                                                                   |
 |Compose/resources/manifest                                |App unit tests, FOSS lint, and the FOSS debug assembly                                                                |
 |Ordinary app user journey                                 |Relevant unit/integration tests plus FOSS lint/build; rely on required CI for E2E                                     |
 |Cross-module or release-sensitive work                    |The full release-parity Gradle command below                                                                          |
@@ -77,8 +73,8 @@ Full release-parity Gradle verification:
 ```sh
 ./gradlew \
   :irc:build \
-  :app:testFossDebugUnitTest :app:testFossReleaseUnitTest \
-  :app:lintFossDebug :app:lintFossRelease :app:assembleFossRelease \
+  :app:testDebugUnitTest :app:testReleaseUnitTest \
+  :app:lintDebug :app:lintRelease :app:assembleRelease \
   --stacktrace
 ```
 
@@ -96,7 +92,7 @@ documented alongside them.
 
 ## Generated (fuzz) tests
 
-The ordinary `:irc:test` and `:app:testFossDebugUnitTest` tasks include bounded,
+The ordinary `:irc:test` and `:app:testDebugUnitTest` tasks include bounded,
 seeded generated tests. Their defaults are stable; CI replaces the seed with
 the pull-request commit and a nightly workflow runs the larger profile.
 Override the campaign with environment variables:

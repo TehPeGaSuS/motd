@@ -59,7 +59,7 @@ AAR in the build directory from the recursively initialized upstream
 submodules and F-Droid's pinned Go toolchain:
 
 ```yaml
-rm: app/libs/libbox.aar,app/src/google,firebase
+rm: app/libs/libbox.aar
 ndk: 28.2.13676358
 submodules: true
 srclibs: go@go1.25.12
@@ -74,7 +74,7 @@ build:
   - export LIBBOX_NDK_HOME="$$NDK$$"
   - export LIBBOX_PATCH_NDK_HOST_TOOLS=0
   - ../third_party/sing-box/build-libbox.sh
-gradle: foss
+gradle: yes
 gradleprops: motdLibboxSource=true,motdLibboxAar=build/generated/libbox/libbox.aar,motdLibboxManifest=build/generated/libbox/libbox-v1.13.12.manifest
 ```
 
@@ -126,12 +126,11 @@ pinned fdroiddata recipe and the release's complete libbox source bundle.
 
 ## FOSS boundary
 
-The recipe builds `foss`, not `google`. Firebase code is under `app/src/google`
-and Firebase dependencies are attached only to `googleImplementation`; neither
-appears in the FOSS runtime classpath. A local dependency check is:
+The app has a single build with no Google or Firebase dependency at all. The
+check below guards against one being reintroduced:
 
 ```sh
-if nix develop -c ./gradlew :app:dependencies --configuration fossReleaseRuntimeClasspath | rg -i 'firebase|play-services'; then
+if nix develop -c ./gradlew :app:dependencies --configuration releaseRuntimeClasspath | rg -i 'firebase|play-services'; then
   echo "Google-only dependency reached the FOSS runtime classpath" >&2
   exit 1
 fi

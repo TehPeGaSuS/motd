@@ -44,12 +44,12 @@ keeping UI-state coverage continuous without coupling those cases to Soju.
 - Build the appropriate APK:
 
   ```sh
-  nix develop -c ./gradlew :app:assembleFossDebug
+  nix develop -c ./gradlew :app:assembleDebug
   ```
 
   The physical-device APK is
-  `app/build/outputs/apk/foss/debug/app-foss-debug.apk`. The x86_64 hermetic
-  emulator uses `app/build/outputs/apk/foss/e2e/app-foss-e2e.apk`, which omits
+  `app/build/outputs/apk/debug/app-debug.apk`. The x86_64 hermetic
+  emulator uses `app/build/outputs/apk/e2e/app-e2e.apk`, which omits
   the arm64-only libbox core.
 
 ## Fast local headless loop
@@ -402,7 +402,7 @@ run a clean debug-only proof using:
 
 ```sh
 SERIAL=<device> \
-MOTD_APK=app/build/outputs/apk/foss/debug/app-foss-debug.apk \
+MOTD_APK=app/build/outputs/apk/debug/app-debug.apk \
 MOTD_SOJU_HOST=127.0.0.1 MOTD_SOJU_USER=motd MOTD_SOJU_PASS=motdtest \
 E2E_PHASES="a k" nix develop -c ./test/e2e/runbook.sh
 ```
@@ -448,7 +448,7 @@ CHATHISTORY, exposed to Android emulators at `10.0.2.2:6697`.
 ```sh
 ./test/e2e/hermetic-stack.sh up
 cp test/e2e/.env.ci test/e2e/.env
-nix develop -c ./gradlew :app:assembleFossE2e
+nix develop -c ./gradlew :app:assembleE2e
 nix develop -c ./test/e2e/runbook.sh
 ./test/e2e/hermetic-stack.sh down
 ```

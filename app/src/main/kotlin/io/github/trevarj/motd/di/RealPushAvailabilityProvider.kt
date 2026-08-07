@@ -124,7 +124,6 @@ class RealPushAvailabilityProvider(
         return PushAvailability(
             bouncerWebpush = liveWebpush || durableWebpush,
             distributorInstalled = hasDistributor,
-            fcmAvailable = BuildConfig.FCM_AVAILABLE,
             distributors = installed,
             selectedDistributor = selected,
             setupStatus = status,

@@ -4,8 +4,6 @@ import android.util.Log
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.PushPrefs
-import io.github.trevarj.motd.data.prefs.PushProvider
-import io.github.trevarj.motd.data.prefs.PushProviderPrefs
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.di.ApplicationScope
@@ -32,8 +30,6 @@ class PushInstanceCoordinator @Inject constructor(
     private val networkDao: NetworkDao,
     private val pushPrefs: PushPrefs,
     private val up: UnifiedPushApi,
-    private val providerPrefs: PushProviderPrefs = DefaultPushProviderPrefs,
-    private val fcm: FcmPushApi = NoopFcmPushApi,
     private val healthStore: PushHealthStore = NoopPushHealthStore,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
@@ -45,15 +41,14 @@ class PushInstanceCoordinator @Inject constructor(
     fun start() {
         if (started) return
         started = true
-        fcm.start()
         scope.launch {
-            combine(settingsRepository.settings, providerPrefs.provider, networkDao.observeAll()) { s, provider, nets ->
-                Triple(s.deliveryMode, provider, nets)
-            }.distinctUntilChanged().collect { (mode, provider, networks) ->
+            combine(settingsRepository.settings, networkDao.observeAll()) { s, nets ->
+                s.deliveryMode to nets
+            }.distinctUntilChanged().collect { (mode, networks) ->
                 val ids = pushEligibleNetworkIds(networks)
                 runCatching {
                     healthStore.retain(networks.map { it.id }.toSet())
-                    reconcile(mode, provider, ids)
+                    reconcile(mode, ids)
                 }
                     .onFailure { Log.w(TAG, "push provider reconciliation failed", it) }
             }
@@ -71,28 +66,12 @@ class PushInstanceCoordinator @Inject constructor(
      * Public for direct unit tests with a FakeUnifiedPushApi.
      */
     suspend fun reconcile(mode: DeliveryMode, connectable: Set<Long>) {
-        reconcile(mode, PushProvider.UNIFIED_PUSH, connectable)
-    }
-
-    suspend fun reconcile(mode: DeliveryMode, provider: PushProvider, connectable: Set<Long>) {
         if (mode != DeliveryMode.UNIFIED_PUSH) {
             cancelEndpointTimeoutsExcept(emptySet())
-            fcm.reconcile(emptySet())
             reconcileUnifiedPush(emptySet(), connectable)
             return
         }
-        if (provider == PushProvider.FCM) {
-            if (!fcm.available) {
-                settingsRepository.setDeliveryMode(DeliveryMode.PERSISTENT_SOCKET)
-                return
-            }
-            // Stop connector registrations before replacing their endpoints with relay endpoints.
-            for (id in connectable) up.unregisterApp(id.toString())
-            fcm.reconcile(connectable)
-        } else {
-            fcm.reconcile(emptySet())
-            reconcileUnifiedPush(connectable, connectable)
-        }
+        reconcileUnifiedPush(connectable, connectable)
     }
 
     private suspend fun reconcileUnifiedPush(desired: Set<Long>, connectable: Set<Long>) {
@@ -156,16 +135,3 @@ internal fun pushEligibleNetworkIds(networks: List<io.github.trevarj.motd.data.d
         .map { it.id }
         .toSet()
 
-private object DefaultPushProviderPrefs : PushProviderPrefs {
-    override val provider = kotlinx.coroutines.flow.flowOf(PushProvider.UNIFIED_PUSH)
-    override suspend fun setProvider(provider: PushProvider) = Unit
-    override suspend fun fcmSubscriptions() = emptyMap<Long, io.github.trevarj.motd.data.prefs.FcmSubscription>()
-    override suspend fun setFcmSubscription(networkId: Long, subscription: io.github.trevarj.motd.data.prefs.FcmSubscription?) = Unit
-}
-
-private object NoopFcmPushApi : FcmPushApi {
-    override val available = false
-    override fun start() = Unit
-    override suspend fun reconcile(connectable: Set<Long>) = Unit
-    override suspend fun onTokenChanged(token: String) = Unit
-}

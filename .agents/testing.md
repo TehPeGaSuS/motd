@@ -10,8 +10,7 @@ narrowest useful check and expand when a change crosses boundaries.
 | Documentation only | `git diff --check`; verify links, commands, and referenced paths |
 | Shell harness/config | `bash -n test/e2e/*.sh test/e2e/fixtures/*.sh test/e2e/hermetic/*/*.sh` plus the relevant dry run |
 | IRC parser/client/transport | `nix develop -c ./gradlew :irc:test --stacktrace` |
-| Android repositories, services, preferences, or ViewModels | `nix develop -c ./gradlew :app:testFossDebugUnitTest --stacktrace` |
-| Firebase relay | `nix develop -c npm ci --prefix firebase/functions --ignore-scripts`, then `npm test` and `npm audit --omit=dev` with the same prefix |
+| Android repositories, services, preferences, or ViewModels | `nix develop -c ./gradlew :app:testDebugUnitTest --stacktrace` |
 | Compose/resources/manifest | App unit tests, FOSS lint, and the FOSS debug assembly |
 | Ordinary app user journey | Relevant unit/integration tests plus FOSS lint/build; rely on required CI for E2E |
 | Cross-module or release-sensitive work | The full release-parity Gradle command below |
@@ -20,7 +19,7 @@ FOSS lint and debug assembly:
 
 ```sh
 nix develop -c ./gradlew \
-  :app:lintFossDebug :app:assembleFossDebug \
+  :app:lintDebug :app:assembleDebug \
   --stacktrace
 ```
 
@@ -29,13 +28,10 @@ Full release-parity Gradle verification:
 ```sh
 nix develop .#native -c ./gradlew \
   :irc:build \
-  :app:testFossDebugUnitTest :app:testFossReleaseUnitTest \
-  :app:lintFossDebug :app:lintFossRelease :app:assembleFossRelease \
+  :app:testDebugUnitTest :app:testReleaseUnitTest \
+  :app:lintDebug :app:lintRelease :app:assembleRelease \
   --stacktrace
 ```
-
-The Google/FCM flavor is dormant. Do not run Google Gradle tasks or build a
-Google APK unless the maintainer explicitly reactivates that distribution.
 
 Lint warnings are errors. Run with the warm daemon and the repo's bounded worker
 cap (`org.gradle.workers.max` in `gradle.properties`); do not add
@@ -46,7 +42,7 @@ and release both wrap lint in a bounded retry for the same reason.
 
 ## Deterministic generated tests
 
-The ordinary `:irc:test` and `:app:testFossDebugUnitTest` tasks include bounded,
+The ordinary `:irc:test` and `:app:testDebugUnitTest` tasks include bounded,
 seeded generated tests. Their defaults are stable; CI replaces the seed with the
 pull-request commit and `.github/workflows/fuzz.yml` runs the larger nightly
 profile.
@@ -64,7 +60,7 @@ effective counts, index ranges, and any manual overrides.
   Only positive values apply (`0` is ignored and falls back to the profile), so
   the minimum is `1`. For the tightest inner loop when iterating on code
   unrelated to the fuzzed surfaces, run e.g.
-  `MOTD_FUZZ_CASES=1 MOTD_FUZZ_STEPS=1 ./gradlew :app:testFossDebugUnitTest` to
+  `MOTD_FUZZ_CASES=1 MOTD_FUZZ_STEPS=1 ./gradlew :app:testDebugUnitTest` to
   shrink the generated campaign to a single case; the committed regression corpus
   still runs. Never commit that reduced profile; leave the CI/default counts
   intact so coverage is not silently lost.
@@ -107,7 +103,7 @@ version, seed, case, and fixture in that module's
 - Use `test/e2e/runbook.sh` for multi-screen interaction and crash sweeps. The
   local headless `full` command runs A-H/J/V/R before teardown phase I on the isolated emulator;
   the hermetic Docker stack is used by the scheduled/manual CI workflow.
-- Use `:app:assembleFossE2e` only for x86_64 emulator testing. It deliberately
+- Use `:app:assembleE2e` only for x86_64 emulator testing. It deliberately
   excludes the arm64-only embedded libbox core and is not representative of
   obfuscation support.
 

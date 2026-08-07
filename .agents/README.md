@@ -10,8 +10,6 @@ into a long runbook.
   uploads, push, connection lifecycle, and Android transport integration.
 - `irc/` — pure-JVM IRC parser, serializer, client state machine, extensions,
   and socket transport.
-- `firebase/functions/` — optional FCM relay, with its own locked Node package
-  graph and tests.
 - `test/e2e/` — fast isolated headless, physical-device, and exhaustive emulator
   harnesses plus the local ergo/soju bouncer stack.
 - `.github/workflows/` — current CI, smoke, exhaustive E2E, and release behavior.
@@ -45,5 +43,4 @@ connection ownership, or module boundaries.
   device, hermetic emulator, phases, selectors, and diagnostics.
 - [`../docs/obfuscation.md`](../docs/obfuscation.md) — SOCKS5, Tor, and VLESS +
   REALITY behavior and validation.
-- [`../docs/firebase-push.md`](../docs/firebase-push.md) and
-  [`../docs/ntfy-push.md`](../docs/ntfy-push.md) — delivery backends.
+- [`../docs/ntfy-push.md`](../docs/ntfy-push.md) — delivery backends.

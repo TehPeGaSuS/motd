@@ -157,8 +157,6 @@
     <string name="settings_delivery_push_scope">Push covers direct messages and channel highlights. Other channel history syncs when you open the app.</string>
     <string name="settings_delivery_push_error">Status: %1$s</string>
     <string name="settings_delivery_push_distributor_url">https://f-droid.org/packages/io.heckel.ntfy/</string>
-    <string name="settings_delivery_fcm">Firebase Cloud Messaging (Google)</string>
-    <string name="settings_delivery_fcm_desc">Battery-friendly Google push via your bouncer.</string>
     <string name="settings_battery">Battery optimization</string>
     <string name="settings_battery_desc">Exempt motd to keep connections reliable.</string>
     <string name="settings_battery_push_desc">Exempt your push distributor so background messages arrive promptly.</string>

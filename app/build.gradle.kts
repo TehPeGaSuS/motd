@@ -23,7 +23,7 @@ room {
 }
 
 // Opt in for release-only characterization without slowing routine builds or checking generated
-// reports into source control: ./gradlew :app:compileFossReleaseKotlin -PmotdComposeMetrics=true
+// reports into source control: ./gradlew :app:compileReleaseKotlin -PmotdComposeMetrics=true
 if (providers.gradleProperty("motdComposeMetrics").map(String::toBoolean).getOrElse(false)) {
     composeCompiler {
         reportsDestination.set(layout.buildDirectory.dir("compose_compiler"))
@@ -151,32 +151,6 @@ android {
         testInstrumentationRunnerArguments["clearPackageData"] = "true"
     }
 
-    flavorDimensions += "distribution"
-    productFlavors {
-        create("foss") {
-            dimension = "distribution"
-            buildConfigField("boolean", "FCM_AVAILABLE", "false")
-        }
-        create("google") {
-            dimension = "distribution"
-            val firebaseApiKey = System.getenv("MOTD_FIREBASE_API_KEY").orEmpty()
-            val firebaseAppId = System.getenv("MOTD_FIREBASE_APP_ID").orEmpty()
-            val firebaseProjectId = System.getenv("MOTD_FIREBASE_PROJECT_ID").orEmpty()
-            val firebaseSenderId = System.getenv("MOTD_FIREBASE_SENDER_ID").orEmpty()
-            val relayUrl = System.getenv("MOTD_FCM_RELAY_URL").orEmpty().trimEnd('/')
-            val fcmConfigured = listOf(
-                firebaseApiKey, firebaseAppId, firebaseProjectId, firebaseSenderId, relayUrl,
-            ).all { it.isNotBlank() }
-            fun quoted(value: String) = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
-            buildConfigField("boolean", "FCM_AVAILABLE", fcmConfigured.toString())
-            buildConfigField("String", "FIREBASE_API_KEY", quoted(firebaseApiKey))
-            buildConfigField("String", "FIREBASE_APP_ID", quoted(firebaseAppId))
-            buildConfigField("String", "FIREBASE_PROJECT_ID", quoted(firebaseProjectId))
-            buildConfigField("String", "FIREBASE_SENDER_ID", quoted(firebaseSenderId))
-            buildConfigField("String", "FCM_RELAY_URL", quoted(relayUrl))
-        }
-    }
-
     // Signing only when CI secrets are present; local/debug builds never fail on this.
     val keystorePath = System.getenv("MOTD_KEYSTORE_PATH")
     if (keystorePath != null) {
@@ -255,14 +229,6 @@ android {
     }
 }
 
-androidComponents {
-    // Hermetic E2E uses an AOSP image with no Google Play services. Building a Google E2E APK
-    // adds a large, unusable variant and needlessly doubles the emulator-test compilation graph.
-    beforeVariants(selector().withBuildType("e2e")) { variant ->
-        if (variant.productFlavors.contains("distribution" to "google")) variant.enable = false
-    }
-}
-
 val verifyLibboxArtifact by tasks.registering(VerifyLibboxArtifact::class) {
     group = "verification"
     description = "Verifies the libbox AAR against its manifest and pinned source contract."
@@ -325,8 +291,6 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.serialization.json)
     implementation(libs.unifiedpush.connector)
-    "googleImplementation"(platform(libs.firebase.bom))
-    "googleImplementation"(libs.firebase.messaging)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.turbine)

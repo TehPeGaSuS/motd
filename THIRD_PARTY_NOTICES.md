@@ -71,10 +71,3 @@ a simplified monochrome derivative of the [Guix logo](https://commons.wikimedia.
 by Luis Felipe López Acevedo, from `guix-artwork.git`. That source and its
 derived path data are attributed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
-## Google distribution: Firebase Cloud Messaging
-
-Only the `google` APK includes the Firebase Android SDK for Cloud Messaging. The Firebase Android
-SDK is distributed under the Apache License 2.0; message delivery also uses the separately operated
-Google Firebase service and is subject to its terms. The `foss` APK contains no Firebase dependency.
-The optional relay source under `firebase/` uses the MIT-licensed Firebase Functions SDK and the
-Apache-2.0-licensed Firebase Admin SDK; exact versions are recorded in its lockfile.

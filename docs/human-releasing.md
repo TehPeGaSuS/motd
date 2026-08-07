@@ -19,10 +19,6 @@ this document and the workflow disagree, the workflow wins.
 5. Confirm the four signing secrets exist in GitHub: `KEYSTORE_BASE64`,
    `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD`.
 
-The Google/FCM distribution is paused. Do not build, sign, attach, or publish a
-Google APK, and do not require Firebase client or relay configuration for a
-release, until the maintainer explicitly reactivates it.
-
 ## Bump the version
 
 Edit `gradle.properties` and commit the bump before tagging. The release
@@ -90,16 +86,16 @@ creating or changing it, reload direnv and build the supported FOSS release:
 ```sh
 direnv allow
 MOTD_SOURCE_COMMIT="$(git rev-parse HEAD)" \
-  ./gradlew :app:assembleFossRelease
+  ./gradlew :app:assembleRelease
 ```
 
 The signed APK is
-`app/build/outputs/apk/foss/release/app-foss-release.apk`. Verify its signature
+`app/build/outputs/apk/release/app-release.apk`. Verify its signature
 before installing or distributing it:
 
 ```sh
 apksigner verify --verbose --print-certs \
-  app/build/outputs/apk/foss/release/app-foss-release.apk
+  app/build/outputs/apk/release/app-release.apk
 ```
 
 The command must report verification success and the expected signer

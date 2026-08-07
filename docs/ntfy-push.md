@@ -94,9 +94,9 @@ The destructive setup is hard-gated to the debug package and never clears the re
 
 ```sh
 ./test/e2e/local-stack.sh up
-nix develop -c ./gradlew :app:assembleFossDebug
+nix develop -c ./gradlew :app:assembleDebug
 SERIAL=<device> \
-MOTD_APK=app/build/outputs/apk/foss/debug/app-foss-debug.apk \
+MOTD_APK=app/build/outputs/apk/debug/app-debug.apk \
 MOTD_SOJU_HOST=127.0.0.1 MOTD_SOJU_USER=motd MOTD_SOJU_PASS=motdtest \
 E2E_PHASES="a k" nix develop -c ./test/e2e/runbook.sh
 ```

@@ -27,14 +27,14 @@ export. Envelope metadata is authenticated as associated data.
   marker, auto-connect intent, SOCKS/Tor/VLESS settings, and ZNC classification
 - User-facing settings for appearance, chat behavior, previews, replies,
   upload backend configuration, avatar display, per-network self-avatar setting,
-  delivery mode, and selected push provider
+  and delivery mode
 
 ## Excluded
 
 - Room primary keys, messages, buffers, read markers, drafts, cached previews,
-  upload history, deletion tokens, generated push endpoints, push keypairs, FCM
-  subscriptions, certificate pins, STS policy state, diagnostics, history
-  cursors, and other runtime/cache state
+  upload history, deletion tokens, generated push endpoints, push keypairs,
+  certificate pins, STS policy state, diagnostics, history cursors, and other
+  runtime/cache state
 - Android KeyChain aliases. A network that used a client certificate is imported
   disconnected until the user selects a certificate on the destination device.
 

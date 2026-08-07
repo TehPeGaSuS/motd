@@ -7,15 +7,12 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import io.github.trevarj.motd.data.db.NetworkDao
-import io.github.trevarj.motd.data.prefs.PushProvider
-import io.github.trevarj.motd.data.prefs.PushProviderPrefs
 import io.github.trevarj.motd.service.ConnectionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.flow.first
 import org.unifiedpush.android.connector.FailedReason
 import org.unifiedpush.android.connector.MessagingReceiver
 import org.unifiedpush.android.connector.data.PushEndpoint
@@ -63,7 +60,6 @@ class MotdPushReceiver : MessagingReceiver() {
         fun connectionManager(): ConnectionManager
         fun networkDao(): NetworkDao
         fun unifiedPush(): UnifiedPushApi
-        fun pushProviderPrefs(): PushProviderPrefs
         fun pushHealthStore(): PushHealthStore
         fun pushDistributorController(): PushDistributorController
     }
@@ -74,7 +70,6 @@ class MotdPushReceiver : MessagingReceiver() {
     override fun onNewEndpoint(context: Context, endpoint: PushEndpoint, instance: String) {
         val e = entry(context)
         runOnWakelock {
-            if (e.pushProviderPrefs().provider.first() != PushProvider.UNIFIED_PUSH) return@runOnWakelock
             val networkId = resolveInstance(e, instance) ?: return@runOnWakelock
             // Mode is user-driven and precedes registration; do NOT flip it here.
             e.registrar().onNewEndpoint(networkId, endpoint.url)
@@ -86,7 +81,6 @@ class MotdPushReceiver : MessagingReceiver() {
     override fun onMessage(context: Context, message: PushMessage, instance: String) {
         val e = entry(context)
         runOnWakelock {
-            if (e.pushProviderPrefs().provider.first() != PushProvider.UNIFIED_PUSH) return@runOnWakelock
             val networkId = resolveInstance(e, instance) ?: return@runOnWakelock
             val keys = e.registrar().loadOrCreateKeys()
             e.eventHandler().handle(networkId, message.content, keys, message.decrypted)
@@ -96,7 +90,6 @@ class MotdPushReceiver : MessagingReceiver() {
     override fun onRegistrationFailed(context: Context, reason: FailedReason, instance: String) {
         val e = entry(context)
         runOnWakelock {
-            if (e.pushProviderPrefs().provider.first() != PushProvider.UNIFIED_PUSH) return@runOnWakelock
             val networkId = resolveInstance(e, instance) ?: return@runOnWakelock
             e.pushHealthStore().failed(networkId, "DISTRIBUTOR_REGISTRATION_${reason.name}")
             // Preserve the user's UnifiedPush choice, but immediately restore this network's
@@ -109,7 +102,6 @@ class MotdPushReceiver : MessagingReceiver() {
     override fun onUnregistered(context: Context, instance: String) {
         val e = entry(context)
         runOnWakelock {
-            if (e.pushProviderPrefs().provider.first() != PushProvider.UNIFIED_PUSH) return@runOnWakelock
             val networkId = instance.toLongOrNull()
             if (networkId != null) {
                 e.registrar().onUnregisteredNetwork(networkId)

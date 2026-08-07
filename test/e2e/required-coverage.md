@@ -5,7 +5,7 @@ compact required real-stack gate, and a broad nightly choreography sweep.
 
 | Behavior and state class | Continuous evidence | Broad or specialized evidence |
 | --- | --- | --- |
-| protocol parsing, playback mapping, canonical storage, ordering, and dedup | seeded JVM tests in `:irc:test` and `:app:testFossDebugUnitTest` | larger nightly generated-test shards |
+| protocol parsing, playback mapping, canonical storage, ordering, and dedup | seeded JVM tests in `:irc:test` and `:app:testDebugUnitTest` | larger nightly generated-test shards |
 | message bubbles, actions, audio, replies, placeholders, sync/error states | 64 fixture-free cases via `component-suite.sh`, including full-list variants and Paging replacement | phases C, G, and conditional H |
 | chat-list badges, presence, selection, archive, drawer, and empty states | component suite | phases B and I |
 | onboarding, TLS trust, Soju import, child readiness | required real-stack onboarding journey | phase A |

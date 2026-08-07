@@ -20,10 +20,6 @@ automation in `.github/workflows/release.yml` is authoritative.
    fails nothing locally or in CI—it only surfaces as a blank "What's New" once
    the F-Droid metadata advances. Keep it user-facing and under 500 characters.
 
-The Google/FCM distribution is paused. Do not build, sign, attach, or publish a
-Google APK, and do not require Firebase client or relay configuration for a
-release, until the maintainer explicitly reactivates it.
-
 ## Cut the release
 
 ```sh

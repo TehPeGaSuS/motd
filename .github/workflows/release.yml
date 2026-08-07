@@ -45,8 +45,8 @@ jobs:
           MOTD_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: >-
           ./gradlew :irc:build
-          :app:testFossDebugUnitTest :app:testFossReleaseUnitTest
-          :app:assembleFossRelease
+          :app:testDebugUnitTest :app:testReleaseUnitTest
+          :app:assembleRelease
           --stacktrace
       # Lint is split out with a bounded retry: it can rarely hit the
       # ModifierDeclarationDetector classloader race, and unlike required CI the
@@ -56,21 +56,21 @@ jobs:
       - name: Android lint (warnings as errors)
         run: |
           for attempt in 1 2; do
-            ./gradlew :app:lintFossDebug :app:lintFossRelease --stacktrace && exit 0
+            ./gradlew :app:lintDebug :app:lintRelease --stacktrace && exit 0
             echo "lint attempt $attempt failed; retrying" >&2
           done
           exit 1
       - name: Verify F-Droid-compatible APK signing blocks
         run: >-
           java .github/scripts/CheckApkSigningBlocks.java
-          app/build/outputs/apk/foss/release/app-foss-release.apk
+          app/build/outputs/apk/release/app-release.apk
       - name: Prepare licensed release assets
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           ./third_party/sing-box/prepare-release-assets.sh \
             "${{ github.ref_name }}" \
-            app/build/outputs/apk/foss/release/app-foss-release.apk \
+            app/build/outputs/apk/release/app-release.apk \
             release-assets
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:

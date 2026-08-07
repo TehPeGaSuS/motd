@@ -112,7 +112,7 @@ jobs:
         with: { distribution: temurin, java-version: 21 }
       - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
       - name: Run app generated targets
-        run: ./gradlew :app:testFossDebugUnitTest --tests 'io.github.trevarj.motd.fuzz.*' --stacktrace
+        run: ./gradlew :app:testDebugUnitTest --tests 'io.github.trevarj.motd.fuzz.*' --stacktrace
       - name: Publish app fuzz summary
         if: always()
         shell: bash
@@ -159,7 +159,7 @@ jobs:
           name: nightly-app-fuzz-${{ github.run_id }}-${{ matrix.shard }}
           path: |
             app/build/fuzz-failures/**
-            app/build/reports/tests/testFossDebugUnitTest/**
+            app/build/reports/tests/testDebugUnitTest/**
           if-no-files-found: ignore
 
   summary:

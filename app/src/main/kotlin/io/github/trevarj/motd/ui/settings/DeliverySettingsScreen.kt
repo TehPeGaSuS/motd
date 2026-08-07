@@ -35,7 +35,6 @@ import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.service.DeliveryMode
-import io.github.trevarj.motd.data.prefs.PushProvider
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Notifications & delivery category: delivery mode (persistent/push) and battery optimization. */
@@ -59,10 +58,8 @@ fun DeliverySettingsScreen(
     DeliverySettingsContent(
         deliveryMode = state.settings.deliveryMode,
         pushAvailability = state.pushAvailability,
-        pushProvider = state.pushProvider,
         onBack = onBack,
         onDeliveryMode = viewModel::setDeliveryMode,
-        onPushProvider = viewModel::setPushProvider,
         onSelectDistributor = viewModel::selectPushDistributor,
         onRetryPush = viewModel::retryPushSetup,
     )
@@ -72,10 +69,8 @@ fun DeliverySettingsScreen(
 fun DeliverySettingsContent(
     deliveryMode: DeliveryMode,
     pushAvailability: PushAvailability,
-    pushProvider: PushProvider,
     onBack: () -> Unit,
     onDeliveryMode: (DeliveryMode) -> Unit,
-    onPushProvider: (PushProvider) -> Unit,
     onSelectDistributor: (String) -> Unit = {},
     onRetryPush: () -> Unit = {},
 ) {
@@ -87,9 +82,7 @@ fun DeliverySettingsContent(
             DeliveryGroup(
                 current = deliveryMode,
                 availability = pushAvailability,
-                provider = pushProvider,
                 onSelect = onDeliveryMode,
-                onSelectProvider = onPushProvider,
                 onInstallDistributor = { context.startActivity(Intent(Intent.ACTION_VIEW, distributorUrl.toUri())) },
                 onChooseDistributor = { showDistributorChooser = true },
                 onRetryPush = onRetryPush,
@@ -164,9 +157,7 @@ fun DeliverySettingsContent(
 private fun DeliveryGroup(
     current: DeliveryMode,
     availability: PushAvailability,
-    provider: PushProvider,
     onSelect: (DeliveryMode) -> Unit,
-    onSelectProvider: (PushProvider) -> Unit,
     onInstallDistributor: () -> Unit,
     onChooseDistributor: () -> Unit,
     onRetryPush: () -> Unit,
@@ -190,10 +181,10 @@ private fun DeliveryGroup(
         RadioRow(
             label = stringResource(R.string.settings_delivery_push),
             subtitle = subtitle,
-            selected = current == DeliveryMode.UNIFIED_PUSH && provider == PushProvider.UNIFIED_PUSH,
+            selected = current == DeliveryMode.UNIFIED_PUSH,
             enabled = availability.selectable,
             onClick = {
-                onSelectProvider(PushProvider.UNIFIED_PUSH)
+                onSelect(DeliveryMode.UNIFIED_PUSH)
                 if (availability.distributors.size > 1 && availability.selectedDistributor == null) {
                     onChooseDistributor()
                 }
@@ -212,20 +203,7 @@ private fun DeliveryGroup(
                 Text(stringResource(R.string.settings_delivery_push_install_distributor))
             }
         }
-        if (availability.fcmAvailable) {
-            RadioRow(
-                label = stringResource(R.string.settings_delivery_fcm),
-                subtitle = if (availability.selectable) {
-                    stringResource(R.string.settings_delivery_fcm_desc)
-                } else {
-                    stringResource(R.string.settings_delivery_push_unavailable)
-                },
-                selected = current == DeliveryMode.UNIFIED_PUSH && provider == PushProvider.FCM,
-                enabled = availability.selectable,
-                onClick = { onSelectProvider(PushProvider.FCM) },
-            )
-        }
-        if (current == DeliveryMode.UNIFIED_PUSH && provider == PushProvider.UNIFIED_PUSH) {
+        if (current == DeliveryMode.UNIFIED_PUSH) {
             PushStatusCard(
                 availability = availability,
                 onChooseDistributor = onChooseDistributor,
@@ -327,9 +305,7 @@ private fun DeliverySettingsPreview() {
         DeliverySettingsContent(
             deliveryMode = DeliveryMode.PERSISTENT_SOCKET,
             pushAvailability = PushAvailability(),
-            pushProvider = PushProvider.UNIFIED_PUSH,
             onBack = {}, onDeliveryMode = {},
-            onPushProvider = {},
         )
     }
 }

@@ -46,8 +46,8 @@ class IrcForegroundService : LifecycleService() {
         return START_STICKY
     }
 
-    // The merged manifest for every flavor declares specialUse. AGP lint loses that declaration
-    // when analyzing the shared service against the Google flavor's manifest overlay.
+    // The merged manifest declares specialUse; AGP lint loses that declaration when analyzing the
+    // service in isolation, so the check is suppressed here rather than disabled project-wide.
     @SuppressLint("ForegroundServiceType")
     private fun startAsForeground() {
         val notification = notifications.statusNotification(

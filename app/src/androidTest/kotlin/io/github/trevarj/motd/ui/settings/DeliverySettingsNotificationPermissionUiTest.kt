@@ -6,7 +6,6 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import io.github.trevarj.motd.data.prefs.PushProvider
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Rule
@@ -21,10 +20,8 @@ class DeliverySettingsNotificationPermissionUiTest {
                 DeliverySettingsContent(
                     deliveryMode = DeliveryMode.PERSISTENT_SOCKET,
                     pushAvailability = PushAvailability(notificationsGranted = false),
-                    pushProvider = PushProvider.UNIFIED_PUSH,
                     onBack = {},
                     onDeliveryMode = {},
-                    onPushProvider = {},
                 )
             }
         }

@@ -18,7 +18,6 @@ import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
-import io.github.trevarj.motd.data.prefs.PushProviderPrefs
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefsImpl
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
@@ -165,9 +164,6 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun pushPrefs(impl: DataStoreSettingsRepository): PushPrefs
-
-    @Binds @Singleton
-    abstract fun pushProviderPrefs(impl: DataStoreSettingsRepository): PushProviderPrefs
 
     /** TOFU cert-pin store (plans/12); same DataStore-backed impl. */
     @Binds @Singleton

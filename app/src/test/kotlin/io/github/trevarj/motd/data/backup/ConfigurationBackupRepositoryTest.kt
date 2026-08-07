@@ -133,7 +133,6 @@ class ConfigurationBackupRepositoryTest {
             voicePrefs = VoicePrefsImpl(context),
             avatarPrefs = AvatarPrefsImpl(context),
             bouncerKindPrefs = BouncerKindPrefsImpl(context),
-            pushProviderPrefs = settings,
         )
     }
 

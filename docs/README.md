@@ -23,8 +23,6 @@ exact `nix develop` commands for one activity.
 - [`cloak.md`](cloak.md) — CLoak bouncer connection guide.
 - [`obfuscation.md`](obfuscation.md) — SOCKS5, Tor, and VLESS + REALITY
   transport behavior and validation.
-- [`firebase-push.md`](firebase-push.md) — Firebase Cloud Messaging relay
-  (paused Google/FCM flavor).
 - [`ntfy-push.md`](ntfy-push.md) — ntfy and UnifiedPush setup for Google-free
   push.
 - [`theme-sources.md`](theme-sources.md) — editor, terminal, and wallpaper

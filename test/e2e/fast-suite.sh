@@ -87,11 +87,11 @@ discover_direct_methods() {
 run_direct_suite() {
   local app_apk test_apk runner method channel_arg instrument_output rc=0
   local -a methods
-  app_apk="${FAST_E2E_APP_APK:-$REPO/app/build/outputs/apk/foss/e2e/app-foss-e2e.apk}"
-  test_apk="${FAST_E2E_TEST_APK:-$REPO/app/build/outputs/apk/androidTest/foss/e2e/app-foss-e2e-androidTest.apk}"
+  app_apk="${FAST_E2E_APP_APK:-$REPO/app/build/outputs/apk/e2e/app-e2e.apk}"
+  test_apk="${FAST_E2E_TEST_APK:-$REPO/app/build/outputs/apk/androidTest/e2e/app-e2e-androidTest.apk}"
   # Daemon on for warm rebuilds; --max-workers=2 because the emulator + native
   # stack are already resident and competing for the 14 GiB box's RAM.
-  "$REPO/gradlew" :app:assembleFossE2e :app:assembleFossE2eAndroidTest --stacktrace --max-workers=2
+  "$REPO/gradlew" :app:assembleE2e :app:assembleE2eAndroidTest --stacktrace --max-workers=2
   e2e_adb install -r -g "$app_apk" >/dev/null
   e2e_adb install -r "$test_apk" >/dev/null
   runner="$(e2e_adb shell pm list instrumentation | sed -n "s#^instrumentation:\([^ ]*\) (target=${FAST_E2E_TARGET_PACKAGE})#\1#p" | head -1 | tr -d '\r')"
@@ -122,8 +122,8 @@ run_direct_suite() {
 
 run_attempt() {
   case "$MODE" in
-    connected) run_gradle_suite :app:connectedFossE2eAndroidTest "$@" ;;
-    managed) run_gradle_suite headlessApi34FossE2eAndroidTest -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect "$@" ;;
+    connected) run_gradle_suite :app:connectedE2eAndroidTest "$@" ;;
+    managed) run_gradle_suite headlessApi34E2eAndroidTest -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect "$@" ;;
     direct) run_direct_suite ;;
     *) echo "usage: $0 {connected|managed|direct} [Gradle arguments...]" >&2; return 2 ;;
   esac

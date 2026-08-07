@@ -47,10 +47,10 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
 - Match verification to the affected surface, using the command matrix in
   [`.agents/testing.md`](.agents/testing.md). Tests for changed behavior are
   part of the implementation, not optional follow-up work.
-- FOSS is the only supported build and release flavor. The Google/FCM sources
-  are dormant until that integration is ready; do not run Google Gradle tasks
-  or publish a Google APK unless the maintainer explicitly reactivates it. Lint
-  warnings are errors.
+- The app is a single Google-free build with no product flavors. Push delivery
+  is UnifiedPush only; do not reintroduce Firebase/FCM or a Play Store
+  distribution unless the maintainer explicitly asks for it. Lint warnings are
+  errors.
   When a change crosses modules or release behavior, run the full documented
   build rather than only the nearest unit test.
 - Do not run emulator/device E2E as part of routine local development. Keep

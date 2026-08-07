@@ -102,10 +102,10 @@ jobs:
         with: { distribution: temurin, java-version: 21 }
       - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
       - name: Assemble E2E APK
-        run: ./gradlew :app:assembleFossE2e --stacktrace
+        run: ./gradlew :app:assembleE2e --stacktrace
       - name: Verify E2E APK omits the arm64-only native core
         run: |
-          if unzip -Z1 app/build/outputs/apk/foss/e2e/app-foss-e2e.apk | grep -q '/libbox.so$'; then
+          if unzip -Z1 app/build/outputs/apk/e2e/app-e2e.apk | grep -q '/libbox.so$'; then
             echo "E2E APK unexpectedly contains libbox JNI" >&2
             exit 1
           fi
@@ -149,7 +149,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
           script: |
-            adb install -r -g app/build/outputs/apk/foss/e2e/app-foss-e2e.apk
+            adb install -r -g app/build/outputs/apk/e2e/app-e2e.apk
             ./test/e2e/runbook.sh
 
       # --- Artifacts on failure ---------------------------------------------

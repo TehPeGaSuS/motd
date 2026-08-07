@@ -186,11 +186,11 @@ fast() {
 full() {
   up
   log "building shell-runbook E2E APK"
-  nix develop "$REPO" -c ./gradlew :app:assembleFossE2e \
+  nix develop "$REPO" -c ./gradlew :app:assembleE2e \
     --stacktrace --max-workers=2
   ANDROID_SERIAL="$SERIAL" SERIAL="$SERIAL" \
     MOTD_PKG=io.github.trevarj.motd.debug \
-    MOTD_APK="$REPO/app/build/outputs/apk/foss/e2e/app-foss-e2e.apk" \
+    MOTD_APK="$REPO/app/build/outputs/apk/e2e/app-e2e.apk" \
     MOTD_SOJU_HOST=127.0.0.1 MOTD_SOJU_PORT="$SOJU_PORT" \
     MOTD_SOJU_USER=motd MOTD_SOJU_PASS=motdtest \
     MOTD_NICK=motdadb MOTD_TEST_CHANNEL='##motdtest' MOTD_SECOND_NICK=motdadb2 \
@@ -210,12 +210,12 @@ showcase() {
   down
   up
   log "building showcase E2E APK"
-  nix develop "$REPO" -c ./gradlew :app:assembleFossE2e \
+  nix develop "$REPO" -c ./gradlew :app:assembleE2e \
     --stacktrace --max-workers=2
   log "capturing public showcase screenshots into $screenshot_dir"
   ANDROID_SERIAL="$SERIAL" SERIAL="$SERIAL" \
     MOTD_PKG=io.github.trevarj.motd.debug \
-    MOTD_APK="$REPO/app/build/outputs/apk/foss/e2e/app-foss-e2e.apk" \
+    MOTD_APK="$REPO/app/build/outputs/apk/e2e/app-e2e.apk" \
     MOTD_SOJU_HOST=127.0.0.1 MOTD_SOJU_PORT="$SOJU_PORT" \
     MOTD_SOJU_USER=motd MOTD_SOJU_PASS=motdtest \
     MOTD_NICK=motdadb MOTD_TEST_CHANNEL='#guix' MOTD_SECOND_NICK=motdadb2 \

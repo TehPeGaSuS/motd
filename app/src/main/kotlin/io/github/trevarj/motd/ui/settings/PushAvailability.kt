@@ -21,7 +21,6 @@ import javax.inject.Inject
 data class PushAvailability(
     val bouncerWebpush: Boolean = false,
     val distributorInstalled: Boolean = false,
-    val fcmAvailable: Boolean = false,
     val distributors: List<PushDistributor> = emptyList(),
     val selectedDistributor: String? = null,
     val setupStatus: PushSetupStatus = PushSetupStatus.NEEDS_ATTENTION,
