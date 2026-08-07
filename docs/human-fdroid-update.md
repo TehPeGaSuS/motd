@@ -63,12 +63,11 @@ entry:
   `rm:` paths disappearing.
 - A new ABI.
 
-**Outstanding:** the flavor collapse. The first release containing
-"build: remove Firebase/FCM and collapse the distribution flavor" needs
-`gradle: yes` in place of `gradle: [foss]`, and the `app/src/google` and
-`firebase` entries dropped from `rm:`. Details in [`fdroid.md`](fdroid.md)
-"Recipe change pending". v0.13.0 predates that commit and is fine as a plain
-copy.
+The worked example is 0.13.1, the first release after the flavor collapse: it
+needed `gradle: yes` in place of `gradle: [foss]` and the `app/src/google` and
+`firebase` entries dropped from `rm:`, and went out as
+[!45080](https://gitlab.com/fdroid/fdroiddata/-/merge_requests/45080). See
+[`fdroid.md`](fdroid.md) "The flavor collapse, as a worked example".
 
 To make the edit, work from the fork and open a merge request against
 `fdroid/fdroiddata:master`:
@@ -82,28 +81,47 @@ git checkout -B motd-update-vX.Y.Z upstream/master
 $EDITOR metadata/io.github.trevarj.motd.yml
 ```
 
+Clone in full. fdroiddata is large and `--depth 1` is tempting, but GitLab
+rejects a push from a shallow clone with `shallow update not allowed`, and
+recovering means fetching the history anyway.
+
 Append the new entry under `Builds:`, copying the previous one and changing only
 `versionName`, `versionCode`, `commit`, and the fields the source change forces.
 If the bot already opened a merge request for the same version, say so on it so
 the two do not land twice.
+
+Put the reason for any recipe change in the commit body. There is no `glab` on
+this machine, so the merge request is created with GitLab push options, and the
+commit message becomes its description:
 
 ```sh
 nix shell nixpkgs#fdroidserver -c fdroid readmeta io.github.trevarj.motd
 nix shell nixpkgs#fdroidserver -c fdroid lint io.github.trevarj.motd
 
 git commit -S -m "io.github.trevarj.motd: update to X.Y.Z" -- metadata/io.github.trevarj.motd.yml
-git push -u origin motd-update-vX.Y.Z
+git push origin motd-update-vX.Y.Z \
+  -o merge_request.create \
+  -o merge_request.target=master \
+  -o merge_request.target_project=fdroid/fdroiddata \
+  -o merge_request.title="io.github.trevarj.motd: update to X.Y.Z" \
+  -o merge_request.remove_source_branch
 ```
 
-`fdroid build --test --verbose io.github.trevarj.motd:<versionCode>` is expected
-to run on an F-Droid buildserver, not locally.
+The local `readmeta`/`lint` pair is a convenience, not the gate. The merge
+request pipeline runs both plus `fdroid rewritemeta`, schema validation,
+`checkupdates`, the real `fdroid build`, and the `check apk` reproducibility
+comparison. If `fdroidserver` is slow to resolve through Nix, push and let the
+pipeline judge. `fdroid build --test --verbose io.github.trevarj.motd:<versionCode>`
+is expected to run on an F-Droid buildserver, not locally.
 
 ## 5. Merge, build, publish
 
 An F-Droid maintainer merges. The buildserver then rebuilds from source and
 compares the result against the GitHub APK; F-Droid publishes with the upstream
-signature only when they match. That happens on F-Droid's timeline, not
-immediately on merge. Watch the merge request for reviewer requests, typically
+signature only when they match. A green `check apk` job on the merge request is
+that same comparison run ahead of time, so it is a strong predictor but not the
+publication itself. That happens on F-Droid's timeline, not immediately on
+merge. Watch the merge request for reviewer requests, typically
 around srclibs pinning, metadata lint, and reproducibility.
 
 Once published, the SHA-256 of the F-Droid APK must equal the SHA-256 of

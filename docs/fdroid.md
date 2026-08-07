@@ -109,23 +109,28 @@ API 23 is required by gomobile; platform 37.0 and build-tools 36.0.0 match
 `compileSdk = 37`. The buildserver supplies OpenJDK 21, so the recipe selects it
 with `JAVA_HOME` instead of installing a JDK.
 
-## Recipe change pending
+## The flavor collapse, as a worked example
 
-The bot copies the previous entry verbatim, so a source-tree change that invalidates
-any recipe field has to be applied by hand in a merge request. One is outstanding:
+The bot copies the previous entry verbatim, so a source-tree change that
+invalidates any recipe field has to be applied by hand in a merge request. The
+0.13.1 entry is the reference case for what that looks like.
 
 The commit "build: remove Firebase/FCM and collapse the distribution flavor"
 deletes the `distribution` flavor dimension, `app/src/google/`, `app/src/foss/`,
-and `firebase/`. The first release that contains it needs:
+and `firebase/`, so the first release containing it needed two changes:
 
 - `gradle: yes` instead of `gradle: [foss]`. `assembleFossRelease` no longer
-  exists, so the copied entry fails outright.
+  exists, so the copied entry would have failed outright.
 - `rm:` reduced to `app/libs/libbox.aar`,
   `third_party/gomobile/internal/binres/testdata/bootstrap.bin`, and
   `third_party/sing-box/source/clients/android/settings.gradle.kts`. The
   `app/src/google` and `firebase` paths are gone.
 
-v0.13.0 predates that commit and still builds with `gradle: [foss]`.
+Everything else carried over untouched. That went out as
+[!45080](https://gitlab.com/fdroid/fdroiddata/-/merge_requests/45080), whose
+pipeline passed `fdroid lint`, `fdroid rewritemeta`, `fdroid build`, and the
+`check apk` reproducibility comparison against the upstream-signed APK. v0.13.0
+predates the collapse and was skipped rather than backfilled.
 
 The published release asset keeps the name `motd-<tag>-foss.apk` because the
 `Binaries:` line pins it; only the Gradle-derived input path changed.
