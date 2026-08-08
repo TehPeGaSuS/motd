@@ -72,6 +72,11 @@ jobs:
           MOTD_NICK=motdadb
           MOTD_TEST_CHANNEL=#guix
           MOTD_SECOND_NICK=motdadb2
+          # A capture only needs a connected app. Skip Phase A's stop/restart
+          # reconnect drill: the hosted emulator regularly misses its 30s
+          # reconnect window, which loses the libera import and cascades into
+          # every Phase S assertion. The required E2E gate keeps the drill.
+          MOTD_RECONNECT_DRILL=0
           # runbook.sh sources this file, so a multi-phase list must stay one word.
           E2E_PHASES="a s"
           EOF
@@ -105,9 +110,14 @@ jobs:
             adb shell cmd uimode night no || true
             # Hold the seeded companion in the showcase channels so the member
             # list and conversation stay populated for the whole capture.
-            SEED_HOLD_SECONDS=900 ./test/e2e/local-stack.sh showcase-hold &
+            # setsid + redirected output keeps the hold off this step's stdout:
+            # an inherited pipe outlives a failing runbook and strands the job
+            # until the workflow timeout instead of failing fast. Kill the whole
+            # process group so the nix-develop child dies with its wrapper.
+            setsid env SEED_HOLD_SECONDS=900 ./test/e2e/local-stack.sh showcase-hold \
+              >"$RUNNER_TEMP/showcase-hold.log" 2>&1 &
             hold_pid=$!
-            trap 'kill "$hold_pid" 2>/dev/null || true' EXIT
+            trap 'kill -- "-$hold_pid" 2>/dev/null || kill "$hold_pid" 2>/dev/null || true' EXIT
             adb install -r -g app/build/outputs/apk/e2e/app-e2e.apk
             ./test/e2e/runbook.sh
 

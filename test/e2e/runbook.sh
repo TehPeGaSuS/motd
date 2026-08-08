@@ -68,6 +68,12 @@ MOTD_ACTIVITY="${MOTD_PKG}/io.github.trevarj.motd.MainActivity"
 : "${MOTD_SECOND_NICK:=}"
 : "${MOTD_RECONNECT_TOKEN:=motd$(date +%s)}"
 : "${MOTD_RECONNECT_STACK_KIND:=native}"
+# Phase A step 9 stops and restarts soju to prove onboarding recovers from a
+# failed bouncer discovery. That drill is the point of the required gate, but it
+# is dead weight for a run that only needs a connected app to photograph — and a
+# slow host that misses the reconnect window fails every later step. Set 0 to
+# skip it; the gate leaves this at 1.
+: "${MOTD_RECONNECT_DRILL:=1}"
 
 export MOTD_PKG
 
@@ -356,28 +362,32 @@ phase_a() {
   # a refresh, and require the retained-row retry UI before restarting it. No remote network or
   # local child is created until the existing libera fixture is selected below.
   step "Surface failed bouncer discovery and retry after soju restart"
-  wait_for_tag onboarding_bouncer_discovery_refresh 20 || true
-  assert_tag_present onboarding_bouncer_discovery_refresh
-  if reconnect_stack stop-soju; then
-    _reconnect_restore_armed=true
-    sleep 2
-    tap_tag onboarding_bouncer_discovery_refresh
-    wait_for_tag onboarding_bouncer_discovery_error 20 || true
-    assert_tag_present onboarding_bouncer_discovery_error
-    if reconnect_stack start-soju; then
-      _reconnect_restore_armed=false
-      if wait_for_text "Connected as $MOTD_NICK" 30; then
-        tap_tag onboarding_bouncer_discovery_retry
-        wait_for_tag onboarding_bouncer_discovery_refresh 25 || true
-        assert_tag_present onboarding_bouncer_discovery_refresh
+  if [ "$MOTD_RECONNECT_DRILL" != 1 ]; then
+    note "MOTD_RECONNECT_DRILL=0 — leaving the connected bouncer session untouched"
+  else
+    wait_for_tag onboarding_bouncer_discovery_refresh 20 || true
+    assert_tag_present onboarding_bouncer_discovery_refresh
+    if reconnect_stack stop-soju; then
+      _reconnect_restore_armed=true
+      sleep 2
+      tap_tag onboarding_bouncer_discovery_refresh
+      wait_for_tag onboarding_bouncer_discovery_error 20 || true
+      assert_tag_present onboarding_bouncer_discovery_error
+      if reconnect_stack start-soju; then
+        _reconnect_restore_armed=false
+        if wait_for_text "Connected as $MOTD_NICK" 30; then
+          tap_tag onboarding_bouncer_discovery_retry
+          wait_for_tag onboarding_bouncer_discovery_refresh 25 || true
+          assert_tag_present onboarding_bouncer_discovery_refresh
+        else
+          fail "bouncer did not reconnect before discovery retry"
+        fi
       else
-        fail "bouncer did not reconnect before discovery retry"
+        fail "could not restart soju after discovery-failure exercise"
       fi
     else
-      fail "could not restart soju after discovery-failure exercise"
+      fail "could not stop soju for discovery-failure exercise"
     fi
-  else
-    fail "could not stop soju for discovery-failure exercise"
   fi
   assert_no_crash
 
