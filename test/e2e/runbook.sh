@@ -1720,10 +1720,13 @@ phase_s() {
   # tree entirely and no amount of waiting finds it. "Vivendi" drops every
   # light row, leaving the target as the first entry under the dark group.
   input_by_text_label "Search themes" "Vivendi"
-  # Address the row by testTag: its label is also a prefix of the Tinted,
-  # Deuteranopia, and Tritanopia variants left by the same filter.
-  wait_for_tag settings_theme_modus_vivendi 10 || true
-  tap_tag settings_theme_modus_vivendi
+  # Address the row by text, not testTag. The sheet is its own Compose window,
+  # so the Activity root's testTagsAsResourceId never reaches it and every node
+  # inside dumps with an empty resource-id. UIAutomator matches text exactly,
+  # so "Modus Vivendi" cannot collide with the Tinted/Deuteranopia/Tritanopia
+  # variants, nor with the search field now holding "Vivendi".
+  wait_for_text "Modus Vivendi" 10 || true
+  tap_text "Modus Vivendi"
   # The sheet is a separate Compose window. Do not start scrolling the
   # underlying Appearance page until its close affordance has disappeared.
   local _theme_wait
