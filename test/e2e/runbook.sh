@@ -1714,11 +1714,16 @@ phase_s() {
   wait_for_text "Appearance" 8 || true
   tap_tag settings_theme_picker
   wait_for_text "Search themes" 6 || true
-  # Keep the query shorter than the result label so tap_text cannot match the
-  # focused search field itself when UIAutomator returns exact text matches.
-  input_by_text_label "Search themes" "Modus"
-  wait_for_text "Modus Vivendi" 6 || true
-  tap_text "Modus Vivendi"
+  # Filter on "Vivendi", not "Modus": the latter also keeps all four Modus
+  # Operandi rows, which push Modus Vivendi past the sheet's 680dp fold. The
+  # list is a LazyColumn, so an off-screen row is absent from the semantics
+  # tree entirely and no amount of waiting finds it. "Vivendi" drops every
+  # light row, leaving the target as the first entry under the dark group.
+  input_by_text_label "Search themes" "Vivendi"
+  # Address the row by testTag: its label is also a prefix of the Tinted,
+  # Deuteranopia, and Tritanopia variants left by the same filter.
+  wait_for_tag settings_theme_modus_vivendi 10 || true
+  tap_tag settings_theme_modus_vivendi
   # The sheet is a separate Compose window. Do not start scrolling the
   # underlying Appearance page until its close affordance has disappeared.
   local _theme_wait
@@ -1730,7 +1735,11 @@ phase_s() {
   wait_for_text "Appearance" 6 || true
   # Phase A cleared app data, so the production defaults already pin comfortable bubbles and IRC
   # sprites. Restarting avoids racing two navigation pops while the theme sheet is disappearing.
-  ok "selected Modus Vivendi with the showcase presentation defaults"
+  # State only what happened. This line used to claim the theme was selected
+  # even on a run whose tap had already failed, which read as success next to
+  # light-themed frames. The tap_tag above is the real gate: it fails the run,
+  # and a failed run never reaches the upload.
+  note "theme sheet dismissed; showcase presentation defaults left at their post-wipe values"
   sleep 1
   adb_shell am force-stop "$MOTD_PKG"
   reset_to_chatlist || { fail "could not return to chat list after applying showcase theme"; return 1; }
