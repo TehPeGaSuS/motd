@@ -108,16 +108,13 @@ jobs:
             # Phase S picks the dark Modus Vivendi app preset itself; keep the
             # system appearance out of the way so the frames stay deterministic.
             adb shell cmd uimode night no || true
-            # Hold the seeded companion in the showcase channels so the member
-            # list and conversation stay populated for the whole capture.
-            # setsid + redirected output keeps the hold off this step's stdout:
-            # an inherited pipe outlives a failing runbook and strands the job
-            # until the workflow timeout instead of failing fast. Kill the whole
-            # process group so the nix-develop child dies with its wrapper.
-            setsid env SEED_HOLD_SECONDS=900 ./test/e2e/local-stack.sh showcase-hold \
-              >"$RUNNER_TEMP/showcase-hold.log" 2>&1 &
-            hold_pid=$!
-            trap 'kill -- "-$hold_pid" 2>/dev/null || kill "$hold_pid" 2>/dev/null || true' EXIT
+            # Deliberately no showcase-hold here. The stack's own showcase seed
+            # already posted the fixture conversations and disconnected, so a
+            # second member rejoining lands a JOIN and a +q MODE after every
+            # seeded message — and the chat list preview shows the newest event,
+            # which turned all four rows into "mode +q motdadb2" instead of the
+            # conversation. Phase S only asserts seeded content, so the frames
+            # are better without a live companion.
             adb install -r -g app/build/outputs/apk/e2e/app-e2e.apk
             ./test/e2e/runbook.sh
 
