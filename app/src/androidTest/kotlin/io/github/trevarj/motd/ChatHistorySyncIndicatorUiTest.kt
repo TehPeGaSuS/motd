@@ -59,16 +59,18 @@ class ChatHistorySyncIndicatorUiTest {
         }
         compose.waitForIdle()
 
-        // Enough frames for the micro fade to settle; charged against the escalation budget below so
-        // the threshold assertion still lands exactly one millisecond short.
+        // Enough frames for the micro fade to settle.
         compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
         compose.onNodeWithTag(CHAT_HISTORY_SYNC_BAR_TAG).assertIsDisplayed()
         compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertCountEquals(0)
 
-        compose.mainClock.advanceTimeBy(HISTORY_SYNC_PILL_ESCALATION_MS - FADE_BUDGET_MS - 1)
+        // advanceTimeBy rounds every advance up to a whole 16ms frame, so a 1ms-short edge can
+        // overshoot the threshold once advances are chained. Stop a full fade budget short instead:
+        // still inside the escalation window, but immune to frame rounding.
+        compose.mainClock.advanceTimeBy(HISTORY_SYNC_PILL_ESCALATION_MS - 2 * FADE_BUDGET_MS)
         compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertCountEquals(0)
 
-        compose.mainClock.advanceTimeBy(1)
+        compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
         compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
         compose.onNodeWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertIsDisplayed()
         compose.onNodeWithText("Finding first unread…").assertExists()
