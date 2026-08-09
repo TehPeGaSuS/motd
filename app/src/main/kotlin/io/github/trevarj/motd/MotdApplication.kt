@@ -11,6 +11,7 @@ import dagger.hilt.android.HiltAndroidApp
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.push.PushInstanceCoordinator
 import io.github.trevarj.motd.push.PushLifecycleCoordinator
+import io.github.trevarj.motd.ui.ComposeFoundationWorkarounds
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -25,6 +26,7 @@ class MotdApplication : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        ComposeFoundationWorkarounds.apply()
         diagnosticLogger.record("app", "process_started") {
             mapOf("cold_start" to true)
         }
