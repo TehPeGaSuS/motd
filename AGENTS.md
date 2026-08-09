@@ -71,6 +71,7 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
 - Do not rewrite, discard, or reformat unrelated changes. Avoid destructive Git
   commands. Do not commit, push, tag, install on a device, publish, or cut a
   release unless the user requests that action.
+- Do not add "Co-Authored-By:" trailer when LLMs have assisted with commits.
 - Keep commits narrowly scoped and report the verification performed. A request
   to release authorizes the documented release workflow, not unrelated cleanup
   or silently moving an existing tag.
