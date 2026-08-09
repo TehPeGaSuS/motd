@@ -99,6 +99,12 @@ require_env() {
 
 require_env MOTD_SOJU_HOST MOTD_SOJU_USER MOTD_SOJU_PASS
 
+# Ready label for the ROOT bouncer session. soju registers an unbound bouncer connection under the
+# SASL account name and echoes that back in RPL_WELCOME, so the wizard's status line reads
+# "Connected as $MOTD_SOJU_USER" — not the wizard's nick field, which only applies to the imported
+# child networks (their drawer rows are asserted against MOTD_NICK later).
+MOTD_ROOT_READY_LABEL="Connected as ${MOTD_SOJU_USER}"
+
 # Topic editing has a multiline draft and can exceed the generic short-form clear budget in
 # lib.sh. Keep this journey-specific helper on the stable field tag, and accept an empty original
 # topic so Phase D can restore either seeded or manually configured channels.
@@ -350,7 +356,7 @@ phase_a() {
     note "cert dialog did not appear (already trusted or fast connect); continuing"
   fi
   # Wait for either the ready indicator or the bouncer section.
-  if wait_for_any_text 30 "Connected as $MOTD_NICK" "Bouncer networks" >/dev/null; then
+  if wait_for_any_text 30 "$MOTD_ROOT_READY_LABEL" "Bouncer networks" >/dev/null; then
     ok "connect settled (ready or bouncer section shown)"
   else
     fail "connect did not reach Ready / Bouncer networks within timeout"
@@ -375,7 +381,10 @@ phase_a() {
       assert_tag_present onboarding_bouncer_discovery_error
       if reconnect_stack start-soju; then
         _reconnect_restore_armed=false
-        if wait_for_text "Connected as $MOTD_NICK" 30; then
+        # The actor reconnects on its own exponential backoff (base 2s, ×2, jitter), so on a slow
+        # host the attempt that lands after soju is listening can be a full backoff step away.
+        # Budget for one more step than the outage itself costs; a healthy run matches immediately.
+        if wait_for_text "$MOTD_ROOT_READY_LABEL" 60; then
           tap_tag onboarding_bouncer_discovery_retry
           wait_for_tag onboarding_bouncer_discovery_refresh 25 || true
           assert_tag_present onboarding_bouncer_discovery_refresh
