@@ -46,6 +46,11 @@ class BufferRepositoryImpl @Inject constructor(
             memberDao.observe(room?.id ?: bufferId)
         }
 
+    override fun observeMemberNicks(bufferId: Long): Flow<List<String>> =
+        bufferDao.observe(bufferId).flatMapLatest { room ->
+            memberDao.observeNicks(room?.id ?: bufferId)
+        }
+
     override fun observeLastSpokeByNick(bufferId: Long): Flow<Map<String, Long>> =
         bufferDao.observe(bufferId).flatMapLatest { room ->
             messageDao.observeLastSpoke(room?.id ?: bufferId)

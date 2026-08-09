@@ -19,6 +19,7 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 
 interface NetworkRepository {
     fun observeNetworks(): Flow<List<NetworkEntity>>
@@ -71,6 +72,9 @@ interface BufferRepository {
     fun observeJoinedChannelNames(networkId: Long): Flow<Set<String>> = flowOf(emptySet())
     fun observeBuffer(id: Long): Flow<BufferEntity?>
     fun observeMembers(bufferId: Long): Flow<List<MemberEntity>>
+    /** Nick-only member projection, cheap enough to observe from the moment a conversation opens. */
+    fun observeMemberNicks(bufferId: Long): Flow<List<String>> =
+        observeMembers(bufferId).map { members -> members.map(MemberEntity::nick) }
     /** Per-nick last-spoke time in a channel (PRIVMSG/NOTICE/ACTION, isSelf=0). Empty when unavailable. */
     fun observeLastSpokeByNick(bufferId: Long): Flow<Map<String, Long>> = flowOf(emptyMap())
     suspend fun setPinned(id: Long, pinned: Boolean)

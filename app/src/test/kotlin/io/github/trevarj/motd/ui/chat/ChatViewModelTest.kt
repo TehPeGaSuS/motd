@@ -36,6 +36,7 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.repo.BufferRepository
+import io.github.trevarj.motd.data.repo.BufferRepositoryImpl
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
@@ -333,6 +334,32 @@ class ChatViewModelTest {
         val recreated = viewModel(channel, FakeConnectionManager(network.id))
         val restored = recreated.composerDraft.first { it.hydrated }
         assertEquals("answer", restored.text)
+    }
+
+    @Test
+    fun `mention nicks resolve from the cached roster without an authoritative roster load`() = runTest {
+        db.memberDao().insertAll(
+            listOf(
+                MemberEntity(channel.id, "Alice"),
+                MemberEntity(channel.id, "bob", prefixes = "@"),
+            ),
+        )
+        val vm = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            buffers = BufferRepositoryImpl(
+                bufferDao = db.bufferDao(),
+                memberDao = db.memberDao(),
+                messageDao = db.messageDao(),
+                settings = FakeSettingsRepository(),
+                visibilityReader = MessageVisibilityReader(db),
+            ),
+        )
+
+        // Mention coloring must not wait for ensureMembersObserved() or a LOADED roster: neither has
+        // happened here, yet the locally cached nicks are already resolvable.
+        assertEquals(setOf("alice", "bob"), vm.knownNicks.first { it.isNotEmpty() })
+        assertTrue(vm.memberNicks.value.isEmpty())
     }
 
     @Test
@@ -2047,7 +2074,7 @@ class ChatViewModelTest {
         foreground: FakeForegroundBufferTracker = FakeForegroundBufferTracker(),
         scrollPositions: ChatScrollPositionStore = ChatScrollPositionStore(),
         settings: FakeSettingsRepository = FakeSettingsRepository(),
-        buffers: FakeBufferRepository = FakeBufferRepository(buffer, routeBufferId),
+        buffers: BufferRepository = FakeBufferRepository(buffer, routeBufferId),
         jumpToMsgid: String? = null,
         jumpToTime: Long = 0,
         jumpToEventId: Long? = null,

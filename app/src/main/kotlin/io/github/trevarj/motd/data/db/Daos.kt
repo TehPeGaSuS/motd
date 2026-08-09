@@ -1283,6 +1283,11 @@ interface MemberDao {
     @Query("SELECT * FROM members WHERE bufferId = :bufferId")
     fun observe(bufferId: Long): Flow<List<MemberEntity>>
 
+    // Nick-only projection. Mention coloring observes the roster eagerly on every chat open, so it
+    // must not materialize whole member rows for a busy channel.
+    @Query("SELECT nick FROM members WHERE bufferId = :bufferId")
+    fun observeNicks(bufferId: Long): Flow<List<String>>
+
     @Query("SELECT * FROM members WHERE bufferId = :bufferId")
     suspend fun allNow(bufferId: Long): List<MemberEntity>
 

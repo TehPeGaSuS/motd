@@ -81,6 +81,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.onEach
@@ -498,8 +499,6 @@ class ChatViewModel @Inject constructor(
     private val _members = MutableStateFlow<List<MemberEntity>>(emptyList())
     private val _memberNicks = MutableStateFlow<List<String>>(emptyList())
     val memberNicks: StateFlow<List<String>> = _memberNicks.asStateFlow()
-    private val _knownNicks = MutableStateFlow<Set<String>>(emptySet())
-    val knownNicks: StateFlow<Set<String>> = _knownNicks.asStateFlow()
     private val _memberCount = MutableStateFlow<Int?>(null)
     private var membersJob: Job? = null
 
@@ -575,6 +574,23 @@ class ChatViewModel @Inject constructor(
         }
     }.distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), IrcIdentityRules())
+
+    /**
+     * Normalized nicks whose @mentions are colored inside message bodies.
+     *
+     * Deliberately independent of [ensureMembersObserved] and of [RosterLoadState]: mention coloring
+     * must land on the same frame as the message text, so it reads the locally cached roster eagerly
+     * and never waits for an authoritative NAMES/WHOX round trip. A stale cached nick colors
+     * correctly; the autocomplete/moderation roster keeps its authoritative gating below. The
+     * nick-only projection plus the Default-dispatched normalize keep the eager read cheap on busy
+     * channels.
+     */
+    val knownNicks: StateFlow<Set<String>> = bufferRepository.observeMemberNicks(bufferId)
+        .distinctUntilChanged()
+        .combine(identityRules) { nicks, rules -> nicks.mapTo(mutableSetOf(), rules::normalize) }
+        .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
     val historyAvailability: StateFlow<HistoryAvailability> = combine(buffer, connState) { current, connection ->
         when {
@@ -685,10 +701,11 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Member rosters can be large on public IRC channels. Do not collect them as part of the first
-     * chat-state emission. The screen requests them only when autocomplete or nick moderation needs
-     * the roster, so opening a busy channel never rebuilds every visible message merely to show a
-     * member count.
+     * Member rosters can be large on public IRC channels. Do not collect the full rows as part of
+     * the first chat-state emission. The screen requests them only when autocomplete or nick
+     * moderation needs the roster, so opening a busy channel never rebuilds every visible message
+     * merely to show a member count. Mention coloring does not come through here: it reads the
+     * nick-only [knownNicks] projection so it never waits on this explicit request.
      */
     fun ensureMembersObserved() {
         if (membersJob == null) {
@@ -697,18 +714,15 @@ class ChatViewModel @Inject constructor(
                     bufferRepository.observeMembers(bufferId).distinctUntilChanged(),
                     connectionManager.rosterStates,
                     operationalBufferId,
-                    identityRules,
-                ) { members, rosterStates, roomId, rules -> Triple(members, rosterStates[roomId], rules) }
+                ) { members, rosterStates, roomId -> members to rosterStates[roomId] }
                 .distinctUntilChanged()
-                .collect { (members, rosterState, rules) ->
+                .collect { (members, rosterState) ->
                     val authoritative = rosterState == RosterLoadState.LOADED
-                    val (nicks, known) = withContext(Dispatchers.Default) {
-                        val nicks = if (authoritative) members.map { it.nick } else emptyList()
-                        nicks to nicks.map(rules::normalize).toSet()
+                    val nicks = withContext(Dispatchers.Default) {
+                        if (authoritative) members.map { it.nick } else emptyList()
                     }
                     _members.value = if (authoritative) members else emptyList()
                     _memberNicks.value = nicks
-                    _knownNicks.value = known
                     _memberCount.value = members.size.takeIf { authoritative }
                 }
             }
