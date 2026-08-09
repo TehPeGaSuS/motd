@@ -217,8 +217,13 @@ private const val REACTION_PREFETCH_ROWS = 12
 private const val SEAM_PREFETCH_SETTLE_MS = 300L
 private const val MAX_VISIBLE_REACTION_MSGIDS = 80
 private const val MAX_UNREAD_BADGE_COUNT = 100
-internal const val HISTORY_SYNC_INDICATOR_DELAY_MS = 5_000L
-internal const val EMPTY_HISTORY_LOADING_INDICATOR_DELAY_MS = 400L
+/**
+ * How long an active sync has to run before the history pill escalates in.
+ *
+ * The thin top-edge bar reports the sync instantly, so this delay only gates the heavier pill: a
+ * sync that outlives it is no longer routine catch-up and deserves the wordier explanation.
+ */
+internal const val HISTORY_SYNC_PILL_ESCALATION_MS = 3_000L
 
 private data class PendingDccAccept(
     val transferId: Long,
@@ -1983,6 +1988,12 @@ fun ChatContent(
                                 onRetry = { items.retry() },
                             )
                         },
+                        syncBar = {
+                            TimelineHistorySyncBar(
+                                status = timelineHistoryStatus,
+                                timelineEmpty = items.itemCount == 0,
+                            )
+                        },
                     )
                 }
 
@@ -2420,15 +2431,23 @@ internal fun composerNeedsMemberNicks(value: TextFieldValue): Boolean {
 
 const val CHAT_HISTORY_SYNC_INDICATOR_TAG = "chat_history_sync_indicator"
 const val CHAT_HISTORY_SYNC_RETRY_TAG = "chat_history_sync_retry"
+const val CHAT_HISTORY_SYNC_BAR_TAG = "chat_history_sync_bar"
 
 private val HistorySyncStatus.isActive: Boolean
     get() = this == HistorySyncStatus.Checking || this == HistorySyncStatus.Syncing
 
-/** Pins transient timeline chrome below the title bar without allowing the layers to overlap. */
+/**
+ * Pins transient timeline chrome below the title bar without allowing the stacked layers to overlap.
+ *
+ * The sync bar is the deliberate exception: it is a sibling of the stack rather than a column child,
+ * so an instant sync never pushes the audio mini player down. When both are visible the hairline
+ * bar draws over the player's top ~3dp, which is the price of keeping playback controls stationary.
+ */
 @Composable
 internal fun BoxScope.TimelineTopOverlays(
     audioPlayer: @Composable () -> Unit,
     historyIndicator: @Composable () -> Unit,
+    syncBar: @Composable () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -2439,6 +2458,45 @@ internal fun BoxScope.TimelineTopOverlays(
         // Keep playback controls stationary when delayed history progress becomes visible.
         audioPlayer()
         historyIndicator()
+    }
+    Box(
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .fillMaxWidth(),
+    ) {
+        syncBar()
+    }
+}
+
+/**
+ * Reports an in-flight history sync the instant it starts, hugging the top edge of the timeline.
+ *
+ * Only shown once there is a timeline to prepend into; an empty timeline gets the pill's spinner
+ * instead. There is deliberately no appearance grace period: the 140 ms fade on a 3dp hairline turns
+ * a sub-100 ms sync into a faint shimmer rather than a flash, and a grace timer would reintroduce
+ * exactly the delay this bar exists to remove.
+ */
+@Composable
+internal fun TimelineHistorySyncBar(
+    status: HistorySyncStatus,
+    timelineEmpty: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    AnimatedVisibility(
+        visible = status.isActive && !timelineEmpty,
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag(CHAT_HISTORY_SYNC_BAR_TAG),
+        enter = fadeIn(MotdMotion.microFadeIn),
+        exit = fadeOut(MotdMotion.microFadeOut),
+    ) {
+        // No liveRegion here: routine prepend loads would spam polite announcements. The pill keeps
+        // the announcement role, so a sync worth narrating is still narrated.
+        LinearProgressIndicator(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp),
+        )
     }
 }
 
@@ -2452,20 +2510,20 @@ internal fun TimelineHistorySyncIndicator(
     modifier: Modifier = Modifier,
 ) {
     val active = status.isActive
-    var activeVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(active, timelineEmpty) {
+    var pillEscalated by remember { mutableStateOf(false) }
+    // Keyed on `active` alone so a timeline that fills mid-sync swaps the empty spinner for the bar
+    // without restarting the escalation timer; the reader has been waiting since the sync began.
+    LaunchedEffect(active) {
         if (active) {
-            kotlinx.coroutines.delay(
-                if (timelineEmpty) EMPTY_HISTORY_LOADING_INDICATOR_DELAY_MS
-                else HISTORY_SYNC_INDICATOR_DELAY_MS,
-            )
-            activeVisible = true
+            kotlinx.coroutines.delay(HISTORY_SYNC_PILL_ESCALATION_MS)
+            pillEscalated = true
         } else {
-            activeVisible = false
+            pillEscalated = false
         }
     }
     val visible = if (active) {
-        activeVisible
+        // An empty timeline has nothing else to show, so its spinner appears immediately.
+        timelineEmpty || pillEscalated
     } else {
         status is HistorySyncStatus.Failed
     }
