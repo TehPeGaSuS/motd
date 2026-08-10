@@ -182,16 +182,26 @@ class HistoryResyncCoordinatorTest {
         val responder: suspend (ChatHistoryRequest) -> FakeResponse,
     ) : HistoryResyncCoordinator.HistorySource {
         val requests = mutableListOf<ChatHistoryRequest>()
-        override suspend fun availability(): HistoryAvailability = if (supported) {
-            HistoryAvailability.Ready(
-                buildSet {
-                    if (timestampRefs) add(HistoryReferenceType.TIMESTAMP)
-                    if (msgidRefs) add(HistoryReferenceType.MSGID)
-                },
-                pageLimit,
-            )
-        } else {
-            HistoryAvailability.Unsupported
+
+        /**
+         * Sampling seam: the coordinator probes availability while preparing a target, which is the
+         * only point a test can observe a buffer between registration (Queued) and its wire fetch.
+         */
+        var onAvailability: (suspend () -> Unit)? = null
+
+        override suspend fun availability(): HistoryAvailability {
+            onAvailability?.invoke()
+            return if (supported) {
+                HistoryAvailability.Ready(
+                    buildSet {
+                        if (timestampRefs) add(HistoryReferenceType.TIMESTAMP)
+                        if (msgidRefs) add(HistoryReferenceType.MSGID)
+                    },
+                    pageLimit,
+                )
+            } else {
+                HistoryAvailability.Unsupported
+            }
         }
         override fun canClassifyTargets(): Boolean = targetClassificationReady
         override fun isChannelTarget(target: String): Boolean = channelClassifier(target)
@@ -1546,8 +1556,13 @@ class HistoryResyncCoordinatorTest {
             },
         )
         assertEquals(listOf("chan-latest"), rows().map { it.msgid })
-        // No "Couldn't sync messages" banner on the refused buffer, and none on the healthy one.
-        assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(serviceBufferId).first())
+        // The refused buffer reports Unavailable — a permanent server refusal, not a retryable
+        // failure — while the healthy one settles clean and leaves the map entirely.
+        assertEquals(
+            mapOf(serviceBufferId to HistorySyncStatus.Unavailable),
+            coordinator.syncStatuses.value,
+        )
+        assertEquals(HistorySyncStatus.Unavailable, coordinator.syncStatus(serviceBufferId).first())
         assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
         // Watermark advanced, so the catch-up loop terminates instead of retrying forever.
         assertEquals(2_000L, syncPrefs.lastSuccessfulSync(networkId))
@@ -1631,6 +1646,209 @@ class HistoryResyncCoordinatorTest {
                 status = HistorySyncStatus.Syncing,
             ),
         )
+    }
+
+    @Test
+    fun reconcileSessionSupersedesAStaleNetworkPassStatus() = runTest {
+        processor.process(networkId, message("seed", 100))
+        val stalled = FakeSource(pageLimit = 1) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
+                    targets = listOf("#chan" to 102L),
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(events = listOf(message("m101", 101)), endOfHistory = true)
+            }
+        }
+        coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), stalled)
+        assertTrue(coordinator.syncStatuses.value.getValue(bufferId) is HistorySyncStatus.Partial)
+
+        val recovered = FakeSource {
+            FakeResponse(events = listOf(message("m102", 102)), endOfHistory = true)
+        }
+        coordinator.reconcileBuffer(networkId, bufferId, "#chan", recovered)
+
+        // The newer single-buffer session owns the entry, so the stale pass's Partial is gone.
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+        assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
+    }
+
+    @Test
+    fun networkPassSupersedesAStaleReconcileStatus() = runTest {
+        // A saturated timestamp boundary is the reconcile path's Incomplete verdict.
+        val saturated = FakeSource(pageLimit = 1) {
+            FakeResponse(
+                events = listOf(message("m1", 100)),
+                oldest = ChatHistoryReference(null, 100),
+                newest = ChatHistoryReference(null, 100),
+                primaryMessageCount = 1,
+            )
+        }
+        coordinator.reconcileBuffer(networkId, bufferId, "#chan", saturated)
+        assertTrue(coordinator.syncStatuses.value.getValue(bufferId) is HistorySyncStatus.Partial)
+
+        val healthy = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
+                    targets = listOf("#chan" to 200L),
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(events = listOf(message("m2", 200)), endOfHistory = true)
+            }
+        }
+        coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), healthy)
+
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+    }
+
+    @Test
+    fun skippedUpToDateTargetSettlesBeforeThePassEnds() = runTest {
+        // #chan's advertised newest is already stored, so the pass skips it without a request. That
+        // skip must clear its status immediately instead of parking a spinner until the pass ends.
+        db.historyCursorDao().upsert(
+            HistoryCursorEntity(roomId = bufferId, newestMsgid = "stored", newestServerTime = 400),
+        )
+        var duringLaterFetch: Map<Long, HistorySyncStatus>? = null
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
+                    targets = listOf("#chan" to 400L, "bob" to 300L),
+                    endOfHistory = true,
+                )
+                else -> {
+                    duringLaterFetch = coordinator.syncStatuses.value
+                    FakeResponse(listOf(directMessage("dm", 300)), endOfHistory = true)
+                }
+            }
+        }
+
+        coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+
+        val bob = requireNotNull(db.bufferDao().byName(networkId, "bob"))
+        assertTrue(source.requests.none { it.target == "#chan" })
+        // The skipped buffer is already absent while a later target is still on the wire.
+        assertEquals(mapOf(bob.id to HistorySyncStatus.Syncing), duringLaterFetch)
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+    }
+
+    @Test
+    fun targetDiscoveredMidPassReachesQueuedThenSyncingThenSettles() = runTest {
+        db.bufferDao().deleteBuffer(bufferId)
+        var whileQueued: Map<Long, HistorySyncStatus>? = null
+        var whileSyncing: Map<Long, HistorySyncStatus>? = null
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("bob" to 500L), endOfHistory = true)
+                else -> {
+                    whileSyncing = coordinator.syncStatuses.value
+                    FakeResponse(listOf(directMessage("dm", 500)), endOfHistory = true)
+                }
+            }
+        }
+        source.onAvailability = {
+            val current = coordinator.syncStatuses.value
+            if (current.values.any { it == HistorySyncStatus.Queued }) whileQueued = current
+        }
+
+        // No open buffers: this target is registered only because discovery found it mid-pass.
+        coordinator.resyncNetwork(networkId, emptyList(), source)
+
+        val bob = requireNotNull(db.bufferDao().byName(networkId, "bob"))
+        assertEquals(mapOf(bob.id to HistorySyncStatus.Queued), whileQueued)
+        assertEquals(mapOf(bob.id to HistorySyncStatus.Syncing), whileSyncing)
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+    }
+
+    @Test
+    fun passFailureMarksOnlyTheInFlightBufferAndDropsStillQueuedOnes() = runTest {
+        val otherId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "#other",
+                displayName = "#other",
+                type = BufferType.CHANNEL,
+            ),
+        )
+        var duringFailedFetch: Map<Long, HistorySyncStatus>? = null
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
+                else -> {
+                    duringFailedFetch = coordinator.syncStatuses.value
+                    throw IOException("transport died mid-pass")
+                }
+            }
+        }
+
+        val result = coordinator.resyncNetwork(
+            networkId,
+            listOf(bufferId to "#chan", otherId to "#other"),
+            source,
+        )
+
+        assertTrue(result is HistoryResyncState.Failed)
+        assertEquals(
+            mapOf(bufferId to HistorySyncStatus.Syncing, otherId to HistorySyncStatus.Queued),
+            duringFailedFetch,
+        )
+        // The catch-up loop re-runs the whole pass, so a buffer it never touched must not be
+        // painted with the pass's failure.
+        val settled = coordinator.syncStatuses.value
+        assertEquals(setOf(bufferId), settled.keys)
+        assertTrue(settled.getValue(bufferId) is HistorySyncStatus.Failed)
+        assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(otherId).first())
+    }
+
+    @Test
+    fun reconcileBufferPublishesQueuedThenSyncingThenSettles() = runTest {
+        var whileQueued: Map<Long, HistorySyncStatus>? = null
+        var whileSyncing: Map<Long, HistorySyncStatus>? = null
+        val source = FakeSource {
+            whileSyncing = coordinator.syncStatuses.value
+            FakeResponse(listOf(message("m1", 100)), endOfHistory = true)
+        }
+        source.onAvailability = {
+            val current = coordinator.syncStatuses.value
+            if (current.values.any { it == HistorySyncStatus.Queued }) whileQueued = current
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(1),
+            coordinator.reconcileBuffer(networkId, bufferId, "#chan", source),
+        )
+        assertEquals(mapOf(bufferId to HistorySyncStatus.Queued), whileQueued)
+        assertEquals(mapOf(bufferId to HistorySyncStatus.Syncing), whileSyncing)
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+    }
+
+    @Test
+    fun backfillPublishesNoPerBufferSyncStatus() = runTest {
+        db.historyBackfillCursorDao().seed(
+            io.github.trevarj.motd.data.db.HistoryBackfillCursorEntity(networkId, upperBound = 1_000),
+        )
+        val observed = mutableListOf<Map<Long, HistorySyncStatus>>()
+        val source = FakeSource { request ->
+            observed += coordinator.syncStatuses.value
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("old-friend" to 500L), endOfHistory = true)
+                else -> FakeResponse(
+                    events = listOf(directMessage("old1", 500, peer = "old-friend")),
+                    endOfHistory = true,
+                )
+            }
+        }
+        source.onAvailability = { observed += coordinator.syncStatuses.value }
+
+        coordinator.backfillTargets(networkId, source) { true }
+
+        // The paced background seed does the same per-target work as the reconnect pass; its
+        // invisibility is the whole point, so every observation must be empty.
+        assertTrue(db.bufferDao().byName(networkId, "old-friend") != null)
+        assertTrue(observed.isNotEmpty())
+        assertTrue(observed.all { it.isEmpty() })
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
     }
 
     @Test

@@ -2276,12 +2276,12 @@ class ChatViewModelTest {
     private class FakeHistoryResyncController(
         private val onReconcile: suspend (Int) -> Unit = {},
     ) : HistoryResyncController {
-        private val syncStatuses = MutableStateFlow<HistorySyncStatus>(HistorySyncStatus.Idle)
+        private val bufferStatus = MutableStateFlow<HistorySyncStatus>(HistorySyncStatus.Idle)
         val reconciledBuffers = mutableListOf<Long>()
         val pendingReconciledBuffers = mutableListOf<Long>()
 
-        override fun syncStatus(bufferId: Long): Flow<HistorySyncStatus> = syncStatuses
-        fun setSyncStatus(status: HistorySyncStatus) { syncStatuses.value = status }
+        override fun syncStatus(bufferId: Long): Flow<HistorySyncStatus> = bufferStatus
+        fun setSyncStatus(status: HistorySyncStatus) { bufferStatus.value = status }
 
         override suspend fun reconcileBuffer(
             buffer: BufferEntity,

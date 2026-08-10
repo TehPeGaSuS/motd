@@ -2434,7 +2434,7 @@ const val CHAT_HISTORY_SYNC_RETRY_TAG = "chat_history_sync_retry"
 const val CHAT_HISTORY_SYNC_BAR_TAG = "chat_history_sync_bar"
 
 private val HistorySyncStatus.isActive: Boolean
-    get() = this == HistorySyncStatus.Checking || this == HistorySyncStatus.Syncing
+    get() = this == HistorySyncStatus.Queued || this == HistorySyncStatus.Syncing
 
 /**
  * Pins transient timeline chrome below the title bar without allowing the stacked layers to overlap.
@@ -2537,7 +2537,7 @@ internal fun TimelineHistorySyncIndicator(
     ) {
         val content: @Composable () -> Unit = {
             when (status) {
-                HistorySyncStatus.Checking,
+                HistorySyncStatus.Queued,
                 HistorySyncStatus.Syncing,
                 -> Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -2574,8 +2574,11 @@ internal fun TimelineHistorySyncIndicator(
                         Text(stringResource(R.string.chat_retry))
                     }
                 }
+                // A permanently refused target has no retry worth offering, so it renders nothing.
                 is HistorySyncStatus.Partial,
-                HistorySyncStatus.Idle -> Unit
+                HistorySyncStatus.Unavailable,
+                HistorySyncStatus.Idle,
+                -> Unit
             }
         }
         if (timelineEmpty && active) {

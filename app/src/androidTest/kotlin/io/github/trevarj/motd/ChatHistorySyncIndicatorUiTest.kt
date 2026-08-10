@@ -84,11 +84,11 @@ class ChatHistorySyncIndicatorUiTest {
             MotdTheme {
                 Column {
                     TimelineHistorySyncBar(
-                        status = HistorySyncStatus.Checking,
+                        status = HistorySyncStatus.Queued,
                         timelineEmpty = true,
                     )
                     TimelineHistorySyncIndicator(
-                        status = HistorySyncStatus.Checking,
+                        status = HistorySyncStatus.Queued,
                         timelineEmpty = true,
                         retryEnabled = true,
                         onRetry = {},

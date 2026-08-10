@@ -19,7 +19,6 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ChannelCloseCoordinator
 import io.github.trevarj.motd.service.HistoryResyncController
-import io.github.trevarj.motd.service.HistorySyncProgress
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
@@ -54,8 +53,6 @@ data class ChatListState(
     val drawerRows: List<DrawerRow> = emptyList(),
     val allUnread: Int = 0, // "All chats" unread rollup (non-muted)
     val allMentions: Int = 0, // "All chats" mention rollup
-    /** Aggregate reconnect catch-up progress; null while no network is seeding history. */
-    val syncProgress: HistorySyncProgress? = null,
 ) {
     val allUnreadIncomplete: Boolean
         get() = rows.any { !it.muted && it.unreadCountIncomplete }
@@ -139,14 +136,12 @@ class ChatListViewModel @Inject constructor(
             networkRepository.observeNetworks(),
             connectionManager.connectionStates.combine(connectionManager.presenceStates) { connection, presence ->
                 connection to presence
-            }.combine(historyResync.networkSyncProgress) { (connection, presence), progress ->
-                Triple(connection, presence, progress)
             },
             settingsAndOnboarding,
             selectionAndOrder,
         ) { listData, networks, connectionAndPresence, settingsAndOnboarding, selectionAndOrder ->
             val (rows, invitationEvents) = listData
-            val (connection, presence, syncProgress) = connectionAndPresence
+            val (connection, presence) = connectionAndPresence
             val (settings, onboardingComplete) = settingsAndOnboarding
             val (selected, pending) = selectionAndOrder
             // If the selected network was deleted, fall back to the unified list.
@@ -190,11 +185,6 @@ class ChatListViewModel @Inject constructor(
                 drawerRows = applyDrawerOrder(storedDrawerRows, pending),
                 allUnread = rows.filterNot { it.muted || it.archived }.sumOf { it.unreadCount },
                 allMentions = rows.filterNot { it.muted || it.archived }.sumOf { it.mentionCount },
-                syncProgress = syncProgress.values
-                    .takeIf { it.isNotEmpty() }
-                    ?.let { active ->
-                        HistorySyncProgress(active.sumOf { it.synced }, active.sumOf { it.total })
-                    },
             )
         }.stateIn(
             scope = viewModelScope,

@@ -36,6 +36,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -69,9 +70,14 @@ sealed interface HistoryResyncState {
 
 /** Per-buffer progress and actionable failure state for automatic and user-requested history work. */
 sealed interface HistorySyncStatus {
+    /** Settled cleanly; the buffer carries no entry in the published map. */
     data object Idle : HistorySyncStatus
-    data object Checking : HistorySyncStatus
+    /** Registered in the current pass, waiting for its strictly-sequential turn. */
+    data object Queued : HistorySyncStatus
+    /** A request for this buffer is on the wire right now. */
     data object Syncing : HistorySyncStatus
+    /** The server permanently refuses this target (FAIL CHATHISTORY INVALID_TARGET). */
+    data object Unavailable : HistorySyncStatus
     data class Partial(val reason: String) : HistorySyncStatus
     data class Failed(val reason: String) : HistorySyncStatus
 }
@@ -89,19 +95,20 @@ internal fun initialSyncStatusIfCurrent(
     current
 }
 
-/** Whole-network reconnect catch-up progress for list-level UI. */
-data class HistorySyncProgress(val synced: Int, val total: Int)
-
-private val EMPTY_SYNC_PROGRESS: MutableStateFlow<Map<Long, HistorySyncProgress>> =
-    MutableStateFlow(emptyMap())
+private val EMPTY_SYNC_STATUSES: StateFlow<Map<Long, HistorySyncStatus>> = MutableStateFlow(emptyMap())
 
 /** Chat-facing boundary for lifecycle-driven history reconciliation. */
 interface HistoryResyncController {
-    fun syncStatus(bufferId: Long): Flow<HistorySyncStatus>
+    /**
+     * Every buffer with a live or actionable history status. A buffer absent from the map is
+     * settled, which is why [HistorySyncStatus.Idle] never appears as a value.
+     */
+    val syncStatuses: StateFlow<Map<Long, HistorySyncStatus>>
+        get() = EMPTY_SYNC_STATUSES
 
-    /** Per-network catch-up progress; empty while no reconnect pass is seeding targets. */
-    val networkSyncProgress: kotlinx.coroutines.flow.StateFlow<Map<Long, HistorySyncProgress>>
-        get() = EMPTY_SYNC_PROGRESS
+    fun syncStatus(bufferId: Long): Flow<HistorySyncStatus> = syncStatuses
+        .map { it[bufferId] ?: HistorySyncStatus.Idle }
+        .distinctUntilChanged()
 
     suspend fun reconcileBuffer(
         buffer: BufferEntity,
@@ -143,10 +150,6 @@ class HistoryResyncCoordinator @Inject constructor(
     // loader's per-network lock. Defaulted so tests keep the four-argument construction.
     private val loader: HistoryPageLoader = HistoryPageLoader(processor),
 ) : HistoryResyncController {
-    private val _networkSyncProgress = MutableStateFlow<Map<Long, HistorySyncProgress>>(emptyMap())
-    override val networkSyncProgress: kotlinx.coroutines.flow.StateFlow<Map<Long, HistorySyncProgress>> =
-        _networkSyncProgress
-
     // Reuses the loader's transport seam so a source can drive both the coordinator's orchestration
     // and the loader's fetch primitives directly, and adds the discovery/classification metadata the
     // reconnect pass needs (target normalization, channel detection, and a per-connection flight id).
@@ -210,14 +213,57 @@ class HistoryResyncCoordinator @Inject constructor(
     // Cancellation is non-suspending, so registration and removal share a synchronous monitor.
     private val activeGuard = Any()
     private val activeFlights = LinkedHashMap<RequestSpec, ActiveFlight>()
-    private val syncStatuses = MutableStateFlow<Map<Long, HistorySyncStatus>>(emptyMap())
+    private val _syncStatuses = MutableStateFlow<Map<Long, HistorySyncStatus>>(emptyMap())
+    override val syncStatuses: StateFlow<Map<Long, HistorySyncStatus>> = _syncStatuses
     private val syncStatusGenerations = ConcurrentHashMap<Long, AtomicLong>()
     internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
     internal var targetsRequestLimit: Int = TARGETS_REQUEST_LIMIT
 
-    override fun syncStatus(bufferId: Long): Flow<HistorySyncStatus> = syncStatuses
-        .map { it[bufferId] ?: HistorySyncStatus.Idle }
-        .distinctUntilChanged()
+    /**
+     * One pass's per-buffer status publication: registration, the generation guard that keeps a
+     * cancelled or superseded pass from publishing late, and settlement. Work without a session
+     * (the paced background backfill) publishes nothing at all.
+     *
+     * A session is driven strictly sequentially by the single coroutine that owns its pass; the
+     * cross-pass race — a manual retry superseding a reconnect pass, or the reverse — is arbitrated
+     * by the per-buffer generation counter, not by this bookkeeping.
+     */
+    private inner class SyncStatusSession {
+        // Registration order; an entry lives here until that buffer settles.
+        private val generations = LinkedHashMap<Long, Long>()
+        // The one buffer whose request is on the wire; only it can wear a whole-pass verdict.
+        private var inFlight: Long? = null
+
+        /** Register a buffer in this pass. Re-registration within one pass keeps the first turn. */
+        fun queue(bufferId: Long) {
+            if (generations.containsKey(bufferId)) return
+            generations[bufferId] = beginSyncStatus(bufferId, HistorySyncStatus.Queued)
+        }
+
+        /** This buffer's request is about to go on the wire. */
+        fun syncing(bufferId: Long) {
+            val generation = generations[bufferId] ?: return
+            inFlight = bufferId
+            publishSyncStatus(bufferId, generation, HistorySyncStatus.Syncing)
+        }
+
+        /** Terminal for one buffer: [HistorySyncStatus.Idle] removes it, anything else persists. */
+        fun settle(bufferId: Long, status: HistorySyncStatus) {
+            val generation = generations.remove(bufferId) ?: return
+            if (inFlight == bufferId) inFlight = null
+            finishSyncStatus(bufferId, generation, status)
+        }
+
+        /**
+         * Pass end. Only the buffer that actually had a request on the wire wears the pass verdict;
+         * every still-queued buffer is simply dropped, because the catch-up retry loop re-runs the
+         * whole pass and painting a whole-pass failure on untouched buffers would be a lie.
+         */
+        fun finish(result: HistoryResyncState) {
+            inFlight?.let { settle(it, result.toSyncStatus()) }
+            generations.keys.toList().forEach { settle(it, HistorySyncStatus.Idle) }
+        }
+    }
 
     /**
      * Reconcile a visible chat. The request shares the exact same per-buffer single flight as the
@@ -460,9 +506,8 @@ class HistoryResyncCoordinator @Inject constructor(
             HistoryAvailability.NegotiatingOrOffline -> return@coalesced historyUnavailable()
             is HistoryAvailability.Ready -> Unit
         }
-        val syncGenerations = openBuffers.associate { (bufferId, _) ->
-            bufferId to beginSyncStatus(bufferId, HistorySyncStatus.Checking)
-        }
+        val session = SyncStatusSession()
+        openBuffers.forEach { (bufferId, _) -> session.queue(bufferId) }
         // A room row's newest message is not a reliable reconnect cursor: a newer push-delivered
         // message in one buffer can otherwise hide an older missed message in another. The wall
         // clock bounds discovery but is never persisted; only completed server response metadata
@@ -501,26 +546,14 @@ class HistoryResyncCoordinator @Inject constructor(
                 )
             }
             val mergedTargets = mergeSyncTargets(openBuffers, discovery.targets, source)
-            val targetPass = try {
-                _networkSyncProgress.update {
-                    it + (networkId to HistorySyncProgress(0, mergedTargets.size))
-                }
-                syncTargets(
-                    networkId = networkId,
-                    targets = mergedTargets,
-                    source = source,
-                    isCurrent = isCurrent,
-                    hasDiscoveryWatermark = previousSync != null,
-                    syncGenerations = syncGenerations,
-                    onProgress = { synced, total ->
-                        _networkSyncProgress.update {
-                            it + (networkId to HistorySyncProgress(synced, total))
-                        }
-                    },
-                )
-            } finally {
-                _networkSyncProgress.update { it - networkId }
-            }
+            val targetPass = syncTargets(
+                networkId = networkId,
+                targets = mergedTargets,
+                source = source,
+                isCurrent = isCurrent,
+                hasDiscoveryWatermark = previousSync != null,
+                session = session,
+            )
             val inserted = targetPass.inserted
             val status = discovery.status.merge(targetPass.status)
             val highWater = maxHighWater(
@@ -535,9 +568,7 @@ class HistoryResyncCoordinator @Inject constructor(
         } catch (_: TimeoutCancellationException) {
             HistoryResyncState.Failed("History refresh timed out")
         } catch (cancelled: CancellationException) {
-            syncGenerations.forEach { (bufferId, generation) ->
-                finishSyncStatus(bufferId, generation, HistorySyncStatus.Idle)
-            }
+            session.finish(HistoryResyncState.Idle)
             throw cancelled
         } catch (_: StaleConnectionException) {
             staleConnection()
@@ -553,13 +584,7 @@ class HistoryResyncCoordinator @Inject constructor(
                 "result" to result::class.simpleName,
             )
         }
-        syncGenerations.forEach { (bufferId, generation) ->
-            finishUnresolvedSyncStatus(
-                bufferId,
-                generation,
-                if (isCurrent()) result else HistoryResyncState.Idle,
-            )
-        }
+        session.finish(if (isCurrent()) result else HistoryResyncState.Idle)
         result
     }
 
@@ -725,7 +750,11 @@ class HistoryResyncCoordinator @Inject constructor(
                 source.flightIdentity(),
             ),
         ) {
-            try {
+            // A user retry or JOIN seed is its own single-buffer pass; the generation guard lets it
+            // supersede a stale reconnect-pass entry for the same buffer, and vice versa.
+            val session = SyncStatusSession()
+            session.queue(bufferId)
+            val result = try {
                 val work = syncRecentTarget(
                     networkId = networkId,
                     bufferId = bufferId,
@@ -733,17 +762,21 @@ class HistoryResyncCoordinator @Inject constructor(
                     source = source,
                     isCurrent = isCurrent,
                     discoveredLatestMessageTime = null,
+                    session = session,
                 )
                 work.status.toState(work.inserted)
             } catch (_: TimeoutCancellationException) {
                 HistoryResyncState.Failed("History refresh timed out")
             } catch (cancelled: CancellationException) {
+                session.finish(HistoryResyncState.Idle)
                 throw cancelled
             } catch (_: StaleConnectionException) {
                 staleConnection()
             } catch (error: Exception) {
                 HistoryResyncState.Failed(error.message?.take(160) ?: "History refresh failed")
             }
+            session.finish(if (isCurrent()) result else HistoryResyncState.Idle)
+            result
         }
     }
 
@@ -753,9 +786,9 @@ class HistoryResyncCoordinator @Inject constructor(
         source: HistorySource,
         isCurrent: () -> Boolean,
         hasDiscoveryWatermark: Boolean,
-        syncGenerations: Map<Long, Long> = emptyMap(),
+        // Null publishes nothing: the paced background backfill must stay invisible.
+        session: SyncStatusSession? = null,
         paceBetweenTargetsMs: Long = 0,
-        onProgress: (suspend (synced: Int, total: Int) -> Unit)? = null,
     ): TargetPass {
         when (source.availability()) {
             HistoryAvailability.Unsupported -> error("History support disappeared during reconciliation")
@@ -767,21 +800,25 @@ class HistoryResyncCoordinator @Inject constructor(
         var status: WorkStatus = WorkStatus.Complete
         var highWater: Long? = null
         var retryRecommended = false
-        for ((targetIndex, targetSpec) in targets.withIndex()) {
+        for (targetSpec in targets) {
             if (!isCurrent()) throw StaleConnectionException()
-            onProgress?.invoke(targetIndex, targets.size)
             val target = targetSpec.name
             val canonicalRoomId = targetSpec.knownBufferId ?: if (source.isChannelTarget(target)) {
                 continue
             } else {
                 processor.ensureHistoryQuery(networkId, target, source.normalizeTarget(target))
             }
+            // A target discovered mid-pass registers here; without this it would sync with no
+            // status at all, because only the pass's open buffers were registered up front.
+            session?.queue(canonicalRoomId)
             val roomCursor = db.historyCursorDao().byRoom(canonicalRoomId)
             if (
                 hasDiscoveryWatermark &&
                 targetSpec.latestMessageTime == null &&
                 roomCursor != null
             ) {
+                // Nothing to fetch: settle now instead of leaving a spinner up until pass end.
+                session?.settle(canonicalRoomId, HistorySyncStatus.Idle)
                 continue
             }
             // The advertised newest is already stored: nothing new to fetch regardless of the
@@ -792,13 +829,10 @@ class HistoryResyncCoordinator @Inject constructor(
                 advertisedLatest != null &&
                 roomCursor?.newestServerTime?.let { it >= advertisedLatest } == true
             ) {
+                session?.settle(canonicalRoomId, HistorySyncStatus.Idle)
                 continue
             }
             if (paceBetweenTargetsMs > 0) delay(paceBetweenTargetsMs)
-            val syncGeneration = syncGenerations[canonicalRoomId]
-            if (syncGeneration != null) {
-                publishSyncStatus(canonicalRoomId, syncGeneration, HistorySyncStatus.Syncing)
-            }
             val targetResult = try {
                 syncRecentTarget(
                     networkId = networkId,
@@ -807,6 +841,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     source = source,
                     isCurrent = isCurrent,
                     discoveredLatestMessageTime = targetSpec.latestMessageTime,
+                    session = session,
                 )
             } catch (refused: IrcCommandException) {
                 // A target-scoped permanent refusal (services such as ChanServ typically answer
@@ -822,10 +857,8 @@ class HistoryResyncCoordinator @Inject constructor(
                         "code" to refused.code,
                     )
                 }
-                if (syncGeneration != null) {
-                    // The server will never serve this target; a retry affordance would be a lie.
-                    finishSyncStatus(canonicalRoomId, syncGeneration, HistorySyncStatus.Idle)
-                }
+                // The server will never serve this target; a retry affordance would be a lie.
+                session?.settle(canonicalRoomId, HistorySyncStatus.Unavailable)
                 continue
             }
             inserted += targetResult.inserted
@@ -852,17 +885,14 @@ class HistoryResyncCoordinator @Inject constructor(
             retryRecommended = retryRecommended || targetNeedsRetry
             status = status.merge(effectiveStatus)
             highWater = maxHighWater(highWater, targetResult.highWater)
-            if (syncGeneration != null) {
-                finishSyncStatus(
-                    canonicalRoomId,
-                    syncGeneration,
-                    if (reachedAdvertisedLatest == true) {
-                        HistorySyncStatus.Idle
-                    } else {
-                        effectiveStatus.toSyncStatus()
-                    },
-                )
-            }
+            session?.settle(
+                canonicalRoomId,
+                if (reachedAdvertisedLatest == true) {
+                    HistorySyncStatus.Idle
+                } else {
+                    effectiveStatus.toSyncStatus()
+                },
+            )
         }
         return TargetPass(inserted, status, highWater, retryRecommended)
     }
@@ -879,6 +909,7 @@ class HistoryResyncCoordinator @Inject constructor(
         source: HistorySource,
         isCurrent: () -> Boolean,
         discoveredLatestMessageTime: Long?,
+        session: SyncStatusSession? = null,
     ): WorkResult {
         val room = db.bufferDao().observeById(bufferId) ?: throw StaleConnectionException()
         val referenceTypes = source.referenceTypes()
@@ -899,6 +930,9 @@ class HistoryResyncCoordinator @Inject constructor(
         }
 
         val requestLimit = minOf(source.pageLimit(), RECENT_PAGE_SIZE)
+        // Everything above can settle this target without a round trip, so only announce Syncing
+        // once a request is genuinely about to go on the wire.
+        session?.syncing(bufferId)
         val boundedLatest = discardedBoundary
             ?.takeIf { room.type == BufferType.QUERY }
             ?.let { floor ->
@@ -1110,7 +1144,7 @@ class HistoryResyncCoordinator @Inject constructor(
         val generation = syncStatusGenerations
             .computeIfAbsent(bufferId) { AtomicLong() }
             .incrementAndGet()
-        syncStatuses.update { current ->
+        _syncStatuses.update { current ->
             initialSyncStatusIfCurrent(
                 current = current,
                 bufferId = bufferId,
@@ -1123,7 +1157,7 @@ class HistoryResyncCoordinator @Inject constructor(
     }
 
     private fun publishSyncStatus(bufferId: Long, generation: Long, status: HistorySyncStatus) {
-        syncStatuses.update { current ->
+        _syncStatuses.update { current ->
             if (syncStatusGenerations[bufferId]?.get() == generation) {
                 current + (bufferId to status)
             } else {
@@ -1133,7 +1167,7 @@ class HistoryResyncCoordinator @Inject constructor(
     }
 
     private fun finishSyncStatus(bufferId: Long, generation: Long, status: HistorySyncStatus) {
-        syncStatuses.update { current ->
+        _syncStatuses.update { current ->
             if (syncStatusGenerations[bufferId]?.get() != generation) {
                 current
             } else if (status == HistorySyncStatus.Idle) {
@@ -1142,16 +1176,6 @@ class HistoryResyncCoordinator @Inject constructor(
                 current + (bufferId to status)
             }
         }
-    }
-
-    private fun finishUnresolvedSyncStatus(
-        bufferId: Long,
-        generation: Long,
-        result: HistoryResyncState,
-    ) {
-        val current = syncStatuses.value[bufferId]
-        if (current != HistorySyncStatus.Checking && current != HistorySyncStatus.Syncing) return
-        finishSyncStatus(bufferId, generation, result.toSyncStatus())
     }
 
     private fun WorkStatus.toState(
@@ -1181,7 +1205,7 @@ class HistoryResyncCoordinator @Inject constructor(
         HistoryResyncState.UpToDate,
         HistoryResyncState.Unsupported,
         -> HistorySyncStatus.Idle
-        HistoryResyncState.WaitingForCapability -> HistorySyncStatus.Checking
+        HistoryResyncState.WaitingForCapability -> HistorySyncStatus.Queued
         is HistoryResyncState.Running -> HistorySyncStatus.Syncing
         is HistoryResyncState.Incomplete -> HistorySyncStatus.Partial(reason)
         is HistoryResyncState.Capped -> HistorySyncStatus.Partial(reason)
