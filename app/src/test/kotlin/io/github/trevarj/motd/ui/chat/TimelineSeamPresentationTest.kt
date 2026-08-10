@@ -117,9 +117,9 @@ class TimelineSeamPresentationTest {
 
     /**
      * The steady state of a room the reader is looking at: a transport is up and nothing has failed,
-     * so a recoverable seam renders as loading. `historyUnavailable` defaults to true (a caller that
-     * models nothing gets a tappable seam rather than an endless spinner), which is not the case
-     * these placement tests are about.
+     * so a recoverable seam nothing is fetching renders idle. `historyUnavailable` defaults to true
+     * (a caller that models nothing gets a tappable seam rather than an endless spinner), which is
+     * not the case these placement tests are about.
      */
     private suspend fun seamState(filling: Set<Long> = emptySet(), failed: Set<Long> = emptySet()) =
         TimelineSeamState(
@@ -157,7 +157,8 @@ class TimelineSeamPresentationTest {
         // Exactly one slot, above the first row at or after the gap — not above the last row on the
         // far side, and not once per island.
         assertEquals(listOf("new-1"), rendered.map { it.first })
-        assertEquals(HistoryGapState.Loading, rendered.single().second.state)
+        // Nothing is fetching this gap in this scenario, so the honest divider is idle, not spinning.
+        assertEquals(HistoryGapState.Idle, rendered.single().second.state)
         assertEquals(newer1, seamState().seams.single().position.eventId)
 
         // The abstention rule is unchanged and still applies at the BOTTOM of the loaded list: a
@@ -218,21 +219,24 @@ class TimelineSeamPresentationTest {
 
         val rendered = renderedSeams(rows, seamState(filling = setOf(gapId + 1))).single()
 
-        assertEquals(HistoryGapState.Loading, rendered.second.state)
+        // This gap's own id is not in `filling`, so it stays idle rather than borrowing the spinner
+        // of the gap that actually is loading.
+        assertEquals(HistoryGapState.Idle, rendered.second.state)
     }
 
     @Test
-    fun `a failed attempt is what turns this seam into a retry`() = runTest {
+    fun `a failed attempt is what turns this seam's tap into a retry`() = runTest {
         val rows = loadWindow()
         val gapId = seamState().seams.single().gapId
 
-        // The only tap the timeline still has. An unrelated gap's failure must not raise it here.
+        // An unrelated gap's failure must not raise the retry state here.
         assertEquals(
             HistoryGapState.Failed,
             renderedSeams(rows, seamState(failed = setOf(gapId))).single().second.state,
         )
+        // Still tappable, but as an idle "load", not a retry — nothing failed for THIS gap.
         assertEquals(
-            HistoryGapState.Loading,
+            HistoryGapState.Idle,
             renderedSeams(rows, seamState(failed = setOf(gapId + 1))).single().second.state,
         )
     }

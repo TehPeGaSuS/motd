@@ -1027,18 +1027,30 @@ class ChatModelsTest {
     // --- what one seam's divider says -------------------------------------------------------------
 
     @Test
-    fun `a recoverable seam the reader has reached is loading, not waiting for a tap`() {
+    fun `a recoverable seam nothing is fetching is idle, not a fake spinner`() {
         val target = seam(gapId = 2, serverTime = 900)
         val state = TimelineSeamState(seams = listOf(target), historyUnavailable = false)
 
-        // The divider exists only where its seam is composed, i.e. where the reader has scrolled to,
-        // and scrolling to it is what loads it. A resting "tap to load" would be a second affordance
-        // for something already happening — the incoherence this rule exists to remove.
+        // The divider is composed wherever its seam is, but composition alone proves nothing about
+        // whether a fetch is actually running. Painting a spinner here would be a perpetual lie for a
+        // gap nothing is moving; the honest resting state is idle, with the same tap Failed offers.
+        assertEquals(HistoryGapState.Idle, state.stateFor(target))
+    }
+
+    @Test
+    fun `only an in-flight fill spins`() {
+        val target = seam(gapId = 2, serverTime = 900)
+        val state = TimelineSeamState(
+            seams = listOf(target),
+            filling = setOf(2L),
+            historyUnavailable = false,
+        )
+
         assertEquals(HistoryGapState.Loading, state.stateFor(target))
     }
 
     @Test
-    fun `only a failed attempt offers a tap`() {
+    fun `a failed attempt offers a retry, an unrelated gap stays a plain idle tap`() {
         val failed = seam(gapId = 2, serverTime = 900)
         val fine = seam(gapId = 3, serverTime = 100)
         val state = TimelineSeamState(
@@ -1048,8 +1060,8 @@ class ChatModelsTest {
         )
 
         assertEquals(HistoryGapState.Failed, state.stateFor(failed))
-        // Per gap, not per room: the seam that has not broken is still loading.
-        assertEquals(HistoryGapState.Loading, state.stateFor(fine))
+        // Per gap, not per room: the seam that has not broken is idle, not retrying.
+        assertEquals(HistoryGapState.Idle, state.stateFor(fine))
     }
 
     @Test

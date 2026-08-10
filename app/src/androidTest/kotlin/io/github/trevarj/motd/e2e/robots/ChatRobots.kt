@@ -271,10 +271,11 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
      *
      * Each sweep is one deliberate approach and therefore one load. That is the rule's bound made
      * visible: the loop cannot drain a gap without scrolling toward it every time, and a caller who
-     * stops calling stops the fetching. The wait is on rows landing rather than on a spinner,
-     * because a loading seam and a failed one share a test tag — they are one control with a busy
-     * state description. The seam recedes rather than vanishes, so absence right here only means it
-     * left the composed window; page toward it again to tell a closed seam apart from a receded one.
+     * stops calling stops the fetching. The wait is on rows landing rather than on a spinner, because
+     * a loading, idle, and failed seam all share the one root test tag — three divider states with
+     * one control identity, distinguished only by their inner variant tag in the unmerged tree. The
+     * seam recedes rather than vanishes, so absence right here only means it left the composed
+     * window; page toward it again to tell a closed seam apart from a receded one.
      *
      * Tolerant of finding nothing, deliberately. The room opens AT the seam after a reconnect (the
      * first unread row is the one on its newer side), so the rule may well have closed it before

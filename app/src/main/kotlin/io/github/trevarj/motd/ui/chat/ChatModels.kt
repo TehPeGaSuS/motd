@@ -39,7 +39,8 @@ typealias MessageFilterSpec = MessageVisibilitySpec
  *
  * They travel together because the divider's state is a function of all of it: the seam supplies the
  * gap's identity and recoverability, [filling] supplies whether a fetch is on the wire for it right
- * now, and [historyUnavailable]/[failed] supply the only two reasons a seam is not being loaded.
+ * now, and [historyUnavailable]/[failed] supply the only two reasons a resting seam reads as broken
+ * rather than merely idle.
  */
 data class TimelineSeamState(
     val seams: List<TimelineSeam> = emptyList(),
@@ -50,7 +51,7 @@ data class TimelineSeamState(
      * never resolve.
      */
     val historyUnavailable: Boolean = true,
-    /** Gaps whose last load attempt failed. The only gaps whose divider offers a tap. */
+    /** Gaps whose last load attempt failed, rendered as a retry rather than a plain idle tap. */
     val failed: Set<Long> = emptySet(),
 ) {
     /**
@@ -60,12 +61,14 @@ data class TimelineSeamState(
      * never be in flight; ordering the other way would let a stale in-flight id paint a spinner on
      * a seam that will never move.
      *
-     * [HistoryGapState.Loading] is the DEFAULT for a recoverable seam, and that is the whole shape
-     * of the rule. A seam is only ever composed when the viewport has reached it, and reaching it is
-     * what loads it — exactly as reaching the end of the list loads more. A resting "tap to load"
-     * state would be a second affordance for something already happening, which is the incoherence
-     * this design exists to remove. The tap survives only where loading genuinely is not happening:
-     * a failed attempt, or no transport to attempt with.
+     * [HistoryGapState.Idle] is the DEFAULT for a recoverable seam — deliberately reversed from this
+     * class's earlier rule. A seam being composed only proves the viewport has reached it, not that
+     * anything is fetching across it, so defaulting to [HistoryGapState.Loading] painted a spinner
+     * over gaps nothing was ever going to move: a perpetual, dishonest "in progress". The spinner is
+     * now earned strictly: [HistoryGapState.Loading] renders ONLY while [seam]'s gap id is actually
+     * present in [filling]. Everywhere else recoverable, the divider says exactly what is true —
+     * nothing is happening right now — and offers the same tap [HistoryGapState.Failed] does, so the
+     * reader can start the fetch [SeamLoadingRule] would otherwise wait for a scroll to trigger.
      *
      * [filling] is checked before [failed] so a retry that is already running shows its progress
      * rather than the error it is retrying.
@@ -74,7 +77,7 @@ data class TimelineSeamState(
         !seam.recoverable -> HistoryGapState.Unrecoverable
         seam.gapId in filling -> HistoryGapState.Loading
         historyUnavailable || seam.gapId in failed -> HistoryGapState.Failed
-        else -> HistoryGapState.Loading
+        else -> HistoryGapState.Idle
     }
 }
 
@@ -195,11 +198,12 @@ internal data class GapFillRequest(
  * The timeline's one history rule: **a seam behaves exactly like the end of the list.**
  *
  * Scrolling toward a seam loads history across it, with a spinner, for as long as the user keeps
- * scrolling toward it. There is no "tap to load", no per-seam allowance to run out of, and no
- * special case for the newest gap: after a reconnect the catch-up gap simply happens to be where the
- * room opens, so hands-free catch-up falls out of the general rule rather than being a mechanism of
- * its own. The divider offers a tap in exactly one situation — the last attempt failed — and then it
- * is a retry.
+ * scrolling toward it — no per-seam allowance to run out of, and no special case for the newest gap:
+ * after a reconnect the catch-up gap simply happens to be where the room opens, so hands-free
+ * catch-up falls out of the general rule rather than being a mechanism of its own. A resting seam
+ * ALSO offers a tap — [HistoryGapState.Idle] when nothing has gone wrong, [HistoryGapState.Failed]
+ * as a retry once it has — but either way the tap is the same [GapTapRequest], and [next] does not
+ * care which divider issued it.
  *
  * ## Why this cannot run away
  *
@@ -242,8 +246,8 @@ internal data class GapFillRequest(
  * opened, from the store, and a fill that rewrites the store first would land that frozen boundary
  * on rows this class had just fetched. Entry resolves first, then history loads underneath it.
  *
- * A tap bypasses the gate. The user is looking at a failed divider; nothing about a pending entry or
- * a stale availability snapshot makes their retry wrong.
+ * A tap bypasses the gate. The user is looking at an idle or failed divider; nothing about a pending
+ * entry or a stale availability snapshot makes their tap wrong.
  */
 internal class SeamLoadingRule {
     private val fetchedAtDepth = mutableMapOf<Long, Int>()
