@@ -9,11 +9,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -140,21 +138,27 @@ fun ServerDrawerContent(
 
     ModalDrawerSheet {
         Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-            // Compact brand header: the lockup is deliberately smaller than a navigation row so
-            // the network list, rather than the branding, owns the drawer's visual hierarchy.
-            Image(
-                painter = painterResource(R.drawable.motd_logo_lockup),
-                contentDescription = stringResource(R.string.app_name),
-                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
-                contentScale = ContentScale.Fit,
-                alignment = Alignment.CenterStart,
-                modifier = Modifier
-                    // 490:180 source ratio. Specifying both dimensions avoids the drawable's
-                    // oversized 200x75dp intrinsic size expanding this header.
-                    .padding(start = 16.dp, top = 12.dp, bottom = 8.dp)
-                    .width(128.dp)
-                    .height(47.dp),
-            )
+            // Compact brand header: bubble mark plus the app name in the same plain bold platform
+            // typography as the chat-list title bar, kept smaller than a navigation row so the
+            // network list, rather than the branding, owns the drawer's visual hierarchy.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.motd_logo_mark),
+                    contentDescription = null,
+                    colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(26.dp),
+                )
+                Text(
+                    text = stringResource(R.string.app_name),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
 
             // 1. Networks section header. The unscoped ("all chats") state is simply "no network
             // selected" — reflected by the title-bar wordmark — so there is no standalone row for
