@@ -504,6 +504,7 @@ fun ChatScreen(
         onFocusRecentMention = viewModel::focusRecentMention,
         onInitialPositionUnresolved = viewModel::onInitialPositionUnresolved,
         onScrollPositionChanged = viewModel::saveScrollPosition,
+        onTimelineInteraction = viewModel::onTimelineInteraction,
         onClearScrollPosition = viewModel::clearScrollPosition,
         onForgetScrollPosition = viewModel::forgetScrollPosition,
         onFurthestDisplayedChanged = viewModel::recordFurthestDisplayed,
@@ -672,6 +673,9 @@ fun ChatContent(
     onFocusRecentMention: (ChatPositionTarget) -> Unit = {},
     onInitialPositionUnresolved: () -> Unit = {},
     onScrollPositionChanged: (ChatScrollPosition) -> Unit = {},
+    // The reader started a scroll themselves. Retires the ViewModel's one post-catch-up entry
+    // correction: a viewport its reader is driving is no longer entry's to move.
+    onTimelineInteraction: () -> Unit = {},
     onClearScrollPosition: () -> Unit = {},
     // Indeterminate snapshot at save time: drop the saved viewport WITHOUT asserting a bottom park.
     onForgetScrollPosition: () -> Unit = {},
@@ -1405,6 +1409,11 @@ fun ChatContent(
         snapshotFlow { listState.isScrollInProgress to (programmaticScrolls > 0) }
             .distinctUntilChanged()
             .collect { (scrolling, programmatic) ->
+                // The same edge auto-follow reads as "the user is taking over", reported to the
+                // ViewModel so its one post-catch-up entry correction stands down. Programmatic
+                // scrolls (entry placement, the newest FAB, a send) are excluded here; the actions
+                // that issue them retire the correction themselves.
+                if (scrolling && !programmatic) onTimelineInteraction()
                 val before = autoFollow.following
                 autoFollow.onScrollStateChanged(scrolling, programmatic, atBottom)
                 AutoFollowTrace.record("scroll_intent", traceBufferId, traceSessionId) {
@@ -2003,6 +2012,7 @@ fun ChatContent(
                             TimelineHistorySyncIndicator(
                                 status = timelineHistoryStatus,
                                 timelineEmpty = items.itemCount == 0,
+                                entryUnresolved = entryState is EntryPositionState.Unresolved,
                                 retryEnabled = state.connState is IrcClientState.Ready,
                                 // Both halves of history recovery: the coordinator re-runs the
                                 // reconciliation pass (coalescing onto any in-flight one) while
@@ -2577,6 +2587,7 @@ internal fun TimelineHistoryStaleChip(
 internal fun TimelineHistorySyncIndicator(
     status: HistorySyncStatus,
     timelineEmpty: Boolean,
+    entryUnresolved: Boolean,
     retryEnabled: Boolean,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
@@ -2595,7 +2606,13 @@ internal fun TimelineHistorySyncIndicator(
     }
     val visible = if (active) {
         // An empty timeline has nothing else to show, so its spinner appears immediately.
-        timelineEmpty || pillEscalated
+        //
+        // Everything else has rows to read and a viewport already positioned in them: entry resolves
+        // from at-rest anchors and no longer waits on this sync, so an ongoing sync alone is not
+        // worth covering the conversation with a pill — the 3dp bar already reports it. The pill
+        // escalates only when entry genuinely could not be placed, which is the one case where the
+        // reader is waiting on the sync rather than reading through it.
+        timelineEmpty || (pillEscalated && entryUnresolved)
     } else {
         status is HistorySyncStatus.Failed
     }

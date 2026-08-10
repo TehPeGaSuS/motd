@@ -1469,6 +1469,30 @@ class ChatModelsTest {
     }
 
     @Test
+    fun `only a moved anchor is worth a post-catch-up entry correction`() {
+        val entered = ChatPositionTarget(
+            index = 49,
+            expectedEventId = 7,
+            serverTime = 1_000,
+            placeAtTop = true,
+        )
+
+        // The same row at the same depth: republishing would scroll a placement that is already
+        // being made, for nothing.
+        assertFalse(entryAnchorMoved(entered, entered.copy()))
+        // Catch-up delivered older unread: a different row is now the oldest unseen one.
+        assertTrue(entryAnchorMoved(entered, entered.copy(expectedEventId = 6, serverTime = 900)))
+        // Same row, deeper: rows landed newer than the anchor, so the index it must be placed at
+        // moved even though nothing about its identity did.
+        assertTrue(entryAnchorMoved(entered, entered.copy(index = 199)))
+        // A positional fallback (mute floor / hidden marker) carries no identity, so its timestamp
+        // is the only thing left that can report a move.
+        val positional = ChatPositionTarget(index = 0, serverTime = 1_000, placeAtTop = true)
+        assertFalse(entryAnchorMoved(positional, positional.copy()))
+        assertTrue(entryAnchorMoved(positional, positional.copy(serverTime = 900)))
+    }
+
+    @Test
     fun `the displayed watermark never claims a row the reader could not read`() {
         val policy = MessageVisibilityPolicy(MessageVisibilitySpec(fools = setOf("troll")))
         val rows = listOf(

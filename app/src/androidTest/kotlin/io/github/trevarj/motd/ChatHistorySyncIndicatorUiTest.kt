@@ -41,7 +41,7 @@ class ChatHistorySyncIndicatorUiTest {
     val compose = createComposeRule()
 
     @Test
-    fun barShowsImmediatelyAndPillEscalates() {
+    fun barShowsImmediatelyAndPillEscalatesForUnresolvedEntry() {
         compose.mainClock.autoAdvance = false
         compose.setContent {
             MotdTheme {
@@ -53,6 +53,8 @@ class ChatHistorySyncIndicatorUiTest {
                     TimelineHistorySyncIndicator(
                         status = HistorySyncStatus.Syncing,
                         timelineEmpty = false,
+                        // The reader is genuinely waiting on this sync: entry could not be placed.
+                        entryUnresolved = true,
                         retryEnabled = true,
                         onRetry = {},
                     )
@@ -75,8 +77,41 @@ class ChatHistorySyncIndicatorUiTest {
         compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
         compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
         compose.onNodeWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertIsDisplayed()
-        compose.onNodeWithText("Finding first unread…").assertExists()
+        // A sync statement, not a claim about finding the first unread row: entry resolves that
+        // from at-rest anchors and never waits for this sync.
+        compose.onNodeWithText("Syncing messages…").assertExists()
         compose.onNodeWithTag(CHAT_HISTORY_SYNC_BAR_TAG).assertIsDisplayed()
+    }
+
+    @Test
+    fun populatedTimelineWithSettledEntryNeverEscalatesToThePill() {
+        // The common reconnect: rows on screen, a viewport already positioned in them, and a sync
+        // running behind both. The 3dp bar reports it; covering the conversation the reader is
+        // already reading with a pill does not.
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            MotdTheme {
+                Column {
+                    TimelineHistorySyncBar(
+                        status = HistorySyncStatus.Syncing,
+                        timelineEmpty = false,
+                    )
+                    TimelineHistorySyncIndicator(
+                        status = HistorySyncStatus.Syncing,
+                        timelineEmpty = false,
+                        entryUnresolved = false,
+                        retryEnabled = true,
+                        onRetry = {},
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+
+        compose.mainClock.advanceTimeBy(HISTORY_SYNC_PILL_ESCALATION_MS + FADE_BUDGET_MS)
+        compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
+        compose.onNodeWithTag(CHAT_HISTORY_SYNC_BAR_TAG).assertIsDisplayed()
+        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertCountEquals(0)
     }
 
     @Test
@@ -92,6 +127,9 @@ class ChatHistorySyncIndicatorUiTest {
                     TimelineHistorySyncIndicator(
                         status = HistorySyncStatus.Queued,
                         timelineEmpty = true,
+                        // An empty timeline shows its spinner regardless: there is nothing to read
+                        // behind it either way.
+                        entryUnresolved = false,
                         retryEnabled = true,
                         onRetry = {},
                     )
@@ -118,6 +156,7 @@ class ChatHistorySyncIndicatorUiTest {
                     TimelineHistorySyncIndicator(
                         status = status,
                         timelineEmpty = false,
+                        entryUnresolved = true,
                         retryEnabled = true,
                         onRetry = {},
                     )
@@ -148,6 +187,7 @@ class ChatHistorySyncIndicatorUiTest {
                     TimelineHistorySyncIndicator(
                         status = HistorySyncStatus.Partial("fixture"),
                         timelineEmpty = false,
+                        entryUnresolved = false,
                         retryEnabled = true,
                         onRetry = {},
                     )
@@ -201,6 +241,8 @@ class ChatHistorySyncIndicatorUiTest {
                     TimelineHistorySyncIndicator(
                         status = HistorySyncStatus.Failed("fixture"),
                         timelineEmpty = false,
+                        // A failed pass keeps its retry regardless of where entry landed.
+                        entryUnresolved = false,
                         retryEnabled = true,
                         // Mirrors the screen's composed action: the coordinator re-runs the
                         // reconciliation pass and Paging re-attempts the failed fetch.

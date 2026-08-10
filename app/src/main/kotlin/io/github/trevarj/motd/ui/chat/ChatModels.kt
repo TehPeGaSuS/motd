@@ -750,6 +750,21 @@ internal fun preferredEntryTarget(
 }
 
 /**
+ * Whether a re-resolved entry anchor names a different place than the one entry actually landed on.
+ *
+ * Both halves matter. Identity moves when catch-up delivers an older unread row than the one the
+ * at-rest resolution could see, and depth moves when it delivers rows behind an anchor whose
+ * identity is unchanged — a divider that is still the same message but is now 150 rows further from
+ * the bottom. Either one leaves the reader in the wrong place, and nothing else is worth a
+ * correction: an unmoved anchor must NOT republish, or the placement already in progress would be
+ * restarted against the same row for nothing.
+ */
+internal fun entryAnchorMoved(entered: ChatPositionTarget, repaired: ChatPositionTarget): Boolean =
+    entered.index != repaired.index ||
+        entered.expectedEventId != repaired.expectedEventId ||
+        entered.serverTime != repaired.serverTime
+
+/**
  * [firstUnreadWinsEntry] applied to the two entry indices, for the Pager key.
  *
  * The key must name the anchor entry will LAND on, not merely one deep enough to cover both:

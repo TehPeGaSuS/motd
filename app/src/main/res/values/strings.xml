@@ -448,7 +448,10 @@
     <string name="chat_history_error">Couldn\'t load older messages</string>
     <string name="chat_history_load_older">Load older messages</string>
     <string name="chat_history_loading_messages">Loading messages…</string>
-    <string name="chat_history_syncing_messages">Finding first unread…</string>
+    <!-- Escalated pill over a populated timeline: entry could not be placed, so the sync itself is
+         what the reader is waiting on. It never claims to be finding the first unread row — entry
+         resolves that from at-rest anchors without waiting for this sync. -->
+    <string name="chat_history_syncing_messages">Syncing messages…</string>
     <string name="chat_history_sync_failed_inline">Couldn\'t sync messages</string>
     <!-- Quiet staleness chip: cached rows are readable but the sync stopped short of the server tail -->
     <string name="chat_history_partial_chip">History may be incomplete</string>

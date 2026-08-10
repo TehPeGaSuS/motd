@@ -1295,10 +1295,41 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `cold ready entry waits for connection catchup before anchoring`() = runTest {
-        // The ordering property: entry must not resolve against a store that catch-up has not
-        // finished writing. It anchors on the OLDEST visible unread row, which on an unbounded
-        // timeline is the whole room's oldest unread — the catch-up page can only move it older.
+    fun `cold ready entry anchors immediately from at-rest data`() = runTest {
+        // Entry does not wait for the network's history catch-up. `historyCatchUpPending` is held
+        // across catch-up's whole retry loop, and waiting on it kept the screen's follow/FAB/read
+        // machinery disarmed for a documented 42-second dead window — on a room whose read anchor
+        // was in Room the entire time. A room with durable content is positioned from that anchor
+        // on the frame it opens.
+        val markerId = db.messageDao().insertAll(
+            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
+        ).single()
+        val manager = FakeConnectionManager(
+            networkId = network.id,
+            state = IrcClientState.Ready("me", emptySet(), emptyMap()),
+            client = testClient(),
+            historyPending = setOf(network.id),
+        )
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
+            manager,
+            messages = FakeMessageRepository(),
+        )
+        vm.state.first { it.buffer != null }
+
+        val entered = checkNotNull(vm.initialTarget.first { it != null })
+        assertEquals(100L, entered.serverTime)
+        // ...and the wait it used to perform is provably not what published it: catch-up for this
+        // network is still pending.
+        assertTrue(network.id in manager.connectionActivity.value.historyCatchUpPending)
+    }
+
+    @Test
+    fun `history catch-up corrects an entry placement still in flight exactly once`() = runTest {
+        // The correction that replaces the wait. Entry is published from the read anchor
+        // immediately; while the screen is still materializing and placing that target, catch-up
+        // lands unread history the at-rest resolution could not see, so the anchor is re-resolved
+        // ONCE and the position (and the divider frozen with it) follow it.
         val markerId = db.messageDao().insertAll(
             listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
         ).single()
@@ -1315,11 +1346,11 @@ class ChatViewModelTest {
             messages = messages,
         )
         vm.state.first { it.buffer != null }
-        runCurrent()
+        val entered = checkNotNull(vm.initialTarget.first { it != null })
+        assertNull("nothing was unread at rest, so no divider was frozen", entered.expectedEventId)
+        assertNull(vm.unreadEntrySnapshot.value)
 
-        assertNull(vm.initialTarget.value)
-
-        // Catch-up delivers the unread backlog only now.
+        // Catch-up delivers the unread backlog only now, before the screen has settled the entry.
         val caughtUpId = db.messageDao().insertAll(
             listOf(message(channel.id, "caught up", "m101", "alice").copy(serverTime = 101)),
         ).single()
@@ -1329,24 +1360,107 @@ class ChatViewModelTest {
         messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(caughtUpId))
         manager.finishHistoryCatchUp(network.id)
 
-        val target = checkNotNull(vm.initialTarget.first { it != null })
-        assertEquals(caughtUpId, target.expectedEventId)
-        assertEquals(101L, target.serverTime)
+        val repaired = checkNotNull(vm.initialTarget.first { it?.expectedEventId != null })
+        assertEquals(caughtUpId, repaired.expectedEventId)
+        assertEquals(101L, repaired.serverTime)
+        assertTrue(repaired.placeAtTop)
+        // The divider this visit froze as an absence is refined onto the same row the corrected
+        // position lands on — one boundary, one anchor — because it has not been shown yet.
+        assertEquals(caughtUpId - 1L, vm.unreadEntrySnapshot.value?.marker?.eventId)
+
+        // EXACTLY once: the correction is a single-shot arm, so a later catch-up edge is inert.
+        vm.onInitialPositionHandled()
+        manager.finishHistoryCatchUp(network.id)
+        advanceUntilIdle()
+        assertNull(vm.initialTarget.value)
     }
 
     @Test
-    fun `entry positioning is bounded when history catch-up overruns its window`() = runTest {
+    fun `a placed entry and its shown divider are never corrected by late catch-up`() = runTest {
+        // The other half of the contract, and the one the frozen-boundary invariant depends on.
+        // Once the screen has placed the entry the position is on screen and the divider has been
+        // SHOWN: both are outcomes the reader has already seen, and history arriving afterwards —
+        // catch-up or a gap fill across its seam — belongs below that boundary rather than
+        // redrawing it somewhere else under them.
+        val markerId = db.messageDao().insertAll(
+            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
+        ).single()
+        val manager = FakeConnectionManager(
+            networkId = network.id,
+            state = IrcClientState.Ready("me", emptySet(), emptyMap()),
+            client = testClient(),
+            historyPending = setOf(network.id),
+        )
+        val messages = FakeMessageRepository()
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
+            manager,
+            messages = messages,
+        )
+        vm.state.first { it.buffer != null }
+        checkNotNull(vm.initialTarget.first { it != null })
+        vm.onInitialPositionHandled()
+
+        val caughtUpId = db.messageDao().insertAll(
+            listOf(message(channel.id, "caught up", "m101", "alice").copy(serverTime = 101)),
+        ).single()
+        messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(caughtUpId))
+        manager.finishHistoryCatchUp(network.id)
+        advanceUntilIdle()
+
+        assertNull("a placed entry is an outcome, not a placement in flight", vm.initialTarget.value)
+        assertNull("the frozen boundary is not re-derived once it has been shown", vm.unreadEntrySnapshot.value)
+        assertEquals(EntryPositionState.Settled, vm.entryState.value)
+    }
+
+    @Test
+    fun `a reader who has moved the viewport is never corrected by late catch-up`() = runTest {
+        // A drag before the screen finished placing entry: the reader took the viewport over, so the
+        // correction stands down even though entry is still Pending. Read-marker correctness
+        // converges through ordinary marker advancement instead of by yanking them somewhere they
+        // did not ask to be.
+        val markerId = db.messageDao().insertAll(
+            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
+        ).single()
+        val manager = FakeConnectionManager(
+            networkId = network.id,
+            state = IrcClientState.Ready("me", emptySet(), emptyMap()),
+            client = testClient(),
+            historyPending = setOf(network.id),
+        )
+        val messages = FakeMessageRepository()
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
+            manager,
+            messages = messages,
+        )
+        vm.state.first { it.buffer != null }
+        val entered = checkNotNull(vm.initialTarget.first { it != null })
+        vm.onTimelineInteraction()
+
+        val caughtUpId = db.messageDao().insertAll(
+            listOf(message(channel.id, "caught up", "m101", "alice").copy(serverTime = 101)),
+        ).single()
+        messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(caughtUpId))
+        manager.finishHistoryCatchUp(network.id)
+        advanceUntilIdle()
+
+        assertEquals("a viewport the reader is driving is not entry's to move", entered, vm.initialTarget.value)
+        assertEquals(EntryPositionState.Pending, vm.entryState.value)
+        assertNull(vm.unreadEntrySnapshot.value)
+    }
+
+    @Test
+    fun `at-rest entry stands when history catch-up overruns its window`() = runTest {
         // The catch-up gate holds `historyCatchUpPending` across its WHOLE retry loop (exponential
-        // backoff up to 30s per attempt), and while entry waits on it the screen keeps auto-follow,
-        // the newest FAB, and read-marker gating disarmed — captured live as a 42-second dead
-        // window. The wait is therefore bounded: within the window the gate behaves exactly as the
-        // test above pins, and once it expires entry anchors on local data the way an offline
-        // network already does.
+        // backoff up to 30s per attempt). Entry never waits on that, and the correction it arms is
+        // bounded by the same window: once the bound expires the at-rest position is final, which is
+        // exactly how an offline network already enters.
         val markerId = db.messageDao().insertAll(
             listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
         ).single()
         val unreadId = db.messageDao().insertAll(
-            listOf(message(channel.id, "local unread", "m101", "alice").copy(serverTime = 101)),
+            listOf(message(channel.id, "local unread", "m200", "alice").copy(serverTime = 200)),
         ).single()
         val manager = FakeConnectionManager(
             networkId = network.id,
@@ -1362,25 +1476,53 @@ class ChatViewModelTest {
             messages = messages,
         )
         vm.state.first { it.buffer != null }
-        runCurrent()
 
-        // Within the bounded window the gate holds: no target resolves against un-caught-up data.
-        assertNull(vm.initialTarget.value)
-
-        // Catch-up never finishes. The bound expires and entry proceeds on the local store,
-        // anchoring the divider at the locally known first unread row.
-        advanceTimeBy(ENTRY_HISTORY_READY_TIMEOUT_MS)
+        // The locally known first unread row, without waiting for anything.
         val target = checkNotNull(vm.initialTarget.first { it != null })
         assertEquals(unreadId, target.expectedEventId)
-        assertEquals(101L, target.serverTime)
+        assertEquals(200L, target.serverTime)
 
-        // The screen settles that target; catch-up completing later must not republish a stale
-        // divider target and yank the viewport away from wherever the reader now is.
-        vm.onInitialPositionHandled()
+        // The correction's bound expires with catch-up still pending, and entry deliberately stays
+        // un-settled and untouched here so nothing but that bound can be what retires it.
+        advanceTimeBy(ENTRY_HISTORY_READY_TIMEOUT_MS + 1)
+        advanceUntilIdle()
+        assertEquals(target, vm.initialTarget.value)
+
+        // Catch-up completing after the bound lands an OLDER unread row — the exact input that
+        // would have moved the anchor inside the window — and must now change nothing.
+        val lateId = db.messageDao().insertAll(
+            listOf(message(channel.id, "caught up late", "m150", "alice").copy(serverTime = 150)),
+        ).single()
+        messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(lateId))
         manager.finishHistoryCatchUp(network.id)
         advanceUntilIdle()
+        assertEquals(target, vm.initialTarget.value)
+    }
+
+    @Test
+    fun `an empty room still waits for history catch-up before entry`() = runTest {
+        // The only remaining wait, and the only room it is right for: no stored anchor, no saved
+        // viewport, not one retained row. There is genuinely nothing to position in, and the reader
+        // is looking at the empty-timeline spinner either way.
+        val manager = FakeConnectionManager(
+            networkId = network.id,
+            state = IrcClientState.Ready("me", emptySet(), emptyMap()),
+            client = testClient(),
+            historyPending = setOf(network.id),
+        )
+        val vm = viewModel(channel, manager, messages = FakeMessageRepository())
+        vm.state.first { it.buffer != null }
+        runCurrent()
+
         assertNull(vm.initialTarget.value)
-        assertEquals(EntryPositionState.Settled, vm.entryState.value)
+
+        db.messageDao().insertAll(
+            listOf(message(channel.id, "first", "m1", "alice").copy(serverTime = 100)),
+        )
+        manager.finishHistoryCatchUp(network.id)
+
+        val target = checkNotNull(vm.initialTarget.first { it != null })
+        assertEquals(0, target.index)
     }
 
     @Test
@@ -1779,13 +1921,13 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `sending while entry waits on history catch-up settles entry so the timeline can follow`() = runTest {
-        // The entry target is gated on the network's history catch-up (entryHistoryReady), which
-        // can run for tens of seconds after a reconnect. The screen keeps its entire auto-follow
-        // machinery disarmed until entry settles, so a message sent inside that window echoed into
-        // a timeline that did not follow it: the viewport stayed keyed to the previous newest row.
+    fun `sending abandons the entry position and its post-catch-up correction`() = runTest {
         // A send is an explicit trip to the live bottom (the screen scrolls there as part of the
-        // same gesture), so it must abandon the pending entry exactly as the newest FAB does.
+        // same gesture). The screen keeps its entire auto-follow machinery disarmed until entry
+        // settles, so a message sent while entry is still being placed echoed into a timeline that
+        // did not follow it: the viewport stayed keyed to the previous newest row. The send must
+        // therefore abandon the one-shot positioning exactly as the newest FAB does — and, on a
+        // room entered mid-catch-up, its armed correction with it.
         val markerId = db.messageDao().insertAll(
             listOf(message(channel.id, "marker", null, "alice").copy(serverTime = 100, dedupKey = "marker")),
         ).single()
@@ -1803,15 +1945,9 @@ class ChatViewModelTest {
             manager,
         )
         vm.state.first { it.buffer != null }
-        // runCurrent, not advanceUntilIdle: the entry wait is now bounded, and advancing virtual
-        // time to idle would expire ENTRY_HISTORY_READY_TIMEOUT_MS and publish the local-data
-        // target before the send this test is about.
-        runCurrent()
-
-        // Catch-up has not finished and the bounded wait has not expired: entry is still pending
-        // and no target has been published.
+        // Entry is published from at-rest data even though catch-up is still running.
+        checkNotNull(vm.initialTarget.first { it != null })
         assertEquals(EntryPositionState.Pending, vm.entryState.value)
-        assertNull(vm.initialTarget.value)
 
         vm.saveDraft("hello there")
         vm.submit("hello there", {}, {}).join()
@@ -1819,10 +1955,14 @@ class ChatViewModelTest {
         // The author is at the live bottom now; entry settles so the follow machinery arms and
         // the echoed row is classified as a live arrival instead of landing above a dead gate.
         assertEquals(EntryPositionState.Settled, vm.entryState.value)
+        assertNull(vm.initialTarget.value)
         assertEquals(listOf(SentMessage(channel.id, "hello there", null)), manager.messages)
 
-        // When catch-up completes, the abandoned divider target must not fire and yank the
+        // Catch-up delivering older unread afterwards must not fire the correction and yank the
         // viewport away from the message that was just sent.
+        db.messageDao().insertAll(
+            listOf(message(channel.id, "caught up", "m101", "alice").copy(serverTime = 101)),
+        )
         manager.finishHistoryCatchUp(network.id)
         advanceUntilIdle()
         assertNull(vm.initialTarget.value)

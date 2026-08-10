@@ -96,6 +96,8 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import io.github.trevarj.motd.ui.components.ReactionChip
@@ -375,12 +377,12 @@ class ChatViewModel @Inject constructor(
             }.cachedIn(viewModelScope)
 
     /**
-     * Pager initial key for the one-shot normal entry, resolved from the same durable state the
-     * entry pipeline reads: the room's oldest visible unread row and its saved viewport. Null unless
-     * a pending entry sits beyond the default newest load, so first-open backfill, escapes and
-     * mentions keep their unkeyed newest-first load. A deep jump is excluded outright: its
-     * destination is the jump target, not the entry anchor, and it reaches that row by requesting the
-     * placeholder inside this SAME generation rather than by rebuilding the Pager around it.
+     * Pager initial key for the one-shot normal entry, taken from the SAME at-rest resolution the
+     * entry decision publishes ([entryAnchors]). Null unless a pending entry sits beyond the default
+     * newest load, so first-open backfill, escapes and mentions keep their unkeyed newest-first load.
+     * A deep jump is excluded outright: its destination is the jump target, not the entry anchor, and
+     * it reaches that row by requesting the placeholder inside this SAME generation rather than by
+     * rebuilding the Pager around it.
      *
      * BOTH entry anchors are considered, and the key names the one [preferredEntryTarget] will
      * actually land on — resolved through [preferredEntryIndex], the same rule, on the same inputs
@@ -394,30 +396,8 @@ class ChatViewModel @Inject constructor(
     private suspend fun entryPagingKey(spec: MessageVisibilitySpec): Int? {
         if (routeHasDeepJump) return null
         if (_entryState.value !is EntryPositionState.Pending) return null
-        val parked = parkedAtBottom()
         return try {
-            // Non-destructive on this path: it runs before catch-up has finished writing, and a
-            // saved anchor that cannot be resolved YET is not a saved anchor that is gone.
-            //
-            // A park cleared the saved viewport, so a follower has exactly one possible anchor: the
-            // unread divider, which they now land on when unread arrived while they were away. That
-            // run can be arbitrarily deep, so it needs the key as much as any other deep entry.
-            // Skipping the saved lookup entirely mirrors the entry decision, which does not consult
-            // it either; with nothing unread both agree on the newest row, and preferredEntryIndex
-            // then returns null — exactly the unkeyed newest-first load a park used to short-circuit
-            // to here.
-            val savedIndex = if (parked) {
-                null
-            } else {
-                restoredScrollPosition(spec, discardUnresolved = false)?.index
-            }
-            val unreadIndex = firstUnreadEntryIndex(spec)
-            val anchorIndex = preferredEntryIndex(
-                savedIndex = savedIndex,
-                firstUnreadIndex = unreadIndex,
-                furthestDisplayedIndex = furthestDisplayedEntryIndex(spec),
-            ) ?: return null
-            entryAnchorPagingKey(anchorIndex)
+            entryAnchors(spec).pagingKey
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (_: RuntimeException) {
@@ -427,12 +407,123 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Timeline index of the deepest row this process has displayed in the room, or null if none.
+     * Everything the one-shot normal entry decides, resolved from at-rest state alone.
      *
-     * Counted with the same `countTimelineNewerQuery` the two entry anchors use, so all three live
-     * in one coordinate system. The identity-resolving overload is deliberate: a coalesced
-     * watermark row follows its winner rather than counting against a retired event id.
+     * [hasDurableContent] is what separates "enter now" from "there is genuinely nothing to show":
+     * a stored read/mute anchor, a saved viewport, or a single retained row is already enough to
+     * place a viewport without asking the network for anything.
      */
+    private data class EntryAnchors(
+        val room: BufferEntity?,
+        val firstUnread: TimelineAnchor?,
+        val target: ChatPositionTarget,
+        val pagingKey: Int?,
+        val hasDurableContent: Boolean,
+    )
+
+    private val entryAnchorsLock = Mutex()
+    private var resolvedEntryAnchors: Pair<MessageVisibilitySpec, EntryAnchors>? = null
+
+    /**
+     * The single at-rest entry resolution, computed on first demand and then shared.
+     *
+     * The Pager key and the entry decision used to run these 6-8 indexed queries independently, and
+     * agreed only because both applied the same rule to the same inputs. Resolving once makes that
+     * identity structural and halves what an open costs.
+     *
+     * Cached against its spec rather than outright: a behavioral filter change rebuilds the Pager
+     * around a different set of rows, and an index counted under the previous spec would name a
+     * different row in it.
+     */
+    private suspend fun entryAnchors(spec: MessageVisibilitySpec): EntryAnchors =
+        entryAnchorsLock.withLock {
+            resolvedEntryAnchors?.takeIf { it.first == spec }?.second
+                ?: resolveEntryAnchors(spec, discardUnresolvedSaved = false)
+                    .also { resolvedEntryAnchors = spec to it }
+        }
+
+    /**
+     * Resolve the entry anchors against the store exactly as it stands.
+     *
+     * A normal open chooses between two anchors — the oldest unread row and the viewport this room
+     * was last left at — with the bare read marker as the fallback for a room that offers neither.
+     * A deep link owns its own target and never reaches here.
+     *
+     * Leaving at the live bottom retires the second anchor rather than the first: it is a statement
+     * about where the reader stopped, and nothing about what arrived afterwards. So a park decides
+     * only the caught-up case, and the unread divider keeps entry whenever this visit has one.
+     *
+     * The read marker used to divert entry on its own, which made the saved viewport unreachable:
+     * every room anyone has opened HAS a read anchor, so the restore branch ran only for rooms that
+     * had never been read. That is the "leaving and re-entering does not restore my position"
+     * defect; [preferredEntryTarget] states the rule that replaces it, and the furthest-displayed
+     * watermark is the input that keeps that rule from resetting a reader who is working FORWARD
+     * through an unread backlog they have not yet finished.
+     *
+     * All three indices are comparable because they are the same count: `countNewerThan` and
+     * `countTimelineNewer` are both `countTimelineNewerQuery` over this room and spec — pinned by
+     * MessageRepositoryPagingTest so neither can grow a predicate the other lacks.
+     *
+     * [discardUnresolvedSaved] forgets a saved viewport whose anchor no longer resolves, which is
+     * right once history has caught up (the row is gone and nothing will bring it back) and wrong
+     * for the immediate entry, which can run before catch-up has finished writing: there, "cannot
+     * resolve" usually means "not stored yet".
+     */
+    private suspend fun resolveEntryAnchors(
+        spec: MessageVisibilitySpec,
+        discardUnresolvedSaved: Boolean,
+    ): EntryAnchors {
+        val room = bufferRepository.observeBuffer(bufferId).firstOrNull()
+        val marker = room?.let { visibilityReader.effectiveLocalReadAnchor(it) }
+        // The timeline is unbounded, so this resolves against every retained row. That is the same
+        // answer a bounded call would give: a window bound could only ever hide rows the client
+        // already holds, and a gap's far side is by definition rows it does not.
+        val firstUnread = marker?.let {
+            visibilityReader.firstVisibleUnreadAnchor(bufferId, it, spec)
+        }
+        // A park cleared the saved viewport, so a follower has exactly one possible anchor: the
+        // unread divider, which they land on when unread arrived while they were away.
+        val parked = parkedAtBottom()
+        val saved = if (parked) null else restoredScrollPosition(spec, discardUnresolvedSaved)
+        val furthestDisplayedIndex = furthestDisplayedEntryIndex(spec)
+        val unreadTarget = firstUnread?.let {
+            readMarkerEntryTarget(it, spec, requireExactIdentity = true)
+        }
+        val target = if (parked) {
+            // A reader who left at the live bottom was following the conversation, so they return to
+            // it — but only when there is nothing unread to return to instead. Messages that arrived
+            // while they were away are exactly what the divider exists to announce, and entering at
+            // the newest row buries it somewhere above the viewport, where finding out what was
+            // missed means scrolling BACKWARDS past the very messages the divider was drawn for.
+            //
+            // Only the unread anchor may divert a follower, never the bare read marker: every room
+            // anyone has read HAS a marker, so consulting it here would park them behind a divider
+            // on a room that has nothing new at all.
+            unreadTarget ?: ChatPositionTarget(index = 0)
+        } else {
+            preferredEntryTarget(saved, unreadTarget, furthestDisplayedIndex)
+                ?: marker?.let { readMarkerEntryTarget(it, spec, requireExactIdentity = false) }
+                ?: ChatPositionTarget(index = 0)
+        }
+        return EntryAnchors(
+            room = room,
+            firstUnread = firstUnread,
+            target = target,
+            // The key must name the anchor entry LANDS on, which is why it runs the same rule over
+            // the same indices rather than picking the deeper of the two.
+            pagingKey = preferredEntryIndex(
+                savedIndex = saved?.index,
+                firstUnreadIndex = unreadTarget?.index,
+                furthestDisplayedIndex = furthestDisplayedIndex,
+            )?.let(::entryAnchorPagingKey),
+            // Ordered cheapest-first: the extra row lookup only runs for a room with no stored
+            // anchor and no saved viewport at all.
+            hasDurableContent = marker != null ||
+                saved != null ||
+                visibilityReader.latestRawAnchor(bufferId) != null,
+        )
+    }
+
     /**
      * True when the reader left this room at the live bottom, using the same room-with-buffer
      * fallback keying as the rest of the viewport memory.
@@ -443,26 +534,19 @@ class ChatViewModel @Inject constructor(
             (bufferId != roomId && scrollPositionStore.isParkedAtBottom(bufferId))
     }
 
+    /**
+     * Timeline index of the deepest row this process has displayed in the room, or null if none.
+     *
+     * Counted with the same `countTimelineNewerQuery` the two entry anchors use, so all three live
+     * in one coordinate system. The identity-resolving overload is deliberate: a coalesced
+     * watermark row follows its winner rather than counting against a retired event id.
+     */
     private suspend fun furthestDisplayedEntryIndex(spec: MessageVisibilitySpec): Int? {
         val roomId = operationalBufferId.value
         val seen = scrollPositionStore.furthestDisplayed(roomId)
             ?: bufferId.takeIf { it != roomId }?.let(scrollPositionStore::furthestDisplayed)
             ?: return null
         return visibilityReader.countTimelineNewer(bufferId, seen.serverTime, seen.eventId, spec)
-    }
-
-    /** Timeline index of the room's oldest visible unread row, or null when it is caught up. */
-    private suspend fun firstUnreadEntryIndex(spec: MessageVisibilitySpec): Int? {
-        val room = bufferRepository.observeBuffer(bufferId).firstOrNull() ?: return null
-        val marker = visibilityReader.effectiveLocalReadAnchor(room) ?: return null
-        val firstUnread = visibilityReader.firstVisibleUnreadAnchor(bufferId, marker, spec)
-            ?: return null
-        return messageRepository.countNewerThan(
-            bufferId,
-            firstUnread.serverTime,
-            firstUnread.eventId,
-            spec,
-        )
     }
 
     /** Newest stored wire row, including ignored tails; effective bottom may acknowledge it. */
@@ -1109,12 +1193,12 @@ class ChatViewModel @Inject constructor(
             is ChatCommand.None -> Unit
             is ChatCommand.Message -> {
                 // Sending parks the author at the live bottom: the screen scrolls there as part of
-                // the same gesture. Entry positioning can still be pending here — its target waits
-                // on history catch-up (entryHistoryReady, bounded by
-                // ENTRY_HISTORY_READY_TIMEOUT_MS) — and while it is pending the screen keeps the
-                // whole auto-follow machinery disarmed, so the echoed message would land with the
-                // viewport anchored one row above it. Abandon the stale one-shot positioning
-                // exactly as the newest FAB does; a divider entry is moot for a reader already
+                // the same gesture. Entry positioning can still be pending here (an empty room is
+                // still waiting on history, or the screen has not materialized the target yet), and
+                // while it is pending the screen keeps the whole auto-follow machinery disarmed, so
+                // the echoed message would land with the viewport anchored one row above it.
+                // Abandon the stale one-shot positioning exactly as the newest FAB does — including
+                // the post-catch-up correction — since a divider entry is moot for a reader already
                 // conversing at the bottom.
                 jumpToNewest()
                 val roomId = operationalBufferId.value
@@ -1651,6 +1735,17 @@ class ChatViewModel @Inject constructor(
     // their own guard so a superseded request cannot spend the newer request's retry.
     private var initialReresolveUsed = false
 
+    // Set the moment the reader takes the viewport over: a drag or fling on the timeline, the newest
+    // FAB, a send, or an explicit jump. [armPostCatchUpEntryRepair] is its only reader — a position
+    // the reader is driving themselves is no longer entry's to correct.
+    @Volatile
+    private var timelineInteracted = false
+
+    /** The timeline reported a user-driven scroll (as opposed to a programmatic one). */
+    fun onTimelineInteraction() {
+        timelineInteracted = true
+    }
+
     init {
         val hasDeepJump = routeHasDeepJump
         // `jump_consumed` only prevents duplicate work after a completed jump. If Android kills
@@ -1665,13 +1760,13 @@ class ChatViewModel @Inject constructor(
             savedStateHandle[JUMP_CONSUMED_KEY] = true
             resolveJump()
         }
-        // Freeze the read-marker once, on the first buffer emission, so the unread divider/badge
-        // stay put instead of collapsing as markRead advances the live marker (plans/15 #2).
-        // Anchor it to the first message from SOMEONE ELSE past the marker (minus 1, so the existing
-        // "> marker" divider/badge comparisons land on that message): your own sent messages must
-        // never trip the "new messages" divider or the scroll-down badge, since you have read what
-        // you just sent. Null (no real marker, or nothing unread from others) hides both.
+        // Normal entry, on the first buffer emission: freeze the visit's divider boundary
+        // ([freezeUnreadEntrySnapshot], plans/15 #2) and publish the one-shot entry target, both
+        // from ONE at-rest resolution shared with the Pager key.
         viewModelScope.launch {
+            // A restored visit already positioned itself in a previous process; only a fresh one may
+            // still be corrected below.
+            val freshVisit = _entryState.value is EntryPositionState.Pending
             val initialEntryBuffer = bufferRepository.observeBuffer(bufferId).firstOrNull()
             // Must match the paging spec exactly, presence override included, or the entry index it
             // resolves would count rows the PagingSource never emits.
@@ -1679,108 +1774,47 @@ class ChatViewModel @Inject constructor(
                 settingsRepository.settings.first(),
                 initialEntryBuffer?.presenceModeOverride,
             )
-            if (!hasDeepJump && initialEntryBuffer != null && initialEntryBuffer.type != BufferType.SERVER) {
-                // Wait for history catch-up so the divider anchors on caught-up data — but only for
-                // a bounded window. `historyCatchUpPending` is held across catch-up's entire retry
-                // loop (exponential backoff up to 30s per attempt), and while entry stays pending
-                // the screen keeps its whole follow machinery disarmed: no auto-follow at the live
-                // bottom, no newest FAB, no read-marker advancement — captured live as a 42-second
-                // dead window. When the window expires, entry proceeds against local data, which is
-                // exactly how an offline network already enters (entryHistoryReady is true when
-                // Disconnected), and the once-per-target re-resolve repairs an index that late
-                // history shifts. The bound also caps how stale a divider target can be when it
-                // finally fires: at most this many milliseconds after open, not a minute later.
+            // The room this open may position in: a deep link owns its own destination, and a SERVER
+            // buffer has no read-marker entry to resolve.
+            val entryRoom = initialEntryBuffer
+                ?.takeIf { !hasDeepJump && it.type != BufferType.SERVER }
+            // Whether the network was still catching up AT ENTRY. Entry itself never waits on that
+            // (see below), but a room entered mid-catch-up is owed exactly one correction once the
+            // catch-up lands and the anchors it resolves may have moved older.
+            val catchUpPending = entryRoom != null && !entryHistoryReady(
+                connectionManager.connectionActivity.value,
+                entryRoom.networkId,
+            )
+            // The SAME at-rest resolution the Pager key was built from, so entry lands on the row the
+            // generation is already keyed at. Entry does NOT wait for history catch-up to publish it:
+            // `historyCatchUpPending` is held across catch-up's whole retry loop (exponential backoff
+            // up to 30s per attempt), and while entry stayed pending the screen kept its entire follow
+            // machinery disarmed — no auto-follow at the live bottom, no newest FAB, no read-marker
+            // advancement — captured live as a 42-second dead window on a room whose divider was
+            // sitting in the store the whole time.
+            var anchors = entryAnchors(entrySpec)
+            val enteredFromAtRest = anchors.hasDurableContent
+            if (entryRoom != null && !enteredFromAtRest) {
+                // The one case that still waits: no stored anchor, no saved viewport, not one
+                // retained row, so there is genuinely nothing to position in and the reader is
+                // looking at the empty-timeline spinner either way. Bounded for the same reason as
+                // before — a struggling catch-up must not own the screen for its whole retry loop —
+                // and the fallback is the already-shipped offline entry behavior, not a new mode.
                 withTimeoutOrNull(ENTRY_HISTORY_READY_TIMEOUT_MS) {
                     connectionManager.connectionActivity.first { activity ->
-                        entryHistoryReady(activity, initialEntryBuffer.networkId)
+                        entryHistoryReady(activity, entryRoom.networkId)
                     }
                 }
+                anchors = resolveEntryAnchors(entrySpec, discardUnresolvedSaved = true)
             }
-            // Read the buffer again after catch-up because read-marker convergence runs before the
-            // newest history page and may have advanced the durable marker while entry was waiting.
-            val entryBuffer = bufferRepository.observeBuffer(bufferId).firstOrNull()
-            val realMarker: TimelineAnchor? = entryBuffer?.let {
-                visibilityReader.effectiveLocalReadAnchor(it)
-            }
-            // The timeline is unbounded, so this resolves against every retained row. That is the
-            // same answer the old bounded call gave: a window bound could only ever hide rows the
-            // client already holds, and a gap's far side is by definition rows it does not.
-            val firstUnread = realMarker?.let {
-                visibilityReader.firstVisibleUnreadAnchor(bufferId, it, entrySpec)
-            }
-            val unreadRow = entryBuffer?.let { room ->
-                bufferRepository.observeChatList().first()
-                    .firstOrNull { it.bufferId == room.id }
-            }
-            // Freeze exactly once per visit. A restored snapshot already IS this visit's boundary;
-            // re-deriving it here would place the divider at what is unread now, not on entry.
-            if (!unreadEntrySnapshotRestored) {
-                val frozen = firstUnread?.let {
-                    UnreadEntrySnapshot(
-                        marker = TimelineAnchor(it.serverTime, it.eventId - 1L, it.timelineOrder),
-                        loadedCount = (unreadRow?.unreadCount ?: 1).coerceAtLeast(1),
-                        // Gap-derived only. The window-bounds disjunct that used to sit here is now
-                        // always false (Recent no longer passes a lower boundary), and it was always
-                        // the weaker of the two: `unreadCountIncomplete` is computed in SQL from the
-                        // room's stored gaps against its read marker, so it states "some unread
-                        // history is missing" directly instead of inferring it from a clamp.
-                        lowerBound = unreadRow?.unreadCountIncomplete == true,
-                    )
-                }
-                _unreadEntrySnapshot.value = frozen
-                persistUnreadEntrySnapshot(frozen)
-            }
-            // A normal open chooses between two anchors — the oldest unread row and the viewport
-            // this room was last left at — with the bare read marker as the fallback for a room
-            // that offers neither. A deep link owns its own target and never reaches here.
-            //
-            // Leaving at the live bottom retires the second anchor rather than the first: it is a
-            // statement about where the reader stopped, and nothing about what arrived afterwards.
-            // So a park decides only the caught-up case, and the unread divider keeps entry
-            // whenever this visit has one — see the branch below.
-            //
-            // The read marker used to divert entry on its own, which made the saved viewport
-            // unreachable: every room anyone has opened HAS a read anchor, so the restore branch ran
-            // only for rooms that had never been read. That is the "leaving and re-entering does not
-            // restore my position" defect; [preferredEntryTarget] states the rule that replaces it,
-            // and the furthest-displayed watermark is the input that keeps that rule from resetting
-            // a reader who is working FORWARD through an unread backlog they have not yet finished.
-            //
-            // All three indices are comparable because they are the same count: `countNewerThan` and
-            // `countTimelineNewer` are both `countTimelineNewerQuery` over this room and spec —
-            // pinned by MessageRepositoryPagingTest so neither can grow a predicate the other lacks.
+            freezeUnreadEntrySnapshot(anchors)
             if (!hasDeepJump && _entryState.value !is EntryPositionState.Settled) {
-                // The same `firstUnread` the freeze above consumed, so the target and the divider
-                // name ONE row by construction. They cannot diverge on a restored snapshot either:
-                // a restore means the process died, and the park below lives in a process-local map
-                // that dies with it, so the branch that depends on the divider only ever runs on a
-                // visit that just froze it here.
-                val unreadTarget = firstUnread?.let {
-                    readMarkerEntryTarget(it, entrySpec, requireExactIdentity = true)
-                }
-                _initialTarget.value = if (parkedAtBottom()) {
-                    // A reader who left at the live bottom was following the conversation, so they
-                    // return to it — but only when there is nothing unread to return to instead.
-                    // Messages that arrived while they were away are exactly what the divider
-                    // exists to announce, and entering at the newest row buries it somewhere above
-                    // the viewport, where finding out what was missed means scrolling BACKWARDS
-                    // past the very messages the divider was drawn for.
-                    //
-                    // Only the unread anchor may divert a follower, never the bare read marker:
-                    // every room anyone has read HAS a marker, so consulting it here would park
-                    // them behind a divider on a room that has nothing new at all.
-                    unreadTarget ?: ChatPositionTarget(index = 0)
-                } else {
-                    preferredEntryTarget(
-                        saved = restoredScrollPosition(entrySpec),
-                        firstUnread = unreadTarget,
-                        furthestDisplayedIndex = furthestDisplayedEntryIndex(entrySpec),
-                    )
-                        ?: realMarker?.let {
-                            readMarkerEntryTarget(it, entrySpec, requireExactIdentity = false)
-                        }
-                        ?: ChatPositionTarget(index = 0)
-                }
+                _initialTarget.value = anchors.target
+            }
+            // The wait path already resolved against caught-up data (or against an expired bound),
+            // so only an at-rest entry can still be owed a correction.
+            if (entryRoom != null && freshVisit && catchUpPending && enteredFromAtRest) {
+                armPostCatchUpEntryRepair(entryRoom.networkId, entrySpec, anchors)
             }
         }
         viewModelScope.launch {
@@ -1789,6 +1823,94 @@ class ChatViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * Freeze the visit's "New messages" divider boundary from [anchors], absence included.
+     *
+     * The boundary is anchored to the first message from SOMEONE ELSE past the marker (minus 1, so
+     * the existing `> marker` divider/badge comparisons land on that message): your own sent messages
+     * must never trip the divider or the scroll-down badge, since you have read what you just sent.
+     * Null (no real marker, or nothing unread from others) hides both.
+     *
+     * It uses the SAME `firstUnread` the entry target was resolved from, so the divider and the row
+     * entry lands on name one row by construction.
+     *
+     * Frozen once per VISIT. A restored snapshot already IS this visit's boundary; re-deriving it
+     * would place the divider at what is unread NOW rather than on entry, which is exactly what
+     * freezing exists to prevent. [armPostCatchUpEntryRepair] is the single exception and it is not
+     * a re-derivation of a settled boundary: it refines a boundary this same visit froze from
+     * not-yet-caught-up data, only while the reader has not touched the viewport, and at most once.
+     */
+    private suspend fun freezeUnreadEntrySnapshot(anchors: EntryAnchors) {
+        if (unreadEntrySnapshotRestored) return
+        val frozen = anchors.firstUnread?.let { first ->
+            val unreadRow = anchors.room?.let { room ->
+                bufferRepository.observeChatList().first().firstOrNull { it.bufferId == room.id }
+            }
+            UnreadEntrySnapshot(
+                marker = TimelineAnchor(first.serverTime, first.eventId - 1L, first.timelineOrder),
+                loadedCount = (unreadRow?.unreadCount ?: 1).coerceAtLeast(1),
+                // Gap-derived only. The window-bounds disjunct that used to sit here is now always
+                // false (Recent no longer passes a lower boundary), and it was always the weaker of
+                // the two: `unreadCountIncomplete` is computed in SQL from the room's stored gaps
+                // against its read marker, so it states "some unread history is missing" directly
+                // instead of inferring it from a clamp.
+                lowerBound = unreadRow?.unreadCountIncomplete == true,
+            )
+        }
+        _unreadEntrySnapshot.value = frozen
+        persistUnreadEntrySnapshot(frozen)
+    }
+
+    /**
+     * The one bounded correction owed to a room that was entered while its network was still
+     * catching up.
+     *
+     * Entry is published from at-rest data immediately, which is right — the anchors that decide it
+     * are durable columns on the buffer, and a room with content can always be placed. What catch-up
+     * can still change is which row those anchors name, and how deep it sits, so the correction
+     * re-resolves once when catch-up clears (or when its own bound expires, in which case the
+     * at-rest entry stands) and republishes only if the anchor actually moved. `jumpThreshold` in
+     * the paging config turns a far correction into a Pager jump rather than a scroll through
+     * history.
+     *
+     * It corrects a placement in progress and never an outcome:
+     *
+     *  * Entry must still be [EntryPositionState.Pending] — the screen has not finished placing the
+     *    at-rest target. Once it has, the position is on screen and the divider has been SHOWN, and
+     *    both are outcomes the reader has already seen: moving them then is the yank the frozen
+     *    boundary exists to prevent, and it would also let arriving history (a gap fill across the
+     *    catch-up seam, say) redraw a divider that is by contract frozen for the visit.
+     *  * The reader must not have touched the viewport: a drag, fling, send, FAB or explicit jump
+     *    retires the correction, after which read-marker correctness converges through ordinary
+     *    marker advancement instead.
+     */
+    private fun armPostCatchUpEntryRepair(
+        networkId: Long,
+        spec: MessageVisibilitySpec,
+        entered: EntryAnchors,
+    ) = viewModelScope.launch {
+        withTimeoutOrNull(ENTRY_HISTORY_READY_TIMEOUT_MS) {
+            connectionManager.connectionActivity.first { entryHistoryReady(it, networkId) }
+        } ?: return@launch
+        if (!entryCorrectable()) return@launch
+        val repaired = resolveEntryAnchors(spec, discardUnresolvedSaved = true)
+        if (!entryAnchorMoved(entered.target, repaired.target)) return@launch
+        // Re-checked after the queries: the screen may have placed the entered target, or the reader
+        // taken the viewport over, while they ran.
+        if (!entryCorrectable()) return@launch
+        freezeUnreadEntrySnapshot(repaired)
+        // The screen may already have settled the entered position, so force a distinct emission —
+        // as [restoreRedirectedViewport] does — and give the correction its own one-shot index
+        // repair budget.
+        initialReresolveUsed = false
+        _initialTarget.value = null
+        _initialTarget.value = repaired.target
+    }
+
+    /** The entry placement is still in flight and still ours; see [armPostCatchUpEntryRepair]. */
+    private fun entryCorrectable(): Boolean =
+        !timelineInteracted && _entryState.value is EntryPositionState.Pending
 
     /**
      * Position the viewport on the oldest unread message (the first unseen row) so it tops the
@@ -1969,6 +2091,7 @@ class ChatViewModel @Inject constructor(
      * and settle entry so read state is no longer gated on a position the user just overrode.
      */
     fun jumpToNewest() {
+        timelineInteracted = true
         jumpResolveJob?.cancel()
         jumpResolveJob = null
         activeJumpRequest = null
@@ -1979,6 +2102,7 @@ class ChatViewModel @Inject constructor(
 
     /** Re-resolve an exact mention against the live timeline before scrolling to it. */
     fun focusRecentMention(target: ChatPositionTarget) {
+        timelineInteracted = true
         jumpResolveJob?.cancel()
         _jumpTarget.value = null
         activeJumpRequest = null
@@ -2059,6 +2183,7 @@ class ChatViewModel @Inject constructor(
      * shared jump pipeline still supplies bounded paging, index-shift recovery, and highlighting.
      */
     fun jumpToRepliedMessage(msgid: String) {
+        timelineInteracted = true
         val settlesEntryPosition = _entryState.value is EntryPositionState.Pending
         val request = JumpRequest(
             token = ++nextJumpToken,
@@ -2248,11 +2373,12 @@ internal fun needsDeepJumpResolution(
 ): Boolean = hasDeepJump && (!jumpConsumed || entryState is EntryPositionState.Pending)
 
 /**
- * Upper bound on how long normal entry waits for [entryHistoryReady] before positioning against
- * local data. Long enough for a healthy catch-up (typically one CHATHISTORY pass, low seconds) and
- * a first 2s-backoff retry; short enough that a struggling catch-up cannot keep the screen's
- * follow/FAB/read machinery disarmed for its whole retry loop. The fallback is the already-shipped
- * offline entry behavior, not a new mode.
+ * Upper bound on the two remaining waits for [entryHistoryReady]: the empty-room entry that has
+ * nothing to position in, and the single post-catch-up correction armed for a room entered while its
+ * network was still catching up. Long enough for a healthy catch-up (typically one CHATHISTORY pass,
+ * low seconds) and a first 2s-backoff retry; short enough that a struggling catch-up cannot keep the
+ * screen's follow/FAB/read machinery disarmed for its whole retry loop. Expiry is not a failure: the
+ * at-rest entry stands, which is the already-shipped offline entry behavior rather than a new mode.
  */
 internal const val ENTRY_HISTORY_READY_TIMEOUT_MS = 8_000L
 
