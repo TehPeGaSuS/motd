@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +34,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -154,6 +156,7 @@ fun ChatListRowItem(
     presence: PresenceState? = null,
     selected: Boolean = false,
     active: Boolean = false,
+    syncIndicator: ChatListSyncIndicator = ChatListSyncIndicator.NONE,
 ) {
     // Resolved per-nick color (also used to tint the friend star), matching sender coloring.
     val nickColor = LocalNickColors.current.nick(row.displayName, MaterialTheme.colorScheme.onSurfaceVariant)
@@ -212,6 +215,7 @@ fun ChatListRowItem(
             networkId = row.networkId,
             presence = queryPresence,
             size = spacing.chatListAvatar,
+            syncIndicator = syncIndicator,
         )
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -395,6 +399,7 @@ private fun PresenceAvatar(
     networkId: Long,
     presence: PresenceState?,
     size: Dp,
+    syncIndicator: ChatListSyncIndicator = ChatListSyncIndicator.NONE,
 ) {
     Box(modifier = Modifier.size(size)) {
         Avatar(
@@ -411,6 +416,59 @@ private fun PresenceAvatar(
                 modifier = Modifier.align(Alignment.BottomEnd),
             )
         }
+        if (syncIndicator != ChatListSyncIndicator.NONE) {
+            SyncStatusBadge(
+                indicator = syncIndicator,
+                modifier = Modifier.align(Alignment.TopEnd),
+            )
+        }
+    }
+}
+
+/**
+ * Overlays the avatar's top-right corner with the row's history-sync affordance (mirrors
+ * [PresenceBadge] at the opposite corner). Absolutely positioned inside the avatar's fixed-size
+ * [Box], so it never shifts row layout. No live region: rows churn constantly during a resync
+ * pass, and announcing every transition would spam TalkBack.
+ */
+@Composable
+private fun SyncStatusBadge(
+    indicator: ChatListSyncIndicator,
+    modifier: Modifier = Modifier,
+) {
+    when (indicator) {
+        ChatListSyncIndicator.SYNCING -> {
+            val description = stringResource(R.string.chatlist_sync_syncing)
+            CircularProgressIndicator(
+                strokeWidth = 1.5.dp,
+                modifier = modifier
+                    .size(12.dp)
+                    .testTag("chatlist_row_sync_syncing")
+                    .semantics { contentDescription = description },
+            )
+        }
+        ChatListSyncIndicator.QUEUED -> {
+            val description = stringResource(R.string.chatlist_sync_queued)
+            Box(
+                modifier = modifier
+                    .size(12.dp)
+                    .testTag("chatlist_row_sync_queued")
+                    .semantics { contentDescription = description }
+                    .border(1.5.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), CircleShape),
+            )
+        }
+        ChatListSyncIndicator.ERROR -> {
+            val description = stringResource(R.string.chatlist_sync_error)
+            Box(
+                modifier = modifier
+                    .size(8.dp)
+                    .testTag("chatlist_row_sync_error")
+                    .semantics { contentDescription = description }
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.error),
+            )
+        }
+        ChatListSyncIndicator.NONE -> Unit
     }
 }
 

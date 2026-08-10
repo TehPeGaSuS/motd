@@ -19,6 +19,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ChannelCloseCoordinator
 import io.github.trevarj.motd.service.HistoryResyncController
+import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
@@ -26,13 +27,37 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.SharingStarted.Companion.WhileSubscribed
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/** Per-row chat-list sync affordance; coarser than [HistorySyncStatus] so unrelated reason-string
+ * churn (e.g. a retried [HistorySyncStatus.Partial] with a new reason) never invalidates a row. */
+enum class ChatListSyncIndicator { NONE, QUEUED, SYNCING, ERROR }
+
+/**
+ * Pure mapper from the coordinator's per-buffer status map to the chat list's coarser indicator.
+ * [HistorySyncStatus.Idle] and [HistorySyncStatus.Unavailable] settle to [ChatListSyncIndicator.NONE]
+ * and are dropped from the result map entirely, so a row with no entry never renders a badge.
+ */
+internal fun chatListSyncIndicators(
+    statuses: Map<Long, HistorySyncStatus>,
+): Map<Long, ChatListSyncIndicator> = statuses.mapNotNull { (bufferId, status) ->
+    val indicator = when (status) {
+        HistorySyncStatus.Queued -> ChatListSyncIndicator.QUEUED
+        HistorySyncStatus.Syncing -> ChatListSyncIndicator.SYNCING
+        is HistorySyncStatus.Partial, is HistorySyncStatus.Failed -> ChatListSyncIndicator.ERROR
+        HistorySyncStatus.Idle, HistorySyncStatus.Unavailable -> ChatListSyncIndicator.NONE
+    }
+    (bufferId to indicator).takeIf { indicator != ChatListSyncIndicator.NONE }
+}.toMap()
 
 /** Single UI state for the chat list screen. See plans/07 + plans/16 §3.4. */
 data class ChatListState(
@@ -108,6 +133,14 @@ class ChatListViewModel @Inject constructor(
     // One-shot: unmuting marked a muted backlog read, so the screen can report it and offer an undo.
     private val _muteBacklogSuppressions = MutableSharedFlow<List<MuteBacklogSuppression>>(extraBufferCapacity = 1)
     val muteBacklogSuppressions: SharedFlow<List<MuteBacklogSuppression>> = _muteBacklogSuppressions.asSharedFlow()
+
+    // Deliberately kept out of the [state] combine: the enum map already defeats a retried
+    // Partial/Failed's reason-string churn, but folding it into ChatListState would still
+    // recompose every row on any one buffer's sync transition instead of just its own row.
+    val syncIndicators: StateFlow<Map<Long, ChatListSyncIndicator>> = historyResync.syncStatuses
+        .map(::chatListSyncIndicators)
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, WhileSubscribed(5_000), emptyMap())
 
     // Scope selection survives config changes; null = unified list (default).
     private val selection = MutableStateFlow(savedStateHandle.get<Long?>(KEY_SELECTED))

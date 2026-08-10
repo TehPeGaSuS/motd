@@ -12,6 +12,9 @@
         <item quantity="other">Scroll to top, %1$d unread messages above</item>
     </plurals>
     <string name="chatlist_pinned">Pinned</string>
+    <string name="chatlist_sync_syncing">Syncing history</string>
+    <string name="chatlist_sync_queued">Queued for history sync</string>
+    <string name="chatlist_sync_error">History sync couldn\'t finish</string>
     <string name="chatlist_empty_title">No conversations yet</string>
     <string name="chatlist_empty_message">Connect to a network to start chatting.</string>
     <string name="chatlist_no_networks_title">No networks configured</string>

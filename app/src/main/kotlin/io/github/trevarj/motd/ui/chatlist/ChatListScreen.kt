@@ -171,6 +171,9 @@ fun ChatListScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val audioPlaybackState by audioViewModel.state.collectAsStateWithLifecycle()
+    // Collected once here, outside the ChatListState combine (see ChatListViewModel), so a
+    // buffer's sync transition recomposes only its own row rather than the whole list.
+    val syncIndicators by viewModel.syncIndicators.collectAsStateWithLifecycle()
 
     // Fresh installs enter onboarding once state is loaded; a durable skip keeps the empty main UI.
     LaunchedEffect(state.loading, state.networks.isEmpty(), state.onboardingComplete) {
@@ -191,6 +194,7 @@ fun ChatListScreen(
 
     ChatListContent(
         state = state,
+        syncIndicators = syncIndicators,
         snackbarHostState = snackbarHostState,
         audioPlaybackState = audioPlaybackState,
         onAudioToggle = audioViewModel::toggle,
@@ -237,6 +241,7 @@ internal fun defaultChatBufferId(rows: List<ChatListRow>): Long? = rows.maxWithO
 @Composable
 fun ChatListContent(
     state: ChatListState,
+    syncIndicators: Map<Long, ChatListSyncIndicator> = emptyMap(),
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     audioPlaybackState: AudioPlaybackState = AudioPlaybackState(),
     onAudioToggle: () -> Unit = {},
@@ -503,6 +508,7 @@ fun ChatListContent(
                             onAcceptInvitation = onAcceptInvitation,
                             onIgnoreInvitation = onIgnoreInvitation,
                             presence = state.queryPresence,
+                            syncIndicators = syncIndicators,
                             friends = state.friends,
                             fools = state.fools,
                             multiNetwork = showNetworkChip,
@@ -738,6 +744,7 @@ private fun ChatList(
     onAcceptInvitation: (Long) -> Unit,
     onIgnoreInvitation: (Long) -> Unit,
     presence: Map<Long, io.github.trevarj.motd.service.PresenceState>,
+    syncIndicators: Map<Long, ChatListSyncIndicator>,
     friends: Set<String>,
     fools: Set<String>,
     multiNetwork: Boolean,
@@ -1018,6 +1025,7 @@ private fun ChatList(
                         onToggleSelection = onToggleSelection,
                         onStartSelection = onStartSelection,
                         onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
+                        syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
                         modifier = Modifier.animateItem(
                             fadeInSpec = ChatListItemMotion.fadeInSpec,
                             fadeOutSpec = ChatListItemMotion.fadeOutSpec,
@@ -1043,6 +1051,7 @@ private fun ChatList(
                             onToggleSelection = onToggleSelection,
                             onStartSelection = onStartSelection,
                             onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
+                            syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
                             modifier = Modifier.animateItem(
                                 fadeInSpec = ChatListItemMotion.fadeInSpec,
                                 fadeOutSpec = ChatListItemMotion.fadeOutSpec,
@@ -1070,6 +1079,7 @@ private fun ChatList(
                         onToggleSelection = onToggleSelection,
                         onStartSelection = onStartSelection,
                         onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
+                        syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
                         modifier = Modifier.animateItem(
                             fadeInSpec = ChatListItemMotion.fadeInSpec,
                             fadeOutSpec = ChatListItemMotion.fadeOutSpec,
@@ -1111,6 +1121,7 @@ private fun ChatList(
                                     onToggleSelection = onToggleSelection,
                                     onStartSelection = onStartSelection,
                                     onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
+                                    syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
                                 )
                             }
                         }
@@ -1483,6 +1494,7 @@ private fun SelectableChatListRow(
     onStartSelection: (Long) -> Unit,
     onArchive: () -> Unit,
     modifier: Modifier = Modifier,
+    syncIndicator: ChatListSyncIndicator = ChatListSyncIndicator.NONE,
 ) {
     val currentArchive by rememberUpdatedState(onArchive)
     val dismissState = rememberSwipeToDismissBoxState()
@@ -1519,6 +1531,7 @@ private fun SelectableChatListRow(
                 presence = presence,
                 selected = selected,
                 active = active,
+                syncIndicator = syncIndicator,
             )
         }
     }
