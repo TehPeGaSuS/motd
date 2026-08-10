@@ -335,8 +335,8 @@ class FreshInstallScrollbackTest {
                 "no load state was published while the page was on the wire"
             }
             // The footer reads `loadState.append`, so pin the raw state Paging publishes for a
-            // mediator page in flight — not just the mapping, which now shimmers for an armed ladder
-            // too and would pass either way.
+            // mediator page in flight as well as the mapping: only a real in-flight page may reach
+            // the shimmer, an armed-but-idle ladder maps to Armed.
             assertTrue(
                 "append must report Loading while the page is on the wire, got ${observed.append}",
                 observed.append is LoadState.Loading,

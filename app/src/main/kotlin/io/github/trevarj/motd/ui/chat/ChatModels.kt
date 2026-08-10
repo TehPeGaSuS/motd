@@ -1060,6 +1060,13 @@ sealed interface ChatHistoryUiState {
     /** An APPEND page is in flight (shimmer). */
     data object Loading : ChatHistoryUiState
 
+    /**
+     * More history exists and the ladder is armed at this footer, but nothing is on the wire yet.
+     * A static status line rather than a spinner: promising motion that is not happening is what
+     * made the old permanent shimmer uninformative.
+     */
+    data object Armed : ChatHistoryUiState
+
     /** A recoverable append error; the footer offers `items.retry()`. */
     data object Retry : ChatHistoryUiState
 
@@ -1111,15 +1118,88 @@ internal fun chatHistoryUiState(
             ChatHistoryUiState.Unavailable(offline = isHistoryOffline(connectionState))
         // This footer is an item at the far end of the timeline, so it is composed only once the
         // reader has actually scrolled past the oldest retained row — the exact position where the
-        // ladder's APPEND fires. An armed ladder therefore shows the shimmer rather than nothing:
-        // the fetch is in flight, or it is about to be. Waiting for `LoadState.Loading` alone left
-        // the older end silent at the very moment it had something to say, because prefetch starts
-        // the page a screenful earlier and it usually lands before the reader arrives.
+        // ladder's APPEND fires. An armed ladder therefore says so, but it says it honestly: only
+        // `LoadState.Loading` may render the shimmer. Prefetch fires the APPEND a screenful before
+        // the reader arrives, so a real fetch still shows the spinner; what disappears is the
+        // permanent spinner that spun over an idle ladder.
         //
         // End-of-pagination without persisted completion stays silent: the direction is finished for
-        // this Pager and a shimmer there would promise a page that is never coming.
+        // this Pager and a status line there would promise a page that is never coming.
         is HistoryAvailability.Ready ->
-            if (append.endOfPaginationReached) ChatHistoryUiState.Hidden else ChatHistoryUiState.Loading
+            if (append.endOfPaginationReached) ChatHistoryUiState.Hidden else ChatHistoryUiState.Armed
+    }
+}
+
+/** Appearance grace before the append shimmer may show, matching the sync bar's 140 ms fade. */
+internal const val FOOTER_APPEARANCE_DELAY_MS = 140L
+
+/** Once shown, the shimmer holds this long so a page that lands immediately is not a flash. */
+internal const val FOOTER_MIN_VISIBLE_MS = 500L
+
+/**
+ * Debounces [ChatHistoryUiState] for the append footer. Pure and clock-free: the caller injects
+ * [nowMs], so the whole policy is testable without a wall clock or a real frame clock.
+ *
+ * Two windows, both aimed at the same defect — a footer that flicks as PagingSource generations
+ * churn Loading/Hidden/Armed within a few frames:
+ * - [FOOTER_APPEARANCE_DELAY_MS] before Loading may appear, so a page that resolves inside the
+ *   window never paints a spinner at all.
+ * - [FOOTER_MIN_VISIBLE_MS] before a shown Loading may collapse, so a spinner that did appear stays
+ *   readable instead of blinking out one frame later.
+ *
+ * Terminal and actionable states ([ChatHistoryUiState.ConfirmedStart], [ChatHistoryUiState.Unsupported],
+ * [ChatHistoryUiState.Retry], [ChatHistoryUiState.LoadOlder]) pass through immediately: they are
+ * answers, not transitions, and delaying them only withholds what the reader can act on.
+ */
+internal class FooterStatePresenter {
+    private var presented: ChatHistoryUiState = ChatHistoryUiState.Hidden
+    private var loadingSinceMs: Long? = null
+    private var lastLoadingSeenMs: Long? = null
+    private var shownSinceMs: Long? = null
+
+    fun resolve(candidate: ChatHistoryUiState, nowMs: Long): ChatHistoryUiState {
+        if (isImmediate(candidate)) return settle(candidate)
+        if (candidate == ChatHistoryUiState.Loading) {
+            // A Loading that returns within the flick window continues the same burst and keeps the
+            // original appearance deadline; a genuinely new fetch (a long quiet gap) earns its own.
+            val gap = lastLoadingSeenMs?.let { nowMs - it }
+            if (loadingSinceMs == null || (gap != null && gap >= FOOTER_MIN_VISIBLE_MS)) {
+                loadingSinceMs = nowMs
+            }
+            lastLoadingSeenMs = nowMs
+            if (presented == ChatHistoryUiState.Loading) return ChatHistoryUiState.Loading
+            val since = nowMs - (loadingSinceMs ?: nowMs)
+            if (since < FOOTER_APPEARANCE_DELAY_MS) return presented
+            shownSinceMs = nowMs
+            presented = ChatHistoryUiState.Loading
+            return presented
+        }
+        // Collapsing away from a visible shimmer waits out its minimum-visible window.
+        val shownFor = shownSinceMs?.let { nowMs - it }
+        if (presented == ChatHistoryUiState.Loading && shownFor != null && shownFor < FOOTER_MIN_VISIBLE_MS) {
+            return ChatHistoryUiState.Loading
+        }
+        shownSinceMs = null
+        presented = candidate
+        return presented
+    }
+
+    /** Adopts [candidate] outright, clearing every pending window. */
+    private fun settle(candidate: ChatHistoryUiState): ChatHistoryUiState {
+        loadingSinceMs = null
+        lastLoadingSeenMs = null
+        shownSinceMs = null
+        presented = candidate
+        return presented
+    }
+
+    private fun isImmediate(candidate: ChatHistoryUiState): Boolean = when (candidate) {
+        ChatHistoryUiState.ConfirmedStart,
+        ChatHistoryUiState.Unsupported,
+        ChatHistoryUiState.Retry,
+        ChatHistoryUiState.LoadOlder,
+        -> true
+        else -> false
     }
 }
 

@@ -455,6 +455,7 @@
     <string name="chat_history_footer_offline">Reconnect to load older messages</string>
     <string name="chat_history_footer_negotiating">Waiting for history support…</string>
     <string name="chat_history_footer_unsupported">This server does not provide older history</string>
+    <string name="chat_history_footer_more">Older messages</string>
     <string name="chat_history_start">Beginning of history</string>
     <!-- History gap seam: a visible marker where the timeline has a hole -->
     <string name="chat_history_gap_failed">Couldn\'t load missing history — tap to retry</string>

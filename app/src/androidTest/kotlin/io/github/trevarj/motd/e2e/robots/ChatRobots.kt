@@ -20,6 +20,7 @@ import androidx.compose.ui.test.swipeDown
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.trevarj.motd.e2e.TimelineDiagnostics
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_LOADING_TAG
+import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_MORE_TAG
 import io.github.trevarj.motd.ui.components.CHAT_GAP_DIVIDER_TAG
 import org.junit.Assert.assertTrue
 
@@ -214,14 +215,18 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
             rule.onNodeWithTag("chat_timeline", useUnmergedTree = true)
                 .performTouchInput { swipeDown(durationMillis = 300) }
         }
-        // The boundary hit paints the shimmer footer while the APPEND is in flight, or the row set
-        // grows if the fixture page lands before the tag is first observed. If neither happens the
-        // step reached the confirmed start of history or loaded instantly; either way settle. The
-        // swallowed timeout costs at most 10s per fully-settled step (e.g. paging past the true
-        // start of history) and stays bounded: scrollOlderUntil's maximumSwipes cap still throws
-        // loudly if the requested row never becomes addressable.
+        // The boundary hit composes the footer — the shimmer while an APPEND is actually in flight,
+        // the armed status line otherwise — or the row set grows if the fixture page lands before
+        // either tag is observed. If none of that happens the step reached the confirmed start of
+        // history or loaded instantly; either way settle. The swallowed timeout costs at most 10s
+        // per fully-settled step (e.g. paging past the true start of history) and stays bounded:
+        // scrollOlderUntil's maximumSwipes cap still throws loudly if the requested row never
+        // becomes addressable.
         runCatching {
-            rule.waitUntil(10_000) { isPresent(CHAT_HISTORY_LOADING_TAG) || timelineItemCount() > before }
+            rule.waitUntil(10_000) {
+                isPresent(CHAT_HISTORY_LOADING_TAG) || isPresent(CHAT_HISTORY_MORE_TAG) ||
+                    timelineItemCount() > before
+            }
         }
         if (isPresent(CHAT_HISTORY_LOADING_TAG)) {
             rule.waitUntil(45_000) { !isPresent(CHAT_HISTORY_LOADING_TAG) }

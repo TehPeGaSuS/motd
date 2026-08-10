@@ -740,11 +740,17 @@ class ChatModelsTest {
         assertEquals(ChatHistoryUiState.Hidden, state(BufferType.SERVER, connected, ready, idle))
         assertEquals(ChatHistoryUiState.Hidden, state(BufferType.CHANNEL, connected, ready, ended))
 
-        // Loading: an APPEND page is in flight, OR the ladder is armed and the reader has reached
-        // the footer — the position where it fires. Both are "older messages are coming", and the
-        // footer only composes at the older end, so neither may render as silence.
+        // Loading: an APPEND page is in flight, and nothing else. A spinner over an idle ladder is
+        // a lie the reader cannot distinguish from a stuck fetch.
         assertEquals(ChatHistoryUiState.Loading, state(BufferType.CHANNEL, connected, ready, LoadState.Loading))
-        assertEquals(ChatHistoryUiState.Loading, state(BufferType.CHANNEL, connected, ready, idle))
+
+        // Armed: more history exists and the reader has reached the position where APPEND fires,
+        // but nothing is on the wire yet. Still not silence — the footer has something true to say.
+        assertEquals(ChatHistoryUiState.Armed, state(BufferType.CHANNEL, connected, ready, idle))
+        assertEquals(
+            ChatHistoryUiState.Armed,
+            state(BufferType.CHANNEL, connected, ready, idle, historyComplete = true),
+        )
 
         // Retry: a recoverable append error while history is advertised.
         assertEquals(ChatHistoryUiState.Retry, state(BufferType.CHANNEL, connected, ready, failed))
@@ -786,6 +792,80 @@ class ChatModelsTest {
         assertEquals(
             ChatHistoryUiState.ConfirmedStart,
             state(BufferType.CHANNEL, connected, ready, ended, historyComplete = true),
+        )
+    }
+
+    @Test fun `footer presenter withholds the shimmer until the appearance delay elapses`() {
+        val presenter = FooterStatePresenter()
+
+        // A page that resolves inside the appearance window never paints a spinner at all.
+        assertEquals(ChatHistoryUiState.Armed, presenter.resolve(ChatHistoryUiState.Armed, 0))
+        assertEquals(ChatHistoryUiState.Armed, presenter.resolve(ChatHistoryUiState.Loading, 10))
+        assertEquals(
+            ChatHistoryUiState.Armed,
+            presenter.resolve(ChatHistoryUiState.Loading, 10 + FOOTER_APPEARANCE_DELAY_MS - 1),
+        )
+        assertEquals(
+            ChatHistoryUiState.Loading,
+            presenter.resolve(ChatHistoryUiState.Loading, 10 + FOOTER_APPEARANCE_DELAY_MS),
+        )
+    }
+
+    @Test fun `footer presenter holds a shown shimmer for its minimum visible window`() {
+        val presenter = FooterStatePresenter()
+        presenter.resolve(ChatHistoryUiState.Loading, 0)
+        assertEquals(ChatHistoryUiState.Loading, presenter.resolve(ChatHistoryUiState.Loading, FOOTER_APPEARANCE_DELAY_MS))
+
+        val shownAt = FOOTER_APPEARANCE_DELAY_MS
+        // The page landed immediately; the spinner still stays readable rather than blinking out.
+        assertEquals(ChatHistoryUiState.Loading, presenter.resolve(ChatHistoryUiState.Hidden, shownAt + 1))
+        assertEquals(
+            ChatHistoryUiState.Loading,
+            presenter.resolve(ChatHistoryUiState.Armed, shownAt + FOOTER_MIN_VISIBLE_MS - 1),
+        )
+        assertEquals(
+            ChatHistoryUiState.Armed,
+            presenter.resolve(ChatHistoryUiState.Armed, shownAt + FOOTER_MIN_VISIBLE_MS),
+        )
+    }
+
+    @Test fun `footer presenter passes terminal and actionable states straight through`() {
+        listOf(
+            ChatHistoryUiState.ConfirmedStart,
+            ChatHistoryUiState.Unsupported,
+            ChatHistoryUiState.Retry,
+            ChatHistoryUiState.LoadOlder,
+        ).forEach { terminal ->
+            val presenter = FooterStatePresenter()
+            // Mid-shimmer, inside the minimum-visible window: an answer the reader can act on still
+            // wins, because withholding it buys nothing.
+            presenter.resolve(ChatHistoryUiState.Loading, 0)
+            presenter.resolve(ChatHistoryUiState.Loading, FOOTER_APPEARANCE_DELAY_MS)
+            assertEquals(terminal, presenter.resolve(terminal, FOOTER_APPEARANCE_DELAY_MS + 1))
+            // ...and the windows it interrupted are cleared, so the next fetch earns its own delay.
+            assertEquals(terminal, presenter.resolve(ChatHistoryUiState.Loading, FOOTER_APPEARANCE_DELAY_MS + 2))
+        }
+    }
+
+    @Test fun `footer presenter collapses a generation flick into one steady shimmer`() {
+        val presenter = FooterStatePresenter()
+        // A PagingSource generation swap churns Loading -> Hidden -> Loading within a few frames.
+        assertEquals(ChatHistoryUiState.Hidden, presenter.resolve(ChatHistoryUiState.Loading, 0))
+        assertEquals(ChatHistoryUiState.Loading, presenter.resolve(ChatHistoryUiState.Loading, 160))
+        assertEquals(ChatHistoryUiState.Loading, presenter.resolve(ChatHistoryUiState.Hidden, 180))
+        assertEquals(ChatHistoryUiState.Loading, presenter.resolve(ChatHistoryUiState.Loading, 200))
+        assertEquals(ChatHistoryUiState.Loading, presenter.resolve(ChatHistoryUiState.Hidden, 400))
+        assertEquals(ChatHistoryUiState.Loading, presenter.resolve(ChatHistoryUiState.Loading, 420))
+        // Only a settled state past the minimum-visible window ends it, and it ends it once.
+        assertEquals(ChatHistoryUiState.Armed, presenter.resolve(ChatHistoryUiState.Armed, 160 + FOOTER_MIN_VISIBLE_MS))
+
+        // A quiet gap longer than the flick window makes the next fetch a new burst with its own
+        // appearance delay, rather than inheriting a stale deadline and flashing instantly.
+        val quiet = 160 + FOOTER_MIN_VISIBLE_MS + 2 * FOOTER_MIN_VISIBLE_MS
+        assertEquals(ChatHistoryUiState.Armed, presenter.resolve(ChatHistoryUiState.Loading, quiet))
+        assertEquals(
+            ChatHistoryUiState.Loading,
+            presenter.resolve(ChatHistoryUiState.Loading, quiet + FOOTER_APPEARANCE_DELAY_MS),
         )
     }
 

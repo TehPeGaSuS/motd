@@ -188,7 +188,10 @@ internal class TimelineDiagnostics(
             }
         out.put("composedRows", composed)
         out.put("composedRowCount", composed.length())
-        out.put("historyFooterComposed", compose.onAllNodesWithTag(HISTORY_LOADING_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+        val footerTagged = listOf(HISTORY_LOADING_TAG, HISTORY_MORE_TAG).any { tag ->
+            compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        out.put("historyFooterComposed", footerTagged)
         out.put("unreadDividerComposed", compose.onAllNodesWithTag(UNREAD_DIVIDER_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
         return out
     }
@@ -538,6 +541,9 @@ internal class TimelineDiagnostics(
         const val DATABASE_NAME = "motd.db"
         const val TIMELINE_ROW_TAG_PREFIX = "chat_message_"
         const val HISTORY_LOADING_TAG = "chat_history_loading"
+
+        /** An armed ladder renders this instead of the shimmer, and still means "footer composed". */
+        const val HISTORY_MORE_TAG = "chat_history_more"
         const val UNREAD_DIVIDER_TAG = "chat_read_marker_divider"
 
         /** Structural columns of `messages`; deliberately excludes every free-text column. */

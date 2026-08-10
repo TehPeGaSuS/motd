@@ -46,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameMillis
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -501,7 +502,10 @@ fun MessageList(
         // top of the reversed list, i.e. visually above the oldest message where APPEND loads more.
         item(key = "append-state", contentType = "loadstate") {
             ChatHistoryFooter(
-                state = historyUiState,
+                // Debounced here, at the one existing item: PagingSource generation churn flicks the
+                // raw state within a few frames and no new list item may be added for it (the jump
+                // and placeholder math both count on this itemCount).
+                state = rememberFooterUiState(historyUiState),
                 onRetry = {
                     onHistoryRetry()
                     items.retry()
@@ -1425,11 +1429,39 @@ internal fun FoolCollapseChip(sender: String, tag: String, onCollapse: () -> Uni
 const val CHAT_HISTORY_RETRY_TAG = "chat_history_retry"
 const val CHAT_HISTORY_LOADING_TAG = "chat_history_loading"
 const val CHAT_HISTORY_LOAD_OLDER_TAG = "chat_history_load_older"
+const val CHAT_HISTORY_MORE_TAG = "chat_history_more"
+
+/** Height of the shimmer footer (12dp padding + 20dp indicator + 12dp padding). */
+private val HistoryFooterHeight = 44.dp
+
+/**
+ * Debounces the raw append footer state so a PagingSource generation swap cannot flick the footer.
+ *
+ * Driven off the frame clock rather than a wall clock, which keeps [FooterStatePresenter] pure and
+ * lets instrumentation step the windows with `mainClock`. Frames are pulled only while a decision is
+ * still pending; once the presenter agrees with the raw state the effect stops.
+ */
+@Composable
+fun rememberFooterUiState(raw: ChatHistoryUiState): ChatHistoryUiState {
+    val presenter = remember { FooterStatePresenter() }
+    // The presenter starts from Hidden, so an initial Loading must not paint a spinner for the one
+    // frame before the effect first resolves it.
+    var resolved by remember { mutableStateOf(if (raw == ChatHistoryUiState.Loading) ChatHistoryUiState.Hidden else raw) }
+    LaunchedEffect(raw) {
+        while (true) {
+            val settled = presenter.resolve(raw, withFrameMillis { it })
+            resolved = settled
+            if (settled == raw) break
+        }
+    }
+    return resolved
+}
 
 /**
  * Older-end paging footer. Scroll-driven APPEND drives history automatically, so the footer only
- * renders the shimmer, a retry affordance for recoverable errors, or a terminal status line. Only
- * persisted protocol completion may render the beginning-of-history claim.
+ * renders the shimmer for a page actually in flight, a static "more exists" line for an armed
+ * ladder, a retry affordance for recoverable errors, or a terminal status line. Only persisted
+ * protocol completion may render the beginning-of-history claim.
  */
 @Composable
 fun ChatHistoryFooter(
@@ -1441,6 +1473,7 @@ fun ChatHistoryFooter(
         ChatHistoryUiState.Loading -> androidx.compose.foundation.layout.Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = HistoryFooterHeight)
                 .padding(vertical = 12.dp)
                 .testTag(CHAT_HISTORY_LOADING_TAG),
             contentAlignment = androidx.compose.ui.Alignment.Center,
@@ -1450,6 +1483,12 @@ fun ChatHistoryFooter(
                 strokeWidth = 2.dp,
             )
         }
+        // Armed, not fetching: a slim static line, sized exactly like the shimmer box so swapping
+        // between the two never reflows the rows above it.
+        ChatHistoryUiState.Armed -> HistoryStatusText(
+            R.string.chat_history_footer_more,
+            modifier = Modifier.heightIn(min = HistoryFooterHeight).testTag(CHAT_HISTORY_MORE_TAG),
+        )
         ChatHistoryUiState.Retry -> HistoryRetryFooter(
             text = stringResource(R.string.chat_history_error),
             onRetry = onRetry,
@@ -1480,9 +1519,9 @@ fun ChatHistoryFooter(
 }
 
 @Composable
-private fun HistoryStatusText(textRes: Int) {
+private fun HistoryStatusText(textRes: Int, modifier: Modifier = Modifier) {
     Box(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        modifier = modifier.fillMaxWidth().padding(vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
