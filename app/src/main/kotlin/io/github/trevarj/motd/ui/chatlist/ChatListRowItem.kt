@@ -372,12 +372,18 @@ fun ChatListRowItem(
                         modifier = Modifier.testTag("chatlist_row_mention_badge"),
                     )
                 }
-                badges.unread?.let { count ->
-                    UnreadBadge(
-                        count = count,
-                        lowerBound = badges.unreadIncomplete,
-                        modifier = Modifier.testTag("chatlist_row_unread_badge"),
-                    )
+                // While this chat's history request is on the wire the spinner takes the unread
+                // badge's slot; the count returns (possibly updated) once the fetch settles.
+                if (syncIndicator == ChatListSyncIndicator.SYNCING) {
+                    SyncingCountSlotSpinner()
+                } else {
+                    badges.unread?.let { count ->
+                        UnreadBadge(
+                            count = count,
+                            lowerBound = badges.unreadIncomplete,
+                            modifier = Modifier.testTag("chatlist_row_unread_badge"),
+                        )
+                    }
                 }
             }
         }
@@ -416,7 +422,7 @@ private fun PresenceAvatar(
                 modifier = Modifier.align(Alignment.BottomEnd),
             )
         }
-        if (syncIndicator != ChatListSyncIndicator.NONE) {
+        if (syncIndicator == ChatListSyncIndicator.QUEUED || syncIndicator == ChatListSyncIndicator.ERROR) {
             SyncStatusBadge(
                 indicator = syncIndicator,
                 modifier = Modifier.align(Alignment.TopEnd),
@@ -426,10 +432,11 @@ private fun PresenceAvatar(
 }
 
 /**
- * Overlays the avatar's top-right corner with the row's history-sync affordance (mirrors
- * [PresenceBadge] at the opposite corner). Absolutely positioned inside the avatar's fixed-size
- * [Box], so it never shifts row layout. No live region: rows churn constantly during a resync
- * pass, and announcing every transition would spam TalkBack.
+ * Overlays the avatar's top-right corner with the row's quiet history-sync cues (mirrors
+ * [PresenceBadge] at the opposite corner): the queued ring and the error dot. The active-fetch
+ * spinner instead takes the unread badge's slot via [SyncingCountSlotSpinner]. Absolutely
+ * positioned inside the avatar's fixed-size [Box], so it never shifts row layout. No live region:
+ * rows churn constantly during a resync pass, and announcing every transition would spam TalkBack.
  */
 @Composable
 private fun SyncStatusBadge(
@@ -437,16 +444,6 @@ private fun SyncStatusBadge(
     modifier: Modifier = Modifier,
 ) {
     when (indicator) {
-        ChatListSyncIndicator.SYNCING -> {
-            val description = stringResource(R.string.chatlist_sync_syncing)
-            CircularProgressIndicator(
-                strokeWidth = 1.5.dp,
-                modifier = modifier
-                    .size(12.dp)
-                    .testTag("chatlist_row_sync_syncing")
-                    .semantics { contentDescription = description },
-            )
-        }
         ChatListSyncIndicator.QUEUED -> {
             val description = stringResource(R.string.chatlist_sync_queued)
             Box(
@@ -468,7 +465,29 @@ private fun SyncStatusBadge(
                     .background(MaterialTheme.colorScheme.error),
             )
         }
-        ChatListSyncIndicator.NONE -> Unit
+        ChatListSyncIndicator.SYNCING, ChatListSyncIndicator.NONE -> Unit
+    }
+}
+
+/**
+ * Active-fetch spinner rendered in the trailing badge row, occupying the unread badge's slot
+ * (which is suppressed while it shows). Sized to [UnreadBadge]'s 20dp minimum so the swap does
+ * not reflow the column. Same no-live-region policy as [SyncStatusBadge].
+ */
+@Composable
+private fun SyncingCountSlotSpinner(modifier: Modifier = Modifier) {
+    val description = stringResource(R.string.chatlist_sync_syncing)
+    Box(
+        modifier = modifier.size(20.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator(
+            strokeWidth = 2.dp,
+            modifier = Modifier
+                .size(16.dp)
+                .testTag("chatlist_row_sync_syncing")
+                .semantics { contentDescription = description },
+        )
     }
 }
 

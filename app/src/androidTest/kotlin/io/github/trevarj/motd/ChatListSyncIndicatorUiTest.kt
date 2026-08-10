@@ -13,7 +13,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
-/** Per-row sync badge (plans task 2): [ChatListRowItem] overlays the avatar's top-right corner. */
+/**
+ * Per-row sync cues on [ChatListRowItem]: the queued ring and error dot overlay the avatar's
+ * top-right corner, while the active-fetch spinner takes the unread badge's slot in the trailing
+ * badge row (suppressing the count until the fetch settles).
+ */
 class ChatListSyncIndicatorUiTest {
     @get:Rule
     val compose = createComposeRule()
@@ -23,6 +27,18 @@ class ChatListSyncIndicatorUiTest {
         setRow(ChatListSyncIndicator.SYNCING)
 
         compose.onNodeWithTag("chatlist_row_sync_syncing", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun syncing_spinnerTakesTheUnreadBadgeSlot() {
+        setRow(ChatListSyncIndicator.SYNCING, unreadCount = 7)
+
+        compose.onNodeWithTag("chatlist_row_sync_syncing", useUnmergedTree = true).assertIsDisplayed()
+        assertEquals(
+            0,
+            compose.onAllNodesWithTag("chatlist_row_unread_badge", useUnmergedTree = true)
+                .fetchSemanticsNodes().size,
+        )
     }
 
     @Test
@@ -48,11 +64,11 @@ class ChatListSyncIndicatorUiTest {
         }
     }
 
-    private fun setRow(indicator: ChatListSyncIndicator) {
+    private fun setRow(indicator: ChatListSyncIndicator, unreadCount: Int = 0) {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 ChatListRowItem(
-                    row = queryRow(),
+                    row = queryRow(unreadCount = unreadCount),
                     showNetworkChip = false,
                     onClick = {},
                     onLongClick = {},
@@ -62,7 +78,7 @@ class ChatListSyncIndicatorUiTest {
         }
     }
 
-    private fun queryRow() = ChatListRow(
+    private fun queryRow(unreadCount: Int = 0) = ChatListRow(
         bufferId = 1,
         networkId = 1,
         networkName = "Libera",
@@ -73,7 +89,7 @@ class ChatListSyncIndicatorUiTest {
         lastMessageText = "hello",
         lastMessageSender = "alice",
         lastMessageTime = 1L,
-        unreadCount = 0,
+        unreadCount = unreadCount,
         mentionCount = 0,
     )
 }
