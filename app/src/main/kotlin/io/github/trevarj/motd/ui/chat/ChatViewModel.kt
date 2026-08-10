@@ -648,6 +648,22 @@ class ChatViewModel @Inject constructor(
         .flatMapLatest(historyResyncCoordinator::syncStatus)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistorySyncStatus.Idle)
 
+    /**
+     * Manual retry behind the failed-sync pill. It reuses the ordinary reconciliation entry point so
+     * a tap racing the reconnect pass collapses onto that flight instead of opening a second one;
+     * HistoryPageLoader still serializes the wire request and EventProcessor still writes Room.
+     * Without a buffer or a live client there is nothing to reconcile, so the tap is a no-op.
+     */
+    fun retryHistorySync() = viewModelScope.launch {
+        val currentBuffer = buffer.value ?: return@launch
+        val client = connectionManager.clientFor(currentBuffer.networkId) ?: return@launch
+        historyResyncCoordinator.reconcileBuffer(
+            buffer = currentBuffer,
+            client = client,
+            isCurrent = { connectionManager.clientFor(currentBuffer.networkId) === client },
+        )
+    }
+
     private val typingNicks = operationalBufferId
         .flatMapLatest(typingTracker::typingNicks)
 

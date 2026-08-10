@@ -450,6 +450,8 @@
     <string name="chat_history_loading_messages">Loading messages…</string>
     <string name="chat_history_syncing_messages">Finding first unread…</string>
     <string name="chat_history_sync_failed_inline">Couldn\'t sync messages</string>
+    <!-- Quiet staleness chip: cached rows are readable but the sync stopped short of the server tail -->
+    <string name="chat_history_partial_chip">History may be incomplete</string>
     <string name="chat_history_footer_offline">Reconnect to load older messages</string>
     <string name="chat_history_footer_negotiating">Waiting for history support…</string>
     <string name="chat_history_footer_unsupported">This server does not provide older history</string>

@@ -521,6 +521,7 @@ fun ChatScreen(
         onUiEventAcknowledged = viewModel::acknowledgeUiEvent,
         onRetryReplyJump = viewModel::retryReplyJump,
         historySyncStatus = historySyncStatus,
+        onHistorySyncRetry = viewModel::retryHistorySync,
         historyAvailability = historyAvailability,
         conversationLayout = state.conversationLayout,
         onConversationLayoutSelected = viewModel::setConversationLayoutOverride,
@@ -695,6 +696,8 @@ fun ChatContent(
     onUiEventAcknowledged: (Long) -> Unit = {},
     onRetryReplyJump: (ReplyJumpRequest) -> Unit = {},
     historySyncStatus: HistorySyncStatus = HistorySyncStatus.Idle,
+    // Re-runs the reconciliation pass behind the failed-sync pill; Paging's own retry runs with it.
+    onHistorySyncRetry: () -> Unit = {},
     historyAvailability: HistoryAvailability = HistoryAvailability.NegotiatingOrOffline,
     countUnreadBelowViewport: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int = { _, _ -> 0 },
     nearestUnreadMentionBelow: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> ChatPositionTarget? = { _, _ -> null },
@@ -1983,9 +1986,19 @@ fun ChatContent(
                                 status = timelineHistoryStatus,
                                 timelineEmpty = items.itemCount == 0,
                                 retryEnabled = state.connState is IrcClientState.Ready,
-                                // Scroll-driven Paging owns history recovery: retrying the mediator
-                                // re-attempts the failed newer/older fetch (RemoteMediator gap fill).
-                                onRetry = { items.retry() },
+                                // Both halves of history recovery: the coordinator re-runs the
+                                // reconciliation pass (coalescing onto any in-flight one) while
+                                // Paging re-attempts the failed newer/older fetch.
+                                onRetry = {
+                                    onHistorySyncRetry()
+                                    items.retry()
+                                },
+                            )
+                        },
+                        staleChip = {
+                            TimelineHistoryStaleChip(
+                                status = timelineHistoryStatus,
+                                timelineEmpty = items.itemCount == 0,
                             )
                         },
                         syncBar = {
@@ -2432,6 +2445,7 @@ internal fun composerNeedsMemberNicks(value: TextFieldValue): Boolean {
 const val CHAT_HISTORY_SYNC_INDICATOR_TAG = "chat_history_sync_indicator"
 const val CHAT_HISTORY_SYNC_RETRY_TAG = "chat_history_sync_retry"
 const val CHAT_HISTORY_SYNC_BAR_TAG = "chat_history_sync_bar"
+const val CHAT_HISTORY_PARTIAL_CHIP_TAG = "chat_history_partial_chip"
 
 private val HistorySyncStatus.isActive: Boolean
     get() = this == HistorySyncStatus.Queued || this == HistorySyncStatus.Syncing
@@ -2447,6 +2461,7 @@ private val HistorySyncStatus.isActive: Boolean
 internal fun BoxScope.TimelineTopOverlays(
     audioPlayer: @Composable () -> Unit,
     historyIndicator: @Composable () -> Unit,
+    staleChip: @Composable () -> Unit,
     syncBar: @Composable () -> Unit,
 ) {
     Column(
@@ -2458,6 +2473,8 @@ internal fun BoxScope.TimelineTopOverlays(
         // Keep playback controls stationary when delayed history progress becomes visible.
         audioPlayer()
         historyIndicator()
+        // Column child, not a sibling overlay: the staleness chip must never cover the player.
+        staleChip()
     }
     Box(
         modifier = Modifier
@@ -2497,6 +2514,44 @@ internal fun TimelineHistorySyncBar(
                 .fillMaxWidth()
                 .height(3.dp),
         )
+    }
+}
+
+/**
+ * Advisory staleness only: a Partial pass left readable cached rows behind, so the chip states that
+ * without offering an action. An empty timeline has nothing to qualify, and a Failed pass keeps the
+ * retry on its pill, so neither renders this.
+ */
+internal fun showsStaleChip(status: HistorySyncStatus, timelineEmpty: Boolean): Boolean =
+    status is HistorySyncStatus.Partial && !timelineEmpty
+
+/** Quiet, non-interactive companion to the sync pill for a settled-but-incomplete history pass. */
+@Composable
+internal fun TimelineHistoryStaleChip(
+    status: HistorySyncStatus,
+    timelineEmpty: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    AnimatedVisibility(
+        visible = showsStaleChip(status, timelineEmpty),
+        modifier = modifier
+            .padding(horizontal = 24.dp, vertical = 8.dp)
+            .testTag(CHAT_HISTORY_PARTIAL_CHIP_TAG),
+        enter = fadeIn(MotdMotion.microFadeIn),
+        exit = fadeOut(MotdMotion.microFadeOut),
+    ) {
+        Surface(
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        ) {
+            Text(
+                text = stringResource(R.string.chat_history_partial_chip),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+        }
     }
 }
 

@@ -21,10 +21,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.service.HistorySyncStatus
+import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_PARTIAL_CHIP_TAG
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_SYNC_BAR_TAG
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_SYNC_INDICATOR_TAG
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_SYNC_RETRY_TAG
 import io.github.trevarj.motd.ui.chat.HISTORY_SYNC_PILL_ESCALATION_MS
+import io.github.trevarj.motd.ui.chat.TimelineHistoryStaleChip
 import io.github.trevarj.motd.ui.chat.TimelineHistorySyncBar
 import io.github.trevarj.motd.ui.chat.TimelineHistorySyncIndicator
 import io.github.trevarj.motd.ui.chat.TimelineTopOverlays
@@ -149,17 +151,46 @@ class ChatHistorySyncIndicatorUiTest {
                         retryEnabled = true,
                         onRetry = {},
                     )
+                    TimelineHistoryStaleChip(
+                        status = HistorySyncStatus.Partial("fixture"),
+                        timelineEmpty = false,
+                    )
                 }
             }
         }
 
         compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertCountEquals(0)
         compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_BAR_TAG).assertCountEquals(0)
+        // The cached rows stay readable; only an advisory, action-free chip marks them stale.
+        compose.onNodeWithTag(CHAT_HISTORY_PARTIAL_CHIP_TAG).assertIsDisplayed()
+        compose.onNodeWithText("History may be incomplete").assertIsDisplayed()
+        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_RETRY_TAG).assertCountEquals(0)
+    }
+
+    @Test
+    fun staleChipStaysHiddenWithoutCachedRows() {
+        compose.setContent {
+            MotdTheme {
+                Column {
+                    TimelineHistoryStaleChip(
+                        status = HistorySyncStatus.Partial("fixture"),
+                        timelineEmpty = true,
+                    )
+                    TimelineHistoryStaleChip(
+                        status = HistorySyncStatus.Failed("fixture"),
+                        timelineEmpty = false,
+                    )
+                }
+            }
+        }
+
+        compose.onAllNodesWithTag(CHAT_HISTORY_PARTIAL_CHIP_TAG).assertCountEquals(0)
     }
 
     @Test
     fun failedStateKeepsAccessibleManualRetry() {
-        var retries = 0
+        var syncRetries = 0
+        var pagingRetries = 0
         compose.setContent {
             MotdTheme {
                 Column {
@@ -171,7 +202,12 @@ class ChatHistorySyncIndicatorUiTest {
                         status = HistorySyncStatus.Failed("fixture"),
                         timelineEmpty = false,
                         retryEnabled = true,
-                        onRetry = { retries++ },
+                        // Mirrors the screen's composed action: the coordinator re-runs the
+                        // reconciliation pass and Paging re-attempts the failed fetch.
+                        onRetry = {
+                            syncRetries++
+                            pagingRetries++
+                        },
                     )
                 }
             }
@@ -179,10 +215,12 @@ class ChatHistorySyncIndicatorUiTest {
 
         compose.onNodeWithText("Couldn't sync messages").assertIsDisplayed()
         compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_BAR_TAG).assertCountEquals(0)
+        compose.onAllNodesWithTag(CHAT_HISTORY_PARTIAL_CHIP_TAG).assertCountEquals(0)
         compose.onNodeWithTag(CHAT_HISTORY_SYNC_RETRY_TAG)
             .assertHeightIsAtLeast(48.dp)
             .performClick()
-        assertEquals(1, retries)
+        assertEquals(1, syncRetries)
+        assertEquals(1, pagingRetries)
     }
 
     @Test
@@ -201,6 +239,9 @@ class ChatHistorySyncIndicatorUiTest {
                     historyIndicator = {
                         Box(Modifier.size(24.dp).testTag("fixture_history_sync"))
                     },
+                    staleChip = {
+                        Box(Modifier.size(24.dp).testTag("fixture_stale_chip"))
+                    },
                     syncBar = {
                         Box(
                             Modifier
@@ -215,9 +256,11 @@ class ChatHistorySyncIndicatorUiTest {
 
         val audioBounds = compose.onNodeWithTag("fixture_audio_player").getUnclippedBoundsInRoot()
         val syncBounds = compose.onNodeWithTag("fixture_history_sync").getUnclippedBoundsInRoot()
+        val chipBounds = compose.onNodeWithTag("fixture_stale_chip").getUnclippedBoundsInRoot()
         val barBounds = compose.onNodeWithTag("fixture_sync_bar").getUnclippedBoundsInRoot()
         assertTrue("audio player was not pinned to the timeline top", audioBounds.top <= 1.dp)
         assertTrue("history sync overlapped the audio player", syncBounds.top >= audioBounds.bottom)
+        assertTrue("stale chip overlapped the audio player", chipBounds.top >= audioBounds.bottom)
         assertEquals("sync bar was not pinned to the timeline top edge", 0.dp, barBounds.top)
         // The bar is a sibling of the overlay column, so it draws over the player instead of
         // pushing it down; playback controls stay exactly where they were without the bar.

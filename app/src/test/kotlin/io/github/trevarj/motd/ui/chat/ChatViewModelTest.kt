@@ -787,6 +787,47 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `manual history retry reconciles the current buffer through the coordinator`() = runTest {
+        val history = FakeHistoryResyncController()
+        val manager = FakeConnectionManager(network.id, client = testClient())
+        val vm = viewModel(channel, manager, history)
+        vm.state.first { it.buffer != null }
+
+        vm.retryHistorySync()
+        advanceUntilIdle()
+
+        // The ordinary reconciliation entry point, so a tap collapses onto any in-flight pass
+        // instead of opening a bespoke fetch beside it.
+        assertEquals(listOf(channel.id), history.reconciledBuffers)
+        assertTrue(history.pendingReconciledBuffers.isEmpty())
+    }
+
+    @Test
+    fun `manual history retry no-ops without a resolved buffer or a live client`() = runTest {
+        val history = FakeHistoryResyncController()
+        // Route points at a buffer the repository does not know: nothing to reconcile.
+        val unresolved = viewModel(
+            channel,
+            FakeConnectionManager(network.id, client = testClient()),
+            history,
+            routeBufferId = channel.id + 999,
+            buffers = FakeBufferRepository(channel),
+        )
+        unresolved.retryHistorySync()
+        advanceUntilIdle()
+
+        assertTrue(history.reconciledBuffers.isEmpty())
+
+        // Buffer resolved but the network has no socket: clientFor returns null.
+        val offline = viewModel(channel, FakeConnectionManager(network.id), history)
+        offline.state.first { it.buffer != null }
+        offline.retryHistorySync()
+        advanceUntilIdle()
+
+        assertTrue(history.reconciledBuffers.isEmpty())
+    }
+
+    @Test
     fun `server buffer never performs automatic history reconciliation`() = runTest {
         val server = BufferEntity(
             networkId = network.id,

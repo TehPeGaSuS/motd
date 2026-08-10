@@ -24,6 +24,7 @@ import io.github.trevarj.motd.irc.client.IrcDisconnectedException
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.service.HistorySyncStatus
 import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -697,6 +698,24 @@ class ChatModelsTest {
         )
         assertEquals(request, retried)
         assertEquals(listOf("retry", "ack:8"), order)
+    }
+
+    @Test fun `stale chip marks only a settled partial pass over cached rows`() {
+        // The only visible combination: a Partial verdict with rows already on screen to qualify.
+        assertTrue(showsStaleChip(HistorySyncStatus.Partial("capped"), timelineEmpty = false))
+        // Nothing cached yet, so there is no incomplete history to warn about.
+        assertFalse(showsStaleChip(HistorySyncStatus.Partial("capped"), timelineEmpty = true))
+        // Every other status is owned by the bar (in flight) or the pill (Failed keeps the retry).
+        listOf(
+            HistorySyncStatus.Idle,
+            HistorySyncStatus.Queued,
+            HistorySyncStatus.Syncing,
+            HistorySyncStatus.Unavailable,
+            HistorySyncStatus.Failed("boom"),
+        ).forEach { status ->
+            assertFalse("$status must not raise the stale chip", showsStaleChip(status, timelineEmpty = false))
+            assertFalse("$status must not raise the stale chip", showsStaleChip(status, timelineEmpty = true))
+        }
     }
 
     @Test fun `history footer derives its states from append and availability`() {
