@@ -20,6 +20,7 @@ object MotdMotion {
     const val MicroDurationMs = 140
     const val StandardDurationMs = 210
     const val NavigationDurationMs = 340
+    const val ChatBackDurationMs = 420
     const val ArchiveSettleMinimumDurationMs = 200
     const val ArchiveSettleMaximumDurationMs = 300
 
@@ -30,10 +31,6 @@ object MotdMotion {
         1f - inverse * inverse * inverse * inverse * inverse
     }
     private const val SoftSpringStiffness = 340f
-    private const val MaterialDefaultSpatialDampingRatio = 0.9f
-    private const val MaterialDefaultSpatialStiffness = 700f
-    private const val ChatBackSpatialDampingRatio = 0.8f
-    private const val ChatBackSpatialStiffness = 112.5f
 
     val fadeIn: FiniteAnimationSpec<Float> = tween(
         durationMillis = StandardDurationMs,
@@ -53,23 +50,24 @@ object MotdMotion {
     )
 
     /**
-     * The standard spatial spring used by Material 3's
-     * [androidx.compose.material3.ModalNavigationDrawer]. Material 3 1.4 keeps its motion scheme
-     * internal, so custom navigation mirrors the pinned token values.
+     * Chat entry at the tempo of Material 3's
+     * [androidx.compose.material3.ModalNavigationDrawer]. Navigation specs are bounded tweens,
+     * never springs: a spring's settling tail keeps the NavHost transition open long after the
+     * surface looks parked, and a navigation that interrupts that window can wedge the NavHost
+     * into composing no destination at all (full blank screen until the activity is recreated).
      */
-    val navigationDrawerSpatial: FiniteAnimationSpec<IntOffset> = spring(
-        dampingRatio = MaterialDefaultSpatialDampingRatio,
-        stiffness = MaterialDefaultSpatialStiffness,
+    val navigationDrawerSpatial: FiniteAnimationSpec<IntOffset> = tween(
+        durationMillis = NavigationDurationMs,
+        easing = StandardEasing,
     )
 
     /**
-     * A lightly underdamped spatial spring for returning from chat to the chat list. At this
-     * damping ratio, its stiffness gives a 1.5x characteristic-speed increase over the prior
-     * very-low token, with roughly 4/3 the characteristic time of [Spring.StiffnessLow].
+     * Returning from chat to the chat list, deliberately calmer than the entry. Bounded for the
+     * same reason as [navigationDrawerSpatial].
      */
-    val chatBackSpatial: FiniteAnimationSpec<IntOffset> = spring(
-        dampingRatio = ChatBackSpatialDampingRatio,
-        stiffness = ChatBackSpatialStiffness,
+    val chatBackSpatial: FiniteAnimationSpec<IntOffset> = tween(
+        durationMillis = ChatBackDurationMs,
+        easing = StandardEasing,
     )
 
     /** A calm spring: responsive and soft, without a playful bounce. */

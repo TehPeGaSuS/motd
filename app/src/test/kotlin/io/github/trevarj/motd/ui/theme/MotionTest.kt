@@ -1,57 +1,42 @@
 package io.github.trevarj.motd.ui.theme
 
 import androidx.compose.animation.core.AnimationVector2D
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.TargetBasedAnimation
+import androidx.compose.animation.core.TweenSpec
 import androidx.compose.animation.core.VectorConverter
-import androidx.compose.animation.core.spring
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.sqrt
 
 class MotionTest {
     @Test
-    fun `chat back spring is one and a half times faster and springier than drawer entry`() {
-        val chatBack = MotdMotion.chatBackSpatial as SpringSpec<*>
-        val drawerEntry = MotdMotion.navigationDrawerSpatial as SpringSpec<*>
+    fun `chat back stays calmer than drawer entry and both are bounded tweens`() {
+        // Bounded tweens, never springs: a spring's settling tail leaves the NavHost transition
+        // interruptible long after it looks parked, which can wedge it into a blank composition.
+        val chatBack = MotdMotion.chatBackSpatial as TweenSpec<*>
+        val drawerEntry = MotdMotion.navigationDrawerSpatial as TweenSpec<*>
 
-        assertEquals(0.8f, chatBack.dampingRatio, 0f)
-        assertEquals(112.5f, chatBack.stiffness, 0f)
-        assertEquals(4f / 3f, sqrt(Spring.StiffnessLow / chatBack.stiffness), 0f)
-        assertTrue(chatBack.dampingRatio < drawerEntry.dampingRatio)
-        assertTrue(chatBack.stiffness < drawerEntry.stiffness)
+        assertEquals(MotdMotion.ChatBackDurationMs, chatBack.durationMillis)
+        assertEquals(MotdMotion.NavigationDurationMs, drawerEntry.durationMillis)
+        assertTrue(chatBack.durationMillis > drawerEntry.durationMillis)
     }
 
     @Test
-    fun `chat back spring takes approximately four thirds as long as low stiffness`() {
-        val start = IntOffset(1080, 0)
-        val target = IntOffset.Zero
+    fun `chat back duration is finite and independent of travel distance`() {
         val zeroVelocity = AnimationVector2D(0f, 0f)
-        val lowStiffnessBaseline: SpringSpec<IntOffset> = spring(
-            dampingRatio = 0.8f,
-            stiffness = Spring.StiffnessLow,
-        )
-        val baseline = TargetBasedAnimation(
-            lowStiffnessBaseline,
-            IntOffset.VectorConverter,
-            start,
-            target,
-            zeroVelocity,
-        )
-        val chatBack = TargetBasedAnimation(
-            MotdMotion.chatBackSpatial,
-            IntOffset.VectorConverter,
-            start,
-            target,
-            zeroVelocity,
-        )
+        val durations = listOf(IntOffset(60, 0), IntOffset(1080, 0), IntOffset(4320, 0)).map { start ->
+            TargetBasedAnimation(
+                MotdMotion.chatBackSpatial,
+                IntOffset.VectorConverter,
+                start,
+                IntOffset.Zero,
+                zeroVelocity,
+            ).durationNanos
+        }
 
-        val durationRatio = chatBack.durationNanos.toDouble() / baseline.durationNanos
-        assertTrue(durationRatio in 1.28..1.38)
+        assertTrue(durations.all { it == MotdMotion.ChatBackDurationMs * 1_000_000L })
     }
 
     @Test
