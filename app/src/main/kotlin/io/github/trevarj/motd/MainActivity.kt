@@ -49,6 +49,9 @@ import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.chat.PreloadChatWallpaperTile
 import io.github.trevarj.motd.ui.nav.MotdNavGraph
 import io.github.trevarj.motd.ui.nav.NotificationTarget
+import io.github.trevarj.motd.ui.share.PendingShare
+import io.github.trevarj.motd.ui.share.PendingShareStore
+import io.github.trevarj.motd.ui.share.parseSharedContent
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import javax.inject.Inject
 import kotlinx.coroutines.flow.first
@@ -68,6 +71,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var db: MotdDatabase
     @Inject lateinit var connectionManager: ConnectionManager
     @Inject lateinit var notificationPermission: NotificationPermissionStatus
+    @Inject lateinit var pendingShareStore: PendingShareStore
 
     // POST_NOTIFICATIONS is a delivery concern: report its result immediately to Settings state.
     private val requestNotifications =
@@ -78,6 +82,10 @@ class MainActivity : ComponentActivity() {
     // Latest notification-tap deep-link target. Seeded from the launch intent (cold start) and
     // updated by onNewIntent (warm start); the nav graph consumes it and clears it after routing.
     private var notificationTarget by mutableStateOf<NotificationTarget?>(null)
+
+    // Latest inbound ACTION_SEND payload, seeded/updated the same way. The payload itself is parked
+    // in [pendingShareStore]; this state only drives the navigation to the chat picker.
+    private var pendingShare by mutableStateOf<PendingShare?>(null)
 
     private val rootUiState by lazy {
         combine(
@@ -106,6 +114,7 @@ class MainActivity : ComponentActivity() {
         maybeStartForegroundService()
         // Cold start: the launcher created the activity with the notification's content intent.
         notificationTarget = parseNotificationTarget(intent)
+        acceptShareFrom(intent)
         acceptInvitationFrom(intent)
 
         setContent {
@@ -148,6 +157,8 @@ class MainActivity : ComponentActivity() {
                             navController = navController,
                             notificationTarget = notificationTarget,
                             onNotificationTargetHandled = ::consumeNotificationTarget,
+                            pendingShare = pendingShare,
+                            onPendingShareHandled = ::consumePendingShare,
                         )
                         // Global TOFU cert-trust dialog host, above the whole navigation graph.
                         CertTrustDialogHost()
@@ -162,6 +173,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         parseNotificationTarget(intent)?.let { notificationTarget = it }
+        acceptShareFrom(intent)
         acceptInvitationFrom(intent)
     }
 
@@ -177,6 +189,22 @@ class MainActivity : ComponentActivity() {
             intent.action == MotdNotifications.ACTION_ACCEPT_INVITE
         ) {
             setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
+        }
+    }
+
+    /** Prevent recreation from replaying a share whose picker was already opened. */
+    private fun consumePendingShare() {
+        pendingShare = null
+        if (intent.action == Intent.ACTION_SEND) {
+            setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
+        }
+    }
+
+    /** Park a single-item share payload for the picker; ignores every non-share intent. */
+    private fun acceptShareFrom(intent: Intent?) {
+        parseSharedContent(intent)?.let {
+            pendingShareStore.set(it)
+            pendingShare = it
         }
     }
 

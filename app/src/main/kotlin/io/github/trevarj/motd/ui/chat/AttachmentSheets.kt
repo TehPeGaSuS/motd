@@ -88,6 +88,7 @@ import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.attachment.supports
+import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -126,6 +127,8 @@ fun AttachmentSheets(
     networkId: Long?,
     sojuFileHostAvailable: Boolean,
     startWithCurrentDraft: Boolean = false,
+    // Inbound share hand-off: skip source selection and confirm this file directly.
+    sharedFile: PendingShare.File? = null,
     directFileTransferAvailable: Boolean = false,
     onDismiss: () -> Unit,
     onInsertUrl: (String) -> Unit,
@@ -144,12 +147,23 @@ fun AttachmentSheets(
     var deleteTarget by remember { mutableStateOf<UploadRecord?>(null) }
     var backendPickerRequest by remember { mutableStateOf<AttachmentFlow.Confirm?>(null) }
 
-    LaunchedEffect(open, startWithCurrentDraft) {
+    LaunchedEffect(open, startWithCurrentDraft, sharedFile) {
         if (!open) return@LaunchedEffect
-        flow = if (startWithCurrentDraft && currentDraft.isNotBlank()) {
-            AttachmentFlow.Confirm(AttachmentSource.Text(currentDraft), true, defaultConfig)
-        } else {
-            AttachmentFlow.Sources
+        flow = when {
+            sharedFile != null -> {
+                // The sender's declared type wins; fall back to the provider's when it omitted one.
+                val mime = sharedFile.mimeType ?: context.contentResolver.getType(sharedFile.uri)
+                val meta = context.contentResolver.queryMeta(sharedFile.uri)
+                val source = if (mime?.startsWith("image/") == true) {
+                    AttachmentSource.Photo(sharedFile.uri, meta.first, mime, meta.second)
+                } else {
+                    AttachmentSource.Document(sharedFile.uri, meta.first, mime, meta.second)
+                }
+                AttachmentFlow.Confirm(source, false, defaultConfig)
+            }
+            startWithCurrentDraft && currentDraft.isNotBlank() ->
+                AttachmentFlow.Confirm(AttachmentSource.Text(currentDraft), true, defaultConfig)
+            else -> AttachmentFlow.Sources
         }
     }
 

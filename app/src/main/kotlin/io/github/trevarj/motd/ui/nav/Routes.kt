@@ -24,6 +24,8 @@ import kotlinx.serialization.Serializable
 @Serializable data class SearchRoute(val bufferId: Long? = null)
 @Serializable data class ChannelInfoRoute(val bufferId: Long)
 @Serializable data class ImageViewerRoute(val url: String)
+// Inbound ACTION_SEND: pick the chat that receives the shared payload.
+@Serializable data object SharePickerRoute
 
 // Round 4 (plans/13): manage-nicks screens (one screen, three routes).
 @Serializable data object FriendsRoute

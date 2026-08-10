@@ -42,6 +42,8 @@ import io.github.trevarj.motd.ui.settings.NickListKind
 import io.github.trevarj.motd.ui.settings.SettingsScreen
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkScreen
 import io.github.trevarj.motd.ui.settings.bouncer.BouncerNetworksScreen
+import io.github.trevarj.motd.ui.share.PendingShare
+import io.github.trevarj.motd.ui.share.SharePickerScreen
 import io.github.trevarj.motd.ui.theme.MotdMotion
 
 /**
@@ -59,6 +61,9 @@ fun MotdNavGraph(
     // Notification-tap deep-link: open the buffer and jump to the message. Null when absent.
     notificationTarget: NotificationTarget? = null,
     onNotificationTargetHandled: () -> Unit = {},
+    // Inbound ACTION_SEND payload: route to the chat picker. Null when absent.
+    pendingShare: PendingShare? = null,
+    onPendingShareHandled: () -> Unit = {},
 ) {
     // Route a notification tap to ChatRoute so the existing jump path (local resolve → CHATHISTORY
     // AROUND fallback) scrolls to and highlights the message. Runs for both cold start (target
@@ -79,6 +84,13 @@ fun MotdNavGraph(
             replaceCurrentChat = true,
         )
         onNotificationTargetHandled()
+    }
+    // The payload itself lives in PendingShareStore; this state only triggers the navigation, so
+    // clearing it after routing lets a subsequent share re-trigger (null → value transition).
+    LaunchedEffect(pendingShare) {
+        if (pendingShare == null) return@LaunchedEffect
+        navController.navigate(SharePickerRoute) { launchSingleTop = true }
+        onPendingShareHandled()
     }
     NavHost(
         navController = navController,
@@ -282,6 +294,17 @@ fun MotdNavGraph(
         ) { entry ->
             val route = entry.toRoute<ImageViewerRoute>()
             ImageViewerScreen(url = route.url, onBack = { navController.popBackStack() })
+        }
+        composable<SharePickerRoute> {
+            SharePickerScreen(
+                // Leave the picker before opening the chat so back returns to the previous screen
+                // rather than the (now empty) picker.
+                onPicked = { bufferId ->
+                    navController.popBackStack()
+                    navController.openChat(ChatRoute(bufferId), replaceCurrentChat = true)
+                },
+                onCancel = { navController.popBackStack() },
+            )
         }
         composable<AboutRoute> {
             AboutScreen(onBack = { navController.popBackStack() })

@@ -66,6 +66,8 @@ import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.service.SendRejectionReason
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.ui.nav.ChatRoute
+import io.github.trevarj.motd.ui.share.PendingShare
+import io.github.trevarj.motd.ui.share.PendingShareStore
 import androidx.navigation.toRoute
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -203,6 +205,7 @@ class ChatViewModel @Inject constructor(
     private val audioMetadataRepository: AudioMetadataRepository,
     private val audioPlaybackController: AudioPlaybackController,
     private val draftStore: ComposerDraftStore,
+    private val pendingShareStore: PendingShareStore,
     private val scrollPositionStore: ChatScrollPositionStore,
     private val eventSink: IrcEventSink,
     private val settingsRepository: SettingsRepository,
@@ -1486,6 +1489,10 @@ class ChatViewModel @Inject constructor(
 
     /** Consume-once composer prefill queued by ChannelInfo before popping back; null when none. */
     fun consumePrefill(): String? = draftStore.consume(operationalBufferId.value)
+
+    /** Consume-once shared file routed here by the share picker; the screen opens the upload sheet. */
+    fun consumeSharedFile(): PendingShare.File? =
+        pendingShareStore.consumeFile(operationalBufferId.value)
 
     fun saveDraft(text: String) {
         synchronized(draftStateLock) {

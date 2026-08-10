@@ -181,6 +181,7 @@ import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.typingText
+import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdSizes
@@ -489,6 +490,7 @@ fun ChatScreen(
         onVoiceErrorDismissed = voiceViewModel::clearError,
         onVoiceNoticeDismissed = voiceViewModel::clearNotice,
         consumePrefill = viewModel::consumePrefill,
+        consumeSharedFile = viewModel::consumeSharedFile,
         composerDraft = composerDraft,
         onDraftChanged = viewModel::saveDraft,
         mentionPrefill = mentionRequest,
@@ -656,6 +658,8 @@ fun ChatContent(
     // Re-join the current channel from the parted banner.
     onRejoin: () -> Unit = {},
     consumePrefill: () -> String? = { null },
+    // Consume-once file routed here by the share picker; opens the upload confirmation sheet.
+    consumeSharedFile: () -> PendingShare.File? = { null },
     composerDraft: ComposerDraftState = ComposerDraftState(),
     onDraftChanged: (String) -> Unit = {},
     // Immediate nick-sheet mention request. The nonce permits mentioning the same nick repeatedly.
@@ -792,6 +796,16 @@ fun ChatContent(
     }
     var attachmentSheetOpen by rememberSaveable { mutableStateOf(false) }
     var uploadCurrentDraftDirectly by rememberSaveable { mutableStateOf(false) }
+    // A file handed over by the share picker: open the upload confirmation sheet for it directly.
+    var sharedFile by remember(traceBufferId) { mutableStateOf<PendingShare.File?>(null) }
+    LaunchedEffect(traceBufferId) {
+        if (traceBufferId == null) return@LaunchedEffect
+        consumeSharedFile()?.let { file ->
+            sharedFile = file
+            uploadCurrentDraftDirectly = false
+            attachmentSheetOpen = true
+        }
+    }
     var longDraftPrompt by rememberSaveable { mutableStateOf(false) }
     var overflowOpen by rememberSaveable { mutableStateOf(false) }
     var conversationLayoutSheetOpen by rememberSaveable { mutableStateOf(false) }
@@ -2156,9 +2170,10 @@ fun ChatContent(
             ?.isupport
             ?.let(::sojuFileHostEndpoint) != null,
         startWithCurrentDraft = uploadCurrentDraftDirectly,
+        sharedFile = sharedFile,
         directFileTransferAvailable = state.buffer?.type == BufferType.QUERY &&
             state.connState is IrcClientState.Ready,
-        onDismiss = { attachmentSheetOpen = false; uploadCurrentDraftDirectly = false },
+        onDismiss = { attachmentSheetOpen = false; uploadCurrentDraftDirectly = false; sharedFile = null },
         onInsertUrl = {
             composerText = io.github.trevarj.motd.ui.components.insertAtCursor(composerText, it)
             onDraftChanged(composerText.text)
@@ -2246,6 +2261,8 @@ fun ChatContent(
                     onDraftChanged(composerText.text)
                 }
             },
+            // Outbound share: the raw message text, no formatting or attribution.
+            onShare = { hideThen { shareMessageText(ctx, target.text) } },
         )
     }
 
@@ -2372,6 +2389,17 @@ fun appendPrefill(value: TextFieldValue, prefill: String): TextFieldValue {
     val sep = if (current.isNotEmpty() && !current.last().isWhitespace()) " " else ""
     val text = current + sep + prefill
     return TextFieldValue(text = text, selection = androidx.compose.ui.text.TextRange(text.length))
+}
+
+/** Hand the raw message text to the system share sheet (mirrors the image viewer's share). */
+private fun shareMessageText(context: android.content.Context, text: String) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    context.startActivity(
+        Intent.createChooser(intent, context.getString(R.string.chat_action_share_chooser)),
+    )
 }
 
 /** Restore a buffer draft, then merge a one-shot mention prefill without losing the cursor. */

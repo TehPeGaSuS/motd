@@ -424,10 +424,16 @@
     <string name="chat_reply_open">Go to replied message</string>
     <string name="chat_action_copy">Copy</string>
     <string name="chat_action_quote">Quote</string>
+    <string name="chat_action_share">Share</string>
+    <string name="chat_action_share_chooser">Share message</string>
     <string name="chat_action_more_reactions">More reactions</string>
     <string name="chat_bubble_actions">Message actions</string>
     <string name="chat_action_message">Action message</string>
     <string name="chat_message_mentions_you">Mentions you</string>
+    <!-- Inbound share target: pick the conversation that receives the shared payload. -->
+    <string name="share_picker_title">Share to…</string>
+    <string name="share_picker_empty">No conversations yet</string>
+    <string name="share_picker_search">Search</string>
     <!-- Chat screen / message list (plans/15 #25) -->
     <string name="chat_back">Back</string>
     <string name="chat_open_channel_info">Open channel info</string>

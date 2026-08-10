@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FormatQuote
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -74,6 +75,7 @@ fun MessageActionSheet(
     reactionEnabled: (String) -> Boolean = { true },
     onCopy: () -> Unit,
     onQuote: () -> Unit,
+    onShare: () -> Unit,
     // SERVER buffers have no msgids/targets: reply + reactions are inert and hidden (plans/16 §5.6).
     isServerBuffer: Boolean = false,
 ) {
@@ -155,15 +157,26 @@ fun MessageActionSheet(
             ActionItem(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_action_reply), onReply)
             } // end !isServerBuffer (reactions + reply hidden for SERVER buffers)
             ActionItem(Icons.Filled.ContentCopy, stringResource(R.string.chat_action_copy), onCopy)
+            ActionItem(
+                Icons.Filled.Share,
+                stringResource(R.string.chat_action_share),
+                onShare,
+                modifier = Modifier.testTag("message_action_share"),
+            )
             ActionItem(Icons.Filled.FormatQuote, stringResource(R.string.chat_action_quote), onQuote)
         }
     }
 }
 
 @Composable
-private fun ActionItem(icon: ImageVector, label: String, onClick: () -> Unit) {
+private fun ActionItem(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onClick() }
             .padding(horizontal = 24.dp, vertical = 14.dp),

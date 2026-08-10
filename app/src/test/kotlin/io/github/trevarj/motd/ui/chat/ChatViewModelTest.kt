@@ -72,6 +72,7 @@ import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
+import io.github.trevarj.motd.ui.share.PendingShareStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -2285,6 +2286,7 @@ class ChatViewModelTest {
                 override suspend fun preview(url: String, networkId: Long?): LinkPreview? = null
             },
             draftStore = ComposerDraftStore(db),
+            pendingShareStore = PendingShareStore(),
             scrollPositionStore = scrollPositions,
             eventSink = eventSink,
             settingsRepository = settings,
