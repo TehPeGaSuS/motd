@@ -379,6 +379,7 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
         settings.contentPreviews?.let {
             contentPreviewPrefs.setShowImages(it.showImages)
             contentPreviewPrefs.setShowLinkPreviews(it.showLinkPreviews)
+            contentPreviewPrefs.setDirectMediaOnProxiedNetworks(it.directMediaOnProxiedNetworks)
         }
         settings.replies?.let { replyPrefs.setVisibleChannelPrefix(it.visibleChannelPrefix) }
         settings.attachments?.let { attachmentPrefs.setConfig(it) }

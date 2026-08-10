@@ -84,6 +84,7 @@ fun ChatSettingsScreen(
         onVisibleReplyPrefix = viewModel::setVisibleReplyPrefix,
         onShowImages = viewModel::setShowImages,
         onShowLinkPreviews = viewModel::setShowLinkPreviews,
+        onDirectMediaOnProxiedNetworks = viewModel::setDirectMediaOnProxiedNetworks,
         onShowSharedAvatars = viewModel::setShowSharedAvatars,
         onVoiceEncryptionDefault = viewModel::setVoiceEncryptionDefault,
         onVoiceQuality = viewModel::setVoiceQuality,
@@ -110,6 +111,7 @@ fun ChatSettingsContent(
     onVisibleReplyPrefix: (Boolean) -> Unit,
     onShowImages: (Boolean) -> Unit,
     onShowLinkPreviews: (Boolean) -> Unit,
+    onDirectMediaOnProxiedNetworks: (Boolean) -> Unit,
     onShowSharedAvatars: (Boolean) -> Unit,
     onVoiceEncryptionDefault: (Boolean) -> Unit,
     onVoiceQuality: (VoiceRecordingQuality) -> Unit,
@@ -128,6 +130,14 @@ fun ChatSettingsContent(
                 checked = contentPreviews.showImages,
                 onCheckedChange = onShowImages,
                 switchTag = "settings_switch_show_images",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_direct_media_proxied),
+                subtitle = stringResource(R.string.settings_direct_media_proxied_desc),
+                checked = contentPreviews.directMediaOnProxiedNetworks,
+                onCheckedChange = onDirectMediaOnProxiedNetworks,
+                switchTag = "settings_switch_direct_media_proxied",
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
@@ -337,7 +347,8 @@ private fun ChatSettingsPreview() {
             onPresenceMode = {}, onFoolsMode = {}, onShowComposerEmoji = {},
             onChatSoundsEnabled = {},
             onVisibleReplyPrefix = {},
-            onShowImages = {}, onShowLinkPreviews = {}, onShowSharedAvatars = {},
+            onShowImages = {}, onShowLinkPreviews = {}, onDirectMediaOnProxiedNetworks = {},
+            onShowSharedAvatars = {},
             onVoiceEncryptionDefault = {}, onClearAudioCache = {},
             onVoiceQuality = {}, onVoiceNoiseReduction = {},
         )

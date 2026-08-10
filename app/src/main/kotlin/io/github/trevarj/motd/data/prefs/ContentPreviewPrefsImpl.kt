@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.map
 private val Context.contentPreviewDataStore by preferencesDataStore("content_previews")
 private val SHOW_IMAGES = booleanPreferencesKey("show_images")
 private val SHOW_LINK_PREVIEWS = booleanPreferencesKey("show_link_previews")
+private val DIRECT_MEDIA_ON_PROXIED_NETWORKS = booleanPreferencesKey("direct_media_on_proxied_networks")
 
 @Singleton
 class ContentPreviewPrefsImpl @Inject constructor(
@@ -24,6 +25,7 @@ class ContentPreviewPrefsImpl @Inject constructor(
         ContentPreviewConfig(
             showImages = prefs[SHOW_IMAGES] ?: true,
             showLinkPreviews = prefs[SHOW_LINK_PREVIEWS] ?: true,
+            directMediaOnProxiedNetworks = prefs[DIRECT_MEDIA_ON_PROXIED_NETWORKS] ?: false,
         )
     }
 
@@ -33,5 +35,9 @@ class ContentPreviewPrefsImpl @Inject constructor(
 
     override suspend fun setShowLinkPreviews(show: Boolean) {
         store.edit { it[SHOW_LINK_PREVIEWS] = show }
+    }
+
+    override suspend fun setDirectMediaOnProxiedNetworks(enabled: Boolean) {
+        store.edit { it[DIRECT_MEDIA_ON_PROXIED_NETWORKS] = enabled }
     }
 }

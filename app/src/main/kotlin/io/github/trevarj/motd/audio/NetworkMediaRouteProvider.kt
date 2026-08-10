@@ -5,6 +5,7 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.prefs.CertTrustStore
+import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.service.PinningTrustManager
 import io.github.trevarj.motd.service.LocalSocksProvider
 import io.github.trevarj.motd.service.resolveTransportProxy
@@ -17,6 +18,7 @@ import javax.inject.Singleton
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
+import kotlinx.coroutines.flow.first
 
 data class NetworkMediaRoute(
     val networkId: Long,
@@ -62,8 +64,9 @@ fun interface MediaRouteResolver {
 
 /**
  * Whether the app-global fetch stacks (the process Coil loader, ExoPlayer) may load network content
- * for one network. Those stacks cannot be routed per-network, so any obfuscated transport answers
- * false and the UI must withhold that content instead of fetching it directly.
+ * for one network. Those stacks cannot be routed per-network, so an obfuscated transport answers
+ * false by default and the UI withholds that content instead of fetching it directly — unless the
+ * user opts into direct media on proxied networks, trading tunnel privacy for previews that load.
  */
 fun interface DirectMediaPolicy {
     suspend fun directMediaAllowed(networkId: Long): Boolean
@@ -74,6 +77,7 @@ class NetworkMediaRouteProvider @Inject constructor(
     private val db: MotdDatabase,
     private val localSocksProvider: LocalSocksProvider,
     private val certTrustStore: CertTrustStore,
+    private val contentPreviewPrefs: ContentPreviewPrefs,
 ) : MediaRouteResolver, DirectMediaPolicy {
     override suspend fun routeForNetwork(networkId: Long): NetworkMediaRoute? {
         val row = db.networkDao().byId(networkId) ?: return null
@@ -97,6 +101,8 @@ class NetworkMediaRouteProvider @Inject constructor(
     }
 
     override suspend fun directMediaAllowed(networkId: Long): Boolean {
+        // Unknown networks always fail closed: the opt-in cannot rescue a fetch whose transport
+        // policy we cannot even resolve.
         val row = db.networkDao().byId(networkId) ?: return false
         // A bouncer child shares its physical endpoint (and therefore its transport policy) with
         // the bouncer root, exactly as routeForNetwork does above.
@@ -105,7 +111,10 @@ class NetworkMediaRouteProvider @Inject constructor(
         } else {
             row
         }
-        return endpoint.obfsMode == null || endpoint.obfsMode == ObfsMode.NONE
+        if (endpoint.obfsMode == null || endpoint.obfsMode == ObfsMode.NONE) return true
+        // Obfuscated transport: the global stacks would fetch outside the tunnel. Permit that only
+        // when the user has explicitly opted in, accepting that the device IP reaches the media host.
+        return contentPreviewPrefs.config.first().directMediaOnProxiedNetworks
     }
 }
 

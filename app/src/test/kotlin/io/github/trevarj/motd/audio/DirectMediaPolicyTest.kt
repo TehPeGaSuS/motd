@@ -8,8 +8,12 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.prefs.CertTrustStore
+import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
+import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.service.LocalSocksEngine
 import io.github.trevarj.motd.service.LocalSocksProvider
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertFalse
@@ -20,12 +24,15 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * The app-global Coil/ExoPlayer stacks cannot honor a per-network proxy, so the policy must deny
- * direct media for every obfuscated transport and for unknown networks (fail closed).
+ * The app-global Coil/ExoPlayer stacks cannot honor a per-network proxy, so the policy denies
+ * direct media for every obfuscated transport and for unknown networks (fail closed) — unless the
+ * user opts into direct media on proxied networks, which lifts the obfuscated-transport denial but
+ * never the unknown-network one.
  */
 @RunWith(RobolectricTestRunner::class)
 class DirectMediaPolicyTest {
     private lateinit var db: MotdDatabase
+    private lateinit var prefs: FakeContentPreviewPrefs
     private lateinit var provider: NetworkMediaRouteProvider
 
     @Before
@@ -34,10 +41,12 @@ class DirectMediaPolicyTest {
         db = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
             .allowMainThreadQueries()
             .build()
+        prefs = FakeContentPreviewPrefs()
         provider = NetworkMediaRouteProvider(
             db,
             LocalSocksProvider.forTest { FailingEngine },
             NoPinsTrustStore,
+            prefs,
         )
     }
 
@@ -57,6 +66,24 @@ class DirectMediaPolicyTest {
         assertFalse(provider.directMediaAllowed(insert(obfsMode = ObfsMode.SOCKS5)))
         assertFalse(provider.directMediaAllowed(insert(obfsMode = ObfsMode.TOR)))
         assertFalse(provider.directMediaAllowed(insert(obfsMode = ObfsMode.EMBEDDED_REALITY)))
+    }
+
+    @Test
+    fun opt_in_allows_direct_media_on_obfuscated_transports() = runTest {
+        prefs.state.value = ContentPreviewConfig(directMediaOnProxiedNetworks = true)
+        assertTrue(provider.directMediaAllowed(insert(obfsMode = ObfsMode.SOCKS5)))
+        assertTrue(provider.directMediaAllowed(insert(obfsMode = ObfsMode.TOR)))
+        assertTrue(provider.directMediaAllowed(insert(obfsMode = ObfsMode.EMBEDDED_REALITY)))
+    }
+
+    @Test
+    fun opt_in_lifts_the_denial_for_an_obfuscated_bouncer_child() = runTest {
+        val realityParent = insert(obfsMode = ObfsMode.EMBEDDED_REALITY)
+        val child = insert(obfsMode = null, role = NetworkRole.BOUNCER_CHILD, parentId = realityParent)
+        assertFalse(provider.directMediaAllowed(child))
+
+        prefs.state.value = ContentPreviewConfig(directMediaOnProxiedNetworks = true)
+        assertTrue(provider.directMediaAllowed(child))
     }
 
     @Test
@@ -83,6 +110,12 @@ class DirectMediaPolicyTest {
         assertFalse(provider.directMediaAllowed(9_999L))
     }
 
+    @Test
+    fun unknown_networks_fail_closed_even_with_opt_in() = runTest {
+        prefs.state.value = ContentPreviewConfig(directMediaOnProxiedNetworks = true)
+        assertFalse(provider.directMediaAllowed(9_999L))
+    }
+
     private suspend fun insert(
         obfsMode: ObfsMode?,
         role: NetworkRole = NetworkRole.DIRECT,
@@ -102,6 +135,20 @@ class DirectMediaPolicyTest {
             proxyPort = if (obfsMode == ObfsMode.SOCKS5) 1080 else null,
         ),
     )
+
+    private class FakeContentPreviewPrefs : ContentPreviewPrefs {
+        val state = MutableStateFlow(ContentPreviewConfig())
+        override val config: Flow<ContentPreviewConfig> = state
+        override suspend fun setShowImages(show: Boolean) {
+            state.value = state.value.copy(showImages = show)
+        }
+        override suspend fun setShowLinkPreviews(show: Boolean) {
+            state.value = state.value.copy(showLinkPreviews = show)
+        }
+        override suspend fun setDirectMediaOnProxiedNetworks(enabled: Boolean) {
+            state.value = state.value.copy(directMediaOnProxiedNetworks = enabled)
+        }
+    }
 
     private object FailingEngine : LocalSocksEngine {
         override fun start(configJson: String): Result<Int> =

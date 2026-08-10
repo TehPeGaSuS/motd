@@ -596,11 +596,14 @@ class ChatViewModel @Inject constructor(
     /**
      * Whether the app-global image/video stacks (Coil, ExoPlayer) may fetch network content for
      * this buffer. Starts false so a proxied network cannot leak a direct fetch during the initial
-     * lookup; flips once the network row confirms it uses no obfuscated transport.
+     * lookup; flips once the network row confirms it uses no obfuscated transport, or once the user
+     * opts into direct media on proxied networks. Recomputes on that opt-in too, so flipping the
+     * setting reveals previews in the open conversation without a buffer switch.
      */
-    val directMediaAllowed: StateFlow<Boolean> = buffer
-        .mapNotNull { it?.networkId }
-        .distinctUntilChanged()
+    val directMediaAllowed: StateFlow<Boolean> = combine(
+        buffer.mapNotNull { it?.networkId }.distinctUntilChanged(),
+        contentPreviews.map { it.directMediaOnProxiedNetworks }.distinctUntilChanged(),
+    ) { networkId, _ -> networkId }
         .map { networkId -> directMediaPolicy.directMediaAllowed(networkId) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 

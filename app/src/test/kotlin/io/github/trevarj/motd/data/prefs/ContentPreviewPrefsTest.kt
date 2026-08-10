@@ -33,5 +33,15 @@ class ContentPreviewPrefsTest {
             ContentPreviewConfig(showImages = true, showLinkPreviews = false),
             prefs.config.first(),
         )
+
+        prefs.setDirectMediaOnProxiedNetworks(true)
+        assertEquals(
+            ContentPreviewConfig(
+                showImages = true,
+                showLinkPreviews = false,
+                directMediaOnProxiedNetworks = true,
+            ),
+            prefs.config.first(),
+        )
     }
 }

@@ -2639,6 +2639,7 @@ class ChatViewModelTest {
         override val config = MutableStateFlow(ContentPreviewConfig())
         override suspend fun setShowImages(show: Boolean) = Unit
         override suspend fun setShowLinkPreviews(show: Boolean) = Unit
+        override suspend fun setDirectMediaOnProxiedNetworks(enabled: Boolean) = Unit
     }
 
     private class FakeAudioMetadataRepository : AudioMetadataRepository {

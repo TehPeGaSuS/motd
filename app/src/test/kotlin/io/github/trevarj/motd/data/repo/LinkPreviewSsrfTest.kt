@@ -195,6 +195,10 @@ class LinkPreviewSsrfTest {
         override suspend fun setShowLinkPreviews(show: Boolean) {
             state.value = state.value.copy(showLinkPreviews = show)
         }
+
+        override suspend fun setDirectMediaOnProxiedNetworks(enabled: Boolean) {
+            state.value = state.value.copy(directMediaOnProxiedNetworks = enabled)
+        }
     }
 
     private companion object {

@@ -529,6 +529,8 @@
     <string name="chat_presence_write_failed">Couldn\'t save presence setting</string>
     <string name="settings_show_images">Show images and videos</string>
     <string name="settings_show_images_desc">Load inline images, videos, and preview thumbnails</string>
+    <string name="settings_direct_media_proxied">Load previews over direct connection</string>
+    <string name="settings_direct_media_proxied_desc">On proxy and VLESS/REALITY networks, fetch media previews over your device\'s direct connection instead of the tunnel. Previews load, but the media host sees your IP address.</string>
     <string name="settings_show_link_previews">Show link previews</string>
     <string name="settings_show_link_previews_desc">Fetch page titles and descriptions for links</string>
     <string name="chat_video_preview">Video preview</string>

@@ -233,6 +233,10 @@ class SettingsViewModel @Inject constructor(
         contentPreviewPrefs.setShowLinkPreviews(show)
     }
 
+    fun setDirectMediaOnProxiedNetworks(enabled: Boolean) = viewModelScope.launch {
+        contentPreviewPrefs.setDirectMediaOnProxiedNetworks(enabled)
+    }
+
     fun setVoiceEncryptionDefault(enabled: Boolean) = viewModelScope.launch {
         voicePrefs.setEncryptionDefault(enabled)
     }
