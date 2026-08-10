@@ -1,0 +1,4 @@
+- A top-edge bar shows history syncing the moment it starts, so reconnects no longer look idle while backlog arrives.
+- Tapping scroll-to-top no longer makes chat-list rows visibly spring into place on the next scroll down.
+- Nick mentions in messages pick up their roster color right away instead of waiting for the next roster refresh.
+- IRC servers that wrap CHATHISTORY batches in a labeled-response (e.g. soju) now load older history correctly.
