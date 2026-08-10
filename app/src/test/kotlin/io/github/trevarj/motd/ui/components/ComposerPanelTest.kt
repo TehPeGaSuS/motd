@@ -214,15 +214,135 @@ class ComposerPanelTest {
     }
 
     @Test
-    fun `ime inset tracker follows explicit insets and remembers the largest visible height`() {
-        val tracker = ImeInsetTracker()
+    fun `ime content height ignores the separately consumed navigation bar inset`() {
+        assertEquals(320, imeContentHeightPx(imeBottomPx = 380, navigationBarsBottomPx = 60))
+        assertEquals(0, imeContentHeightPx(imeBottomPx = 40, navigationBarsBottomPx = 60))
+    }
 
-        assertEquals(0, tracker.update(0))
-        assertEquals(400, tracker.update(400))
-        assertEquals(885, tracker.update(885))
+    @Test
+    fun `ime inset tracker only remembers a height the keyboard actually rested at`() {
+        val tracker = ImeInsetTracker(settledFrameCount = 3)
+
+        // Mid-animation samples are not resting positions, however tall they get.
+        listOf(0, 220, 640, 885).forEach { tracker.update(it) }
+        assertEquals(885, tracker.currentImeHeightPx)
+        assertEquals(0, tracker.lastVisibleImeHeightPx)
+
+        tracker.settleAt(885)
         assertEquals(885, tracker.lastVisibleImeHeightPx)
-        assertEquals(400, tracker.update(400))
-        assertEquals(0, tracker.update(0))
-        assertEquals(885, tracker.lastVisibleImeHeightPx)
+
+        // A keyboard switch that settles shorter replaces the remembered height instead of keeping
+        // the stale maximum that used to leave the panel with residual height.
+        listOf(600, 400).forEach { tracker.update(it) }
+        tracker.settleAt(720)
+        assertEquals(720, tracker.lastVisibleImeHeightPx)
+
+        // Hiding the keyboard never overwrites the last visible resting height.
+        tracker.settleAt(0)
+        assertEquals(720, tracker.lastVisibleImeHeightPx)
+        assertEquals(0, tracker.currentImeHeightPx)
+    }
+
+    @Test
+    fun `ime inset tracker reports a new settle generation per resting position`() {
+        val tracker = ImeInsetTracker(settledFrameCount = 3)
+        val start = tracker.settleGeneration
+
+        tracker.update(400)
+        tracker.update(400)
+        assertEquals(false, tracker.settled)
+        assertEquals(start, tracker.settleGeneration)
+
+        tracker.update(400)
+        assertEquals(true, tracker.settled)
+        assertEquals(start + 1, tracker.settleGeneration)
+
+        // Holding still does not keep bumping the generation; only the next settle does.
+        repeat(4) { tracker.update(400) }
+        assertEquals(start + 1, tracker.settleGeneration)
+        tracker.settleAt(0)
+        assertEquals(start + 2, tracker.settleGeneration)
+    }
+
+    @Test
+    fun `panel height complements the ime across a full hide and restore including a shorter keyboard`() {
+        val tracker = ImeInsetTracker(settledFrameCount = 3)
+        tracker.settleAt(320)
+        val session = openEmojiPickerSession(
+            imeHeightPx = tracker.currentImeHeightPx,
+            lastVisibleImeHeightPx = tracker.lastVisibleImeHeightPx,
+            inputFocused = true,
+            compactPickerHeightPx = 250,
+        )
+
+        // Hide, then restore to a shorter keyboard: every frame must still add up to the captured
+        // height, which is what keeps the message-list viewport from resizing.
+        listOf(320, 240, 120, 0, 90, 200, 280).forEach { currentImeHeightPx ->
+            tracker.update(currentImeHeightPx)
+            assertEquals(
+                session.capturedImeHeightPx,
+                currentImeHeightPx + emojiPickerReplacementHeight(
+                    session.capturedImeHeightPx,
+                    currentImeHeightPx,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `residual strip collapses to zero before the panel is removed`() {
+        val restoredImeHeightPx = 280
+        var capturedImeHeightPx = 320
+        var remainingFrames = 8
+
+        while (
+            remainingFrames > 0 &&
+            emojiPickerReplacementHeight(capturedImeHeightPx, restoredImeHeightPx) > 0
+        ) {
+            capturedImeHeightPx = collapseCapturedImeHeightPx(
+                capturedImeHeightPx = capturedImeHeightPx,
+                currentImeHeightPx = restoredImeHeightPx,
+                remainingFrames = remainingFrames,
+            )
+            remainingFrames--
+        }
+
+        // The panel only disappears once it reports no height at all, so removal cannot snap.
+        assertEquals(0, emojiPickerReplacementHeight(capturedImeHeightPx, restoredImeHeightPx))
+        assertEquals(restoredImeHeightPx, capturedImeHeightPx)
+    }
+
+    @Test
+    fun `residual collapse steps down without overshooting the restored keyboard`() {
+        assertEquals(
+            290,
+            collapseCapturedImeHeightPx(
+                capturedImeHeightPx = 320,
+                currentImeHeightPx = 200,
+                remainingFrames = 4,
+            ),
+        )
+        // The final frame lands exactly on the floor rather than leaving a sliver behind.
+        assertEquals(
+            200,
+            collapseCapturedImeHeightPx(
+                capturedImeHeightPx = 320,
+                currentImeHeightPx = 200,
+                remainingFrames = 1,
+            ),
+        )
+        // A keyboard taller than the captured height already reports no residual height.
+        assertEquals(
+            400,
+            collapseCapturedImeHeightPx(
+                capturedImeHeightPx = 320,
+                currentImeHeightPx = 400,
+                remainingFrames = 8,
+            ),
+        )
+    }
+
+    private fun ImeInsetTracker.settleAt(heightPx: Int) {
+        repeat(4) { update(heightPx) }
     }
 }

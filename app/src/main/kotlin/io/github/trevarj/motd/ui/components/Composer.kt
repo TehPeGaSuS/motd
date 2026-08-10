@@ -10,16 +10,17 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -51,6 +52,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,6 +87,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -107,6 +110,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 data class ComposerReply(val sender: String, val text: String)
@@ -186,24 +190,81 @@ internal fun emojiPickerReplacementHeight(
     currentImeHeightPx: Int,
 ): Int = (capturedImeHeightPx.coerceAtLeast(0) - currentImeHeightPx.coerceAtLeast(0)).coerceAtLeast(0)
 
-internal class ImeInsetTracker {
-    var currentImeHeightPx: Int = 0
+/**
+ * The composer's ancestor consumes the navigation-bar inset before applying `imePadding()`, so only
+ * the part of the keyboard above the navigation bar actually moves the input row. Sampling this in
+ * the measure phase — the same phase `imePadding()` reads in — is what keeps
+ * `imePadding + panel height == captured` on every frame of the IME animation.
+ */
+internal fun imeContentHeightPx(imeBottomPx: Int, navigationBarsBottomPx: Int): Int =
+    (imeBottomPx - navigationBarsBottomPx).coerceAtLeast(0)
+
+/**
+ * One frame of the residual collapse. A keyboard that comes back shorter than the captured height
+ * leaves a strip below the input row; stepping the captured height down to the live IME height
+ * animates that strip away instead of snapping the timeline when the session is finally dropped.
+ */
+internal fun collapseCapturedImeHeightPx(
+    capturedImeHeightPx: Int,
+    currentImeHeightPx: Int,
+    remainingFrames: Int,
+): Int {
+    val floorPx = currentImeHeightPx.coerceAtLeast(0)
+    val capturedPx = capturedImeHeightPx.coerceAtLeast(0)
+    if (capturedPx <= floorPx || remainingFrames <= 1) return floorPx
+    val stepPx = (capturedPx - floorPx + remainingFrames - 1) / remainingFrames
+    return (capturedPx - stepPx).coerceAtLeast(floorPx)
+}
+
+/**
+ * Follows the animated IME inset outside composition. Heights are snapshot-backed so the restore
+ * handoff can await them without depending on a recomposition that may legitimately be skipped.
+ *
+ * [lastVisibleImeHeightPx] deliberately tracks the last height the keyboard actually *rested* at
+ * rather than the largest one ever seen: rotation, a keyboard switch or a suggestion strip all make
+ * the resting height shrink, and capturing a stale maximum leaves the panel with residual height.
+ */
+internal class ImeInsetTracker(private val settledFrameCount: Int = IME_SETTLED_FRAME_COUNT) {
+    var currentImeHeightPx by mutableIntStateOf(0)
         private set
 
-    var lastVisibleImeHeightPx: Int = 0
+    var lastVisibleImeHeightPx by mutableIntStateOf(0)
         private set
+
+    /** Bumped whenever a height settles, so a restore can await the *next* settle specifically. */
+    var settleGeneration by mutableIntStateOf(0)
+        private set
+
+    private var candidateHeightPx = 0
+    private var stableFrames = settledFrameCount
+
+    /** True once the current height has held still long enough to count as a resting position. */
+    val settled: Boolean get() = stableFrames >= settledFrameCount
 
     fun update(currentHeightPx: Int): Int {
-        currentImeHeightPx = currentHeightPx.coerceAtLeast(0)
-        if (currentImeHeightPx > 0) {
-            lastVisibleImeHeightPx = maxOf(lastVisibleImeHeightPx, currentImeHeightPx)
+        val heightPx = currentHeightPx.coerceAtLeast(0)
+        currentImeHeightPx = heightPx
+        if (heightPx != candidateHeightPx) {
+            candidateHeightPx = heightPx
+            stableFrames = 1
+            return heightPx
         }
-        return currentImeHeightPx
+        if (stableFrames < settledFrameCount) {
+            stableFrames++
+            if (stableFrames == settledFrameCount) {
+                if (heightPx > 0) lastVisibleImeHeightPx = heightPx
+                settleGeneration++
+            }
+        }
+        return heightPx
     }
 }
 
 private const val EMOJI_IME_RESTORE_TIMEOUT_MILLIS = 1_500L
 private const val IME_SETTLED_FRAME_COUNT = 3
+private const val IME_RESTORE_REFOCUS_FRAMES = 6
+private const val IME_RESIDUAL_COLLAPSE_FRAMES = 8
+private const val IME_FOLLOW_FRAME_LIMIT = 240
 private val COMPACT_EMOJI_PICKER_HEIGHT = 250.dp
 
 internal enum class VoiceGestureTarget { NONE, CANCEL, LOCK }
@@ -248,7 +309,10 @@ fun Composer(
     onVoiceHoldStop: () -> Unit = {},
     onVoiceHoldCancel: () -> Unit = {},
     onVoiceLock: () -> Unit = {},
-    imeHeightPx: Int = 0,
+    // Test seam only. Production leaves this null so the panel samples the real window insets in the
+    // measure phase, in lock-step with the ancestor `imePadding()`; a composition-phase value would
+    // always trail measure by one frame of keyboard travel and resize the timeline viewport.
+    imeHeightPx: Int? = null,
     autocomplete: (@Composable () -> Unit)? = null,
 ) {
     var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
@@ -265,13 +329,29 @@ fun Composer(
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val density = LocalDensity.current
+    val readImeContentHeightPx = rememberImeContentHeightReader(imeHeightPx)
     val imeInsetTracker = remember { ImeInsetTracker() }
-    val currentImeHeightPx = imeInsetTracker.update(imeHeightPx)
     val compactPickerHeightPx = with(density) { COMPACT_EMOJI_PICKER_HEIGHT.roundToPx() }
     var inputFocused by remember { mutableStateOf(false) }
     val latestInputFocused by rememberUpdatedState(inputFocused)
-    val restoringSession = emojiPickerSession?.takeIf { it.phase == EmojiPickerPhase.RESTORING_IME }
+    // Height the retained picker is measured at. Non-zero once the picker has been opened at least
+    // once, which is also what keeps the inflated view alive between sessions.
+    var pickerContentHeightPx by remember { mutableIntStateOf(0) }
     val closeEmojiPickerDescription = stringResource(R.string.chat_composer_emoji_close)
+
+    // Follow the IME only while it is actually moving, and only from a coroutine: no composition
+    // scope reads the animated inset, so the timeline above the composer stays skippable for the
+    // whole transition instead of recomposing once per frame.
+    LaunchedEffect(readImeContentHeightPx, density) {
+        snapshotFlow { readImeContentHeightPx(density) }.collect { heightPx ->
+            imeInsetTracker.update(heightPx)
+            var frames = 0
+            while (!imeInsetTracker.settled && frames++ < IME_FOLLOW_FRAME_LIMIT) {
+                withFrameNanos { }
+                imeInsetTracker.update(readImeContentHeightPx(density))
+            }
+        }
+    }
 
     fun dismissEmojiPicker() {
         val session = emojiPickerSession ?: return
@@ -281,57 +361,85 @@ fun Composer(
     }
 
     fun openEmojiPicker() {
-        emojiPickerSession = openEmojiPickerSession(
-            imeHeightPx = currentImeHeightPx,
+        val session = openEmojiPickerSession(
+            imeHeightPx = imeInsetTracker.currentImeHeightPx,
             lastVisibleImeHeightPx = imeInsetTracker.lastVisibleImeHeightPx,
             inputFocused = inputFocused,
             compactPickerHeightPx = compactPickerHeightPx,
         )
+        // Measure the picker content once per session; the restore tail only shrinks the viewport.
+        pickerContentHeightPx = session.capturedImeHeightPx
+        emojiPickerSession = session
         keyboard?.hide()
     }
 
     // Re-establish the text input connection on a frame boundary, then keep the picker occupying
     // the complementary space until the IME animation has actually settled. If an IME refuses the
     // request, return to the open picker instead of collapsing both input surfaces.
-    LaunchedEffect(restoringSession) {
-        if (restoringSession != null) {
-            if (!latestInputFocused) focusRequester.requestFocus()
-            withFrameNanos { }
-            var previousHeightPx = -1
-            var settledFrames = 0
-            var framesWithoutIme = 0
-            keyboard?.show()
-            val restored = withTimeoutOrNull(EMOJI_IME_RESTORE_TIMEOUT_MILLIS) {
-                while (settledFrames < IME_SETTLED_FRAME_COUNT) {
-                    withFrameNanos { }
-                    val heightPx = imeInsetTracker.currentImeHeightPx
-                    if (heightPx > 0 && heightPx == previousHeightPx) {
-                        settledFrames++
-                    } else {
-                        settledFrames = 0
-                    }
-                    if (heightPx == 0 && ++framesWithoutIme == 6) {
-                        // Most keyboards reopen the still-focused input connection immediately.
-                        // If one ignores that request, create exactly one fresh focus transition
-                        // instead of repeatedly clearing focus and flashing the entire composer.
-                        focusManager.clearFocus(force = true)
-                        withFrameNanos { }
-                        focusRequester.requestFocus()
-                        withFrameNanos { }
-                        keyboard?.show()
-                    }
-                    previousHeightPx = heightPx
-                }
-                true
-            } == true
-            if (emojiPickerSession == restoringSession) {
-                emojiPickerSession = if (restored && previousHeightPx > 0) {
-                    null
-                } else {
-                    reopenEmojiPickerSession(restoringSession)
-                }
+    val restoringIme = emojiPickerSession?.phase == EmojiPickerPhase.RESTORING_IME
+    LaunchedEffect(restoringIme) {
+        if (!restoringIme) return@LaunchedEffect
+        if (!latestInputFocused) focusRequester.requestFocus()
+        withFrameNanos { }
+        val startGeneration = imeInsetTracker.settleGeneration
+        keyboard?.show()
+        // Most keyboards reopen the still-focused input connection immediately. If one ignores that
+        // request, create exactly one fresh focus transition instead of repeatedly clearing focus
+        // and flashing the entire composer.
+        val refocus = launch {
+            repeat(IME_RESTORE_REFOCUS_FRAMES) { withFrameNanos { } }
+            if (imeInsetTracker.currentImeHeightPx == 0) {
+                focusManager.clearFocus(force = true)
+                withFrameNanos { }
+                focusRequester.requestFocus()
+                withFrameNanos { }
+                keyboard?.show()
             }
         }
+        // A settle at zero only means the keyboard has not started coming back yet, so keep waiting
+        // for a resting height the panel can actually hand its space over to.
+        val restoredHeightPx = withTimeoutOrNull(EMOJI_IME_RESTORE_TIMEOUT_MILLIS) {
+            var generation = startGeneration
+            var heightPx = 0
+            while (heightPx <= 0) {
+                generation = snapshotFlow { imeInsetTracker.settleGeneration }
+                    .first { it != generation }
+                heightPx = imeInsetTracker.currentImeHeightPx
+            }
+            heightPx
+        } ?: 0
+        refocus.cancel()
+        val settledSession = emojiPickerSession
+            ?.takeIf { it.phase == EmojiPickerPhase.RESTORING_IME }
+            ?: return@LaunchedEffect
+        if (restoredHeightPx <= 0) {
+            emojiPickerSession = reopenEmojiPickerSession(settledSession)
+            return@LaunchedEffect
+        }
+        // Never drop the panel while it still reports height: a keyboard that returns shorter than
+        // the captured one would otherwise snap the timeline by the leftover strip.
+        var collapsing: EmojiPickerSession = settledSession
+        var remainingFrames = IME_RESIDUAL_COLLAPSE_FRAMES
+        while (
+            remainingFrames > 0 &&
+            emojiPickerReplacementHeight(
+                collapsing.capturedImeHeightPx,
+                imeInsetTracker.currentImeHeightPx,
+            ) > 0
+        ) {
+            withFrameNanos { }
+            if (emojiPickerSession !== collapsing) return@LaunchedEffect
+            collapsing = collapsing.copy(
+                capturedImeHeightPx = collapseCapturedImeHeightPx(
+                    capturedImeHeightPx = collapsing.capturedImeHeightPx,
+                    currentImeHeightPx = imeInsetTracker.currentImeHeightPx,
+                    remainingFrames = remainingFrames,
+                ),
+            )
+            emojiPickerSession = collapsing
+            remainingFrames--
+        }
+        if (emojiPickerSession === collapsing) emojiPickerSession = null
     }
 
     // The first Back closes the picker and restores the keyboard only when it replaced one. Once
@@ -516,7 +624,8 @@ fun Composer(
 
                 EmojiPickerReplacementSurface(
                     session = emojiPickerSession,
-                    currentImeHeightPx = currentImeHeightPx,
+                    contentHeightPx = pickerContentHeightPx,
+                    readImeContentHeightPx = readImeContentHeightPx,
                     onPick = { emoji -> onValueChange(insertAtCursor(value, emoji)) },
                 )
             }
@@ -678,16 +787,41 @@ private fun AutocompleteOverlayLayout(
     }
 }
 
+/**
+ * Samples the live IME height wherever the caller needs it. The returned reader is stable, so
+ * handing it to a layout keeps the read in that layout's measure phase instead of pinning the
+ * animated inset to a composition scope.
+ */
+@Composable
+private fun rememberImeContentHeightReader(overridePx: Int?): (Density) -> Int {
+    val imeInsets = WindowInsets.ime
+    val navigationBarsInsets = WindowInsets.navigationBars
+    val latestOverridePx by rememberUpdatedState(overridePx)
+    return remember(imeInsets, navigationBarsInsets) {
+        { density ->
+            latestOverridePx ?: imeContentHeightPx(
+                imeBottomPx = imeInsets.getBottom(density),
+                navigationBarsBottomPx = navigationBarsInsets.getBottom(density),
+            )
+        }
+    }
+}
+
 @Composable
 private fun EmojiPickerReplacementSurface(
     session: EmojiPickerSession?,
-    currentImeHeightPx: Int,
+    contentHeightPx: Int,
+    readImeContentHeightPx: (Density) -> Int,
     onPick: (String) -> Unit,
 ) {
-    session ?: return
+    // Stay composed once the picker has been opened once. Re-inflating [EmojiPickerView] restarts
+    // its async category load, which is exactly the blank-then-populate flash on the most expensive
+    // frame of the handoff.
+    if (contentHeightPx <= 0) return
     Layout(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag("chat_composer_emoji_panel")
             .clipToBounds(),
         content = {
             // Measure the picker once at the captured keyboard height. Only the clipping viewport
@@ -695,13 +829,15 @@ private fun EmojiPickerReplacementSurface(
             EmojiPickerPanel(onPick = onPick, modifier = Modifier.fillMaxWidth())
         },
     ) { measurables, constraints ->
-        val fullHeightPx = session.capturedImeHeightPx
-            .coerceAtLeast(0)
-            .coerceAtMost(constraints.maxHeight)
-        val visibleHeightPx = emojiPickerReplacementHeight(
-            capturedImeHeightPx = fullHeightPx,
-            currentImeHeightPx = currentImeHeightPx,
-        ).coerceAtMost(fullHeightPx)
+        val fullHeightPx = contentHeightPx.coerceAtMost(constraints.maxHeight)
+        // Measure-phase inset read: the ancestor `imePadding()` samples the very same frame, so the
+        // input row never moves by one frame of keyboard travel and the timeline viewport is stable.
+        val visibleHeightPx = session?.let {
+            emojiPickerReplacementHeight(
+                capturedImeHeightPx = it.capturedImeHeightPx,
+                currentImeHeightPx = readImeContentHeightPx(this),
+            ).coerceAtMost(fullHeightPx)
+        } ?: 0
         val placeable = measurables.single().measure(
             constraints.copy(minHeight = fullHeightPx, maxHeight = fullHeightPx),
         )
@@ -720,14 +856,13 @@ private fun ComposerTextField(
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val interactions = remember { MutableInteractionSource() }
-    val focused by interactions.collectIsFocusedAsState()
-    LaunchedEffect(focused) { if (focused) onFocused() }
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = modifier
             .heightIn(min = 48.dp, max = 148.dp)
+            // Single source of focus truth. Mirroring this through the interaction source as well
+            // dismissed the picker twice for every focus gain.
             .onFocusChanged {
                 onFocusChanged(it.isFocused)
                 if (it.isFocused) onFocused()
@@ -740,7 +875,6 @@ private fun ComposerTextField(
             imeAction = ImeAction.Default,
         ),
         maxLines = 6,
-        interactionSource = interactions,
         decorationBox = { inner ->
             Box(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 12.dp),

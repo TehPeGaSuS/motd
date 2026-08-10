@@ -27,9 +27,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
@@ -112,7 +110,6 @@ import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -1825,11 +1822,9 @@ fun ChatContent(
                 .navigationBarsPadding()
                 .imePadding(),
         ) {
-            val density = LocalDensity.current
-            val imeContentHeightPx = (
-                WindowInsets.ime.getBottom(density) -
-                    WindowInsets.navigationBars.getBottom(density)
-                ).coerceAtLeast(0)
+            // No composition-phase IME read here on purpose: the composer samples the animated inset
+            // in its own measure phase, so the whole timeline stays skippable while the keyboard
+            // animates instead of recomposing once per frame.
             ConversationTypography(conversationFontScalePercent) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.weight(1f)) {
@@ -1846,13 +1841,57 @@ fun ChatContent(
                             .fillMaxSize()
                             .testTag("chat_layout_effective_${conversationLayout.effective.name.lowercase()}"),
                     ) {
+                    // Keep the timeline's callbacks stable. A freshly allocated lambda on every
+                    // recomposition of this scope defeats MessageList's skipping, which is what
+                    // turned any surrounding state change into a full timeline recomposition.
+                    // Keyed like `liveEntryIds` itself, which is re-remembered per buffer.
+                    val onLiveEntryConsumed = remember(state.buffer?.id) {
+                        { id: Long -> liveEntryIds = consumeLiveEntryId(liveEntryIds, id) }
+                    }
+                    val onTimelineLongPress = remember {
+                        { message: MessageEntity -> sheetTarget = message }
+                    }
+                    val canRetryMessage = remember(state.buffer) {
+                        { message: MessageEntity ->
+                            state.buffer?.let { buffer ->
+                                io.github.trevarj.motd.service.isGenericRetryEligible(buffer, message)
+                            } == true
+                        }
+                    }
+                    val onAcceptDccTransferRequest = remember(dccDestinationPicker) {
+                        { transferId: Long, filename: String, allowPrivate: Boolean ->
+                            pendingDccAccept = PendingDccAccept(transferId, allowPrivate)
+                            dccDestinationPicker.launch(filename)
+                        }
+                    }
+                    // Link-preview tap opens the URL in the system browser.
+                    val onOpenLink = remember(ctx) {
+                        { url: String -> ctx.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
+                    }
+                    // Effective expansion: global expand-all default, minus rows the user
+                    // re-collapsed; otherwise only individually expanded rows show (bug #9).
+                    val foolExpanded = remember {
+                        { id: Long ->
+                            if (expandAllFools) id !in collapsedFools else id in expandedFools
+                        }
+                    }
+                    // Bidirectional per-row toggle, respecting the global default.
+                    val onToggleFool = remember {
+                        { id: Long ->
+                            if (expandAllFools) {
+                                collapsedFools =
+                                    if (id in collapsedFools) collapsedFools - id else collapsedFools + id
+                            } else {
+                                expandedFools =
+                                    if (id in expandedFools) expandedFools - id else expandedFools + id
+                            }
+                        }
+                    }
                     MessageList(
                         items = items,
                         listState = listState,
                         liveEntryIds = liveEntryIds,
-                        onLiveEntryConsumed = { id ->
-                            liveEntryIds = consumeLiveEntryId(liveEntryIds, id)
-                        },
+                        onLiveEntryConsumed = onLiveEntryConsumed,
                         networkId = state.buffer?.networkId,
                         bufferId = state.buffer?.id,
                         conversationName = state.buffer?.displayName,
@@ -1865,24 +1904,17 @@ fun ChatContent(
                         reactionChips = reactionChips,
                         replyPreview = replyPreview,
                         onReplyPreviewClick = onReplyPreviewClick,
-                        onLongPress = { sheetTarget = it },
+                        onLongPress = onTimelineLongPress,
                         onReply = timelineReply,
                         onReact = onReact,
                         onImageClick = onOpenImage,
                         onRetry = onRetry,
-                        canRetry = { message ->
-                            state.buffer?.let { buffer ->
-                                io.github.trevarj.motd.service.isGenericRetryEligible(buffer, message)
-                            } == true
-                        },
+                        canRetry = canRetryMessage,
                         onDelete = onDelete,
                         onAcceptInvite = onAcceptInvite,
                         onDismissInvite = onDismissInvite,
                         dccTransfer = dccTransfer,
-                        onAcceptDccTransfer = { transferId, filename, allowPrivate ->
-                            pendingDccAccept = PendingDccAccept(transferId, allowPrivate)
-                            dccDestinationPicker.launch(filename)
-                        },
+                        onAcceptDccTransfer = onAcceptDccTransferRequest,
                         onRejectDccTransfer = onRejectDccTransfer,
                         onRemoveDccTransfer = onRemoveDccTransfer,
                         loadPreview = loadPreview,
@@ -1898,8 +1930,7 @@ fun ChatContent(
                         onAudioToggle = onAudioToggle,
                         onAudioCacheInspect = onAudioCacheInspect,
                         onAudioSeek = onAudioSeek,
-                        // Link-preview tap opens the URL in the system browser.
-                        onOpenLink = { ctx.startActivity(Intent(Intent.ACTION_VIEW, it.toUri())) },
+                        onOpenLink = onOpenLink,
                         highlightMsgid = highlightMsgid,
                         knownNicks = knownNicks,
                         friends = friends,
@@ -1907,21 +1938,8 @@ fun ChatContent(
                         foolsMode = foolsMode,
                         identityRules = identityRules,
                         historyUiState = historyUiState,
-                        // Effective expansion: global expand-all default, minus rows the user
-                        // re-collapsed; otherwise only individually expanded rows show (bug #9).
-                        foolExpanded = { id ->
-                            if (expandAllFools) id !in collapsedFools else id in expandedFools
-                        },
-                        // Bidirectional per-row toggle, respecting the global default.
-                        onToggleFool = { id ->
-                            if (expandAllFools) {
-                                collapsedFools =
-                                    if (id in collapsedFools) collapsedFools - id else collapsedFools + id
-                            } else {
-                                expandedFools =
-                                    if (id in expandedFools) expandedFools - id else expandedFools + id
-                            }
-                        },
+                        foolExpanded = foolExpanded,
+                        onToggleFool = onToggleFool,
                         onSenderClick = onSenderClick,
                     )
                     }
@@ -2101,7 +2119,6 @@ fun ChatContent(
                     onVoiceHoldStop = onVoiceHoldStop,
                     onVoiceHoldCancel = onVoiceHoldCancel,
                     onVoiceLock = onVoiceLock,
-                    imeHeightPx = imeContentHeightPx,
                     autocomplete = if (showAutocomplete && completions.isNotEmpty()) {
                         {
                             AutocompletePanel(

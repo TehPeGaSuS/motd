@@ -16,6 +16,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -69,10 +70,76 @@ class ComposerUiTest {
         compose.waitForIdle()
 
         compose.onNodeWithTag("chat_composer_input_row").assertIsDisplayed()
+        // The picker stays inflated but reports no height, so closing it frees the space without
+        // throwing away the populated emoji grid.
+        compose.onNodeWithTag("chat_composer_emoji_picker").assertIsNotDisplayed()
         assertEquals(
             0,
-            compose.onAllNodesWithTag("chat_composer_emoji_picker").fetchSemanticsNodes().size,
+            compose.onNodeWithTag("chat_composer_emoji_panel").fetchSemanticsNode().size.height,
         )
+    }
+
+    @Test
+    fun emojiPicker_reopensWithTheRetainedPicker() {
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = TextFieldValue("draft"),
+                    onValueChange = {},
+                    onSend = {},
+                    enabled = true,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chat_composer_emoji").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_composer_emoji_grid").assertExists()
+
+        compose.onNodeWithTag("chat_composer_emoji").performClick()
+        compose.waitForIdle()
+        // Retained across the close: reopening reveals the same view instead of re-inflating it and
+        // re-running the async category load that made the picker flash blank.
+        compose.onNodeWithTag("chat_composer_emoji_grid").assertExists()
+
+        compose.onNodeWithTag("chat_composer_emoji").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_composer_emoji_picker").assertIsDisplayed()
+        compose.onNodeWithTag("chat_composer_emoji_grid").assertExists()
+    }
+
+    @Test
+    fun emojiPicker_panelHeightComplementsTheImeThroughoutTheAnimation() {
+        val imeHeightPx = mutableStateOf(200)
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = TextFieldValue("draft"),
+                    onValueChange = {},
+                    onSend = {},
+                    enabled = true,
+                    imeHeightPx = imeHeightPx.value,
+                )
+            }
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("chat_composer_emoji").performClick()
+        compose.waitForIdle()
+
+        // Simulated keyboard fall and rise. The panel is measured from the same inset value the
+        // ancestor imePadding() consumes, so their sum — the space below the input row — never moves.
+        var expectedSumPx = -1
+        listOf(200, 150, 100, 40, 0, 80, 160, 200).forEach { currentImeHeightPx ->
+            compose.runOnIdle { imeHeightPx.value = currentImeHeightPx }
+            compose.waitForIdle()
+            val panelHeightPx = compose.onNodeWithTag("chat_composer_emoji_panel")
+                .fetchSemanticsNode()
+                .size
+                .height
+            val sumPx = panelHeightPx + currentImeHeightPx
+            if (expectedSumPx < 0) expectedSumPx = sumPx else assertEquals(expectedSumPx, sumPx)
+        }
     }
 
     @Test

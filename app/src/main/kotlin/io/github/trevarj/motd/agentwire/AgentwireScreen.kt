@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -60,7 +59,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontFamily
@@ -493,7 +491,6 @@ private fun AgentwireComposer(
     onSend: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val density = LocalDensity.current
     Surface(shadowElevation = 4.dp) {
         Column(Modifier.fillMaxWidth()) {
             if (state.busy) {
@@ -520,7 +517,6 @@ private fun AgentwireComposer(
                 // Voice and attachments stay on the shared composer boundary. They can be enabled
                 // when Agentwire defines safe attachment payloads instead of inventing a wire form.
                 voiceEnabled = false,
-                imeHeightPx = WindowInsets.ime.getBottom(density),
             )
         }
     }
