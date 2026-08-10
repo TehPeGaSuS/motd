@@ -14,9 +14,8 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * Per-row sync cues on [ChatListRowItem]: the queued ring and error dot overlay the avatar's
- * top-right corner, while the active-fetch spinner takes the unread badge's slot in the trailing
- * badge row (suppressing the count until the fetch settles).
+ * Per-row sync cues on [ChatListRowItem]: every cue (spinner, queued ring, error dot) renders in
+ * the trailing badge row, taking the unread badge's slot and suppressing the count while shown.
  */
 class ChatListSyncIndicatorUiTest {
     @get:Rule
@@ -53,6 +52,18 @@ class ChatListSyncIndicatorUiTest {
         setRow(ChatListSyncIndicator.ERROR)
 
         compose.onNodeWithTag("chatlist_row_sync_error", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun error_dotTakesTheUnreadBadgeSlot() {
+        setRow(ChatListSyncIndicator.ERROR, unreadCount = 7)
+
+        compose.onNodeWithTag("chatlist_row_sync_error", useUnmergedTree = true).assertIsDisplayed()
+        assertEquals(
+            0,
+            compose.onAllNodesWithTag("chatlist_row_unread_badge", useUnmergedTree = true)
+                .fetchSemanticsNodes().size,
+        )
     }
 
     @Test

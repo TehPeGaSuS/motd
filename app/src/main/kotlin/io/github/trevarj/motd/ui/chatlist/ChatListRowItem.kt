@@ -215,7 +215,6 @@ fun ChatListRowItem(
             networkId = row.networkId,
             presence = queryPresence,
             size = spacing.chatListAvatar,
-            syncIndicator = syncIndicator,
         )
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -372,10 +371,10 @@ fun ChatListRowItem(
                         modifier = Modifier.testTag("chatlist_row_mention_badge"),
                     )
                 }
-                // While this chat's history request is on the wire the spinner takes the unread
-                // badge's slot; the count returns (possibly updated) once the fetch settles.
-                if (syncIndicator == ChatListSyncIndicator.SYNCING) {
-                    SyncingCountSlotSpinner()
+                // Any sync cue takes the unread badge's slot; the count returns (possibly
+                // updated) once the buffer settles clean.
+                if (syncIndicator != ChatListSyncIndicator.NONE) {
+                    SyncStatusBadge(indicator = syncIndicator)
                 } else {
                     badges.unread?.let { count ->
                         UnreadBadge(
@@ -405,7 +404,6 @@ private fun PresenceAvatar(
     networkId: Long,
     presence: PresenceState?,
     size: Dp,
-    syncIndicator: ChatListSyncIndicator = ChatListSyncIndicator.NONE,
 ) {
     Box(modifier = Modifier.size(size)) {
         Avatar(
@@ -422,32 +420,45 @@ private fun PresenceAvatar(
                 modifier = Modifier.align(Alignment.BottomEnd),
             )
         }
-        if (syncIndicator == ChatListSyncIndicator.QUEUED || syncIndicator == ChatListSyncIndicator.ERROR) {
-            SyncStatusBadge(
-                indicator = syncIndicator,
-                modifier = Modifier.align(Alignment.TopEnd),
-            )
-        }
     }
 }
 
 /**
- * Overlays the avatar's top-right corner with the row's quiet history-sync cues (mirrors
- * [PresenceBadge] at the opposite corner): the queued ring and the error dot. The active-fetch
- * spinner instead takes the unread badge's slot via [SyncingCountSlotSpinner]. Absolutely
- * positioned inside the avatar's fixed-size [Box], so it never shifts row layout. No live region:
- * rows churn constantly during a resync pass, and announcing every transition would spam TalkBack.
+ * The row's history-sync cue, rendered in the trailing badge row where it occupies the unread
+ * badge's slot (which is suppressed while any cue shows). Every variant sits centered in the
+ * badge's 20dp minimum footprint so the swap never reflows the column. No live region: rows churn
+ * constantly during a resync pass, and announcing every transition would spam TalkBack.
  */
 @Composable
 private fun SyncStatusBadge(
     indicator: ChatListSyncIndicator,
     modifier: Modifier = Modifier,
 ) {
+    Box(
+        modifier = modifier.size(20.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        SyncStatusBadgeContent(indicator)
+    }
+}
+
+@Composable
+private fun SyncStatusBadgeContent(indicator: ChatListSyncIndicator) {
     when (indicator) {
+        ChatListSyncIndicator.SYNCING -> {
+            val description = stringResource(R.string.chatlist_sync_syncing)
+            CircularProgressIndicator(
+                strokeWidth = 2.dp,
+                modifier = Modifier
+                    .size(16.dp)
+                    .testTag("chatlist_row_sync_syncing")
+                    .semantics { contentDescription = description },
+            )
+        }
         ChatListSyncIndicator.QUEUED -> {
             val description = stringResource(R.string.chatlist_sync_queued)
             Box(
-                modifier = modifier
+                modifier = Modifier
                     .size(12.dp)
                     .testTag("chatlist_row_sync_queued")
                     .semantics { contentDescription = description }
@@ -457,7 +468,7 @@ private fun SyncStatusBadge(
         ChatListSyncIndicator.ERROR -> {
             val description = stringResource(R.string.chatlist_sync_error)
             Box(
-                modifier = modifier
+                modifier = Modifier
                     .size(8.dp)
                     .testTag("chatlist_row_sync_error")
                     .semantics { contentDescription = description }
@@ -465,29 +476,7 @@ private fun SyncStatusBadge(
                     .background(MaterialTheme.colorScheme.error),
             )
         }
-        ChatListSyncIndicator.SYNCING, ChatListSyncIndicator.NONE -> Unit
-    }
-}
-
-/**
- * Active-fetch spinner rendered in the trailing badge row, occupying the unread badge's slot
- * (which is suppressed while it shows). Sized to [UnreadBadge]'s 20dp minimum so the swap does
- * not reflow the column. Same no-live-region policy as [SyncStatusBadge].
- */
-@Composable
-private fun SyncingCountSlotSpinner(modifier: Modifier = Modifier) {
-    val description = stringResource(R.string.chatlist_sync_syncing)
-    Box(
-        modifier = modifier.size(20.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        CircularProgressIndicator(
-            strokeWidth = 2.dp,
-            modifier = Modifier
-                .size(16.dp)
-                .testTag("chatlist_row_sync_syncing")
-                .semantics { contentDescription = description },
-        )
+        ChatListSyncIndicator.NONE -> Unit
     }
 }
 
