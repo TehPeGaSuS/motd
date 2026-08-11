@@ -1,0 +1,5 @@
+- Share photos, links, and files into MOTD chats, and share messages out to other apps.
+- Chat list shows clearer per-conversation history sync progress, with automatic retry if it stalls and honest "tap to load" gaps.
+- New messages get a read marker right away instead of waiting for history to finish loading.
+- Smoother navigation transitions and keyboard/emoji handoff, with fewer visual glitches.
+- Optional: load link and image previews directly instead of through the bouncer.
