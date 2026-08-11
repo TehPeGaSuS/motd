@@ -1015,6 +1015,14 @@ class ChatViewModel @Inject constructor(
         AutoFollowTrace.record("chat_pause", operationalBufferId.value)
         foregroundBufferTracker.set(null)
         visibleSession.value = null
+        // Leaving the chat acknowledges a settled history error: the user has had the in-chat
+        // detail (stale chip / retry pill) on screen, so the chat-list badge must not keep
+        // nagging. Transient Queued/Syncing states are left untouched.
+        val bufferId = operationalBufferId.value ?: return
+        val status = historyResyncCoordinator.syncStatuses.value[bufferId]
+        if (status is HistorySyncStatus.Partial || status is HistorySyncStatus.Failed) {
+            historyResyncCoordinator.dismissSyncStatus(bufferId)
+        }
     }
 
     /**

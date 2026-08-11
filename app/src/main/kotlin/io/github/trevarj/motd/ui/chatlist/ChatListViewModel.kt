@@ -40,21 +40,23 @@ import javax.inject.Inject
 
 /** Per-row chat-list sync affordance; coarser than [HistorySyncStatus] so unrelated reason-string
  * churn (e.g. a retried [HistorySyncStatus.Partial] with a new reason) never invalidates a row. */
-enum class ChatListSyncIndicator { NONE, QUEUED, SYNCING, ERROR }
+enum class ChatListSyncIndicator { NONE, SYNCING, ERROR }
 
 /**
  * Pure mapper from the coordinator's per-buffer status map to the chat list's coarser indicator.
  * [HistorySyncStatus.Idle] and [HistorySyncStatus.Unavailable] settle to [ChatListSyncIndicator.NONE]
  * and are dropped from the result map entirely, so a row with no entry never renders a badge.
+ * [HistorySyncStatus.Queued] is deliberately invisible here: waiting for a fetch slot is scheduler
+ * internals, and painting it made the whole list churn on every reconnect pass.
  */
 internal fun chatListSyncIndicators(
     statuses: Map<Long, HistorySyncStatus>,
 ): Map<Long, ChatListSyncIndicator> = statuses.mapNotNull { (bufferId, status) ->
     val indicator = when (status) {
-        HistorySyncStatus.Queued -> ChatListSyncIndicator.QUEUED
         HistorySyncStatus.Syncing -> ChatListSyncIndicator.SYNCING
         is HistorySyncStatus.Partial, is HistorySyncStatus.Failed -> ChatListSyncIndicator.ERROR
-        HistorySyncStatus.Idle, HistorySyncStatus.Unavailable -> ChatListSyncIndicator.NONE
+        HistorySyncStatus.Queued, HistorySyncStatus.Idle, HistorySyncStatus.Unavailable ->
+            ChatListSyncIndicator.NONE
     }
     (bufferId to indicator).takeIf { indicator != ChatListSyncIndicator.NONE }
 }.toMap()

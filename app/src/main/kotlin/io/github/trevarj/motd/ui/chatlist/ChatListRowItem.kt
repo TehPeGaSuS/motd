@@ -455,16 +455,6 @@ private fun SyncStatusBadgeContent(indicator: ChatListSyncIndicator) {
                     .semantics { contentDescription = description },
             )
         }
-        ChatListSyncIndicator.QUEUED -> {
-            val description = stringResource(R.string.chatlist_sync_queued)
-            Box(
-                modifier = Modifier
-                    .size(12.dp)
-                    .testTag("chatlist_row_sync_queued")
-                    .semantics { contentDescription = description }
-                    .border(1.5.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), CircleShape),
-            )
-        }
         ChatListSyncIndicator.ERROR -> {
             val description = stringResource(R.string.chatlist_sync_error)
             Box(

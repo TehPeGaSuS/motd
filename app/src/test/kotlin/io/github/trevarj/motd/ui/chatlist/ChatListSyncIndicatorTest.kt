@@ -6,14 +6,15 @@ import org.junit.Test
 
 class ChatListSyncIndicatorTest {
     @Test
-    fun queued_and_syncing_map_to_their_matching_indicator() {
+    fun syncing_maps_to_spinner_and_queued_stays_invisible() {
         val statuses = mapOf(
             1L to HistorySyncStatus.Queued,
             2L to HistorySyncStatus.Syncing,
         )
 
+        // Queued is scheduler internals; painting it made the whole list churn on reconnect.
         assertEquals(
-            mapOf(1L to ChatListSyncIndicator.QUEUED, 2L to ChatListSyncIndicator.SYNCING),
+            mapOf(2L to ChatListSyncIndicator.SYNCING),
             chatListSyncIndicators(statuses),
         )
     }

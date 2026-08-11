@@ -14,8 +14,8 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * Per-row sync cues on [ChatListRowItem]: every cue (spinner, queued ring, error dot) renders in
- * the trailing badge row, taking the unread badge's slot and suppressing the count while shown.
+ * Per-row sync cues on [ChatListRowItem]: every cue (spinner, error dot) renders in the trailing
+ * badge row, taking the unread badge's slot and suppressing the count while shown.
  */
 class ChatListSyncIndicatorUiTest {
     @get:Rule
@@ -41,13 +41,6 @@ class ChatListSyncIndicatorUiTest {
     }
 
     @Test
-    fun queued_rendersDimmedRingBadge() {
-        setRow(ChatListSyncIndicator.QUEUED)
-
-        compose.onNodeWithTag("chatlist_row_sync_queued", useUnmergedTree = true).assertIsDisplayed()
-    }
-
-    @Test
     fun error_rendersDotBadge() {
         setRow(ChatListSyncIndicator.ERROR)
 
@@ -70,7 +63,7 @@ class ChatListSyncIndicatorUiTest {
     fun none_rendersNoSyncBadge() {
         setRow(ChatListSyncIndicator.NONE)
 
-        listOf("chatlist_row_sync_syncing", "chatlist_row_sync_queued", "chatlist_row_sync_error").forEach { tag ->
+        listOf("chatlist_row_sync_syncing", "chatlist_row_sync_error").forEach { tag ->
             assertEquals(0, compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().size)
         }
     }
