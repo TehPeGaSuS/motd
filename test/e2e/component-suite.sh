@@ -4,7 +4,8 @@ set -euo pipefail
 
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$E2E_DIR/../.." && pwd)"
-EXPECTED_CASES=90
+# 89 since the chat list's queued-ring badge (and its test) was removed in 0.14.1.
+EXPECTED_CASES=89
 REAL_STACK_ANNOTATION=io.github.trevarj.motd.FastHeadlessE2e
 
 cd "$REPO"
