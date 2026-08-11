@@ -192,6 +192,12 @@ class HistoryResyncCoordinator @Inject constructor(
         data class Incomplete(
             val reason: String,
             val awaitsTargetClassification: Boolean = false,
+            /**
+             * Discovery finished the whole window but could not PROVE a timestamp tie exhausted
+             * (soju 0.10.x omits draft/chathistory-end on short tie pages). Enumeration is done;
+             * only the proof is missing.
+             */
+            val unprovenTieOnly: Boolean = false,
         ) : WorkStatus
         data class Capped(val reason: String, val limit: Int) : WorkStatus
     }
@@ -611,7 +617,16 @@ class HistoryResyncCoordinator @Inject constructor(
                 discovery.highWater,
                 targetPass.highWater,
             )
-            if (status == WorkStatus.Complete && isCurrent() && highWater != null) {
+            // The unproven-tie incompleteness still enumerated the whole window; refusing to
+            // advance the watermark on it re-ran a full-window discovery on every reconnect
+            // forever. TARGETS_FUZZ_MS already absorbs same-timestamp stragglers around the
+            // advanced boundary, so treat proof-only incompleteness as watermark-safe.
+            val advanceWatermark = status == WorkStatus.Complete ||
+                (
+                    targetPass.status == WorkStatus.Complete &&
+                        (discovery.status as? WorkStatus.Incomplete)?.unprovenTieOnly == true
+                    )
+            if (advanceWatermark && isCurrent() && highWater != null) {
                 syncPrefs.setLastSuccessfulSync(networkId, highWater)
             }
             status.toState(inserted, retryRecommended = targetPass.retryRecommended)
@@ -705,6 +720,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     status = status.merge(
                         WorkStatus.Incomplete(
                             "CHATHISTORY TARGETS could not prove a timestamp tie was exhausted",
+                            unprovenTieOnly = true,
                         ),
                     )
                     pageUpper = oldest

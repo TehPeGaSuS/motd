@@ -1425,7 +1425,9 @@ class HistoryResyncCoordinatorTest {
         )
         assertEquals(4, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
         assertEquals(3, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
-        assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
+        // The tie is only unprovable, not unfinished: enumeration reached the empty page, so the
+        // watermark still advances and the next reconnect does not re-walk the whole window.
+        assertEquals(300L, syncPrefs.lastSuccessfulSync(networkId))
     }
 
     @Test
@@ -1899,6 +1901,37 @@ class HistoryResyncCoordinatorTest {
         assertEquals(mapOf(bufferId to HistorySyncStatus.Queued), whileQueued)
         assertEquals(mapOf(bufferId to HistorySyncStatus.Syncing), whileSyncing)
         assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+    }
+
+    @Test
+    fun unprovenTargetsTieStillAdvancesTheWatermark() = runTest {
+        // Soju 0.10.x omits draft/chathistory-end, so a repeated short tie page can never PROVE
+        // discovery complete. Enumeration still finished; refusing to advance the watermark on
+        // that proof gap re-ran a full-window discovery on every reconnect forever.
+        processor.process(networkId, message("seed", 4_000_000))
+        var targetsCalls = 0
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> when (++targetsCalls) {
+                    // The same short page twice: the unprovable timestamp tie.
+                    1, 2 -> FakeResponse(targets = listOf("#chan" to 5_000_000L))
+                    else -> FakeResponse(endOfHistory = true)
+                }
+                else -> FakeResponse(listOf(message("m5", 5_000_000)), endOfHistory = true)
+            }
+        }
+
+        val result = coordinator.resyncNetwork(
+            networkId,
+            listOf(bufferId to "#chan"),
+            source,
+            initialLookbackMs = null,
+        )
+
+        assertTrue(result is HistoryResyncState.Incomplete)
+        assertEquals(false, (result as HistoryResyncState.Incomplete).retryRecommended)
+        assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
+        assertEquals(5_000_000L, syncPrefs.lastSuccessfulSync(networkId))
     }
 
     @Test
