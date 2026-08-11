@@ -212,6 +212,49 @@ class ConnectionActorTest {
         actor.stop()
     }
 
+    @Test
+    fun wakeSignal_resetsBackoffEscalation() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val conns = ArrayDeque<FakeConnection>()
+        val actor = ConnectionActor(
+            networkId = 1, scope = scope,
+            connectionFactory = { FakeConnection().also { conns.addLast(it) } },
+            onState = { _, _ -> }, onEvent = { _, _ -> }, onReady = {}, random = { 0.5 }, // jitter 1.0
+        )
+        actor.start()
+        scope.testScheduler.runCurrent()
+        assertEquals(1, conns.size)
+
+        // Escalate to attempt 2 by serving two full waits (post-Doze shape: fast-failing dials).
+        listOf(2_000L, 4_000L).forEach { delayMs ->
+            conns.last().transition(IrcClientState.Disconnected)
+            scope.testScheduler.runCurrent()
+            scope.testScheduler.advanceTimeBy(delayMs)
+            scope.testScheduler.runCurrent()
+        }
+        assertEquals(3, conns.size)
+
+        // The wake (connectivity/app-foreground) cuts the 8s wait short...
+        conns.last().transition(IrcClientState.Disconnected)
+        scope.testScheduler.runCurrent()
+        actor.onNetworkAvailable()
+        scope.testScheduler.runCurrent()
+        assertEquals(4, conns.size)
+
+        // ...and resets the escalation: the woken dial's own failure schedules the 2s base wait
+        // again instead of continuing to 16s, so the user is not parked behind the old cap.
+        conns.last().transition(IrcClientState.Disconnected)
+        scope.testScheduler.runCurrent()
+        scope.testScheduler.advanceTimeBy(1_999)
+        scope.testScheduler.runCurrent()
+        assertEquals(4, conns.size)
+        scope.testScheduler.advanceTimeBy(1)
+        scope.testScheduler.runCurrent()
+        assertEquals(5, conns.size)
+        actor.stop()
+    }
+
     /**
      * The protective half of the wake contract: with no wake signal at all, a server that is
      * genuinely down must keep escalating to the 90s cap and must not redial early. Pins the

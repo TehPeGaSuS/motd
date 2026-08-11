@@ -235,6 +235,14 @@ class ConnectionActor(
                     attempt++
                     val wokeEarly = waitBeforeRetry(delayMs)
                     onBackoff(if (wokeEarly) "woke_early" else "elapsed", scheduledFor, delayMs)
+                    if (wokeEarly) {
+                        // The wake signal (connectivity restored, app foregrounded) invalidates the
+                        // failures this escalation was built on: after Doze the counter sits at the
+                        // cap from dials that fast-failed against a dead network, and without this
+                        // reset one failed post-wake dial would serve the full ~90s cap as the
+                        // user's very next wait. Re-escalate from the base instead.
+                        attempt = 0
+                    }
                 }
             }
         }
