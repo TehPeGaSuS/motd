@@ -563,15 +563,15 @@ class HistoryResyncCoordinatorTest {
 
     @Test
     fun automaticNetworkResyncRecommendsRetryWhileAdvertisedLatestIsMissing() = runTest {
-        processor.process(networkId, message("seed", 100))
+        processor.process(networkId, message("seed", 100_000))
         val source = FakeSource(pageLimit = 1) { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
-                    targets = listOf("#chan" to 102L),
+                    targets = listOf("#chan" to 102_000L),
                     endOfHistory = true,
                 )
                 ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
-                    events = listOf(message("m101", 101)),
+                    events = listOf(message("m101", 101_000)),
                     endOfHistory = true,
                 )
                 else -> error("unexpected ${request.subcommand}")
@@ -588,7 +588,9 @@ class HistoryResyncCoordinatorTest {
         val incomplete = result as HistoryResyncState.Incomplete
         assertEquals(true, incomplete.retryRecommended)
         assertTrue(shouldRetryIncompleteCatchUp(incomplete))
-        assertTrue(coordinator.syncStatus(bufferId).first() is HistorySyncStatus.Partial)
+        // The buffer's own fetch succeeded end-to-end, so no error badge: the shortfall drives
+        // only the automatic pass retry, never a user-facing false negative.
+        assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
         assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
         assertEquals(listOf("m101", "seed"), rows().mapNotNull { it.msgid })
     }
@@ -599,15 +601,15 @@ class HistoryResyncCoordinatorTest {
         // replay never returns). A terminal LATEST that inserts nothing is the server's proof that
         // nothing newer will ever arrive, so the target must settle instead of wearing a permanent
         // Partial badge with no affordance to clear it.
-        processor.process(networkId, message("m400", 400))
+        processor.process(networkId, message("m400", 400_000))
         val source = FakeSource { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
-                    targets = listOf("#chan" to 500L),
+                    targets = listOf("#chan" to 500_000L),
                     endOfHistory = true,
                 )
                 ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
-                    events = listOf(message("m400", 400)),
+                    events = listOf(message("m400", 400_000)),
                     endOfHistory = true,
                 )
                 else -> error("unexpected ${request.subcommand}")
@@ -621,7 +623,7 @@ class HistoryResyncCoordinatorTest {
         assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
         // The pass completed, so the watermark advances past the unreachable advertised time and
         // the next reconnect does not rediscover the same dead end.
-        assertEquals(500L, syncPrefs.lastSuccessfulSync(networkId))
+        assertEquals(500_000L, syncPrefs.lastSuccessfulSync(networkId))
     }
 
     @Test
@@ -629,15 +631,15 @@ class HistoryResyncCoordinatorTest {
         // First pass: LATEST genuinely inserts a new message but still falls short of the
         // advertised time, so a retry is recommended. Retry pass: the same terminal page now
         // deduplicates to zero inserts, which settles the target instead of looping forever.
-        processor.process(networkId, message("seed", 100))
+        processor.process(networkId, message("seed", 100_000))
         val source = FakeSource { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
-                    targets = listOf("#chan" to 102L),
+                    targets = listOf("#chan" to 102_000L),
                     endOfHistory = true,
                 )
                 ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
-                    events = listOf(message("m101", 101)),
+                    events = listOf(message("m101", 101_000)),
                     endOfHistory = true,
                 )
                 else -> error("unexpected ${request.subcommand}")
@@ -651,7 +653,7 @@ class HistoryResyncCoordinatorTest {
         val second = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
         assertEquals(HistoryResyncState.UpToDate, second)
         assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
-        assertEquals(102L, syncPrefs.lastSuccessfulSync(networkId))
+        assertEquals(102_000L, syncPrefs.lastSuccessfulSync(networkId))
     }
 
     @Test
@@ -831,18 +833,18 @@ class HistoryResyncCoordinatorTest {
 
     @Test
     fun dismissedQueryIgnoresUnchangedHistoryThenRevivesForNewDm() = runTest {
-        processor.process(networkId, directMessage("dm-old", 100))
+        processor.process(networkId, directMessage("dm-old", 100_000))
         val query = db.bufferDao().byName(networkId, "bob")!!
         db.bufferDao().deleteBuffer(query.id)
-        syncPrefs.setLastSuccessfulSync(networkId, 150)
+        syncPrefs.setLastSuccessfulSync(networkId, 150_000)
 
         val unchanged = FakeSource { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS ->
-                    FakeResponse(targets = listOf("bob" to 100L), endOfHistory = true)
+                    FakeResponse(targets = listOf("bob" to 100_000L), endOfHistory = true)
                 ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(endOfHistory = true)
                 ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
-                    events = if (request.target == "bob") listOf(directMessage("dm-old", 100)) else emptyList(),
+                    events = if (request.target == "bob") listOf(directMessage("dm-old", 100_000)) else emptyList(),
                     endOfHistory = true,
                 )
                 else -> FakeResponse(endOfHistory = true)
@@ -863,14 +865,14 @@ class HistoryResyncCoordinatorTest {
         val updated = FakeSource { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS ->
-                    FakeResponse(targets = listOf("bob" to 200L), endOfHistory = true)
+                    FakeResponse(targets = listOf("bob" to 200_000L), endOfHistory = true)
                 ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(
-                    events = if (request.target == "bob") listOf(directMessage("dm-new", 200)) else emptyList(),
+                    events = if (request.target == "bob") listOf(directMessage("dm-new", 200_000)) else emptyList(),
                     endOfHistory = true,
                 )
                 ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
                     events = if (request.target == "bob") {
-                        listOf(directMessage("dm-old", 100), directMessage("dm-new", 200))
+                        listOf(directMessage("dm-old", 100_000), directMessage("dm-new", 200_000))
                     } else {
                         emptyList()
                     },
@@ -1731,14 +1733,20 @@ class HistoryResyncCoordinatorTest {
 
     @Test
     fun reconcileSessionSupersedesAStaleNetworkPassStatus() = runTest {
-        processor.process(networkId, message("seed", 100))
+        processor.process(networkId, message("seed", 100_000))
         val stalled = FakeSource(pageLimit = 1) { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
-                    targets = listOf("#chan" to 102L),
+                    targets = listOf("#chan" to 102_000L),
                     endOfHistory = true,
                 )
-                else -> FakeResponse(events = listOf(message("m101", 101)), endOfHistory = true)
+                // Non-terminal with no usable boundary: a genuinely incomplete fetch, so the pass
+                // paints Partial (a terminal shortfall would settle Idle instead).
+                else -> FakeResponse(
+                    events = listOf(message("m101", 101_000)),
+                    oldest = null,
+                    newest = null,
+                )
             }
         }
         coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), stalled)
@@ -1935,14 +1943,41 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
-    fun dismissSyncStatusClearsASettledPartialBadge() = runTest {
-        // The advertised latest stays unreached with fresh inserts, leaving a Partial badge.
-        processor.process(networkId, message("seed", 100))
+    fun sameSecondAdvertisedLatestSkipsWithoutARequest() = runTest {
+        // Stored server-time tags can carry second precision while TARGETS advertises
+        // milliseconds; a stored newest in the same second must not refetch on every pass.
+        db.historyCursorDao().upsert(
+            HistoryCursorEntity(roomId = bufferId, newestMsgid = "stored", newestServerTime = 400_400),
+        )
         val source = FakeSource { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS ->
-                    FakeResponse(targets = listOf("#chan" to 102L), endOfHistory = true)
-                else -> FakeResponse(listOf(message("m101", 101)), endOfHistory = true)
+                    FakeResponse(targets = listOf("#chan" to 400_900L), endOfHistory = true)
+                else -> error("no message fetch expected for a same-second advertisement")
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+
+        assertEquals(HistoryResyncState.UpToDate, result)
+        assertTrue(source.requests.none { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+    }
+
+    @Test
+    fun dismissSyncStatusClearsASettledPartialBadge() = runTest {
+        // A non-terminal page with no usable boundary is a genuinely incomplete target fetch,
+        // which is what still paints a Partial badge.
+        processor.process(networkId, message("seed", 100_000))
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 102_000L), endOfHistory = true)
+                else -> FakeResponse(
+                    events = listOf(message("m101", 101_000)),
+                    oldest = null,
+                    newest = null,
+                )
             }
         }
         coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)

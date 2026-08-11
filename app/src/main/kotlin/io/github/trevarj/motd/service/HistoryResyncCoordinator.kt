@@ -958,10 +958,7 @@ class HistoryResyncCoordinator @Inject constructor(
         // watermark. This keeps first-run retries and the paced backfill from re-requesting a
         // page for every target they have already seeded.
         val advertisedLatest = targetSpec.latestMessageTime
-        if (
-            advertisedLatest != null &&
-            roomCursor?.newestServerTime?.let { it >= advertisedLatest } == true
-        ) {
+        if (advertisedLatest != null && reachedAdvertised(roomCursor?.newestServerTime, advertisedLatest)) {
             session?.settle(canonicalRoomId, HistorySyncStatus.Idle)
             return TargetOutcome()
         }
@@ -1005,7 +1002,7 @@ class HistoryResyncCoordinator @Inject constructor(
             targetResult.highWater,
         )
         val reachedAdvertisedLatest = targetSpec.latestMessageTime?.let { latest ->
-            newestStoredTime?.let { it >= latest } == true
+            reachedAdvertised(newestStoredTime, latest)
         }
         if (
             reachedAdvertisedLatest == false &&
@@ -1034,7 +1031,13 @@ class HistoryResyncCoordinator @Inject constructor(
         }
         session?.settle(
             canonicalRoomId,
-            if (reachedAdvertisedLatest == true) {
+            if (
+                reachedAdvertisedLatest != false ||
+                (targetResult.status == WorkStatus.Complete && targetResult.terminalPage)
+            ) {
+                // A terminal fetch that fell short of the advertisement is bookkeeping, not damage:
+                // the automatic pass retry keeps chasing genuinely lagging replay, but a buffer
+                // whose own fetch succeeded end-to-end must not wear an error badge.
                 HistorySyncStatus.Idle
             } else {
                 effectiveStatus.toSyncStatus()
@@ -1379,6 +1382,14 @@ class HistoryResyncCoordinator @Inject constructor(
     }
 
     private fun maxHighWater(vararg values: Long?): Long? = values.filterNotNull().maxOrNull()
+
+    /**
+     * Advertised-latest comparisons tolerate sub-second precision differences: stored server-time
+     * tags can carry second precision while TARGETS advertises milliseconds, and a stored newest
+     * in the same second as the advertisement means the LATEST page already covered it.
+     */
+    private fun reachedAdvertised(stored: Long?, advertised: Long): Boolean =
+        stored != null && stored / 1000 >= advertised / 1000
 
     private class ClientHistorySource(private val client: IrcClient) : HistorySource {
         override suspend fun availability(): HistoryAvailability = client.historyAvailability
