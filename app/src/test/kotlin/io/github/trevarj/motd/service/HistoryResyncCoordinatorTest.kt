@@ -591,7 +591,8 @@ class HistoryResyncCoordinatorTest {
         // The buffer's own fetch succeeded end-to-end, so no error badge: the shortfall drives
         // only the automatic pass retry, never a user-facing false negative.
         assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
-        assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
+        // Discovery itself completed, so the watermark advances despite the target shortfall.
+        assertEquals(102_000L, syncPrefs.lastSuccessfulSync(networkId))
         assertEquals(listOf("m101", "seed"), rows().mapNotNull { it.msgid })
     }
 
@@ -608,9 +609,10 @@ class HistoryResyncCoordinatorTest {
                     targets = listOf("#chan" to 500_000L),
                     endOfHistory = true,
                 )
+                // No endOfHistory: soju 0.10.x omits draft/chathistory-end on message batches, so
+                // convergence must not depend on a terminal marker that never arrives.
                 ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
                     events = listOf(message("m400", 400_000)),
-                    endOfHistory = true,
                 )
                 else -> error("unexpected ${request.subcommand}")
             }
@@ -1535,7 +1537,11 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
-    fun incompleteTargetPassPreservesPreviousNetworkWatermark() = runTest {
+    fun incompleteTargetPassStillAdvancesTheDiscoveryWatermark() = runTest {
+        // The watermark bounds TARGETS discovery only; a per-target message-level incompleteness
+        // must not starve it (an active account always has some target mid-catch-up). Hard
+        // discovery failures preserving the watermark are pinned by
+        // [saturatedTargetsTimestampTieReturnsIncompleteWithoutWatermark].
         processor.process(networkId, message("seed", 100))
         syncPrefs.setLastSuccessfulSync(networkId, 1_000)
         val source = FakeSource { request ->
@@ -1562,7 +1568,7 @@ class HistoryResyncCoordinatorTest {
         val result = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
 
         assertTrue(result is HistoryResyncState.Incomplete)
-        assertEquals(1_000L, syncPrefs.lastSuccessfulSync(networkId))
+        assertEquals(2_000L, syncPrefs.lastSuccessfulSync(networkId))
     }
 
     @Test
@@ -1943,6 +1949,36 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun saturatedMsgidlessPageWithZeroInsertsConverges() = runTest {
+        // A busy msgid-less channel returns a FULL timestamp-only LATEST page every pass. When
+        // that page deduplicates entirely into the store, the saturation ambiguity cannot hide
+        // anything new at the head, so the target must converge instead of re-failing forever.
+        val events = (0 until 50).map { i ->
+            message("x", 1_000_000L + i * 1_000).copy(
+                ctx = MessageContext(null, 1_000_000L + i * 1_000, null, "batch", null),
+                text = "msgidless-$i",
+            )
+        }
+        events.forEach { processor.process(networkId, it) }
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
+                    targets = listOf("#chan" to 90_000_000L),
+                    endOfHistory = true,
+                )
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(events = events)
+                else -> error("unexpected ${request.subcommand}")
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+
+        assertEquals(HistoryResyncState.UpToDate, result)
+        assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
+        assertEquals(90_000_000L, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
     fun sameSecondAdvertisedLatestSkipsWithoutARequest() = runTest {
         // Stored server-time tags can carry second precision while TARGETS advertises
         // milliseconds; a stored newest in the same second must not refetch on every pass.
@@ -2121,7 +2157,8 @@ class HistoryResyncCoordinatorTest {
             HistoryResyncState.Incomplete(2, "CHATHISTORY LATEST returned no usable oldest boundary"),
             result,
         )
-        assertNull(syncPrefs.lastSuccessfulSync(networkId))
+        // Discovery completed, so the watermark still advances to the clean target's high water.
+        assertEquals(200L, syncPrefs.lastSuccessfulSync(networkId))
     }
 
     @Test

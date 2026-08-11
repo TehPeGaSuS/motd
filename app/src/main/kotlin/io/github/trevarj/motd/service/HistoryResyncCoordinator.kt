@@ -206,8 +206,6 @@ class HistoryResyncCoordinator @Inject constructor(
         val status: WorkStatus = WorkStatus.Complete,
         val highWater: Long? = null,
         val inserted: Int = 0,
-        /** True when the server closed the page as end-of-history (or returned nothing at all). */
-        val terminalPage: Boolean = false,
     )
 
     private data class TargetPass(
@@ -617,15 +615,15 @@ class HistoryResyncCoordinator @Inject constructor(
                 discovery.highWater,
                 targetPass.highWater,
             )
-            // The unproven-tie incompleteness still enumerated the whole window; refusing to
-            // advance the watermark on it re-ran a full-window discovery on every reconnect
-            // forever. TARGETS_FUZZ_MS already absorbs same-timestamp stragglers around the
-            // advanced boundary, so treat proof-only incompleteness as watermark-safe.
-            val advanceWatermark = status == WorkStatus.Complete ||
-                (
-                    targetPass.status == WorkStatus.Complete &&
-                        (discovery.status as? WorkStatus.Incomplete)?.unprovenTieOnly == true
-                    )
+            // The watermark bounds the next pass's TARGETS window, so only DISCOVERY decides it:
+            // per-target message gaps are owned by room cursors and durable gaps, and on an active
+            // account some target is always mid-catch-up — gating on targetPass starved the
+            // watermark forever, re-running full-window discovery on every reconnect. The
+            // unproven-tie incompleteness still enumerated the whole window (only the proof is
+            // missing) and TARGETS_FUZZ_MS absorbs same-timestamp stragglers, so it advances too;
+            // hard discovery failures (unusable boundary, saturated tie) still preserve.
+            val advanceWatermark = discovery.status == WorkStatus.Complete ||
+                (discovery.status as? WorkStatus.Incomplete)?.unprovenTieOnly == true
             if (advanceWatermark && isCurrent() && highWater != null) {
                 syncPrefs.setLastSuccessfulSync(networkId, highWater)
             }
@@ -1007,15 +1005,16 @@ class HistoryResyncCoordinator @Inject constructor(
         if (
             reachedAdvertisedLatest == false &&
             targetResult.status == WorkStatus.Complete &&
-            targetResult.terminalPage &&
             targetResult.inserted == 0
         ) {
-            // The server proved it will replay nothing newer: the page closed as end-of-history and
-            // added no rows, yet TARGETS still advertises a newer timestamp. That timestamp is not
-            // reachable via CHATHISTORY (soju can index an event that replay never returns), so
-            // painting Partial and recommending retries would never converge. A miss that DID
-            // insert rows still reports Incomplete below, giving a genuinely new message one more
-            // pass to be reached before this settles.
+            // The server proved it will replay nothing newer: LATEST is by definition the newest
+            // page, and it added no rows, yet TARGETS still advertises a newer timestamp. That
+            // timestamp is not reachable via CHATHISTORY (soju can index an event that replay
+            // never returns), so painting Partial and recommending retries would never converge.
+            // Deliberately NOT keyed on an end-of-history marker: soju 0.10.x omits
+            // draft/chathistory-end on message batches too, so a terminal-page condition would
+            // never fire against it. A miss that DID insert rows still reports Incomplete below,
+            // giving a genuinely new message one more pass to be reached before this settles.
             diagnostics.record("history", "advertised_latest_unreachable") {
                 mapOf("network_id" to networkId, "room_id" to canonicalRoomId)
             }
@@ -1031,10 +1030,7 @@ class HistoryResyncCoordinator @Inject constructor(
         }
         session?.settle(
             canonicalRoomId,
-            if (
-                reachedAdvertisedLatest != false ||
-                (targetResult.status == WorkStatus.Complete && targetResult.terminalPage)
-            ) {
+            if (reachedAdvertisedLatest != false || targetResult.status == WorkStatus.Complete) {
                 // A terminal fetch that fell short of the advertisement is bookkeeping, not damage:
                 // the automatic pass retry keeps chasing genuinely lagging replay, but a buffer
                 // whose own fetch succeeded end-to-end must not wear an error badge.
@@ -1121,10 +1117,13 @@ class HistoryResyncCoordinator @Inject constructor(
         if (!isCurrent()) throw StaleConnectionException()
         val inserted = ingest(networkId, bufferId, request, page)
         val highWater = page.highWater()
-        if (page.isTerminalPage()) {
-            return WorkResult(highWater = highWater, inserted = inserted, terminalPage = true)
-        }
+        if (page.isTerminalPage()) return WorkResult(highWater = highWater, inserted = inserted)
         if (page.oldest?.msgid == null && page.primaryMessageCount >= request.limit) {
+            // A full timestamp-only page that deduplicated entirely into the store proves the head
+            // is already converged: the saturation ambiguity (same-timestamp siblings beyond the
+            // cut) can only hide rows when this page ADDED rows. Without this, a busy msgid-less
+            // channel re-fetched and re-failed on every pass forever.
+            if (inserted == 0) return WorkResult(highWater = highWater, inserted = 0)
             return WorkResult(
                 WorkStatus.Incomplete("CHATHISTORY timestamp boundary is saturated"),
                 highWater,
