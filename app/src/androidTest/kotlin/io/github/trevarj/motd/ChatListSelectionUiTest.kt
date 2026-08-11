@@ -9,6 +9,9 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -141,7 +144,12 @@ class ChatListSelectionUiTest {
             }
         }
 
-        compose.onNodeWithText("motd").assertIsDisplayed()
+        // Scope to the title bar: the drawer brand header now renders the same "motd" wordmark, so
+        // an unscoped match finds two nodes. The title bar is the one these tests mean to assert.
+        compose.onNode(
+            hasText("motd") and hasAnyAncestor(hasTestTag("chatlist_top_app_bar")),
+            useUnmergedTree = true,
+        ).assertIsDisplayed()
         assertEquals(0, compose.onAllNodesWithText("/motd").fetchSemanticsNodes().size)
     }
 
@@ -234,7 +242,12 @@ class ChatListSelectionUiTest {
         compose.onNodeWithText("No archived chats yet").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_selection_close").performClick()
 
-        compose.onNodeWithText("motd").assertIsDisplayed()
+        // Scope to the title bar: the drawer brand header now renders the same "motd" wordmark, so
+        // an unscoped match finds two nodes. The title bar is the one these tests mean to assert.
+        compose.onNode(
+            hasText("motd") and hasAnyAncestor(hasTestTag("chatlist_top_app_bar")),
+            useUnmergedTree = true,
+        ).assertIsDisplayed()
         compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
     }
 
@@ -270,7 +283,12 @@ class ChatListSelectionUiTest {
         compose.onNodeWithText("No archived chats yet").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_selection_close").performClick()
 
-        compose.onNodeWithText("motd").assertIsDisplayed()
+        // Scope to the title bar: the drawer brand header now renders the same "motd" wordmark, so
+        // an unscoped match finds two nodes. The title bar is the one these tests mean to assert.
+        compose.onNode(
+            hasText("motd") and hasAnyAncestor(hasTestTag("chatlist_top_app_bar")),
+            useUnmergedTree = true,
+        ).assertIsDisplayed()
         compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
         assertEquals(0, compose.onAllNodesWithText("No archived chats yet").fetchSemanticsNodes().size)
     }
