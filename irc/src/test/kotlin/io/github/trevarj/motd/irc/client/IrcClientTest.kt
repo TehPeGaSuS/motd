@@ -476,6 +476,7 @@ class IrcClientTest {
             HistoryAvailability.Ready(
                 setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID),
                 25,
+                supportsConcurrentRequests = true,
             ),
             defaultClient.historyAvailability,
         )
@@ -486,7 +487,11 @@ class IrcClientTest {
             "CHATHISTORY=0 MSGREFTYPES=timestamp",
         )
         assertEquals(
-            HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP), Int.MAX_VALUE),
+            HistoryAvailability.Ready(
+                setOf(HistoryReferenceType.TIMESTAMP),
+                Int.MAX_VALUE,
+                supportsConcurrentRequests = true,
+            ),
             timestampClient.historyAvailability,
         )
         assertEquals("timestamp", (timestampClient.state.value as IrcClientState.Ready).isupport["MSGREFTYPES"])
@@ -499,6 +504,14 @@ class IrcClientTest {
         runCurrent()
         assertTrue(timestampTransport.sent.last { it.contains("CHATHISTORY") }.contains(" #chan * 250"))
         unlimitedRequest.cancelAndJoin()
+    }
+
+    @Test
+    fun `history availability without labeled-response reports no concurrent request support`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft, caps = fullLs.replace(" labeled-response", ""))
+        val ready = client.historyAvailability as HistoryAvailability.Ready
+        assertFalse(ready.supportsConcurrentRequests)
     }
 
     @Test

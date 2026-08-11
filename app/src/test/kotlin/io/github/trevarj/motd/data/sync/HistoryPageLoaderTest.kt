@@ -564,4 +564,126 @@ class HistoryPageLoaderTest {
         assertTrue(db.historyGapDao().forRoom(bufferId).isEmpty())
         assertTrue(db.messageDao().byMsgid(bufferId, "old") != null)
     }
+
+    private val bothRefs = setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID)
+
+    private fun latestRequest(target: String) =
+        ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = 50)
+
+    @Test
+    fun concurrentFetchesShareTheWireWhenAllowed() = runTest {
+        var entered = 0
+        val release = CompletableDeferred<Unit>()
+        val history = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability =
+                HistoryAvailability.Ready(bothRefs, 100, supportsConcurrentRequests = true)
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                entered++
+                release.await()
+                return messages(emptyList(), endOfHistory = true)
+            }
+        }
+
+        val first = async {
+            loader.fetchMessages(
+                networkId, history, latestRequest("#chan"), bothRefs,
+                msgidAllowed = true, timeoutMs = 5_000, allowConcurrent = true,
+            )
+        }
+        val second = async {
+            loader.fetchMessages(
+                networkId, history, latestRequest("#other"), bothRefs,
+                msgidAllowed = true, timeoutMs = 5_000, allowConcurrent = true,
+            )
+        }
+        runCurrent()
+
+        // Both requests are on the wire before either completes: the gate admits more than one.
+        assertEquals(2, entered)
+        release.complete(Unit)
+        first.await()
+        second.await()
+    }
+
+    @Test
+    fun wireWidthCollapsesToOneAcrossACapabilityChange() = runTest {
+        var entered = 0
+        var blocking = false
+        val release = CompletableDeferred<Unit>()
+        val history = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability =
+                HistoryAvailability.Ready(bothRefs, 100)
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                entered++
+                if (blocking) release.await()
+                return messages(emptyList(), endOfHistory = true)
+            }
+        }
+
+        // A labeled-response connection widened this network's gate...
+        loader.fetchMessages(
+            networkId, history, latestRequest("#chan"), bothRefs,
+            msgidAllowed = true, timeoutMs = 5_000, allowConcurrent = true,
+        )
+        assertEquals(1, entered)
+
+        // ...then a reconnect without the cap must fall back to strict serialization.
+        blocking = true
+        val first = async {
+            loader.fetchMessages(
+                networkId, history, latestRequest("#chan"), bothRefs,
+                msgidAllowed = true, timeoutMs = 5_000,
+            )
+        }
+        val second = async {
+            loader.fetchMessages(
+                networkId, history, latestRequest("#other"), bothRefs,
+                msgidAllowed = true, timeoutMs = 5_000,
+            )
+        }
+        runCurrent()
+        assertEquals(2, entered)
+        release.complete(Unit)
+        first.await()
+        second.await()
+        assertEquals(3, entered)
+    }
+
+    @Test
+    fun timeoutWhileQueuedBehindAFullGateSurfacesAsRetryableFailure() = runTest {
+        val requests = mutableListOf<String>()
+        val history = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability =
+                HistoryAvailability.Ready(bothRefs, 100, supportsConcurrentRequests = true)
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                requests += req.target
+                return awaitCancellation()
+            }
+        }
+
+        val hung = (1..3).map { slot ->
+            async {
+                runCatching {
+                    loader.fetchMessages(
+                        networkId, history, latestRequest("#hung$slot"), bothRefs,
+                        msgidAllowed = true, timeoutMs = 60_000, allowConcurrent = true,
+                    )
+                }
+            }
+        }
+        runCurrent()
+        assertEquals(3, requests.size)
+
+        // Every permit is held: the queued fetch's budget still bounds permit wait, surfacing as a
+        // retryable transport failure instead of stretching behind the busy wire.
+        val queued = runCatching {
+            loader.fetchMessages(
+                networkId, history, latestRequest("#queued"), bothRefs,
+                msgidAllowed = true, timeoutMs = 1_000, retryableTimeout = true, allowConcurrent = true,
+            )
+        }
+        assertTrue(queued.exceptionOrNull() is IrcDisconnectedException)
+        assertEquals(3, requests.size)
+        hung.forEach { it.cancelAndJoin() }
+    }
 }

@@ -33,6 +33,8 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +43,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 
@@ -72,7 +76,7 @@ sealed interface HistoryResyncState {
 sealed interface HistorySyncStatus {
     /** Settled cleanly; the buffer carries no entry in the published map. */
     data object Idle : HistorySyncStatus
-    /** Registered in the current pass, waiting for its strictly-sequential turn. */
+    /** Registered in the current pass, waiting for a fetch slot. */
     data object Queued : HistorySyncStatus
     /** A request for this buffer is on the wire right now. */
     data object Syncing : HistorySyncStatus
@@ -130,8 +134,9 @@ interface HistoryResyncController {
 /**
  * The sole reconnect/manual tail-revalidation entry point. The coordinator decides WHAT to fetch
  * (targets, ranges, ordering, gap recording, marker convergence) and what to report (states,
- * per-buffer sync status); every wire fetch goes through [HistoryPageLoader], whose per-network
- * lock serializes each individual CHATHISTORY request against scroll-driven Paging. Equivalent
+ * per-buffer sync status); every wire fetch goes through [HistoryPageLoader], whose bounded
+ * per-network wire gate admits each individual CHATHISTORY request against scroll-driven Paging
+ * (width 1 — strict serialization — unless labeled-response correlates concurrency). Equivalent
  * whole requests (a reconnect pass, a manual refresh) still coalesce onto one [ActiveFlight], but
  * only to back user-facing status and cancellation — not as a fetch lock: two concurrent
  * same-buffer LATEST fetches are safe because [EventProcessor] deduplicates rows by msgid/identity
@@ -146,8 +151,8 @@ class HistoryResyncCoordinator @Inject constructor(
     @param:ApplicationScope private val scope: CoroutineScope,
     private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
     // The single wire-fetch primitive: every CHATHISTORY request the coordinator issues goes through
-    // this shared singleton so reconnect/manual traversals serialize with scroll-driven Paging on the
-    // loader's per-network lock. Defaulted so tests keep the four-argument construction.
+    // this shared singleton so reconnect/manual traversals share the loader's per-network wire gate
+    // with scroll-driven Paging. Defaulted so tests keep the four-argument construction.
     private val loader: HistoryPageLoader = HistoryPageLoader(processor),
 ) : HistoryResyncController {
     // Reuses the loader's transport seam so a source can drive both the coordinator's orchestration
@@ -198,6 +203,14 @@ class HistoryResyncCoordinator @Inject constructor(
         val retryRecommended: Boolean,
     )
 
+    /** One target's contribution to a pass; skips and refused targets contribute the neutral value. */
+    private data class TargetOutcome(
+        val inserted: Int = 0,
+        val status: WorkStatus = WorkStatus.Complete,
+        val highWater: Long? = null,
+        val retryRecommended: Boolean = false,
+    )
+
     private data class TargetDiscovery(
         val targets: List<ChatHistoryTarget>,
         val status: WorkStatus,
@@ -224,44 +237,58 @@ class HistoryResyncCoordinator @Inject constructor(
      * cancelled or superseded pass from publishing late, and settlement. Work without a session
      * (the paced background backfill) publishes nothing at all.
      *
-     * A session is driven strictly sequentially by the single coroutine that owns its pass; the
-     * cross-pass race — a manual retry superseding a reconnect pass, or the reverse — is arbitrated
-     * by the per-buffer generation counter, not by this bookkeeping.
+     * A labeled-response pass drives a bounded number of buffers concurrently, so within-pass
+     * bookkeeping is monitor-guarded; the cross-pass race — a manual retry superseding a reconnect
+     * pass, or the reverse — is still arbitrated by the per-buffer generation counter, not by this
+     * bookkeeping.
      */
     private inner class SyncStatusSession {
+        private val monitor = Any()
         // Registration order; an entry lives here until that buffer settles.
         private val generations = LinkedHashMap<Long, Long>()
-        // The one buffer whose request is on the wire; only it can wear a whole-pass verdict.
-        private var inFlight: Long? = null
+        // Buffers whose requests are on the wire right now; each wears the whole-pass verdict.
+        private val inFlight = LinkedHashSet<Long>()
 
         /** Register a buffer in this pass. Re-registration within one pass keeps the first turn. */
         fun queue(bufferId: Long) {
-            if (generations.containsKey(bufferId)) return
-            generations[bufferId] = beginSyncStatus(bufferId, HistorySyncStatus.Queued)
+            synchronized(monitor) {
+                if (generations.containsKey(bufferId)) return
+                generations[bufferId] = beginSyncStatus(bufferId, HistorySyncStatus.Queued)
+            }
         }
 
         /** This buffer's request is about to go on the wire. */
         fun syncing(bufferId: Long) {
-            val generation = generations[bufferId] ?: return
-            inFlight = bufferId
-            publishSyncStatus(bufferId, generation, HistorySyncStatus.Syncing)
+            synchronized(monitor) {
+                val generation = generations[bufferId] ?: return
+                inFlight += bufferId
+                publishSyncStatus(bufferId, generation, HistorySyncStatus.Syncing)
+            }
         }
 
         /** Terminal for one buffer: [HistorySyncStatus.Idle] removes it, anything else persists. */
         fun settle(bufferId: Long, status: HistorySyncStatus) {
+            synchronized(monitor) { settleLocked(bufferId, status) }
+        }
+
+        private fun settleLocked(bufferId: Long, status: HistorySyncStatus) {
             val generation = generations.remove(bufferId) ?: return
-            if (inFlight == bufferId) inFlight = null
+            inFlight -= bufferId
             finishSyncStatus(bufferId, generation, status)
         }
 
         /**
-         * Pass end. Only the buffer that actually had a request on the wire wears the pass verdict;
-         * every still-queued buffer is simply dropped, because the catch-up retry loop re-runs the
-         * whole pass and painting a whole-pass failure on untouched buffers would be a lie.
+         * Pass end. Only buffers that actually had a request on the wire wear the pass verdict
+         * (a cancelled sibling's request was genuinely in flight); every still-queued buffer is
+         * simply dropped, because the catch-up retry loop re-runs the whole pass and painting a
+         * whole-pass failure on untouched buffers would be a lie.
          */
         fun finish(result: HistoryResyncState) {
-            inFlight?.let { settle(it, result.toSyncStatus()) }
-            generations.keys.toList().forEach { settle(it, HistorySyncStatus.Idle) }
+            val verdict = result.toSyncStatus()
+            synchronized(monitor) {
+                inFlight.toList().forEach { settleLocked(it, verdict) }
+                generations.keys.toList().forEach { settleLocked(it, HistorySyncStatus.Idle) }
+            }
         }
     }
 
@@ -320,8 +347,8 @@ class HistoryResyncCoordinator @Inject constructor(
                 target = target,
                 limit = ready.pageLimit.coerceAtMost(PAGE_LIMIT).coerceAtLeast(1),
             )
-            // The loader serializes this LATEST on the same per-network wire lock as every other
-            // history fetch. Because that lock is held per wire request (never for a whole discovery
+            // The loader admits this LATEST on the same per-network wire gate as every other
+            // history fetch. Because a permit is held per wire request (never for a whole discovery
             // pass), an urgent pending promotion interleaves between a network resync's pages instead
             // of queuing behind the entire pass — the guarantee the old bespoke bypass provided.
             val latest = loader.fetchMessages(
@@ -331,6 +358,7 @@ class HistoryResyncCoordinator @Inject constructor(
                 referenceTypes,
                 msgidAllowed,
                 timeoutMs = PENDING_MESSAGE_TIMEOUT_MS,
+                allowConcurrent = ready.supportsConcurrentRequests,
             )
             if (!isCurrent()) return staleConnection()
             val inserted = ingest(networkId, bufferId, request, latest)
@@ -415,7 +443,7 @@ class HistoryResyncCoordinator @Inject constructor(
             cursorDao.markComplete(networkId)
             return
         }
-        if (source.availability() !is HistoryAvailability.Ready) return
+        val ready = source.availability() as? HistoryAvailability.Ready ?: return
         if (!source.canClassifyTargets()) return
         diagnostics.record("history", "backfill_started") {
             mapOf("network_id" to networkId, "upper_bound" to cursor.upperBound)
@@ -436,6 +464,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     if (!isCurrent()) throw StaleConnectionException()
                     delay(BACKFILL_TARGETS_PACE_MS)
                 },
+                allowConcurrent = ready.supportsConcurrentRequests,
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -501,10 +530,10 @@ class HistoryResyncCoordinator @Inject constructor(
         diagnostics.record("history", "network_sync_started") {
             mapOf("network_id" to networkId, "open_buffers" to openBuffers.size)
         }
-        when (source.availability()) {
+        val ready = when (val availability = source.availability()) {
             HistoryAvailability.Unsupported -> return@coalesced HistoryResyncState.Unsupported
             HistoryAvailability.NegotiatingOrOffline -> return@coalesced historyUnavailable()
-            is HistoryAvailability.Ready -> Unit
+            is HistoryAvailability.Ready -> availability
         }
         val session = SyncStatusSession()
         openBuffers.forEach { (bufferId, _) -> session.queue(bufferId) }
@@ -534,7 +563,13 @@ class HistoryResyncCoordinator @Inject constructor(
         }
         val result = try {
             val discovery = if (source.canClassifyTargets()) {
-                discoverTargets(networkId, source, upper, lower)
+                discoverTargets(
+                    networkId,
+                    source,
+                    upper,
+                    lower,
+                    allowConcurrent = ready.supportsConcurrentRequests,
+                )
             } else {
                 TargetDiscovery(
                     targets = emptyList(),
@@ -603,6 +638,7 @@ class HistoryResyncCoordinator @Inject constructor(
         // killed process never skips enumerated targets), [betweenPages] paces the next request.
         onPageEnd: (suspend (page: List<ChatHistoryTarget>, nextUpper: Long) -> Unit)? = null,
         betweenPages: (suspend () -> Unit)? = null,
+        allowConcurrent: Boolean = false,
     ): TargetDiscovery {
         val limit = source.pageLimit().coerceAtLeast(1)
         val targets = LinkedHashMap<String, ChatHistoryTarget>()
@@ -624,6 +660,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     limit = limit,
                 ),
                 requestTimeoutMs,
+                allowConcurrent = allowConcurrent,
             )
             requestsInChunk++
             val page = response.targets
@@ -738,10 +775,10 @@ class HistoryResyncCoordinator @Inject constructor(
         source: HistorySource,
         isCurrent: () -> Boolean = { true },
     ): HistoryResyncState {
-        when (source.availability()) {
+        val ready = when (val availability = source.availability()) {
             HistoryAvailability.Unsupported -> return HistoryResyncState.Unsupported
             HistoryAvailability.NegotiatingOrOffline -> return historyUnavailable()
-            is HistoryAvailability.Ready -> Unit
+            is HistoryAvailability.Ready -> availability
         }
         if (!isCurrent()) return staleConnection()
         return coalesced(
@@ -763,6 +800,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     isCurrent = isCurrent,
                     discoveredLatestMessageTime = null,
                     session = session,
+                    allowConcurrent = ready.supportsConcurrentRequests,
                 )
                 work.status.toState(work.inserted)
             } catch (_: TimeoutCancellationException) {
@@ -790,111 +828,175 @@ class HistoryResyncCoordinator @Inject constructor(
         session: SyncStatusSession? = null,
         paceBetweenTargetsMs: Long = 0,
     ): TargetPass {
-        when (source.availability()) {
+        val ready = when (val availability = source.availability()) {
             HistoryAvailability.Unsupported -> error("History support disappeared during reconciliation")
             HistoryAvailability.NegotiatingOrOffline -> error("History support became unavailable")
-            is HistoryAvailability.Ready -> Unit
+            is HistoryAvailability.Ready -> availability
         }
         if (!isCurrent()) throw StaleConnectionException()
-        var inserted = 0
-        var status: WorkStatus = WorkStatus.Complete
-        var highWater: Long? = null
-        var retryRecommended = false
-        for (targetSpec in targets) {
-            if (!isCurrent()) throw StaleConnectionException()
-            val target = targetSpec.name
-            val canonicalRoomId = targetSpec.knownBufferId ?: if (source.isChannelTarget(target)) {
-                continue
-            } else {
-                processor.ensureHistoryQuery(networkId, target, source.normalizeTarget(target))
+        val outcomes = if (ready.supportsConcurrentRequests && paceBetweenTargetsMs == 0L) {
+            // Bounded fan-out: labeled-response correlates concurrent CHATHISTORY, so a reconnect
+            // pass may keep several targets on the wire. The coordinator-side permit is
+            // load-bearing: a fetch's timeout starts when it is CALLED and includes gate wait, so
+            // launching every target's fetch at once would start every timeout clock at once and
+            // mass-expire the tail of a large pass. [mergeSyncTargets] sorts newest-first and the
+            // fair semaphore admits in launch order, so the newest targets still start first.
+            val permits = Semaphore(HistoryPageLoader.MAX_CONCURRENT_WIRE_REQUESTS)
+            coroutineScope {
+                targets.map { targetSpec ->
+                    async {
+                        permits.withPermit {
+                            syncOneTarget(
+                                networkId = networkId,
+                                targetSpec = targetSpec,
+                                source = source,
+                                isCurrent = isCurrent,
+                                hasDiscoveryWatermark = hasDiscoveryWatermark,
+                                session = session,
+                                paceBeforeFetchMs = 0,
+                                allowConcurrent = true,
+                            )
+                        }
+                    }
+                }.awaitAll()
             }
-            // A target discovered mid-pass registers here; without this it would sync with no
-            // status at all, because only the pass's open buffers were registered up front.
-            session?.queue(canonicalRoomId)
-            val roomCursor = db.historyCursorDao().byRoom(canonicalRoomId)
-            if (
-                hasDiscoveryWatermark &&
-                targetSpec.latestMessageTime == null &&
-                roomCursor != null
-            ) {
-                // Nothing to fetch: settle now instead of leaving a spinner up until pass end.
-                session?.settle(canonicalRoomId, HistorySyncStatus.Idle)
-                continue
-            }
-            // The advertised newest is already stored: nothing new to fetch regardless of the
-            // watermark. This keeps first-run retries and the paced backfill from re-requesting a
-            // page for every target they have already seeded.
-            val advertisedLatest = targetSpec.latestMessageTime
-            if (
-                advertisedLatest != null &&
-                roomCursor?.newestServerTime?.let { it >= advertisedLatest } == true
-            ) {
-                session?.settle(canonicalRoomId, HistorySyncStatus.Idle)
-                continue
-            }
-            if (paceBetweenTargetsMs > 0) delay(paceBetweenTargetsMs)
-            val targetResult = try {
-                syncRecentTarget(
+        } else {
+            // Strictly sequential: connections without labeled-response, and the paced backfill
+            // seed, keep today's one-at-a-time order.
+            targets.map { targetSpec ->
+                syncOneTarget(
                     networkId = networkId,
-                    bufferId = canonicalRoomId,
-                    target = target,
+                    targetSpec = targetSpec,
                     source = source,
                     isCurrent = isCurrent,
-                    discoveredLatestMessageTime = targetSpec.latestMessageTime,
+                    hasDiscoveryWatermark = hasDiscoveryWatermark,
                     session = session,
+                    paceBeforeFetchMs = paceBetweenTargetsMs,
+                    allowConcurrent = false,
                 )
-            } catch (refused: IrcCommandException) {
-                // A target-scoped permanent refusal (services such as ChanServ typically answer
-                // FAIL CHATHISTORY INVALID_TARGET) must not abort the pass: letting it escape
-                // skipped every remaining target, marked every open buffer Failed, and left an
-                // unrecoverable retry banner because the next attempt reissues the same request.
-                if (refused.code != HistoryPageLoader.INVALID_TARGET) throw refused
-                diagnostics.record("history", "target_history_refused") {
-                    mapOf(
-                        "network_id" to networkId,
-                        "room_id" to canonicalRoomId,
-                        "target_fp" to diagnostics.fingerprint(source.normalizeTarget(target)),
-                        "code" to refused.code,
-                    )
-                }
-                // The server will never serve this target; a retry affordance would be a lie.
-                session?.settle(canonicalRoomId, HistorySyncStatus.Unavailable)
-                continue
             }
-            inserted += targetResult.inserted
-            // TARGETS describes the newest server event, which may be a JOIN or an event that is
-            // intentionally filtered/rerouted during ingestion. Count either a durable local event
-            // or an event observed in this response as reaching it; relying on the chat cursor alone
-            // would retry forever for those valid cases.
-            val newestStoredTime = maxHighWater(
-                db.messageDao().latestBoundary(canonicalRoomId)?.serverTime,
-                db.historyCursorDao().byRoom(canonicalRoomId)?.newestServerTime,
-                targetResult.highWater,
-            )
-            val reachedAdvertisedLatest = targetSpec.latestMessageTime?.let { advertisedLatest ->
-                newestStoredTime?.let { it >= advertisedLatest } == true
-            }
-            val effectiveStatus = if (
-                reachedAdvertisedLatest == false && targetResult.status == WorkStatus.Complete
-            ) {
-                WorkStatus.Incomplete("CHATHISTORY did not reach the latest advertised message")
-            } else {
-                targetResult.status
-            }
-            val targetNeedsRetry = reachedAdvertisedLatest == false
-            retryRecommended = retryRecommended || targetNeedsRetry
-            status = status.merge(effectiveStatus)
-            highWater = maxHighWater(highWater, targetResult.highWater)
-            session?.settle(
-                canonicalRoomId,
-                if (reachedAdvertisedLatest == true) {
-                    HistorySyncStatus.Idle
-                } else {
-                    effectiveStatus.toSyncStatus()
-                },
-            )
         }
-        return TargetPass(inserted, status, highWater, retryRecommended)
+        // Fold in list order so the first Incomplete reason (newest-first) stays deterministic.
+        return TargetPass(
+            inserted = outcomes.sumOf { it.inserted },
+            status = outcomes.fold(WorkStatus.Complete as WorkStatus) { acc, outcome ->
+                acc.merge(outcome.status)
+            },
+            highWater = maxHighWater(*outcomes.map { it.highWater }.toTypedArray()),
+            retryRecommended = outcomes.any { it.retryRecommended },
+        )
+    }
+
+    /**
+     * One target's share of a pass: resolve its room, skip cheaply when nothing changed, fetch the
+     * newest page, and settle its status. Throws [StaleConnectionException] (aborting the pass and
+     * cancelling fan-out siblings) when the connection is superseded; contains target-scoped
+     * permanent refusals so one bad target cannot abort the pass.
+     */
+    private suspend fun syncOneTarget(
+        networkId: Long,
+        targetSpec: SyncTarget,
+        source: HistorySource,
+        isCurrent: () -> Boolean,
+        hasDiscoveryWatermark: Boolean,
+        session: SyncStatusSession?,
+        paceBeforeFetchMs: Long,
+        allowConcurrent: Boolean,
+    ): TargetOutcome {
+        if (!isCurrent()) throw StaleConnectionException()
+        val target = targetSpec.name
+        val canonicalRoomId = targetSpec.knownBufferId ?: if (source.isChannelTarget(target)) {
+            return TargetOutcome()
+        } else {
+            processor.ensureHistoryQuery(networkId, target, source.normalizeTarget(target))
+        }
+        // A target discovered mid-pass registers here; without this it would sync with no
+        // status at all, because only the pass's open buffers were registered up front.
+        session?.queue(canonicalRoomId)
+        val roomCursor = db.historyCursorDao().byRoom(canonicalRoomId)
+        if (
+            hasDiscoveryWatermark &&
+            targetSpec.latestMessageTime == null &&
+            roomCursor != null
+        ) {
+            // Nothing to fetch: settle now instead of leaving a spinner up until pass end.
+            session?.settle(canonicalRoomId, HistorySyncStatus.Idle)
+            return TargetOutcome()
+        }
+        // The advertised newest is already stored: nothing new to fetch regardless of the
+        // watermark. This keeps first-run retries and the paced backfill from re-requesting a
+        // page for every target they have already seeded.
+        val advertisedLatest = targetSpec.latestMessageTime
+        if (
+            advertisedLatest != null &&
+            roomCursor?.newestServerTime?.let { it >= advertisedLatest } == true
+        ) {
+            session?.settle(canonicalRoomId, HistorySyncStatus.Idle)
+            return TargetOutcome()
+        }
+        if (paceBeforeFetchMs > 0) delay(paceBeforeFetchMs)
+        val targetResult = try {
+            syncRecentTarget(
+                networkId = networkId,
+                bufferId = canonicalRoomId,
+                target = target,
+                source = source,
+                isCurrent = isCurrent,
+                discoveredLatestMessageTime = targetSpec.latestMessageTime,
+                session = session,
+                allowConcurrent = allowConcurrent,
+            )
+        } catch (refused: IrcCommandException) {
+            // A target-scoped permanent refusal (services such as ChanServ typically answer
+            // FAIL CHATHISTORY INVALID_TARGET) must not abort the pass: letting it escape
+            // skipped every remaining target, marked every open buffer Failed, and left an
+            // unrecoverable retry banner because the next attempt reissues the same request.
+            if (refused.code != HistoryPageLoader.INVALID_TARGET) throw refused
+            diagnostics.record("history", "target_history_refused") {
+                mapOf(
+                    "network_id" to networkId,
+                    "room_id" to canonicalRoomId,
+                    "target_fp" to diagnostics.fingerprint(source.normalizeTarget(target)),
+                    "code" to refused.code,
+                )
+            }
+            // The server will never serve this target; a retry affordance would be a lie.
+            session?.settle(canonicalRoomId, HistorySyncStatus.Unavailable)
+            return TargetOutcome()
+        }
+        // TARGETS describes the newest server event, which may be a JOIN or an event that is
+        // intentionally filtered/rerouted during ingestion. Count either a durable local event
+        // or an event observed in this response as reaching it; relying on the chat cursor alone
+        // would retry forever for those valid cases.
+        val newestStoredTime = maxHighWater(
+            db.messageDao().latestBoundary(canonicalRoomId)?.serverTime,
+            db.historyCursorDao().byRoom(canonicalRoomId)?.newestServerTime,
+            targetResult.highWater,
+        )
+        val reachedAdvertisedLatest = targetSpec.latestMessageTime?.let { latest ->
+            newestStoredTime?.let { it >= latest } == true
+        }
+        val effectiveStatus = if (
+            reachedAdvertisedLatest == false && targetResult.status == WorkStatus.Complete
+        ) {
+            WorkStatus.Incomplete("CHATHISTORY did not reach the latest advertised message")
+        } else {
+            targetResult.status
+        }
+        session?.settle(
+            canonicalRoomId,
+            if (reachedAdvertisedLatest == true) {
+                HistorySyncStatus.Idle
+            } else {
+                effectiveStatus.toSyncStatus()
+            },
+        )
+        return TargetOutcome(
+            inserted = targetResult.inserted,
+            status = effectiveStatus,
+            highWater = targetResult.highWater,
+            retryRecommended = reachedAdvertisedLatest == false,
+        )
     }
 
     /**
@@ -910,6 +1012,7 @@ class HistoryResyncCoordinator @Inject constructor(
         isCurrent: () -> Boolean,
         discoveredLatestMessageTime: Long?,
         session: SyncStatusSession? = null,
+        allowConcurrent: Boolean = false,
     ): WorkResult {
         val room = db.bufferDao().observeById(bufferId) ?: throw StaleConnectionException()
         val referenceTypes = source.referenceTypes()
@@ -946,6 +1049,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     referenceTypes = referenceTypes,
                     limit = requestLimit,
                     msgidAllowed = msgidAllowed,
+                    allowConcurrent = allowConcurrent,
                 )
             }
         val request = boundedLatest?.request ?: ChatHistoryRequest(
@@ -960,6 +1064,7 @@ class HistoryResyncCoordinator @Inject constructor(
             referenceTypes,
             msgidAllowed,
             requestTimeoutMs,
+            allowConcurrent = allowConcurrent,
         )
         if (!isCurrent()) throw StaleConnectionException()
         val inserted = ingest(networkId, bufferId, request, page)
@@ -996,8 +1101,8 @@ class HistoryResyncCoordinator @Inject constructor(
                 FlightRegistration(joined, ownsFlight = false)
             } else {
                 val deferred = scope.async(start = CoroutineStart.LAZY) {
-                    // Wire serialization now lives in the loader's per-network lock, acquired per
-                    // fetch inside block(); this flight only owns request-level coalescing and
+                    // Wire admission lives in the loader's per-network gate, acquired per fetch
+                    // inside block(); this flight only owns request-level coalescing and
                     // user-facing status.
                     block()
                 }
@@ -1045,6 +1150,7 @@ class HistoryResyncCoordinator @Inject constructor(
         referenceTypes: Set<HistoryReferenceType>,
         limit: Int,
         msgidAllowed: Boolean,
+        allowConcurrent: Boolean = false,
     ): HistoryPageLoader.FetchedPage? = try {
         loader.fetchPage(
             networkId = networkId,
@@ -1057,6 +1163,7 @@ class HistoryResyncCoordinator @Inject constructor(
             limit = limit,
             msgidAllowed = msgidAllowed,
             timeoutMs = requestTimeoutMs,
+            allowConcurrent = allowConcurrent,
         )
     } catch (error: IrcCommandException) {
         // Only the exact no-fallback msgid rejection degrades; every other command error (including

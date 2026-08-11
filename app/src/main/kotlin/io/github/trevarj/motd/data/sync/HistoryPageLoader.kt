@@ -18,8 +18,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 
@@ -27,7 +27,7 @@ import kotlinx.coroutines.yield
  * Sole owner of a single CHATHISTORY page fetch: it builds the directional request from a
  * caller-supplied local boundary, applies the msgid→timestamp fallback, guards unsafe continuation,
  * persists the page through the sole IRC→Room writer ([EventProcessor]), and owns all fetch
- * concurrency (per-network wire serialization, per-direction coalescing, and the request timeout).
+ * concurrency (per-network wire admission, per-direction coalescing, and the request timeout).
  *
  * Directional decisions — which boundary to page from, and how a per-focus gap constrains the
  * endOfPagination outcome — stay with the caller ([ChatHistoryRemoteMediator]); the loader only
@@ -37,8 +37,9 @@ import kotlinx.coroutines.yield
  * The loader is also the single wire-access primitive for the orchestration in
  * [io.github.trevarj.motd.service.HistoryResyncCoordinator]: its multi-page reconnect/manual
  * traversals build no requests of their own but call [fetchPage]/[fetchMessages]/[fetchTargets],
- * which share this loader's per-network [Mutex] map so a scroll fetch and a reconnect catch-up
- * serialize on the wire instead of racing pages into the same timeline. That covers every
+ * which share this loader's per-network wire gates so a scroll fetch and a reconnect catch-up
+ * admit on the same bounded gate (width 1 without labeled-response, so strictly serialized)
+ * instead of racing pages into the same timeline. That covers every
  * Paging-driven and coordinator-issued CHATHISTORY request; the one remaining path outside the
  * loader is the deep-link AROUND prefetch in ChatJumpResolver (pre-existing, unrouted here).
  */
@@ -101,11 +102,14 @@ class HistoryPageLoader @Inject constructor(
         val type: HistoryReferenceType,
     )
 
-    // Sole fetch serialization for Paging-driven pages and the coordinator's reconnect/manual
-    // traversals: both acquire these per-network locks (Phase 3 gate collapse), so neither can
-    // interleave the other's pages on the socket. ChatJumpResolver's AROUND prefetch is the one
-    // history request that does not pass through these locks (pre-existing).
-    private val networkLocks = ConcurrentHashMap<Long, Mutex>()
+    // Sole fetch admission for Paging-driven pages and the coordinator's reconnect/manual
+    // traversals: both acquire these per-network gates (Phase 3 gate collapse). Width is 1 (strict
+    // serialization, Mutex-equivalent) unless the connection correlates concurrent CHATHISTORY via
+    // labeled-response, in which case a bounded number of requests may share the wire.
+    // ChatJumpResolver's AROUND prefetch is the one history request that does not pass through
+    // these gates (pre-existing).
+    private class WireGate(val width: Int, val semaphore: Semaphore)
+    private val networkGates = ConcurrentHashMap<Long, WireGate>()
     private val inFlight = ConcurrentHashMap<FlightKey, CompletableDeferred<PageResult>>()
     internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
 
@@ -168,14 +172,21 @@ class HistoryPageLoader @Inject constructor(
         }
         val requestLimit = minOf(pageSize, ready.pageLimit).coerceAtLeast(1)
         val referenceTypes = ready.referenceTypes
+        // Keep every fetch on this connection at one coherent gate width; mixed widths per call
+        // would thrash the per-network gate.
+        val allowConcurrent = ready.supportsConcurrentRequests
         return coalesced(FlightKey(networkId, roomId, direction, gapId)) {
             when (direction) {
-                Direction.LATEST -> loadLatest(networkId, roomId, target, source, requestLimit, referenceTypes)
+                Direction.LATEST -> loadLatest(
+                    networkId, roomId, target, source, requestLimit, referenceTypes, allowConcurrent,
+                )
                 Direction.OLDER -> loadOlder(
                     networkId, roomId, target, source, requestLimit, referenceTypes, gapId, boundary,
+                    allowConcurrent,
                 )
                 Direction.NEWER -> loadNewer(
                     networkId, roomId, target, source, requestLimit, referenceTypes, gapId, boundary,
+                    allowConcurrent,
                 )
             }
         }.also { result ->
@@ -200,6 +211,7 @@ class HistoryPageLoader @Inject constructor(
         source: HistorySource,
         requestLimit: Int,
         referenceTypes: Set<HistoryReferenceType>,
+        allowConcurrent: Boolean,
     ): PageResult {
         val allowMsgid = HistoryReferenceType.MSGID in referenceTypes
         val request = ChatHistoryRequest(
@@ -208,7 +220,8 @@ class HistoryPageLoader @Inject constructor(
             limit = requestLimit,
         )
         val result = fetchMessages(
-            networkId, source, request, referenceTypes, allowMsgid, requestTimeoutMs, retryableTimeout = true,
+            networkId, source, request, referenceTypes, allowMsgid, requestTimeoutMs,
+            retryableTimeout = true, allowConcurrent = allowConcurrent,
         )
         if (!result.isComplete && !result.hasUsableOldest(referenceTypes, true)) {
             return PageResult.Failed(
@@ -239,6 +252,7 @@ class HistoryPageLoader @Inject constructor(
         referenceTypes: Set<HistoryReferenceType>,
         gapId: Long?,
         boundary: ChatHistoryReference?,
+        allowConcurrent: Boolean,
     ): PageResult {
         val oldest = boundary ?: return PageResult.Failed(
             IllegalStateException("CHATHISTORY BEFORE requires a local boundary"),
@@ -260,6 +274,7 @@ class HistoryPageLoader @Inject constructor(
             msgidAllowed = true,
             requestTimeoutMs,
             retryableTimeout = true,
+            allowConcurrent = allowConcurrent,
         ) ?: return PageResult.Failed(
             IllegalStateException("CHATHISTORY BEFORE has no advertised local boundary selector"),
         )
@@ -307,6 +322,7 @@ class HistoryPageLoader @Inject constructor(
         referenceTypes: Set<HistoryReferenceType>,
         gapId: Long?,
         boundary: ChatHistoryReference?,
+        allowConcurrent: Boolean,
     ): PageResult {
         val newer = boundary ?: return PageResult.Failed(
             IllegalStateException("CHATHISTORY AFTER requires a local boundary"),
@@ -328,6 +344,7 @@ class HistoryPageLoader @Inject constructor(
             msgidAllowed = true,
             requestTimeoutMs,
             retryableTimeout = true,
+            allowConcurrent = allowConcurrent,
         ) ?: return PageResult.Failed(
             IllegalStateException("CHATHISTORY AFTER has no advertised local boundary selector"),
         )
@@ -380,6 +397,7 @@ class HistoryPageLoader @Inject constructor(
         msgidAllowed: Boolean,
         timeoutMs: Long,
         retryableTimeout: Boolean = false,
+        allowConcurrent: Boolean = false,
     ): FetchedPage? {
         val selector = selectorOf(boundary, referenceTypes, msgidAllowed) ?: return null
         val secondSelector = secondBoundary?.let { selectorOf(it, referenceTypes, msgidAllowed = false)?.value }
@@ -391,7 +409,7 @@ class HistoryPageLoader @Inject constructor(
             bound2 = secondSelector,
             limit = limit.coerceAtLeast(1),
         )
-        return onWireLock(networkId, timeoutMs, retryableTimeout) {
+        return onWireLock(networkId, wireWidth(allowConcurrent), timeoutMs, retryableTimeout) {
             try {
                 FetchedPage(
                     runRequest(source, request).withAdvertisedBoundaries(referenceTypes, msgidAllowed),
@@ -432,8 +450,9 @@ class HistoryPageLoader @Inject constructor(
         msgidAllowed: Boolean,
         timeoutMs: Long,
         retryableTimeout: Boolean = false,
+        allowConcurrent: Boolean = false,
     ): ChatHistoryResponse.Messages =
-        onWireLock(networkId, timeoutMs, retryableTimeout) {
+        onWireLock(networkId, wireWidth(allowConcurrent), timeoutMs, retryableTimeout) {
             runRequest(source, request).withAdvertisedBoundaries(referenceTypes, msgidAllowed)
         }
 
@@ -443,8 +462,9 @@ class HistoryPageLoader @Inject constructor(
         source: HistorySource,
         request: ChatHistoryRequest,
         timeoutMs: Long,
+        allowConcurrent: Boolean = false,
     ): ChatHistoryResponse.Targets =
-        onWireLock(networkId, timeoutMs, retryableTimeout = false) {
+        onWireLock(networkId, wireWidth(allowConcurrent), timeoutMs, retryableTimeout = false) {
             source.chathistory(request) as? ChatHistoryResponse.Targets
                 ?: error("CHATHISTORY TARGETS returned a message response")
         }
@@ -500,13 +520,17 @@ class HistoryPageLoader @Inject constructor(
     }
 
     /**
-     * Acquire the per-network wire lock and run [block] with [timeoutMs] bounding the WHOLE
-     * operation: lock wait plus the request(s). A timeout fired while still queued behind another
-     * fetch cancels the pending lock acquisition cleanly, so a caller's budget is honored even on a
-     * busy wire.
+     * Acquire a permit on the per-network wire gate and run [block] with [timeoutMs] bounding the
+     * WHOLE operation: permit wait plus the request(s). A timeout fired while still queued behind
+     * other fetches cancels the pending acquisition cleanly, so a caller's budget is honored even
+     * on a busy wire. [wireWidth] follows the connection's labeled-response support; a width change
+     * across reconnects on the same networkId swaps the gate on the next fetch (one in-flight
+     * request from the doomed connection may briefly overlap — harmless, because labels correlate
+     * responses and EventProcessor serializes persists).
      */
     private suspend fun <T> onWireLock(
         networkId: Long,
+        wireWidth: Int,
         timeoutMs: Long,
         retryableTimeout: Boolean,
         block: suspend () -> T,
@@ -515,11 +539,14 @@ class HistoryPageLoader @Inject constructor(
         // a copy of whatever the block raised. RemoteMediator must let the original
         // CancellationException instance reach Paging untouched, so capture and rethrow the exact
         // throwable the block produced.
+        val gate = networkGates.compute(networkId) { _, existing ->
+            if (existing?.width == wireWidth) existing else WireGate(wireWidth, Semaphore(wireWidth))
+        }!!
         var raised: Throwable? = null
         return try {
             withTimeout(timeoutMs) {
                 try {
-                    networkLocks.getOrPut(networkId, ::Mutex).withLock { block() }
+                    gate.semaphore.withPermit { block() }
                 } catch (error: Throwable) {
                     raised = error
                     throw error
@@ -613,7 +640,17 @@ class HistoryPageLoader @Inject constructor(
         }
     }
 
+    private fun wireWidth(allowConcurrent: Boolean): Int =
+        if (allowConcurrent) MAX_CONCURRENT_WIRE_REQUESTS else 1
+
     internal companion object {
+        /**
+         * Bounded CHATHISTORY fan-out when labeled-response correlates concurrent requests; width 1
+         * (strict serialization) otherwise. Shared with the coordinator's per-pass fan-out so the
+         * two bounds cannot drift.
+         */
+        internal const val MAX_CONCURRENT_WIRE_REQUESTS = 3
+
         /** IRCv3 error code for "this msgid selector type is not accepted"; shared with callers. */
         internal const val INVALID_MSGREFTYPE = "INVALID_MSGREFTYPE"
 

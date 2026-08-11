@@ -12,6 +12,8 @@ sealed interface HistoryAvailability {
         val referenceTypes: Set<HistoryReferenceType>,
         /** Advertised per-request maximum; [Int.MAX_VALUE] means the server advertised no maximum. */
         val pageLimit: Int,
+        /** True when labeled-response is negotiated, so concurrent CHATHISTORY requests correlate safely. */
+        val supportsConcurrentRequests: Boolean = false,
     ) : HistoryAvailability
 
     data object NegotiatingOrOffline : HistoryAvailability

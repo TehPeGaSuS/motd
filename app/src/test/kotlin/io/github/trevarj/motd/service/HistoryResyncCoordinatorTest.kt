@@ -34,7 +34,12 @@ import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.Prefix
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -49,6 +54,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -176,12 +182,16 @@ class HistoryResyncCoordinatorTest {
         var timestampRefs: Boolean = true,
         var pageLimit: Int = 100,
         var targetClassificationReady: Boolean = true,
+        // False keeps every existing test on the strictly-sequential driver.
+        var supportsConcurrent: Boolean = false,
         val channelClassifier: (String) -> Boolean = { target ->
             target.startsWith('#') || target.startsWith('&')
         },
         val responder: suspend (ChatHistoryRequest) -> FakeResponse,
     ) : HistoryResyncCoordinator.HistorySource {
-        val requests = mutableListOf<ChatHistoryRequest>()
+        // Synchronized: a labeled-response pass records requests from concurrent fetches.
+        val requests: MutableList<ChatHistoryRequest> =
+            java.util.Collections.synchronizedList(mutableListOf())
 
         /**
          * Sampling seam: the coordinator probes availability while preparing a target, which is the
@@ -198,6 +208,7 @@ class HistoryResyncCoordinatorTest {
                         if (msgidRefs) add(HistoryReferenceType.MSGID)
                     },
                     pageLimit,
+                    supportsConcurrentRequests = supportsConcurrent,
                 )
             } else {
                 HistoryAvailability.Unsupported
@@ -1819,6 +1830,259 @@ class HistoryResyncCoordinatorTest {
         )
         assertEquals(mapOf(bufferId to HistorySyncStatus.Queued), whileQueued)
         assertEquals(mapOf(bufferId to HistorySyncStatus.Syncing), whileSyncing)
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+    }
+
+    private suspend fun insertChannels(names: List<String>): List<Long> = names.map { name ->
+        db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = name, displayName = name, type = BufferType.CHANNEL),
+        )
+    }
+
+    @Test
+    fun labeledResponsePassRunsTargetsInParallelBoundedByWireWidth() = runTest {
+        val names = listOf("#a", "#b", "#c", "#d", "#e")
+        val ids = insertChannels(names)
+        val entered = AtomicInteger()
+        val wireWidthReached = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val source = FakeSource(supportsConcurrent = true) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
+                else -> {
+                    if (entered.incrementAndGet() == 3) wireWidthReached.complete(Unit)
+                    release.await()
+                    FakeResponse(
+                        listOf(message("m-${request.target}", 100, target = request.target)),
+                        endOfHistory = true,
+                    )
+                }
+            }
+        }
+
+        val pass = async { coordinator.resyncNetwork(networkId, ids.zip(names), source) }
+        wireWidthReached.await()
+
+        // Exactly the wire width is on the wire at once; the remaining targets wait on a permit.
+        assertEquals(
+            3,
+            source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.LATEST },
+        )
+        release.complete(Unit)
+        assertEquals(HistoryResyncState.Updated(5), pass.await())
+        assertEquals(
+            names.toSet(),
+            source.requests
+                .filter { it.subcommand == ChatHistoryRequest.Subcommand.LATEST }
+                .map { it.target }
+                .toSet(),
+        )
+    }
+
+    @Test
+    fun passWithoutLabeledResponseStaysStrictlySequential() = runTest {
+        val names = listOf("#a", "#b", "#c")
+        val ids = insertChannels(names)
+        val active = AtomicInteger()
+        val maxActive = AtomicInteger()
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
+                else -> {
+                    maxActive.updateAndGet { maxOf(it, active.incrementAndGet()) }
+                    // Give any (incorrect) fan-out sibling the chance to overlap before finishing.
+                    yield()
+                    active.decrementAndGet()
+                    FakeResponse(
+                        listOf(message("m-${request.target}", 100, target = request.target)),
+                        endOfHistory = true,
+                    )
+                }
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(3),
+            coordinator.resyncNetwork(networkId, ids.zip(names), source),
+        )
+        assertEquals(1, maxActive.get())
+        // Sequential order is the open-buffer (newest-first merge) order, one at a time.
+        assertEquals(listOf("*", "#a", "#b", "#c"), source.requests.map { it.target })
+    }
+
+    @Test
+    fun parallelPassFoldsAccumulatorsAcrossTargets() = runTest {
+        val (incompleteId, cleanId) = insertChannels(listOf("#inc", "#ok"))
+        val source = FakeSource(supportsConcurrent = true) { request ->
+            when {
+                request.subcommand == ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(endOfHistory = true)
+                // A non-terminal page with no usable oldest boundary: inserted but Incomplete.
+                request.target == "#inc" -> FakeResponse(
+                    events = listOf(message("inc1", 100, target = "#inc")),
+                    oldest = null,
+                    newest = null,
+                )
+                else -> FakeResponse(listOf(message("ok1", 200, target = "#ok")), endOfHistory = true)
+            }
+        }
+
+        val result = coordinator.resyncNetwork(
+            networkId,
+            listOf(incompleteId to "#inc", cleanId to "#ok"),
+            source,
+        )
+
+        // Inserted counts fold across both targets; the incomplete target's reason wins the pass.
+        assertEquals(
+            HistoryResyncState.Incomplete(2, "CHATHISTORY LATEST returned no usable oldest boundary"),
+            result,
+        )
+        assertNull(syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
+    fun cleanParallelPassAdvancesTheWatermarkToTheMaxHighWater() = runTest {
+        val (aId, bId) = insertChannels(listOf("#a", "#b"))
+        val source = FakeSource(supportsConcurrent = true) { request ->
+            when {
+                request.subcommand == ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(endOfHistory = true)
+                request.target == "#a" ->
+                    FakeResponse(listOf(message("a1", 150, target = "#a")), endOfHistory = true)
+                else -> FakeResponse(listOf(message("b1", 250, target = "#b")), endOfHistory = true)
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(2),
+            coordinator.resyncNetwork(networkId, listOf(aId to "#a", bId to "#b"), source),
+        )
+        assertEquals(250L, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
+    fun parallelPassPublishesConcurrentSyncingStatusesAndSettlesIndependently() = runTest {
+        val names = listOf("#a", "#b", "#c")
+        val ids = insertChannels(names)
+        val idByName = names.zip(ids).toMap()
+        val releases = names.associateWith { CompletableDeferred<Unit>() }
+        val syncing = AtomicInteger()
+        val allSyncing = CompletableDeferred<Unit>()
+        val source = FakeSource(supportsConcurrent = true) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
+                else -> {
+                    if (syncing.incrementAndGet() == 3) allSyncing.complete(Unit)
+                    releases.getValue(request.target).await()
+                    FakeResponse(
+                        listOf(message("m-${request.target}", 100, target = request.target)),
+                        endOfHistory = true,
+                    )
+                }
+            }
+        }
+
+        val pass = async { coordinator.resyncNetwork(networkId, ids.zip(names), source) }
+        allSyncing.await()
+        assertEquals(
+            ids.associateWith { HistorySyncStatus.Syncing as HistorySyncStatus },
+            coordinator.syncStatuses.value,
+        )
+
+        releases.getValue("#a").complete(Unit)
+        // #a settles and clears on its own while its siblings are still on the wire.
+        coordinator.syncStatuses.first { idByName.getValue("#a") !in it }
+        assertEquals(
+            setOf(idByName.getValue("#b"), idByName.getValue("#c")),
+            coordinator.syncStatuses.value.keys,
+        )
+
+        releases.getValue("#b").complete(Unit)
+        releases.getValue("#c").complete(Unit)
+        assertEquals(HistoryResyncState.Updated(3), pass.await())
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+    }
+
+    @Test
+    fun failedTargetCancelsInFlightSiblingsAndPaintsThemWithThePassVerdict() = runTest {
+        // Width 3: three targets go on the wire together; the fourth waits for a permit it never
+        // gets. Permit order on a multithreaded dispatcher is arbitrary, so roles are assigned by
+        // arrival: the first two entrants block, the third fails the pass.
+        val names = listOf("#a", "#b", "#c", "#d")
+        val ids = insertChannels(names)
+        val idByName = names.zip(ids).toMap()
+        val enteredTargets = ConcurrentHashMap.newKeySet<String>()
+        val arrival = AtomicInteger()
+        val twoBlocked = CompletableDeferred<Unit>()
+        val cancelledTargets = ConcurrentHashMap.newKeySet<String>()
+        val source = FakeSource(supportsConcurrent = true) { request ->
+            when {
+                request.subcommand == ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(endOfHistory = true)
+                else -> {
+                    enteredTargets += request.target
+                    val n = arrival.incrementAndGet()
+                    if (n <= 2) {
+                        if (n == 2) twoBlocked.complete(Unit)
+                        try {
+                            awaitCancellation()
+                        } catch (cancelled: CancellationException) {
+                            cancelledTargets += request.target
+                            throw cancelled
+                        }
+                    } else {
+                        twoBlocked.await()
+                        throw IOException("transport died mid-pass")
+                    }
+                }
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, ids.zip(names), source)
+
+        assertTrue(result is HistoryResyncState.Failed)
+        // The failing target aborted the pass and both in-flight siblings were cancelled with it.
+        assertEquals(3, enteredTargets.size)
+        assertEquals(2, cancelledTargets.size)
+        assertTrue(enteredTargets.containsAll(cancelledTargets))
+        // Every buffer that had a request on the wire wears the pass verdict; the never-started
+        // fourth is dropped instead of being painted with a failure it never touched.
+        val settled = coordinator.syncStatuses.value
+        assertEquals(enteredTargets.map { idByName.getValue(it) }.toSet(), settled.keys)
+        assertTrue(settled.values.all { it is HistorySyncStatus.Failed })
+    }
+
+    @Test
+    fun staleConnectionDuringAParallelPassClearsEveryStatus() = runTest {
+        val names = listOf("#a", "#b")
+        val ids = insertChannels(names)
+        val current = AtomicBoolean(true)
+        val entered = AtomicInteger()
+        val bothIn = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val source = FakeSource(supportsConcurrent = true) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
+                else -> {
+                    if (entered.incrementAndGet() == 2) bothIn.complete(Unit)
+                    release.await()
+                    FakeResponse(
+                        listOf(message("m-${request.target}", 100, target = request.target)),
+                        endOfHistory = true,
+                    )
+                }
+            }
+        }
+
+        val pass = async {
+            coordinator.resyncNetwork(networkId, ids.zip(names), source, isCurrent = { current.get() })
+        }
+        bothIn.await()
+        current.set(false)
+        release.complete(Unit)
+
+        assertEquals(HistoryResyncState.Failed("Connection changed; try again"), pass.await())
         assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
     }
 

@@ -1424,7 +1424,11 @@ class IrcClient(
                 advertisedLimit != null && advertisedLimit > 0 -> advertisedLimit
                 else -> DEFAULT_HISTORY_PAGE_LIMIT
             }
-            return HistoryAvailability.Ready(referenceTypes, pageLimit)
+            return HistoryAvailability.Ready(
+                referenceTypes,
+                pageLimit,
+                supportsConcurrentRequests = hasCap("labeled-response"),
+            )
         }
 
     // -- helpers --
