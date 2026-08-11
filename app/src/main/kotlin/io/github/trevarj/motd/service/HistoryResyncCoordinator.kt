@@ -194,6 +194,8 @@ class HistoryResyncCoordinator @Inject constructor(
         val status: WorkStatus = WorkStatus.Complete,
         val highWater: Long? = null,
         val inserted: Int = 0,
+        /** True when the server closed the page as end-of-history (or returned nothing at all). */
+        val terminalPage: Boolean = false,
     )
 
     private data class TargetPass(
@@ -976,6 +978,24 @@ class HistoryResyncCoordinator @Inject constructor(
         val reachedAdvertisedLatest = targetSpec.latestMessageTime?.let { latest ->
             newestStoredTime?.let { it >= latest } == true
         }
+        if (
+            reachedAdvertisedLatest == false &&
+            targetResult.status == WorkStatus.Complete &&
+            targetResult.terminalPage &&
+            targetResult.inserted == 0
+        ) {
+            // The server proved it will replay nothing newer: the page closed as end-of-history and
+            // added no rows, yet TARGETS still advertises a newer timestamp. That timestamp is not
+            // reachable via CHATHISTORY (soju can index an event that replay never returns), so
+            // painting Partial and recommending retries would never converge. A miss that DID
+            // insert rows still reports Incomplete below, giving a genuinely new message one more
+            // pass to be reached before this settles.
+            diagnostics.record("history", "advertised_latest_unreachable") {
+                mapOf("network_id" to networkId, "room_id" to canonicalRoomId)
+            }
+            session?.settle(canonicalRoomId, HistorySyncStatus.Idle)
+            return TargetOutcome(highWater = targetResult.highWater)
+        }
         val effectiveStatus = if (
             reachedAdvertisedLatest == false && targetResult.status == WorkStatus.Complete
         ) {
@@ -1069,7 +1089,9 @@ class HistoryResyncCoordinator @Inject constructor(
         if (!isCurrent()) throw StaleConnectionException()
         val inserted = ingest(networkId, bufferId, request, page)
         val highWater = page.highWater()
-        if (page.isTerminalPage()) return WorkResult(highWater = highWater, inserted = inserted)
+        if (page.isTerminalPage()) {
+            return WorkResult(highWater = highWater, inserted = inserted, terminalPage = true)
+        }
         if (page.oldest?.msgid == null && page.primaryMessageCount >= request.limit) {
             return WorkResult(
                 WorkStatus.Incomplete("CHATHISTORY timestamp boundary is saturated"),

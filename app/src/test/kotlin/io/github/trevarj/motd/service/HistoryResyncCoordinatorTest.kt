@@ -594,6 +594,67 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun unreachableAdvertisedLatestSettlesIdleAfterAnEmptyTerminalPage() = runTest {
+        // TARGETS advertises a timestamp CHATHISTORY never replays (soju can index an event that
+        // replay never returns). A terminal LATEST that inserts nothing is the server's proof that
+        // nothing newer will ever arrive, so the target must settle instead of wearing a permanent
+        // Partial badge with no affordance to clear it.
+        processor.process(networkId, message("m400", 400))
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
+                    targets = listOf("#chan" to 500L),
+                    endOfHistory = true,
+                )
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = listOf(message("m400", 400)),
+                    endOfHistory = true,
+                )
+                else -> error("unexpected ${request.subcommand}")
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+
+        assertEquals(HistoryResyncState.UpToDate, result)
+        assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+        // The pass completed, so the watermark advances past the unreachable advertised time and
+        // the next reconnect does not rediscover the same dead end.
+        assertEquals(500L, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
+    fun advertisedLatestMissConvergesOnTheRetryPassOnceNothingNewIsReplayed() = runTest {
+        // First pass: LATEST genuinely inserts a new message but still falls short of the
+        // advertised time, so a retry is recommended. Retry pass: the same terminal page now
+        // deduplicates to zero inserts, which settles the target instead of looping forever.
+        processor.process(networkId, message("seed", 100))
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
+                    targets = listOf("#chan" to 102L),
+                    endOfHistory = true,
+                )
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = listOf(message("m101", 101)),
+                    endOfHistory = true,
+                )
+                else -> error("unexpected ${request.subcommand}")
+            }
+        }
+
+        val first = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+        assertTrue(first is HistoryResyncState.Incomplete)
+        assertTrue(shouldRetryIncompleteCatchUp(first as HistoryResyncState.Failed))
+
+        val second = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+        assertEquals(HistoryResyncState.UpToDate, second)
+        assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
+        assertEquals(102L, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
     fun staleConnectionClearsTransientTimelineSyncStatus() = runTest {
         processor.process(networkId, message("seed", 100))
         val requestStarted = CompletableDeferred<Unit>()
@@ -1483,7 +1544,14 @@ class HistoryResyncCoordinatorTest {
                     newest = null,
                     primaryMessageCount = 1,
                 )
-                else -> FakeResponse(endOfHistory = true)
+                // Non-terminal page with no usable boundary: a genuinely incomplete target pass.
+                // (An EMPTY terminal page short of the advertised time is no longer incomplete —
+                // it settles as the unreachable-advertised-latest convergence.)
+                else -> FakeResponse(
+                    events = listOf(message("m1500", 1_500)),
+                    oldest = null,
+                    newest = null,
+                )
             }
         }
 
