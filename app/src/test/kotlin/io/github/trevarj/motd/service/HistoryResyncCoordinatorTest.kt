@@ -1901,6 +1901,53 @@ class HistoryResyncCoordinatorTest {
         assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
     }
 
+    @Test
+    fun dismissSyncStatusClearsASettledPartialBadge() = runTest {
+        // The advertised latest stays unreached with fresh inserts, leaving a Partial badge.
+        processor.process(networkId, message("seed", 100))
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 102L), endOfHistory = true)
+                else -> FakeResponse(listOf(message("m101", 101)), endOfHistory = true)
+            }
+        }
+        coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+        assertTrue(coordinator.syncStatus(bufferId).first() is HistorySyncStatus.Partial)
+
+        coordinator.dismissSyncStatus(bufferId)
+
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+        assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
+    }
+
+    @Test
+    fun dismissSyncStatusWinsARaceWithAnInFlightPass() = runTest {
+        val fetchEntered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 102L), endOfHistory = true)
+                else -> {
+                    fetchEntered.complete(Unit)
+                    release.await()
+                    FakeResponse(listOf(message("m101", 101)), endOfHistory = true)
+                }
+            }
+        }
+
+        val pass = async { coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source) }
+        fetchEntered.await()
+        // Dismissed while the buffer's request is on the wire: the pass's later settle for this
+        // buffer carries a stale generation, so the dismissal must not be overwritten.
+        coordinator.dismissSyncStatus(bufferId)
+        release.complete(Unit)
+        pass.await()
+
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+    }
+
     private suspend fun insertChannels(names: List<String>): List<Long> = names.map { name ->
         db.bufferDao().insert(
             BufferEntity(networkId = networkId, name = name, displayName = name, type = BufferType.CHANNEL),

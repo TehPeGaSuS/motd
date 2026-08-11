@@ -754,6 +754,12 @@ class ChatViewModel @Inject constructor(
         )
     }
 
+    /** Dismisses the settled "history may be incomplete" chip and its chat-list badge. */
+    fun dismissHistorySyncStatus() {
+        val bufferId = buffer.value?.id ?: return
+        historyResyncCoordinator.dismissSyncStatus(bufferId)
+    }
+
     private val typingNicks = operationalBufferId
         .flatMapLatest(typingTracker::typingNicks)
 

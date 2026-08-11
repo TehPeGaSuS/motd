@@ -114,6 +114,12 @@ interface HistoryResyncController {
         .map { it[bufferId] ?: HistorySyncStatus.Idle }
         .distinctUntilChanged()
 
+    /**
+     * User-requested dismissal of a settled per-buffer status (the "history may be incomplete"
+     * chip and the chat-list badge). A later pass that fails again publishes a fresh status.
+     */
+    fun dismissSyncStatus(bufferId: Long) = Unit
+
     suspend fun reconcileBuffer(
         buffer: BufferEntity,
         client: IrcClient,
@@ -233,6 +239,13 @@ class HistoryResyncCoordinator @Inject constructor(
     private val syncStatusGenerations = ConcurrentHashMap<Long, AtomicLong>()
     internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
     internal var targetsRequestLimit: Int = TARGETS_REQUEST_LIMIT
+
+    override fun dismissSyncStatus(bufferId: Long) {
+        // Bump the generation first so the dismissal wins any race with an in-flight pass: that
+        // pass's later publishes for this buffer carry a stale generation and are dropped.
+        syncStatusGenerations.computeIfAbsent(bufferId) { AtomicLong() }.incrementAndGet()
+        _syncStatuses.update { it - bufferId }
+    }
 
     /**
      * One pass's per-buffer status publication: registration, the generation guard that keeps a

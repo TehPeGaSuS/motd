@@ -44,6 +44,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
@@ -522,6 +523,7 @@ fun ChatScreen(
         onRetryReplyJump = viewModel::retryReplyJump,
         historySyncStatus = historySyncStatus,
         onHistorySyncRetry = viewModel::retryHistorySync,
+        onHistorySyncDismiss = viewModel::dismissHistorySyncStatus,
         historyAvailability = historyAvailability,
         conversationLayout = state.conversationLayout,
         onConversationLayoutSelected = viewModel::setConversationLayoutOverride,
@@ -703,6 +705,7 @@ fun ChatContent(
     historySyncStatus: HistorySyncStatus = HistorySyncStatus.Idle,
     // Re-runs the reconciliation pass behind the failed-sync pill; Paging's own retry runs with it.
     onHistorySyncRetry: () -> Unit = {},
+    onHistorySyncDismiss: () -> Unit = {},
     historyAvailability: HistoryAvailability = HistoryAvailability.NegotiatingOrOffline,
     countUnreadBelowViewport: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int = { _, _ -> 0 },
     nearestUnreadMentionBelow: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> ChatPositionTarget? = { _, _ -> null },
@@ -2041,6 +2044,7 @@ fun ChatContent(
                             TimelineHistoryStaleChip(
                                 status = timelineHistoryStatus,
                                 timelineEmpty = items.itemCount == 0,
+                                onDismiss = onHistorySyncDismiss,
                             )
                         },
                         syncBar = {
@@ -2580,12 +2584,13 @@ internal fun TimelineHistorySyncBar(
 internal fun showsStaleChip(status: HistorySyncStatus, timelineEmpty: Boolean): Boolean =
     status is HistorySyncStatus.Partial && !timelineEmpty
 
-/** Quiet, non-interactive companion to the sync pill for a settled-but-incomplete history pass. */
+/** Quiet companion to the sync pill for a settled-but-incomplete history pass; tap to dismiss. */
 @Composable
 internal fun TimelineHistoryStaleChip(
     status: HistorySyncStatus,
     timelineEmpty: Boolean,
     modifier: Modifier = Modifier,
+    onDismiss: () -> Unit = {},
 ) {
     AnimatedVisibility(
         visible = showsStaleChip(status, timelineEmpty),
@@ -2595,17 +2600,32 @@ internal fun TimelineHistoryStaleChip(
         enter = fadeIn(MotdMotion.microFadeIn),
         exit = fadeOut(MotdMotion.microFadeOut),
     ) {
+        val dismissLabel = stringResource(R.string.chat_history_partial_dismiss)
         Surface(
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            modifier = Modifier
+                .semantics { liveRegion = LiveRegionMode.Polite }
+                .clickable(onClickLabel = dismissLabel, onClick = onDismiss),
         ) {
-            Text(
-                text = stringResource(R.string.chat_history_partial_chip),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            )
+            ) {
+                Text(
+                    text = stringResource(R.string.chat_history_partial_chip),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    // The clickable's label already announces the action; the icon is decorative.
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
         }
     }
 }
