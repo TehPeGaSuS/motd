@@ -1,0 +1,4 @@
+- History catch-up after reconnect is much lighter: progress is remembered, channels sync in parallel on capable servers, and the repeated retry cycling at startup is gone.
+- Chat list sync indicators are calmer: no more queued rings, and error dots only appear for real failures and clear once you visit the chat.
+- The "history may be incomplete" notice can now be dismissed.
+- Faster reconnect when opening the app after the phone was idle.
