@@ -1,5 +1,10 @@
 package io.github.trevarj.motd.ui.channellist
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -48,6 +53,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.irc.client.ChannelListing
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.components.EmptyState
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /**
@@ -115,8 +121,13 @@ internal fun ChannelListContent(
                     }
                 },
                 actions = {
-                    if (state.availability == ChannelBrowserAvailability.READY &&
-                        !state.loading
+                    // Fade only, both specs explicit: the RowScope defaults would add a
+                    // horizontal expansion that sweeps the fixed top-bar chrome sideways.
+                    AnimatedVisibility(
+                        visible = state.availability == ChannelBrowserAvailability.READY &&
+                            !state.loading,
+                        enter = fadeIn(MotdMotion.microFadeIn),
+                        exit = fadeOut(MotdMotion.microFadeOut),
                     ) {
                         IconButton(
                             onClick = { onSearch(text.text) },
@@ -162,7 +173,15 @@ internal fun ChannelListContent(
                             .padding(horizontal = 16.dp, vertical = 8.dp)
                             .testTag("channel_list_search_field"),
                     )
-                    if (state.loading) {
+                    // Ease the bar's height in and out so the results below never jump
+                    // by the indicator height twice per fetch.
+                    AnimatedVisibility(
+                        visible = state.loading,
+                        enter = fadeIn(MotdMotion.microFadeIn) +
+                            expandVertically(animationSpec = MotdMotion.contentSize),
+                        exit = fadeOut(MotdMotion.microFadeOut) +
+                            shrinkVertically(animationSpec = MotdMotion.contentSize),
+                    ) {
                         LinearProgressIndicator(Modifier.fillMaxWidth())
                     }
                     ResultsBody(
