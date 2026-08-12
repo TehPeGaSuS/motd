@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import android.os.SystemClock
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -40,23 +41,31 @@ import javax.inject.Inject
 
 /** Per-row chat-list sync affordance; coarser than [HistorySyncStatus] so unrelated reason-string
  * churn (e.g. a retried [HistorySyncStatus.Partial] with a new reason) never invalidates a row. */
-enum class ChatListSyncIndicator { NONE, SYNCING, ERROR }
+enum class ChatListSyncIndicator { NONE, QUEUED, WAITING, SYNCING, ERROR, UNAVAILABLE }
 
 /**
  * Pure mapper from the coordinator's per-buffer status map to the chat list's coarser indicator.
- * [HistorySyncStatus.Idle] and [HistorySyncStatus.Unavailable] settle to [ChatListSyncIndicator.NONE]
- * and are dropped from the result map entirely, so a row with no entry never renders a badge.
- * [HistorySyncStatus.Queued] is deliberately invisible here: waiting for a fetch slot is scheduler
- * internals, and painting it made the whole list churn on every reconnect pass.
+ * [HistorySyncStatus.Idle] settles to [ChatListSyncIndicator.NONE] and is dropped from the result
+ * map entirely, so a row with no entry never renders a badge.
+ *
+ * [queuedCuesVisible] is the shared sync-chrome gate (see [ChatListSyncChrome]): while it is closed
+ * the optimistic states paint nothing, so a pass that resolves inside the anti-flash window never
+ * churns the list. [HistorySyncStatus.Partial] is deliberately unpainted here — the in-chat stale
+ * chip carries it, and a list dot that reads identical to a hard failure overstated it.
  */
 internal fun chatListSyncIndicators(
     statuses: Map<Long, HistorySyncStatus>,
+    queuedCuesVisible: Boolean,
 ): Map<Long, ChatListSyncIndicator> = statuses.mapNotNull { (bufferId, status) ->
     val indicator = when (status) {
+        HistorySyncStatus.Queued ->
+            if (queuedCuesVisible) ChatListSyncIndicator.QUEUED else ChatListSyncIndicator.NONE
+        HistorySyncStatus.AwaitingConnection ->
+            if (queuedCuesVisible) ChatListSyncIndicator.WAITING else ChatListSyncIndicator.NONE
         HistorySyncStatus.Syncing -> ChatListSyncIndicator.SYNCING
-        is HistorySyncStatus.Partial, is HistorySyncStatus.Failed -> ChatListSyncIndicator.ERROR
-        HistorySyncStatus.Queued, HistorySyncStatus.Idle, HistorySyncStatus.Unavailable ->
-            ChatListSyncIndicator.NONE
+        is HistorySyncStatus.Failed -> ChatListSyncIndicator.ERROR
+        HistorySyncStatus.Unavailable -> ChatListSyncIndicator.UNAVAILABLE
+        is HistorySyncStatus.Partial, HistorySyncStatus.Idle -> ChatListSyncIndicator.NONE
     }
     (bufferId to indicator).takeIf { indicator != ChatListSyncIndicator.NONE }
 }.toMap()
@@ -136,11 +145,26 @@ class ChatListViewModel @Inject constructor(
     private val _muteBacklogSuppressions = MutableSharedFlow<List<MuteBacklogSuppression>>(extraBufferCapacity = 1)
     val muteBacklogSuppressions: SharedFlow<List<MuteBacklogSuppression>> = _muteBacklogSuppressions.asSharedFlow()
 
+    // Aggregate header chrome, debounced so a fast pass never flashes. Engine-owned counts; the
+    // driver's clock is elapsed real time, which keeps the windows honest across Doze.
+    val syncChrome: StateFlow<ChatListSyncChrome> = combine(
+        historyResync.passProgress,
+        historyResync.syncStatuses,
+        ::syncChromeSnapshot,
+    )
+        .distinctUntilChanged()
+        .presentSyncChrome(SystemClock::elapsedRealtime)
+        .stateIn(viewModelScope, WhileSubscribed(5_000), ChatListSyncChrome.Hidden)
+
     // Deliberately kept out of the [state] combine: the enum map already defeats a retried
-    // Partial/Failed's reason-string churn, but folding it into ChatListState would still
-    // recompose every row on any one buffer's sync transition instead of just its own row.
-    val syncIndicators: StateFlow<Map<Long, ChatListSyncIndicator>> = historyResync.syncStatuses
-        .map(::chatListSyncIndicators)
+    // Failed's reason-string churn, but folding it into ChatListState would still recompose every
+    // row on any one buffer's sync transition instead of just its own row. Gated by the same
+    // chrome flow as the header so queued rings and the explaining line appear together.
+    val syncIndicators: StateFlow<Map<Long, ChatListSyncIndicator>> = combine(
+        historyResync.syncStatuses,
+        syncChrome.map { it != ChatListSyncChrome.Hidden }.distinctUntilChanged(),
+        ::chatListSyncIndicators,
+    )
         .distinctUntilChanged()
         .stateIn(viewModelScope, WhileSubscribed(5_000), emptyMap())
 

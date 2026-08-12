@@ -22,6 +22,7 @@ import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcCommandException
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import java.lang.ref.WeakReference
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -78,6 +79,13 @@ sealed interface HistorySyncStatus {
     data object Idle : HistorySyncStatus
     /** Registered in the current pass, waiting for a fetch slot. */
     data object Queued : HistorySyncStatus
+    /**
+     * Queued for a pass that cannot run yet: the app foregrounded without a Ready connection, or a
+     * running pass died with its connection. Deliberately distinct from [Queued] so the UI can say
+     * "waiting for connection" instead of implying work is under way; both are optimistic, neither
+     * is an error.
+     */
+    data object AwaitingConnection : HistorySyncStatus
     /** A request for this buffer is on the wire right now. */
     data object Syncing : HistorySyncStatus
     /** The server permanently refuses this target (FAIL CHATHISTORY INVALID_TARGET). */
@@ -85,6 +93,17 @@ sealed interface HistorySyncStatus {
     data class Partial(val reason: String) : HistorySyncStatus
     data class Failed(val reason: String) : HistorySyncStatus
 }
+
+/**
+ * One network pass's aggregate progress. [total] grows as targets are registered (open buffers up
+ * front, discovered targets mid-pass) and [settled] counts buffers that reached a terminal status,
+ * so a UI can render "settled/total" without reconstructing it from the per-buffer status map,
+ * where settled buffers no longer appear.
+ */
+data class SyncPassProgress(val total: Int, val settled: Int)
+
+/** An open buffer offered to a network pass, carrying the ordering inputs the pass sorts on. */
+data class OpenBufferTarget(val id: Long, val name: String, val pinned: Boolean = false)
 
 /** Prevent a cancelled or superseded sync from publishing its initial transient status late. */
 internal fun initialSyncStatusIfCurrent(
@@ -100,6 +119,7 @@ internal fun initialSyncStatusIfCurrent(
 }
 
 private val EMPTY_SYNC_STATUSES: StateFlow<Map<Long, HistorySyncStatus>> = MutableStateFlow(emptyMap())
+private val EMPTY_PASS_PROGRESS: StateFlow<Map<Long, SyncPassProgress>> = MutableStateFlow(emptyMap())
 
 /** Chat-facing boundary for lifecycle-driven history reconciliation. */
 interface HistoryResyncController {
@@ -109,6 +129,24 @@ interface HistoryResyncController {
      */
     val syncStatuses: StateFlow<Map<Long, HistorySyncStatus>>
         get() = EMPTY_SYNC_STATUSES
+
+    /** Live per-network pass progress; a network without a live pass carries no entry. */
+    val passProgress: StateFlow<Map<Long, SyncPassProgress>>
+        get() = EMPTY_PASS_PROGRESS
+
+    /**
+     * Optimistically mark open buffers as queued for a pass that cannot start yet (the app
+     * foregrounded with a non-Ready connection). The real pass adopts these entries when it
+     * queues, so the user sees no Idle gap between the optimistic mark and the pass.
+     */
+    fun markAwaitingConnection(networkId: Long, openBufferIds: List<Long>) = Unit
+
+    /**
+     * Drop every waiting entry for a network no pass will ever adopt them for — a server that does
+     * not support history, or a connection retired by a deliberate disconnect. Backgrounding and
+     * Doze intentionally do NOT clear it: those buffers really are still waiting.
+     */
+    fun clearAwaitingConnection(networkId: Long) = Unit
 
     fun syncStatus(bufferId: Long): Flow<HistorySyncStatus> = syncStatuses
         .map { it[bufferId] ?: HistorySyncStatus.Idle }
@@ -160,6 +198,9 @@ class HistoryResyncCoordinator @Inject constructor(
     // this shared singleton so reconnect/manual traversals share the loader's per-network wire gate
     // with scroll-driven Paging. Defaulted so tests keep the four-argument construction.
     private val loader: HistoryPageLoader = HistoryPageLoader(processor),
+    // Read at sort time so the chat the user is looking at is admitted in the first fan-out wave.
+    // Defaulted so test fixtures keep the shorter construction.
+    private val foregroundBuffers: ForegroundBufferTracker = NoopForegroundBufferTracker,
 ) : HistoryResyncController {
     // Reuses the loader's transport seam so a source can drive both the coordinator's orchestration
     // and the loader's fetch primitives directly, and adds the discovery/classification metadata the
@@ -233,6 +274,7 @@ class HistoryResyncCoordinator @Inject constructor(
         val knownBufferId: Long?,
         val name: String,
         val latestMessageTime: Long?,
+        val pinned: Boolean = false,
     )
 
     // Cancellation is non-suspending, so registration and removal share a synchronous monitor.
@@ -240,7 +282,26 @@ class HistoryResyncCoordinator @Inject constructor(
     private val activeFlights = LinkedHashMap<RequestSpec, ActiveFlight>()
     private val _syncStatuses = MutableStateFlow<Map<Long, HistorySyncStatus>>(emptyMap())
     override val syncStatuses: StateFlow<Map<Long, HistorySyncStatus>> = _syncStatuses
+    private val _passProgress = MutableStateFlow<Map<Long, SyncPassProgress>>(emptyMap())
+    override val passProgress: StateFlow<Map<Long, SyncPassProgress>> = _passProgress
     private val syncStatusGenerations = ConcurrentHashMap<Long, AtomicLong>()
+    // Buffers optimistically marked [HistorySyncStatus.AwaitingConnection], per network. Entries
+    // survive backgrounding and Doze; only an adopting pass or an explicit disconnect clears them.
+    private val awaitingByNetwork = ConcurrentHashMap<Long, MutableSet<Long>>()
+    // The newest network pass's session, kept across a retryable failure so the catch-up loop's
+    // final give-up verdict can still be painted onto whatever that pass left behind.
+    private val networkSessions = ConcurrentHashMap<Long, SyncStatusSession>()
+    // Connections the caller took offline deliberately, keyed by network and holding the retired
+    // connection's flight identity. A pass runs in this coordinator's own scope, so it outlives the
+    // caller that started it: this tombstone is how a pass still winding down for a retired
+    // connection learns that nothing it publishes may reach the UI. A pass for any other identity
+    // (the next connection) clears it. Weak because a tombstone whose connection is unreachable can
+    // have no late pass left to silence, and a dead client must not be pinned by this map.
+    private val retiredNetworks = ConcurrentHashMap<Long, WeakReference<Any>>()
+    // Serializes retirement against a pass's terminal so a terminal cannot slip its republication
+    // between the tombstone and the clear. Always the OUTER lock: a session's own monitor is only
+    // ever taken inside it, never the reverse.
+    private val retireGuard = Any()
     internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
     internal var targetsRequestLimit: Int = TARGETS_REQUEST_LIMIT
 
@@ -252,6 +313,92 @@ class HistoryResyncCoordinator @Inject constructor(
     }
 
     /**
+     * Optimistic pre-pass marking. Bumping the generation is the whole adoption story: a stale
+     * in-flight publish from a dying pass carries an older generation and is dropped, and the real
+     * pass's own registration bumps again, replacing waiting with Queued without an Idle gap.
+     */
+    override fun markAwaitingConnection(networkId: Long, openBufferIds: List<Long>) {
+        if (openBufferIds.isEmpty()) return
+        val waiting = awaitingByNetwork.computeIfAbsent(networkId) { ConcurrentHashMap.newKeySet() }
+        openBufferIds.forEach { bufferId ->
+            // A permanently refused target is not waiting for a connection; leave its badge alone.
+            if (_syncStatuses.value[bufferId] == HistorySyncStatus.Unavailable) return@forEach
+            waiting += bufferId
+            beginSyncStatus(bufferId, HistorySyncStatus.AwaitingConnection)
+        }
+    }
+
+    override fun clearAwaitingConnection(networkId: Long) {
+        awaitingByNetwork.remove(networkId)?.forEach(::clearAwaitingBuffer)
+    }
+
+    /**
+     * A real pass has taken over: every buffer it re-queued is already published as Queued, so only
+     * the ids it did NOT re-queue (closed since the optimistic mark) still need clearing.
+     */
+    private fun adoptAwaiting(networkId: Long, queuedIds: Set<Long>) {
+        val waiting = awaitingByNetwork.remove(networkId) ?: return
+        waiting.forEach { bufferId ->
+            if (bufferId !in queuedIds) clearAwaitingBuffer(bufferId)
+        }
+    }
+
+    private fun clearAwaitingBuffer(bufferId: Long) {
+        if (_syncStatuses.value[bufferId] != HistorySyncStatus.AwaitingConnection) return
+        syncStatusGenerations.computeIfAbsent(bufferId) { AtomicLong() }.incrementAndGet()
+        _syncStatuses.update { current ->
+            if (current[bufferId] == HistorySyncStatus.AwaitingConnection) current - bufferId else current
+        }
+    }
+
+    /**
+     * Paint a network pass's final verdict on whatever its last attempt left behind. The catch-up
+     * loop calls this when it gives up (attempts exhausted, or a failure it will not retry) so the
+     * statuses a retryable failure deliberately kept alive do not linger forever.
+     *
+     * Value-guarded on [sourceIdentity]: between the caller's own superseded-client check and this
+     * call the successor connection can already have registered its pass, and finishing a live
+     * successor's session with the predecessor's give-up verdict would drop its queued buffers to
+     * Idle mid-pass.
+     */
+    fun settleNetworkPass(networkId: Long, result: HistoryResyncState, sourceIdentity: Any) {
+        val session = networkSessions[networkId] ?: return
+        if (!session.ownedBy(sourceIdentity)) return
+        if (!networkSessions.remove(networkId, session)) return
+        session.finish(result)
+    }
+
+    /**
+     * The network was taken offline deliberately (user disconnect or service shutdown). Nothing is
+     * going to reconnect it, so every status and progress entry it owns is retired: the live or
+     * suspended-for-retry session is settled to Idle, the optimistic waiting entries are dropped,
+     * and [sourceIdentity] is tombstoned so a pass still winding down in this coordinator's scope
+     * publishes nothing late — in particular it may not repaint AwaitingConnection or re-register
+     * waiting buffers after this call has cleared them.
+     */
+    fun retireNetwork(networkId: Long, sourceIdentity: Any?) = synchronized(retireGuard) {
+        if (sourceIdentity != null) retiredNetworks[networkId] = WeakReference(sourceIdentity)
+        networkSessions.remove(networkId)?.retire()
+        clearAwaitingConnection(networkId)
+        _passProgress.update { it - networkId }
+    }
+
+    /**
+     * Open a network pass's session. A pass for any connection other than a retired one proves the
+     * network is live again and drops the tombstone; the retired connection's OWN late pass keeps
+     * it, stays silent, and never takes the session slot away from its successor.
+     */
+    private fun beginNetworkSession(networkId: Long, sourceIdentity: Any): SyncStatusSession =
+        synchronized(retireGuard) {
+            retiredNetworks.computeIfPresent(networkId) { _, retired ->
+                if (retired.get() === sourceIdentity) retired else null
+            }
+            val session = SyncStatusSession(networkId, sourceIdentity)
+            if (!retiredNetworks.containsKey(networkId)) networkSessions[networkId] = session
+            session
+        }
+
+    /**
      * One pass's per-buffer status publication: registration, the generation guard that keeps a
      * cancelled or superseded pass from publishing late, and settlement. Work without a session
      * (the paced background backfill) publishes nothing at all.
@@ -261,19 +408,60 @@ class HistoryResyncCoordinator @Inject constructor(
      * pass, or the reverse — is still arbitrated by the per-buffer generation counter, not by this
      * bookkeeping.
      */
-    private inner class SyncStatusSession {
+    private inner class SyncStatusSession(
+        // Null for a single-buffer reconcile: those publish no aggregate progress and have no
+        // network-wide waiting state to fall back to.
+        private val networkId: Long? = null,
+        // The connection this pass belongs to, so a caller that only knows the client can prove a
+        // session is still its own before settling it, and so retirement can silence exactly the
+        // passes that belong to a connection the user took offline.
+        private val sourceIdentity: Any? = null,
+    ) {
         private val monitor = Any()
         // Registration order; an entry lives here until that buffer settles.
         private val generations = LinkedHashMap<Long, Long>()
         // Buffers whose requests are on the wire right now; each wears the whole-pass verdict.
         private val inFlight = LinkedHashSet<Long>()
+        // Registered buffers the server permanently refuses. They own a generation (so this pass
+        // can still settle them) but their transient Queued/Syncing publications are suppressed:
+        // re-refusing an Unavailable target every pass must produce zero visible churn.
+        private val silenced = LinkedHashSet<Long>()
+        private var total = 0
+        private var settled = 0
+        // Set once this pass's network is taken offline deliberately. The pass keeps running in the
+        // coordinator's own scope, but from here on it publishes nothing at all.
+        private var retired = false
+
+        /** True when [identity] is the connection that started this pass. */
+        fun ownedBy(identity: Any): Boolean = sourceIdentity === identity
 
         /** Register a buffer in this pass. Re-registration within one pass keeps the first turn. */
         fun queue(bufferId: Long) {
             synchronized(monitor) {
-                if (generations.containsKey(bufferId)) return
-                generations[bufferId] = beginSyncStatus(bufferId, HistorySyncStatus.Queued)
+                if (!registerLocked(bufferId)) return
             }
+            publishProgress()
+        }
+
+        /** Bulk registration of the pass's known open buffers as one progress emission. */
+        fun queueAll(bufferIds: Collection<Long>) {
+            if (bufferIds.isEmpty()) return
+            synchronized(monitor) { bufferIds.forEach { registerLocked(it) } }
+            publishProgress()
+        }
+
+        private fun registerLocked(bufferId: Long): Boolean {
+            if (retiredLocked()) return false
+            if (generations.containsKey(bufferId)) return false
+            val refused = _syncStatuses.value[bufferId] == HistorySyncStatus.Unavailable
+            generations[bufferId] = if (refused) {
+                silenced += bufferId
+                bumpSyncStatusGeneration(bufferId)
+            } else {
+                beginSyncStatus(bufferId, HistorySyncStatus.Queued)
+            }
+            total++
+            return true
         }
 
         /** This buffer's request is about to go on the wire. */
@@ -281,39 +469,134 @@ class HistoryResyncCoordinator @Inject constructor(
             synchronized(monitor) {
                 val generation = generations[bufferId] ?: return
                 inFlight += bufferId
+                if (bufferId in silenced) return
                 publishSyncStatus(bufferId, generation, HistorySyncStatus.Syncing)
             }
         }
 
         /** Terminal for one buffer: [HistorySyncStatus.Idle] removes it, anything else persists. */
         fun settle(bufferId: Long, status: HistorySyncStatus) {
-            synchronized(monitor) { settleLocked(bufferId, status) }
+            val changed = synchronized(monitor) { settleLocked(bufferId, status) }
+            if (changed) publishProgress()
         }
 
-        private fun settleLocked(bufferId: Long, status: HistorySyncStatus) {
-            val generation = generations.remove(bufferId) ?: return
+        private fun settleLocked(bufferId: Long, status: HistorySyncStatus): Boolean {
+            val generation = generations.remove(bufferId) ?: return false
             inFlight -= bufferId
+            silenced -= bufferId
+            settled++
             finishSyncStatus(bufferId, generation, status)
+            return true
         }
 
         /**
-         * Pass end. Only buffers that actually had a request on the wire wear the pass verdict
-         * (a cancelled sibling's request was genuinely in flight); every still-queued buffer is
-         * simply dropped, because the catch-up retry loop re-runs the whole pass and painting a
-         * whole-pass failure on untouched buffers would be a lie.
+         * Pass end with no retry coming. Only buffers that actually had a request on the wire wear
+         * the pass verdict (a cancelled sibling's request was genuinely in flight); every
+         * still-queued buffer is simply dropped, because painting a whole-pass failure on untouched
+         * buffers would be a lie.
          */
-        fun finish(result: HistoryResyncState) {
+        fun finish(result: HistoryResyncState): Unit = synchronized(retireGuard) {
+            if (retireIfNetworkRetired()) return@synchronized
             val verdict = result.toSyncStatus()
             synchronized(monitor) {
                 inFlight.toList().forEach { settleLocked(it, verdict) }
                 generations.keys.toList().forEach { settleLocked(it, HistorySyncStatus.Idle) }
             }
+            releaseProgress()
+        }
+
+        /**
+         * The pass failed in a way the catch-up loop will retry. Publish nothing: the statuses this
+         * attempt painted stay up through the backoff, and the next attempt's re-registration
+         * republishes Queued over Queued, which is invisible. The frozen progress entry is
+         * deliberately kept too — a truthful stale count beats a 0/N flash every backoff.
+         */
+        fun suspendForRetry(): Unit = synchronized(retireGuard) {
+            // Unless the retry can never come: a retired network has no next attempt to repaint
+            // these statuses, so freezing them would strand them for the process lifetime.
+            retireIfNetworkRetired()
+        }
+
+        /**
+         * The network was retired under this pass. Drop everything it painted, publish no verdict,
+         * no waiting state and no progress, and make every later registration and terminal a no-op.
+         * Idempotent, and safe while the pass is still winding down.
+         */
+        fun retire(): Unit = synchronized(retireGuard) {
+            synchronized(monitor) {
+                retired = true
+                generations.keys.toList().forEach { settleLocked(it, HistorySyncStatus.Idle) }
+            }
+            releaseProgress()
+        }
+
+        /** Retire lazily for a tombstone published after this session was created. */
+        private fun retireIfNetworkRetired(): Boolean {
+            if (!synchronized(monitor) { retiredLocked() }) return false
+            retire()
+            return true
+        }
+
+        private fun retiredLocked(): Boolean {
+            if (!retired && networkId != null && sourceIdentity != null &&
+                retiredNetworks[networkId]?.get() === sourceIdentity
+            ) {
+                retired = true
+            }
+            return retired
+        }
+
+        /**
+         * The pass died with its connection. Survivors go back to the optimistic waiting state and
+         * are registered for adoption by whichever pass the next connection starts.
+         */
+        fun abandonToAwaitingConnection(): Unit = synchronized(retireGuard) {
+            // A retired network is not waiting for anything: republishing here would repaint every
+            // unsettled buffer after the disconnect already cleared them. The guard is what makes
+            // that check reliable — retireNetwork holds it across the clear.
+            if (retireIfNetworkRetired()) return@synchronized
+            val survivors = synchronized(monitor) {
+                val entries = generations.entries.toList()
+                generations.clear()
+                inFlight.clear()
+                val waiting = mutableListOf<Long>()
+                entries.forEach { (bufferId, generation) ->
+                    settled++
+                    if (silenced.remove(bufferId)) {
+                        // A permanently refused target is not waiting for anything; leave its badge.
+                        return@forEach
+                    }
+                    finishSyncStatus(bufferId, generation, HistorySyncStatus.AwaitingConnection)
+                    waiting += bufferId
+                }
+                waiting
+            }
+            releaseProgress()
+            if (networkId != null && survivors.isNotEmpty()) {
+                awaitingByNetwork
+                    .computeIfAbsent(networkId) { ConcurrentHashMap.newKeySet() }
+                    .addAll(survivors)
+            }
+        }
+
+        private fun publishProgress() {
+            val id = networkId ?: return
+            val snapshot = synchronized(monitor) { SyncPassProgress(total, settled) }
+            _passProgress.update { it + (id to snapshot) }
+        }
+
+        private fun releaseProgress() {
+            val id = networkId ?: return
+            _passProgress.update { it - id }
         }
     }
 
     /**
-     * Reconcile a visible chat. The request shares the exact same per-buffer single flight as the
-     * reconnect network pass.
+     * Reconcile a visible chat. This is its own per-buffer flight: it coalesces with another
+     * reconcile of the same buffer on the same connection, but NOT with the network-wide reconnect
+     * pass, whose flight key carries a null buffer id. Overlap is safe — two concurrent same-buffer
+     * LATEST fetches deduplicate in [EventProcessor] — and the per-buffer generation counter
+     * arbitrates which of the two owns the visible status.
      */
     override suspend fun reconcileBuffer(
         buffer: BufferEntity,
@@ -412,7 +695,7 @@ class HistoryResyncCoordinator @Inject constructor(
 
     suspend fun resyncNetwork(
         networkId: Long,
-        openBuffers: List<Pair<Long, String>>,
+        openBuffers: List<OpenBufferTarget>,
         client: IrcClient,
         isCurrent: () -> Boolean,
         // null means "everything": the first pass enumerates from epoch and leaves no backfill.
@@ -536,7 +819,7 @@ class HistoryResyncCoordinator @Inject constructor(
 
     internal suspend fun resyncNetwork(
         networkId: Long,
-        openBuffers: List<Pair<Long, String>>,
+        openBuffers: List<OpenBufferTarget>,
         source: HistorySource,
         isCurrent: () -> Boolean = { true },
         initialLookbackMs: Long? = INITIAL_SYNC_LOOKBACK_MS,
@@ -549,13 +832,28 @@ class HistoryResyncCoordinator @Inject constructor(
         diagnostics.record("history", "network_sync_started") {
             mapOf("network_id" to networkId, "open_buffers" to openBuffers.size)
         }
+        val identity = source.flightIdentity()
         val ready = when (val availability = source.availability()) {
-            HistoryAvailability.Unsupported -> return@coalesced HistoryResyncState.Unsupported
+            HistoryAvailability.Unsupported -> {
+                // This server will never serve history, so no later pass can ever adopt the
+                // optimistic waiting entries. Retire them instead of stranding them.
+                clearAwaitingConnection(networkId)
+                // Availability can degrade between two attempts of the same catch-up loop (a
+                // CAP DEL of chathistory). The previous attempt's session is suspended for a retry
+                // that just became impossible: settle it now or its frozen statuses and progress
+                // entry survive for the process lifetime.
+                settleNetworkPass(networkId, HistoryResyncState.Unsupported, identity)
+                return@coalesced HistoryResyncState.Unsupported
+            }
+            // Still negotiating (or offline): the buffers genuinely are waiting for a connection.
             HistoryAvailability.NegotiatingOrOffline -> return@coalesced historyUnavailable()
             is HistoryAvailability.Ready -> availability
         }
-        val session = SyncStatusSession()
-        openBuffers.forEach { (bufferId, _) -> session.queue(bufferId) }
+        val session = beginNetworkSession(networkId, identity)
+        session.queueAll(openBuffers.map { it.id })
+        // Queued is already published over the optimistic waiting state; only buffers that closed
+        // between the foreground mark and this pass still need clearing.
+        adoptAwaiting(networkId, openBuffers.mapTo(mutableSetOf()) { it.id })
         // A room row's newest message is not a reliable reconnect cursor: a newer push-delivered
         // message in one buffer can otherwise hide an older missed message in another. The wall
         // clock bounds discovery but is never persisted; only completed server response metadata
@@ -631,7 +929,9 @@ class HistoryResyncCoordinator @Inject constructor(
         } catch (_: TimeoutCancellationException) {
             HistoryResyncState.Failed("History refresh timed out")
         } catch (cancelled: CancellationException) {
-            session.finish(HistoryResyncState.Idle)
+            // The pass died with its connection (or with the Ready session that owns it): every
+            // survivor goes back to waiting instead of silently disappearing.
+            endSession(networkId, session) { it.abandonToAwaitingConnection() }
             throw cancelled
         } catch (_: StaleConnectionException) {
             staleConnection()
@@ -647,8 +947,39 @@ class HistoryResyncCoordinator @Inject constructor(
                 "result" to result::class.simpleName,
             )
         }
-        session.finish(if (isCurrent()) result else HistoryResyncState.Idle)
+        when {
+            !isCurrent() -> endSession(networkId, session) { it.abandonToAwaitingConnection() }
+            // The catch-up loop will run this pass again; leave the painted statuses alone so the
+            // user does not watch every badge blink off and on across the backoff.
+            result.isRetryableCatchUpFailure() -> session.suspendForRetry()
+            else -> endSession(networkId, session) { it.finish(result) }
+        }
         result
+    }
+
+    /**
+     * Retire [session] from the per-network map (a newer pass may already have replaced it, which
+     * the value-matched removal tolerates) and run its terminal. The terminal itself is always
+     * safe: a superseded session's per-buffer generations no longer match, so it publishes nothing.
+     */
+    private fun endSession(
+        networkId: Long,
+        session: SyncStatusSession,
+        terminal: (SyncStatusSession) -> Unit,
+    ) {
+        networkSessions.remove(networkId, session)
+        terminal(session)
+    }
+
+    /**
+     * Mirrors the catch-up loop's retry decision (see `shouldRetryIncompleteCatchUp`): only a
+     * failure that loop will genuinely reattempt may keep this pass's statuses painted.
+     */
+    private fun HistoryResyncState.isRetryableCatchUpFailure(): Boolean = when (this) {
+        is HistoryResyncState.Incomplete -> awaitsTargetClassification || retryRecommended
+        is HistoryResyncState.Capped -> false
+        is HistoryResyncState.Failed -> true
+        else -> false
     }
 
     /**
@@ -770,13 +1101,14 @@ class HistoryResyncCoordinator @Inject constructor(
     }
 
     private fun mergeSyncTargets(
-        openBuffers: List<Pair<Long, String>>,
+        openBuffers: List<OpenBufferTarget>,
         discovered: List<ChatHistoryTarget>,
         source: HistorySource,
     ): List<SyncTarget> {
         val targets = LinkedHashMap<String, SyncTarget>()
-        openBuffers.forEach { (bufferId, name) ->
-            targets[source.normalizeTarget(name)] = SyncTarget(bufferId, name, null)
+        openBuffers.forEach { open ->
+            targets[source.normalizeTarget(open.name)] =
+                SyncTarget(open.id, open.name, null, open.pinned)
         }
         discovered.forEach { target ->
             val key = source.normalizeTarget(target.name)
@@ -791,8 +1123,19 @@ class HistoryResyncCoordinator @Inject constructor(
                 )
             }
         }
+        // Read at sort time, not at pass start: every catch-up retry attempt re-sorts, so switching
+        // chats mid-backoff re-prioritizes the newly visible conversation.
+        val foregroundBufferId = foregroundBuffers.foregroundBufferId.value
         return targets.values.sortedWith(
-            compareByDescending<SyncTarget> { it.latestMessageTime != null }
+            // The fair semaphore admits in launch order, so this ordering decides who is in the
+            // first wave of concurrent requests: the open chat, then pinned rooms, then everything
+            // discovery advertised, newest first. `sortedWith` stability preserves the existing
+            // buffer-id order among the null-latest tail.
+            compareByDescending<SyncTarget> {
+                foregroundBufferId != null && it.knownBufferId == foregroundBufferId
+            }
+                .thenByDescending { it.pinned }
+                .thenByDescending { it.latestMessageTime != null }
                 .thenByDescending { it.latestMessageTime ?: Long.MIN_VALUE },
         )
     }
@@ -1315,6 +1658,14 @@ class HistoryResyncCoordinator @Inject constructor(
         }
         return generation
     }
+
+    /**
+     * Take ownership of a buffer's status without publishing anything: the silent registration a
+     * permanently refused target gets, so this pass can still settle it while its Unavailable badge
+     * stays exactly as it was.
+     */
+    private fun bumpSyncStatusGeneration(bufferId: Long): Long =
+        syncStatusGenerations.computeIfAbsent(bufferId) { AtomicLong() }.incrementAndGet()
 
     private fun publishSyncStatus(bufferId: Long, generation: Long, status: HistorySyncStatus) {
         _syncStatuses.update { current ->

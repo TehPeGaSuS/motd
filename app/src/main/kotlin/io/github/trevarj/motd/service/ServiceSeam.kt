@@ -262,3 +262,9 @@ interface ForegroundBufferTracker {
     val foregroundBufferId: StateFlow<Long?>
     fun set(bufferId: Long?)
 }
+
+/** Nothing is ever visible: the default for fixtures and headless collaborators. */
+object NoopForegroundBufferTracker : ForegroundBufferTracker {
+    override val foregroundBufferId: StateFlow<Long?> = MutableStateFlow(null)
+    override fun set(bufferId: Long?) = Unit
+}

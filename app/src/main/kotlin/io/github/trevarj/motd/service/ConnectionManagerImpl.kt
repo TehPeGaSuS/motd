@@ -3,6 +3,7 @@ package io.github.trevarj.motd.service
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.room.withTransaction
@@ -66,6 +67,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -497,6 +499,12 @@ class ConnectionManagerImpl @Inject constructor(
     // by the actor to park in "awaiting trust" instead of backoff-looping.
     private val certFailures = java.util.concurrent.ConcurrentHashMap<Long, CertUntrustedException>()
 
+    // Last catch-up pass that completed successfully, per network. Keyed on the exact client so a
+    // reconnect always re-verifies; elapsed-realtime because it keeps counting through Doze.
+    private val completedCatchUps = java.util.concurrent.ConcurrentHashMap<Long, CompletedCatchUp>()
+    // Foreground-verification passes only; the Ready-session pass stays inline (see launchCatchUp).
+    private val catchUpJobs = java.util.concurrent.ConcurrentHashMap<Long, Job>()
+
     @Volatile private var appForeground = false
     @Volatile private var deviceIdle = false
     private val pushSuspendedIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
@@ -640,6 +648,58 @@ class ConnectionManagerImpl @Inject constructor(
             startForegroundKeeper()
         }
         reconnectStale()
+        verifyHistoryOnForeground()
+    }
+
+    /**
+     * Every foreground is a history checkpoint, even when the socket survived Doze: a Ready
+     * connection proves nothing about what the server accepted while the process was frozen.
+     *
+     * Networks that are not Ready get the optimistic waiting state instead of a pass, so the list
+     * shows queued feedback immediately; the reconnect this method follows adopts those entries
+     * when it finally runs a real pass. Ready networks run a normal catch-up pass unless one just
+     * completed on this very socket, which is the only case where re-verifying is pure waste.
+     */
+    internal suspend fun verifyHistoryOnForeground() {
+        val snapshot = registry.snapshot.value
+        if (!snapshot.started) return
+        for ((networkId, state) in snapshot.states) {
+            val client = clientFor(networkId)
+            if (client == null || state !is IrcClientState.Ready) {
+                historyResyncCoordinator.markAwaitingConnection(
+                    networkId,
+                    openBuffers(networkId).map { it.id },
+                )
+                continue
+            }
+            val shouldVerify = shouldRunForegroundVerification(
+                recorded = completedCatchUps[networkId],
+                currentClient = client,
+                nowElapsedMs = SystemClock.elapsedRealtime(),
+            )
+            if (shouldVerify) launchCatchUp(networkId, client)
+        }
+    }
+
+    /**
+     * Per-network single flight for verification passes. The Ready-session catch-up at
+     * [onReadySession] deliberately stays inline (the history gate must not be released before it
+     * finishes); a same-client overlap between the two degrades to the coordinator's own request
+     * coalescing rather than issuing the pass twice.
+     */
+    private fun launchCatchUp(networkId: Long, client: IrcClient) {
+        val candidate = scope.launch(start = CoroutineStart.LAZY) {
+            catchUpForConnection(networkId, client)
+        }
+        val owner = catchUpJobs.compute(networkId) { _, existing ->
+            if (existing != null && existing.isActive) existing else candidate
+        }
+        if (owner !== candidate) {
+            candidate.cancel()
+            return
+        }
+        candidate.invokeOnCompletion { catchUpJobs.remove(networkId, candidate) }
+        candidate.start()
     }
 
     /** Process background: retain embedded REALITY through a short app switch, even in Doze. */
@@ -714,6 +774,9 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     override suspend fun stopAll() = withContext(NonCancellable) {
+        // Captured before the registry stops, for the same reason as in [disconnect]: a pass still
+        // winding down in the coordinator's scope is only silenceable by its connection's identity.
+        val retiring = networksById.keys.associateWith { clientFor(it) }
         sendLifecycle.quiesce(
             onBlocked = {
                 backgroundRetention.cancel()
@@ -727,6 +790,13 @@ class ConnectionManagerImpl @Inject constructor(
             localSocksProvider.stop()
             // Service teardown resets sticky user intent (in-memory only).
             userIntents.clear()
+            retiring.forEach { (networkId, client) ->
+                catchUpJobs.remove(networkId)?.cancelAndJoin()
+                historyResyncCoordinator.retireNetwork(networkId, client)
+            }
+            completedCatchUps.clear()
+            catchUpJobs.values.forEach { it.cancel() }
+            catchUpJobs.clear()
             pushSuspendedIds.clear()
             rosterRequests.values.forEach { it.cancel() }
             rosterRequests.clear()
@@ -757,7 +827,17 @@ class ConnectionManagerImpl @Inject constructor(
     override suspend fun disconnect(networkId: Long) {
         // Record intent before removal so the next reconcile does not re-create the actor.
         userIntents[networkId] = false
+        // Captured before the actor is torn down: retirement has to name the exact connection whose
+        // catch-up pass may still be winding down inside the coordinator's own scope.
+        val client = clientFor(networkId)
+        completedCatchUps.remove(networkId)
         registry.disconnect(networkId)
+        // The verification loop is ours, not the actor's, so nothing else stops it; stop it before
+        // retiring so it cannot start another attempt behind the retirement.
+        catchUpJobs.remove(networkId)?.cancelAndJoin()
+        // A deliberate disconnect is the one case where "waiting for connection" is a lie: nothing
+        // is coming. Backgrounding and Doze deliberately keep those entries.
+        historyResyncCoordinator.retireNetwork(networkId, client)
         invalidateRosters(networkId)
         invalidatePresence(networkId)
     }
@@ -1389,6 +1469,7 @@ class ConnectionManagerImpl @Inject constructor(
                             if (clientFor(networkId) !== client) return
                             if (attempt >= CATCH_UP_MAX_ATTEMPTS) {
                                 Log.w(TAG, "CHATHISTORY catch-up gave up after $attempt attempts for network $networkId")
+                                historyResyncCoordinator.settleNetworkPass(networkId, result, client)
                                 return
                             }
                             val retryMs = catchUpRetryDelayMs(attempt++)
@@ -1402,6 +1483,7 @@ class ConnectionManagerImpl @Inject constructor(
                         }
                         // A server can omit end-of-history metadata even after its advertised
                         // latest message is local. Do not loop merely to prove older completeness.
+                        historyResyncCoordinator.settleNetworkPass(networkId, result, client)
                         return
                     }
                     diagnostics.record("history", "catch_up_failed") {
@@ -1414,6 +1496,7 @@ class ConnectionManagerImpl @Inject constructor(
                     if (clientFor(networkId) !== client) return
                     if (attempt >= CATCH_UP_MAX_ATTEMPTS) {
                         Log.w(TAG, "CHATHISTORY catch-up gave up after $attempt attempts for network $networkId")
+                        historyResyncCoordinator.settleNetworkPass(networkId, result, client)
                         return
                     }
                     val retryMs = catchUpRetryDelayMs(attempt++)
@@ -1428,6 +1511,9 @@ class ConnectionManagerImpl @Inject constructor(
                             "result" to result::class.simpleName,
                         )
                     }
+                    // Only a pass that actually converged arms the foreground throttle.
+                    completedCatchUps[networkId] =
+                        CompletedCatchUp(client, SystemClock.elapsedRealtime())
                     return
                 }
             }
@@ -1537,8 +1623,8 @@ class ConnectionManagerImpl @Inject constructor(
         return client.historyAvailability is HistoryAvailability.Ready
     }
 
-    private suspend fun openBuffers(networkId: Long): List<Pair<Long, String>> =
-        bufferDao.openTargets(networkId).map { it.id to it.name }
+    private suspend fun openBuffers(networkId: Long): List<OpenBufferTarget> =
+        bufferDao.openTargets(networkId).map { OpenBufferTarget(it.id, it.name, it.pinned) }
 
     private suspend fun normalize(networkId: Long, name: String): String {
         return identityRules(networkId).normalize(name)
@@ -2143,6 +2229,26 @@ internal fun wantedNetworkUsesEmbeddedReality(
     }
     return endpoint.obfsMode == ObfsMode.EMBEDDED_REALITY
 }
+
+/** A catch-up pass that converged, tagged with the exact socket that served it. */
+internal data class CompletedCatchUp(val client: Any, val atElapsedMs: Long)
+
+/** Skip a foreground verification only when the same socket already converged very recently. */
+internal const val FOREGROUND_VERIFY_THROTTLE_MS = 30_000L
+
+/**
+ * A reconnect always re-verifies (a new client can never inherit the old one's proof), and so does
+ * any foreground more than [FOREGROUND_VERIFY_THROTTLE_MS] after the last converged pass. The
+ * throttle only suppresses the rapid app-switch case on an untouched socket. Times are elapsed
+ * realtime, which keeps counting through Doze.
+ */
+internal fun shouldRunForegroundVerification(
+    recorded: CompletedCatchUp?,
+    currentClient: Any,
+    nowElapsedMs: Long,
+): Boolean = recorded == null ||
+    recorded.client !== currentClient ||
+    nowElapsedMs - recorded.atElapsedMs >= FOREGROUND_VERIFY_THROTTLE_MS
 
 internal fun catchUpRetryDelayMs(attempt: Int): Long =
     (2_000L * (1L shl attempt.coerceIn(0, 4))).coerceAtMost(30_000L)

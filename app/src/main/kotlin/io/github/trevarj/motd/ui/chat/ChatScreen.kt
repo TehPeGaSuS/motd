@@ -2675,6 +2675,7 @@ internal fun TimelineHistorySyncIndicator(
         val content: @Composable () -> Unit = {
             when (status) {
                 HistorySyncStatus.Queued,
+                HistorySyncStatus.AwaitingConnection,
                 HistorySyncStatus.Syncing,
                 -> Row(
                     verticalAlignment = Alignment.CenterVertically,

@@ -28,7 +28,9 @@ class HistorySyncProbe(
             withTimeout(timeoutMs) {
                 var active = false
                 history.syncStatus(bufferId).first { status ->
-                    val isActive = status == HistorySyncStatus.Queued || status == HistorySyncStatus.Syncing
+                    val isActive = status == HistorySyncStatus.Queued ||
+                        status == HistorySyncStatus.AwaitingConnection ||
+                        status == HistorySyncStatus.Syncing
                     if (isActive) active = true
                     active && !isActive
                 }

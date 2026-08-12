@@ -4,8 +4,10 @@ set -euo pipefail
 
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$E2E_DIR/../.." && pwd)"
-# 89 since the chat list's queued-ring badge (and its test) was removed in 0.14.1.
-EXPECTED_CASES=89
+# 96: 89 + 3 new per-row sync cues (queued ring, waiting ring, unavailable glyph) + 4 aggregate
+# sync-header cases. The two badge/unread cases were rewritten in place (coexistence, not
+# substitution), so they add nothing.
+EXPECTED_CASES=96
 REAL_STACK_ANNOTATION=io.github.trevarj.motd.FastHeadlessE2e
 
 cd "$REPO"

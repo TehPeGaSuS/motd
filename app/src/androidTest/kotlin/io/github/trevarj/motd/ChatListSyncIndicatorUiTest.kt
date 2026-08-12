@@ -14,8 +14,9 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * Per-row sync cues on [ChatListRowItem]: every cue (spinner, error dot) renders in the trailing
- * badge row, taking the unread badge's slot and suppressing the count while shown.
+ * Per-row sync cues on [ChatListRowItem]: every cue (spinner, queued/waiting ring, error dot,
+ * unavailable glyph) renders in the trailing badge row, overlaying the unread badge's corner rather
+ * than replacing it, so the count stays readable through the whole sync lifecycle.
  */
 class ChatListSyncIndicatorUiTest {
     @get:Rule
@@ -29,15 +30,37 @@ class ChatListSyncIndicatorUiTest {
     }
 
     @Test
-    fun syncing_spinnerTakesTheUnreadBadgeSlot() {
+    fun syncing_spinnerCoexistsWithTheUnreadCount() {
         setRow(ChatListSyncIndicator.SYNCING, unreadCount = 7)
 
         compose.onNodeWithTag("chatlist_row_sync_syncing", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_unread_badge", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun queued_rendersDimmedRingBadge() {
+        setRow(ChatListSyncIndicator.QUEUED)
+
+        compose.onNodeWithTag("chatlist_row_sync_queued", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun waiting_rendersItsOwnRingBadge() {
+        setRow(ChatListSyncIndicator.WAITING)
+
+        compose.onNodeWithTag("chatlist_row_sync_waiting", useUnmergedTree = true).assertIsDisplayed()
         assertEquals(
             0,
-            compose.onAllNodesWithTag("chatlist_row_unread_badge", useUnmergedTree = true)
+            compose.onAllNodesWithTag("chatlist_row_sync_queued", useUnmergedTree = true)
                 .fetchSemanticsNodes().size,
         )
+    }
+
+    @Test
+    fun unavailable_rendersMutedTerminalCue() {
+        setRow(ChatListSyncIndicator.UNAVAILABLE)
+
+        compose.onNodeWithTag("chatlist_row_sync_unavailable", useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test
@@ -48,22 +71,25 @@ class ChatListSyncIndicatorUiTest {
     }
 
     @Test
-    fun error_dotTakesTheUnreadBadgeSlot() {
+    fun error_dotCoexistsWithTheUnreadCount() {
         setRow(ChatListSyncIndicator.ERROR, unreadCount = 7)
 
         compose.onNodeWithTag("chatlist_row_sync_error", useUnmergedTree = true).assertIsDisplayed()
-        assertEquals(
-            0,
-            compose.onAllNodesWithTag("chatlist_row_unread_badge", useUnmergedTree = true)
-                .fetchSemanticsNodes().size,
-        )
+        // A failed sync must never hide how much is unread: the dot overlays the badge's corner.
+        compose.onNodeWithTag("chatlist_row_unread_badge", useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test
     fun none_rendersNoSyncBadge() {
         setRow(ChatListSyncIndicator.NONE)
 
-        listOf("chatlist_row_sync_syncing", "chatlist_row_sync_error").forEach { tag ->
+        listOf(
+            "chatlist_row_sync_syncing",
+            "chatlist_row_sync_queued",
+            "chatlist_row_sync_waiting",
+            "chatlist_row_sync_unavailable",
+            "chatlist_row_sync_error",
+        ).forEach { tag ->
             assertEquals(0, compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().size)
         }
     }

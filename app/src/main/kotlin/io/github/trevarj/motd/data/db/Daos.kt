@@ -334,7 +334,7 @@ interface BufferDao {
     fun observeJoinedChannelNames(networkId: Long): Flow<List<String>>
 
     @Query(
-        """SELECT id, CASE WHEN type = 'SERVER' THEN name ELSE displayName END AS name
+        """SELECT id, CASE WHEN type = 'SERVER' THEN name ELSE displayName END AS name, pinned
            FROM buffers WHERE networkId = :networkId AND type != 'SERVER'
              AND pendingCloseAt IS NULL AND redirectToRoomId IS NULL ORDER BY id""",
     )
@@ -733,7 +733,8 @@ data class InvitationEventRow(
     val serverTime: Long,
 )
 
-data class BufferTargetRow(val id: Long, val name: String)
+/** A history pass's open-buffer input; [pinned] is an ordering signal, not a filter. */
+data class BufferTargetRow(val id: Long, val name: String, val pinned: Boolean = false)
 
 data class NetworkBufferToolRow(
     val bufferId: Long,

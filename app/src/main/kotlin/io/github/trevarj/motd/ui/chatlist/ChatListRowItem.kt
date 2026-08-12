@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -371,19 +372,13 @@ fun ChatListRowItem(
                         modifier = Modifier.testTag("chatlist_row_mention_badge"),
                     )
                 }
-                // Any sync cue takes the unread badge's slot; the count returns (possibly
-                // updated) once the buffer settles clean.
-                if (syncIndicator != ChatListSyncIndicator.NONE) {
-                    SyncStatusBadge(indicator = syncIndicator)
-                } else {
-                    badges.unread?.let { count ->
-                        UnreadBadge(
-                            count = count,
-                            lowerBound = badges.unreadIncomplete,
-                            modifier = Modifier.testTag("chatlist_row_unread_badge"),
-                        )
-                    }
-                }
+                // The sync cue overlays the unread badge's corner instead of replacing it: a
+                // failed or stalled sync must never hide how much is unread.
+                SyncAwareUnreadBadge(
+                    indicator = syncIndicator,
+                    unread = badges.unread,
+                    unreadIncomplete = badges.unreadIncomplete,
+                )
             }
         }
     }
@@ -424,21 +419,52 @@ private fun PresenceAvatar(
 }
 
 /**
- * The row's history-sync cue, rendered in the trailing badge row where it occupies the unread
- * badge's slot (which is suppressed while any cue shows). Every variant sits centered in the
- * badge's 20dp minimum footprint so the swap never reflows the column. No live region: rows churn
- * constantly during a resync pass, and announcing every transition would spam TalkBack.
+ * The trailing badge slot: the unread count keeps the centered 20dp footprint it always had, and
+ * any history-sync cue overlays its top-right corner with a ring of the row's own background so the
+ * two read as separate marks. Corner-anchoring rather than substitution means an error or a stalled
+ * queue never hides the count, and the slot's size is driven purely by the count, so a cue
+ * appearing or settling never reflows the row. No live region: rows churn constantly during a
+ * resync pass, and announcing every transition would spam TalkBack.
  */
 @Composable
-private fun SyncStatusBadge(
+private fun SyncAwareUnreadBadge(
     indicator: ChatListSyncIndicator,
-    modifier: Modifier = Modifier,
+    unread: Int?,
+    unreadIncomplete: Boolean,
 ) {
+    if (indicator == ChatListSyncIndicator.NONE && unread == null) return
     Box(
-        modifier = modifier.size(20.dp),
+        modifier = Modifier.defaultMinSize(minWidth = 20.dp, minHeight = 20.dp),
         contentAlignment = Alignment.Center,
     ) {
-        SyncStatusBadgeContent(indicator)
+        unread?.let { count ->
+            UnreadBadge(
+                count = count,
+                lowerBound = unreadIncomplete,
+                modifier = Modifier.testTag("chatlist_row_unread_badge"),
+            )
+        }
+        if (indicator != ChatListSyncIndicator.NONE) {
+            Box(
+                modifier = Modifier
+                    .align(if (unread == null) Alignment.Center else Alignment.TopEnd)
+                    .then(
+                        if (unread == null) {
+                            Modifier
+                        } else {
+                            // PresenceBadge idiom: a ring of the surface behind the row separates
+                            // the cue from the badge it sits on.
+                            Modifier
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.background)
+                                .padding(1.5.dp)
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                SyncStatusBadgeContent(indicator)
+            }
+        }
     }
 }
 
@@ -450,9 +476,31 @@ private fun SyncStatusBadgeContent(indicator: ChatListSyncIndicator) {
             CircularProgressIndicator(
                 strokeWidth = 2.dp,
                 modifier = Modifier
-                    .size(16.dp)
+                    .size(12.dp)
                     .testTag("chatlist_row_sync_syncing")
                     .semantics { contentDescription = description },
+            )
+        }
+        ChatListSyncIndicator.QUEUED -> {
+            val description = stringResource(R.string.chatlist_sync_queued)
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .testTag("chatlist_row_sync_queued")
+                    .semantics { contentDescription = description }
+                    .border(1.5.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), CircleShape),
+            )
+        }
+        ChatListSyncIndicator.WAITING -> {
+            // The same ring as QUEUED, dimmer: nothing is moving yet, and it must not read as an
+            // error just because the app opened offline.
+            val description = stringResource(R.string.chatlist_sync_waiting)
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .testTag("chatlist_row_sync_waiting")
+                    .semantics { contentDescription = description }
+                    .border(1.5.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f), CircleShape),
             )
         }
         ChatListSyncIndicator.ERROR -> {
@@ -464,6 +512,18 @@ private fun SyncStatusBadgeContent(indicator: ChatListSyncIndicator) {
                     .semantics { contentDescription = description }
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.error),
+            )
+        }
+        ChatListSyncIndicator.UNAVAILABLE -> {
+            // Terminal but not a failure: the server simply refuses history for this target.
+            val description = stringResource(R.string.chatlist_sync_unavailable)
+            Icon(
+                imageVector = Icons.Outlined.Block,
+                contentDescription = description,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier
+                    .size(10.dp)
+                    .testTag("chatlist_row_sync_unavailable"),
             )
         }
         ChatListSyncIndicator.NONE -> Unit

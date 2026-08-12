@@ -174,6 +174,7 @@ fun ChatListScreen(
     // Collected once here, outside the ChatListState combine (see ChatListViewModel), so a
     // buffer's sync transition recomposes only its own row rather than the whole list.
     val syncIndicators by viewModel.syncIndicators.collectAsStateWithLifecycle()
+    val syncChrome by viewModel.syncChrome.collectAsStateWithLifecycle()
 
     // Fresh installs enter onboarding once state is loaded; a durable skip keeps the empty main UI.
     LaunchedEffect(state.loading, state.networks.isEmpty(), state.onboardingComplete) {
@@ -195,6 +196,7 @@ fun ChatListScreen(
     ChatListContent(
         state = state,
         syncIndicators = syncIndicators,
+        syncChrome = syncChrome,
         snackbarHostState = snackbarHostState,
         audioPlaybackState = audioPlaybackState,
         onAudioToggle = audioViewModel::toggle,
@@ -242,6 +244,7 @@ internal fun defaultChatBufferId(rows: List<ChatListRow>): Long? = rows.maxWithO
 fun ChatListContent(
     state: ChatListState,
     syncIndicators: Map<Long, ChatListSyncIndicator> = emptyMap(),
+    syncChrome: ChatListSyncChrome = ChatListSyncChrome.Hidden,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     audioPlaybackState: AudioPlaybackState = AudioPlaybackState(),
     onAudioToggle: () -> Unit = {},
@@ -454,6 +457,12 @@ fun ChatListContent(
                         states = state.connection,
                         networkName = { id -> state.networks.firstOrNull { it.id == id }?.name },
                     )
+
+                    // Aggregate history-sync line, pinned above the list. Scoped views (archive,
+                    // invitations) deliberately omit it: it reports on the whole app, not on them.
+                    if (!archiveMode && !invitationMode) {
+                        ChatListSyncHeader(chrome = syncChrome)
+                    }
 
                     // Active-scope chip: keeps the filter discoverable/escapable without the drawer.
                     if (state.selectedNetworkId != null) {
