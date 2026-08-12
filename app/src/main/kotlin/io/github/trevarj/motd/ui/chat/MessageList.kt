@@ -1,10 +1,15 @@
 package io.github.trevarj.motd.ui.chat
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -523,16 +528,37 @@ private fun DccTransferCard(
     onReject: (Long) -> Unit,
     onRemove: (Long) -> Unit,
 ) {
-    if (transfer == null) {
-        SystemEventPill(
-            summary = message.text,
-            lineCount = 1,
-            loadLines = { listOf(message.text) },
-            contentKey = message.id,
-            modifier = Modifier.testTag("chat_dcc_transfer_compact_${message.id}"),
-        )
-        return
+    // Latch the outgoing entity: by the time the card collapses into the compact pill the entity
+    // is already gone, and the exiting frames must keep rendering the last real content.
+    var lastTransfer by remember { mutableStateOf(transfer) }
+    if (transfer != null) lastTransfer = transfer
+    AnimatedContent(
+        targetState = transfer != null,
+        transitionSpec = { cardPillTransform() },
+        label = "dcc_render",
+    ) { hasTransfer ->
+        val entity = lastTransfer
+        if (!hasTransfer || entity == null) {
+            SystemEventPill(
+                summary = message.text,
+                lineCount = 1,
+                loadLines = { listOf(message.text) },
+                contentKey = message.id,
+                modifier = Modifier.testTag("chat_dcc_transfer_compact_${message.id}"),
+            )
+        } else {
+            ActiveDccTransferCard(entity, onAccept, onReject, onRemove)
+        }
     }
+}
+
+@Composable
+private fun ActiveDccTransferCard(
+    transfer: DccTransferEntity,
+    onAccept: (Long, String, Boolean) -> Unit,
+    onReject: (Long) -> Unit,
+    onRemove: (Long) -> Unit,
+) {
     val privateRisk = remember(transfer.address, transfer.addressKind) {
         runCatching { dccEndpointRisk(resolveDccAddress(transfer.address, transfer.addressKind)) }
             .getOrDefault(DccEndpointRisk.UNSPECIFIED)
@@ -821,6 +847,23 @@ private fun NetworkBatchPill(message: MessageEntity) {
     )
 }
 
+/**
+ * Card <-> pill swap for the self-contained timeline rows: micro crossfade with the eased height
+ * collapse. Single-shot and state-driven, so it stays within the no-decorative-timeline rule.
+ */
+private fun AnimatedContentTransitionScope<*>.cardPillTransform(): ContentTransform =
+    (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut))
+        .using(SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> MotdMotion.contentSize }))
+
+/**
+ * Value form of [InvitationCard]'s render fork. Each variant carries the text it renders so the
+ * exiting frame keeps its old content while the replacement fades in.
+ */
+private sealed interface InviteRender {
+    data class Pill(val summary: String, val testTag: String) : InviteRender
+    data class ActiveCard(val channel: String, val state: InviteState) : InviteRender
+}
+
 @Composable
 private fun InvitationCard(
     message: MessageEntity,
@@ -829,52 +872,60 @@ private fun InvitationCard(
 ) {
     val payload = remember(message.eventPayload) { InvitePayloadV1.decode(message.eventPayload) }
     val state = message.inviteState
-    if (payload == null || state == null || state == InviteState.HISTORICAL) {
-        SystemEventPill(
+    val render = when {
+        payload == null || state == null || state == InviteState.HISTORICAL -> InviteRender.Pill(
             summary = message.text,
-            lineCount = 1,
-            loadLines = { listOf(message.text) },
-            contentKey = message.id,
-            modifier = Modifier.testTag("chat_invite_compact_${message.id}"),
+            testTag = "chat_invite_compact_${message.id}",
         )
-        return
-    }
-    if (state == InviteState.JOINED || state == InviteState.DISMISSED) {
-        val resolution = if (state == InviteState.JOINED) "Joined" else "Dismissed"
-        SystemEventPill(
-            summary = "$resolution ${payload.channel}",
-            lineCount = 1,
-            loadLines = { listOf(message.text) },
-            contentKey = message.id,
-            modifier = Modifier.testTag("chat_invite_resolved_${message.id}"),
+        state == InviteState.JOINED || state == InviteState.DISMISSED -> InviteRender.Pill(
+            summary = "${if (state == InviteState.JOINED) "Joined" else "Dismissed"} ${payload.channel}",
+            testTag = "chat_invite_resolved_${message.id}",
         )
-        return
+        else -> InviteRender.ActiveCard(channel = payload.channel, state = state)
     }
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .testTag("chat_invite_card_${message.id}"),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text("Invitation to ${payload.channel}", style = MaterialTheme.typography.titleMedium)
-            Text(message.text, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
-            if (state == InviteState.FAILED) {
-                Text("Could not join. You can retry.", color = MaterialTheme.colorScheme.error)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = onJoin,
-                    enabled = state != InviteState.JOINING,
-                    modifier = Modifier.testTag("chat_invite_join_${message.id}"),
-                ) {
-                    Text(if (state == InviteState.JOINING) "Joining…" else "Join")
-                }
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.testTag("chat_invite_dismiss_${message.id}"),
-                ) {
-                    Text("Dismiss")
+    AnimatedContent(
+        targetState = render,
+        transitionSpec = { cardPillTransform() },
+        // Pill-to-pill changes (resolved -> historical) swap in place; only the card <-> pill
+        // height collapse animates.
+        contentKey = { it is InviteRender.ActiveCard },
+        label = "invite_render",
+    ) { target ->
+        when (target) {
+            is InviteRender.Pill -> SystemEventPill(
+                summary = target.summary,
+                lineCount = 1,
+                loadLines = { listOf(message.text) },
+                contentKey = message.id,
+                modifier = Modifier.testTag(target.testTag),
+            )
+            is InviteRender.ActiveCard -> Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .testTag("chat_invite_card_${message.id}"),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Invitation to ${target.channel}", style = MaterialTheme.typography.titleMedium)
+                    Text(message.text, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
+                    if (target.state == InviteState.FAILED) {
+                        Text("Could not join. You can retry.", color = MaterialTheme.colorScheme.error)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = onJoin,
+                            enabled = target.state != InviteState.JOINING,
+                            modifier = Modifier.testTag("chat_invite_join_${message.id}"),
+                        ) {
+                            Text(if (target.state == InviteState.JOINING) "Joining…" else "Join")
+                        }
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.testTag("chat_invite_dismiss_${message.id}"),
+                        ) {
+                            Text("Dismiss")
+                        }
+                    }
                 }
             }
         }
@@ -1325,11 +1376,23 @@ private fun MessageRow(
             )
         }
     }
-    if (msg.failed) {
-        RetryRow(
-            onRetry = if (canRetry) ({ onRetry(msg) }) else null,
-            onDelete = { onDelete(msg) },
-        )
+    // The outer gate keeps the Transition holder off ordinary rows: only pending or failed rows
+    // compose the AnimatedVisibility, and pending stays in the gate so the pending -> failed flip
+    // (and a retry back to pending) animates instead of remounting. A historical failed row first
+    // composes with visible = true and renders statically.
+    if (msg.failed || msg.pendingLabel != null) {
+        AnimatedVisibility(
+            visible = msg.failed,
+            enter = expandVertically(animationSpec = MotdMotion.contentSize) +
+                fadeIn(MotdMotion.microFadeIn),
+            exit = shrinkVertically(animationSpec = MotdMotion.contentSize) +
+                fadeOut(MotdMotion.microFadeOut),
+        ) {
+            RetryRow(
+                onRetry = if (canRetry) ({ onRetry(msg) }) else null,
+                onDelete = { onDelete(msg) },
+            )
+        }
     }
 }
 
