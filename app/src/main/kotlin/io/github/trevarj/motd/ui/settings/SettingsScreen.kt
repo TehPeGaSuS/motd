@@ -5,7 +5,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -92,18 +91,18 @@ fun SettingsScreen(
         transitionSpec = {
             if (targetState == SettingsLocalPage.UPLOADS) {
                 slideInHorizontally(
-                    animationSpec = tween(MotdMotion.NavigationDurationMs),
+                    animationSpec = MotdMotion.navigationDrawerSpatial,
                     initialOffsetX = { it },
                 ) togetherWith slideOutHorizontally(
-                    animationSpec = tween(MotdMotion.NavigationDurationMs),
+                    animationSpec = MotdMotion.navigationDrawerSpatial,
                     targetOffsetX = { -it },
                 )
             } else {
                 slideInHorizontally(
-                    animationSpec = tween(MotdMotion.NavigationDurationMs),
+                    animationSpec = MotdMotion.navigationDrawerSpatial,
                     initialOffsetX = { -it },
                 ) togetherWith slideOutHorizontally(
-                    animationSpec = tween(MotdMotion.NavigationDurationMs),
+                    animationSpec = MotdMotion.navigationDrawerSpatial,
                     targetOffsetX = { it },
                 )
             }

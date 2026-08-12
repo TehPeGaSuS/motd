@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
@@ -101,7 +100,7 @@ fun MotdNavGraph(
             } else if (isChatTarget()) {
                 slideIntoContainer(SlideDirection.Start, MotdMotion.navigationDrawerSpatial)
             } else {
-                slideIntoContainer(SlideDirection.Start, tween(MotdMotion.NavigationDurationMs))
+                slideIntoContainer(SlideDirection.Start, MotdMotion.navigationDrawerSpatial)
             }
         },
         exitTransition = {
@@ -112,7 +111,7 @@ fun MotdNavGraph(
                 // ModalNavigationDrawer's single moving surface over stationary content.
                 ExitTransition.KeepUntilTransitionsFinished
             } else {
-                slideOutOfContainer(SlideDirection.Start, tween(MotdMotion.NavigationDurationMs))
+                slideOutOfContainer(SlideDirection.Start, MotdMotion.navigationDrawerSpatial)
             }
         },
         popEnterTransition = {
@@ -120,14 +119,14 @@ fun MotdNavGraph(
                 // The destination is already visible beneath the outgoing chat surface.
                 EnterTransition.None
             } else {
-                slideIntoContainer(SlideDirection.End, tween(MotdMotion.NavigationDurationMs))
+                slideIntoContainer(SlideDirection.End, MotdMotion.navigationDrawerSpatial)
             }
         },
         popExitTransition = {
             if (isChatInitial()) {
                 slideOutOfContainer(SlideDirection.End, MotdMotion.chatBackSpatial)
             } else {
-                slideOutOfContainer(SlideDirection.End, tween(MotdMotion.NavigationDurationMs))
+                slideOutOfContainer(SlideDirection.End, MotdMotion.navigationDrawerSpatial)
             }
         },
     ) {
@@ -287,10 +286,10 @@ fun MotdNavGraph(
         }
         composable<ImageViewerRoute>(
             // Full-screen image reads better appearing/dismissing in place than sliding sideways.
-            enterTransition = { fadeIn(tween(MotdMotion.NavigationDurationMs)) },
-            exitTransition = { fadeOut(tween(MotdMotion.NavigationDurationMs)) },
-            popEnterTransition = { fadeIn(tween(MotdMotion.NavigationDurationMs)) },
-            popExitTransition = { fadeOut(tween(MotdMotion.NavigationDurationMs)) },
+            enterTransition = { fadeIn(MotdMotion.navigationFade) },
+            exitTransition = { fadeOut(MotdMotion.navigationFade) },
+            popEnterTransition = { fadeIn(MotdMotion.navigationFade) },
+            popExitTransition = { fadeOut(MotdMotion.navigationFade) },
         ) { entry ->
             val route = entry.toRoute<ImageViewerRoute>()
             ImageViewerScreen(url = route.url, onBack = { navController.popBackStack() })

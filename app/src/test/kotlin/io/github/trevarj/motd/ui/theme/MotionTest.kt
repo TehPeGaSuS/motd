@@ -61,6 +61,14 @@ class MotionTest {
     }
 
     @Test
+    fun `navigation fade is a bounded tween at navigation tempo`() {
+        // In-place destination fades ride the same bounded-tween NavHost constraint as the slides.
+        val navigationFade = MotdMotion.navigationFade as TweenSpec<*>
+
+        assertEquals(MotdMotion.NavigationDurationMs, navigationFade.durationMillis)
+    }
+
+    @Test
     fun `color fade is a bounded micro tween`() {
         // Container-color transitions stay at the micro tempo, never an unbounded spring.
         val colorFade = MotdMotion.colorFade as TweenSpec<*>

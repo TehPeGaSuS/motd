@@ -57,13 +57,23 @@ object MotdMotion {
     )
 
     /**
-     * Chat entry at the tempo of Material 3's
-     * [androidx.compose.material3.ModalNavigationDrawer]. Navigation specs are bounded tweens,
-     * never springs: a spring's settling tail keeps the NavHost transition open long after the
-     * surface looks parked, and a navigation that interrupts that window can wedge the NavHost
-     * into composing no destination at all (full blank screen until the activity is recreated).
+     * Screen-to-screen slides: chat entry at the tempo of Material 3's
+     * [androidx.compose.material3.ModalNavigationDrawer], and the shared-axis push/pop between
+     * sibling screens. Navigation specs are bounded tweens, never springs: a spring's settling
+     * tail keeps the NavHost transition open long after the surface looks parked, and a
+     * navigation that interrupts that window can wedge the NavHost into composing no destination
+     * at all (full blank screen until the activity is recreated).
      */
     val navigationDrawerSpatial: FiniteAnimationSpec<IntOffset> = tween(
+        durationMillis = NavigationDurationMs,
+        easing = StandardEasing,
+    )
+
+    /**
+     * Navigation-tempo fade for destinations that appear in place rather than sliding (the image
+     * viewer). Bounded for the same reason as [navigationDrawerSpatial].
+     */
+    val navigationFade: FiniteAnimationSpec<Float> = tween(
         durationMillis = NavigationDurationMs,
         easing = StandardEasing,
     )
