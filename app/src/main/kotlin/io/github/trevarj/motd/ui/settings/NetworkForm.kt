@@ -1,6 +1,11 @@
 package io.github.trevarj.motd.ui.settings
 
 import android.security.KeyChain
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,6 +52,7 @@ import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
 import io.github.trevarj.motd.ui.onboarding.ServerForm
+import io.github.trevarj.motd.ui.theme.MotdMotion
 
 /**
  * Reusable server + auth edit form, shared by onboarding steps 3-4 and NetworkSettings. Stateless:
@@ -471,57 +477,77 @@ private fun AuthSection(auth: AuthForm, onAuthChange: (AuthForm) -> Unit) {
         supportingText = stringResource(R.string.onboarding_auth_server_password_desc),
         isError = !auth.serverPasswordValid,
     )
-    Column(Modifier.selectableGroup()) {
-        AuthOption(AuthMode.NONE, auth.mode, stringResource(R.string.onboarding_auth_none)) {
-            onAuthChange(auth.copy(mode = AuthMode.NONE))
-        }
-        AuthOption(AuthMode.PLAIN, auth.mode, stringResource(R.string.onboarding_auth_plain)) {
-            onAuthChange(auth.copy(mode = AuthMode.PLAIN))
-        }
-        AuthOption(AuthMode.EXTERNAL, auth.mode, stringResource(R.string.onboarding_auth_external)) {
-            onAuthChange(auth.copy(mode = AuthMode.EXTERNAL))
-        }
-    }
-
-    when (auth.mode) {
-        AuthMode.PLAIN -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedTextField(
-                value = auth.saslUser,
-                onValueChange = { onAuthChange(auth.copy(saslUser = it)) },
-                label = { Text(stringResource(R.string.onboarding_auth_sasl_user)) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.None,
-                    autoCorrectEnabled = false,
-                    imeAction = ImeAction.Next,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            PasswordField(
-                value = auth.saslPassword,
-                onValueChange = { onAuthChange(auth.copy(saslPassword = it)) },
-                label = stringResource(R.string.onboarding_auth_sasl_password),
-                imeAction = ImeAction.Done,
-            )
-        }
-
-        AuthMode.EXTERNAL -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = {
-                    // System client-cert picker; result folds back into the form.
-                    KeyChain.choosePrivateKeyAlias(
-                        context as android.app.Activity,
-                        { alias -> onAuthChange(auth.copy(certAlias = alias)) },
-                        null, null, null, -1, null,
-                    )
-                },
-            ) { Text(stringResource(R.string.onboarding_auth_choose_cert)) }
-            auth.certAlias?.let {
-                Text(stringResource(R.string.onboarding_auth_cert_selected, it))
+    // The radio group and the mode fields share one Column child so the caller's spacedBy never
+    // reserves a gap for the collapsed NONE state; the top padding lives inside the non-empty
+    // branches so NONE collapses to true zero height.
+    Column {
+        Column(Modifier.selectableGroup()) {
+            AuthOption(AuthMode.NONE, auth.mode, stringResource(R.string.onboarding_auth_none)) {
+                onAuthChange(auth.copy(mode = AuthMode.NONE))
+            }
+            AuthOption(AuthMode.PLAIN, auth.mode, stringResource(R.string.onboarding_auth_plain)) {
+                onAuthChange(auth.copy(mode = AuthMode.PLAIN))
+            }
+            AuthOption(AuthMode.EXTERNAL, auth.mode, stringResource(R.string.onboarding_auth_external)) {
+                onAuthChange(auth.copy(mode = AuthMode.EXTERNAL))
             }
         }
 
-        AuthMode.NONE -> Unit
+        AnimatedContent(
+            targetState = auth.mode,
+            transitionSpec = {
+                (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut))
+                    .using(SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> MotdMotion.contentSize }))
+            },
+            label = "auth_mode_fields",
+        ) { mode ->
+            when (mode) {
+                AuthMode.PLAIN -> Column(
+                    modifier = Modifier.padding(top = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    OutlinedTextField(
+                        value = auth.saslUser,
+                        onValueChange = { onAuthChange(auth.copy(saslUser = it)) },
+                        label = { Text(stringResource(R.string.onboarding_auth_sasl_user)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            autoCorrectEnabled = false,
+                            imeAction = ImeAction.Next,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    PasswordField(
+                        value = auth.saslPassword,
+                        onValueChange = { onAuthChange(auth.copy(saslPassword = it)) },
+                        label = stringResource(R.string.onboarding_auth_sasl_password),
+                        imeAction = ImeAction.Done,
+                    )
+                }
+
+                AuthMode.EXTERNAL -> Column(
+                    modifier = Modifier.padding(top = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = {
+                            // System client-cert picker; result folds back into the form.
+                            KeyChain.choosePrivateKeyAlias(
+                                context as android.app.Activity,
+                                { alias -> onAuthChange(auth.copy(certAlias = alias)) },
+                                null, null, null, -1, null,
+                            )
+                        },
+                    ) { Text(stringResource(R.string.onboarding_auth_choose_cert)) }
+                    auth.certAlias?.let {
+                        Text(stringResource(R.string.onboarding_auth_cert_selected, it))
+                    }
+                }
+
+                AuthMode.NONE -> Unit
+            }
+        }
     }
 }
 

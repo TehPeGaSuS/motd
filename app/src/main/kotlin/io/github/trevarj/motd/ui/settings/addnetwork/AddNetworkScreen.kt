@@ -1,6 +1,12 @@
 package io.github.trevarj.motd.ui.settings.addnetwork
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +58,7 @@ import io.github.trevarj.motd.ui.settings.NetworkForm
 import io.github.trevarj.motd.ui.settings.RadioRow
 import io.github.trevarj.motd.ui.settings.SettingsGroup
 import io.github.trevarj.motd.ui.settings.SubLabel
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Stateful entry: wires the ViewModel and drives navigation (plans/16 §5.4). */
@@ -128,40 +135,58 @@ fun AddNetworkContent(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                SettingsGroup(title = stringResource(R.string.add_network_type_section)) {
-                    KindSelector(kind = state.kind, enabled = state.phase == AddNetworkPhase.FORM, onSetKind = onSetKind)
-                    if (state.isBouncer) {
-                        BouncerKindSelector(
-                            kind = state.bouncerKind,
-                            enabled = state.phase == AddNetworkPhase.FORM,
-                            onSetKind = onSetBouncerKind,
-                        )
-                    }
-                }
-                if (!state.isBouncer && state.phase == AddNetworkPhase.FORM) {
-                    NetworkPresetPicker(selected = state.presetId, onSelect = onSelectPreset)
-                }
-                SettingsGroup(title = stringResource(R.string.add_network_details_section)) {
-                    if (state.isBouncer) {
-                        Column(Modifier.padding(16.dp)) {
-                            BouncerLoginFields(
+                // The type group and the preset picker share one Column child so the collapsed
+                // picker sits outside the spacedBy flow; its 12dp gap lives inside the animation.
+                Column {
+                    SettingsGroup(title = stringResource(R.string.add_network_type_section)) {
+                        KindSelector(kind = state.kind, enabled = state.phase == AddNetworkPhase.FORM, onSetKind = onSetKind)
+                        AnimatedVisibility(
+                            visible = state.isBouncer,
+                            enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                            exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+                        ) {
+                            BouncerKindSelector(
                                 kind = state.bouncerKind,
-                                server = state.server,
-                                sojuLogin = state.sojuLogin,
-                                zncLogin = state.zncLogin,
-                                onServerChange = onServerChange,
-                                onSojuLoginChange = onSojuLoginChange,
-                                onZncLoginChange = onZncLoginChange,
+                                enabled = state.phase == AddNetworkPhase.FORM,
+                                onSetKind = onSetBouncerKind,
                             )
                         }
-                    } else {
-                        NetworkForm(
-                            server = state.server,
-                            auth = state.auth,
-                            onServerChange = onServerChange,
-                            onAuthChange = onAuthChange,
-                            modifier = Modifier.padding(vertical = 16.dp),
-                        )
+                    }
+                    AnimatedVisibility(
+                        visible = !state.isBouncer && state.phase == AddNetworkPhase.FORM,
+                        enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                        exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+                    ) {
+                        Box(Modifier.padding(top = 12.dp)) {
+                            NetworkPresetPicker(selected = state.presetId, onSelect = onSelectPreset)
+                        }
+                    }
+                }
+                SettingsGroup(title = stringResource(R.string.add_network_details_section)) {
+                    // Ease the height between the two form variants; the branch swap itself (and
+                    // its field state reset) is unchanged from today.
+                    Box(Modifier.animateContentSize(animationSpec = MotdMotion.contentSize)) {
+                        if (state.isBouncer) {
+                            Column(Modifier.padding(16.dp)) {
+                                BouncerLoginFields(
+                                    kind = state.bouncerKind,
+                                    server = state.server,
+                                    sojuLogin = state.sojuLogin,
+                                    zncLogin = state.zncLogin,
+                                    onServerChange = onServerChange,
+                                    onSojuLoginChange = onSojuLoginChange,
+                                    onZncLoginChange = onZncLoginChange,
+                                )
+                            }
+                        } else {
+                            NetworkForm(
+                                server = state.server,
+                                auth = state.auth,
+                                onServerChange = onServerChange,
+                                onAuthChange = onAuthChange,
+                                modifier = Modifier.padding(vertical = 16.dp),
+                            )
+                        }
                     }
                 }
                 Button(

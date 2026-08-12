@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings.bouncer
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -61,6 +62,7 @@ import io.github.trevarj.motd.bouncer.NetworkCommandFields
 import io.github.trevarj.motd.bouncer.UserCommandFields
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 data class BouncerControlCallbacks(
@@ -180,12 +182,20 @@ fun BouncerNetworksContent(
             ConnectionAndCapabilityCard(state, callbacks)
             BouncerTabs(state.selectedTab, state.capabilities.administrator, callbacks.onSelectTab)
             Box(Modifier.fillMaxWidth().weight(1f)) {
-                when (state.selectedTab) {
-                    BouncerControlTab.NETWORKS -> NetworksPanel(state, ready, callbacks)
-                    BouncerControlTab.CHANNELS -> ChannelsPanel(state, ready, callbacks)
-                    BouncerControlTab.ACCOUNT -> AccountPanel(state, ready, callbacks)
-                    BouncerControlTab.ADMIN -> AdminPanel(state, ready, callbacks)
-                    BouncerControlTab.CONSOLE -> ConsolePanel(state, ready, callbacks)
+                // The tab indicator glides; crossfade the panel beneath it at the micro tempo so
+                // the content doesn't teleport while the indicator animates.
+                Crossfade(
+                    targetState = state.selectedTab,
+                    animationSpec = MotdMotion.microFadeIn,
+                    label = "bouncer_panel",
+                ) { tab ->
+                    when (tab) {
+                        BouncerControlTab.NETWORKS -> NetworksPanel(state, ready, callbacks)
+                        BouncerControlTab.CHANNELS -> ChannelsPanel(state, ready, callbacks)
+                        BouncerControlTab.ACCOUNT -> AccountPanel(state, ready, callbacks)
+                        BouncerControlTab.ADMIN -> AdminPanel(state, ready, callbacks)
+                        BouncerControlTab.CONSOLE -> ConsolePanel(state, ready, callbacks)
+                    }
                 }
             }
         }

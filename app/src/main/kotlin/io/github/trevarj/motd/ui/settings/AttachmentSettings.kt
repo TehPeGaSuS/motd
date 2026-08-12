@@ -1,5 +1,11 @@
 package io.github.trevarj.motd.ui.settings
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -30,6 +36,7 @@ import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.backendMaxBytes
 import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.attachment.validateEndpoint
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -63,88 +70,101 @@ fun UploadsSettingsContent(viewModel: AttachmentSettingsViewModel = hiltViewMode
         }
     }
 
-    if (config.backend == AttachmentBackend.TERMBIN) {
-        UploadWarning(stringResource(io.github.trevarj.motd.R.string.settings_upload_termbin_warning))
-    }
-    if (config.backend == AttachmentBackend.CUSTOM_0X0) {
-        SettingsGroup(title = stringResource(io.github.trevarj.motd.R.string.settings_upload_endpoint)) {
-            val endpointError = customEndpoint.isNotBlank() && validateEndpoint(customEndpoint) == null
-            OutlinedTextField(
-                value = customEndpoint,
-                onValueChange = { value ->
-                    customEndpoint = value
-                    validateEndpoint(value)?.let { endpoint ->
-                        viewModel.update { it.copy(endpoint = endpoint, customEndpoint = endpoint) }
-                    }
-                },
-                label = { Text(stringResource(io.github.trevarj.motd.R.string.settings_upload_custom_url)) },
-                isError = endpointError,
-                supportingText = {
-                    Text(stringResource(
-                        if (endpointError) io.github.trevarj.motd.R.string.settings_upload_custom_error
-                        else io.github.trevarj.motd.R.string.settings_upload_custom_desc,
-                    ))
-                },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-                    .testTag("settings_upload_custom_endpoint"),
-            )
-        }
-    }
-
-    when (config.backend) {
-        AttachmentBackend.CRAFTERBIN, AttachmentBackend.ZERO_X_ZERO, AttachmentBackend.CUSTOM_0X0 ->
-        SettingsGroup(title = stringResource(io.github.trevarj.motd.R.string.settings_upload_privacy)) {
-            SwitchRow(
-                title = stringResource(io.github.trevarj.motd.R.string.settings_upload_secret),
-                subtitle = stringResource(io.github.trevarj.motd.R.string.settings_upload_secret_desc),
-                checked = config.secretUrl,
-                onCheckedChange = { value -> viewModel.update { it.copy(secretUrl = value) } },
-                switchTag = "settings_upload_secret",
-            )
-            OutlinedTextField(
-                value = config.expiry.orEmpty(),
-                onValueChange = { value -> viewModel.update { it.copy(expiry = value.ifBlank { null }) } },
-                label = { Text(stringResource(io.github.trevarj.motd.R.string.settings_upload_expiry)) },
-                supportingText = { Text(stringResource(io.github.trevarj.motd.R.string.settings_upload_expiry_desc)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-        }
-        AttachmentBackend.LITTERBOX -> SettingsGroup(
-            title = stringResource(io.github.trevarj.motd.R.string.settings_upload_privacy),
-        ) {
-            Column(Modifier.selectableGroup()) {
-                LITTERBOX_EXPIRIES.forEach { expiry ->
-                    RadioRow(
-                        label = litterboxExpiryLabel(expiry),
-                        subtitle = stringResource(io.github.trevarj.motd.R.string.settings_upload_litterbox_expiry_desc),
-                        selected = config.litterboxExpiry == expiry,
-                        enabled = true,
-                        onClick = { viewModel.update { it.copy(litterboxExpiry = expiry) } },
+    // One animated region hosts every backend-specific block (warning, endpoint, options) so a
+    // radio pick crossfades and eases the height once instead of snapping three conditionals.
+    AnimatedContent(
+        targetState = config.backend,
+        transitionSpec = {
+            (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut))
+                .using(SizeTransform(sizeAnimationSpec = { _, _ -> MotdMotion.contentSize }))
+        },
+        label = "upload_backend_options",
+    ) { backend ->
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (backend == AttachmentBackend.TERMBIN) {
+                UploadWarning(stringResource(io.github.trevarj.motd.R.string.settings_upload_termbin_warning))
+            }
+            if (backend == AttachmentBackend.CUSTOM_0X0) {
+                SettingsGroup(title = stringResource(io.github.trevarj.motd.R.string.settings_upload_endpoint)) {
+                    val endpointError = customEndpoint.isNotBlank() && validateEndpoint(customEndpoint) == null
+                    OutlinedTextField(
+                        value = customEndpoint,
+                        onValueChange = { value ->
+                            customEndpoint = value
+                            validateEndpoint(value)?.let { endpoint ->
+                                viewModel.update { it.copy(endpoint = endpoint, customEndpoint = endpoint) }
+                            }
+                        },
+                        label = { Text(stringResource(io.github.trevarj.motd.R.string.settings_upload_custom_url)) },
+                        isError = endpointError,
+                        supportingText = {
+                            Text(stringResource(
+                                if (endpointError) io.github.trevarj.motd.R.string.settings_upload_custom_error
+                                else io.github.trevarj.motd.R.string.settings_upload_custom_desc,
+                            ))
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                            .testTag("settings_upload_custom_endpoint"),
                     )
                 }
             }
+
+            when (backend) {
+                AttachmentBackend.CRAFTERBIN, AttachmentBackend.ZERO_X_ZERO, AttachmentBackend.CUSTOM_0X0 ->
+                SettingsGroup(title = stringResource(io.github.trevarj.motd.R.string.settings_upload_privacy)) {
+                    SwitchRow(
+                        title = stringResource(io.github.trevarj.motd.R.string.settings_upload_secret),
+                        subtitle = stringResource(io.github.trevarj.motd.R.string.settings_upload_secret_desc),
+                        checked = config.secretUrl,
+                        onCheckedChange = { value -> viewModel.update { it.copy(secretUrl = value) } },
+                        switchTag = "settings_upload_secret",
+                    )
+                    OutlinedTextField(
+                        value = config.expiry.orEmpty(),
+                        onValueChange = { value -> viewModel.update { it.copy(expiry = value.ifBlank { null }) } },
+                        label = { Text(stringResource(io.github.trevarj.motd.R.string.settings_upload_expiry)) },
+                        supportingText = { Text(stringResource(io.github.trevarj.motd.R.string.settings_upload_expiry_desc)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+                AttachmentBackend.LITTERBOX -> SettingsGroup(
+                    title = stringResource(io.github.trevarj.motd.R.string.settings_upload_privacy),
+                ) {
+                    Column(Modifier.selectableGroup()) {
+                        LITTERBOX_EXPIRIES.forEach { expiry ->
+                            RadioRow(
+                                label = litterboxExpiryLabel(expiry),
+                                subtitle = stringResource(io.github.trevarj.motd.R.string.settings_upload_litterbox_expiry_desc),
+                                selected = config.litterboxExpiry == expiry,
+                                enabled = true,
+                                onClick = { viewModel.update { it.copy(litterboxExpiry = expiry) } },
+                            )
+                        }
+                    }
+                }
+                AttachmentBackend.UGUU -> UploadWarning(
+                    stringResource(io.github.trevarj.motd.R.string.settings_upload_uguu_warning),
+                    caution = false,
+                )
+                AttachmentBackend.X0_AT -> UploadWarning(
+                    stringResource(io.github.trevarj.motd.R.string.settings_upload_x0at_warning),
+                    caution = false,
+                )
+                AttachmentBackend.CNET -> UploadWarning(
+                    stringResource(io.github.trevarj.motd.R.string.settings_upload_cnet_warning),
+                    caution = false,
+                )
+                AttachmentBackend.CATBOX -> UploadWarning(stringResource(io.github.trevarj.motd.R.string.settings_upload_catbox_warning))
+                AttachmentBackend.SOJU_FILEHOST -> UploadWarning(
+                    stringResource(io.github.trevarj.motd.R.string.settings_upload_soju_warning),
+                    caution = false,
+                )
+                AttachmentBackend.TERMBIN -> Unit
+            }
         }
-        AttachmentBackend.UGUU -> UploadWarning(
-            stringResource(io.github.trevarj.motd.R.string.settings_upload_uguu_warning),
-            caution = false,
-        )
-        AttachmentBackend.X0_AT -> UploadWarning(
-            stringResource(io.github.trevarj.motd.R.string.settings_upload_x0at_warning),
-            caution = false,
-        )
-        AttachmentBackend.CNET -> UploadWarning(
-            stringResource(io.github.trevarj.motd.R.string.settings_upload_cnet_warning),
-            caution = false,
-        )
-        AttachmentBackend.CATBOX -> UploadWarning(stringResource(io.github.trevarj.motd.R.string.settings_upload_catbox_warning))
-        AttachmentBackend.SOJU_FILEHOST -> UploadWarning(
-            stringResource(io.github.trevarj.motd.R.string.settings_upload_soju_warning),
-            caution = false,
-        )
-        AttachmentBackend.TERMBIN -> Unit
     }
 
     SettingsGroup(title = stringResource(io.github.trevarj.motd.R.string.settings_upload_limits)) {

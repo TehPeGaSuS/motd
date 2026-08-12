@@ -1,5 +1,10 @@
 package io.github.trevarj.motd.ui.settings
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
@@ -60,6 +65,7 @@ import io.github.trevarj.motd.data.prefs.MIN_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
 import io.github.trevarj.motd.ui.components.IrcChannelBadge
 import io.github.trevarj.motd.ui.components.IrcSpriteAvatar
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import androidx.compose.material.icons.Icons
@@ -267,13 +273,19 @@ private fun FontScaleSlider(
                     stateDescription = percent
                 },
         )
-        if (displayed != DEFAULT_FONT_SCALE_PERCENT) {
+        // The threshold flips repeatedly while the slider is dragged; ease the reset button's row
+        // in and out so the content below doesn't jump under the user's finger.
+        AnimatedVisibility(
+            visible = displayed != DEFAULT_FONT_SCALE_PERCENT,
+            enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+            exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+            modifier = Modifier.align(androidx.compose.ui.Alignment.End),
+        ) {
             TextButton(
                 onClick = {
                     pending = DEFAULT_FONT_SCALE_PERCENT.toFloat()
                     onValue(DEFAULT_FONT_SCALE_PERCENT)
                 },
-                modifier = Modifier.align(androidx.compose.ui.Alignment.End),
             ) {
                 Text(stringResource(R.string.settings_font_size_reset))
             }

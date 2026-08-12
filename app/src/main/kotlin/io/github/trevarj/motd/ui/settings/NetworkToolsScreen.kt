@@ -1,5 +1,10 @@
 package io.github.trevarj.motd.ui.settings
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -62,6 +67,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.ReasonPresetChips
+import io.github.trevarj.motd.ui.theme.MotdMotion
 
 @Composable
 fun NetworkToolsScreen(
@@ -281,214 +287,221 @@ private fun OperatorSection(
                 .clickable { expanded = !expanded }
                 .testTag("network_tools_ircop_expand"),
         )
-        if (!expanded) return@SettingsGroup
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                text = if (enabled) {
-                    stringResource(R.string.network_tools_operator_help)
-                } else {
-                    stringResource(R.string.network_tools_disconnected)
-                },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            OutlinedTextField(
-                value = operUser,
-                onValueChange = { operUser = it },
-                label = { Text(stringResource(R.string.network_tools_oper_user)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("network_tools_oper_user"),
-            )
-            OutlinedTextField(
-                value = operPassword,
-                onValueChange = { operPassword = it },
-                label = { Text(stringResource(R.string.network_tools_oper_password)) },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                modifier = Modifier.fillMaxWidth().testTag("network_tools_oper_password"),
-            )
-            Button(
-                onClick = { onSendCommand(operMessage(operUser, operPassword)); operPassword = "" },
-                enabled = enabled && operUser.isNotBlank() && operPassword.isNotBlank(),
-                modifier = Modifier.testTag("network_tools_oper_send"),
-            ) { Text(stringResource(R.string.network_tools_send_oper)) }
-
-            HorizontalDivider()
-            // Editable suggestions: own nick first, then this network's channels. MODE targets that
-            // are neither (a service, another user) stay typable.
-            ExposedDropdownMenuBox(
-                expanded = modeTargetExpanded,
-                onExpandedChange = { modeTargetExpanded = it },
-            ) {
-                OutlinedTextField(
-                    value = modeTarget,
-                    onValueChange = { modeTarget = it },
-                    label = { Text(stringResource(R.string.network_tools_target)) },
-                    singleLine = true,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(modeTargetExpanded) },
-                    modifier = Modifier
-                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable)
-                        .fillMaxWidth()
-                        .testTag("network_tools_mode_target"),
+        // Eased expand/collapse instead of the previous hard conditional; the content composes as
+        // the expansion starts, so scroll-to targets inside it resolve immediately.
+        AnimatedVisibility(
+            visible = expanded,
+            enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+            exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = if (enabled) {
+                        stringResource(R.string.network_tools_operator_help)
+                    } else {
+                        stringResource(R.string.network_tools_disconnected)
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
                 )
-                ExposedDropdownMenu(
+                OutlinedTextField(
+                    value = operUser,
+                    onValueChange = { operUser = it },
+                    label = { Text(stringResource(R.string.network_tools_oper_user)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("network_tools_oper_user"),
+                )
+                OutlinedTextField(
+                    value = operPassword,
+                    onValueChange = { operPassword = it },
+                    label = { Text(stringResource(R.string.network_tools_oper_password)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth().testTag("network_tools_oper_password"),
+                )
+                Button(
+                    onClick = { onSendCommand(operMessage(operUser, operPassword)); operPassword = "" },
+                    enabled = enabled && operUser.isNotBlank() && operPassword.isNotBlank(),
+                    modifier = Modifier.testTag("network_tools_oper_send"),
+                ) { Text(stringResource(R.string.network_tools_send_oper)) }
+    
+                HorizontalDivider()
+                // Editable suggestions: own nick first, then this network's channels. MODE targets that
+                // are neither (a service, another user) stay typable.
+                ExposedDropdownMenuBox(
                     expanded = modeTargetExpanded,
-                    onDismissRequest = { modeTargetExpanded = false },
+                    onExpandedChange = { modeTargetExpanded = it },
                 ) {
-                    state.selfNick?.let { nick ->
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.network_tools_target_self, nick)) },
-                            onClick = { modeTarget = nick; modeTargetExpanded = false },
-                        )
-                    }
-                    state.buffers.filter { it.type == BufferType.CHANNEL }.forEach { row ->
-                        DropdownMenuItem(
-                            text = { Text(row.displayName) },
-                            onClick = { modeTarget = row.displayName; modeTargetExpanded = false },
-                        )
+                    OutlinedTextField(
+                        value = modeTarget,
+                        onValueChange = { modeTarget = it },
+                        label = { Text(stringResource(R.string.network_tools_target)) },
+                        singleLine = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(modeTargetExpanded) },
+                        modifier = Modifier
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable)
+                            .fillMaxWidth()
+                            .testTag("network_tools_mode_target"),
+                    )
+                    ExposedDropdownMenu(
+                        expanded = modeTargetExpanded,
+                        onDismissRequest = { modeTargetExpanded = false },
+                    ) {
+                        state.selfNick?.let { nick ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.network_tools_target_self, nick)) },
+                                onClick = { modeTarget = nick; modeTargetExpanded = false },
+                            )
+                        }
+                        state.buffers.filter { it.type == BufferType.CHANNEL }.forEach { row ->
+                            DropdownMenuItem(
+                                text = { Text(row.displayName) },
+                                onClick = { modeTarget = row.displayName; modeTargetExpanded = false },
+                            )
+                        }
                     }
                 }
+                OutlinedTextField(
+                    value = modes,
+                    onValueChange = { modes = it },
+                    label = { Text(stringResource(R.string.network_tools_modes)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("network_tools_mode_letters"),
+                )
+                OutlinedTextField(
+                    value = modeArgs,
+                    onValueChange = { modeArgs = it },
+                    label = { Text(stringResource(R.string.network_tools_mode_args)) },
+                    supportingText = { Text(stringResource(R.string.network_tools_mode_help)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("network_tools_mode_args"),
+                )
+                OutlinedButton(
+                    onClick = { onSendCommand(modeMessage(modeTarget, modes, modeArgs)) },
+                    enabled = enabled && modeTarget.isNotBlank() && modes.isNotBlank(),
+                    modifier = Modifier.testTag("network_tools_mode_send"),
+                ) { Text(stringResource(R.string.network_tools_send_mode)) }
+    
+                HorizontalDivider()
+                OutlinedTextField(
+                    value = killNick,
+                    onValueChange = { killNick = it },
+                    label = { Text(stringResource(R.string.network_tools_kill_nick)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("network_tools_kill_nick"),
+                )
+                ReasonPresetChips(
+                    current = killReason,
+                    onSelect = { killReason = it },
+                    tagPrefix = "network_tools_kill_chip",
+                )
+                ReasonField(
+                    value = killReason,
+                    onValueChange = { killReason = it },
+                    label = stringResource(R.string.network_tools_kill_reason),
+                    tag = "network_tools_kill_reason",
+                )
+                DestructiveButton(
+                    label = stringResource(R.string.network_tools_send_kill),
+                    enabled = enabled && killNick.isNotBlank() && killReason.isNotBlank(),
+                    tag = "network_tools_kill_send",
+                    command = {
+                        PendingOperatorCommand(
+                            kind = OperatorCommandKind.KILL,
+                            target = killNick.trim(),
+                            message = killMessage(killNick, killReason),
+                        )
+                    },
+                    onConfirm = { pending = it },
+                )
+    
+                HorizontalDivider()
+                OutlinedTextField(
+                    value = rehashServer,
+                    onValueChange = { rehashServer = it },
+                    label = { Text(stringResource(R.string.network_tools_rehash_server)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                DestructiveButton(
+                    label = stringResource(R.string.network_tools_send_rehash),
+                    enabled = enabled,
+                    tag = "network_tools_rehash_send",
+                    command = {
+                        PendingOperatorCommand(
+                            kind = OperatorCommandKind.REHASH,
+                            target = rehashServer.trim().ifBlank { state.network?.name.orEmpty() },
+                            message = rehashMessage(rehashServer),
+                        )
+                    },
+                    onConfirm = { pending = it },
+                )
+    
+                HorizontalDivider()
+                OutlinedTextField(
+                    value = connectServer,
+                    onValueChange = { connectServer = it },
+                    label = { Text(stringResource(R.string.network_tools_connect_server)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = connectPort,
+                    onValueChange = { connectPort = it.filter(Char::isDigit) },
+                    label = { Text(stringResource(R.string.network_tools_connect_port)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = connectRemote,
+                    onValueChange = { connectRemote = it },
+                    label = { Text(stringResource(R.string.network_tools_connect_remote)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                DestructiveButton(
+                    label = stringResource(R.string.network_tools_send_connect),
+                    enabled = enabled && connectServer.isNotBlank(),
+                    tag = "network_tools_connect_send",
+                    command = {
+                        PendingOperatorCommand(
+                            kind = OperatorCommandKind.CONNECT,
+                            target = connectServer.trim(),
+                            message = connectMessage(connectServer, connectPort, connectRemote),
+                        )
+                    },
+                    onConfirm = { pending = it },
+                )
+    
+                HorizontalDivider()
+                OutlinedTextField(
+                    value = squitServer,
+                    onValueChange = { squitServer = it },
+                    label = { Text(stringResource(R.string.network_tools_squit_server)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("network_tools_squit_server"),
+                )
+                ReasonField(
+                    value = squitReason,
+                    onValueChange = { squitReason = it },
+                    label = stringResource(R.string.network_tools_squit_reason),
+                    tag = "network_tools_squit_reason",
+                )
+                DestructiveButton(
+                    label = stringResource(R.string.network_tools_send_squit),
+                    enabled = enabled && squitServer.isNotBlank() && squitReason.isNotBlank(),
+                    tag = "network_tools_squit_send",
+                    command = {
+                        PendingOperatorCommand(
+                            kind = OperatorCommandKind.SQUIT,
+                            target = squitServer.trim(),
+                            message = squitMessage(squitServer, squitReason),
+                        )
+                    },
+                    onConfirm = { pending = it },
+                )
             }
-            OutlinedTextField(
-                value = modes,
-                onValueChange = { modes = it },
-                label = { Text(stringResource(R.string.network_tools_modes)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("network_tools_mode_letters"),
-            )
-            OutlinedTextField(
-                value = modeArgs,
-                onValueChange = { modeArgs = it },
-                label = { Text(stringResource(R.string.network_tools_mode_args)) },
-                supportingText = { Text(stringResource(R.string.network_tools_mode_help)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("network_tools_mode_args"),
-            )
-            OutlinedButton(
-                onClick = { onSendCommand(modeMessage(modeTarget, modes, modeArgs)) },
-                enabled = enabled && modeTarget.isNotBlank() && modes.isNotBlank(),
-                modifier = Modifier.testTag("network_tools_mode_send"),
-            ) { Text(stringResource(R.string.network_tools_send_mode)) }
-
-            HorizontalDivider()
-            OutlinedTextField(
-                value = killNick,
-                onValueChange = { killNick = it },
-                label = { Text(stringResource(R.string.network_tools_kill_nick)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("network_tools_kill_nick"),
-            )
-            ReasonPresetChips(
-                current = killReason,
-                onSelect = { killReason = it },
-                tagPrefix = "network_tools_kill_chip",
-            )
-            ReasonField(
-                value = killReason,
-                onValueChange = { killReason = it },
-                label = stringResource(R.string.network_tools_kill_reason),
-                tag = "network_tools_kill_reason",
-            )
-            DestructiveButton(
-                label = stringResource(R.string.network_tools_send_kill),
-                enabled = enabled && killNick.isNotBlank() && killReason.isNotBlank(),
-                tag = "network_tools_kill_send",
-                command = {
-                    PendingOperatorCommand(
-                        kind = OperatorCommandKind.KILL,
-                        target = killNick.trim(),
-                        message = killMessage(killNick, killReason),
-                    )
-                },
-                onConfirm = { pending = it },
-            )
-
-            HorizontalDivider()
-            OutlinedTextField(
-                value = rehashServer,
-                onValueChange = { rehashServer = it },
-                label = { Text(stringResource(R.string.network_tools_rehash_server)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            DestructiveButton(
-                label = stringResource(R.string.network_tools_send_rehash),
-                enabled = enabled,
-                tag = "network_tools_rehash_send",
-                command = {
-                    PendingOperatorCommand(
-                        kind = OperatorCommandKind.REHASH,
-                        target = rehashServer.trim().ifBlank { state.network?.name.orEmpty() },
-                        message = rehashMessage(rehashServer),
-                    )
-                },
-                onConfirm = { pending = it },
-            )
-
-            HorizontalDivider()
-            OutlinedTextField(
-                value = connectServer,
-                onValueChange = { connectServer = it },
-                label = { Text(stringResource(R.string.network_tools_connect_server)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = connectPort,
-                onValueChange = { connectPort = it.filter(Char::isDigit) },
-                label = { Text(stringResource(R.string.network_tools_connect_port)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = connectRemote,
-                onValueChange = { connectRemote = it },
-                label = { Text(stringResource(R.string.network_tools_connect_remote)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            DestructiveButton(
-                label = stringResource(R.string.network_tools_send_connect),
-                enabled = enabled && connectServer.isNotBlank(),
-                tag = "network_tools_connect_send",
-                command = {
-                    PendingOperatorCommand(
-                        kind = OperatorCommandKind.CONNECT,
-                        target = connectServer.trim(),
-                        message = connectMessage(connectServer, connectPort, connectRemote),
-                    )
-                },
-                onConfirm = { pending = it },
-            )
-
-            HorizontalDivider()
-            OutlinedTextField(
-                value = squitServer,
-                onValueChange = { squitServer = it },
-                label = { Text(stringResource(R.string.network_tools_squit_server)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("network_tools_squit_server"),
-            )
-            ReasonField(
-                value = squitReason,
-                onValueChange = { squitReason = it },
-                label = stringResource(R.string.network_tools_squit_reason),
-                tag = "network_tools_squit_reason",
-            )
-            DestructiveButton(
-                label = stringResource(R.string.network_tools_send_squit),
-                enabled = enabled && squitServer.isNotBlank() && squitReason.isNotBlank(),
-                tag = "network_tools_squit_send",
-                command = {
-                    PendingOperatorCommand(
-                        kind = OperatorCommandKind.SQUIT,
-                        target = squitServer.trim(),
-                        message = squitMessage(squitServer, squitReason),
-                    )
-                },
-                onConfirm = { pending = it },
-            )
         }
     }
 

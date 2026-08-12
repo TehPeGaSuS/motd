@@ -4,6 +4,11 @@ import android.content.Intent
 import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
 import android.text.format.DateUtils
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -35,6 +40,7 @@ import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.service.DeliveryMode
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Notifications & delivery category: delivery mode (persistent/push) and battery optimization. */
@@ -87,7 +93,13 @@ fun DeliverySettingsContent(
                 onChooseDistributor = { showDistributorChooser = true },
                 onRetryPush = onRetryPush,
             )
-            if (!pushAvailability.notificationsGranted) {
+            // Permission is re-checked in onResume, so the warning flips while the user watches the
+            // screen re-appear; ease the height change instead of jumping.
+            AnimatedVisibility(
+                visible = !pushAvailability.notificationsGranted,
+                enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+            ) {
                 NotificationPermissionWarning(
                     onFixNotifications = {
                         context.startActivity(
@@ -193,7 +205,11 @@ private fun DeliveryGroup(
         )
         // Install-a-distributor action, shown only when push is selectable but no distributor exists.
         // Opens ntfy's F-Droid listing so the user can fix the missing-distributor gap in one tap.
-        if (availability.needsDistributor) {
+        AnimatedVisibility(
+            visible = availability.needsDistributor,
+            enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+            exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+        ) {
             TextButton(
                 onClick = onInstallDistributor,
                 modifier = Modifier
@@ -203,7 +219,13 @@ private fun DeliveryGroup(
                 Text(stringResource(R.string.settings_delivery_push_install_distributor))
             }
         }
-        if (current == DeliveryMode.UNIFIED_PUSH) {
+        // The status card appears the moment the user selects the push radio; ease it in so the
+        // radio group below doesn't jump under their finger.
+        AnimatedVisibility(
+            visible = current == DeliveryMode.UNIFIED_PUSH,
+            enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+            exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+        ) {
             PushStatusCard(
                 availability = availability,
                 onChooseDistributor = onChooseDistributor,

@@ -4,6 +4,11 @@ import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,6 +49,7 @@ import io.github.trevarj.motd.data.backup.BackupExportMode
 import io.github.trevarj.motd.data.backup.BackupImportMode
 import io.github.trevarj.motd.data.backup.ConfigurationBackupRepository
 import io.github.trevarj.motd.data.backup.ConfigurationImportPreview
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import java.io.ByteArrayOutputStream
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -81,36 +88,44 @@ fun BackupRestoreScreen(
         SettingsGroup("Export configuration") {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Messages, chat history, drafts, generated push keys, cached previews, upload history, certificate pins, and runtime state are not exported.")
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(role = Role.Switch) { includeSecrets = !includeSecrets }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Include credentials", fontWeight = FontWeight.Medium)
-                        Text(
-                            "Creates a password-encrypted export. Client certificate selections still stay device-local.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // The switch row and the password field share one Column child so the collapsed
+                // field sits outside the spacedBy flow; its 12dp gap lives inside the animation.
+                Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(role = Role.Switch) { includeSecrets = !includeSecrets }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Include credentials", fontWeight = FontWeight.Medium)
+                            Text(
+                                "Creates a password-encrypted export. Client certificate selections still stay device-local.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = includeSecrets,
+                            onCheckedChange = null,
+                            modifier = Modifier.testTag("backup_export_include_credentials"),
                         )
                     }
-                    Switch(
-                        checked = includeSecrets,
-                        onCheckedChange = null,
-                        modifier = Modifier.testTag("backup_export_include_credentials"),
-                    )
-                }
-                if (includeSecrets) {
-                    PasswordField(
-                        value = exportPassword,
-                        onValueChange = { exportPassword = it },
-                        modifier = Modifier.fillMaxWidth().testTag("backup_export_password"),
-                        label = "Export password",
-                        supportingText = "Use 12 to 128 characters.",
-                    )
+                    AnimatedVisibility(
+                        visible = includeSecrets,
+                        enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                        exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+                    ) {
+                        PasswordField(
+                            value = exportPassword,
+                            onValueChange = { exportPassword = it },
+                            modifier = Modifier.padding(top = 12.dp).fillMaxWidth().testTag("backup_export_password"),
+                            label = "Export password",
+                            supportingText = "Use 12 to 128 characters.",
+                        )
+                    }
                 }
                 Button(
                     onClick = {
@@ -133,40 +148,64 @@ fun BackupRestoreScreen(
 
         SettingsGroup("Import configuration") {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(
-                    onClick = { openDocument.launch(arrayOf("application/json", "text/*", "*/*")) },
-                    enabled = !state.busy,
-                    modifier = Modifier.testTag("backup_import_choose"),
-                ) {
-                    Text("Choose backup")
-                }
-                if (state.importNeedsPassword) {
-                    PasswordField(
-                        value = importPassword,
-                        onValueChange = { importPassword = it },
-                        modifier = Modifier.fillMaxWidth().testTag("backup_import_password"),
-                        label = "Backup password",
-                    )
-                    Button(
-                        onClick = { viewModel.previewImport(importPassword) },
-                        enabled = !state.busy && importPassword.isNotBlank(),
-                        modifier = Modifier.testTag("backup_import_preview_encrypted"),
+                // Same grouping trick as the export block: each collapsed section stays outside
+                // the spacedBy flow and carries its own 12dp gap inside the animation.
+                Column {
+                    OutlinedButton(
+                        onClick = { openDocument.launch(arrayOf("application/json", "text/*", "*/*")) },
+                        enabled = !state.busy,
+                        modifier = Modifier.testTag("backup_import_choose"),
                     ) {
-                        Text("Preview")
+                        Text("Choose backup")
+                    }
+                    AnimatedVisibility(
+                        visible = state.importNeedsPassword,
+                        enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                        exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+                    ) {
+                        Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            PasswordField(
+                                value = importPassword,
+                                onValueChange = { importPassword = it },
+                                modifier = Modifier.fillMaxWidth().testTag("backup_import_password"),
+                                label = "Backup password",
+                            )
+                            Button(
+                                onClick = { viewModel.previewImport(importPassword) },
+                                enabled = !state.busy && importPassword.isNotBlank(),
+                                modifier = Modifier.testTag("backup_import_preview_encrypted"),
+                            ) {
+                                Text("Preview")
+                            }
+                        }
                     }
                 }
-                ImportModeRow(
-                    selected = state.importMode,
-                    onSelected = viewModel::setImportMode,
-                )
-                state.preview?.let { preview ->
-                    ImportPreview(preview)
-                    Button(
-                        onClick = { viewModel.applyImport(importPassword) },
-                        enabled = !state.busy,
-                        modifier = Modifier.testTag("backup_import_apply"),
+                Column {
+                    ImportModeRow(
+                        selected = state.importMode,
+                        onSelected = viewModel::setImportMode,
+                    )
+                    // Exit latch: the preview nulls when the import applies, so the outgoing block
+                    // holds the last real preview while it collapses.
+                    var lastPreview by remember { mutableStateOf<ConfigurationImportPreview?>(null) }
+                    state.preview?.let { lastPreview = it }
+                    AnimatedVisibility(
+                        visible = state.preview != null,
+                        enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                        exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
                     ) {
-                        Text(if (state.importMode == BackupImportMode.REPLACE && preview.removedNetworks > 0) "Replace configuration" else "Apply import")
+                        lastPreview?.let { preview ->
+                            Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                ImportPreview(preview)
+                                Button(
+                                    onClick = { viewModel.applyImport(importPassword) },
+                                    enabled = !state.busy,
+                                    modifier = Modifier.testTag("backup_import_apply"),
+                                ) {
+                                    Text(if (state.importMode == BackupImportMode.REPLACE && preview.removedNetworks > 0) "Replace configuration" else "Apply import")
+                                }
+                            }
+                        }
                     }
                 }
             }

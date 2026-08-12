@@ -46,6 +46,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /**
@@ -188,10 +189,17 @@ fun ManageNicksContent(
                 ) {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(state.nicks, key = { it }) { nick ->
+                        // Nick keys are stable, so add/remove edits fade and the surviving rows
+                        // settle into place instead of snapping.
+                        val animatedModifier = Modifier.animateItem(
+                            fadeInSpec = MotdMotion.microFadeIn,
+                            placementSpec = MotdMotion.rowPlacement,
+                            fadeOutSpec = MotdMotion.microFadeOut,
+                        )
                         val rowModifier = if (state.kind == NickListKind.COLORS) {
-                            Modifier.clickable { editingNick = nick }
+                            animatedModifier.clickable { editingNick = nick }
                         } else {
-                            Modifier
+                            animatedModifier
                         }
                         ListItem(
                             headlineContent = { Text(nick) },

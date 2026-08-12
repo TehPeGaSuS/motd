@@ -2,6 +2,11 @@ package io.github.trevarj.motd.ui.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -72,6 +77,7 @@ import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
 import io.github.trevarj.motd.ui.onboarding.ServerForm
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Stateful entry: wires the ViewModel, seeds the edit form from the network id. */
@@ -555,7 +561,11 @@ private fun ObfuscationSection(
                 ),
             )
         }
-        AnimatedVisibility(visible = expanded) {
+        AnimatedVisibility(
+            visible = expanded,
+            enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+            exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+        ) {
             Column(Modifier.padding(start = 8.dp, end = 16.dp, bottom = 16.dp)) {
                 Text(
                     stringResource(R.string.network_settings_obfs_section_desc),
@@ -569,7 +579,10 @@ private fun ObfuscationSection(
                     ObfsOption(ObfsMode.TOR, mode, stringResource(R.string.network_settings_obfs_mode_tor), onModeChange)
                     ObfsOption(ObfsMode.EMBEDDED_REALITY, mode, stringResource(R.string.network_settings_obfs_mode_reality), onModeChange)
                 }
-                when (mode) {
+                // Mode picks swap in sub-forms of very different heights; ease the swap so the
+                // expanded section doesn't jolt.
+                Column(Modifier.animateContentSize(animationSpec = MotdMotion.contentSize)) {
+                    when (mode) {
             ObfsMode.TOR -> Text(
                 stringResource(R.string.network_settings_obfs_tor_desc),
                 style = MaterialTheme.typography.bodySmall,
@@ -638,6 +651,7 @@ private fun ObfuscationSection(
                 )
             }
             ObfsMode.NONE -> Unit
+                    }
                 }
             }
         }
@@ -675,7 +689,11 @@ private fun TransportSection(wsUrl: String, onWsUrlChange: (String) -> Unit) {
                 contentDescription = stringResource(if (expanded) R.string.network_settings_collapse else R.string.network_settings_expand),
             )
         }
-        AnimatedVisibility(expanded) {
+        AnimatedVisibility(
+            visible = expanded,
+            enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+            exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+        ) {
             Column(Modifier.padding(start = 8.dp, end = 16.dp, bottom = 16.dp).selectableGroup()) {
                 RadioRow(
                     label = stringResource(R.string.network_settings_transport_tcp),
@@ -691,7 +709,13 @@ private fun TransportSection(wsUrl: String, onWsUrlChange: (String) -> Unit) {
                     enabled = true,
                     onClick = { websocketSelected = true },
                 )
-                if (websocketSelected) {
+                // The URL field appears the moment the WebSocket radio is picked; ease it in
+                // instead of popping the row below the radios.
+                AnimatedVisibility(
+                    visible = websocketSelected,
+                    enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                    exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+                ) {
                     OutlinedTextField(
                         value = wsUrl,
                         onValueChange = onWsUrlChange,
