@@ -93,6 +93,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -1545,6 +1546,10 @@ private fun ViewportScrollToTopFab(
     val unreadAbove = remember(sections, foolsExpanded, firstVisibleItemIndex) {
         unreadActivityBeforeDisplayIndex(sections, foolsExpanded, firstVisibleItemIndex)
     }
+    // The exit fade must not render the zero that triggered it; hold the last positive count for
+    // the badge's outgoing frames, like the other latched exits in this file.
+    var lastPositiveUnreadAbove by remember { mutableIntStateOf(0) }
+    if (unreadAbove > 0) lastPositiveUnreadAbove = unreadAbove
     val description = if (unreadAbove > 0) {
         pluralStringResource(
             R.plurals.chatlist_scroll_to_top_with_unread,
@@ -1570,7 +1575,9 @@ private fun ViewportScrollToTopFab(
                     enter = fadeIn(MotdMotion.microFadeIn) + scaleIn(MotdMotion.microFadeIn, initialScale = 0.96f),
                     exit = fadeOut(MotdMotion.microFadeOut) + scaleOut(MotdMotion.microFadeOut, targetScale = 0.96f),
                 ) {
-                    Badge { Text(if (unreadAbove > 99) "99+" else unreadAbove.toString()) }
+                    Badge {
+                        Text(if (lastPositiveUnreadAbove > 99) "99+" else lastPositiveUnreadAbove.toString())
+                    }
                 }
             },
         ) {
