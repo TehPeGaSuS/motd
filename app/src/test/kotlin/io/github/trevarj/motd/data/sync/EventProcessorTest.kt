@@ -162,31 +162,77 @@ class EventProcessorTest {
     }
 
     @Test
-    fun `history self and muted live chat retain archive`() = runTest {
+    fun `new history catch-up peer chat revives an unmuted archive`() = runTest {
         val room = db.bufferDao().insert(
             BufferEntity(networkId = networkId, name = "#archive", displayName = "#archive", type = BufferType.CHANNEL, archived = true),
         )
+
+        processor.process(networkId, IrcEvent.HistoryBatch("#archive", listOf(
+            IrcEvent.ChatMessage(
+                ctx = ctx(msgid = "caught-up", time = 2000).copy(batchId = "history"), kind = IrcEvent.ChatKind.PRIVMSG,
+                source = Prefix("alice"), target = "#archive", text = "new while away", isSelf = false, replyToMsgid = null,
+            ),
+        )))
+
+        assertFalse(db.bufferDao().observeById(room)!!.archived)
+    }
+
+    @Test
+    fun `push-delivered new peer chat revives an unmuted archive`() = runTest {
+        val room = db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "#archive", displayName = "#archive", type = BufferType.CHANNEL, archived = true),
+        )
+
+        processor.processPush(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "pushed", time = 2000), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#archive", text = "pushed while away", isSelf = false, replyToMsgid = null,
+        ))
+
+        assertFalse(db.bufferDao().observeById(room)!!.archived)
+    }
+
+    @Test
+    fun `backfill self and muted chat retain archive`() = runTest {
+        // Seed a newest already-read message, then archive: replayed older or duplicate
+        // history must not resurrect the chat.
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "seen", time = 5000), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#archive", text = "seen", isSelf = false, replyToMsgid = null,
+        ))
+        val room = db.bufferDao().byName(networkId, "#archive")!!.id
+        val seen = db.messageDao().byMsgid(room, "seen")!!
+        db.bufferDao().advanceLocalReadAnchor(room, seen.serverTime, seen.id)
+        db.bufferDao().setArchived(room, true)
         suspend fun archived() = db.bufferDao().observeById(room)!!.archived
 
         processor.process(networkId, IrcEvent.HistoryBatch("#archive", listOf(
             IrcEvent.ChatMessage(
-                ctx = ctx(msgid = "history").copy(batchId = "history"), kind = IrcEvent.ChatKind.PRIVMSG,
+                ctx = ctx(msgid = "backfill", time = 1000).copy(batchId = "history"), kind = IrcEvent.ChatKind.PRIVMSG,
                 source = Prefix("alice"), target = "#archive", text = "old", isSelf = false, replyToMsgid = null,
             ),
         )))
         assertTrue(archived())
 
         processor.process(networkId, IrcEvent.ChatMessage(
-            ctx = ctx(msgid = "self"), kind = IrcEvent.ChatKind.PRIVMSG,
+            ctx = ctx(msgid = "self", time = 6000), kind = IrcEvent.ChatKind.PRIVMSG,
             source = Prefix("me"), target = "#archive", text = "mine", isSelf = true, replyToMsgid = null,
         ))
         assertTrue(archived())
 
         db.bufferDao().setMuted(room, true)
         processor.process(networkId, IrcEvent.ChatMessage(
-            ctx = ctx(msgid = "muted-live"), kind = IrcEvent.ChatKind.PRIVMSG,
+            ctx = ctx(msgid = "muted-live", time = 7000), kind = IrcEvent.ChatKind.PRIVMSG,
             source = Prefix("alice"), target = "#archive", text = "still hidden", isSelf = false, replyToMsgid = null,
         ))
+        assertTrue(archived())
+
+        db.bufferDao().setMuted(room, false)
+        processor.process(networkId, IrcEvent.HistoryBatch("#archive", listOf(
+            IrcEvent.ChatMessage(
+                ctx = ctx(msgid = "read-elsewhere", time = 5000).copy(batchId = "history2"), kind = IrcEvent.ChatKind.PRIVMSG,
+                source = Prefix("alice"), target = "#archive", text = "duplicate-time replay", isSelf = false, replyToMsgid = null,
+            ),
+        )))
         assertTrue(archived())
     }
 

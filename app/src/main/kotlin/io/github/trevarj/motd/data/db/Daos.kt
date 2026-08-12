@@ -421,6 +421,32 @@ interface BufferDao {
     @Query("UPDATE buffers SET archived = 0 WHERE id = :id AND muted = 0")
     suspend fun unarchiveIfUnmuted(id: RoomId): Int
 
+    /**
+     * Genuinely new peer activity delivered off the live socket (history catch-up, replay, push)
+     * also revives an unmuted conversation, but only when the inserted row is unread and newer
+     * than every other stored chat row — backfill, gap fills, and duplicate transports must
+     * retain the user's choice.
+     */
+    @Query(
+        """UPDATE buffers SET archived = 0
+           WHERE id = :id AND archived = 1 AND muted = 0
+             AND :serverTime > MAX(COALESCE(localReadAnchorTime, 0), COALESCE(localUnreadFloorTime, 0))
+             AND NOT EXISTS(
+                 SELECT 1 FROM messages m
+                 WHERE m.bufferId = :id AND m.id != :eventId
+                   AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+                   AND (m.serverTime > :serverTime
+                        OR (m.serverTime = :serverTime AND m.timelineOrder > :timelineOrder)
+                        OR (m.serverTime = :serverTime AND m.timelineOrder = :timelineOrder
+                            AND m.id > :eventId)))""",
+    )
+    suspend fun unarchiveIfUnmutedForNewPeerActivity(
+        id: RoomId,
+        eventId: Long,
+        serverTime: Long,
+        timelineOrder: Long,
+    ): Int
+
     /** Write via a stale redirect shell to its current canonical conversation. */
     @Query(
         """UPDATE buffers SET layoutDensityOverride = :layout

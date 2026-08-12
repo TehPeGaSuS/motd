@@ -473,10 +473,21 @@ class EventProcessor @Inject constructor(
                         selfAttributionAuthoritative = route.selfAttributionAuthoritative,
                     ),
                 )
-                // Only a new peer chat received live from the server revives an archive. History,
-                // push, self echoes, and system activity deliberately retain the user's choice.
-                if (origin == EventOrigin.LIVE && !sourceIsSelf && type != BufferType.SERVER) {
-                    bufferDao.unarchiveIfUnmuted(ingested.event.bufferId)
+                // A new peer chat revives an unmuted archive. Live delivery is authoritative on
+                // its own; history, replay, and push revive only when they insert a genuinely new
+                // newest unread row, so backfill, gap fills, and duplicate transports retain the
+                // user's choice. Self echoes and system activity never revive.
+                if (!sourceIsSelf && type != BufferType.SERVER) {
+                    if (origin == EventOrigin.LIVE) {
+                        bufferDao.unarchiveIfUnmuted(ingested.event.bufferId)
+                    } else if (ingested is IngestResult.Inserted) {
+                        bufferDao.unarchiveIfUnmutedForNewPeerActivity(
+                            ingested.event.bufferId,
+                            ingested.event.id,
+                            ingested.event.serverTime,
+                            ingested.event.timelineOrder,
+                        )
+                    }
                 }
                 ingested
             }
