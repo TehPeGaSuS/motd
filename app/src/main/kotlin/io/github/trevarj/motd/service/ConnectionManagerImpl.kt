@@ -776,7 +776,7 @@ class ConnectionManagerImpl @Inject constructor(
     override suspend fun stopAll() = withContext(NonCancellable) {
         // Captured before the registry stops, for the same reason as in [disconnect]: a pass still
         // winding down in the coordinator's scope is only silenceable by its connection's identity.
-        val retiring = networksById.keys.associateWith { clientFor(it) }
+        val retiring = networksToRetire(networksById.keys, catchUpJobs.keys).associateWith { clientFor(it) }
         sendLifecycle.quiesce(
             onBlocked = {
                 backgroundRetention.cancel()
@@ -795,6 +795,13 @@ class ConnectionManagerImpl @Inject constructor(
                 historyResyncCoordinator.retireNetwork(networkId, client)
             }
             completedCatchUps.clear()
+            // Jobs registered between the retiring-map capture and this sweep were cancelled but
+            // never retired; retire them too so a catch-up racing shutdown can't leave badges
+            // or progress painted.
+            catchUpJobs.keys.filter { it !in retiring }.forEach { networkId ->
+                catchUpJobs.remove(networkId)?.cancelAndJoin()
+                historyResyncCoordinator.retireNetwork(networkId, null)
+            }
             catchUpJobs.values.forEach { it.cancel() }
             catchUpJobs.clear()
             pushSuspendedIds.clear()
@@ -827,8 +834,9 @@ class ConnectionManagerImpl @Inject constructor(
     override suspend fun disconnect(networkId: Long) {
         // Record intent before removal so the next reconcile does not re-create the actor.
         userIntents[networkId] = false
-        // Captured before the actor is torn down: retirement has to name the exact connection whose
-        // catch-up pass may still be winding down inside the coordinator's own scope.
+        // Captured before the actor is torn down: retirement names the exact connection whose
+        // catch-up pass may still be winding down inside the coordinator's own scope. Null when the
+        // actor is already gone, which retires the network's existing passes without naming one.
         val client = clientFor(networkId)
         completedCatchUps.remove(networkId)
         registry.disconnect(networkId)
@@ -2229,6 +2237,17 @@ internal fun wantedNetworkUsesEmbeddedReality(
     }
     return endpoint.obfsMode == ObfsMode.EMBEDDED_REALITY
 }
+
+/**
+ * Networks [ConnectionManagerImpl.stopAll] has to retire in the history coordinator. The known
+ * networks are the obvious half. A tracked verification job can outlive its row — the network was
+ * deleted while its pass was still in flight — and cancelling that job on its own leaves the waiting
+ * badges and progress entry its pass painted up until the next pass or the end of the process, so
+ * every network with a tracked job is retired too. Same pure-function testing style as
+ * [wantedNetworkIds] / [shouldRunForegroundVerification].
+ */
+internal fun networksToRetire(known: Set<Long>, trackedCatchUps: Set<Long>): Set<Long> =
+    known + trackedCatchUps
 
 /** A catch-up pass that converged, tagged with the exact socket that served it. */
 internal data class CompletedCatchUp(val client: Any, val atElapsedMs: Long)

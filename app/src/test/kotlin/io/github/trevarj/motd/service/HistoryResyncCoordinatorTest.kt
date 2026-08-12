@@ -2789,6 +2789,101 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun retiringWithoutAConnectionSilencesASupersededClientsLatePass() = runTest {
+        val otherId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "#other",
+                displayName = "#other",
+                type = BufferType.CHANNEL,
+            ),
+        )
+        val onTheWire = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val current = AtomicBoolean(true)
+        // The superseded client's pass: still on the wire for #chan when everything else happens.
+        // Both connections advertise labeled responses so the successor's own request is not queued
+        // behind the parked one on the per-network wire gate.
+        val stale = FakeSource(supportsConcurrent = true) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
+                else -> {
+                    onTheWire.complete(Unit)
+                    release.await()
+                    FakeResponse(listOf(message("m1", 100)), endOfHistory = true)
+                }
+            }
+        }
+        val successor = FakeSource(supportsConcurrent = true) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
+                else -> FakeResponse(
+                    listOf(message("m-other", 100, target = "#other")),
+                    endOfHistory = true,
+                )
+            }
+        }
+
+        val stalePass = async {
+            coordinator.resyncNetwork(
+                networkId,
+                openTargets(bufferId to "#chan"),
+                stale,
+                isCurrent = { current.get() },
+            )
+        }
+        onTheWire.await()
+        // A stacked reconnect: the successor's pass takes the network's session slot, so the stale
+        // pass is no longer the one a retirement can reach through that slot.
+        coordinator.resyncNetwork(networkId, openTargets(otherId to "#other"), successor)
+        // The user disconnects, and the actor is already gone — the caller has no client to name.
+        coordinator.retireNetwork(networkId, null)
+        current.set(false)
+        release.complete(Unit)
+        stalePass.await()
+
+        // Nothing is going to reconnect this network: the stale pass's abandon must not repaint its
+        // survivors as waiting after the disconnect cleared them.
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+        assertEquals(emptyMap<Long, SyncPassProgress>(), coordinator.passProgress.value)
+    }
+
+    @Test
+    fun retiringWithoutAConnectionLeavesTheNextReconnectsPassPublishing() = runTest {
+        // A retirement that could not name its connection covers the passes that already exist, not
+        // the network: a later reconnect has to sync and paint statuses normally.
+        coordinator.markAwaitingConnection(networkId, listOf(bufferId))
+        coordinator.retireNetwork(networkId, null)
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+
+        var whileSyncing: HistorySyncStatus? = null
+        var progressWhileSyncing: Map<Long, SyncPassProgress>? = null
+        val reconnected = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
+                else -> {
+                    whileSyncing = coordinator.syncStatuses.value[bufferId]
+                    progressWhileSyncing = coordinator.passProgress.value
+                    FakeResponse(listOf(message("m1", 100)), endOfHistory = true)
+                }
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(1),
+            coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), reconnected),
+        )
+
+        assertEquals(HistorySyncStatus.Syncing, whileSyncing)
+        assertEquals(
+            mapOf(networkId to SyncPassProgress(total = 1, settled = 0)),
+            progressWhileSyncing,
+        )
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+        assertEquals(emptyMap<Long, SyncPassProgress>(), coordinator.passProgress.value)
+    }
+
+    @Test
     fun retiringANetworkSettlesAPassSuspendedForRetry() = runTest {
         val source = FakeSource { request ->
             when (request.subcommand) {
@@ -2951,6 +3046,17 @@ class HistoryResyncCoordinatorTest {
                 .filter { it.subcommand == ChatHistoryRequest.Subcommand.LATEST }
                 .map { it.target },
         )
+    }
+
+    @Test
+    fun stopAllRetiresNetworksItOnlyKnowsThroughATrackedCatchUp() {
+        assertEquals(setOf(1L, 2L), networksToRetire(setOf(1L, 2L), emptySet()))
+        assertEquals(setOf(1L, 2L), networksToRetire(setOf(1L, 2L), setOf(2L)))
+        // The network row was deleted while its verification pass was still tracked. Cancelling that
+        // job is not enough: without a retirement its waiting badges and progress entry survive.
+        assertEquals(setOf(1L, 7L), networksToRetire(setOf(1L), setOf(7L)))
+        assertEquals(setOf(7L), networksToRetire(emptySet(), setOf(7L)))
+        assertEquals(emptySet<Long>(), networksToRetire(emptySet(), emptySet()))
     }
 
     private data class ForegroundVerificationCase(

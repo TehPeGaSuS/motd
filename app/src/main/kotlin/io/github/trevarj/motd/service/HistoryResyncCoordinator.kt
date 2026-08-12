@@ -291,13 +291,16 @@ class HistoryResyncCoordinator @Inject constructor(
     // The newest network pass's session, kept across a retryable failure so the catch-up loop's
     // final give-up verdict can still be painted onto whatever that pass left behind.
     private val networkSessions = ConcurrentHashMap<Long, SyncStatusSession>()
-    // Connections the caller took offline deliberately, keyed by network and holding the retired
-    // connection's flight identity. A pass runs in this coordinator's own scope, so it outlives the
-    // caller that started it: this tombstone is how a pass still winding down for a retired
-    // connection learns that nothing it publishes may reach the UI. A pass for any other identity
-    // (the next connection) clears it. Weak because a tombstone whose connection is unreachable can
-    // have no late pass left to silence, and a dead client must not be pinned by this map.
-    private val retiredNetworks = ConcurrentHashMap<Long, WeakReference<Any>>()
+    // Connections the caller took offline deliberately, keyed by network. A pass runs in this
+    // coordinator's own scope, so it outlives the caller that started it: this tombstone is how a
+    // pass still winding down for a retired connection learns that nothing it publishes may reach
+    // the UI. At most one entry per network, replaced by that network's next retirement; a tombstone
+    // a live pass has outgrown simply covers nothing. See [NetworkRetirement].
+    private val retiredNetworks = ConcurrentHashMap<Long, NetworkRetirement>()
+    // Monotonic ticket drawn by every network session under [retireGuard]. It is what makes an
+    // unnamed retirement safe: such a tombstone covers exactly the sessions whose ticket predates
+    // it, so a later reconnect's pass is never silenced by it.
+    private val sessionTickets = AtomicLong()
     // Serializes retirement against a pass's terminal so a terminal cannot slip its republication
     // between the tombstone and the clear. Always the OUTER lock: a session's own monitor is only
     // ever taken inside it, never the reverse.
@@ -375,28 +378,54 @@ class HistoryResyncCoordinator @Inject constructor(
      * and [sourceIdentity] is tombstoned so a pass still winding down in this coordinator's scope
      * publishes nothing late — in particular it may not repaint AwaitingConnection or re-register
      * waiting buffers after this call has cleared them.
+     *
+     * [sourceIdentity] is only the connection the caller knows about, and may be null when its actor
+     * was already gone. Either way the tombstone also covers every session of this network that
+     * already exists, so a pass for an earlier superseded client cannot repaint waiting badges after
+     * this clear. See [NetworkRetirement].
      */
     fun retireNetwork(networkId: Long, sourceIdentity: Any?) = synchronized(retireGuard) {
-        if (sourceIdentity != null) retiredNetworks[networkId] = WeakReference(sourceIdentity)
+        retiredNetworks[networkId] = NetworkRetirement(sourceIdentity, sessionTickets.get())
         networkSessions.remove(networkId)?.retire()
         clearAwaitingConnection(networkId)
         _passProgress.update { it - networkId }
     }
 
     /**
-     * Open a network pass's session. A pass for any connection other than a retired one proves the
-     * network is live again and drops the tombstone; the retired connection's OWN late pass keeps
-     * it, stays silent, and never takes the session slot away from its successor.
+     * Open a network pass's session. A pass the network's tombstone does not cover proves the
+     * network is live again and takes the session slot; a covered pass — the retired connection's
+     * OWN late pass, or one that predates an unnamed retirement — stays silent and never takes the
+     * slot away from its successor.
      */
     private fun beginNetworkSession(networkId: Long, sourceIdentity: Any): SyncStatusSession =
         synchronized(retireGuard) {
-            retiredNetworks.computeIfPresent(networkId) { _, retired ->
-                if (retired.get() === sourceIdentity) retired else null
-            }
-            val session = SyncStatusSession(networkId, sourceIdentity)
-            if (!retiredNetworks.containsKey(networkId)) networkSessions[networkId] = session
+            // Drawn inside the guard, so a session created before a retirement always carries a
+            // smaller ticket than that retirement recorded, and one created after always a larger.
+            val session = SyncStatusSession(networkId, sourceIdentity, sessionTickets.incrementAndGet())
+            if (!session.networkRetired()) networkSessions[networkId] = session
             session
         }
+
+    /**
+     * One network's tombstone, covering every pass that may not publish after it.
+     *
+     * By ticket: every session that already existed when the network was taken offline. Those are
+     * exactly the passes that could still repaint the statuses this retirement just cleared —
+     * including one for an earlier superseded client, which is invisible to the caller and which
+     * the retired connection's identity alone would miss. A session created later draws a newer
+     * ticket and is never covered, so the next connection's pass publishes normally.
+     *
+     * By identity: passes the retired connection starts afterwards anyway. A catch-up loop the
+     * caller could not stop can still open one, and it must be silent even though its ticket is
+     * newer. Held weakly, because a tombstone whose connection is unreachable has no late pass left
+     * to silence and a dead client must not be pinned by this map.
+     */
+    private class NetworkRetirement(sourceIdentity: Any?, private val atTicket: Long) {
+        private val identity: WeakReference<Any>? = sourceIdentity?.let(::WeakReference)
+
+        fun covers(sourceIdentity: Any?, ticket: Long): Boolean =
+            ticket <= atTicket || (sourceIdentity != null && identity?.get() === sourceIdentity)
+    }
 
     /**
      * One pass's per-buffer status publication: registration, the generation guard that keeps a
@@ -416,6 +445,9 @@ class HistoryResyncCoordinator @Inject constructor(
         // session is still its own before settling it, and so retirement can silence exactly the
         // passes that belong to a connection the user took offline.
         private val sourceIdentity: Any? = null,
+        // Creation order among network sessions, compared against an unnamed retirement's watermark.
+        // A reconcile session has no ticket to lose: it is never covered by a network retirement.
+        private val ticket: Long = Long.MAX_VALUE,
     ) {
         private val monitor = Any()
         // Registration order; an entry lives here until that buffer settles.
@@ -434,6 +466,13 @@ class HistoryResyncCoordinator @Inject constructor(
 
         /** True when [identity] is the connection that started this pass. */
         fun ownedBy(identity: Any): Boolean = sourceIdentity === identity
+
+        /**
+         * True when this pass's network is already retired under a tombstone that covers it. Latches
+         * the pass silent so it never registers or publishes anything. Callers must hold
+         * [retireGuard] so the answer cannot change under them.
+         */
+        fun networkRetired(): Boolean = synchronized(monitor) { retiredLocked() }
 
         /** Register a buffer in this pass. Re-registration within one pass keeps the first turn. */
         fun queue(bufferId: Long) {
@@ -538,8 +577,8 @@ class HistoryResyncCoordinator @Inject constructor(
         }
 
         private fun retiredLocked(): Boolean {
-            if (!retired && networkId != null && sourceIdentity != null &&
-                retiredNetworks[networkId]?.get() === sourceIdentity
+            if (!retired && networkId != null &&
+                retiredNetworks[networkId]?.covers(sourceIdentity, ticket) == true
             ) {
                 retired = true
             }
