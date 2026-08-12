@@ -15,8 +15,8 @@ import org.junit.Test
 
 /**
  * Per-row sync cues on [ChatListRowItem]: every cue (spinner, queued/waiting ring, error dot,
- * unavailable glyph) renders in the trailing badge row, overlaying the unread badge's corner rather
- * than replacing it, so the count stays readable through the whole sync lifecycle.
+ * unavailable glyph) renders inline on the title line after the network chip, so the trailing
+ * unread count stays readable through the whole sync lifecycle.
  */
 class ChatListSyncIndicatorUiTest {
     @get:Rule
@@ -75,7 +75,7 @@ class ChatListSyncIndicatorUiTest {
         setRow(ChatListSyncIndicator.ERROR, unreadCount = 7)
 
         compose.onNodeWithTag("chatlist_row_sync_error", useUnmergedTree = true).assertIsDisplayed()
-        // A failed sync must never hide how much is unread: the dot overlays the badge's corner.
+        // A failed sync must never hide how much is unread: the dot lives on the title line.
         compose.onNodeWithTag("chatlist_row_unread_badge", useUnmergedTree = true).assertIsDisplayed()
     }
 

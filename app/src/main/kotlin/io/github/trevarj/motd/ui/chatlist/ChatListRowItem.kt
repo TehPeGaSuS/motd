@@ -286,6 +286,12 @@ fun ChatListRowItem(
                         emphasized = isUnread,
                     )
                 }
+                // The sync cue trails the network chip on the title line, well away from the
+                // trailing unread badge it used to overlap.
+                if (syncIndicator != ChatListSyncIndicator.NONE) {
+                    Spacer(Modifier.width(6.dp))
+                    SyncStatusBadgeContent(syncIndicator)
+                }
             }
             Spacer(Modifier.size(2.dp))
             Row(
@@ -372,13 +378,13 @@ fun ChatListRowItem(
                         modifier = Modifier.testTag("chatlist_row_mention_badge"),
                     )
                 }
-                // The sync cue overlays the unread badge's corner instead of replacing it: a
-                // failed or stalled sync must never hide how much is unread.
-                SyncAwareUnreadBadge(
-                    indicator = syncIndicator,
-                    unread = badges.unread,
-                    unreadIncomplete = badges.unreadIncomplete,
-                )
+                badges.unread?.let { count ->
+                    UnreadBadge(
+                        count = count,
+                        lowerBound = badges.unreadIncomplete,
+                        modifier = Modifier.testTag("chatlist_row_unread_badge"),
+                    )
+                }
             }
         }
     }
@@ -419,55 +425,10 @@ private fun PresenceAvatar(
 }
 
 /**
- * The trailing badge slot: the unread count keeps the centered 20dp footprint it always had, and
- * any history-sync cue overlays its top-right corner with a ring of the row's own background so the
- * two read as separate marks. Corner-anchoring rather than substitution means an error or a stalled
- * queue never hides the count, and the slot's size is driven purely by the count, so a cue
- * appearing or settling never reflows the row. No live region: rows churn constantly during a
- * resync pass, and announcing every transition would spam TalkBack.
+ * Per-row history-sync cue, rendered inline on the title line after the network chip so it never
+ * collides with the trailing unread badge. No live region: rows churn constantly during a resync
+ * pass, and announcing every transition would spam TalkBack.
  */
-@Composable
-private fun SyncAwareUnreadBadge(
-    indicator: ChatListSyncIndicator,
-    unread: Int?,
-    unreadIncomplete: Boolean,
-) {
-    if (indicator == ChatListSyncIndicator.NONE && unread == null) return
-    Box(
-        modifier = Modifier.defaultMinSize(minWidth = 20.dp, minHeight = 20.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        unread?.let { count ->
-            UnreadBadge(
-                count = count,
-                lowerBound = unreadIncomplete,
-                modifier = Modifier.testTag("chatlist_row_unread_badge"),
-            )
-        }
-        if (indicator != ChatListSyncIndicator.NONE) {
-            Box(
-                modifier = Modifier
-                    .align(if (unread == null) Alignment.Center else Alignment.TopEnd)
-                    .then(
-                        if (unread == null) {
-                            Modifier
-                        } else {
-                            // PresenceBadge idiom: a ring of the surface behind the row separates
-                            // the cue from the badge it sits on.
-                            Modifier
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.background)
-                                .padding(1.5.dp)
-                        },
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                SyncStatusBadgeContent(indicator)
-            }
-        }
-    }
-}
-
 @Composable
 private fun SyncStatusBadgeContent(indicator: ChatListSyncIndicator) {
     when (indicator) {
