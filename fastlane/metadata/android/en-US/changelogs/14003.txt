@@ -1,0 +1,5 @@
+- Smoother motion throughout: chat list, composer, reactions, image viewer, search, settings, channel info, and onboarding now ease instead of snapping.
+- Opening a chat lands at the unread divider instead of jumping to the bottom.
+- The history-sync cue now sits on the title line beside the network chip.
+- Unread badges keep their last count while fading out.
+- The motd wordmark on the About screen now matches the app's own typography.
