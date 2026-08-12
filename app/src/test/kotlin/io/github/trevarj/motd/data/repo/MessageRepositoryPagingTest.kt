@@ -282,6 +282,73 @@ class MessageRepositoryPagingTest {
     }
 
     @Test
+    fun chatListUnreadCueAndEntryUnreadAnchorCountTheSameRows() = runTest {
+        // The chat-list badge (observeChatList's unreadCount SQL in Daos.kt) and the entry divider
+        // (firstVisibleUnreadQuery) are two statements of one promise: "N new messages" means entry
+        // can land on the first of them. If either counts a row class the other lacks, the badge
+        // shows N > 0 while entry resolves nothing and silently parks at the bottom — payload-bearing
+        // DCC offers were exactly such a class. Enumerating the entry anchor row by row must
+        // reproduce the cue count: for a read room from its marker, and for a never-read room from
+        // the epoch anchor entry resolves with (matching the cue's COALESCE of the missing anchor
+        // to time zero).
+        val networkId = db.networkDao().insert(network("parity"))
+        val readId = db.bufferDao().insert(buffer(networkId, "#read", readMarkerTime = 10))
+        val neverReadId = db.bufferDao().insert(buffer(networkId, "#never-read"))
+        val spec = MessageVisibilitySpec()
+        // One of every row class either side counts, per buffer. Expected cue membership:
+        // conversation kinds from someone else and payload-bearing incoming DCC offers; never self
+        // rows, presence rows, or payload-less DCC records.
+        suspend fun seed(roomId: Long): List<Long> {
+            val counted = db.messageDao().insertAll(
+                listOf(
+                    message(roomId, "old chat", serverTime = 5, dedupKey = "old"),
+                    message(roomId, "chat", serverTime = 11, dedupKey = "chat"),
+                    message(roomId, "notice", serverTime = 12, dedupKey = "notice", kind = MessageKind.NOTICE),
+                    message(roomId, "action", serverTime = 13, dedupKey = "action", kind = MessageKind.ACTION),
+                    message(roomId, "offer", serverTime = 16, dedupKey = "offer", kind = MessageKind.DCC_TRANSFER)
+                        .copy(eventPayload = "payload-v1"),
+                ),
+            )
+            db.messageDao().insertAll(
+                listOf(
+                    message(roomId, "own", serverTime = 14, dedupKey = "own", isSelf = true),
+                    message(roomId, "join", serverTime = 15, dedupKey = "join", kind = MessageKind.JOIN),
+                    message(roomId, "offer record", serverTime = 17, dedupKey = "record", kind = MessageKind.DCC_TRANSFER),
+                    message(roomId, "own offer", serverTime = 18, dedupKey = "own-offer", kind = MessageKind.DCC_TRANSFER, isSelf = true)
+                        .copy(eventPayload = "payload-v1"),
+                ),
+            )
+            return counted
+        }
+        suspend fun unreadAnchorWalk(roomId: Long, from: TimelineAnchor): List<Long> {
+            val walked = mutableListOf<Long>()
+            var anchor = from
+            while (true) {
+                anchor = reader.firstVisibleUnreadAnchor(roomId, anchor, spec) ?: break
+                walked += anchor.eventId
+            }
+            return walked
+        }
+        val readCounted = seed(readId)
+        val neverReadCounted = seed(neverReadId)
+        val cue = db.bufferDao().observeChatList().first().associateBy { it.bufferId }
+
+        // Read room: the marker retires the serverTime-5 row on both sides.
+        val readMarker = checkNotNull(
+            reader.effectiveLocalReadAnchor(buffer(networkId, "#read", readMarkerTime = 10).copy(id = readId)),
+        )
+        val readWalk = unreadAnchorWalk(readId, readMarker)
+        assertEquals(readCounted.drop(1), readWalk)
+        assertEquals(readWalk.size, cue.getValue(readId).unreadCount)
+
+        // Never-read room: the cue counts every visible row, and entry's epoch anchor
+        // (ChatViewModel.resolveEntryAnchors) enumerates exactly the same set.
+        val neverReadWalk = unreadAnchorWalk(neverReadId, TimelineAnchor(0, 0, Long.MIN_VALUE))
+        assertEquals(neverReadCounted, neverReadWalk)
+        assertEquals(neverReadWalk.size, cue.getValue(neverReadId).unreadCount)
+    }
+
+    @Test
     fun importingOlderHistoryAfterRecentPageKeepsNewestWindowInFront() = runTest {
         val recentIds = db.messageDao().insertAll(
             (1..25).map { ordinal ->

@@ -765,6 +765,23 @@ internal fun entryAnchorMoved(entered: ChatPositionTarget, repaired: ChatPositio
         entered.serverTime != repaired.serverTime
 
 /**
+ * Entry landed at the live bottom with no divider to show for it: nothing resolved as unread at
+ * rest, so the target names no row (index 0, no identity) and the visit froze its boundary as
+ * ABSENT. Such an entry has produced no outcome that a post-catch-up correction could yank — there
+ * is no shown divider to move and no chosen row to abandon — so it stays correctable even after the
+ * screen settles it, unlike a placed divider or a restored viewport ([fromSavedPosition]), both of
+ * which the reader has already seen.
+ */
+internal fun nullDividerBottomEntry(
+    firstUnread: TimelineAnchor?,
+    entered: ChatPositionTarget,
+): Boolean = firstUnread == null &&
+    entered.index == 0 &&
+    entered.expectedEventId == null &&
+    entered.expectedMsgid == null &&
+    !entered.fromSavedPosition
+
+/**
  * [firstUnreadWinsEntry] applied to the two entry indices, for the Pager key.
  *
  * The key must name the anchor entry will LAND on, not merely one deep enough to cover both:

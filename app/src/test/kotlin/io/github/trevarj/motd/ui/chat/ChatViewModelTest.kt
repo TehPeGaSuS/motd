@@ -1379,10 +1379,65 @@ class ChatViewModelTest {
     @Test
     fun `a placed entry and its shown divider are never corrected by late catch-up`() = runTest {
         // The other half of the contract, and the one the frozen-boundary invariant depends on.
-        // Once the screen has placed the entry the position is on screen and the divider has been
-        // SHOWN: both are outcomes the reader has already seen, and history arriving afterwards —
-        // catch-up or a gap fill across its seam — belongs below that boundary rather than
-        // redrawing it somewhere else under them.
+        // Something WAS unread at rest, so entry resolved a real divider and the screen placed it.
+        // Once it has, the position is on screen and the divider has been SHOWN: both are outcomes
+        // the reader has already seen, and history arriving afterwards — catch-up or a gap fill
+        // across its seam — belongs below that boundary rather than redrawing it somewhere else
+        // under them. (A bottom entry that froze NO divider has produced no such outcome; that case
+        // stays correctable, pinned by the test below.)
+        val markerId = db.messageDao().insertAll(
+            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
+        ).single()
+        val unreadId = db.messageDao().insertAll(
+            listOf(message(channel.id, "at-rest unread", "m150", "alice").copy(serverTime = 150)),
+        ).single()
+        val manager = FakeConnectionManager(
+            networkId = network.id,
+            state = IrcClientState.Ready("me", emptySet(), emptyMap()),
+            client = testClient(),
+            historyPending = setOf(network.id),
+        )
+        val messages = FakeMessageRepository(
+            events = listOf(checkNotNull(db.messageDao().byCanonicalId(unreadId))),
+        )
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
+            manager,
+            messages = messages,
+        )
+        vm.state.first { it.buffer != null }
+        val entered = checkNotNull(vm.initialTarget.first { it != null })
+        assertEquals(unreadId, entered.expectedEventId)
+        assertEquals(unreadId - 1L, vm.unreadEntrySnapshot.value?.marker?.eventId)
+        vm.onInitialPositionHandled()
+
+        // Catch-up lands an unread row OLDER than the shown divider — the exact input that would
+        // have moved the boundary while the placement was still in flight.
+        val caughtUpId = db.messageDao().insertAll(
+            listOf(message(channel.id, "caught up", "m101", "alice").copy(serverTime = 101)),
+        ).single()
+        messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(caughtUpId))
+        manager.finishHistoryCatchUp(network.id)
+        advanceUntilIdle()
+
+        assertNull("a placed entry is an outcome, not a placement in flight", vm.initialTarget.value)
+        assertEquals(
+            "the frozen boundary is not re-derived once it has been shown",
+            unreadId - 1L,
+            vm.unreadEntrySnapshot.value?.marker?.eventId,
+        )
+        assertEquals(EntryPositionState.Settled, vm.entryState.value)
+    }
+
+    @Test
+    fun `late catch-up still corrects a settled bottom entry that froze no divider`() = runTest {
+        // The gap between the two contracts above. Nothing was unread at rest, so entry resolved
+        // the read-marker fallback at the live bottom and froze the divider as ABSENT; the screen
+        // settles that identity-less target in milliseconds, long before catch-up lands the unread
+        // backlog. Nothing was SHOWN that a correction could yank — no divider, no chosen row — so
+        // the one owed correction survives the settled latch: the republished target and the
+        // refined boundary land on the first unread row, exactly as they would have had the screen
+        // still been placing.
         val markerId = db.messageDao().insertAll(
             listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
         ).single()
@@ -1399,19 +1454,71 @@ class ChatViewModelTest {
             messages = messages,
         )
         vm.state.first { it.buffer != null }
-        checkNotNull(vm.initialTarget.first { it != null })
+        val entered = checkNotNull(vm.initialTarget.first { it != null })
+        assertNull(entered.expectedEventId)
+        assertNull(vm.unreadEntrySnapshot.value)
+        runCurrent()
+        // While that correction is live the settled-at-bottom viewport must not mark read: it
+        // would acknowledge the arriving backlog before the re-resolve, leaving the correction
+        // nothing unread to land on and erasing the divider for the next visit too.
+        assertTrue(vm.viewportReadHold.value)
         vm.onInitialPositionHandled()
+        assertEquals(EntryPositionState.Settled, vm.entryState.value)
 
         val caughtUpId = db.messageDao().insertAll(
             listOf(message(channel.id, "caught up", "m101", "alice").copy(serverTime = 101)),
         ).single()
         messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(caughtUpId))
         manager.finishHistoryCatchUp(network.id)
+
+        val repaired = checkNotNull(vm.initialTarget.first { it?.expectedEventId != null })
+        assertEquals(caughtUpId, repaired.expectedEventId)
+        assertEquals(101L, repaired.serverTime)
+        assertTrue(repaired.placeAtTop)
+        // The boundary this visit froze as an absence is refined onto the corrected row.
+        assertEquals(caughtUpId - 1L, vm.unreadEntrySnapshot.value?.marker?.eventId)
+        // The settled latch never downgrades; the correction republishes through it instead.
+        assertEquals(EntryPositionState.Settled, vm.entryState.value)
+        // The hold outlives the republish — releasing on publish would let the still-bottom
+        // viewport acknowledge the backlog in the frames before the corrected position lands —
+        // and is released the moment the screen consumes the target.
+        assertTrue(vm.viewportReadHold.value)
+        vm.onInitialPositionHandled()
+        runCurrent()
+        assertFalse(vm.viewportReadHold.value)
+    }
+
+    @Test
+    fun `the viewport read hold expires with the correction window`() = runTest {
+        // The bound that keeps the hold from reintroducing the 42-second dead window: a struggling
+        // catch-up retires the correction at ENTRY_HISTORY_READY_TIMEOUT_MS, and the hold is
+        // released with it — the at-rest bottom entry stands and read advancement re-arms.
+        val markerId = db.messageDao().insertAll(
+            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
+        ).single()
+        val manager = FakeConnectionManager(
+            networkId = network.id,
+            state = IrcClientState.Ready("me", emptySet(), emptyMap()),
+            client = testClient(),
+            historyPending = setOf(network.id),
+        )
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
+            manager,
+            messages = FakeMessageRepository(),
+        )
+        vm.state.first { it.buffer != null }
+        checkNotNull(vm.initialTarget.first { it != null })
+        runCurrent()
+        assertTrue(vm.viewportReadHold.value)
+        vm.onInitialPositionHandled()
+
+        advanceTimeBy(ENTRY_HISTORY_READY_TIMEOUT_MS + 1)
         advanceUntilIdle()
 
-        assertNull("a placed entry is an outcome, not a placement in flight", vm.initialTarget.value)
-        assertNull("the frozen boundary is not re-derived once it has been shown", vm.unreadEntrySnapshot.value)
-        assertEquals(EntryPositionState.Settled, vm.entryState.value)
+        assertFalse(vm.viewportReadHold.value)
+        assertNull(vm.initialTarget.value)
+        assertNull(vm.unreadEntrySnapshot.value)
     }
 
     @Test
@@ -1919,6 +2026,76 @@ class ChatViewModelTest {
         assertEquals(0, target.index)
         assertFalse("the newest row is a position, not a divider placement", target.placeAtTop)
         assertNull(vm.unreadEntrySnapshot.value)
+    }
+
+    @Test
+    fun `a never-read room with stored rows enters at the divider its badge promises`() = runTest {
+        // The chat-list cue COALESCEs a missing read anchor to time zero and counts every visible
+        // row, so a room that has never been read shows "N new messages" — while entry used to
+        // skip unread resolution entirely without a marker and silently park at the bottom with no
+        // divider. The epoch anchor closes that split: first open of a room someone else has
+        // written to lands at the oldest unread row like any other unread entry.
+        val ids = db.messageDao().insertAll(
+            (1..3).map { ordinal ->
+                message(channel.id, "unread-$ordinal", "m$ordinal", "alice").copy(
+                    serverTime = 100L * ordinal,
+                    dedupKey = "unread-$ordinal",
+                )
+            },
+        )
+        val vm = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            messages = FakeMessageRepository(
+                events = listOf(checkNotNull(db.messageDao().byCanonicalId(ids.first()))),
+                counts = MessageVisibilityReader(db),
+            ),
+        )
+        vm.state.first { it.buffer != null }
+
+        val target = checkNotNull(vm.initialTarget.first { it != null })
+        assertEquals(2, target.index)
+        assertEquals(ids.first(), target.expectedEventId)
+        assertEquals(100L, target.serverTime)
+        assertTrue(target.placeAtTop)
+        val divider = checkNotNull(vm.unreadEntrySnapshot.first { it != null })
+        assertEquals(ids.first() - 1L, divider.marker.eventId)
+    }
+
+    @Test
+    fun `an unread incoming file offer anchors the divider like any chat row`() = runTest {
+        // The chat-list cue counts payload-bearing DCC_TRANSFER rows, so a parked room whose only
+        // unread is a file offer shows a badge — and the unread anchor must resolve the same row,
+        // or the follower enters at the bottom with no divider under a badge that promised one.
+        val markerId = db.messageDao().insertAll(
+            listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
+        ).single()
+        val offerId = db.messageDao().insertAll(
+            listOf(
+                message(channel.id, "offer", "offer-1", "alice").copy(
+                    serverTime = 200,
+                    kind = MessageKind.DCC_TRANSFER,
+                    eventPayload = "payload-v1",
+                ),
+            ),
+        ).single()
+        val positions = ChatScrollPositionStore().apply { markParkedAtBottom(channel.id) }
+        val vm = viewModel(
+            channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
+            FakeConnectionManager(network.id),
+            messages = FakeMessageRepository(
+                events = listOf(checkNotNull(db.messageDao().byCanonicalId(offerId))),
+                counts = MessageVisibilityReader(db),
+            ),
+            scrollPositions = positions,
+        )
+        vm.state.first { it.buffer != null }
+
+        val target = checkNotNull(vm.initialTarget.first { it != null })
+        assertEquals(offerId, target.expectedEventId)
+        assertTrue(target.placeAtTop)
+        val divider = checkNotNull(vm.unreadEntrySnapshot.first { it != null })
+        assertEquals(offerId - 1L, divider.marker.eventId)
     }
 
     @Test

@@ -379,6 +379,10 @@ fun ChatScreen(
     val jumpTarget by viewModel.jumpTarget.collectAsStateWithLifecycle()
     val initialTarget by viewModel.initialTarget.collectAsStateWithLifecycle()
     val entryState by viewModel.entryState.collectAsStateWithLifecycle()
+    // Held while the post-catch-up correction may still move a settled bottom entry that froze no
+    // divider: settled-at-bottom mark-read would otherwise consume the arriving backlog before the
+    // corrected position (and its divider) lands. Bounded on the ViewModel side.
+    val viewportReadHold by viewModel.viewportReadHold.collectAsStateWithLifecycle()
     // Read marker frozen on entry so the "New messages" divider doesn't flash away (plans/15 #2).
     val unreadEntrySnapshot by viewModel.unreadEntrySnapshot.collectAsStateWithLifecycle()
     // Live read marker drives the FAB unread badge so it clears as messages are read (not on exit).
@@ -435,7 +439,7 @@ fun ChatScreen(
         readMarkerLive = localReadAnchor,
         rawNewestAnchor = rawNewestAnchor,
         onMarkRead = viewModel::markRead,
-        viewportReadEnabled = destinationResumed,
+        viewportReadEnabled = destinationResumed && !viewportReadHold,
         countUnreadBelowViewport = viewModel::countUnreadBelowViewport,
         nearestUnreadMentionBelow = viewModel::nearestUnreadMentionBelow,
         onBack = onHeaderBack,

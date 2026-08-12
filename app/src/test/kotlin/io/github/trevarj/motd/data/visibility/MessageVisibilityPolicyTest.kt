@@ -92,6 +92,22 @@ class MessageVisibilityPolicyTest {
     }
 
     @Test
+    fun `payload-bearing incoming file offer counts as visible unread`() {
+        // The chat-list cue counts payload-bearing DCC_TRANSFER rows, so the unread predicate must
+        // too — otherwise the badge shows N > 0 for a room whose only unread is a file offer while
+        // entry resolves no unread anchor and parks at the bottom with no divider.
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec())
+        val offer = message(kind = MessageKind.DCC_TRANSFER).copy(eventPayload = "payload-v1")
+        val record = message(kind = MessageKind.DCC_TRANSFER)
+        val ownOffer = message(kind = MessageKind.DCC_TRANSFER, isSelf = true)
+            .copy(eventPayload = "payload-v1")
+
+        assertTrue(policy.visibleUnread(offer))
+        assertFalse("a payload-less transfer record is not an attention cue", policy.visibleUnread(record))
+        assertFalse("own offers were sent, not unread", policy.visibleUnread(ownOffer))
+    }
+
+    @Test
     fun `configured fools use the network casemap used by normalized actors`() {
         val stored = message(sender = "[Alice").copy(normalizedActor = "{alice")
         val spec = MessageVisibilitySpec(fools = setOf("[alice"), foolsMode = FoolsMode.HIDE)

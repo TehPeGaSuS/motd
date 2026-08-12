@@ -89,9 +89,17 @@ class MessageVisibilityPolicy(
 
     fun activity(message: MessageEntity): Boolean = preview(message)
 
-    /** Visible unread and mention counts include only other users' meaningful chat rows. */
+    /**
+     * Visible unread and mention counts include only other users' meaningful chat rows, plus
+     * incoming file offers: the chat-list cue counts payload-bearing DCC_TRANSFER rows, so the
+     * unread anchor must too or the badge promises a divider entry never resolves.
+     */
     fun visibleUnread(message: MessageEntity): Boolean =
-        message.kind in CONVERSATION_KINDS && !message.isSelf && !isFool(message)
+        (
+            message.kind in CONVERSATION_KINDS ||
+                (message.kind == MessageKind.DCC_TRANSFER && message.eventPayload != null)
+            ) &&
+            !message.isSelf && !isFool(message)
 
     /** Hide removes fool results; Collapse keeps them so the target can be expanded on open. */
     fun search(message: MessageEntity): Boolean =
@@ -136,8 +144,12 @@ internal class MessageVisibilitySql(
 
     fun preview(alias: String = "m"): String = allOf(notPresence(alias), notFool(alias))
 
+    // The DCC disjunct mirrors the chat-list unreadCount SQL in Daos.kt: a payload-bearing
+    // incoming offer is counted by the cue, so the unread anchor must see the same row.
     fun visibleUnread(alias: String = "m"): String = allOf(
-        "${column(alias, "kind")} IN ($CONVERSATION_KIND_SQL)",
+        "(${column(alias, "kind")} IN ($CONVERSATION_KIND_SQL) " +
+            "OR (${column(alias, "kind")} = '${MessageKind.DCC_TRANSFER.name}' " +
+            "AND ${column(alias, "eventPayload")} IS NOT NULL))",
         "${column(alias, "isSelf")} = 0",
         notFool(alias),
     )
@@ -273,8 +285,9 @@ internal fun firstVisibleUnreadQuery(
 /**
  * Oldest unread nick mention among the newest [beforeIndex] visible-timeline rows: the nearest
  * such mention sitting strictly below the viewport (reversed list, index < firstVisibleItemIndex).
- * `visibleUnread` already excludes self/fools/non-chat kinds, so `hasMention = 1` narrows it to
- * mentions of our nick. Ordered ascending so the oldest (closest to the viewport edge) wins.
+ * `visibleUnread` already excludes self/fools and non-chat kinds (its DCC-offer disjunct never
+ * carries a mention), so `hasMention = 1` narrows it to mentions of our nick. Ordered ascending so
+ * the oldest (closest to the viewport edge) wins.
  */
 internal fun nearestUnreadMentionInPrefixQuery(
     bufferId: Long,

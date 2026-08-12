@@ -481,7 +481,16 @@ class ChatViewModel @Inject constructor(
         // The timeline is unbounded, so this resolves against every retained row. That is the same
         // answer a bounded call would give: a window bound could only ever hide rows the client
         // already holds, and a gap's far side is by definition rows it does not.
-        val firstUnread = marker?.let {
+        //
+        // A never-read room has no marker to resolve from, but the chat-list cue still counts every
+        // visible row it holds as unread (its SQL COALESCEs the missing anchor to time zero), so the
+        // badge promises a divider. Resolving from an epoch anchor keeps that promise: first open of
+        // a room someone else has already written to lands at the divider instead of silently
+        // parking at the bottom the cue said had N new messages above it. SERVER buffers are outside
+        // that promise — the chat list never shows them — so their first open keeps the bottom.
+        val epochAnchor = TimelineAnchor(0, 0, Long.MIN_VALUE)
+            .takeIf { room?.type != BufferType.SERVER }
+        val firstUnread = (marker ?: epochAnchor)?.let {
             visibilityReader.firstVisibleUnreadAnchor(bufferId, it, spec)
         }
         // A park cleared the saved viewport, so a follower has exactly one possible anchor: the
@@ -1738,6 +1747,16 @@ class ChatViewModel @Inject constructor(
     private val _initialTarget = MutableStateFlow<ChatPositionTarget?>(null)
     val initialTarget: StateFlow<ChatPositionTarget?> = _initialTarget.asStateFlow()
 
+    // While the post-catch-up correction may still move a settled bottom entry that froze no
+    // divider, viewport mark-read must wait: settled-at-bottom acknowledgement would consume the
+    // arriving backlog before the correction re-resolves it, leaving the correction nothing unread
+    // to reveal AND erasing the divider for the next visit. Bounded: the repair's catch-up wait is
+    // capped at ENTRY_HISTORY_READY_TIMEOUT_MS, and a republished correction releases the hold as
+    // soon as the screen consumes its target (placed, given up, or overridden by the reader).
+    private val _viewportReadHold = MutableStateFlow(false)
+    /** True while [armPostCatchUpEntryRepair] may still move a settled bottom entry. */
+    val viewportReadHold: StateFlow<Boolean> = _viewportReadHold.asStateFlow()
+
     // One-shot entry positioning as a single sealed state. Pending gates read-state advancement;
     // Settled releases it; Unresolved keeps the gate (messageUnavailable => explicit jump failure).
     // Restored bit-identically from the same three SavedState keys the latches used (settled wins).
@@ -1898,43 +1917,77 @@ class ChatViewModel @Inject constructor(
      * the paging config turns a far correction into a Pager jump rather than a scroll through
      * history.
      *
-     * It corrects a placement in progress and never an outcome:
+     * It corrects a placement in progress or a bottom entry that produced no outcome, never an
+     * outcome the reader has seen:
      *
-     *  * Entry must still be [EntryPositionState.Pending] — the screen has not finished placing the
-     *    at-rest target. Once it has, the position is on screen and the divider has been SHOWN, and
-     *    both are outcomes the reader has already seen: moving them then is the yank the frozen
-     *    boundary exists to prevent, and it would also let arriving history (a gap fill across the
-     *    catch-up seam, say) redraw a divider that is by contract frozen for the visit.
+     *  * Entry may still be [EntryPositionState.Pending] — the screen has not finished placing the
+     *    at-rest target — or it settled a [nullDividerBottomEntry]: the live bottom with the divider
+     *    frozen as ABSENT, which settles in milliseconds and shows nothing a correction could yank.
+     *    A placed divider, by contrast, is an outcome the reader has already seen: moving it then is
+     *    the yank the frozen boundary exists to prevent, and it would also let arriving history (a
+     *    gap fill across the catch-up seam, say) redraw a divider that is by contract frozen for the
+     *    visit — so the settled path additionally requires the frozen snapshot to be null and this
+     *    visit's boundary to be its own (not restored from a previous process).
      *  * The reader must not have touched the viewport: a drag, fling, send, FAB or explicit jump
      *    retires the correction, after which read-marker correctness converges through ordinary
      *    marker advancement instead.
+     *
+     * While a null-divider bottom entry is correctable, viewport mark-read is held ([viewportReadHold]):
+     * that entry settles at the effective bottom, and acknowledging the backlog as it arrives would
+     * both strip the correction of anything unread to land on and advance the marker over rows the
+     * reader never saw. The hold is bounded — the catch-up wait expires with the same
+     * [ENTRY_HISTORY_READY_TIMEOUT_MS] bound that retires the correction, and a republished target
+     * releases it the moment the screen consumes it.
      */
     private fun armPostCatchUpEntryRepair(
         networkId: Long,
         spec: MessageVisibilitySpec,
         entered: EntryAnchors,
     ) = viewModelScope.launch {
-        withTimeoutOrNull(ENTRY_HISTORY_READY_TIMEOUT_MS) {
-            connectionManager.connectionActivity.first { entryHistoryReady(it, networkId) }
-        } ?: return@launch
-        if (!entryCorrectable()) return@launch
-        val repaired = resolveEntryAnchors(spec, discardUnresolvedSaved = true)
-        if (!entryAnchorMoved(entered.target, repaired.target)) return@launch
-        // Re-checked after the queries: the screen may have placed the entered target, or the reader
-        // taken the viewport over, while they ran.
-        if (!entryCorrectable()) return@launch
-        freezeUnreadEntrySnapshot(repaired)
-        // The screen may already have settled the entered position, so force a distinct emission —
-        // as [restoreRedirectedViewport] does — and give the correction its own one-shot index
-        // repair budget.
-        initialReresolveUsed = false
-        _initialTarget.value = null
-        _initialTarget.value = repaired.target
+        val holdsViewportRead = nullDividerBottomEntry(entered.firstUnread, entered.target)
+        if (holdsViewportRead) _viewportReadHold.value = true
+        try {
+            withTimeoutOrNull(ENTRY_HISTORY_READY_TIMEOUT_MS) {
+                connectionManager.connectionActivity.first { entryHistoryReady(it, networkId) }
+            } ?: return@launch
+            if (!entryCorrectable(entered)) return@launch
+            val repaired = resolveEntryAnchors(spec, discardUnresolvedSaved = true)
+            if (!entryAnchorMoved(entered.target, repaired.target)) return@launch
+            // A settled bottom entry is owed only the divider it could not resolve at rest: catch-up
+            // that landed nothing unread (self echoes, presence, read history) must not move an
+            // outcome already on screen just because the marker's depth changed.
+            if (_entryState.value !is EntryPositionState.Pending && repaired.firstUnread == null) {
+                return@launch
+            }
+            // Re-checked after the queries: the screen may have placed the entered target, or the
+            // reader taken the viewport over, while they ran.
+            if (!entryCorrectable(entered)) return@launch
+            freezeUnreadEntrySnapshot(repaired)
+            // The screen may already have settled the entered position, so force a distinct emission —
+            // as [restoreRedirectedViewport] does — and give the correction its own one-shot index
+            // repair budget.
+            initialReresolveUsed = false
+            _initialTarget.value = null
+            _initialTarget.value = repaired.target
+            // Releasing on publish would let a still-bottom viewport acknowledge the backlog in the
+            // frames before the corrected position lands; wait for the screen to consume the target
+            // (onInitialPositionHandled/Unresolved or jumpToNewest, all of which clear it).
+            if (holdsViewportRead) _initialTarget.first { it == null }
+        } finally {
+            if (holdsViewportRead) _viewportReadHold.value = false
+        }
     }
 
     /** The entry placement is still in flight and still ours; see [armPostCatchUpEntryRepair]. */
-    private fun entryCorrectable(): Boolean =
-        !timelineInteracted && _entryState.value is EntryPositionState.Pending
+    private fun entryCorrectable(entered: EntryAnchors): Boolean =
+        !timelineInteracted && (
+            _entryState.value is EntryPositionState.Pending ||
+                (
+                    !unreadEntrySnapshotRestored &&
+                        _unreadEntrySnapshot.value == null &&
+                        nullDividerBottomEntry(entered.firstUnread, entered.target)
+                    )
+            )
 
     /**
      * Position the viewport on the oldest unread message (the first unseen row) so it tops the
