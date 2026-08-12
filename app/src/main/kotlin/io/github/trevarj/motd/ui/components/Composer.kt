@@ -2,6 +2,8 @@ package io.github.trevarj.motd.ui.components
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -105,6 +107,7 @@ import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
 import io.github.trevarj.motd.ui.chat.searchSystemEmojis
 import io.github.trevarj.motd.ui.chat.systemEmojiSearchEntries
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.withTimeoutOrNull
@@ -453,8 +456,10 @@ fun Composer(
         overlay = {
             AnimatedVisibility(
                 visible = visiblePanel == ComposerPanel.AUTOCOMPLETE,
-                enter = fadeIn() + slideInVertically { height -> height / 8 },
-                exit = fadeOut() + slideOutVertically { height -> height / 8 },
+                enter = fadeIn(MotdMotion.fadeIn) +
+                    slideInVertically(animationSpec = MotdMotion.rowPlacement) { height -> height / 8 },
+                exit = fadeOut(MotdMotion.microFadeOut) +
+                    slideOutVertically(animationSpec = MotdMotion.rowPlacement) { height -> height / 8 },
             ) {
                 Box(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
                     if (emojiSuggestions.isNotEmpty() && emojiQuery != null) {
@@ -481,8 +486,8 @@ fun Composer(
 
                 AnimatedVisibility(
                     visible = reply != null,
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut(),
+                    enter = expandVertically(animationSpec = MotdMotion.contentSize) + fadeIn(MotdMotion.fadeIn),
+                    exit = shrinkVertically(animationSpec = MotdMotion.contentSize) + fadeOut(MotdMotion.microFadeOut),
                 ) {
                     reply?.let { ReplyBar(it, onCancelReply) }
                 }
@@ -576,49 +581,57 @@ fun Composer(
                 }
 
                 val canSend = enabled && value.text.isNotBlank()
-                if (canSend || !voiceEnabled) {
-                    FilledIconButton(
-                        onClick = {
-                            dismissEmojiPicker()
-                            onSend()
-                        },
-                        enabled = canSend,
-                        modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
-                        shape = CircleShape,
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
-                        ),
-                    ) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center,
+                // Send and voice are both fixed 48.dp round buttons, so cross-fading the swap
+                // changes only pixels inside that circle and never shifts the input row.
+                Crossfade(
+                    targetState = canSend || !voiceEnabled,
+                    animationSpec = MotdMotion.microFadeIn,
+                    label = "composer_action",
+                ) { showSend ->
+                    if (showSend) {
+                        FilledIconButton(
+                            onClick = {
+                                dismissEmojiPicker()
+                                onSend()
+                            },
+                            enabled = canSend,
+                            modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
+                            shape = CircleShape,
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
+                            ),
                         ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.Send,
-                                stringResource(R.string.chat_composer_send),
-                                modifier = Modifier.size(24.dp),
-                            )
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    stringResource(R.string.chat_composer_send),
+                                    modifier = Modifier.size(24.dp),
+                                )
+                            }
                         }
+                    } else {
+                        VoiceRecordButton(
+                            enabled = enabled,
+                            recording = voiceRecording,
+                            onHoldStart = {
+                                dismissEmojiPicker()
+                                onVoiceHoldStart()
+                            },
+                            onAccessibilityStart = {
+                                dismissEmojiPicker()
+                                onVoiceAccessibilityStart()
+                            },
+                            onHoldStop = onVoiceHoldStop,
+                            onHoldCancel = onVoiceHoldCancel,
+                            onLock = onVoiceLock,
+                        )
                     }
-                } else {
-                    VoiceRecordButton(
-                        enabled = enabled,
-                        recording = voiceRecording,
-                        onHoldStart = {
-                            dismissEmojiPicker()
-                            onVoiceHoldStart()
-                        },
-                        onAccessibilityStart = {
-                            dismissEmojiPicker()
-                            onVoiceAccessibilityStart()
-                        },
-                        onHoldStop = onVoiceHoldStop,
-                        onHoldCancel = onVoiceHoldCancel,
-                        onLock = onVoiceLock,
-                    )
                 }
             }
 
@@ -654,6 +667,17 @@ private fun VoiceRecordButton(
     val latestHoldStop by rememberUpdatedState(onHoldStop)
     val latestHoldCancel by rememberUpdatedState(onHoldCancel)
     val latestLock by rememberUpdatedState(onLock)
+    // Ease the primary-to-error tint at micro tempo so the color never lags the start haptic.
+    val containerColor by animateColorAsState(
+        targetValue = if (recording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        animationSpec = MotdMotion.colorFade,
+        label = "voice_record_container",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (recording) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary,
+        animationSpec = MotdMotion.colorFade,
+        label = "voice_record_content",
+    )
     FilledIconButton(
         onClick = {
             if (latestRecording) latestHoldStop()
@@ -740,16 +764,23 @@ private fun VoiceRecordButton(
             },
         shape = CircleShape,
         colors = IconButtonDefaults.filledIconButtonColors(
-            containerColor = if (recording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-            contentColor = if (recording) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary,
+            containerColor = containerColor,
+            contentColor = contentColor,
         ),
     ) {
-        Icon(
-            if (recording) Icons.Filled.Stop else Icons.Filled.Mic,
-            contentDescription = stringResource(
-                if (recording) R.string.voice_stop_recording else R.string.voice_record,
-            ),
-        )
+        // Cross-fade the glyph so the content description always matches the composed branch.
+        Crossfade(
+            targetState = recording,
+            animationSpec = MotdMotion.microFadeIn,
+            label = "voice_record_icon",
+        ) { isRecording ->
+            Icon(
+                if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
+                contentDescription = stringResource(
+                    if (isRecording) R.string.voice_stop_recording else R.string.voice_record,
+                ),
+            )
+        }
     }
 }
 
