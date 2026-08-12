@@ -2247,10 +2247,11 @@ class HistoryResyncCoordinatorTest {
 
     @Test
     fun failedTargetCancelsInFlightSiblingsAndPaintsThemWithThePassVerdict() = runTest {
-        // Width 3: three targets go on the wire together; the fourth waits for a permit it never
-        // gets. Permit order on a multithreaded dispatcher is arbitrary, so roles are assigned by
-        // arrival: the first two entrants block, the third fails the pass.
-        val names = listOf("#a", "#b", "#c", "#d")
+        // Exactly the fan-out width: all three targets go on the wire together, so no queued
+        // sibling can take a permit a cancellation frees mid-teardown. Permit order on a
+        // multithreaded dispatcher is arbitrary, so roles are assigned by arrival: the first two
+        // entrants block, the third fails the pass.
+        val names = listOf("#a", "#b", "#c")
         val ids = insertChannels(names)
         val idByName = names.zip(ids).toMap()
         val enteredTargets = ConcurrentHashMap.newKeySet<String>()
@@ -2288,11 +2289,38 @@ class HistoryResyncCoordinatorTest {
         assertEquals(2, cancelledTargets.size)
         assertTrue(enteredTargets.containsAll(cancelledTargets))
         // Every buffer that had a request on the wire wears the pass verdict once the catch-up loop
-        // gives up; the never-started fourth is dropped instead of being painted with a failure it
-        // never touched.
+        // gives up.
         coordinator.settleNetworkPass(networkId, result, source)
         val settled = coordinator.syncStatuses.value
         assertEquals(enteredTargets.map { idByName.getValue(it) }.toSet(), settled.keys)
+        assertTrue(settled.values.all { it is HistorySyncStatus.Failed })
+    }
+
+    @Test
+    fun aTargetThatNeverReachedTheWireIsDroppedRatherThanPaintedWithThePassFailure() = runTest {
+        // Sequential pass: the first target fails, so the second never starts. Serialization makes
+        // "never reached the wire" exact, which the concurrent path cannot promise — a cancelled
+        // sibling frees its permit, so a queued target can still slip onto the wire mid-teardown.
+        val names = listOf("#a", "#b")
+        val ids = insertChannels(names)
+        val enteredTargets = ConcurrentHashMap.newKeySet<String>()
+        val source = FakeSource(supportsConcurrent = false) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
+                else -> {
+                    enteredTargets += request.target
+                    throw IOException("transport died mid-pass")
+                }
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, openTargets(ids.zip(names)), source)
+
+        assertTrue(result is HistoryResyncState.Failed)
+        assertEquals(setOf("#a"), enteredTargets)
+        coordinator.settleNetworkPass(networkId, result, source)
+        val settled = coordinator.syncStatuses.value
+        assertEquals(setOf(ids.first()), settled.keys)
         assertTrue(settled.values.all { it is HistorySyncStatus.Failed })
     }
 
