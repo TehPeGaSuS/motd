@@ -8,6 +8,9 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -90,6 +93,7 @@ import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.attachment.supports
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -489,10 +493,23 @@ private fun ConfirmationSheet(
             Text(stringResource(R.string.upload_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(12.dp))
             if (request.source is AttachmentSource.Photo) {
-                thumbnail?.let { bitmap ->
-                        Image(bitmap.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(20.dp)), contentScale = ContentScale.Crop)
-                        Spacer(Modifier.height(12.dp))
+                // The thumbnail decodes on IO after the sheet is already visible, so ease its
+                // arrival instead of shoving the sheet content down in a single frame. The latched
+                // bitmap keeps the expanding frames painted; no exit spec is needed because the
+                // source key resets the whole confirm state.
+                var lastBitmap by remember(request.source) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                thumbnail?.let { lastBitmap = it }
+                AnimatedVisibility(
+                    visible = thumbnail != null,
+                    enter = fadeIn(MotdMotion.fadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                ) {
+                    lastBitmap?.let { bitmap ->
+                        Column {
+                            Image(bitmap.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(20.dp)), contentScale = ContentScale.Crop)
+                            Spacer(Modifier.height(12.dp))
+                        }
                     }
+                }
             }
             AttachmentMetadata(request.source)
             Spacer(Modifier.height(16.dp))
