@@ -5,6 +5,8 @@ import android.content.Intent
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -250,8 +252,12 @@ internal fun ImageViewerContent(
             else -> Unit
         }
 
+        // Fade only: the chrome overlays the image, so the default expand/shrink would clip the
+        // bar diagonally toward its top-start corner instead of dissolving in place.
         AnimatedVisibility(
             visible = chromeVisible,
+            enter = fadeIn(MotdMotion.fadeIn),
+            exit = fadeOut(MotdMotion.fadeOut),
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
             TopAppBar(
@@ -307,22 +313,33 @@ internal fun ImageViewerContent(
             )
         }
 
-        saveFeedback?.let { feedback ->
-            Text(
-                text = stringResource(
-                    if (feedback == ImageSaveFeedback.SAVED) R.string.image_viewer_saved
-                    else R.string.image_viewer_save_failed,
-                ),
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(24.dp)
-                    .background(Color.Black.copy(alpha = 0.72f), MaterialTheme.shapes.small)
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
-                    .semantics { liveRegion = LiveRegionMode.Polite }
-                    .testTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG),
-            )
+        // The exit fade must not render an empty label after the state nulls out; hold the last
+        // feedback for the outgoing frames, like the latched exits in ChatListScreen.
+        var lastFeedback by remember { mutableStateOf<ImageSaveFeedback?>(null) }
+        saveFeedback?.let { lastFeedback = it }
+        AnimatedVisibility(
+            visible = saveFeedback != null,
+            enter = fadeIn(MotdMotion.fadeIn),
+            exit = fadeOut(MotdMotion.microFadeOut),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(24.dp),
+        ) {
+            lastFeedback?.let { feedback ->
+                Text(
+                    text = stringResource(
+                        if (feedback == ImageSaveFeedback.SAVED) R.string.image_viewer_saved
+                        else R.string.image_viewer_save_failed,
+                    ),
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.72f), MaterialTheme.shapes.small)
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .semantics { liveRegion = LiveRegionMode.Polite }
+                        .testTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG),
+                )
+            }
         }
     }
 }
