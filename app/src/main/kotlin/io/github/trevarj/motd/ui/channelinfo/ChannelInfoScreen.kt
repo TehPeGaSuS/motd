@@ -74,6 +74,7 @@ import io.github.trevarj.motd.ui.chat.NickActionSheet
 import io.github.trevarj.motd.ui.chat.lagTone
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.service.RosterLoadState
 
@@ -273,20 +274,30 @@ fun ChannelInfoContent(
             // resolves after the roster loads, so it can appear a moment after the screen does.
             if (state.canModerate && buffer?.type == BufferType.CHANNEL) {
                 item(key = "channel-tools") {
-                    ChannelControlsSection(
-                        catalog = state.modeCatalog,
-                        members = state.sections.flatMap { section -> section.members.map { it.nick } },
-                        resolvedHost = resolvedHost,
-                        hostLoading = hostLoading,
-                        onNickSelected = onNickSelected,
-                        onFlagMode = onFlagMode,
-                        onInvite = onInvite,
-                        onSetKey = onSetKey,
-                        onSetLimit = onSetLimit,
-                        onSetListMask = onSetListMask,
-                        onBanWithMask = onBanWithMask,
-                        onSetChannelMode = onSetChannelMode,
-                    )
+                    // The deferred gate is intentional; only the insert is softened. The rows it
+                    // shoves ease via placement-only animateItem below.
+                    Box(
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = MotdMotion.fadeIn,
+                            placementSpec = MotdMotion.rowPlacement,
+                            fadeOutSpec = MotdMotion.microFadeOut,
+                        ),
+                    ) {
+                        ChannelControlsSection(
+                            catalog = state.modeCatalog,
+                            members = state.sections.flatMap { section -> section.members.map { it.nick } },
+                            resolvedHost = resolvedHost,
+                            hostLoading = hostLoading,
+                            onNickSelected = onNickSelected,
+                            onFlagMode = onFlagMode,
+                            onInvite = onInvite,
+                            onSetKey = onSetKey,
+                            onSetLimit = onSetLimit,
+                            onSetListMask = onSetListMask,
+                            onBanWithMask = onBanWithMask,
+                            onSetChannelMode = onSetChannelMode,
+                        )
+                    }
                 }
             }
             item(key = "search-field") {
@@ -318,7 +329,10 @@ fun ChannelInfoContent(
                     },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { /* in-memory filter; nothing to fetch */ }),
+                    // Placement-only: eases the shove when the channel-tools item lands above,
+                    // without gaining appearance fades.
                     modifier = Modifier
+                        .animateItem(fadeInSpec = null, fadeOutSpec = null, placementSpec = MotdMotion.rowPlacement)
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                         .testTag("channelinfo_member_search_field"),
@@ -342,6 +356,13 @@ fun ChannelInfoContent(
                             networkId = buffer?.networkId,
                             isFriend = state.identityRules.matchesConfiguredNick(member.nick, state.friends),
                             onClick = { onMemberClick(member.nick) },
+                            // Placement-only, fades explicitly nulled: per-keystroke filtering
+                            // must never gain appearance animations.
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = null,
+                                fadeOutSpec = null,
+                                placementSpec = MotdMotion.rowPlacement,
+                            ),
                         )
                     }
                 }
@@ -353,7 +374,11 @@ fun ChannelInfoContent(
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+                            // Headers move with their rows but never fade: their identity is the
+                            // section, not the membership.
+                            modifier = Modifier
+                                .animateItem(fadeInSpec = null, fadeOutSpec = null, placementSpec = MotdMotion.rowPlacement)
+                                .padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
                         )
                     }
                     items(section.members, key = { "${section.prefix}-${it.nick}" }) { member ->
@@ -362,6 +387,13 @@ fun ChannelInfoContent(
                             networkId = buffer?.networkId,
                             isFriend = state.identityRules.matchesConfiguredNick(member.nick, state.friends),
                             onClick = { onMemberClick(member.nick) },
+                            // Keys are stable per section, so joins fade in, parts fade out, and a
+                            // prefix change (key moves sections) reads as fade-out + fade-in.
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = MotdMotion.microFadeIn,
+                                placementSpec = MotdMotion.rowPlacement,
+                                fadeOutSpec = MotdMotion.microFadeOut,
+                            ),
                         )
                     }
                 }
@@ -376,7 +408,17 @@ fun ChannelInfoContent(
                 }
                 if (foolsExpanded) {
                     items(state.foolMembers, key = { "fool-${it.nick}" }) { member ->
-                        Box(modifier = Modifier.alpha(0.55f)) {
+                        // animateItem lives on the dimming Box so the expand/collapse fade covers
+                        // the whole dimmed row.
+                        Box(
+                            modifier = Modifier
+                                .animateItem(
+                                    fadeInSpec = MotdMotion.microFadeIn,
+                                    placementSpec = MotdMotion.rowPlacement,
+                                    fadeOutSpec = MotdMotion.microFadeOut,
+                                )
+                                .alpha(0.55f),
+                        ) {
                             MemberRow(
                                 member = member,
                                 networkId = buffer?.networkId,
@@ -670,7 +712,13 @@ private fun ActionItem(
 }
 
 @Composable
-private fun MemberRow(member: MemberEntity, networkId: Long?, isFriend: Boolean, onClick: () -> Unit) {
+private fun MemberRow(
+    member: MemberEntity,
+    networkId: Long?,
+    isFriend: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     ListItem(
         headlineContent = { Text(member.prefixes.take(1) + member.nick) },
         leadingContent = { Avatar(name = member.nick, size = 36.dp, networkId = networkId) },
@@ -687,7 +735,7 @@ private fun MemberRow(member: MemberEntity, networkId: Long?, isFriend: Boolean,
             null
         },
         // Per-member handle so the harness selects a specific member row.
-        modifier = Modifier.testTag("channelinfo_member_${member.nick}").clickable(onClick = onClick),
+        modifier = modifier.testTag("channelinfo_member_${member.nick}").clickable(onClick = onClick),
     )
 }
 
