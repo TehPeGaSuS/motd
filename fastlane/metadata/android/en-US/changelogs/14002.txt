@@ -1,0 +1,3 @@
+- Archived chats now return to the main list when new messages arrive, however they are delivered; muted archives still stay put.
+- History sync starts the moment the app opens, syncs your current and pinned chats first, and shows a "Syncing history…" progress header.
+- More reliable sync shutdown when a connection drops mid-sync.
