@@ -35,7 +35,7 @@ then builds and signs the FOSS APK and publishes:
 
 - the renamed FOSS APK;
 - complete corresponding libbox source;
-- GPL and IBM Plex license files;
+- GPL and Roboto license files;
 - release-specific third-party notices; and
 - `SHA256SUMS`.
 

@@ -80,7 +80,7 @@ jobs:
             release-assets/motd-${{ github.ref_name }}-foss.apk
             release-assets/motd-libbox-source-${{ github.ref_name }}.tar.gz
             release-assets/LICENSE
-            release-assets/IBM-PLEX-LICENSE.txt
+            release-assets/ROBOTO-LICENSE.txt
             release-assets/SHA256SUMS
             release-assets/motd-${{ github.ref_name }}-THIRD_PARTY_NOTICES.md
           generate_release_notes: true

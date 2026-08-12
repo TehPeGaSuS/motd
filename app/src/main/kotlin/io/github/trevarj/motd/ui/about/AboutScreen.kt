@@ -5,11 +5,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -28,11 +29,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -95,21 +98,26 @@ private fun AboutContent(
     ) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
             item {
-                Image(
-                    painter = painterResource(R.drawable.motd_logo_lockup),
-                    contentDescription = null,
-                    colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(96.dp)
-                        .padding(vertical = 24.dp),
-                )
-                Text(
-                    text = stringResource(R.string.app_name),
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    textAlign = TextAlign.Center,
-                )
+                // Brand lockup: bubble mark plus the app name in the same plain bold platform
+                // typography the title bar and drawer use, so one wordmark serves the whole app.
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(top = 32.dp, bottom = 8.dp),
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.motd_logo_mark),
+                        contentDescription = null,
+                        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(34.dp),
+                    )
+                    Text(
+                        text = stringResource(R.string.app_name),
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
                 Text(
                     text = aboutBuildLabel(appVersion(context), BuildConfig.MOTD_SOURCE_COMMIT),
                     style = MaterialTheme.typography.bodyMedium,

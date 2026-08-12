@@ -252,7 +252,7 @@ private fun WelcomePage() {
             painter = painterResource(R.drawable.motd_onboarding_hero),
             contentDescription = null,
             colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
-            modifier = Modifier.width(220.dp).height(144.dp),
+            modifier = Modifier.width(220.dp).height(129.dp),
         )
         Spacer(Modifier.height(24.dp))
         Text(
