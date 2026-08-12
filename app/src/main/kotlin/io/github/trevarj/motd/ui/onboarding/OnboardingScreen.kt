@@ -1,8 +1,11 @@
 package io.github.trevarj.motd.ui.onboarding
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
@@ -284,43 +287,67 @@ private fun ChoicePage(
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
         )
-        ChoiceCard(
-            title = stringResource(R.string.onboarding_choice_bouncer_title),
-            desc = stringResource(R.string.onboarding_choice_bouncer_desc),
-            selected = state.choice == ConnectionChoice.BOUNCER,
-            onClick = { onChoose(ConnectionChoice.BOUNCER) },
-            modifier = Modifier.testTag("onboarding_choice_bouncer"),
-        )
-        if (state.isBouncer) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ChoiceCard(
-                    title = stringResource(R.string.bouncer_kind_soju),
-                    desc = stringResource(R.string.bouncer_kind_soju_desc),
-                    selected = state.bouncerKind == BouncerKind.SOJU,
-                    onClick = { onChooseBouncerKind(BouncerKind.SOJU) },
-                    modifier = Modifier.weight(1f).testTag("onboarding_choice_soju"),
-                )
-                ChoiceCard(
-                    title = stringResource(R.string.bouncer_kind_znc),
-                    desc = stringResource(R.string.bouncer_kind_znc_desc),
-                    selected = state.bouncerKind == BouncerKind.ZNC,
-                    onClick = { onChooseBouncerKind(BouncerKind.ZNC) },
-                    modifier = Modifier.weight(1f).testTag("onboarding_choice_znc"),
-                )
+        // Each choice card owns its expansion in one Column child so the collapsed
+        // AnimatedVisibility never leaves a zero-height slot in the spacedBy rhythm; the 16dp gap
+        // lives inside the animated content instead.
+        Column {
+            ChoiceCard(
+                title = stringResource(R.string.onboarding_choice_bouncer_title),
+                desc = stringResource(R.string.onboarding_choice_bouncer_desc),
+                selected = state.choice == ConnectionChoice.BOUNCER,
+                onClick = { onChoose(ConnectionChoice.BOUNCER) },
+                modifier = Modifier.testTag("onboarding_choice_bouncer"),
+            )
+            AnimatedVisibility(
+                visible = state.isBouncer,
+                enter = fadeIn(MotdMotion.fadeIn) +
+                    expandVertically(animationSpec = MotdMotion.contentSize),
+                exit = fadeOut(MotdMotion.microFadeOut) +
+                    shrinkVertically(animationSpec = MotdMotion.contentSize),
+            ) {
+                Row(
+                    modifier = Modifier.padding(top = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ChoiceCard(
+                        title = stringResource(R.string.bouncer_kind_soju),
+                        desc = stringResource(R.string.bouncer_kind_soju_desc),
+                        selected = state.bouncerKind == BouncerKind.SOJU,
+                        onClick = { onChooseBouncerKind(BouncerKind.SOJU) },
+                        modifier = Modifier.weight(1f).testTag("onboarding_choice_soju"),
+                    )
+                    ChoiceCard(
+                        title = stringResource(R.string.bouncer_kind_znc),
+                        desc = stringResource(R.string.bouncer_kind_znc_desc),
+                        selected = state.bouncerKind == BouncerKind.ZNC,
+                        onClick = { onChooseBouncerKind(BouncerKind.ZNC) },
+                        modifier = Modifier.weight(1f).testTag("onboarding_choice_znc"),
+                    )
+                }
             }
         }
-        ChoiceCard(
-            title = stringResource(R.string.onboarding_choice_network_title),
-            desc = stringResource(R.string.onboarding_choice_network_desc),
-            selected = state.choice == ConnectionChoice.NETWORK,
-            onClick = { onChoose(ConnectionChoice.NETWORK) },
-            modifier = Modifier.testTag("onboarding_choice_network"),
-        )
-        if (state.choice == ConnectionChoice.NETWORK) {
-            NetworkPresetPicker(
-                selected = state.presetId,
-                onSelect = onSelectPreset,
+        Column {
+            ChoiceCard(
+                title = stringResource(R.string.onboarding_choice_network_title),
+                desc = stringResource(R.string.onboarding_choice_network_desc),
+                selected = state.choice == ConnectionChoice.NETWORK,
+                onClick = { onChoose(ConnectionChoice.NETWORK) },
+                modifier = Modifier.testTag("onboarding_choice_network"),
             )
+            AnimatedVisibility(
+                visible = state.choice == ConnectionChoice.NETWORK,
+                enter = fadeIn(MotdMotion.fadeIn) +
+                    expandVertically(animationSpec = MotdMotion.contentSize),
+                exit = fadeOut(MotdMotion.microFadeOut) +
+                    shrinkVertically(animationSpec = MotdMotion.contentSize),
+            ) {
+                Box(Modifier.padding(top = 16.dp)) {
+                    NetworkPresetPicker(
+                        selected = state.presetId,
+                        onSelect = onSelectPreset,
+                    )
+                }
+            }
         }
     }
 }
@@ -488,6 +515,9 @@ private fun ConnectPage(
     }
 }
 
+/** Icon-relevant collapse of [IrcClientState] so busy states never crossfade into each other. */
+private enum class StateIndicatorKind { READY, FAILED, BUSY }
+
 @Composable
 private fun StateIndicator(connState: IrcClientState?) {
     Row(
@@ -496,14 +526,25 @@ private fun StateIndicator(connState: IrcClientState?) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        AnimatedContent(targetState = connState, label = "connState") { cs ->
-            when (cs) {
-                is IrcClientState.Ready ->
+        // House fade so the icon swaps at the same tempo as the sibling label below.
+        AnimatedContent(
+            targetState = when (connState) {
+                is IrcClientState.Ready -> StateIndicatorKind.READY
+                is IrcClientState.Failed -> StateIndicatorKind.FAILED
+                else -> StateIndicatorKind.BUSY
+            },
+            transitionSpec = {
+                fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
+            },
+            label = "connState",
+        ) { kind ->
+            when (kind) {
+                StateIndicatorKind.READY ->
                     Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                is IrcClientState.Failed ->
+                StateIndicatorKind.FAILED ->
                     Icon(Icons.Filled.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                null -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                else -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                StateIndicatorKind.BUSY ->
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             }
         }
         AnimatedContent(
