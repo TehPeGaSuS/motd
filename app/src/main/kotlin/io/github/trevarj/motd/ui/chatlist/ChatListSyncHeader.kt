@@ -1,6 +1,14 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,6 +21,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -34,50 +45,87 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
  * A11y: only the static label is a polite live region, so TalkBack announces "syncing history" once
  * per episode. The changing count lives in a sibling node and therefore never re-announces.
  */
+/** The transition key: content within a kind updates in place, only kind changes animate. */
+private enum class SyncHeaderKind { HIDDEN, WAITING, SYNCING }
+
 @Composable
 fun ChatListSyncHeader(
     chrome: ChatListSyncChrome,
     modifier: Modifier = Modifier,
 ) {
-    when (chrome) {
-        ChatListSyncChrome.Hidden -> Unit
-        is ChatListSyncChrome.Waiting -> SyncHeaderSurface(modifier) {
-            SyncHeaderLabel(
-                label = stringResource(R.string.chatlist_sync_header_waiting),
-                tag = "chatlist_sync_header_waiting",
-            )
-        }
-        is ChatListSyncChrome.Syncing -> SyncHeaderSurface(modifier) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+    val kind = when (chrome) {
+        ChatListSyncChrome.Hidden -> SyncHeaderKind.HIDDEN
+        is ChatListSyncChrome.Waiting -> SyncHeaderKind.WAITING
+        is ChatListSyncChrome.Syncing -> SyncHeaderKind.SYNCING
+    }
+    // The exiting SYNCING content keeps composing after chrome has moved on; hold the last Syncing
+    // value so it renders real counts through the transition instead of collapsing to nothing.
+    var lastSyncing by remember { mutableStateOf<ChatListSyncChrome.Syncing?>(null) }
+    if (chrome is ChatListSyncChrome.Syncing) lastSyncing = chrome
+    AnimatedContent(
+        targetState = kind,
+        transitionSpec = {
+            val contentTransform = when {
+                initialState == SyncHeaderKind.HIDDEN ->
+                    (fadeIn(MotdMotion.fadeIn) +
+                        expandVertically(animationSpec = MotdMotion.contentSize)) togetherWith
+                        ExitTransition.None
+                targetState == SyncHeaderKind.HIDDEN ->
+                    EnterTransition.None togetherWith
+                        (fadeOut(MotdMotion.fadeOut) +
+                            shrinkVertically(animationSpec = MotdMotion.contentSize))
+                else -> fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
+            }
+            // expand/shrink already own the hidden <-> content size change. Disable
+            // AnimatedContent's default SizeTransform so the same height is not animated twice.
+            contentTransform.using(null)
+        },
+        modifier = modifier,
+        label = "chatlist_sync_header",
+    ) { current ->
+        when (current) {
+            SyncHeaderKind.HIDDEN -> Unit
+            SyncHeaderKind.WAITING -> SyncHeaderSurface {
                 SyncHeaderLabel(
-                    label = stringResource(R.string.chatlist_sync_header_syncing),
-                    tag = "chatlist_sync_header_label",
-                )
-                Text(
-                    text = stringResource(R.string.chatlist_sync_header_count, chrome.done, chrome.total),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.testTag("chatlist_sync_header_count"),
+                    label = stringResource(R.string.chatlist_sync_header_waiting),
+                    tag = "chatlist_sync_header_waiting",
                 )
             }
-            // Targets can be discovered mid-pass, so the fraction can move backwards; animating it
-            // keeps that from reading as a glitch.
-            val fraction by animateFloatAsState(
-                targetValue = if (chrome.total > 0) (chrome.done.toFloat() / chrome.total).coerceIn(0f, 1f) else 0f,
-                animationSpec = MotdMotion.fadeIn,
-                label = "chatlist_sync_header_progress",
-            )
-            LinearProgressIndicator(
-                progress = { fraction },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp)
-                    .testTag("chatlist_sync_header_progress"),
-            )
+            SyncHeaderKind.SYNCING -> {
+                val syncing = (chrome as? ChatListSyncChrome.Syncing) ?: lastSyncing
+                if (syncing != null) SyncHeaderSurface {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        SyncHeaderLabel(
+                            label = stringResource(R.string.chatlist_sync_header_syncing),
+                            tag = "chatlist_sync_header_label",
+                        )
+                        Text(
+                            text = stringResource(R.string.chatlist_sync_header_count, syncing.done, syncing.total),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("chatlist_sync_header_count"),
+                        )
+                    }
+                    // Targets can be discovered mid-pass, so the fraction can move backwards; animating it
+                    // keeps that from reading as a glitch.
+                    val fraction by animateFloatAsState(
+                        targetValue = if (syncing.total > 0) (syncing.done.toFloat() / syncing.total).coerceIn(0f, 1f) else 0f,
+                        animationSpec = MotdMotion.fadeIn,
+                        label = "chatlist_sync_header_progress",
+                    )
+                    LinearProgressIndicator(
+                        progress = { fraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .testTag("chatlist_sync_header_progress"),
+                    )
+                }
+            }
         }
     }
 }

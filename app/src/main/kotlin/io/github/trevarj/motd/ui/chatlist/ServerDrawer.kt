@@ -1,5 +1,10 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -71,6 +76,7 @@ import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /**
@@ -233,7 +239,13 @@ fun ServerDrawerContent(
                 }
             }
 
-            if (scopedUnreadCount > 0) {
+            // Eased in/out so the divider and footer below never jump a full row height when the
+            // scoped unread count crosses zero while the drawer is open.
+            AnimatedVisibility(
+                visible = scopedUnreadCount > 0,
+                enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+            ) {
                 NavigationDrawerItem(
                     icon = { Icon(Icons.Outlined.DoneAll, contentDescription = null) },
                     label = { Text(stringResource(R.string.drawer_mark_all_read)) },

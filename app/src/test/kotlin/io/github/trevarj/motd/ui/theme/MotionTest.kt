@@ -61,6 +61,14 @@ class MotionTest {
     }
 
     @Test
+    fun `color fade is a bounded micro tween`() {
+        // Container-color transitions stay at the micro tempo, never an unbounded spring.
+        val colorFade = MotdMotion.colorFade as TweenSpec<*>
+
+        assertEquals(MotdMotion.MicroDurationMs, colorFade.durationMillis)
+    }
+
+    @Test
     fun `archive settle duration is monotonic and bounded`() {
         assertEquals(200, MotdMotion.archiveSettleDurationMillis(-1f))
         assertEquals(200, MotdMotion.archiveSettleDurationMillis(0f))

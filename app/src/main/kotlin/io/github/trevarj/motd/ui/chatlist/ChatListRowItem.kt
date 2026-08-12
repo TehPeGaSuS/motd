@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
@@ -26,6 +27,7 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,6 +65,7 @@ import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -166,7 +169,13 @@ fun ChatListRowItem(
     val badges = chatListBadgeState(row)
     val isUnread = !row.muted && row.unreadCount > 0
     val visualState = chatListRowVisualState(selected, active, isUnread)
-    val rowContainer = chatListRowContainer(visualState, MaterialTheme.colorScheme)
+    // Ease select/deselect, unread clearing, and the active highlight moving between rows. Rows
+    // are keyed by bufferId, so recycling can never cross-fade one buffer's tint into another's.
+    val rowContainer by animateColorAsState(
+        targetValue = chatListRowContainer(visualState, MaterialTheme.colorScheme),
+        animationSpec = MotdMotion.colorFade,
+        label = "chatlist_row_container",
+    )
     val activeIndicator = MaterialTheme.colorScheme.primary
     val presenceDescription = queryPresence?.let {
         stringResource(

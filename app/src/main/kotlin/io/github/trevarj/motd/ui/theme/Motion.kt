@@ -6,6 +6,7 @@ import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 
@@ -45,6 +46,12 @@ object MotdMotion {
         easing = StandardEasing,
     )
     val microFadeOut: FiniteAnimationSpec<Float> = tween(
+        durationMillis = MicroDurationMs,
+        easing = StandardEasing,
+    )
+
+    /** Container-color state changes: micro tempo, so a tint never lags the tap that caused it. */
+    val colorFade: FiniteAnimationSpec<Color> = tween(
         durationMillis = MicroDurationMs,
         easing = StandardEasing,
     )

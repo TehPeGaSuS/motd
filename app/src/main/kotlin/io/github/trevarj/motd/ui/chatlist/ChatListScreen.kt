@@ -2,14 +2,21 @@ package io.github.trevarj.motd.ui.chatlist
 
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -35,7 +42,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
@@ -239,6 +245,25 @@ internal fun defaultChatBufferId(rows: List<ChatListRow>): Long? = rows.maxWithO
         .thenBy(ChatListRow::bufferId),
 )?.bufferId
 
+/**
+ * The top bar's transition key: title/actions cross-fade only when the mode itself changes, so a
+ * count tick or scoped-name change within a mode updates its text without re-animating.
+ */
+private enum class ChatListTopBarMode { SELECTION, INVITATIONS, ARCHIVE, SCOPED, DEFAULT }
+
+private fun chatListTopBarMode(
+    selectionActive: Boolean,
+    invitationMode: Boolean,
+    archiveMode: Boolean,
+    scoped: Boolean,
+): ChatListTopBarMode = when {
+    selectionActive -> ChatListTopBarMode.SELECTION
+    invitationMode -> ChatListTopBarMode.INVITATIONS
+    archiveMode -> ChatListTopBarMode.ARCHIVE
+    scoped -> ChatListTopBarMode.SCOPED
+    else -> ChatListTopBarMode.DEFAULT
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatListContent(
@@ -294,6 +319,18 @@ fun ChatListContent(
     var selectedIds by rememberSaveable(archiveMode, invitationMode, state.selectedNetworkId) { mutableStateOf(emptyList<Long>()) }
     val selectedRows = orderedSelectedRows(visibleRows, selectedIds)
     val selectionActive = selectedRows.isNotEmpty()
+    val topBarMode = chatListTopBarMode(
+        selectionActive = selectionActive,
+        invitationMode = invitationMode,
+        archiveMode = archiveMode,
+        scoped = state.selectedNetworkName != null,
+    )
+    // Exit latches: the selection empties and the scope name nulls on the same frame their mode
+    // leaves, so the outgoing top-bar/chip content holds the last real value while it fades.
+    var lastSelectedRows by remember { mutableStateOf(listOf<ChatListRow>()) }
+    if (selectedRows.isNotEmpty()) lastSelectedRows = selectedRows
+    var lastScopeName by remember { mutableStateOf("") }
+    state.selectedNetworkName?.let { lastScopeName = it }
     var confirmRemoval by remember { mutableStateOf(false) }
     var archiveRevealSignal by rememberSaveable(state.selectedNetworkId) { mutableStateOf(0) }
 
@@ -368,22 +405,32 @@ fun ChatListContent(
                 ChatListTopBar(
                     modifier = Modifier.testTag(if (selectionActive) "chatlist_selection_top_app_bar" else "chatlist_top_app_bar"),
                     title = {
-                        val scopedName = state.selectedNetworkName
-                        if (selectionActive) {
-                            Text(pluralStringResource(R.plurals.chatlist_selected_count, selectedRows.size, selectedRows.size))
-                        } else if (invitationMode) {
-                            Text(text = stringResource(R.string.chatlist_invitations), fontWeight = FontWeight.Bold)
-                        } else if (archiveMode) {
-                            Text(text = stringResource(R.string.chatlist_archived_chats), fontWeight = FontWeight.Bold)
-                        } else if (scopedName != null) {
-                            // Scoped: show the network name so the active filter is legible.
-                            Text(text = scopedName, fontWeight = FontWeight.Bold)
-                        } else {
-                            // Use the platform typography instead of the stylized brand asset here.
-                            Text(
-                                text = stringResource(R.string.app_name),
-                                fontWeight = FontWeight.Bold,
-                            )
+                        AnimatedContent(
+                            targetState = topBarMode,
+                            transitionSpec = {
+                                // Cross-fade only; using(null) drops the default SizeTransform so
+                                // the bar never pumps when the title width changes.
+                                (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)).using(null)
+                            },
+                            label = "chatlist_top_bar_title",
+                        ) { mode ->
+                            when (mode) {
+                                ChatListTopBarMode.SELECTION ->
+                                    Text(pluralStringResource(R.plurals.chatlist_selected_count, lastSelectedRows.size, lastSelectedRows.size))
+                                ChatListTopBarMode.INVITATIONS ->
+                                    Text(text = stringResource(R.string.chatlist_invitations), fontWeight = FontWeight.Bold)
+                                ChatListTopBarMode.ARCHIVE ->
+                                    Text(text = stringResource(R.string.chatlist_archived_chats), fontWeight = FontWeight.Bold)
+                                // Scoped: show the network name so the active filter is legible.
+                                ChatListTopBarMode.SCOPED ->
+                                    Text(text = lastScopeName, fontWeight = FontWeight.Bold)
+                                // Use the platform typography instead of the stylized brand asset here.
+                                ChatListTopBarMode.DEFAULT ->
+                                    Text(
+                                        text = stringResource(R.string.app_name),
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                            }
                         }
                     },
                     navigationIcon = {
@@ -398,56 +445,88 @@ fun ChatListContent(
                             },
                             modifier = Modifier.testTag("chatlist_selection_close"),
                         ) {
-                            Icon(
-                                if (selectionActive || archiveMode || invitationMode) Icons.AutoMirrored.Filled.ArrowBack else Icons.Filled.Menu,
-                                contentDescription = stringResource(
-                                    if (selectionActive) R.string.chatlist_selection_close else if (archiveMode || invitationMode) R.string.action_back else R.string.drawer_open,
-                                ),
-                            )
+                            // One IconButton across every mode (it owns the close/back/menu tag);
+                            // only the glyph cross-fades when the mode changes what it means.
+                            Crossfade(
+                                targetState = if (selectionActive || archiveMode || invitationMode) Icons.AutoMirrored.Filled.ArrowBack else Icons.Filled.Menu,
+                                animationSpec = MotdMotion.microFadeIn,
+                                label = "chatlist_nav_icon",
+                            ) { icon ->
+                                Icon(
+                                    icon,
+                                    contentDescription = stringResource(
+                                        if (selectionActive) R.string.chatlist_selection_close else if (archiveMode || invitationMode) R.string.action_back else R.string.drawer_open,
+                                    ),
+                                )
+                            }
                         }
                     },
                     actions = {
-                        if (selectionActive) {
-                            val pinTarget = aggregateToggleTarget(selectedRows) { it.pinned }
-                            val muteTarget = aggregateToggleTarget(selectedRows) { it.muted }
-                            IconButton(
-                                onClick = { onSetPinned(selectedRows.map(ChatListRow::bufferId), pinTarget); selectedIds = emptyList() },
-                                modifier = Modifier.testTag("chatlist_selection_pin"),
-                            ) { Icon(Icons.Filled.PushPin, stringResource(if (pinTarget) R.string.chatlist_pin else R.string.chatlist_unpin)) }
-                            IconButton(
-                                onClick = { onSetMuted(selectedRows.map(ChatListRow::bufferId), muteTarget); selectedIds = emptyList() },
-                                modifier = Modifier.testTag("chatlist_selection_mute"),
-                            ) { Icon(if (muteTarget) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications, stringResource(if (muteTarget) R.string.chatlist_mute else R.string.chatlist_unmute)) }
-                            IconButton(
-                                onClick = { setArchivedWithReveal(selectedRows.map(ChatListRow::bufferId), !archiveMode); selectedIds = emptyList() },
-                                modifier = Modifier.testTag("chatlist_selection_archive"),
-                            ) { Icon(archiveActionIcon(archiveMode), stringResource(if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive)) }
-                            IconButton(onClick = { confirmRemoval = true }, modifier = Modifier.testTag("chatlist_selection_remove")) {
-                                Icon(Icons.Outlined.Delete, stringResource(R.string.chatlist_remove))
-                            }
-                        } else if (!archiveMode && !invitationMode) {
-                            IconButton(onClick = onOpenSearch) {
-                                Icon(
-                                    Icons.Outlined.Search,
-                                    contentDescription = stringResource(R.string.chatlist_search),
-                                )
-                            }
-                            IconButton(onClick = onOpenSettings, modifier = Modifier.testTag("chatlist_open_settings")) {
-                                Icon(
-                                    Icons.Outlined.Settings,
-                                    contentDescription = stringResource(R.string.chatlist_settings),
-                                )
+                        AnimatedContent(
+                            targetState = topBarMode,
+                            transitionSpec = {
+                                // Cross-fade only; using(null) drops the default SizeTransform so
+                                // the bar never pumps when the action set changes width.
+                                (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)).using(null)
+                            },
+                            label = "chatlist_top_bar_actions",
+                        ) { mode ->
+                            Row {
+                                when (mode) {
+                                    ChatListTopBarMode.SELECTION -> {
+                                        // Glyph targets read the exit latch; the actions themselves
+                                        // still apply to the live selection.
+                                        val pinTarget = aggregateToggleTarget(lastSelectedRows) { it.pinned }
+                                        val muteTarget = aggregateToggleTarget(lastSelectedRows) { it.muted }
+                                        IconButton(
+                                            onClick = { onSetPinned(selectedRows.map(ChatListRow::bufferId), pinTarget); selectedIds = emptyList() },
+                                            modifier = Modifier.testTag("chatlist_selection_pin"),
+                                        ) { Icon(Icons.Filled.PushPin, stringResource(if (pinTarget) R.string.chatlist_pin else R.string.chatlist_unpin)) }
+                                        IconButton(
+                                            onClick = { onSetMuted(selectedRows.map(ChatListRow::bufferId), muteTarget); selectedIds = emptyList() },
+                                            modifier = Modifier.testTag("chatlist_selection_mute"),
+                                        ) { Icon(if (muteTarget) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications, stringResource(if (muteTarget) R.string.chatlist_mute else R.string.chatlist_unmute)) }
+                                        IconButton(
+                                            onClick = { setArchivedWithReveal(selectedRows.map(ChatListRow::bufferId), !archiveMode); selectedIds = emptyList() },
+                                            modifier = Modifier.testTag("chatlist_selection_archive"),
+                                        ) { Icon(archiveActionIcon(archiveMode), stringResource(if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive)) }
+                                        IconButton(onClick = { confirmRemoval = true }, modifier = Modifier.testTag("chatlist_selection_remove")) {
+                                            Icon(Icons.Outlined.Delete, stringResource(R.string.chatlist_remove))
+                                        }
+                                    }
+                                    ChatListTopBarMode.DEFAULT, ChatListTopBarMode.SCOPED -> {
+                                        IconButton(onClick = onOpenSearch) {
+                                            Icon(
+                                                Icons.Outlined.Search,
+                                                contentDescription = stringResource(R.string.chatlist_search),
+                                            )
+                                        }
+                                        IconButton(onClick = onOpenSettings, modifier = Modifier.testTag("chatlist_open_settings")) {
+                                            Icon(
+                                                Icons.Outlined.Settings,
+                                                contentDescription = stringResource(R.string.chatlist_settings),
+                                            )
+                                        }
+                                    }
+                                    ChatListTopBarMode.INVITATIONS, ChatListTopBarMode.ARCHIVE -> Unit
+                                }
                             }
                         }
                     },
                 )
             },
             floatingActionButton = {
-                if (!selectionActive && !archiveMode && !invitationMode) FloatingActionButton(onClick = { showSheet = true }, modifier = Modifier.testTag("chatlist_new_conversation")) {
-                    Icon(
-                        Icons.Filled.Add,
-                        contentDescription = stringResource(R.string.chatlist_new_conversation),
-                    )
+                AnimatedVisibility(
+                    visible = !selectionActive && !archiveMode && !invitationMode,
+                    enter = scaleIn(initialScale = 0.85f, animationSpec = MotdMotion.softSpring) + fadeIn(MotdMotion.microFadeIn),
+                    exit = scaleOut(targetScale = 0.85f, animationSpec = MotdMotion.softSpring) + fadeOut(MotdMotion.microFadeOut),
+                ) {
+                    FloatingActionButton(onClick = { showSheet = true }, modifier = Modifier.testTag("chatlist_new_conversation")) {
+                        Icon(
+                            Icons.Filled.Add,
+                            contentDescription = stringResource(R.string.chatlist_new_conversation),
+                        )
+                    }
                 }
             },
         ) { padding ->
@@ -465,9 +544,14 @@ fun ChatListContent(
                     }
 
                     // Active-scope chip: keeps the filter discoverable/escapable without the drawer.
-                    if (state.selectedNetworkId != null) {
+                    AnimatedVisibility(
+                        visible = state.selectedNetworkId != null,
+                        enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                        exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+                    ) {
+                        // The latched name keeps the chip's text through its exit animation.
                         ScopeChip(
-                            name = state.selectedNetworkName.orEmpty(),
+                            name = lastScopeName,
                             onClear = { onSelectNetwork(null) },
                         )
                     }
@@ -1013,11 +1097,21 @@ private fun ChatList(
             } else {
                 if (actionableInvitationCount > 0) {
                     item(key = "invitations-folder") {
-                        InvitationsFolder(
-                            count = invitations.size,
-                            actionableCount = actionableInvitationCount,
-                            onOpen = onOpenInvitations,
-                        )
+                        // Box wrapper (as for fools rows below) so the header items animate with
+                        // their neighbor rows without threading a Modifier into each composable.
+                        Box(
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                placementSpec = placementSpec,
+                            ),
+                        ) {
+                            InvitationsFolder(
+                                count = invitations.size,
+                                actionableCount = actionableInvitationCount,
+                                onOpen = onOpenInvitations,
+                            )
+                        }
                     }
                 }
                 items(sections.pinned, key = { it.bufferId }) { row ->
@@ -1044,7 +1138,15 @@ private fun ChatList(
                 }
                 if (sections.friends.isNotEmpty()) {
                     item(key = "friends-header") {
-                        SectionHeader(stringResource(R.string.chatlist_friends))
+                        Box(
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                placementSpec = placementSpec,
+                            ),
+                        ) {
+                            SectionHeader(stringResource(R.string.chatlist_friends))
+                        }
                     }
                     items(sections.friends, key = { it.bufferId }) { row ->
                         SelectableChatListRow(
@@ -1071,7 +1173,15 @@ private fun ChatList(
                 }
                 if (sections.showRecentHeader) {
                     item(key = "recent-header") {
-                        SectionHeader(stringResource(R.string.chatlist_recent))
+                        Box(
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                placementSpec = placementSpec,
+                            ),
+                        ) {
+                            SectionHeader(stringResource(R.string.chatlist_recent))
+                        }
                     }
                 }
                 items(sections.regular, key = { it.bufferId }) { row ->
@@ -1098,14 +1208,22 @@ private fun ChatList(
                 }
                 if (sections.fools.isNotEmpty()) {
                     item(key = "fools-header") {
-                        FoolsSectionHeader(
-                            count = sections.fools.size,
-                            expanded = foolsExpanded,
-                            onToggle = {
-                                if (foolsExpanded) onRemoveSelection(sections.fools.map(ChatListRow::bufferId))
-                                foolsExpanded = !foolsExpanded
-                            },
-                        )
+                        Box(
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                placementSpec = placementSpec,
+                            ),
+                        ) {
+                            FoolsSectionHeader(
+                                count = sections.fools.size,
+                                expanded = foolsExpanded,
+                                onToggle = {
+                                    if (foolsExpanded) onRemoveSelection(sections.fools.map(ChatListRow::bufferId))
+                                    foolsExpanded = !foolsExpanded
+                                },
+                            )
+                        }
                     }
                     if (foolsExpanded) {
                         items(sections.fools, key = { it.bufferId }) { row ->
@@ -1439,13 +1557,19 @@ private fun ViewportScrollToTopFab(
 
     AnimatedVisibility(
         visible = canScrollToTop,
-        enter = scaleIn(),
-        exit = scaleOut(),
+        enter = fadeIn(MotdMotion.microFadeIn) + scaleIn(MotdMotion.microFadeIn, initialScale = 0.96f),
+        exit = fadeOut(MotdMotion.microFadeOut) + scaleOut(MotdMotion.microFadeOut, targetScale = 0.96f),
         modifier = modifier,
     ) {
         BadgedBox(
             badge = {
-                if (unreadAbove > 0) {
+                // Count is read inside the badge content so a tick updates the text in place;
+                // only crossing zero runs the visibility transition.
+                AnimatedVisibility(
+                    visible = unreadAbove > 0,
+                    enter = fadeIn(MotdMotion.microFadeIn) + scaleIn(MotdMotion.microFadeIn, initialScale = 0.96f),
+                    exit = fadeOut(MotdMotion.microFadeOut) + scaleOut(MotdMotion.microFadeOut, targetScale = 0.96f),
+                ) {
                     Badge { Text(if (unreadAbove > 99) "99+" else unreadAbove.toString()) }
                 }
             },
@@ -1479,10 +1603,18 @@ private fun FoolsSectionHeader(count: Int, expanded: Boolean, onToggle: () -> Un
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f),
         )
+        // One glyph rotated in place (as the archive pull overlay rotates its chevron), so the
+        // expand/collapse toggle turns instead of swapping icons.
+        val rotation by animateFloatAsState(
+            targetValue = if (expanded) 180f else 0f,
+            animationSpec = MotdMotion.softSpring,
+            label = "fools_chevron",
+        )
         Icon(
-            imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+            imageVector = Icons.Filled.ExpandMore,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.graphicsLayer { rotationZ = rotation },
         )
     }
 }
