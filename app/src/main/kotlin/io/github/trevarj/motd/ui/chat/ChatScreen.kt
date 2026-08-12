@@ -10,10 +10,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -91,6 +93,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.withFrameNanos
@@ -2088,20 +2091,30 @@ fun ChatContent(
                         showAutocomplete = true
                     }
                 }
-                VoiceComposerPanel(
-                    state = voiceState,
-                    playbackState = audioPlaybackState,
-                    onDelete = onVoiceDelete,
-                    onCancelRecording = onVoiceHoldCancel,
-                    onStopRecording = onVoiceHoldStop,
-                    onSend = onVoiceSend,
-                    onPreview = { attachment -> onAudioToggle(AudioPlaybackRequest(attachment, null)) },
-                    onPreviewSeek = { attachment, positionMs -> onAudioSeek(attachment, positionMs) },
-                    onToggleEncryption = onVoiceToggleEncryption,
-                    onDestinationSelected = onVoiceDestinationSelected,
-                    onErrorDismissed = onVoiceErrorDismissed,
-                )
-                if (state.parted) {
+                // Keyed on the buffer like the sibling composer state so the panel's held exit
+                // content never leaks across a buffer switch.
+                key(traceBufferId) {
+                    VoiceComposerPanel(
+                        state = voiceState,
+                        playbackState = audioPlaybackState,
+                        onDelete = onVoiceDelete,
+                        onCancelRecording = onVoiceHoldCancel,
+                        onStopRecording = onVoiceHoldStop,
+                        onSend = onVoiceSend,
+                        onPreview = { attachment -> onAudioToggle(AudioPlaybackRequest(attachment, null)) },
+                        onPreviewSeek = { attachment, positionMs -> onAudioSeek(attachment, positionMs) },
+                        onToggleEncryption = onVoiceToggleEncryption,
+                        onDestinationSelected = onVoiceDestinationSelected,
+                        onErrorDismissed = onVoiceErrorDismissed,
+                    )
+                }
+                // The buffer stays non-null while a rejoin animates the banner out, so the exiting
+                // content can keep reading it without snapshotting.
+                AnimatedVisibility(
+                    visible = state.parted,
+                    enter = expandVertically(animationSpec = MotdMotion.contentSize) + fadeIn(MotdMotion.fadeIn),
+                    exit = shrinkVertically(animationSpec = MotdMotion.contentSize) + fadeOut(MotdMotion.microFadeOut),
+                ) {
                     PartedChannelBanner(
                         channel = state.buffer?.displayName.orEmpty(),
                         onRejoin = onRejoin,
@@ -2824,7 +2837,12 @@ internal fun ScrollToBottomFab(
         latestOnLongClick()
     }
 
-    AnimatedVisibility(visible = visible, enter = scaleIn(), exit = scaleOut(), modifier = modifier) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(MotdMotion.microFadeIn) + scaleIn(MotdMotion.microFadeIn, initialScale = 0.96f),
+        exit = fadeOut(MotdMotion.microFadeOut) + scaleOut(MotdMotion.microFadeOut, targetScale = 0.96f),
+        modifier = modifier,
+    ) {
         BadgedBox(
             badge = {
                 // An unread @mention of our nick takes priority over the plain unread count: the
@@ -3020,7 +3038,21 @@ internal fun VoiceComposerPanel(
     modifier: Modifier = Modifier,
 ) {
     var destinationSheet by remember { mutableStateOf(false) }
-    state.recording?.let { recording ->
+    // Hold the last non-null panel models so the exit animation still has content to draw after
+    // the state field clears; live fields (state.progress, playbackState) keep reading current
+    // state as before.
+    var lastRecording by remember { mutableStateOf(state.recording) }
+    state.recording?.let { lastRecording = it }
+    var lastStaged by remember { mutableStateOf(state.staged) }
+    state.staged?.let { lastStaged = it }
+    AnimatedVisibility(
+        visible = state.recording != null,
+        enter = expandVertically(animationSpec = MotdMotion.contentSize, expandFrom = Alignment.Top) +
+            fadeIn(MotdMotion.microFadeIn),
+        exit = shrinkVertically(animationSpec = MotdMotion.contentSize, shrinkTowards = Alignment.Top) +
+            fadeOut(MotdMotion.microFadeOut),
+    ) {
+        val recording = lastRecording ?: return@AnimatedVisibility
         Surface(
             modifier = modifier
                 .fillMaxWidth()
@@ -3079,7 +3111,14 @@ internal fun VoiceComposerPanel(
             }
         }
     }
-    state.staged?.let { staged ->
+    AnimatedVisibility(
+        visible = state.staged != null,
+        enter = expandVertically(animationSpec = MotdMotion.contentSize, expandFrom = Alignment.Top) +
+            fadeIn(MotdMotion.microFadeIn),
+        exit = shrinkVertically(animationSpec = MotdMotion.contentSize, shrinkTowards = Alignment.Top) +
+            fadeOut(MotdMotion.microFadeOut),
+    ) {
+        val staged = lastStaged ?: return@AnimatedVisibility
         val progress = state.progress
         val destination = staged.destination
         val preview = remember(staged.file, staged.durationMs, staged.mimeType, staged.sizeBytes) {
@@ -3198,10 +3237,14 @@ internal fun VoiceComposerPanel(
                 }
             }
         }
+    }
+    // The sheet stays keyed to the live staged value (not the held one) so it can never outlive
+    // the message it configures.
+    state.staged?.let { staged ->
         if (destinationSheet) {
             VoiceDestinationSheet(
                 staged = staged,
-                config = destination ?: io.github.trevarj.motd.attachment.PasteBackendConfig(),
+                config = staged.destination ?: io.github.trevarj.motd.attachment.PasteBackendConfig(),
                 onSelect = {
                     destinationSheet = false
                     onDestinationSelected(it)
