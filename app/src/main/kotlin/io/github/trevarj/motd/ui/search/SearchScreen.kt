@@ -1,6 +1,10 @@
 package io.github.trevarj.motd.ui.search
 
 import androidx.annotation.StringRes
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -58,6 +62,7 @@ import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.repo.SearchCoverage
 import io.github.trevarj.motd.ui.chatlist.relativeChatTime
 import io.github.trevarj.motd.ui.components.EmptyState
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Stateful entry: wires the ViewModel, applies the nav buffer scope, drives navigation. */
@@ -146,8 +151,14 @@ fun SearchContent(
                             .focusRequester(focusRequester)
                             .testTag("search_field"),
                         placeholder = { Text(stringResource(R.string.search_hint)) },
-                        trailingIcon = if (text.text.isNotEmpty()) {
-                            {
+                        trailingIcon = {
+                            // The slot stays mounted so the clear affordance fades with the
+                            // house micro tempo instead of popping in on the first keystroke.
+                            AnimatedVisibility(
+                                visible = text.text.isNotEmpty(),
+                                enter = fadeIn(MotdMotion.microFadeIn),
+                                exit = fadeOut(MotdMotion.microFadeOut),
+                            ) {
                                 IconButton(
                                     onClick = {
                                         text = clearedSearchText()
@@ -161,8 +172,6 @@ fun SearchContent(
                                     )
                                 }
                             }
-                        } else {
-                            null
                         },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -223,38 +232,47 @@ fun SearchContent(
                 )
             }
 
-            when {
-                visibleState.scope == SearchScope.SERVER -> ServerSearchSection(
-                    server = visibleState.server,
-                    query = parseSearchQuery(visibleState.rawQuery).text,
-                    onRetry = onServerSearchSubmit,
-                    onOpenHit = onOpenServerHit,
-                )
+            // Keyed on the pane's identity, never on the query or its rows, so debounce cycles
+            // fade between panes while within-pane updates recompose in place without re-fading.
+            Crossfade(
+                targetState = searchPane(visibleState),
+                animationSpec = MotdMotion.microFadeIn,
+                label = "search_pane",
+                modifier = Modifier.fillMaxSize(),
+            ) { pane ->
+                when (pane) {
+                    SearchPane.SERVER -> ServerSearchSection(
+                        server = visibleState.server,
+                        query = parseSearchQuery(visibleState.rawQuery).text,
+                        onRetry = onServerSearchSubmit,
+                        onOpenHit = onOpenServerHit,
+                    )
 
-                visibleState.rawQuery.isBlank() -> EmptyState(
-                    icon = Icons.Outlined.SearchOff,
-                    title = stringResource(R.string.search_prompt_title),
-                    message = stringResource(R.string.search_prompt_message),
-                )
+                    SearchPane.PROMPT -> EmptyState(
+                        icon = Icons.Outlined.SearchOff,
+                        title = stringResource(R.string.search_prompt_title),
+                        message = stringResource(R.string.search_prompt_message),
+                    )
 
-                visibleState.searching -> LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("search_loading"),
-                )
+                    SearchPane.SEARCHING -> LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("search_loading"),
+                    )
 
-                visibleState.groups.isEmpty() -> EmptyState(
-                    icon = Icons.Outlined.SearchOff,
-                    title = stringResource(R.string.search_empty_title),
-                    message = stringResource(emptyMessage(visibleState)),
-                )
+                    SearchPane.NO_RESULTS -> EmptyState(
+                        icon = Icons.Outlined.SearchOff,
+                        title = stringResource(R.string.search_empty_title),
+                        message = stringResource(emptyMessage(visibleState)),
+                    )
 
-                else -> SearchResults(
-                    groups = visibleState.groups,
-                    query = parseSearchQuery(visibleState.rawQuery).text,
-                    truncated = visibleState.truncated,
-                    onOpenHit = onOpenHit,
-                )
+                    SearchPane.RESULTS -> SearchResults(
+                        groups = visibleState.groups,
+                        query = parseSearchQuery(visibleState.rawQuery).text,
+                        truncated = visibleState.truncated,
+                        onOpenHit = onOpenHit,
+                    )
+                }
             }
         }
     }
@@ -262,6 +280,18 @@ fun SearchContent(
 
 /** Clear the visible IME value, including any selection or active composition. */
 internal fun clearedSearchText(): TextFieldValue = TextFieldValue("")
+
+/** The results pane's identity; each value keeps exactly one branch (and its tags) mounted. */
+private enum class SearchPane { SERVER, PROMPT, SEARCHING, NO_RESULTS, RESULTS }
+
+/** Same precedence as the pane branches themselves; the crossfade keys on this. */
+private fun searchPane(state: SearchUiState): SearchPane = when {
+    state.scope == SearchScope.SERVER -> SearchPane.SERVER
+    state.rawQuery.isBlank() -> SearchPane.PROMPT
+    state.searching -> SearchPane.SEARCHING
+    state.groups.isEmpty() -> SearchPane.NO_RESULTS
+    else -> SearchPane.RESULTS
+}
 
 /**
  * The standing disclosure about what was searched, or null when the scope needs no caveat.
