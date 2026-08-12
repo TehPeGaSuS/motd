@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.components
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -44,8 +45,11 @@ fun ReactionRow(
 ) {
     if (reactions.isEmpty()) return
     FlowRow(
-        // Tight top gap so chips sit snugly under the message body without ballooning row height.
-        modifier = modifier.padding(top = 2.dp),
+        // Ease chip add/remove and wrap-line growth; rows scrolled in render at final size (no
+        // first-layout animation). Tight top gap so chips sit snugly under the message body.
+        modifier = modifier
+            .animateContentSize(animationSpec = MotdMotion.contentSize)
+            .padding(top = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {

@@ -6,7 +6,11 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import androidx.core.net.toUri
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -67,6 +71,9 @@ import io.github.trevarj.motd.ui.chat.formatBytes
 import io.github.trevarj.motd.ui.theme.MotdMotion
 
 private const val MAX_COLLAPSED_AUDIO_PLAYERS = 3
+
+/** Distinct glyph states for the play-button circle, so state changes crossfade instead of snap. */
+private enum class AudioToggleGlyph { LOADING, ERROR, PLAYING, DOWNLOAD, PLAY }
 
 @Composable
 fun AudioAttachmentPlayers(
@@ -214,35 +221,53 @@ private fun AudioAttachmentPlayer(
             ) {
                 Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
                     Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
-                        if (loading) {
-                            playbackState.loadingFraction?.let { fraction ->
-                                CircularProgressIndicator(
-                                    progress = { fraction },
+                        val glyph = when {
+                            loading -> AudioToggleGlyph.LOADING
+                            error != null -> AudioToggleGlyph.ERROR
+                            playing -> AudioToggleGlyph.PLAYING
+                            needsDownload -> AudioToggleGlyph.DOWNLOAD
+                            else -> AudioToggleGlyph.PLAY
+                        }
+                        // Crossfade the glyph under the user's finger; the container is a fixed
+                        // 34dp so no size transform is needed.
+                        AnimatedContent(
+                            targetState = glyph,
+                            transitionSpec = {
+                                fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
+                            },
+                            contentAlignment = Alignment.Center,
+                            label = "audio_toggle",
+                        ) { state ->
+                            if (state == AudioToggleGlyph.LOADING) {
+                                playbackState.loadingFraction?.let { fraction ->
+                                    CircularProgressIndicator(
+                                        progress = { fraction },
+                                        modifier = Modifier.size(20.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        strokeWidth = 2.5.dp,
+                                    )
+                                } ?: CircularProgressIndicator(
                                     modifier = Modifier.size(20.dp),
                                     color = MaterialTheme.colorScheme.onPrimary,
                                     strokeWidth = 2.5.dp,
                                 )
-                            } ?: CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                strokeWidth = 2.5.dp,
-                            )
-                        } else {
-                            Icon(
-                                imageVector = when {
-                                    error != null -> Icons.Filled.Refresh
-                                    playing -> Icons.Filled.Pause
-                                    needsDownload -> Icons.Outlined.Download
-                                    else -> Icons.Filled.PlayArrow
-                                },
-                                contentDescription = when {
-                                    error != null -> "Retry audio"
-                                    playing -> "Pause audio"
-                                    needsDownload -> "Download audio"
-                                    else -> "Play audio"
-                                },
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                            )
+                            } else {
+                                Icon(
+                                    imageVector = when (state) {
+                                        AudioToggleGlyph.ERROR -> Icons.Filled.Refresh
+                                        AudioToggleGlyph.PLAYING -> Icons.Filled.Pause
+                                        AudioToggleGlyph.DOWNLOAD -> Icons.Outlined.Download
+                                        else -> Icons.Filled.PlayArrow
+                                    },
+                                    contentDescription = when (state) {
+                                        AudioToggleGlyph.ERROR -> "Retry audio"
+                                        AudioToggleGlyph.PLAYING -> "Pause audio"
+                                        AudioToggleGlyph.DOWNLOAD -> "Download audio"
+                                        else -> "Play audio"
+                                    },
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                )
+                            }
                         }
                     }
                 }

@@ -1,7 +1,6 @@
 package io.github.trevarj.motd.ui.components
 
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
@@ -39,6 +38,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
@@ -162,7 +162,11 @@ internal fun SwipeToReplyContainer(
                         if (shouldCommitSwipeReply(completed, abs(offsetPx), thresholdPx)) currentOnReply()
                         val releasedOffset = offsetPx
                         snapBackJob = animationScope.launch {
-                            animate(releasedOffset, 0f, animationSpec = spring()) { value, _ -> offsetPx = value }
+                            // House settle spring so the release matches the app's calm tempo
+                            // instead of the stiffer stock default.
+                            animate(releasedOffset, 0f, animationSpec = MotdMotion.softSpring) { value, _ ->
+                                offsetPx = value
+                            }
                         }
                     }
                 }
