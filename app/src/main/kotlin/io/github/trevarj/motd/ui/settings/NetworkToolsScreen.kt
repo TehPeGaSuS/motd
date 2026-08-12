@@ -325,7 +325,7 @@ private fun OperatorSection(
                     enabled = enabled && operUser.isNotBlank() && operPassword.isNotBlank(),
                     modifier = Modifier.testTag("network_tools_oper_send"),
                 ) { Text(stringResource(R.string.network_tools_send_oper)) }
-    
+
                 HorizontalDivider()
                 // Editable suggestions: own nick first, then this network's channels. MODE targets that
                 // are neither (a service, another user) stay typable.
@@ -382,7 +382,7 @@ private fun OperatorSection(
                     enabled = enabled && modeTarget.isNotBlank() && modes.isNotBlank(),
                     modifier = Modifier.testTag("network_tools_mode_send"),
                 ) { Text(stringResource(R.string.network_tools_send_mode)) }
-    
+
                 HorizontalDivider()
                 OutlinedTextField(
                     value = killNick,
@@ -415,7 +415,7 @@ private fun OperatorSection(
                     },
                     onConfirm = { pending = it },
                 )
-    
+
                 HorizontalDivider()
                 OutlinedTextField(
                     value = rehashServer,
@@ -437,7 +437,7 @@ private fun OperatorSection(
                     },
                     onConfirm = { pending = it },
                 )
-    
+
                 HorizontalDivider()
                 OutlinedTextField(
                     value = connectServer,
@@ -473,7 +473,7 @@ private fun OperatorSection(
                     },
                     onConfirm = { pending = it },
                 )
-    
+
                 HorizontalDivider()
                 OutlinedTextField(
                     value = squitServer,

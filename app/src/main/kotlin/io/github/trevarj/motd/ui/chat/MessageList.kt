@@ -547,7 +547,15 @@ private fun DccTransferCard(
                 modifier = Modifier.testTag("chat_dcc_transfer_compact_${message.id}"),
             )
         } else {
-            ActiveDccTransferCard(entity, onAccept, onReject, onRemove)
+            // An exiting card keeps composing through the card->pill collapse; its actions must
+            // not fire against the already-retired transfer.
+            val current = transfer != null
+            ActiveDccTransferCard(
+                entity,
+                onAccept = { id, name, resume -> if (current) onAccept(id, name, resume) },
+                onReject = { id -> if (current) onReject(id) },
+                onRemove = { id -> if (current) onRemove(id) },
+            )
         }
     }
 }
@@ -911,16 +919,20 @@ private fun InvitationCard(
                     if (target.state == InviteState.FAILED) {
                         Text("Could not join. You can retry.", color = MaterialTheme.colorScheme.error)
                     }
+                    // An exiting card keeps composing through the card->pill collapse; its
+                    // buttons must not fire against the already-resolved invite.
+                    val current = target == render
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = onJoin,
-                            enabled = target.state != InviteState.JOINING,
+                            enabled = current && target.state != InviteState.JOINING,
                             modifier = Modifier.testTag("chat_invite_join_${message.id}"),
                         ) {
                             Text(if (target.state == InviteState.JOINING) "Joining…" else "Join")
                         }
                         OutlinedButton(
                             onClick = onDismiss,
+                            enabled = current,
                             modifier = Modifier.testTag("chat_invite_dismiss_${message.id}"),
                         ) {
                             Text("Dismiss")

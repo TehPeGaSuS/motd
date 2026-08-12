@@ -199,7 +199,10 @@ fun BackupRestoreScreen(
                                 ImportPreview(preview)
                                 Button(
                                     onClick = { viewModel.applyImport(importPassword) },
-                                    enabled = !state.busy,
+                                    // Also disabled while the block is exiting (preview nulled):
+                                    // the latched content stays tappable for the collapse frames,
+                                    // and a second tap there would re-run the import.
+                                    enabled = !state.busy && state.preview != null,
                                     modifier = Modifier.testTag("backup_import_apply"),
                                 ) {
                                     Text(if (state.importMode == BackupImportMode.REPLACE && preview.removedNetworks > 0) "Replace configuration" else "Apply import")
