@@ -58,16 +58,16 @@ note are in [`docs/assets/avatar-icons/README.md`](docs/assets/avatar-icons/READ
 
 ## Generated channel marks: Devicons and Guix
 
-The opt-in IRC sprite channel renderer embeds a curated subset of monochrome
-SVG paths from [Devicons v1.1.0](https://github.com/vorillaz/devicons/tree/v1.1.0),
-copied from its `packages/core/export-files/font/` source directory. It does
-not distribute a Devicons font binary or load any icon from the network.
-Devicons is licensed under the [MIT License](https://github.com/vorillaz/devicons/blob/v1.1.0/LICENSE).
-The exact selected files, matcher policy, and source pin are listed in
-[`docs/assets/avatar-icons/README.md`](docs/assets/avatar-icons/README.md).
+The IRC sprite channel renderer embeds monochrome SVG path data generated from
+[devicon v2.16.0](https://github.com/devicons/devicon/tree/v2.16.0)
+([MIT](https://github.com/devicons/devicon/blob/v2.16.0/LICENSE)) via
+`tools/gen-channel-devicons/`, plus two marks retained from
+[Devicons v1.1.0](https://github.com/vorillaz/devicons/tree/v1.1.0)
+([MIT](https://github.com/vorillaz/devicons/blob/v1.1.0/LICENSE)). No font
+binary is distributed and no icon is loaded from the network.
 
-Devicons does not currently provide a Guix mark. The `#guix` channel badge is
-a simplified monochrome derivative of the [Guix logo](https://commons.wikimedia.org/wiki/File:Guix_logo.svg),
-by Luis Felipe López Acevedo, from `guix-artwork.git`. That source and its
-derived path data are attributed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+The `#guix` channel badge is a simplified monochrome derivative of the
+[Guix logo](https://commons.wikimedia.org/wiki/File:Guix_logo.svg) by Luis
+Felipe López Acevedo, from `guix-artwork.git`, attributed under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
