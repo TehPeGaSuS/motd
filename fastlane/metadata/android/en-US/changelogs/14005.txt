@@ -1,0 +1,2 @@
+- Fixed the flickering redraw in a chat catching up on history while join, part, and nick changes are set to show all. Collapsed event pills now keep their identity as new lines land instead of being re-grouped on every update.
+- Joins, quits, nick changes, and mode changes now update the chat in one step each, so a reconnect storm no longer redraws the timeline once per channel per line.
