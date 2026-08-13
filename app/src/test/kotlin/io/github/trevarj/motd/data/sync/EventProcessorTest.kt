@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.data.sync
 
+import androidx.room.InvalidationTracker
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import android.content.Context
@@ -1617,6 +1618,132 @@ class EventProcessorTest {
         // A QUIT system message landed in both buffers.
         assertTrue(pagingList(a).any { it.kind == MessageKind.QUIT })
         assertTrue(pagingList(b).any { it.kind == MessageKind.QUIT })
+    }
+
+    /**
+     * A Room commit is what releases a `PagingSource` invalidation, and every invalidation
+     * regenerates the open timeline. These two pin the per-line commit count for the presence
+     * events a reconnect storm delivers by the hundred: one wire event must cost one regeneration,
+     * not one per member table plus one per shared channel.
+     *
+     * The DB is rebuilt with a direct query executor so `InvalidationTracker` refreshes inline at
+     * each commit; the shared one leaves them on a background pool, where the count would race.
+     */
+    @Test
+    fun `a quit fanning across channels commits one timeline invalidation`() = runTest {
+        val direct = directCommitDatabase()
+        try {
+            direct.processor.process(direct.networkId, IrcEvent.Joined(ctx(), "alice", "#a", null, null, false))
+            direct.processor.process(direct.networkId, IrcEvent.Joined(ctx(), "alice", "#b", null, null, false))
+            direct.processor.process(direct.networkId, IrcEvent.Joined(ctx(), "alice", "#c", null, null, false))
+
+            val invalidations = direct.countInvalidations("messages") {
+                direct.processor.process(direct.networkId, IrcEvent.Quit(ctx(time = 2000), "alice", "bye"))
+            }
+
+            assertEquals(1, invalidations)
+            listOf("#a", "#b", "#c").forEach { name ->
+                val buffer = direct.db.bufferDao().byName(direct.networkId, name)!!
+                assertTrue(
+                    direct.db.messageDao().pagingSource(buffer.id).load(
+                        androidx.paging.PagingSource.LoadParams.Refresh(null, 100, false),
+                    ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data }
+                        .any { it.kind == MessageKind.QUIT },
+                )
+            }
+        } finally {
+            direct.db.close()
+        }
+    }
+
+    @Test
+    fun `a peer join commits one invalidation across roster and timeline`() = runTest {
+        val direct = directCommitDatabase()
+        try {
+            direct.processor.process(direct.networkId, IrcEvent.Joined(ctx(), "me", "#a", null, null, isSelf = true))
+
+            // The roster tables are observed by the member list, so a JOIN that committed the member
+            // row, the user row and the timeline row separately redrew three surfaces per line.
+            val invalidations = direct.countInvalidations("messages", "members", "users") {
+                direct.processor.process(
+                    direct.networkId,
+                    IrcEvent.Joined(ctx(time = 2000), "alice", "#a", null, null, false),
+                )
+            }
+
+            assertEquals(1, invalidations)
+        } finally {
+            direct.db.close()
+        }
+    }
+
+    @Test
+    fun `a nick change renaming across channels commits one timeline invalidation`() = runTest {
+        val direct = directCommitDatabase()
+        try {
+            listOf("#a", "#b", "#c").forEach { channel ->
+                direct.processor.process(direct.networkId, IrcEvent.Joined(ctx(), "alice", channel, null, null, false))
+            }
+
+            val invalidations = direct.countInvalidations("messages", "members") {
+                direct.processor.process(
+                    direct.networkId,
+                    IrcEvent.NickChanged(ctx(time = 2000), "alice", "alice2", isSelf = false),
+                )
+            }
+
+            assertEquals(1, invalidations)
+            listOf("#a", "#b", "#c").forEach { name ->
+                val buffer = direct.db.bufferDao().byName(direct.networkId, name)!!
+                assertTrue(direct.db.memberDao().observe(buffer.id).first().any { it.nick == "alice2" })
+            }
+        } finally {
+            direct.db.close()
+        }
+    }
+
+    private class DirectCommitFixture(
+        val db: MotdDatabase,
+        val processor: EventProcessor,
+        val networkId: Long,
+    ) {
+        /** Invalidations of [tables] released while [block] runs. One per committed transaction. */
+        suspend fun countInvalidations(vararg tables: String, block: suspend () -> Unit): Int {
+            var count = 0
+            val observer = object : InvalidationTracker.Observer(arrayOf(*tables)) {
+                override fun onInvalidated(tables: Set<String>) {
+                    count++
+                }
+            }
+            db.invalidationTracker.addObserver(observer)
+            try {
+                block()
+            } finally {
+                db.invalidationTracker.removeObserver(observer)
+            }
+            return count
+        }
+    }
+
+    private suspend fun directCommitDatabase(): DirectCommitFixture {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val directDb = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
+            .allowMainThreadQueries()
+            .setQueryExecutor(Runnable::run)
+            .build()
+        // Close on a failed seed: the caller's `finally` only exists once this returns.
+        return runCatching {
+            val processor = EventProcessor(directDb, TypingTrackerImpl(), MessageNotifier.Noop)
+            val id = directDb.networkDao().insert(
+                NetworkEntity(
+                    name = "libera", role = NetworkRole.DIRECT,
+                    host = "irc.libera.chat", port = 6697,
+                    nick = "me", username = "me", realname = "Me",
+                ),
+            )
+            processor.onRegistered(id, "me", mapOf("CASEMAPPING" to "rfc1459"))
+            DirectCommitFixture(directDb, processor, id)
+        }.onFailure { directDb.close() }.getOrThrow()
     }
 
     @Test

@@ -2082,34 +2082,43 @@ class EventProcessor @Inject constructor(
 
     // -- membership ----------------------------------------------------------
 
+    // One arrival, one commit. The roster upsert, the user record, the invite resolution and the
+    // JOIN row are a single logical event, and a Room commit is what releases a PagingSource
+    // invalidation — so committing them separately regenerated the open timeline two or three times
+    // per JOIN line. A reconnect join storm turns that into visible redraw churn, worst under
+    // presence mode ALL where every one of those rows is also a presented row. Live-only: the
+    // historical path already runs inside [onPlaybackEvents]' batch transaction.
     private suspend fun onJoined(networkId: Long, e: IrcEvent.Joined) {
-        val st = stateFor(networkId)
-        val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
-        if (e.isSelf) markJoined(bufferId, true)
-        memberDao.upsert(MemberEntity(bufferId, e.nick))
-        if (e.ctx.batchId == null) journal(networkId, bufferId, RosterDelta.Upsert(e.nick))
-        upsertUser(networkId, e.nick) { it.copy(account = e.account ?: it.account, realname = e.realname ?: it.realname) }
-        if (e.isSelf) {
-            if (e.ctx.batchId == null) {
-                val resolvedInviteIds = messageDao.actionableInviteIds(bufferId)
-                if (resolvedInviteIds.isNotEmpty()) {
-                    messageDao.markInvitesJoined(bufferId)
-                    resolvedInviteIds.forEach { notifier.onInvitationResolved(it) }
+        var resolvedInviteIds = emptyList<Long>()
+        db.withTransaction {
+            val st = stateFor(networkId)
+            val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
+            if (e.isSelf) markJoined(bufferId, true)
+            memberDao.upsert(MemberEntity(bufferId, e.nick))
+            if (e.ctx.batchId == null) journal(networkId, bufferId, RosterDelta.Upsert(e.nick))
+            upsertUser(networkId, e.nick) { it.copy(account = e.account ?: it.account, realname = e.realname ?: it.realname) }
+            if (e.isSelf) {
+                if (e.ctx.batchId == null) {
+                    resolvedInviteIds = messageDao.actionableInviteIds(bufferId)
+                    if (resolvedInviteIds.isNotEmpty()) messageDao.markInvitesJoined(bufferId)
                 }
+                val cycle = db.bufferDao().observeById(bufferId)?.membershipCycle ?: 0
+                insertSystem(
+                    bufferId,
+                    e.ctx,
+                    MessageKind.JOIN,
+                    e.nick,
+                    "${e.nick} joined",
+                    dedupKey = "selfjoin:$bufferId:$cycle",
+                    isSelf = true,
+                )
+            } else {
+                insertSystem(bufferId, e.ctx, MessageKind.JOIN, e.nick, "${e.nick} joined", isSelf = e.isSelf)
             }
-            val cycle = db.bufferDao().observeById(bufferId)?.membershipCycle ?: 0
-            insertSystem(
-                bufferId,
-                e.ctx,
-                MessageKind.JOIN,
-                e.nick,
-                "${e.nick} joined",
-                dedupKey = "selfjoin:$bufferId:$cycle",
-                isSelf = true,
-            )
-        } else {
-            insertSystem(bufferId, e.ctx, MessageKind.JOIN, e.nick, "${e.nick} joined", isSelf = e.isSelf)
         }
+        // Announced only after the commit: the notifier is an app-level side effect, and firing it
+        // from inside the transaction would resolve an invitation a rollback could still restore.
+        resolvedInviteIds.forEach { notifier.onInvitationResolved(it) }
     }
 
     private suspend fun onHistoricalJoined(networkId: Long, e: IrcEvent.Joined) {
@@ -2151,12 +2160,18 @@ class EventProcessor @Inject constructor(
     }
 
     private suspend fun onQuit(networkId: Long, e: IrcEvent.Quit) {
-        // Fan out to every buffer the nick was a member of.
+        // Fan out to every buffer the nick was a member of, in ONE transaction. A quit is a single
+        // wire event; committing per buffer released one PagingSource invalidation per shared
+        // channel, which is the largest per-line multiplier the timeline sees during a storm.
         val buffers = buffersOfNick(networkId, e.nick)
-        for (bufferId in buffers) {
-            memberDao.remove(bufferId, e.nick)
-            if (e.ctx.batchId == null) journal(networkId, bufferId, RosterDelta.Remove(e.nick))
-            insertSystem(bufferId, e.ctx, MessageKind.QUIT, e.nick, "${e.nick} quit" + (e.reason?.let { " ($it)" } ?: ""))
+        if (buffers.isNotEmpty()) {
+            db.withTransaction {
+                for (bufferId in buffers) {
+                    memberDao.remove(bufferId, e.nick)
+                    if (e.ctx.batchId == null) journal(networkId, bufferId, RosterDelta.Remove(e.nick))
+                    insertSystem(bufferId, e.ctx, MessageKind.QUIT, e.nick, "${e.nick} quit" + (e.reason?.let { " ($it)" } ?: ""))
+                }
+            }
         }
         if (e.ctx.batchId == null) {
             journalAcrossActiveSnapshots(networkId, buffers.toSet(), RosterDelta.DeferredQuit(e))
@@ -2207,15 +2222,21 @@ class EventProcessor @Inject constructor(
             normalizedNewNick = normalizedNewNick,
             displayNewNick = e.to,
         )
-        // Rename member rows across every buffer that had the old nick.
+        // Rename member rows across every buffer that had the old nick, in ONE transaction: three
+        // commits per shared channel was the largest per-line invalidation multiplier left after
+        // JOIN and QUIT, and nick churn is a standard component of a reconnect storm.
         val buffers = buffersOfNick(networkId, e.from)
-        for (bufferId in buffers) {
-            memberDao.remove(bufferId, e.from)
-            memberDao.upsert(MemberEntity(bufferId, e.to))
-            if (e.ctx.batchId == null) {
-                journal(networkId, bufferId, RosterDelta.Rename(e.from, e.to))
+        if (buffers.isNotEmpty()) {
+            db.withTransaction {
+                for (bufferId in buffers) {
+                    memberDao.remove(bufferId, e.from)
+                    memberDao.upsert(MemberEntity(bufferId, e.to))
+                    if (e.ctx.batchId == null) {
+                        journal(networkId, bufferId, RosterDelta.Rename(e.from, e.to))
+                    }
+                    insertSystem(bufferId, e.ctx, MessageKind.NICK, e.from, "${e.from} is now known as ${e.to}")
+                }
             }
-            insertSystem(bufferId, e.ctx, MessageKind.NICK, e.from, "${e.from} is now known as ${e.to}")
         }
         if (e.ctx.batchId == null) {
             journalAcrossActiveSnapshots(networkId, buffers.toSet(), RosterDelta.DeferredNick(e))
@@ -2389,8 +2410,12 @@ class EventProcessor @Inject constructor(
         val st = stateFor(networkId)
         if (!isChannel(networkId, e.target, st)) return
         val bufferId = existingChannelBuffer(networkId, e.target, st)?.id ?: return
-        applyPrefixModes(networkId, bufferId, e, st)
-        insertSystem(bufferId, e.ctx, MessageKind.MODE, "", "mode ${e.modes} ${e.args.joinToString(" ")}".trim())
+        // One commit for the whole line: a multi-argument MODE (a services re-op after a netsplit)
+        // otherwise commits once per prefix change plus once for the row it renders as.
+        db.withTransaction {
+            applyPrefixModes(networkId, bufferId, e, st)
+            insertSystem(bufferId, e.ctx, MessageKind.MODE, "", "mode ${e.modes} ${e.args.joinToString(" ")}".trim())
+        }
     }
 
     private suspend fun onHistoricalModeChanged(networkId: Long, e: IrcEvent.ModeChanged) {
