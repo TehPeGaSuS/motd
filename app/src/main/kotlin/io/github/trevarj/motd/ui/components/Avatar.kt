@@ -16,6 +16,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
@@ -32,6 +33,7 @@ import io.github.trevarj.motd.avatar.expandAvatarUrl
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.bestOnColor
+import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import coil.compose.AsyncImage
 
@@ -88,11 +90,13 @@ internal fun onColorFor(bg: Color): Color =
     bestOnColor(bg)
 
 /**
- * Circular nick avatar. [AvatarStyle.MONOGRAM] is a quiet theme-tinted disc with a single
- * initial; [AvatarStyle.INITIALS] is the bolder solid nick-color chip with two initials; and
- * [AvatarStyle.IRC_SPRITE] (default) renders deterministic IRC robot sprites for people.
- * Project-named channels instead receive a matched Devicons mark, with a neutral IRC fallback.
- * All styles take their identity color from [name] via the current LocalNickColors scheme.
+ * Nick avatar with semantic shape: channels render as rounded squares ([MotdShapes.channelAvatar])
+ * and queries/people as circles, across every style. [AvatarStyle.MONOGRAM] is a quiet
+ * theme-tinted disc with a single initial; [AvatarStyle.INITIALS] is the bolder solid nick-color
+ * chip with two initials; and [AvatarStyle.IRC_SPRITE] (default) renders deterministic IRC robot
+ * sprites for people. Project-named channels instead receive a matched Devicons mark, with a
+ * neutral IRC fallback. All styles take their identity color from [name] via the current
+ * LocalNickColors scheme.
  *
  * [isChannel] uses the name as-is (channels keep the leading `#`); queries fall back to their nick.
  */
@@ -108,10 +112,11 @@ fun Avatar(
     // Avatars keep their generated/override color even when nick coloring is disabled (an all-gray
     // avatar column would be unusable, plans/13 confirmed decision #5); avatar() ignores the flag.
     val nick = LocalNickColors.current.avatar(name)
+    val shape: Shape = if (isChannel) MotdShapes.channelAvatar else CircleShape
     Box(modifier = modifier.size(size), contentAlignment = Alignment.Center) {
         when (LocalAvatarStyle.current) {
-            AvatarStyle.MONOGRAM -> MonogramAvatar(name, nick, size, isChannel, Modifier)
-            AvatarStyle.INITIALS -> InitialsAvatar(name, nick, size, isChannel, Modifier)
+            AvatarStyle.MONOGRAM -> MonogramAvatar(name, nick, size, isChannel, shape, Modifier)
+            AvatarStyle.INITIALS -> InitialsAvatar(name, nick, size, isChannel, shape, Modifier)
             AvatarStyle.IRC_SPRITE -> {
                 if (isChannel) IrcChannelBadge(name, size, Modifier)
                 else IrcSpriteAvatar(name, size, Modifier)
@@ -124,7 +129,7 @@ fun Avatar(
                 model = url,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.size(size).clip(CircleShape),
+                modifier = Modifier.size(size).clip(shape),
             )
         }
     }
@@ -138,7 +143,7 @@ fun Avatar(
  * the color identity; the disc stays mostly neutral, so the avatar column reads calm rather than busy.
  */
 @Composable
-private fun MonogramAvatar(name: String, nick: Color, size: Dp, isChannel: Boolean, modifier: Modifier) {
+private fun MonogramAvatar(name: String, nick: Color, size: Dp, isChannel: Boolean, shape: Shape, modifier: Modifier) {
     val scheme = MaterialTheme.colorScheme
     val dark = isAppliedThemeDark()
     val base = scheme.surfaceContainerHigh
@@ -153,11 +158,11 @@ private fun MonogramAvatar(name: String, nick: Color, size: Dp, isChannel: Boole
     Box(
         modifier = modifier
             .size(size)
-            .clip(CircleShape)
+            .clip(shape)
             .background(Brush.verticalGradient(listOf(top, bottom)))
-            // The hairline ring is what defines the circle on AMOLED (disc barely above true black);
+            // The hairline ring is what defines the shape on AMOLED (disc barely above true black);
             // do not drop it.
-            .border(1.dp, nick.copy(alpha = 0.40f), CircleShape),
+            .border(1.dp, nick.copy(alpha = 0.40f), shape),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -172,11 +177,11 @@ private fun MonogramAvatar(name: String, nick: Color, size: Dp, isChannel: Boole
 
 /** The bolder alternate: two initials over the solid, saturated nick color (the original style). */
 @Composable
-private fun InitialsAvatar(name: String, bg: Color, size: Dp, isChannel: Boolean, modifier: Modifier) {
+private fun InitialsAvatar(name: String, bg: Color, size: Dp, isChannel: Boolean, shape: Shape, modifier: Modifier) {
     Box(
         modifier = modifier
             .size(size)
-            .clip(CircleShape)
+            .clip(shape)
             .background(bg),
         contentAlignment = Alignment.Center,
     ) {

@@ -5,8 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -16,10 +14,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -27,6 +23,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.MotdShapes
+import io.github.trevarj.motd.ui.theme.colorHue
+import io.github.trevarj.motd.ui.theme.hslColor
 import kotlin.math.min
 
 private const val DEVICON_VIEWPORT = 600f
@@ -307,8 +306,9 @@ private fun channelTokens(channelName: String): List<String> {
 
 /**
  * Contextual channel badge: named technical channels get a Devicons mark; ordinary channels keep
- * a quiet IRC sigil. Both retain the deterministic channel color and circular shape of the avatar
- * system, so this reads as part of motd rather than an imported app icon.
+ * a quiet IRC sigil. Channels are rounded-square tiles ([MotdShapes.channelAvatar]) filled with
+ * the vivid mid tone of the deterministic channel hue, so they read as places while people stay
+ * circular sprites.
  */
 @Composable
 internal fun IrcChannelBadge(
@@ -318,20 +318,20 @@ internal fun IrcChannelBadge(
 ) {
     val glyph = remember(name) { matchedChannelDevicon(name) }
     val primary = LocalNickColors.current.avatar(name)
-    val scheme = MaterialTheme.colorScheme
     val dark = isAppliedThemeDark()
-    val base = scheme.surfaceContainerHigh
-    val background = primary
-        .copy(alpha = if (dark) 0.30f else 0.16f)
-        .compositeOver(base)
-    val mark = lerp(primary, scheme.onSurface, if (dark) 0.10f else 0.20f)
+    // Same vivid ramp family as SpritePalette.from: solid mid-tone tile, one step brighter
+    // (dark) / deeper (light) border, and a guaranteed-contrast mark.
+    val hue = colorHue(primary)
+    val background = if (dark) hslColor(hue, 0.72f, 0.48f) else hslColor(hue, 0.70f, 0.50f)
+    val border = if (dark) hslColor(hue, 0.80f, 0.66f) else hslColor(hue, 0.72f, 0.34f)
+    val mark = onColorFor(background)
 
     Box(
         modifier = modifier
             .size(size)
-            .clip(CircleShape)
+            .clip(MotdShapes.channelAvatar)
             .background(background)
-            .border(1.dp, primary.copy(alpha = 0.56f), CircleShape),
+            .border(1.dp, border.copy(alpha = 0.90f), MotdShapes.channelAvatar),
         contentAlignment = Alignment.Center,
     ) {
         if (glyph == null) {
@@ -355,7 +355,9 @@ private fun DrawScope.drawChannelDevicon(
     color: Color,
 ) {
     val diameter = min(size.width, size.height)
-    val available = diameter * 0.64f
+    // The rounded-square tile inscribes more than the old circle did; 0.70 keeps corner clearance
+    // at the 30% radius while letting the mark breathe.
+    val available = diameter * 0.70f
     val scale = min(available / glyph.viewportWidth, available / glyph.viewportHeight)
     val left = (size.width - glyph.viewportWidth * scale) / 2f
     val top = (size.height - glyph.viewportHeight * scale) / 2f

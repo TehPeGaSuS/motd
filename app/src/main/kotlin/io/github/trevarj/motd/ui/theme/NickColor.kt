@@ -14,33 +14,61 @@ import kotlin.math.floor
 private const val GOLDEN_RATIO_CONJUGATE = 0.618033988749895
 
 /**
- * Deterministic per-nick color used for sender names and avatar backgrounds.
- *
- * The nick is hashed to a 0..1 seed, multiplied by the golden ratio conjugate and wrapped, which
- * scatters similar nicks across the hue wheel instead of clustering them. Saturation/lightness are
- * tuned per mode so text stays legible on the mode's surfaces.
+ * Deterministic per-nick color used for sender names and avatar backgrounds. Equivalent to the
+ * CLASSIC hash palette: the spread seed snapped to the curated bin table.
  */
-fun nickColor(nick: String, isDark: Boolean): Color {
-    val hue = nickHue(nick)
-    // Brighter, less-saturated on dark; deeper, more-saturated on light.
-    val saturation = if (isDark) 0.55f else 0.65f
-    val lightness = if (isDark) 0.68f else 0.42f
-    return hslColor(hue, saturation, lightness)
-}
+fun nickColor(nick: String, isDark: Boolean): Color =
+    paletteNickColor(nick, isDark, NickColorPalette.CLASSIC)
 
-/** Golden-ratio hash hue in degrees (0..360). Shared by nickColor + paletteNickColor so the
- *  CLASSIC palette maps to identical hues as the legacy generator. */
-private fun nickHue(nick: String): Float {
+/**
+ * Hash seed in 0..1, scattered by *multiplying* with the golden-ratio conjugate. Adjacent hashes
+ * (`bob1`/`bob2`, `alice`/`alice_` — the x31 hash is linear in trailing chars) land ~0.618 apart
+ * instead of adjacent; the previous additive form was a constant rotation that spread nothing.
+ */
+private fun nickHueSeed(nick: String): Double {
     // Stable, case-insensitive hash so "Alice" and "alice" share a color.
     var hash = 0
     for (c in nick.lowercase()) {
         hash = hash * 31 + c.code
     }
-    val seed = (abs(hash) % 1000) / 1000.0
-    return ((seed + GOLDEN_RATIO_CONJUGATE) % 1.0).toFloat() * 360f
+    val spread = abs(hash.toLong()) * GOLDEN_RATIO_CONJUGATE
+    return spread - floor(spread)
 }
 
-// Palette saturation/lightness per mode; the hue always comes from the hash or an override.
+/** Continuous spread hue in degrees; used by the THEME accent-gradient position and overrides. */
+private fun nickHue(nick: String): Float = (nickHueSeed(nick) * 360.0).toFloat()
+
+/**
+ * Curated identity bins: 16 hues x 2 saturation/lightness tiers. Slots are spaced wider through
+ * the perceptually compressed green/cyan (95..195) and blue (200..280) HSL bands, so any two
+ * different bins stay clearly distinguishable; hash collisions become exact shares rather than
+ * misleading near-misses. Continuous hue hashing put ~7% of unrelated nick pairs within a
+ * confusable distance (deltaE < 12); the table cuts that by ~3x.
+ */
+internal val NICK_BIN_HUES = floatArrayOf(
+    0f, 16f, 32f, 48f, 66f, 85f, 110f, 140f, 170f, 195f, 220f, 248f, 275f, 297f, 318f, 340f,
+)
+internal const val NICK_BIN_COUNT = 32
+
+internal fun nickBin(nick: String): Int =
+    (nickHueSeed(nick) * NICK_BIN_COUNT).toInt().coerceIn(0, NICK_BIN_COUNT - 1)
+
+/** Bold tier is saturated and mode-deep; soft tier is a clearly separated pastel of the same hue. */
+internal fun nickBinSaturation(palette: NickColorPalette, isDark: Boolean, bold: Boolean): Float =
+    when (palette) {
+        NickColorPalette.THEME,
+        NickColorPalette.CLASSIC -> if (isDark) (if (bold) 0.72f else 0.48f) else (if (bold) 0.75f else 0.55f)
+        NickColorPalette.VIVID -> if (isDark) (if (bold) 0.85f else 0.62f) else (if (bold) 0.88f else 0.68f)
+    }
+
+internal fun nickBinLightness(palette: NickColorPalette, isDark: Boolean, bold: Boolean): Float =
+    when (palette) {
+        NickColorPalette.THEME,
+        NickColorPalette.CLASSIC -> if (isDark) (if (bold) 0.60f else 0.76f) else (if (bold) 0.38f else 0.52f)
+        NickColorPalette.VIVID -> if (isDark) (if (bold) 0.56f else 0.72f) else (if (bold) 0.36f else 0.50f)
+    }
+
+// Continuous saturation/lightness for manual hue overrides (the picker remains a full wheel).
 private fun paletteSaturation(palette: NickColorPalette, isDark: Boolean): Float = when (palette) {
     NickColorPalette.THEME,
     NickColorPalette.CLASSIC -> if (isDark) 0.55f else 0.65f
@@ -129,18 +157,25 @@ fun resolveNickColor(
     else paletteNickColor(nick, isDark, palette, themeColors)
 }
 
-/** Palette hash color: golden-ratio hue (identical hue math to nickColor) + palette S/L. Pure. */
+/** Palette hash color: curated bin for hash palettes; tiered accent-gradient lerp for THEME. Pure. */
 fun paletteNickColor(
     nick: String,
     isDark: Boolean,
     palette: NickColorPalette,
     themeColors: List<Color> = emptyList(),
 ): Color {
-    val hue = nickHue(nick)
+    val bin = nickBin(nick)
+    val bold = bin < NICK_BIN_HUES.size
     return if (palette == NickColorPalette.THEME) {
-        themePaletteColor(hue, themeColors, isDark)
+        // THEME stays constrained to the accent gradient; the soft tier adds a second
+        // distinguishing axis since three accents can't carry much hue variance alone.
+        themePaletteColor(nickHue(nick), themeColors, isDark, softTier = !bold)
     } else {
-        hslColor(hue, paletteSaturation(palette, isDark), paletteLightness(palette, isDark))
+        hslColor(
+            NICK_BIN_HUES[bin % NICK_BIN_HUES.size],
+            nickBinSaturation(palette, isDark, bold),
+            nickBinLightness(palette, isDark, bold),
+        )
     }
 }
 
@@ -162,23 +197,49 @@ fun hueColor(
 /**
  * Treat the active theme accents as a cyclic gradient. Hashes and manual overrides select a stable
  * position around primary -> tertiary -> secondary -> primary, keeping identities distinct while
- * ensuring every generated color belongs to the current theme.
+ * ensuring every generated color belongs to the current theme. The soft tier shifts the result
+ * toward the mode's contrast pole, giving hash colors a second axis within the theme's gamut.
  */
-private fun themePaletteColor(position: Float, themeColors: List<Color>, isDark: Boolean): Color {
+private fun themePaletteColor(
+    position: Float,
+    themeColors: List<Color>,
+    isDark: Boolean,
+    softTier: Boolean = false,
+): Color {
     val colors = themeColors.distinct()
-    if (colors.isEmpty()) {
-        return hslColor(
+    val base = when {
+        colors.isEmpty() -> hslColor(
             position,
             paletteSaturation(NickColorPalette.CLASSIC, isDark),
             paletteLightness(NickColorPalette.CLASSIC, isDark),
         )
+        colors.size == 1 -> colors.single()
+        else -> {
+            val scaled = position.coerceIn(0f, 359f) / 360f * colors.size
+            val start = floor(scaled).toInt().coerceAtMost(colors.lastIndex)
+            val amount = scaled - floor(scaled)
+            lerp(colors[start], colors[(start + 1) % colors.size], amount)
+        }
     }
-    if (colors.size == 1) return colors.single()
+    return if (softTier) lerp(base, if (isDark) Color.White else Color.Black, 0.22f) else base
+}
 
-    val scaled = position.coerceIn(0f, 359f) / 360f * colors.size
-    val start = floor(scaled).toInt().coerceAtMost(colors.lastIndex)
-    val amount = scaled - floor(scaled)
-    return lerp(colors[start], colors[(start + 1) % colors.size], amount)
+/**
+ * HSL hue (degrees, 0..360) of an already-resolved color. Lets the sprite ramp rebuild
+ * saturation/lightness around whichever identity color the active palette produced (CLASSIC hash,
+ * THEME lerp, or a manual override), so vivid sprites stay consistent with sender-name hues.
+ */
+internal fun colorHue(color: Color): Float {
+    val max = maxOf(color.red, color.green, color.blue)
+    val min = minOf(color.red, color.green, color.blue)
+    val delta = max - min
+    if (delta == 0f) return 0f
+    val segment = when (max) {
+        color.red -> (color.green - color.blue) / delta
+        color.green -> (color.blue - color.red) / delta + 2f
+        else -> (color.red - color.green) / delta + 4f
+    }
+    return (segment * 60f + 360f) % 360f
 }
 
 /** HSL -> RGB Color (h in degrees, s/l in 0..1). */
