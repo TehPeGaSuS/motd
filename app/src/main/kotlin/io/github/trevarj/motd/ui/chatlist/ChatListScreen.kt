@@ -1599,6 +1599,7 @@ private fun FoolsSectionHeader(count: Int, expanded: Boolean, onToggle: () -> Un
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
             .clickable(onClick = onToggle)
             .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1848,7 +1849,11 @@ private fun SectionHeader(text: String) {
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
+        // Same container as the row wrappers so the list reads as one continuous surface.
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
     )
 }
 
