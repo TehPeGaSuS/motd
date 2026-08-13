@@ -5,21 +5,56 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SystemEventChunkTest {
-    @Test fun `fifty event run partitions into non-overlapping bounded chunks`() {
-        // The first event follows a normal message at index 1. Chunk boundaries are absolute, so
-        // this exercises the short first chunk plus two full/bounded successors.
-        val eventIndices = 1..50
-        val heads = eventIndices.filter { index ->
-            isSystemRunChunkHead(index, newerIsSystem = index != 1)
+    /**
+     * Partition a presented run of system rows the way [MessageList] does: heads are decided per
+     * row, then each head gathers older neighbours up to (not including) the next boundary.
+     */
+    private fun chunksOf(ids: List<Long>): List<List<Long>> {
+        val heads = ids.indices.filter { i -> isSystemRunChunkHead(ids[i], newerIsSystem = i != 0) }
+        return heads.map { head ->
+            val chunk = mutableListOf(ids[head])
+            var i = head + 1
+            while (i < ids.size && !isSystemRunChunkBoundary(ids[i])) {
+                chunk.add(ids[i])
+                i++
+            }
+            chunk
         }
-        assertEquals(listOf(1, 24, 48), heads)
+    }
 
-        val rendered = heads.flatMap { head ->
-            (head until minOf(head + systemRunChunkLimit(head), 51)).toList()
-        }
-        assertEquals(eventIndices.toList(), rendered)
+    @Test fun `long event run partitions into non-overlapping chunks covering every row`() {
+        val ids = (1L..500L).toList()
+        val chunks = chunksOf(ids)
+
+        val rendered = chunks.flatten()
+        assertEquals(ids, rendered)
         assertEquals(rendered.size, rendered.toSet().size)
-        assertTrue(heads.all { systemRunChunkLimit(it) <= MAX_COLLAPSED_SYSTEM_EVENTS })
+        assertTrue(chunks.size > 1)
+    }
+
+    @Test fun `chunk membership survives newer rows landing during catch-up`() {
+        // The flicker case: a playback burst prepends rows, shifting every presented index. Chunk
+        // membership below the newest row must not change, or every visible pill re-wraps.
+        val settled = (100L..400L).toList()
+        val before = chunksOf(settled)
+        val after = chunksOf((1L..99L) + settled)
+
+        val beforeOwner = before.flatMap { chunk -> chunk.map { it to chunk } }.toMap()
+        val afterOwner = after.flatMap { chunk -> chunk.map { it to chunk } }.toMap()
+        // Only the run's former newest chunk may absorb the arriving rows; every other settled row
+        // keeps byte-identical chunk membership, so its pill neither re-summarizes nor re-keys.
+        val interior = settled.filter { beforeOwner.getValue(it) !== before.first() }
+        assertTrue(interior.size > settled.size / 2)
+        interior.forEach { id -> assertEquals(beforeOwner.getValue(id), afterOwner.getValue(id)) }
+    }
+
+    @Test fun `boundary placement is independent of id periodicity`() {
+        // Ids stride by 24 (one room in a busy multi-room store). An index- or modulo-of-id rule
+        // would put every row in the same residue class and never cut; the mixed hash still does.
+        val strided = (0 until 400).map { 7L + it * 24L }
+        val chunks = chunksOf(strided)
+        assertTrue(chunks.size > 5)
+        assertEquals(strided, chunks.flatten())
     }
 
     @Test fun `tail append refreshes content without losing run expansion`() {
@@ -36,8 +71,7 @@ class SystemEventChunkTest {
         assertTrue(systemRunExpanded(listOf(48L, 50L, 49L, 51L), expandedIds))
     }
 
-    @Test fun `arbitrary chunk boundary keeps distinct content identities`() {
-        // Absolute chunk boundaries may create a short first chunk followed by a full one.
+    @Test fun `adjacent chunks keep distinct content identities`() {
         val beforeBoundary = SystemRunContentKey(newestId = 1, oldestId = 23, count = 23)
         val atBoundary = SystemRunContentKey(newestId = 24, oldestId = 47, count = 24)
         assertTrue(beforeBoundary != atBoundary)

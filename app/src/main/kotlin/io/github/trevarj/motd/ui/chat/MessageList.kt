@@ -122,7 +122,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
-/** Limit collapsed system-event work per composed row during high-velocity history traversal. */
+/**
+ * Target collapsed system-event count per pill, and the modulus of the identity hash that places
+ * chunk boundaries. Bounds the work one composed row does during high-velocity history traversal.
+ */
 internal const val MAX_COLLAPSED_SYSTEM_EVENTS = 24
 
 /** Refresh identity for expanded line content; changes when Paging extends a tail chunk. */
@@ -392,7 +395,7 @@ fun MessageList(
             // skip the rest. In a reversed list the newest of a contiguous system run is the item
             // whose just-newer neighbor is not a system event.
             if (isSystemKind(msg.kind)) {
-                if (!isSystemRunChunkHead(index, newer?.let { isSystemKind(it.kind) } == true)) return@items
+                if (!isSystemRunChunkHead(msg.id, newer?.let { isSystemKind(it.kind) } == true)) return@items
                 LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
                     SystemEventRun(
                         items = items,
@@ -965,14 +968,16 @@ private fun SystemEventRun(
     expandedEventIds: Set<Long>,
     onExpandedChange: (Collection<Long>, Boolean) -> Unit,
 ) {
-    // Gather at most one chunk: newest first (index), then older neighbors while still system events.
+    // Gather exactly one chunk: newest first (index), then older neighbors while still system events
+    // and not themselves a boundary — a boundary row heads the next chunk, so stopping there is what
+    // guarantees every event is rendered by one and only one head. Chunk length is geometric with
+    // mean MAX_COLLAPSED_SYSTEM_EVENTS, and the walk terminates at the loaded window edge regardless.
     val run = ArrayList<MessageEntity>()
     run.add(newest)
     var i = index + 1
-    val chunkLimit = systemRunChunkLimit(index)
-    while (i < items.itemCount && run.size < chunkLimit) {
+    while (i < items.itemCount) {
         val m = items.peek(i) ?: break
-        if (!isSystemKind(m.kind)) break
+        if (!isSystemKind(m.kind) || isSystemRunChunkBoundary(m.id)) break
         run.add(m)
         i++
     }
@@ -1018,15 +1023,32 @@ private fun SystemEventRun(
 }
 
 /**
- * A run begins at its newest row and at fixed absolute-index chunk boundaries. This is deliberately
- * O(1): suppressed rows do no neighbor walk while flinging, and each event belongs to one head.
+ * SplitMix64 finalizer. Ids are a monotonic autoincrement shared by every room, so a buffer's rows
+ * can land on an arithmetic progression; avalanching first keeps boundary placement independent of
+ * that periodicity, and keeps it deterministic for tests.
  */
-internal fun isSystemRunChunkHead(index: Int, newerIsSystem: Boolean): Boolean =
-    !newerIsSystem || index % MAX_COLLAPSED_SYSTEM_EVENTS == 0
+private fun mixEventIdentity(id: Long): Long {
+    var z = id + -0x61c8864680b583ebL
+    z = (z xor (z ushr 30)) * -0x40a7b892e31b1a47L
+    z = (z xor (z ushr 27)) * -0x6b2fb644ecceee15L
+    return z xor (z ushr 31)
+}
 
-/** Number of rows from [index] through the next absolute chunk boundary (at most 24). */
-internal fun systemRunChunkLimit(index: Int): Int =
-    MAX_COLLAPSED_SYSTEM_EVENTS - (index % MAX_COLLAPSED_SYSTEM_EVENTS)
+/**
+ * Chunk boundaries are a property of the row itself, never of where Paging happens to present it.
+ * Absolute-index boundaries (`index % 24 == 0`) re-sliced every long presence run each time a newer
+ * row landed: a catch-up burst shifts every index, so already-rendered pills changed membership,
+ * summary, and content key on every invalidation — the "show all" redraw flicker.
+ */
+internal fun isSystemRunChunkBoundary(id: Long): Boolean =
+    (mixEventIdentity(id) ushr 1) % MAX_COLLAPSED_SYSTEM_EVENTS == 0L
+
+/**
+ * A run begins at its newest row and at each identity boundary inside it. Still O(1) per suppressed
+ * row: no neighbor walk while flinging, and each event belongs to exactly one head.
+ */
+internal fun isSystemRunChunkHead(id: Long, newerIsSystem: Boolean): Boolean =
+    !newerIsSystem || isSystemRunChunkBoundary(id)
 
 /**
  * Summarize a run of system events by kind: JOIN → "joined", PART/QUIT → "left", others by kind
