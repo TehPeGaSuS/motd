@@ -98,7 +98,12 @@ internal fun chatListRowContainer(
     ChatListRowVisualState.SELECTED -> scheme.secondaryContainer
     ChatListRowVisualState.ACTIVE -> scheme.primaryContainer
     ChatListRowVisualState.UNREAD -> lerp(scheme.surface, scheme.primaryContainer, 0.48f)
-    ChatListRowVisualState.DEFAULT -> Color.Transparent
+    // Alpha-zero surface, not Color.Transparent: the row's colorFade interpolates color channels
+    // independently of alpha, and Color.Transparent is transparent BLACK — fading a tint from it
+    // dragged every unread/select transition through a semi-opaque dark blend, which flashed the
+    // row dark each time a message landed. Alpha 0 still draws nothing, so resting rows render
+    // exactly as before over any backing.
+    ChatListRowVisualState.DEFAULT -> scheme.surface.copy(alpha = 0f)
 }
 
 internal fun chatListBadgeState(row: ChatListRow): ChatListBadgeState =
