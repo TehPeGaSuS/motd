@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.service
 
+import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
@@ -196,6 +197,19 @@ interface ConnectionManager {
 
     /** True when this network's live client can run a server-side soju SEARCH right now. */
     fun serverSearchAvailable(networkId: Long): Boolean = clientFor(networkId)?.searchAvailable == true
+
+    /**
+     * History paging capability of this network's live client right now, or
+     * [HistoryAvailability.NegotiatingOrOffline] when there is no client to ask.
+     *
+     * Derived accessor over [clientFor], exactly like [serverSearchAvailable] above, and for the
+     * same reason: the answer lives in the client's registration/CAP/ISUPPORT state, which a caller
+     * outside the service layer has no business reaching through a protocol object to read. Having
+     * it on the seam is also what lets a lightweight fake model "history is negotiated and ready"
+     * without standing up a transport and driving a full registration.
+     */
+    fun historyAvailabilityFor(networkId: Long): HistoryAvailability =
+        clientFor(networkId)?.historyAvailability ?: HistoryAvailability.NegotiatingOrOffline
 
     /**
      * Run one server-side SEARCH, or return null when the network has no live client.

@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.paging.PagingData
+import androidx.paging.PagingSource
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
@@ -12,6 +13,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.EventRedirectEntity
+import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
@@ -37,13 +39,19 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.BufferRepositoryImpl
+import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
+import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
 import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.data.sync.GapFillProgress
+import io.github.trevarj.motd.data.sync.HistoryGapFiller
+import io.github.trevarj.motd.data.sync.NoopHistoryGapFiller
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.dcc.DccTransferController
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
@@ -51,6 +59,8 @@ import io.github.trevarj.motd.audio.AudioMetadataRepository
 import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.audio.DirectMediaPolicy
+import io.github.trevarj.motd.irc.client.HistoryAvailability
+import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcClientConfig
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -2420,6 +2430,277 @@ class ChatViewModelTest {
         assertFalse(proxiedVm.directMediaAllowed.value)
     }
 
+    // --- the timeline's history rule: demand -> gate -> SeamLoadingRule -> HistoryGapFiller -------
+    //
+    // Models the store geometry the `unreadHistoryEntersAtMarkerAndRemainsCanonical` E2E journey
+    // reaches just before it opens the room: a read marker, the 49-row reconnect catch-up island
+    // above it, and the recoverable gap between them, one row below the parked viewport.
+    //
+    // This wiring had no coverage at any level below that journey. Everything DOWNSTREAM of
+    // `HistoryGapFiller.fillGap` is pinned by `RecentPagingAppendReproTest`, and `SeamLoadingRule`
+    // and `seamsWithinPrefetch` are pinned as pure functions by `ChatModelsTest` — but no ViewModel
+    // test ever passed a `gapFiller`, so every one of them ran against `NoopHistoryGapFiller` and
+    // could not have observed a fill being requested at all.
+
+    /** The one seam a fill can be observed at: records what the timeline's rule decided to load. */
+    private class RecordingGapFiller : HistoryGapFiller {
+        override val fillsInFlight = MutableStateFlow<Set<Long>>(emptySet())
+        val requests = mutableListOf<Pair<Long, Long>>()
+
+        override suspend fun fillGap(roomId: Long, gapId: Long): GapFillProgress {
+            requests += roomId to gapId
+            return GapFillProgress.MOVED
+        }
+    }
+
+    /** Rows are newest-first on screen, so index 0 is the newest catch-up row. */
+    private data class SeamFixture(val markerId: Long, val oldestCatchUpId: Long, val gapId: Long)
+
+    /**
+     * 50 already-read rows, 49 catch-up rows above them, and the catch-up gap between the two
+     * islands. The gap is hand-inserted rather than driven through `persistHistoryPageResult`
+     * because the production writer's shape is already pinned by `ReconnectGapPresentationTest` and
+     * `RecentPagingAppendReproTest`; what is under test here starts at the seam the store publishes.
+     * Both edges carry an eventId and no msgid, which is what soju's `MSGREFTYPES=timestamp` wire
+     * leaves behind (the journal's `boundary_has_msgid=false`).
+     */
+    private suspend fun seedCatchUpSeam(): SeamFixture {
+        val readIds = db.messageDao().insertAll(
+            (1..50).map { ordinal ->
+                message(channel.id, "read-$ordinal", null, "alice")
+                    .copy(serverTime = ordinal.toLong(), dedupKey = "read-$ordinal")
+            },
+        )
+        val catchUpIds = db.messageDao().insertAll(
+            (212..260).map { ordinal ->
+                message(channel.id, "row$ordinal", null, "alice")
+                    .copy(serverTime = ordinal.toLong(), dedupKey = "row$ordinal")
+            },
+        )
+        val gapId = db.historyGapDao().insert(
+            HistoryGapEntity(
+                roomId = channel.id,
+                olderMsgid = null,
+                olderServerTime = 50,
+                olderEventId = readIds.last(),
+                newerMsgid = null,
+                newerServerTime = 212,
+                newerEventId = catchUpIds.first(),
+                recoverable = true,
+            ),
+        )
+        return SeamFixture(readIds.last(), catchUpIds.first(), gapId)
+    }
+
+    /**
+     * The window the fixture's viewport is looking at, newest first, exactly as Paging presents it.
+     *
+     * Loaded straight from the DAO rather than through the Pager: what the seam cases need from it
+     * is the IDENTITY of the row at a given index, which is what the rule now measures depth in.
+     */
+    private suspend fun seamWindow(): List<MessageEntity> = (
+        db.messageDao().pagingSource(
+            messagePagingQuery(channel.id, MessageVisibilitySpec()),
+        ).load(
+            PagingSource.LoadParams.Refresh(key = null, loadSize = 200, placeholdersEnabled = false),
+        ) as PagingSource.LoadResult.Page<Int, MessageEntity>
+        ).data
+
+    /** The room the fixture entered: read up to the marker, so entry parks at the first unread. */
+    private fun enteredAtMarker(fixture: SeamFixture) =
+        channel.copy(localReadAnchorTime = 50, localReadAnchorEventId = fixture.markerId)
+
+    /** A real repository, because `FakeMessageRepository` publishes no seams and never could. */
+    @OptIn(androidx.paging.ExperimentalPagingApi::class)
+    private fun seamRepository() = MessageRepositoryImpl(
+        bufferDao = db.bufferDao(),
+        networkIdentityDao = db.networkIdentityDao(),
+        messageDao = db.messageDao(),
+        reactionDao = db.reactionDao(),
+        mediatorFactory = ChatHistoryMediatorFactory { error("paging is not exercised here") },
+        historyGapDao = db.historyGapDao(),
+    )
+
+    /** A live network whose CHATHISTORY negotiation finished: the gate's `historyReady` input. */
+    private fun readyHistoryManager() = FakeConnectionManager(
+        network.id,
+        historyAvailability = HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP), 100),
+    )
+
+    @Test
+    fun `the opened unread viewport reports the catch-up seam`() = runTest {
+        // The negative control for everything below: with the whole window materialized and no
+        // placeholders, the demand FUNCTION cannot abstain at this geometry. If this ever fails the
+        // fixture was seeded wrong and the wiring assertions below mean nothing.
+        val fixture = seedCatchUpSeam()
+        val window = seamWindow()
+        val seams = seamRepository().observeTimelineSeams(channel.id).first()
+
+        assertEquals("both islands are materialized", 99, window.size)
+        assertEquals(
+            "the seam sits directly above the oldest catch-up row",
+            48,
+            window.indexOfFirst { it.id == fixture.oldestCatchUpId },
+        )
+        assertEquals(fixture.gapId, seams.single().gapId)
+        assertTrue("the catch-up gap is still fillable", seams.single().recoverable)
+
+        // The journal's own viewport: `after_index=39`, seam one row below the visible end.
+        assertEquals(
+            setOf(fixture.gapId),
+            seamsWithinPrefetch(
+                firstVisibleIndex = 39,
+                lastVisibleIndex = 49,
+                itemCount = window.size,
+                peek = { window.getOrNull(it) },
+                seams = seams,
+            ),
+        )
+    }
+
+    @Test
+    fun `opening at the unread marker requests a gap-directed fill`() = runTest {
+        val fixture = seedCatchUpSeam()
+        val window = seamWindow()
+        val filler = RecordingGapFiller()
+        val vm = viewModel(
+            enteredAtMarker(fixture),
+            readyHistoryManager(),
+            messages = seamRepository(),
+            gapFiller = filler,
+        )
+        vm.state.first { it.buffer != null }
+        // The screen's side of entry, collapsed to its two observable effects: the room is on
+        // screen, and the one-shot entry placement finished.
+        vm.onResume()
+        vm.onInitialPositionHandled()
+        advanceUntilIdle()
+
+        vm.setSeamPrefetch(window[39].timelineAnchor(), olderEdgeIndex = 49, gapIds = setOf(fixture.gapId))
+        advanceUntilIdle()
+
+        assertEquals(listOf(channel.id to fixture.gapId), filler.requests)
+    }
+
+    @Test
+    fun `the opened unread viewport takes exactly one quantum while it stands still`() = runTest {
+        // The required E2E's run-2 failure, below E2E. The journey settled on 262 rows against an
+        // exact 199 because the rule granted two more quanta to a viewport nobody touched: the OLDER
+        // edge re-measured (the seam's divider entered its loading state, then 50 rows landed under
+        // the fold) and the gap's demand blinked out and back as its own fill receded it. Every
+        // report below carries the SAME newest visible row, which is the whole point.
+        val fixture = seedCatchUpSeam()
+        val window = seamWindow()
+        val filler = RecordingGapFiller()
+        val vm = viewModel(
+            enteredAtMarker(fixture),
+            readyHistoryManager(),
+            messages = seamRepository(),
+            gapFiller = filler,
+        )
+        vm.state.first { it.buffer != null }
+        vm.onResume()
+        vm.onInitialPositionHandled()
+        advanceUntilIdle()
+        val parked = window[39].timelineAnchor()
+
+        vm.setSeamPrefetch(parked, olderEdgeIndex = 49, gapIds = setOf(fixture.gapId))
+        advanceUntilIdle()
+        vm.setSeamPrefetch(parked, olderEdgeIndex = 50, gapIds = setOf(fixture.gapId))
+        advanceUntilIdle()
+        vm.setSeamPrefetch(parked, olderEdgeIndex = 51, gapIds = emptySet())
+        advanceUntilIdle()
+        vm.setSeamPrefetch(parked, olderEdgeIndex = 50, gapIds = setOf(fixture.gapId))
+        advanceUntilIdle()
+
+        assertEquals(listOf(channel.id to fixture.gapId), filler.requests)
+    }
+
+    @Test
+    fun `a reader who scrolls deeper gets a second quantum`() = runTest {
+        // The other side of the same rule, and the one over-tightening would break: the E2E closes
+        // the rest of its gap with deliberate scrolls, so a viewport that really did move to an
+        // older row must load again without a tap.
+        val fixture = seedCatchUpSeam()
+        val window = seamWindow()
+        val filler = RecordingGapFiller()
+        val vm = viewModel(
+            enteredAtMarker(fixture),
+            readyHistoryManager(),
+            messages = seamRepository(),
+            gapFiller = filler,
+        )
+        vm.state.first { it.buffer != null }
+        vm.onResume()
+        vm.onInitialPositionHandled()
+        advanceUntilIdle()
+
+        vm.setSeamPrefetch(window[39].timelineAnchor(), olderEdgeIndex = 49, gapIds = setOf(fixture.gapId))
+        advanceUntilIdle()
+        vm.setSeamPrefetch(window[44].timelineAnchor(), olderEdgeIndex = 54, gapIds = setOf(fixture.gapId))
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(channel.id to fixture.gapId, channel.id to fixture.gapId),
+            filler.requests,
+        )
+    }
+
+    @Test
+    fun `a pending entry never starts a fill`() = runTest {
+        // The gate's whole purpose: a fetch started while the one-shot entry placement is still
+        // moving the viewport would page against a list that is about to be re-placed underneath it.
+        val fixture = seedCatchUpSeam()
+        val window = seamWindow()
+        val filler = RecordingGapFiller()
+        val vm = viewModel(
+            enteredAtMarker(fixture),
+            readyHistoryManager(),
+            messages = seamRepository(),
+            gapFiller = filler,
+        )
+        vm.state.first { it.buffer != null }
+        vm.onResume()
+        advanceUntilIdle()
+
+        vm.setSeamPrefetch(window[39].timelineAnchor(), olderEdgeIndex = 49, gapIds = setOf(fixture.gapId))
+        advanceUntilIdle()
+
+        assertTrue("entry has not settled", vm.entryState.value is EntryPositionState.Pending)
+        assertEquals(emptyList<Pair<Long, Long>>(), filler.requests)
+    }
+
+    @Test
+    fun `demand reported before entry settles is not lost`() = runTest {
+        // The demand signal is EDGE-triggered on the screen: a viewport that never moves again
+        // reports once. If the gate were closed at that instant and the retained demand were not
+        // re-evaluated when it opens, the seam would never load however long the reader waits —
+        // which is exactly the terminal state the E2E journey reported, with a recoverable gap in
+        // reach and not one `gap_fill_*` record in the app's journal.
+        val fixture = seedCatchUpSeam()
+        val window = seamWindow()
+        val filler = RecordingGapFiller()
+        val vm = viewModel(
+            enteredAtMarker(fixture),
+            readyHistoryManager(),
+            messages = seamRepository(),
+            gapFiller = filler,
+        )
+        vm.state.first { it.buffer != null }
+        vm.onResume()
+        advanceUntilIdle()
+
+        vm.setSeamPrefetch(window[39].timelineAnchor(), olderEdgeIndex = 49, gapIds = setOf(fixture.gapId))
+        advanceUntilIdle()
+        assertEquals(emptyList<Pair<Long, Long>>(), filler.requests)
+
+        // No second demand report: the gate opening is the only new fact.
+        vm.onInitialPositionHandled()
+        advanceUntilIdle()
+
+        assertEquals(listOf(channel.id to fixture.gapId), filler.requests)
+    }
+
     private fun viewModel(
         buffer: BufferEntity,
         manager: FakeConnectionManager,
@@ -2441,6 +2722,9 @@ class ChatViewModelTest {
         // Injectable so a test can observe the write-through entry-position keys after transitions.
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
         directMediaPolicy: DirectMediaPolicy = DirectMediaPolicy { false },
+        // The seam the timeline's history rule ends at. The production default is a Noop, so a test
+        // that wants to observe a fill at all has to hand one in.
+        gapFiller: HistoryGapFiller = NoopHistoryGapFiller,
     ): ChatViewModel {
         val eventSink: IrcEventSink = processor
         val routeState = mutableMapOf<String, Any>("bufferId" to routeBufferId)
@@ -2475,6 +2759,7 @@ class ChatViewModelTest {
             audioMetadataRepository = FakeAudioMetadataRepository(),
             audioPlaybackController = FakeAudioPlaybackController(),
             directMediaPolicy = directMediaPolicy,
+            gapFiller = gapFiller,
         )
     }
 
@@ -2528,6 +2813,12 @@ class ChatViewModelTest {
         private val sendRejection: io.github.trevarj.motd.service.SendRejectionReason? = null,
         private val retryRejection: io.github.trevarj.motd.service.SendRejectionReason? = null,
         historyPending: Set<Long> = emptySet(),
+        /**
+         * What a negotiated CHATHISTORY wire would report. Defaults to the pre-registration answer
+         * so a fake that models nothing keeps the history gate closed, exactly as the real accessor
+         * does for a network with no live client.
+         */
+        private val historyAvailability: HistoryAvailability = HistoryAvailability.NegotiatingOrOffline,
     ) : ConnectionManager {
         private var currentClient: IrcClient? = client
         override val connectionStates = MutableStateFlow(mapOf(networkId to state))
@@ -2577,6 +2868,7 @@ class ChatViewModelTest {
         }
 
         override fun clientFor(networkId: Long): IrcClient? = currentClient
+        override fun historyAvailabilityFor(networkId: Long): HistoryAvailability = historyAvailability
         override suspend fun startAll() = Unit
         override suspend fun stopAll() = Unit
         override suspend fun connect(networkId: Long) = Unit

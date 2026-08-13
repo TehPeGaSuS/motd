@@ -189,7 +189,9 @@ private fun messageTag(msg: MessageEntity): String = timelineMessageTag(msg.msgi
 internal fun foolCollapseTag(msgid: String?, eventId: Long): String =
     "chat_fool_collapse_${msgid ?: eventId}"
 
-private fun MessageEntity.timelineAnchor(): TimelineAnchor = TimelineAnchor(serverTime, id, timelineOrder)
+// `MessageEntity.timelineAnchor()` lives in ChatModels.kt: it had a byte-identical private copy here
+// until the seam rule needed to name a row from the screen, at which point one package-level
+// definition is the only thing that keeps the timeline's ordering currency singular.
 
 /**
  * True when [current] should show its sender header: it opens a new same-sender ≤3-min group.

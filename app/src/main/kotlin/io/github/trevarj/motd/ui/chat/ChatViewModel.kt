@@ -294,15 +294,17 @@ class ChatViewModel @Inject constructor(
 
     /**
      * What the viewport says about history, debounced by the caller: the seams within loading reach
-     * of its older edge, and how deep into history that edge has got.
+     * of its older edge, and where the reader is.
      *
      * This is the rule's only demand signal, so an empty set is a statement too (nothing is within
      * reach) and must be reported. Both halves matter: the set says WHICH seams may load,
-     * [lastVisibleIndex] says whether the reader has moved since the last load, which is what stops
-     * a stationary viewport fetching twice.
+     * [viewportAnchor] — the identity of the NEWEST row on screen — says whether the reader has
+     * moved since the last load, which is what stops a stationary viewport fetching twice.
+     * [olderEdgeIndex] is carried for the journal only; see [SeamPrefetch] for why comparing an
+     * index there was the runaway.
      */
-    fun setSeamPrefetch(lastVisibleIndex: Int, gapIds: Set<Long>) {
-        val next = SeamPrefetch(lastVisibleIndex, gapIds)
+    fun setSeamPrefetch(viewportAnchor: TimelineAnchor?, olderEdgeIndex: Int, gapIds: Set<Long>) {
+        val next = SeamPrefetch(viewportAnchor, gapIds, olderEdgeIndex)
         if (seamPrefetch.value != next) seamPrefetch.value = next
     }
 
@@ -355,14 +357,69 @@ class ChatViewModel @Inject constructor(
             seamPrefetch,
             gapTapRequest,
         ) { roomId, currentGate, seams, prefetch, tap ->
-            rule.next(roomId, currentGate, seams.seams, prefetch, tap)
+            val decision = rule.next(roomId, currentGate, seams.seams, prefetch, tap)
+            // One line per DECISION, not per frame: the combine's inputs are all distinct-until-
+            // changed, so this is a handful of records per room open. It is the only place the gate's
+            // three inputs, the seam list and the viewport's demand are all in scope at once, which
+            // is what makes "demand never reported", "gate never armed" and "rule refused" separable
+            // in a journal instead of producing the identical silence.
+            journalSeamDecision(roomId, currentGate, seams, prefetch, tap, decision)
+            (decision as? SeamDecision.Start)?.request
         }.filterNotNull().collect { request ->
             // Publish before as well as after: a retry tap clears its gap's failure, and the divider
             // must show the load it started rather than the error it is already retrying.
             failedGapIds.value = rule.failedGapIds
-            rule.settle(request, gapFiller.fillGap(request.roomId, request.gapId))
+            val progress = gapFiller.fillGap(request.roomId, request.gapId)
+            rule.settle(request, progress)
             failedGapIds.value = rule.failedGapIds
+            // Pairs with the coordinator's own gap_fill_started/gap_fill_ended: those say what the
+            // fetch did, this says what the timeline's rule made of it, so a fill that ran and
+            // achieved nothing is distinguishable from one that was never asked for.
+            diagnostics.record("chat_history", "seam_fill_settled") {
+                mapOf(
+                    "room_id" to request.roomId,
+                    "gap_id" to request.gapId,
+                    "from_tap" to request.fromTap,
+                    "progress" to progress.name,
+                    "failed_count" to rule.failedGapIds.size,
+                )
+            }
         }
+    }
+
+    /**
+     * Journal one [SeamDecision] with every input that could have produced it.
+     *
+     * Fields are ids, counts, booleans and the decision's own fixed classification string — nothing
+     * user-derived, per [DiagnosticLogger]'s contract. `decision` rather than `reason` deliberately:
+     * the journal redacts any field literally named `reason`.
+     */
+    private fun journalSeamDecision(
+        roomId: Long,
+        gate: SeamLoadingGate,
+        seams: TimelineSeamState,
+        prefetch: SeamPrefetch,
+        tap: GapTapRequest?,
+        decision: SeamDecision,
+    ) = diagnostics.record("chat_history", "seam_rule_evaluated") {
+        mapOf(
+            "room_id" to roomId,
+            "decision" to decision.journalName,
+            "gap_id" to (decision as? SeamDecision.Start)?.request?.gapId,
+            "on_screen" to gate.onScreen,
+            "history_ready" to gate.historyReady,
+            "entry_settled" to gate.entrySettled,
+            "history_unreachable" to gate.historyUnreachable,
+            "seam_count" to seams.seams.size,
+            "recoverable_count" to seams.seams.count { it.recoverable },
+            "demand_count" to prefetch.gapIds.size,
+            // The rule compares `viewport_event_id`, never the index: the older edge is evidence
+            // that a re-measure is not a scroll, and the two must stay separable in the journal.
+            "older_edge_index" to prefetch.olderEdgeIndex,
+            "viewport_event_id" to prefetch.viewportAnchor?.eventId,
+            "failed_count" to seams.failed.size,
+            "has_tap" to (tap != null),
+        )
     }
 
     /** Every visibility change cancels the old generation and creates a positionally exact Pager. */
@@ -695,8 +752,10 @@ class ChatViewModel @Inject constructor(
         when {
             current == null || current.type == BufferType.SERVER -> HistoryAvailability.Unsupported
             connection !is IrcClientState.Ready -> HistoryAvailability.NegotiatingOrOffline
-            else -> connectionManager.clientFor(current.networkId)?.historyAvailability
-                ?: HistoryAvailability.NegotiatingOrOffline
+            // Through the service seam rather than reaching into the live client: the UI has no
+            // business reading a protocol object's CAP/ISUPPORT state, and the accessor is what
+            // lets a test model a negotiated history wire without standing up a transport.
+            else -> connectionManager.historyAvailabilityFor(current.networkId)
         }
     }.distinctUntilChanged().stateIn(
         viewModelScope,
@@ -2322,6 +2381,27 @@ class ChatViewModel @Inject constructor(
         if (unresolved) savedStateHandle[ENTRY_POSITION_UNRESOLVED_KEY] = true
         if (messageUnavailable) savedStateHandle[ENTRY_MESSAGE_UNAVAILABLE_KEY] = true
         _entryState.value = merged
+        // Entry state is a gate input for history loading (SeamLoadingGate.entrySettled), and until
+        // now the journal could only see the SCREEN's separate `initialPositionSettled` flag, and
+        // only when a Paging generation happened to be presented. A run where entry never left
+        // Pending was therefore indistinguishable from one where it settled and the rule refused.
+        // The screen's own entry tracing goes to AutoFollowTrace, which is logcat-only and cannot be
+        // uploaded, so this is the cheap substitute rather than a duplicate.
+        if (merged != current) {
+            diagnostics.record("chat_timeline", "entry_state_changed") {
+                mapOf(
+                    // The buffer's own id when the redirect has resolved, the ROUTE id until then.
+                    // Read straight off the two things that are always available rather than through
+                    // `operationalBufferId`, so this record cannot depend on the initialization
+                    // order of a later-declared StateFlow: the transition this line exists to
+                    // journal (Pending -> Settled) is the one worth least without a room to pin it
+                    // to, and a field the journal had to drop would be exactly that loss.
+                    "room_id" to (buffer.value?.id ?: bufferId),
+                    "from" to current.journalName,
+                    "to" to merged.journalName,
+                )
+            }
+        }
         return true
     }
 
@@ -2418,6 +2498,18 @@ sealed interface EntryPositionState {
      */
     data class Unresolved(val messageUnavailable: Boolean) : EntryPositionState
 }
+
+/**
+ * Fixed classification string for the journal. `message_unavailable` is folded into the name rather
+ * than carried as a second field so one record fully describes the transition.
+ */
+internal val EntryPositionState.journalName: String
+    get() = when (this) {
+        EntryPositionState.Pending -> "pending"
+        EntryPositionState.Settled -> "settled"
+        is EntryPositionState.Unresolved ->
+            if (messageUnavailable) "unresolved_message_unavailable" else "unresolved"
+    }
 
 /** Map the three restored SavedState booleans back into the sealed entry state (settled wins). */
 internal fun restoredEntryPositionState(

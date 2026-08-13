@@ -1104,6 +1104,46 @@ class ChatModelsTest {
         )
     }
 
+    // --- where the reader is ----------------------------------------------------------------------
+
+    @Test
+    fun `the viewport anchor names the newest row on screen`() {
+        val window = rows(900, 700, 500, 300, 100)
+
+        // The newer edge, not the older one, and not "the newest row in reach": this is the row
+        // LazyList pins its scroll position to, so it moves when and only when the viewport moves.
+        assertEquals(
+            TimelineAnchor(700, window[1].id, window[1].timelineOrder),
+            viewportAnchorAt(firstVisibleIndex = 1, itemCount = window.size) { window.getOrNull(it) },
+        )
+    }
+
+    @Test
+    fun `a placeholder edge names nothing`() {
+        // Specifically NOT the anchor of the first materialized row below it, which is what
+        // seamsWithinPrefetch's own upper bound would give: that value slides OLDER as the newer
+        // edge falls back to placeholders — routine while a page lands — and an anchor that slides
+        // older reads as the reader having scrolled deeper. Abstaining refuses; guessing grants.
+        val window = listOf(null, row(2, 500), row(1, 100))
+
+        assertNull(viewportAnchorAt(firstVisibleIndex = 0, itemCount = window.size) { window[it] })
+    }
+
+    @Test
+    fun `the footer item is not a row`() {
+        // MessageList appends a load-state footer past the last row, so the newer edge can legally
+        // be itemCount. It must abstain rather than index past the end.
+        val window = rows(900, 500)
+
+        assertNull(
+            viewportAnchorAt(firstVisibleIndex = window.size, itemCount = window.size) {
+                window.getOrNull(it)
+            },
+        )
+        assertNull(viewportAnchorAt(firstVisibleIndex = -1, itemCount = window.size) { window[it] })
+        assertNull(viewportAnchorAt(firstVisibleIndex = 0, itemCount = 0) { window.getOrNull(it) })
+    }
+
     // --- what one seam's divider says -------------------------------------------------------------
 
     @Test
@@ -1201,18 +1241,79 @@ class ChatModelsTest {
 
     private val gateOpen = SeamLoadingGate(onScreen = true, historyReady = true, entrySettled = true)
 
+    /** The load a decision started, or null for any of the named refusals. */
+    private val SeamDecision.startedRequest: GapFillRequest?
+        get() = (this as? SeamDecision.Start)?.request
+
+    /**
+     * A viewport parked on one identifiable row, which is what the rule now measures depth in.
+     *
+     * Deeper into history is a SMALLER value, exactly as it is on the wire, so `viewportAt(999)` is
+     * one row further from the present than `viewportAt(1000)`.
+     */
+    private fun viewportAt(serverTime: Long) = TimelineAnchor(serverTime, serverTime, serverTime)
+
     private fun SeamLoadingRule.scrolledTo(
-        depth: Int,
+        at: TimelineAnchor?,
         seams: List<io.github.trevarj.motd.data.history.TimelineSeam>,
         inReach: Set<Long> = seams.mapTo(mutableSetOf()) { it.gapId },
         gate: SeamLoadingGate = gateOpen,
+        olderEdgeIndex: Int = 49,
+    ) = decidedAt(at, seams, inReach, gate, olderEdgeIndex).startedRequest
+
+    /**
+     * The same call as [scrolledTo], kept whole for the cases that assert on the REASON.
+     *
+     * [olderEdgeIndex] is passed through and never asserted on, deliberately: it is journal evidence
+     * and the rule must be blind to it. A case that varies it and expects no change of decision is
+     * the regression for the runaway an older-edge index caused.
+     */
+    private fun SeamLoadingRule.decidedAt(
+        at: TimelineAnchor?,
+        seams: List<io.github.trevarj.motd.data.history.TimelineSeam>,
+        inReach: Set<Long> = seams.mapTo(mutableSetOf()) { it.gapId },
+        gate: SeamLoadingGate = gateOpen,
+        olderEdgeIndex: Int = 49,
     ) = next(
         roomId = 7,
         gate = gate,
         seams = seams,
-        prefetch = SeamPrefetch(lastVisibleIndex = depth, gapIds = inReach),
+        prefetch = SeamPrefetch(viewportAnchor = at, gapIds = inReach, olderEdgeIndex = olderEdgeIndex),
         tap = null,
     )
+
+    @Test
+    fun `every refusal names itself`() {
+        // The five ways this rule declines used to be one nullable answer, so a run where no history
+        // loaded could not say WHICH of them happened — the exact ambiguity that made the required
+        // E2E's "no fill ever ran" failure undiagnosable. The names below are what the journal
+        // carries, so they are asserted at the journey's own shape: one recoverable seam, a viewport
+        // parked with it just below the visible end.
+        val rule = SeamLoadingRule()
+        val seams = listOf(seam(gapId = 2, serverTime = 900))
+        val unrecoverable = listOf(seam(gapId = 4, serverTime = 900, recoverable = false))
+
+        assertEquals(
+            SeamDecision.GateClosed,
+            rule.decidedAt(viewportAt(1000), seams, gate = gateOpen.copy(entrySettled = false)),
+        )
+        assertEquals(
+            SeamDecision.NoDemand,
+            rule.decidedAt(viewportAt(1000), seams, inReach = emptySet()),
+        )
+        assertEquals(SeamDecision.NotRecoverable, rule.decidedAt(viewportAt(1000), unrecoverable))
+        assertEquals(
+            SeamDecision.Start(GapFillRequest(7, 2, fromTap = false)),
+            rule.decidedAt(viewportAt(1000), seams),
+        )
+        // Same viewport, same seam, nothing new asked: the depth is spent until the reader moves.
+        assertEquals(SeamDecision.AlreadyTriedAtDepth, rule.decidedAt(viewportAt(1000), seams))
+        // A failure is a different silence, and the difference is who can end it: scrolling deeper
+        // still yields nothing, only a tap does. Reporting it as a spent depth would send a reader
+        // of the journal looking for a viewport that never moved.
+        rule.settle(GapFillRequest(7, 2, fromTap = false), GapFillProgress.FAILED)
+        assertEquals(SeamDecision.AwaitingRetryTap, rule.decidedAt(viewportAt(800), seams))
+    }
 
     @Test
     fun `scrolling to a seam loads across it`() {
@@ -1221,7 +1322,7 @@ class ChatModelsTest {
 
         assertEquals(
             GapFillRequest(7, 2, fromTap = false),
-            rule.scrolledTo(depth = 60, seams = seams),
+            rule.scrolledTo(viewportAt(1000), seams = seams),
         )
     }
 
@@ -1232,60 +1333,187 @@ class ChatModelsTest {
 
         // Nothing has scrolled toward it. Before the divider existed nothing ever fetched a deep gap
         // on its own, and that is the property being kept.
-        assertNull(rule.scrolledTo(depth = 60, seams = seams, inReach = emptySet()))
+        assertNull(rule.scrolledTo(viewportAt(1000), seams = seams, inReach = emptySet()))
     }
 
     @Test
     fun `a stationary viewport loads once, even when the page did not push the seam out of reach`() {
         val rule = SeamLoadingRule()
         val seams = listOf(seam(gapId = 2, serverTime = 900))
-        val loaded = checkNotNull(rule.scrolledTo(depth = 60, seams = seams))
+        val loaded = checkNotNull(rule.scrolledTo(viewportAt(1000), seams = seams))
         rule.settle(loaded, GapFillProgress.MOVED)
 
         // THE runaway case. Normally a 50-row page moves the seam past the 25-row reach on its own,
         // but a page that lands fewer rows than that leaves the seam sitting in its own trigger zone
         // with an identical signal behind it. Nothing about the reader changed, so nothing more is
         // fetched — no counter, no budget, just "you have not scrolled since".
-        assertNull(rule.scrolledTo(depth = 60, seams = listOf(seam(gapId = 2, serverTime = 600))))
+        assertNull(
+            rule.scrolledTo(viewportAt(1000), seams = listOf(seam(gapId = 2, serverTime = 600))),
+        )
         repeat(20) {
-            assertNull(rule.scrolledTo(depth = 60, seams = listOf(seam(gapId = 2, serverTime = 600))))
+            assertNull(
+                rule.scrolledTo(viewportAt(1000), seams = listOf(seam(gapId = 2, serverTime = 600))),
+            )
         }
+    }
+
+    @Test
+    fun `a stationary viewport that grows under itself gets exactly one quantum`() {
+        // The required E2E's run-2 journal, replayed verbatim. Its viewport never moved — every
+        // report carried the same newest visible row (`first_index=39`) — while the OLDER edge went
+        // 49 -> 50 -> 51: the seam's divider entered its loading state and re-measured the row it is
+        // drawn inside, then 50 rows landed under the fold and one more row fit at the bottom. The
+        // old rule read those two re-measures as two scrolls and authorised two more quanta, so one
+        // hands-free approach drained 262 rows where the design allows 150.
+        val rule = SeamLoadingRule()
+        val seams = listOf(seam(gapId = 1, serverTime = 900))
+        val here = viewportAt(1000)
+        var starts = 0
+
+        val first = rule.decidedAt(here, seams, olderEdgeIndex = 49)
+        assertEquals(SeamDecision.Start(GapFillRequest(7, 1, fromTap = false)), first)
+        starts++
+        rule.settle(checkNotNull(first.startedRequest), GapFillProgress.MOVED)
+
+        // Same row on screen, older edge re-measured by one. Nothing landed: item_count was still 72.
+        assertEquals(SeamDecision.AlreadyTriedAtDepth, rule.decidedAt(here, seams, olderEdgeIndex = 50))
+        // The fill's own 50 rows receded the seam out of reach. Demand emptying is the fill's doing,
+        // not the reader's, so it must not count as having scrolled away and back.
+        assertEquals(
+            SeamDecision.NoDemand,
+            rule.decidedAt(here, seams, inReach = emptySet(), olderEdgeIndex = 51),
+        )
+        // ...and when a later report puts it back in reach at the same row, still refused.
+        assertEquals(SeamDecision.AlreadyTriedAtDepth, rule.decidedAt(here, seams, olderEdgeIndex = 50))
+        assertEquals("one stationary approach is one quantum", 1, starts)
+    }
+
+    @Test
+    fun `a seam its own fill pushed out of reach is not a fresh approach`() {
+        // The forget-on-leave half, isolated from the comparison. A fill RECEDES its own seam past
+        // the prefetch reach, so "the seam left the zone" is something the fill can cause by itself;
+        // forgetting the depth there let one fill authorise its successor no matter what unit depth
+        // was measured in.
+        val rule = SeamLoadingRule()
+        val seams = listOf(seam(gapId = 1, serverTime = 900))
+        val here = viewportAt(1000)
+        rule.settle(checkNotNull(rule.scrolledTo(here, seams)), GapFillProgress.MOVED)
+
+        assertEquals(SeamDecision.NoDemand, rule.decidedAt(here, seams, inReach = emptySet()))
+        assertEquals(SeamDecision.AlreadyTriedAtDepth, rule.decidedAt(here, seams))
+    }
+
+    @Test
+    fun `an insertion that renumbers the viewport is not a scroll`() {
+        // A 50-row PREPEND, or one live message, shifts every index up with the reader stationary.
+        // The case no index-based depth can pass at either edge, and the reason the memory holds a
+        // row IDENTITY: a row cannot be renumbered.
+        val rule = SeamLoadingRule()
+        val seams = listOf(seam(gapId = 1, serverTime = 900))
+        val here = viewportAt(1000)
+        rule.settle(checkNotNull(rule.scrolledTo(here, seams, olderEdgeIndex = 49)), GapFillProgress.MOVED)
+
+        assertEquals(SeamDecision.AlreadyTriedAtDepth, rule.decidedAt(here, seams, olderEdgeIndex = 99))
+    }
+
+    @Test
+    fun `scrolling one row deeper starts a second fill`() {
+        // The legitimate case, and the one over-tightening would break: the E2E closes the rest of
+        // its gap by real scrolls, so a rule that refused these would strand it with an open seam.
+        val rule = SeamLoadingRule()
+        val seams = listOf(seam(gapId = 1, serverTime = 800))
+        rule.settle(checkNotNull(rule.scrolledTo(viewportAt(1000), seams)), GapFillProgress.MOVED)
+
+        val second = checkNotNull(rule.scrolledTo(viewportAt(999), seams))
+        assertEquals(1L, second.gapId)
+        rule.settle(second, GapFillProgress.MOVED)
+        assertEquals(1L, rule.scrolledTo(viewportAt(900), seams)?.gapId)
+    }
+
+    @Test
+    fun `a viewport that cannot name its position does not re-fire`() {
+        // The newer edge is a placeholder or the footer, so `viewportAnchorAt` abstains. Nothing can
+        // prove the reader moved, and refusing is the safe direction — granting here would restore
+        // the runaway through the exact window a landing page occupies.
+        val rule = SeamLoadingRule()
+        val seams = listOf(seam(gapId = 1, serverTime = 800))
+        rule.settle(checkNotNull(rule.scrolledTo(viewportAt(1000), seams)), GapFillProgress.MOVED)
+
+        assertEquals(SeamDecision.AlreadyTriedAtDepth, rule.decidedAt(null, seams, olderEdgeIndex = 60))
+        // ...and it is an abstention, not a latch: the next nameable, deeper viewport still loads.
+        assertEquals(1L, rule.scrolledTo(viewportAt(999), seams)?.gapId)
+    }
+
+    @Test
+    fun `a first approach with no anchor is granted once and only once`() {
+        // A gap fetched at a position the viewport could not name has no depth to be deeper than, so
+        // the memory holds a null VALUE. Presence still means "already fetched during this
+        // approach": the alternative — absence — is an unconditional grant on every emission.
+        val rule = SeamLoadingRule()
+        val seams = listOf(seam(gapId = 1, serverTime = 800))
+
+        assertEquals(1L, rule.scrolledTo(null, seams)?.gapId)
+        assertEquals(SeamDecision.AlreadyTriedAtDepth, rule.decidedAt(null, seams))
+    }
+
+    @Test
+    fun `a nameless fetch survives the first nameable viewport that follows it`() {
+        // The window a landing page occupies: the newer edge is a placeholder when the fill starts,
+        // so the memory holds a null depth; the page then resolves the placeholder AND recedes the
+        // seam out of reach, and the reader has still not touched the screen. Forgetting the fetch
+        // at that out-of-demand emission would hand the seam's return an unconditional grant — the
+        // second half of how one quantum became three. The nameable position is adopted as the
+        // fetch's depth instead, so the return is refused and a real scroll still loads.
+        val rule = SeamLoadingRule()
+        val seams = listOf(seam(gapId = 1, serverTime = 800))
+
+        assertEquals(1L, rule.scrolledTo(null, seams)?.gapId)
+        assertEquals(SeamDecision.NoDemand, rule.decidedAt(viewportAt(1000), seams, inReach = emptySet()))
+        assertEquals(SeamDecision.AlreadyTriedAtDepth, rule.decidedAt(viewportAt(1000), seams))
+        assertEquals(1L, rule.scrolledTo(viewportAt(999), seams)?.gapId)
     }
 
     @Test
     fun `scrolling further toward a seam keeps loading across it`() {
         val rule = SeamLoadingRule()
         val seams = listOf(seam(gapId = 2, serverTime = 900))
-        rule.settle(checkNotNull(rule.scrolledTo(depth = 60, seams = seams)), GapFillProgress.MOVED)
+        rule.settle(checkNotNull(rule.scrolledTo(viewportAt(1000), seams = seams)), GapFillProgress.MOVED)
 
         // The bound is the reader's attention, not an allowance: keep scrolling into history and it
-        // keeps loading, exactly as the end of the list does.
-        assertEquals(2L, rule.scrolledTo(depth = 61, seams = seams)?.gapId)
-        rule.settle(checkNotNull(rule.scrolledTo(depth = 90, seams = seams)), GapFillProgress.MOVED)
-        assertEquals(2L, rule.scrolledTo(depth = 140, seams = seams)?.gapId)
+        // keeps loading, exactly as the end of the list does. "Further" is one row older on screen,
+        // not one index further down a list that may have renumbered under the viewport.
+        assertEquals(2L, rule.scrolledTo(viewportAt(999), seams = seams)?.gapId)
+        rule.settle(
+            checkNotNull(rule.scrolledTo(viewportAt(900), seams = seams)),
+            GapFillProgress.MOVED,
+        )
+        assertEquals(2L, rule.scrolledTo(viewportAt(400), seams = seams)?.gapId)
     }
 
     @Test
     fun `scrolling back toward the present does not re-load a seam`() {
         val rule = SeamLoadingRule()
         val seams = listOf(seam(gapId = 2, serverTime = 900))
-        rule.settle(checkNotNull(rule.scrolledTo(depth = 60, seams = seams)), GapFillProgress.MOVED)
+        rule.settle(checkNotNull(rule.scrolledTo(viewportAt(1000), seams = seams)), GapFillProgress.MOVED)
 
         // Drifting back up is not asking for more history.
-        assertNull(rule.scrolledTo(depth = 59, seams = seams))
-        assertNull(rule.scrolledTo(depth = 60, seams = seams))
+        assertNull(rule.scrolledTo(viewportAt(1001), seams = seams))
+        assertNull(rule.scrolledTo(viewportAt(1000), seams = seams))
     }
 
     @Test
     fun `a seam that left reach and came back loads again`() {
         val rule = SeamLoadingRule()
         val seams = listOf(seam(gapId = 2, serverTime = 900))
-        rule.settle(checkNotNull(rule.scrolledTo(depth = 60, seams = seams)), GapFillProgress.MOVED)
+        rule.settle(checkNotNull(rule.scrolledTo(viewportAt(1000), seams = seams)), GapFillProgress.MOVED)
 
-        // Scroll away: the seam drops out of reach and the depth it was loaded at is forgotten.
-        assertNull(rule.scrolledTo(depth = 10, seams = seams, inReach = emptySet()))
+        // Scroll away — a REAL move, toward the present, so the reader is somewhere else and the
+        // seam drops out of reach. Only then is the depth it was loaded at forgotten.
+        assertNull(
+            rule.scrolledTo(viewportAt(1500), seams = seams, inReach = emptySet(), olderEdgeIndex = 10),
+        )
         // Coming back to it is a fresh approach, and the reader plainly wants what is behind it.
-        assertEquals(2L, rule.scrolledTo(depth = 60, seams = seams)?.gapId)
+        assertEquals(2L, rule.scrolledTo(viewportAt(1000), seams = seams)?.gapId)
     }
 
     @Test
@@ -1298,10 +1526,10 @@ class ChatModelsTest {
         // Two seams in reach at once is the case that would otherwise put two fetches on the wire for
         // adjacent intervals. Exactly one is offered per decision, newest first — the reader is
         // scrolling into history, so the nearer hole is the one they are reading toward.
-        val first = checkNotNull(rule.scrolledTo(depth = 60, seams = both))
+        val first = checkNotNull(rule.scrolledTo(viewportAt(1000), seams = both))
         assertEquals(2L, first.gapId)
         rule.settle(first, GapFillProgress.MOVED)
-        assertEquals(1L, rule.scrolledTo(depth = 60, seams = both)?.gapId)
+        assertEquals(1L, rule.scrolledTo(viewportAt(1000), seams = both)?.gapId)
     }
 
     @Test
@@ -1309,9 +1537,17 @@ class ChatModelsTest {
         val rule = SeamLoadingRule()
 
         // Nothing left to fetch: a load would cost a classification and change nothing.
-        assertNull(rule.scrolledTo(60, listOf(seam(gapId = 4, serverTime = 900, recoverable = false))))
+        assertNull(
+            rule.scrolledTo(
+                viewportAt(1000),
+                listOf(seam(gapId = 4, serverTime = 900, recoverable = false)),
+            ),
+        )
         // ...and refusing it is not the same as consuming it: the real seam still loads.
-        assertEquals(2L, rule.scrolledTo(60, listOf(seam(gapId = 2, serverTime = 900)))?.gapId)
+        assertEquals(
+            2L,
+            rule.scrolledTo(viewportAt(1000), listOf(seam(gapId = 2, serverTime = 900)))?.gapId,
+        )
     }
 
     @Test
@@ -1319,49 +1555,54 @@ class ChatModelsTest {
         val rule = SeamLoadingRule()
         val seams = listOf(seam(gapId = 2, serverTime = 900))
 
-        assertNull("not on screen", rule.scrolledTo(60, seams, gate = gateOpen.copy(onScreen = false)))
+        assertNull(
+            "not on screen",
+            rule.scrolledTo(viewportAt(1000), seams, gate = gateOpen.copy(onScreen = false)),
+        )
         assertNull(
             "no transport to page against",
-            rule.scrolledTo(60, seams, gate = gateOpen.copy(historyReady = false)),
+            rule.scrolledTo(viewportAt(1000), seams, gate = gateOpen.copy(historyReady = false)),
         )
         // Entry freezes the unread boundary from the store, so a load that lands first would move
         // the divider onto rows this class had just fetched.
         assertNull(
             "entry has not resolved yet",
-            rule.scrolledTo(60, seams, gate = gateOpen.copy(entrySettled = false)),
+            rule.scrolledTo(viewportAt(1000), seams, gate = gateOpen.copy(entrySettled = false)),
         )
         // None of the three consumed the seam: the gate is not a latch, so a room opened before its
         // connection settles — or before its entry positions — still catches up afterwards.
-        assertEquals(2L, rule.scrolledTo(60, seams)?.gapId)
+        assertEquals(2L, rule.scrolledTo(viewportAt(1000), seams)?.gapId)
     }
 
     @Test
     fun `a failed attempt is the only thing that stops a seam loading`() {
         val rule = SeamLoadingRule()
         val seams = listOf(seam(gapId = 2, serverTime = 900))
-        rule.settle(checkNotNull(rule.scrolledTo(60, seams)), GapFillProgress.FAILED)
+        rule.settle(checkNotNull(rule.scrolledTo(viewportAt(1000), seams)), GapFillProgress.FAILED)
 
         assertEquals(setOf(2L), rule.failedGapIds)
         // Scrolling further would otherwise retry a broken transport on every gesture. The divider
         // says what happened and the reader decides.
-        assertNull(rule.scrolledTo(120, seams))
+        assertNull(rule.scrolledTo(viewportAt(400), seams))
     }
 
     @Test
     fun `the retry tap resumes a failed seam and clears its error`() {
         val rule = SeamLoadingRule()
         val seams = listOf(seam(gapId = 2, serverTime = 900))
-        rule.settle(checkNotNull(rule.scrolledTo(60, seams)), GapFillProgress.FAILED)
+        val here = viewportAt(1000)
+        rule.settle(checkNotNull(rule.scrolledTo(here, seams)), GapFillProgress.FAILED)
 
-        val tapped = rule.next(7, gateOpen, seams, SeamPrefetch(60, setOf(2L)), GapTapRequest(2, 1))
+        val prefetch = SeamPrefetch(here, setOf(2L), olderEdgeIndex = 60)
+        val tapped = rule.next(7, gateOpen, seams, prefetch, GapTapRequest(2, 1)).startedRequest
 
         assertEquals(GapFillRequest(7, 2, fromTap = true), tapped)
         assertEquals(emptySet<Long>(), rule.failedGapIds)
         // One tap is one attempt: the same request replayed by the next combine emission is refused,
         // and the retry does not also hand the stationary viewport a scroll-driven load.
-        assertNull(rule.next(7, gateOpen, seams, SeamPrefetch(60, setOf(2L)), GapTapRequest(2, 1)))
+        assertNull(rule.next(7, gateOpen, seams, prefetch, GapTapRequest(2, 1)).startedRequest)
         rule.settle(checkNotNull(tapped), GapFillProgress.MOVED)
-        assertNull(rule.scrolledTo(60, seams))
+        assertNull(rule.scrolledTo(here, seams))
     }
 
     @Test
@@ -1371,10 +1612,17 @@ class ChatModelsTest {
         val closed = SeamLoadingGate(onScreen = false, historyReady = false, entrySettled = false)
 
         // The user is looking at a failed divider. Nothing about a pending entry or a stale
-        // availability snapshot makes their retry wrong.
+        // availability snapshot makes their retry wrong — including a viewport that has not laid out
+        // yet and so cannot name the row it is parked on.
         assertEquals(
             2L,
-            rule.next(7, closed, seams, SeamPrefetch(60, emptySet()), GapTapRequest(2, 4))?.gapId,
+            rule.next(
+                7,
+                closed,
+                seams,
+                SeamPrefetch(viewportAnchor = null, gapIds = emptySet(), olderEdgeIndex = 60),
+                GapTapRequest(2, 4),
+            ).startedRequest?.gapId,
         )
     }
 
@@ -1386,30 +1634,36 @@ class ChatModelsTest {
         // The anti-livelock stop with zero inserts, and a fill the room's single flight dropped:
         // some other fetch was working the same interval. The seam is still open, still recoverable,
         // and still exactly where it was, so advertising an error would be a lie about the history.
-        rule.settle(checkNotNull(rule.scrolledTo(60, seams)), GapFillProgress.STALLED)
+        rule.settle(checkNotNull(rule.scrolledTo(viewportAt(1000), seams)), GapFillProgress.STALLED)
         assertEquals(emptySet<Long>(), rule.failedGapIds)
-        assertEquals(2L, rule.scrolledTo(61, seams)?.gapId)
+        assertEquals(2L, rule.scrolledTo(viewportAt(999), seams)?.gapId)
 
-        rule.settle(checkNotNull(rule.scrolledTo(80, seams)), GapFillProgress.DROPPED)
+        rule.settle(checkNotNull(rule.scrolledTo(viewportAt(900), seams)), GapFillProgress.DROPPED)
         assertEquals(emptySet<Long>(), rule.failedGapIds)
         // ...and it is still bounded by the reader: no scroll, no retry.
-        assertNull(rule.scrolledTo(80, seams))
+        assertNull(rule.scrolledTo(viewportAt(900), seams))
     }
 
     @Test
     fun `a page that lands clears an earlier failure`() {
         val rule = SeamLoadingRule()
         val seams = listOf(seam(gapId = 2, serverTime = 900))
-        rule.settle(checkNotNull(rule.scrolledTo(60, seams)), GapFillProgress.FAILED)
+        rule.settle(checkNotNull(rule.scrolledTo(viewportAt(1000), seams)), GapFillProgress.FAILED)
         val tapped = checkNotNull(
-            rule.next(7, gateOpen, seams, SeamPrefetch(60, setOf(2L)), GapTapRequest(2, 1)),
+            rule.next(
+                7,
+                gateOpen,
+                seams,
+                SeamPrefetch(viewportAt(1000), setOf(2L), olderEdgeIndex = 60),
+                GapTapRequest(2, 1),
+            ).startedRequest,
         )
 
         rule.settle(tapped, GapFillProgress.MOVED)
 
         assertEquals(emptySet<Long>(), rule.failedGapIds)
         // The retry worked, so scrolling on resumes loading without another tap.
-        assertEquals(2L, rule.scrolledTo(90, seams)?.gapId)
+        assertEquals(2L, rule.scrolledTo(viewportAt(900), seams)?.gapId)
     }
 
     @Test

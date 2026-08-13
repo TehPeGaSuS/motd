@@ -695,10 +695,12 @@ fun ChatContent(
     // Deepest row this visit put on screen. Local-only entry input; never read state, never wire.
     onFurthestDisplayedChanged: (io.github.trevarj.motd.data.db.TimelineAnchor) -> Unit = {},
     onVisibleMsgidsChanged: (List<String>) -> Unit = {},
-    // How deep the viewport's older edge has reached, and the seams within loading reach of it. The
+    // Where the reader is (the newest visible row's identity), how far the older edge reached
+    // (evidence only, never compared), and the seams within loading reach of that edge. The
     // ViewModel's history rule loads a seam the reader has scrolled to, so this is its whole demand
     // signal — see SEAM_PREFETCH_SETTLE_MS.
-    onSeamPrefetchChanged: (Int, Set<Long>) -> Unit = { _, _ -> },
+    onSeamPrefetchChanged: (io.github.trevarj.motd.data.db.TimelineAnchor?, Int, Set<Long>) -> Unit =
+        { _, _, _ -> },
     onNeedMembers: () -> Unit = {},
     onJumpUnresolved: (Long) -> Unit = {},
     onReresolveJump: (Long) -> Unit = {},
@@ -1310,29 +1312,79 @@ fun ChatContent(
     // edge is the point — a seam a page pushed past the prefetch reach must stop being reported.
     @OptIn(FlowPreview::class)
     LaunchedEffect(items, listState, timelineSeams.seams) {
+        // Report the viewport's demand, and journal every report — including the two that say
+        // "nothing". This effect is the ONLY producer of the rule's demand signal and it is
+        // edge-triggered, so from the ViewModel's side an empty answer and never answering at all
+        // are the same shape. Naming the SOURCE separates them, and pairs with `chat_history
+        // seam_rule_evaluated` to show the report actually crossed the setSeamPrefetch hop.
+        fun reportDemand(
+            source: String,
+            firstIndex: Int,
+            lastIndex: Int,
+            anchor: io.github.trevarj.motd.data.db.TimelineAnchor?,
+            gapIds: Set<Long>,
+        ) {
+            onSeamPrefetchChanged(anchor, lastIndex, gapIds)
+            diagnostics.record("chat_timeline", "seam_demand_reported") {
+                mapOf(
+                    "room_id" to traceBufferId,
+                    "source" to source,
+                    "first_index" to firstIndex,
+                    // Renamed from `last_visible_index`: it is the older EDGE, never a depth. The
+                    // rule does not read it; it is here because its movement under a pinned newer
+                    // edge is the evidence that an index was the wrong unit.
+                    "older_edge_index" to lastIndex,
+                    "viewport_event_id" to anchor?.eventId,
+                    "item_count" to items.itemCount,
+                    "seam_count" to timelineSeams.seams.size,
+                    "demand_count" to gapIds.size,
+                    "settled" to initialPositionSettled,
+                )
+            }
+        }
         // Rooms without a single stored gap are the overwhelming majority, and they have nothing to
         // demand. Return before observing `layoutInfo` at all rather than deriving a reach that can
         // only ever be empty: this effect would otherwise re-read that snapshot state on every
         // measure pass of every timeline in the app, competing with scrolling and paging for the
         // main thread in exactly the rooms that can never use the answer.
         if (timelineSeams.seams.isEmpty()) {
-            onSeamPrefetchChanged(-1, emptySet())
+            reportDemand("no_seams", firstIndex = -1, lastIndex = -1, anchor = null, gapIds = emptySet())
             return@LaunchedEffect
         }
         snapshotFlow {
             val visible = listState.layoutInfo.visibleItemsInfo
-            if (visible.isEmpty()) null else visible.first().index to visible.last().index
+            if (visible.isEmpty()) {
+                null
+            } else {
+                val newestIndex = visible.first().index
+                // Peek the newer edge INSIDE the snapshot read, not after it. The reader's position
+                // is that row's IDENTITY, and a placeholder resolving under a stationary viewport
+                // changes the identity without changing any index — this effect is edge-triggered,
+                // so an identity that is not a snapshot dependency would never be re-reported and a
+                // seam the viewport could not name would wait forever.
+                Triple(
+                    newestIndex,
+                    visible.last().index,
+                    viewportAnchorAt(newestIndex, items.itemCount, items::peek),
+                )
+            }
         }
             .distinctUntilChanged()
             .debounce(SEAM_PREFETCH_SETTLE_MS)
             .collect { range ->
-                val (newestIndex, oldestIndex) = range ?: return@collect onSeamPrefetchChanged(
-                    -1,
-                    emptySet(),
+                val (newestIndex, oldestIndex, anchor) = range ?: return@collect reportDemand(
+                    "empty_range",
+                    firstIndex = -1,
+                    lastIndex = -1,
+                    anchor = null,
+                    gapIds = emptySet(),
                 )
-                onSeamPrefetchChanged(
-                    oldestIndex,
-                    seamsWithinPrefetch(
+                reportDemand(
+                    "range",
+                    firstIndex = newestIndex,
+                    lastIndex = oldestIndex,
+                    anchor = anchor,
+                    gapIds = seamsWithinPrefetch(
                         firstVisibleIndex = newestIndex,
                         lastVisibleIndex = oldestIndex,
                         itemCount = items.itemCount,

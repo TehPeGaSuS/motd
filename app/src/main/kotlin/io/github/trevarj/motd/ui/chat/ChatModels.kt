@@ -99,16 +99,31 @@ const val SEAM_PREFETCH_DISTANCE: Int = 25
 
 /**
  * What the viewport currently says about history: which seams are close enough to load across, and
- * how far the reader has scrolled toward history.
+ * WHERE THE READER IS.
  *
- * [lastVisibleIndex] is the OLDEST row on screen in the reversed list, so it only grows as the user
- * scrolls into history. That is what [SeamLoadingRule] uses to tell "the user is still scrolling
- * toward this seam" from "the viewport has not moved since the last fetch", with no counter and no
- * budget involved.
+ * [viewportAnchor] is the identity of the NEWEST row on screen — the row `LazyList` pins its scroll
+ * position to, since `MessageList` gives every row a stable `itemKey`. No insertion and no
+ * re-measure can move it, which is the whole reason it is here; the one residual is a row REMOVED
+ * newer than it (a dedup, a redaction, a visibility-policy change), which shifts the same index onto
+ * a strictly older row and reads as one row of scroll. That costs at most one extra quantum per
+ * removal and cannot cascade, which is strictly narrower than the index it replaced. Null means the
+ * viewport could
+ * not name its position (the newer edge is the footer item or an unmaterialized placeholder), and
+ * [SeamLoadingRule] treats that as "cannot prove the reader moved", never as a fresh approach.
+ *
+ * It replaced a raw older-edge index, and that swap is the fix for a real runaway. The older edge is
+ * a layout OUTPUT, not a scroll signal: it grows when rows land under the fold, when the seam's own
+ * divider enters its loading state and re-measures the row it is drawn inside, when a placeholder
+ * resolves to a different height, when the viewport itself gets taller. [olderEdgeIndex] survives
+ * ONLY as journal evidence — watching it move 49 -> 50 -> 51 across an unmoved viewport is what
+ * identified this — and must never be compared. Reach still takes the older edge (see
+ * [seamsWithinPrefetch]); only the DEPTH memory changed unit, because reach asks "what is near" and
+ * depth asks "where is the reader", and the two were conflated into one integer.
  */
 internal data class SeamPrefetch(
-    val lastVisibleIndex: Int = -1,
+    val viewportAnchor: TimelineAnchor? = null,
     val gapIds: Set<Long> = emptySet(),
+    val olderEdgeIndex: Int = -1,
 )
 
 /**
@@ -157,7 +172,27 @@ fun seamsWithinPrefetch(
         .toSet()
 }
 
-private fun MessageEntity.timelineAnchor() = TimelineAnchor(serverTime, id, timelineOrder)
+/**
+ * Where the reader is: the identity of the newest row on screen, or null when the viewport cannot
+ * say — [firstVisibleIndex] is the footer item (`itemCount`) or a Paging placeholder.
+ *
+ * Deliberately NOT "the newest MATERIALIZED row in reach", the way [seamsWithinPrefetch] picks its
+ * upper bound. That scan slides OLDER when the rows at the newer edge fall back to placeholders,
+ * which a page landing does routinely — and an anchor that slides older reads as the reader having
+ * scrolled deeper, which would reintroduce the runaway in the exact window a fill occupies.
+ * Abstaining is the safe direction: [SeamLoadingRule] refuses re-entry it cannot justify rather than
+ * granting one it cannot.
+ */
+internal fun viewportAnchorAt(
+    firstVisibleIndex: Int,
+    itemCount: Int,
+    peek: (Int) -> MessageEntity?,
+): TimelineAnchor? = firstVisibleIndex
+    .takeIf { it in 0 until itemCount }
+    ?.let(peek)
+    ?.timelineAnchor()
+
+internal fun MessageEntity.timelineAnchor() = TimelineAnchor(serverTime, id, timelineOrder)
 
 /** Whether the screen is in a state where history can be loaded across a seam at all. */
 internal data class SeamLoadingGate(
@@ -195,6 +230,59 @@ internal data class GapFillRequest(
 )
 
 /**
+ * What [SeamLoadingRule.next] decided, and — when it decided nothing — why.
+ *
+ * The rule used to answer with a bare nullable request, which made five unrelated refusals produce
+ * byte-identical evidence: a closed gate, a viewport with nothing in reach, a demand already spent
+ * at this scroll depth, a candidate parked behind a failure, and a proven-empty interval all looked
+ * like "no fill ran". A required-E2E failure whose whole symptom IS "no fill ran" then said nothing
+ * about which half of the path broke, and every diagnosis had to be reconstructed by hand from
+ * surrounding records.
+ *
+ * Naming them costs no logic — [SeamLoadingRule.next] already computes every distinction below
+ * inline — and it is what lets one failing run be read in one pass.
+ */
+internal sealed interface SeamDecision {
+    /** Start this load. Exactly one [SeamLoadingRule.settle] must follow. */
+    data class Start(val request: GapFillRequest) : SeamDecision
+
+    /** [SeamLoadingGate.armable] is false: the screen may not load history at all right now. */
+    data object GateClosed : SeamDecision
+
+    /** The viewport reported no seam within loading reach, so there is nothing to start. */
+    data object NoDemand : SeamDecision
+
+    /**
+     * Every demanded seam already failed and is waiting on a retry tap. Scrolling will NOT offer it
+     * again, so this is the one refusal whose recovery is the reader's, and keeping it apart from
+     * [AlreadyTriedAtDepth] is the difference between "the viewport has not moved yet" and "the
+     * divider is sitting in its error state".
+     */
+    data object AwaitingRetryTap : SeamDecision
+
+    /**
+     * Every demanded seam was already fetched at this scroll depth — the reader is anchored on the
+     * same row, or on a newer one, or on a row the viewport cannot name. Not "not ever": putting a
+     * strictly OLDER row at the top of the viewport offers the same seam again on the next emission.
+     */
+    data object AlreadyTriedAtDepth : SeamDecision
+
+    /** Every demanded seam is a server-proven-empty interval with nothing left to fetch. */
+    data object NotRecoverable : SeamDecision
+}
+
+/** Fixed classification string for the journal; never a free-form or user-derived value. */
+internal val SeamDecision.journalName: String
+    get() = when (this) {
+        is SeamDecision.Start -> if (request.fromTap) "start_tap" else "start"
+        SeamDecision.GateClosed -> "gate_closed"
+        SeamDecision.NoDemand -> "no_demand"
+        SeamDecision.AwaitingRetryTap -> "awaiting_retry_tap"
+        SeamDecision.AlreadyTriedAtDepth -> "already_tried_at_depth"
+        SeamDecision.NotRecoverable -> "not_recoverable"
+    }
+
+/**
  * The timeline's one history rule: **a seam behaves exactly like the end of the list.**
  *
  * Scrolling toward a seam loads history across it, with a spinner, for as long as the user keeps
@@ -215,11 +303,30 @@ internal data class GapFillRequest(
  *     seam is out of reach. This is the same pageSize-beats-prefetchDistance relationship that makes
  *     Paging's own APPEND fire once per deliberate scroll step rather than cascading.
  *  2. **A gap does not re-fire until the reader scrolls further toward it.** [next] remembers the
- *     [SeamPrefetch.lastVisibleIndex] each gap was last fetched at, and a gap already fetched at the
- *     current depth is refused. That closes fact 1's remaining hole — a page that lands FEWER rows
- *     than the trigger distance would otherwise leave the seam inside its own zone and loop against
- *     an idle viewport. The memory is dropped as soon as the seam leaves the zone, so scrolling away
- *     and coming back loads again, which is what the reader expects.
+ *     [SeamPrefetch.viewportAnchor] — the IDENTITY of the newest row on screen — each gap was last
+ *     fetched at, and re-entry needs the reader to be anchored on a strictly OLDER row than that.
+ *     That closes fact 1's remaining hole — a page that lands FEWER rows than the trigger distance
+ *     would otherwise leave the seam inside its own zone and loop against an idle viewport.
+ *
+ *     The unit is load-bearing, and getting it wrong is how this class ran away in the required E2E.
+ *     Depth used to be `visibleItemsInfo.last().index`, the OLDEST row's list index. That is a
+ *     layout output, not a scroll signal: it grows when rows land under the fold, when the seam's
+ *     own divider enters its loading state and re-measures the row it is drawn inside, when a
+ *     placeholder resolves to a different height, when the viewport gets taller. The journal from
+ *     that run shows it moving 49 -> 50 -> 51 with the NEWER edge pinned at index 39 and nobody
+ *     touching the screen, and the rule read those three re-measures as three scrolls: one
+ *     hands-free approach drained 262 rows where the design allows exactly one 150-row quantum. A
+ *     row identity cannot be re-measured, and it cannot be renumbered by an insertion either, which
+ *     an index at EITHER edge can.
+ *
+ *     The memory is dropped when the seam leaves the zone AND the reader has actually moved, so
+ *     scrolling away and coming back loads again, which is what the reader expects. The second half
+ *     of that condition is the other half of the same runaway: a fill RECEDES its own seam out of
+ *     reach, so an unconditional forget-on-leave let a fill authorise its own successor. The journal
+ *     shows demand for one gap going 1 -> 0 -> 1 inside a single fill with a stationary viewport.
+ *
+ *     A viewport that cannot name its position ([SeamPrefetch.viewportAnchor] null) refuses rather
+ *     than grants: an unprovable move is not a move.
  *
  * So a 10k-message gap cannot drain unprompted: every page costs one deliberate scroll toward it,
  * and stopping stops the fetching. Nothing is fetched for a seam the reader never scrolled to, which
@@ -250,46 +357,85 @@ internal data class GapFillRequest(
  * entry or a stale availability snapshot makes their tap wrong.
  */
 internal class SeamLoadingRule {
-    private val fetchedAtDepth = mutableMapOf<Long, Int>()
+    // gapId -> the viewport anchor the gap was last fetched at. Presence means "fetched during this
+    // approach"; a null VALUE means it was fetched at a position the viewport could not name, which
+    // nothing can prove the reader has moved away from, so it refuses until the prune clears it.
+    private val fetchedAtDepth = mutableMapOf<Long, TimelineAnchor?>()
     private val failures = mutableSetOf<Long>()
     private var consumedTapToken = 0L
 
     /** Gaps whose last attempt failed, for the divider that has to offer the retry. */
     val failedGapIds: Set<Long> get() = failures.toSet()
 
-    /** The load to start now, or null. Exactly one [settle] must follow each non-null result. */
+    /**
+     * The load to start now, or the named reason there is none. Exactly one [settle] must follow
+     * each [SeamDecision.Start].
+     */
     fun next(
         roomId: Long,
         gate: SeamLoadingGate,
         seams: List<TimelineSeam>,
         prefetch: SeamPrefetch,
         tap: GapTapRequest?,
-    ): GapFillRequest? {
+    ): SeamDecision {
         // A seam that has left the zone forgets where it was last fetched, so scrolling away and
-        // back is a fresh approach rather than a depth already spent.
-        fetchedAtDepth.keys.retainAll(prefetch.gapIds)
+        // back is a fresh approach rather than a depth already spent — but ONLY if the reader
+        // actually went away. A seam that left the zone because its OWN fill receded it, under a
+        // viewport that never moved, is the same approach still running, and forgetting there hands
+        // the next evaluation an unconditional grant. That is half of how one quantum turned into
+        // three in the required E2E: demand went 1 -> 0 -> 1 inside a single fill with nobody
+        // touching the screen. A viewport that cannot name its position prunes nothing, for the same
+        // reason it cannot re-fire: it has proved no movement.
+        prefetch.viewportAnchor?.let { here ->
+            // A fetch recorded at a position the viewport could not name has no depth to compare
+            // against, and the prune below would read that null as "not where the reader is now" and
+            // forget the fetch entirely — which is an unconditional grant on the next emission, the
+            // very runaway this rule exists to stop. The first nameable position after such a fetch
+            // is the earliest place the reader can be PROVEN to have been, so adopt it as that
+            // fetch's depth instead. Refusing outright would be the other extreme: the gap could
+            // then never re-fire however far the reader scrolled.
+            fetchedAtDepth.replaceAll { _, at -> at ?: here }
+            fetchedAtDepth.entries.retainAll { (gapId, at) -> gapId in prefetch.gapIds || at == here }
+        }
         if (tap != null && tap.token > consumedTapToken) {
             consumedTapToken = tap.token
             failures -= tap.gapId
-            fetchedAtDepth[tap.gapId] = prefetch.lastVisibleIndex
-            return GapFillRequest(roomId, tap.gapId, fromTap = true)
+            fetchedAtDepth[tap.gapId] = prefetch.viewportAnchor
+            return SeamDecision.Start(GapFillRequest(roomId, tap.gapId, fromTap = true))
         }
-        if (!gate.armable) return null
+        if (!gate.armable) return SeamDecision.GateClosed
+        // The refusals below are split apart rather than folded into one predicate ONLY so each can
+        // be named; the surviving set is the same conjunction it has always been. See [SeamDecision]
+        // for why the distinction has to survive as far as the journal.
+        val demanded = seams.filter { it.gapId in prefetch.gapIds }
+        if (demanded.isEmpty()) return SeamDecision.NoDemand
+        val fillable = demanded.filter { it.recoverable }
+        if (fillable.isEmpty()) return SeamDecision.NotRecoverable
+        // A failed seam and an unmoved viewport both leave nothing to start, but only one of them
+        // clears itself when the reader scrolls, so they are separate answers rather than one.
+        val approachable = fillable.filterNot { it.gapId in failures }
+        if (approachable.isEmpty()) return SeamDecision.AwaitingRetryTap
         // Newest first when two seams share the zone: the reader is scrolling INTO history, so the
         // nearer hole is the one they are reading toward. Only one is started either way — the other
         // is offered on the next emission, and serializing them is what keeps a second fetch from
         // computing its boundary against a store this one is halfway through moving.
-        val candidate = seams
+        val candidate = approachable
             .filter { seam ->
-                seam.recoverable &&
-                    seam.gapId in prefetch.gapIds &&
-                    seam.gapId !in failures &&
-                    fetchedAtDepth[seam.gapId].let { it == null || prefetch.lastVisibleIndex > it }
+                // Never fetched during this approach: nothing to be deeper than. Afterwards the
+                // reader must be anchored on a STRICTLY OLDER row than the one they were on when the
+                // last page was fetched — scrolling into history makes the newest visible row older,
+                // so `here < at` IS "the reader got deeper", and drifting back toward the present can
+                // never grant. Either anchor being unnameable refuses, because an unprovable move is
+                // not a move.
+                if (seam.gapId !in fetchedAtDepth) return@filter true
+                val at = fetchedAtDepth[seam.gapId] ?: return@filter false
+                val here = prefetch.viewportAnchor ?: return@filter false
+                here < at
             }
             .maxWithOrNull(compareBy({ it.position }, { it.gapId }))
-            ?: return null
-        fetchedAtDepth[candidate.gapId] = prefetch.lastVisibleIndex
-        return GapFillRequest(roomId, candidate.gapId, fromTap = false)
+            ?: return SeamDecision.AlreadyTriedAtDepth
+        fetchedAtDepth[candidate.gapId] = prefetch.viewportAnchor
+        return SeamDecision.Start(GapFillRequest(roomId, candidate.gapId, fromTap = false))
     }
 
     /**
