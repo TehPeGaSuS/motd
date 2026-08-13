@@ -198,6 +198,14 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: headless-diagnostics
+          # ONLY the launcher's bundle. AGP keeps its own copy of the same per-test output under
+          # app/build/outputs, and uploading that directly would be the shorter path — but nothing
+          # audits it. e2e_audit_required_artifacts runs over this directory alone, so a second path
+          # would publish whatever the instrumentation happened to leave in an additional-output
+          # directory without the allowlist or the forbidden-field grep ever seeing it. The scrape
+          # into this bundle (e2e_collect_gradle_required_e2e_artifacts) is the audited route, and a
+          # scrape that misses is no longer silent: a red run with no per-test capture is now
+          # reported as ARTIFACTS_MISSING rather than under the real failure's name.
           path: test/e2e/artifacts/fast-suite/**
           if-no-files-found: ignore
       - name: Tear down hermetic stack

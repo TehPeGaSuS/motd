@@ -119,13 +119,45 @@ configure_emulator() {
   adb_e shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
 }
 
+stop_seed_member() {
+  [ -f "$SEED_PID_FILE" ] || return 0
+  kill "$(<"$SEED_PID_FILE")" 2>/dev/null || true
+  rm -f "$SEED_PID_FILE"
+}
+
+# Reuse a running stack by default; wipe its message store only when asked.
+#
+# `stack_alive` only asks whether the ergo/soju processes are up; it says nothing about what is IN
+# soju's message store. That store lives under $STACK_DIR, `local-stack.sh down` deliberately keeps
+# it, and `fast` deliberately leaves the stack running — so a reused stack replays every earlier
+# run's ##motdtest backlog to the next one's CHATHISTORY. That is not hypothetical: it is what put a
+# previous day's rows in front of an exact-row-count journey and cost a full investigation round, so
+# wipe the store (MOTD_HEADLESS_STACK_WIPE=1, or `reset`) before trusting a count you are about to
+# reason about.
+#
+# Rebuilding unconditionally was tried and is worse in practice: it hands the FIRST journey of every
+# run a stack whose ergo/soju came up seconds earlier, and that cold start failed
+# sendEchoPersistsVisibleRowAndReconnects in 2 of 3 local runs while the warm path passed. Hosted CI
+# is unaffected either way — it builds a fresh hermetic stack per run (hermetic-stack.sh) and never
+# takes this path.
+STACK_WIPE="${MOTD_HEADLESS_STACK_WIPE:-0}"
+
 ensure_stack() {
   if stack_alive; then
-    log "native soju/ergo stack already running"
-    adb_e reverse "tcp:$ERGO_PORT" "tcp:$ERGO_PORT" >/dev/null
-    adb_e reverse "tcp:$SOJU_PORT" "tcp:$SOJU_PORT" >/dev/null
-    adb_e reverse "tcp:$SOJU_HTTP_PORT" "tcp:$SOJU_HTTP_PORT" >/dev/null
-    return
+    if [ "$STACK_WIPE" != 1 ]; then
+      log "reusing the running soju/ergo stack; its message store is NOT wiped"
+      adb_e reverse "tcp:$ERGO_PORT" "tcp:$ERGO_PORT" >/dev/null
+      adb_e reverse "tcp:$SOJU_PORT" "tcp:$SOJU_PORT" >/dev/null
+      adb_e reverse "tcp:$SOJU_HTTP_PORT" "tcp:$SOJU_HTTP_PORT" >/dev/null
+      return
+    fi
+    log "rebuilding the native stack so its message store starts empty"
+    # The seed client holds a connection to the ergo that is about to be replaced; leaving it would
+    # leave ensure_seed_member believing a now-orphaned holder is still in the channel.
+    stop_seed_member
+    ANDROID_SERIAL="$SERIAL" MOTD_STACK_DIR="$STACK_DIR" \
+      MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" MOTD_SOJU_HTTP_PORT="$SOJU_HTTP_PORT" \
+      "$E2E_DIR/local-stack.sh" down || true
   fi
   log "starting isolated native soju/ergo stack"
   ANDROID_SERIAL="$SERIAL" MOTD_STACK_DIR="$STACK_DIR" \
@@ -180,7 +212,7 @@ fast() {
     e2e_capture_native_stack_artifacts "$ARTIFACTS" "$STACK_DIR"
     die "fast suite failed; see $ARTIFACTS"
   fi
-  log "PASS; emulator and stack remain running for the next iteration"
+  log "PASS; emulator remains booted (the stack is rebuilt clean on the next run)"
 }
 
 full() {
@@ -233,10 +265,7 @@ status() {
 }
 
 down() {
-  if [ -f "$SEED_PID_FILE" ]; then
-    kill "$(<"$SEED_PID_FILE")" 2>/dev/null || true
-    rm -f "$SEED_PID_FILE"
-  fi
+  stop_seed_member
   if [ -f "$SERIAL_FILE" ]; then
     ANDROID_SERIAL="$SERIAL" MOTD_STACK_DIR="$STACK_DIR" \
       MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" MOTD_SOJU_HTTP_PORT="$SOJU_HTTP_PORT" \

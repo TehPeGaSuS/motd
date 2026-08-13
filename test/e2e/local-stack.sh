@@ -276,10 +276,32 @@ start_recorded_soju() {
 }
 
 stop_pids() {
+  local pending=()
   for p in soju ergo; do
     local f="$RUN/$p.pid"
-    if [ -f "$f" ]; then kill "$(cat "$f")" 2>/dev/null || true; rm -f "$f"; fi
+    if [ -f "$f" ]; then
+      local pid
+      pid="$(cat "$f")"
+      kill "$pid" 2>/dev/null || true
+      pending+=("$pid")
+      rm -f "$f"
+    fi
   done
+  # SIGTERM is asynchronous, and `up`'s port guard fails LOUDLY on a listener that has not gone yet.
+  # A `down` immediately followed by an `up` — which is what a fresh-stack test run does — would
+  # otherwise lose that race on a loaded host and abort the run.
+  [ "${#pending[@]}" -gt 0 ] || return 0
+  local waited=0
+  while [ "$waited" -lt 100 ]; do
+    local alive=0
+    for pid in "${pending[@]}"; do
+      kill -0 "$pid" 2>/dev/null && alive=1
+    done
+    [ "$alive" -eq 1 ] || return 0
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  log "warning: ergo/soju did not exit within 10s of SIGTERM"
 }
 
 up() {

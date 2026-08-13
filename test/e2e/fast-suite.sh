@@ -132,6 +132,10 @@ run_attempt() {
 attempts=1
 rc=0
 run_attempt "$@" || rc=$?
+# Distinct from `rc`, which the case-count assertion below can also raise: only a failing
+# instrumentation attempt owes a per-test failure capture.
+attempt_failed=false
+[ "$rc" -eq 0 ] || attempt_failed=true
 e2e_collect_gradle_required_e2e_artifacts "$OUT_DIR"
 e2e_pull_required_e2e_artifacts "$OUT_DIR"
 if [ "$MODE" != direct ] && [ "$rc" -eq 0 ]; then assert_required_gradle_results || rc=1; fi
@@ -147,6 +151,8 @@ if [ "$rc" -ne 0 ] && [ "$started" = false ] && e2e_retry_allowed "$classificati
   attempts=2
   rc=0
   run_attempt "$@" || rc=$?
+  attempt_failed=false
+  [ "$rc" -eq 0 ] || attempt_failed=true
   e2e_collect_gradle_required_e2e_artifacts "$OUT_DIR"
   e2e_pull_required_e2e_artifacts "$OUT_DIR"
   if [ "$MODE" != direct ] && [ "$rc" -eq 0 ]; then assert_required_gradle_results || rc=1; fi
@@ -154,6 +160,12 @@ if [ "$rc" -ne 0 ] && [ "$started" = false ] && e2e_retry_allowed "$classificati
   e2e_attempt_started "$OUT_DIR" && started=true
 fi
 e2e_audit_required_artifacts "$OUT_DIR" || { write_summary fail 1 "$started" PRIVACY_AUDIT_FAILED "$attempts"; exit 1; }
+# Only meaningful on a red run, and it must run BEFORE the failure exit below so an unreadable
+# bundle is reported as its own class rather than uploaded under the real failure's name.
+if [ "$rc" -ne 0 ] && ! e2e_assert_required_artifacts_collected "$OUT_DIR" "$attempt_failed" "$started"; then
+  write_summary fail "$rc" "$started" ARTIFACTS_MISSING "$attempts"
+  exit "$rc"
+fi
 if [ "$rc" -ne 0 ]; then
   write_summary fail "$rc" "$started" "$classification" "$attempts"
   exit "$rc"
