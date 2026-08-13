@@ -1,0 +1,3 @@
+- Avatars got a redesign: channels are now rounded squares while people stay circles, and the IRC sprites use a vivid pixel-art palette with more robot variety (new bodies, heads, accessories, and faces).
+- Nick colors are spread much further apart, so different people no longer share near-identical colors.
+- Channel logos now cover 300+ projects (NixOS, Postgres, Redis, and more).
