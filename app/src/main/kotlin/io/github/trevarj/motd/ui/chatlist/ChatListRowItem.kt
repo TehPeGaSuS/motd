@@ -21,7 +21,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.PushPin
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +57,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MutedActivityBadge
 import io.github.trevarj.motd.ui.components.NetworkChip
@@ -447,13 +447,9 @@ private fun PresenceAvatar(
 private fun SyncStatusBadgeContent(indicator: ChatListSyncIndicator) {
     when (indicator) {
         ChatListSyncIndicator.SYNCING -> {
-            val description = stringResource(R.string.chatlist_sync_syncing)
-            CircularProgressIndicator(
-                strokeWidth = 2.dp,
-                modifier = Modifier
-                    .size(12.dp)
-                    .testTag("chatlist_row_sync_syncing")
-                    .semantics { contentDescription = description },
+            HistorySyncSpinner(
+                contentDescription = stringResource(R.string.chatlist_sync_syncing),
+                modifier = Modifier.testTag("chatlist_row_sync_syncing"),
             )
         }
         ChatListSyncIndicator.QUEUED -> {

@@ -718,6 +718,46 @@ class ChatModelsTest {
         }
     }
 
+    @Test fun `title sync status folds paging work over the coordinator status`() {
+        val idle = LoadState.NotLoading(endOfPaginationReached = false)
+        val failed = LoadState.Error(IllegalStateException("boom"))
+
+        fun status(
+            refresh: LoadState = idle,
+            prepend: LoadState = idle,
+            itemCount: Int = 12,
+            syncStatus: HistorySyncStatus = HistorySyncStatus.Idle,
+        ) = timelineHistoryStatus(refresh, prepend, itemCount, syncStatus)
+
+        // The cold open the coordinator has not reached yet: the generation's first page is the only
+        // thing in flight, and it is what the reader is waiting on.
+        assertEquals(
+            HistorySyncStatus.Syncing,
+            status(refresh = LoadState.Loading, itemCount = 0),
+        )
+        // Room invalidates on every inserted message and each invalidation re-runs REFRESH. With
+        // rows already on screen that is not a load the reader is waiting on, so the title stays put.
+        assertEquals(HistorySyncStatus.Idle, status(refresh = LoadState.Loading, itemCount = 12))
+        // A terminally empty buffer has settled: no spinner, so the empty state can speak.
+        assertEquals(HistorySyncStatus.Idle, status(itemCount = 0))
+
+        // Newer-end paging reports regardless of how much is already loaded.
+        assertEquals(HistorySyncStatus.Syncing, status(prepend = LoadState.Loading))
+        assertEquals(HistorySyncStatus.Failed("boom"), status(prepend = failed))
+
+        // With Paging quiet the coordinator's own status passes straight through.
+        assertEquals(HistorySyncStatus.Queued, status(syncStatus = HistorySyncStatus.Queued))
+        assertEquals(
+            HistorySyncStatus.Partial("stopped short"),
+            status(syncStatus = HistorySyncStatus.Partial("stopped short")),
+        )
+        // Paging outranks it: a live prepend is more current than a status that has not caught up.
+        assertEquals(
+            HistorySyncStatus.Syncing,
+            status(prepend = LoadState.Loading, syncStatus = HistorySyncStatus.Idle),
+        )
+    }
+
     @Test fun `history footer derives its states from append and availability`() {
         val ready = HistoryAvailability.Ready(setOf(HistoryReferenceType.MSGID), pageLimit = 50)
         val idle = LoadState.NotLoading(endOfPaginationReached = false)

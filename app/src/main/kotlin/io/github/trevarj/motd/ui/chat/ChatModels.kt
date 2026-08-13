@@ -17,6 +17,7 @@ import io.github.trevarj.motd.data.sync.GapFillProgress
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.components.HistoryGapState
 import io.github.trevarj.motd.ui.components.ReactionChip
 import androidx.paging.LoadState
@@ -1308,7 +1309,34 @@ internal fun chatHistoryUiState(
     }
 }
 
-/** Appearance grace before the append shimmer may show, matching the sync bar's 140 ms fade. */
+/**
+ * What the chat title bar reports about history: Paging's own newer-end work folded over the
+ * coordinator's reconciliation status, so one spinner covers every way messages can be in flight.
+ *
+ * REFRESH is included only while [itemCount] is zero. That is exactly the cold open — the generation
+ * has no first page yet, the append footer only mirrors APPEND, and the empty state stays hidden
+ * until the buffer proves terminally empty, so nothing else on screen would report it. The guard
+ * matters because Room invalidates on every inserted message and each invalidation re-runs REFRESH:
+ * unguarded, the title would blink on every incoming line while the reader is caught up and reading.
+ *
+ * APPEND is deliberately absent: the older end has its own footer shimmer at the exact place the
+ * reader is looking, and reporting it twice would only make the title busier.
+ */
+internal fun timelineHistoryStatus(
+    refresh: LoadState,
+    prepend: LoadState,
+    itemCount: Int,
+    syncStatus: HistorySyncStatus,
+): HistorySyncStatus = when {
+    itemCount == 0 && refresh is LoadState.Loading -> HistorySyncStatus.Syncing
+    prepend is LoadState.Loading -> HistorySyncStatus.Syncing
+    prepend is LoadState.Error -> HistorySyncStatus.Failed(
+        prepend.error.message ?: "Unable to load newer history",
+    )
+    else -> syncStatus
+}
+
+/** Appearance grace before the append shimmer may show, matching the title spinner's 140 ms fade. */
 internal const val FOOTER_APPEARANCE_DELAY_MS = 140L
 
 /** Once shown, the shimmer holds this long so a page that lands immediately is not a flash. */

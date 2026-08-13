@@ -22,13 +22,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_PARTIAL_CHIP_TAG
-import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_SYNC_BAR_TAG
-import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_SYNC_INDICATOR_TAG
+import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_SYNC_FAILURE_TAG
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_SYNC_RETRY_TAG
-import io.github.trevarj.motd.ui.chat.HISTORY_SYNC_PILL_ESCALATION_MS
+import io.github.trevarj.motd.ui.chat.CHAT_TITLE_SYNC_SPINNER_TAG
+import io.github.trevarj.motd.ui.chat.ChatTitleSyncSpinner
 import io.github.trevarj.motd.ui.chat.TimelineHistoryStaleChip
-import io.github.trevarj.motd.ui.chat.TimelineHistorySyncBar
-import io.github.trevarj.motd.ui.chat.TimelineHistorySyncIndicator
+import io.github.trevarj.motd.ui.chat.TimelineHistorySyncFailure
 import io.github.trevarj.motd.ui.chat.TimelineTopOverlays
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
@@ -41,20 +40,54 @@ class ChatHistorySyncIndicatorUiTest {
     val compose = createComposeRule()
 
     @Test
-    fun barShowsImmediatelyAndPillEscalatesForUnresolvedEntry() {
+    fun titleSpinnerReportsEveryInFlightSyncState() {
         compose.mainClock.autoAdvance = false
         compose.setContent {
             MotdTheme {
                 Column {
-                    TimelineHistorySyncBar(
+                    ChatTitleSyncSpinner(HistorySyncStatus.Queued)
+                    ChatTitleSyncSpinner(HistorySyncStatus.Syncing)
+                }
+            }
+        }
+        compose.waitForIdle()
+
+        // No appearance grace period: one micro fade is all that stands between the sync starting
+        // and the reader seeing it.
+        compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
+        compose.onAllNodesWithTag(CHAT_TITLE_SYNC_SPINNER_TAG).assertCountEquals(2)
+    }
+
+    @Test
+    fun settledStatesLeaveTheTitleAlone() {
+        // Everything that is not Queued/Syncing: nothing is in flight, so the title carries no cue.
+        // Failure is reported by its own pill, not here.
+        compose.setContent {
+            MotdTheme {
+                Column {
+                    ChatTitleSyncSpinner(HistorySyncStatus.Idle)
+                    ChatTitleSyncSpinner(HistorySyncStatus.AwaitingConnection)
+                    ChatTitleSyncSpinner(HistorySyncStatus.Unavailable)
+                    ChatTitleSyncSpinner(HistorySyncStatus.Partial("fixture"))
+                    ChatTitleSyncSpinner(HistorySyncStatus.Failed("fixture"))
+                }
+            }
+        }
+
+        compose.onAllNodesWithTag(CHAT_TITLE_SYNC_SPINNER_TAG).assertCountEquals(0)
+    }
+
+    @Test
+    fun aLongSyncNeverEscalatesOverTheConversation() {
+        // The point of moving the cue into the title bar: however long a sync runs, it stays a
+        // spinner beside the name and never grows into chrome covering the rows being read.
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            MotdTheme {
+                Column {
+                    ChatTitleSyncSpinner(HistorySyncStatus.Syncing)
+                    TimelineHistorySyncFailure(
                         status = HistorySyncStatus.Syncing,
-                        timelineEmpty = false,
-                    )
-                    TimelineHistorySyncIndicator(
-                        status = HistorySyncStatus.Syncing,
-                        timelineEmpty = false,
-                        // The reader is genuinely waiting on this sync: entry could not be placed.
-                        entryUnresolved = true,
                         retryEnabled = true,
                         onRetry = {},
                     )
@@ -63,116 +96,29 @@ class ChatHistorySyncIndicatorUiTest {
         }
         compose.waitForIdle()
 
-        // Enough frames for the micro fade to settle.
+        compose.mainClock.advanceTimeBy(LONG_SYNC_MS)
         compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
-        compose.onNodeWithTag(CHAT_HISTORY_SYNC_BAR_TAG).assertIsDisplayed()
-        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertCountEquals(0)
-
-        // advanceTimeBy rounds every advance up to a whole 16ms frame, so a 1ms-short edge can
-        // overshoot the threshold once advances are chained. Stop a full fade budget short instead:
-        // still inside the escalation window, but immune to frame rounding.
-        compose.mainClock.advanceTimeBy(HISTORY_SYNC_PILL_ESCALATION_MS - 2 * FADE_BUDGET_MS)
-        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertCountEquals(0)
-
-        compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
-        compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
-        compose.onNodeWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertIsDisplayed()
-        // A sync statement, not a claim about finding the first unread row: entry resolves that
-        // from at-rest anchors and never waits for this sync.
-        compose.onNodeWithText("Syncing messages…").assertExists()
-        compose.onNodeWithTag(CHAT_HISTORY_SYNC_BAR_TAG).assertIsDisplayed()
+        compose.onNodeWithTag(CHAT_TITLE_SYNC_SPINNER_TAG).assertIsDisplayed()
+        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_FAILURE_TAG).assertCountEquals(0)
     }
 
     @Test
-    fun populatedTimelineWithSettledEntryNeverEscalatesToThePill() {
-        // The common reconnect: rows on screen, a viewport already positioned in them, and a sync
-        // running behind both. The 3dp bar reports it; covering the conversation the reader is
-        // already reading with a pill does not.
-        compose.mainClock.autoAdvance = false
-        compose.setContent {
-            MotdTheme {
-                Column {
-                    TimelineHistorySyncBar(
-                        status = HistorySyncStatus.Syncing,
-                        timelineEmpty = false,
-                    )
-                    TimelineHistorySyncIndicator(
-                        status = HistorySyncStatus.Syncing,
-                        timelineEmpty = false,
-                        entryUnresolved = false,
-                        retryEnabled = true,
-                        onRetry = {},
-                    )
-                }
-            }
-        }
-        compose.waitForIdle()
-
-        compose.mainClock.advanceTimeBy(HISTORY_SYNC_PILL_ESCALATION_MS + FADE_BUDGET_MS)
-        compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
-        compose.onNodeWithTag(CHAT_HISTORY_SYNC_BAR_TAG).assertIsDisplayed()
-        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertCountEquals(0)
-    }
-
-    @Test
-    fun emptyTimelineShowsLoadingImmediately() {
-        compose.mainClock.autoAdvance = false
-        compose.setContent {
-            MotdTheme {
-                Column {
-                    TimelineHistorySyncBar(
-                        status = HistorySyncStatus.Queued,
-                        timelineEmpty = true,
-                    )
-                    TimelineHistorySyncIndicator(
-                        status = HistorySyncStatus.Queued,
-                        timelineEmpty = true,
-                        // An empty timeline shows its spinner regardless: there is nothing to read
-                        // behind it either way.
-                        entryUnresolved = false,
-                        retryEnabled = true,
-                        onRetry = {},
-                    )
-                }
-            }
-        }
-        compose.waitForIdle()
-
-        // Only the fade advances: an empty timeline must not wait on the escalation delay.
-        compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
-        compose.onNodeWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertIsDisplayed()
-        compose.onNodeWithText("Loading messages…").assertExists()
-        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_BAR_TAG).assertCountEquals(0)
-    }
-
-    @Test
-    fun indicatorHidesImmediatelyWhenSyncEnds() {
+    fun titleSpinnerClearsWhenTheSyncSettles() {
         var status by mutableStateOf<HistorySyncStatus>(HistorySyncStatus.Syncing)
         compose.mainClock.autoAdvance = false
         compose.setContent {
             MotdTheme {
-                Column {
-                    TimelineHistorySyncBar(status = status, timelineEmpty = false)
-                    TimelineHistorySyncIndicator(
-                        status = status,
-                        timelineEmpty = false,
-                        entryUnresolved = true,
-                        retryEnabled = true,
-                        onRetry = {},
-                    )
-                }
+                ChatTitleSyncSpinner(status)
             }
         }
         compose.waitForIdle()
 
-        compose.mainClock.advanceTimeBy(HISTORY_SYNC_PILL_ESCALATION_MS + FADE_BUDGET_MS)
-        compose.onNodeWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertIsDisplayed()
-        compose.onNodeWithTag(CHAT_HISTORY_SYNC_BAR_TAG).assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
+        compose.onNodeWithTag(CHAT_TITLE_SYNC_SPINNER_TAG).assertIsDisplayed()
 
         compose.runOnUiThread { status = HistorySyncStatus.Idle }
         compose.mainClock.advanceTimeBy(FADE_BUDGET_MS)
-        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertCountEquals(0)
-        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_BAR_TAG).assertCountEquals(0)
+        compose.onAllNodesWithTag(CHAT_TITLE_SYNC_SPINNER_TAG).assertCountEquals(0)
     }
 
     @Test
@@ -180,14 +126,9 @@ class ChatHistorySyncIndicatorUiTest {
         compose.setContent {
             MotdTheme {
                 Column {
-                    TimelineHistorySyncBar(
+                    ChatTitleSyncSpinner(HistorySyncStatus.Partial("fixture"))
+                    TimelineHistorySyncFailure(
                         status = HistorySyncStatus.Partial("fixture"),
-                        timelineEmpty = false,
-                    )
-                    TimelineHistorySyncIndicator(
-                        status = HistorySyncStatus.Partial("fixture"),
-                        timelineEmpty = false,
-                        entryUnresolved = false,
                         retryEnabled = true,
                         onRetry = {},
                     )
@@ -199,8 +140,8 @@ class ChatHistorySyncIndicatorUiTest {
             }
         }
 
-        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_INDICATOR_TAG).assertCountEquals(0)
-        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_BAR_TAG).assertCountEquals(0)
+        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_FAILURE_TAG).assertCountEquals(0)
+        compose.onAllNodesWithTag(CHAT_TITLE_SYNC_SPINNER_TAG).assertCountEquals(0)
         // The cached rows stay readable; only an advisory, action-free chip marks them stale.
         compose.onNodeWithTag(CHAT_HISTORY_PARTIAL_CHIP_TAG).assertIsDisplayed()
         compose.onNodeWithText("History may be incomplete").assertIsDisplayed()
@@ -234,15 +175,9 @@ class ChatHistorySyncIndicatorUiTest {
         compose.setContent {
             MotdTheme {
                 Column {
-                    TimelineHistorySyncBar(
+                    ChatTitleSyncSpinner(HistorySyncStatus.Failed("fixture"))
+                    TimelineHistorySyncFailure(
                         status = HistorySyncStatus.Failed("fixture"),
-                        timelineEmpty = false,
-                    )
-                    TimelineHistorySyncIndicator(
-                        status = HistorySyncStatus.Failed("fixture"),
-                        timelineEmpty = false,
-                        // A failed pass keeps its retry regardless of where entry landed.
-                        entryUnresolved = false,
                         retryEnabled = true,
                         // Mirrors the screen's composed action: the coordinator re-runs the
                         // reconciliation pass and Paging re-attempts the failed fetch.
@@ -256,7 +191,8 @@ class ChatHistorySyncIndicatorUiTest {
         }
 
         compose.onNodeWithText("Couldn't sync messages").assertIsDisplayed()
-        compose.onAllNodesWithTag(CHAT_HISTORY_SYNC_BAR_TAG).assertCountEquals(0)
+        // A failure is not progress: the title cue is gone, the pill carries the whole message.
+        compose.onAllNodesWithTag(CHAT_TITLE_SYNC_SPINNER_TAG).assertCountEquals(0)
         compose.onAllNodesWithTag(CHAT_HISTORY_PARTIAL_CHIP_TAG).assertCountEquals(0)
         compose.onNodeWithTag(CHAT_HISTORY_SYNC_RETRY_TAG)
             .assertHeightIsAtLeast(48.dp)
@@ -278,39 +214,29 @@ class ChatHistorySyncIndicatorUiTest {
                                 .testTag("fixture_audio_player"),
                         )
                     },
-                    historyIndicator = {
-                        Box(Modifier.size(24.dp).testTag("fixture_history_sync"))
+                    historyFailure = {
+                        Box(Modifier.size(24.dp).testTag("fixture_history_failure"))
                     },
                     staleChip = {
                         Box(Modifier.size(24.dp).testTag("fixture_stale_chip"))
-                    },
-                    syncBar = {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(3.dp)
-                                .testTag("fixture_sync_bar"),
-                        )
                     },
                 )
             }
         }
 
         val audioBounds = compose.onNodeWithTag("fixture_audio_player").getUnclippedBoundsInRoot()
-        val syncBounds = compose.onNodeWithTag("fixture_history_sync").getUnclippedBoundsInRoot()
+        val failureBounds = compose.onNodeWithTag("fixture_history_failure").getUnclippedBoundsInRoot()
         val chipBounds = compose.onNodeWithTag("fixture_stale_chip").getUnclippedBoundsInRoot()
-        val barBounds = compose.onNodeWithTag("fixture_sync_bar").getUnclippedBoundsInRoot()
         assertTrue("audio player was not pinned to the timeline top", audioBounds.top <= 1.dp)
-        assertTrue("history sync overlapped the audio player", syncBounds.top >= audioBounds.bottom)
+        assertTrue("sync failure overlapped the audio player", failureBounds.top >= audioBounds.bottom)
         assertTrue("stale chip overlapped the audio player", chipBounds.top >= audioBounds.bottom)
-        assertEquals("sync bar was not pinned to the timeline top edge", 0.dp, barBounds.top)
-        // The bar is a sibling of the overlay column, so it draws over the player instead of
-        // pushing it down; playback controls stay exactly where they were without the bar.
-        assertTrue("sync bar displaced the audio player", audioBounds.top < barBounds.bottom)
     }
 
     private companion object {
         /** Frame budget that lets a `MotdMotion.micro*` fade finish under the manual clock. */
         const val FADE_BUDGET_MS = 500L
+
+        /** Comfortably longer than any sync a reader would sit through without complaint. */
+        const val LONG_SYNC_MS = 10_000L
     }
 }

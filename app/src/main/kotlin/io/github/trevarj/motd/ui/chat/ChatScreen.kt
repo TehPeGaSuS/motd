@@ -64,7 +64,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -183,6 +182,7 @@ import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
+import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.share.PendingShare
@@ -219,13 +219,6 @@ private const val REACTION_PREFETCH_ROWS = 12
 private const val SEAM_PREFETCH_SETTLE_MS = 300L
 private const val MAX_VISIBLE_REACTION_MSGIDS = 80
 private const val MAX_UNREAD_BADGE_COUNT = 100
-/**
- * How long an active sync has to run before the history pill escalates in.
- *
- * The thin top-edge bar reports the sync instantly, so this delay only gates the heavier pill: a
- * sync that outlives it is no longer routine catch-up and deserves the wordier explanation.
- */
-internal const val HISTORY_SYNC_PILL_ESCALATION_MS = 3_000L
 
 private data class PendingDccAccept(
     val transferId: Long,
@@ -763,13 +756,12 @@ fun ChatContent(
         )
     }
     val newerHistoryLoad = items.loadState.prepend
-    val timelineHistoryStatus = when (newerHistoryLoad) {
-        LoadState.Loading -> HistorySyncStatus.Syncing
-        is LoadState.Error -> HistorySyncStatus.Failed(
-            newerHistoryLoad.error.message ?: "Unable to load newer history",
-        )
-        is LoadState.NotLoading -> historySyncStatus
-    }
+    val timelineHistoryStatus = timelineHistoryStatus(
+        refresh = items.loadState.refresh,
+        prepend = newerHistoryLoad,
+        itemCount = items.itemCount,
+        syncStatus = historySyncStatus,
+    )
     val readyRetryGate = remember(items) { HistoryReadyRetryGate() }
     LaunchedEffect(historyAvailability, olderHistoryLoad) {
         if (readyRetryGate.update(historyAvailability, olderHistoryLoad)) {
@@ -1786,6 +1778,7 @@ fun ChatContent(
                                 }
                             }
                         }
+                        ChatTitleSyncSpinner(timelineHistoryStatus)
                         if (titleTarget != ChatTitleTarget.NONE) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
@@ -2084,11 +2077,9 @@ fun ChatContent(
                                 )
                             }
                         },
-                        historyIndicator = {
-                            TimelineHistorySyncIndicator(
+                        historyFailure = {
+                            TimelineHistorySyncFailure(
                                 status = timelineHistoryStatus,
-                                timelineEmpty = items.itemCount == 0,
-                                entryUnresolved = entryState is EntryPositionState.Unresolved,
                                 retryEnabled = state.connState is IrcClientState.Ready,
                                 // Both halves of history recovery: the coordinator re-runs the
                                 // reconciliation pass (coalescing onto any in-flight one) while
@@ -2104,12 +2095,6 @@ fun ChatContent(
                                 status = timelineHistoryStatus,
                                 timelineEmpty = items.itemCount == 0,
                                 onDismiss = onHistorySyncDismiss,
-                            )
-                        },
-                        syncBar = {
-                            TimelineHistorySyncBar(
-                                status = timelineHistoryStatus,
-                                timelineEmpty = items.itemCount == 0,
                             )
                         },
                     )
@@ -2570,27 +2555,50 @@ internal fun composerNeedsMemberNicks(value: TextFieldValue): Boolean {
     return token.text.length >= 2 || atPrefixed
 }
 
-const val CHAT_HISTORY_SYNC_INDICATOR_TAG = "chat_history_sync_indicator"
+const val CHAT_HISTORY_SYNC_FAILURE_TAG = "chat_history_sync_indicator"
 const val CHAT_HISTORY_SYNC_RETRY_TAG = "chat_history_sync_retry"
-const val CHAT_HISTORY_SYNC_BAR_TAG = "chat_history_sync_bar"
+const val CHAT_TITLE_SYNC_SPINNER_TAG = "chat_title_sync_spinner"
 const val CHAT_HISTORY_PARTIAL_CHIP_TAG = "chat_history_partial_chip"
 
-private val HistorySyncStatus.isActive: Boolean
+internal val HistorySyncStatus.isActive: Boolean
     get() = this == HistorySyncStatus.Queued || this == HistorySyncStatus.Syncing
 
 /**
- * Pins transient timeline chrome below the title bar without allowing the stacked layers to overlap.
+ * The chat's entire in-progress sync report: a spinner beside the title, matching the chat list's
+ * per-row cue.
  *
- * The sync bar is the deliberate exception: it is a sibling of the stack rather than a column child,
- * so an instant sync never pushes the audio mini player down. When both are visible the hairline
- * bar draws over the player's top ~3dp, which is the price of keeping playback controls stationary.
+ * It lives in the title bar rather than over the timeline precisely because a sync is not worth
+ * interrupting a reader for — nothing is drawn over the conversation while one runs. There is
+ * deliberately no appearance grace period: the micro fade turns a sub-100 ms sync into a faint
+ * shimmer rather than a flash, and a grace timer would reintroduce the delay this cue removes.
+ *
+ * No liveRegion: a chat's sync restarts on every reconnect and routine prepend loads would spam
+ * polite announcements. Only the failure pill, which asks for an action, announces itself.
  */
+@Composable
+internal fun ChatTitleSyncSpinner(status: HistorySyncStatus, modifier: Modifier = Modifier) {
+    AnimatedVisibility(
+        visible = status.isActive,
+        modifier = modifier,
+        enter = fadeIn(MotdMotion.microFadeIn),
+        exit = fadeOut(MotdMotion.microFadeOut),
+    ) {
+        HistorySyncSpinner(
+            contentDescription = stringResource(R.string.chatlist_sync_syncing),
+            // Padding inside the visibility scope so a settled sync leaves no gap in the title.
+            modifier = Modifier
+                .padding(start = 8.dp)
+                .testTag(CHAT_TITLE_SYNC_SPINNER_TAG),
+        )
+    }
+}
+
+/** Pins transient timeline chrome below the title bar without allowing the stacked layers to overlap. */
 @Composable
 internal fun BoxScope.TimelineTopOverlays(
     audioPlayer: @Composable () -> Unit,
-    historyIndicator: @Composable () -> Unit,
+    historyFailure: @Composable () -> Unit,
     staleChip: @Composable () -> Unit,
-    syncBar: @Composable () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -2598,50 +2606,11 @@ internal fun BoxScope.TimelineTopOverlays(
             .fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Keep playback controls stationary when delayed history progress becomes visible.
+        // Keep playback controls stationary when a delayed sync failure becomes visible.
         audioPlayer()
-        historyIndicator()
+        historyFailure()
         // Column child, not a sibling overlay: the staleness chip must never cover the player.
         staleChip()
-    }
-    Box(
-        modifier = Modifier
-            .align(Alignment.TopCenter)
-            .fillMaxWidth(),
-    ) {
-        syncBar()
-    }
-}
-
-/**
- * Reports an in-flight history sync the instant it starts, hugging the top edge of the timeline.
- *
- * Only shown once there is a timeline to prepend into; an empty timeline gets the pill's spinner
- * instead. There is deliberately no appearance grace period: the 140 ms fade on a 3dp hairline turns
- * a sub-100 ms sync into a faint shimmer rather than a flash, and a grace timer would reintroduce
- * exactly the delay this bar exists to remove.
- */
-@Composable
-internal fun TimelineHistorySyncBar(
-    status: HistorySyncStatus,
-    timelineEmpty: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    AnimatedVisibility(
-        visible = status.isActive && !timelineEmpty,
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag(CHAT_HISTORY_SYNC_BAR_TAG),
-        enter = fadeIn(MotdMotion.microFadeIn),
-        exit = fadeOut(MotdMotion.microFadeOut),
-    ) {
-        // No liveRegion here: routine prepend loads would spam polite announcements. The pill keeps
-        // the announcement role, so a sync worth narrating is still narrated.
-        LinearProgressIndicator(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(3.dp),
-        )
     }
 }
 
@@ -2699,116 +2668,53 @@ internal fun TimelineHistoryStaleChip(
     }
 }
 
-/** A stable overlay so timeline inserts cannot move history progress or its retry action. */
+/**
+ * A stable overlay so timeline inserts cannot move a failed sync's retry action.
+ *
+ * Failure is the only history-sync state that still interrupts the reader: it asks for a decision.
+ * Progress is reported quietly by [ChatTitleSyncSpinner], and a settled-but-incomplete pass by
+ * [TimelineHistoryStaleChip], so neither reaches this pill.
+ */
 @Composable
-internal fun TimelineHistorySyncIndicator(
+internal fun TimelineHistorySyncFailure(
     status: HistorySyncStatus,
-    timelineEmpty: Boolean,
-    entryUnresolved: Boolean,
     retryEnabled: Boolean,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val active = status.isActive
-    var pillEscalated by remember { mutableStateOf(false) }
-    // Keyed on `active` alone so a timeline that fills mid-sync swaps the empty spinner for the bar
-    // without restarting the escalation timer; the reader has been waiting since the sync began.
-    LaunchedEffect(active) {
-        if (active) {
-            kotlinx.coroutines.delay(HISTORY_SYNC_PILL_ESCALATION_MS)
-            pillEscalated = true
-        } else {
-            pillEscalated = false
-        }
-    }
-    val visible = if (active) {
-        // An empty timeline has nothing else to show, so its spinner appears immediately.
-        //
-        // Everything else has rows to read and a viewport already positioned in them: entry resolves
-        // from at-rest anchors and no longer waits on this sync, so an ongoing sync alone is not
-        // worth covering the conversation with a pill — the 3dp bar already reports it. The pill
-        // escalates only when entry genuinely could not be placed, which is the one case where the
-        // reader is waiting on the sync rather than reading through it.
-        timelineEmpty || (pillEscalated && entryUnresolved)
-    } else {
-        status is HistorySyncStatus.Failed
-    }
     AnimatedVisibility(
-        visible = visible,
+        visible = status is HistorySyncStatus.Failed,
         modifier = modifier
             .padding(horizontal = 24.dp, vertical = 16.dp)
-            .testTag(CHAT_HISTORY_SYNC_INDICATOR_TAG),
+            .testTag(CHAT_HISTORY_SYNC_FAILURE_TAG),
         enter = fadeIn(MotdMotion.microFadeIn) + scaleIn(MotdMotion.microFadeIn, initialScale = 0.96f),
         exit = fadeOut(MotdMotion.microFadeOut) + scaleOut(MotdMotion.microFadeOut, targetScale = 0.96f),
     ) {
-        val content: @Composable () -> Unit = {
-            when (status) {
-                HistorySyncStatus.Queued,
-                HistorySyncStatus.AwaitingConnection,
-                HistorySyncStatus.Syncing,
-                -> Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                    )
-                    Text(
-                        text = stringResource(
-                            if (timelineEmpty) R.string.chat_history_loading_messages
-                            else R.string.chat_history_syncing_messages,
-                        ),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                }
-                is HistorySyncStatus.Failed -> Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.chat_history_sync_failed_inline),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Button(
-                        onClick = onRetry,
-                        enabled = retryEnabled,
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .testTag(CHAT_HISTORY_SYNC_RETRY_TAG),
-                    ) {
-                        Text(stringResource(R.string.chat_retry))
-                    }
-                }
-                // A permanently refused target has no retry worth offering, so it renders nothing.
-                is HistorySyncStatus.Partial,
-                HistorySyncStatus.Unavailable,
-                HistorySyncStatus.Idle,
-                -> Unit
-            }
-        }
-        if (timelineEmpty && active) {
-            Box(
-                modifier = Modifier
-                    .semantics { liveRegion = LiveRegionMode.Polite },
-                contentAlignment = Alignment.Center,
+        Surface(
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp,
+            shadowElevation = 3.dp,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
-                content()
-            }
-        } else {
-            Surface(
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 6.dp,
-                shadowElevation = 3.dp,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            ) {
-                Box(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    contentAlignment = Alignment.Center,
+                Text(
+                    text = stringResource(R.string.chat_history_sync_failed_inline),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Button(
+                    onClick = onRetry,
+                    enabled = retryEnabled,
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag(CHAT_HISTORY_SYNC_RETRY_TAG),
                 ) {
-                    content()
+                    Text(stringResource(R.string.chat_retry))
                 }
             }
         }
