@@ -126,6 +126,36 @@ class MessageBubbleTextTest {
     }
 
     @Test
+    fun action_line_without_star_starts_with_sender_and_keeps_link() {
+        val senderLink = LinkAnnotation.Clickable(tag = "action-sender", linkInteractionListener = {})
+        val line = buildActionLine(
+            sender = "alice",
+            text = "waves hello",
+            accentColor = Color.Unspecified,
+            nameColor = Color.Green,
+            bodyColor = Color.Gray,
+            linkColor = Color.Blue,
+            mentionsActive = false,
+            senderLink = senderLink,
+            includeStar = false,
+        )
+
+        // The comfortable emote bubble drops the `* ` marker (the inline avatar plays that role);
+        // the line opens directly with the nick.
+        assertEquals("alice waves hello", line.text)
+        val sender = line.spanStyles.first { it.start == 0 && it.end == 5 }.item
+        val body = line.spanStyles.first { it.start == 6 && it.end == line.length }.item
+        assertEquals(Color.Green, sender.color)
+        assertEquals(FontWeight.Bold, sender.fontWeight)
+        assertEquals(FontStyle.Normal, sender.fontStyle)
+        assertEquals(Color.Gray, body.color)
+        assertEquals(FontStyle.Italic, body.fontStyle)
+        // Tappable nick survives the merge.
+        assertTrue(line.hasLinkAnnotations(0, 5))
+        assertTrue(!line.hasLinkAnnotations(6, line.length))
+    }
+
+    @Test
     fun action_accessibility_label_matches_classic_me_prefix() {
         assertEquals("* alice waves hello", actionAccessibilityLabel("alice", "waves hello"))
         assertEquals("* alice", actionAccessibilityLabel("alice", ""))
@@ -173,8 +203,9 @@ class MessageBubbleTextTest {
             mentionsActive = false,
         )
 
-        // The comfortable emote bubble replaces `* nick` with an avatar, so the body string is the
-        // raw text only.
+        // buildActionBody is the sender-less body primitive that buildActionLine composes; on its
+        // own it is the raw text only. (The comfortable bubble now renders the full line via
+        // buildActionLine(includeStar = false).)
         assertEquals("waves hello", body.text)
         assertTrue(body.spanStyles.isNotEmpty())
         // The whole run is italic; no bold sender span and no asterisk.

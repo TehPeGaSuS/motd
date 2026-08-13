@@ -215,9 +215,9 @@ fun MessageBubble(
     }
 
     if (kind == MessageKind.ACTION) {
-        // COMFORTABLE renders emotes as a thin content-sized bubble with a small inline avatar
-        // replacing the `* nick` prefix; COMPACT and TWO_LINE keep the classic full-width
-        // `* nick action` banner row.
+        // COMFORTABLE renders emotes as a thin content-sized bubble: a small inline avatar stands
+        // in for the `* ` marker and the nick opens the flowing message text; COMPACT and TWO_LINE
+        // keep the classic full-width `* nick action` banner row.
         if (spacing.compact || spacing.twoLine) {
             ActionMessageRow(
                 sender = sender,
@@ -529,10 +529,10 @@ fun MessageBubble(
 }
 
 /**
- * COMFORTABLE ACTION renderer: a thin content-sized tinted bubble. The `* nick` prefix is replaced
- * by a small inline avatar (the sender indicator), and the body is italic. Keeps the accent rail
- * and tertiary tint so emotes stay visually distinct from ordinary bubbles; the body reuses the
- * same rich-text behavior (links/mentions/code) as a normal message via [buildActionBody].
+ * COMFORTABLE ACTION renderer: a thin content-sized tinted bubble. A small inline avatar stands in
+ * for the `* ` marker; the nick opens the message text itself (bold, upright) with the italic body
+ * flowing after it, via [buildActionLine] without the star. Keeps the tertiary tint so emotes stay
+ * visually distinct from ordinary bubbles; links/mentions/code keep working as in a normal message.
  */
 @Composable
 private fun ComfortableActionBubble(
@@ -584,6 +584,19 @@ private fun ComfortableActionBubble(
     val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
     val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
     val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
+    val friendTint = if (senderIsFriend) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+    } else {
+        Color.Unspecified
+    }
+    val senderLink = remember(onSenderClick) {
+        onSenderClick?.let { callback ->
+            LinkAnnotation.Clickable(
+                tag = "action-sender",
+                linkInteractionListener = { callback() },
+            )
+        }
+    }
 
     // Tighten the inner (grouped) top corner like an ordinary bubble. ACTION always opens a new
     // group (showsSender), so this is the full corner in practice, but mirror the bubble logic.
@@ -595,19 +608,26 @@ private fun ComfortableActionBubble(
         RoundedCornerShape(topStart = topCorner, topEnd = spacing.bubbleCorner, bottomEnd = spacing.bubbleCorner, bottomStart = groupedCorner)
     }
 
-    // Italic emote body (links/mentions/code preserved). Rendered in its own Text so the slant is
-    // unconditional; the nick is a separate non-italic Text to the right of the avatar.
-    val body = remember(
-        text, bodyColor, linkColor, mentionsActive, mentionColor, codeBackground, codeColor,
+    // One flowing `nick action` paragraph: bold upright tappable nick, italic rich-text body. No
+    // `* ` prefix — the inline avatar is the emote marker in this layout.
+    val actionLine = remember(
+        sender, text, nameColor, bodyColor, linkColor, friendTint, mentionsActive, mentionColor,
+        codeBackground, codeColor, senderLink,
     ) {
-        buildActionBody(
+        buildActionLine(
+            sender = sender,
             text = text,
+            accentColor = Color.Unspecified,
+            nameColor = nameColor,
             bodyColor = bodyColor,
             linkColor = linkColor,
+            friendTint = friendTint,
             mentionsActive = mentionsActive,
             mentionColor = mentionColor,
             codeBackground = codeBackground,
             codeColor = codeColor,
+            senderLink = senderLink,
+            includeStar = false,
         )
     }
 
@@ -639,9 +659,9 @@ private fun ComfortableActionBubble(
         ) {
             reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.Top) {
                 val avatarMod = Modifier
-                    .padding(end = 6.dp, bottom = 1.dp)
+                    .padding(end = 6.dp, top = 2.dp)
                     .size(20.dp)
                     .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
                 Avatar(
@@ -651,20 +671,8 @@ private fun ComfortableActionBubble(
                     networkId = networkId,
                     account = senderAccount,
                 )
-                // Sender nick: bold, nick-colored, friend-tinted, tappable — same shape as the
-                // ordinary bubble header, kept non-italic so it reads as an attribution.
                 Text(
-                    text = sender,
-                    color = nameColor,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .padding(end = 6.dp, bottom = 1.dp)
-                        .let { if (senderIsFriend) it.friendNickTint() else it }
-                        .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it },
-                )
-                Text(
-                    text = body,
+                    text = actionLine,
                     style = MaterialTheme.typography.bodyLarge.copy(
                         fontStyle = FontStyle.Italic,
                         fontSynthesis = FontSynthesis.Style,
@@ -675,7 +683,9 @@ private fun ComfortableActionBubble(
                 )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
+                    modifier = Modifier
+                        .align(Alignment.Bottom)
+                        .padding(start = 8.dp, bottom = 1.dp),
                 ) {
                     val metadataColor = if (failed) MaterialTheme.colorScheme.error else bodyColor
                     MessageStatusIcon(
@@ -928,7 +938,11 @@ internal fun buildActionBody(
     )
 }
 
-/** Build the styled `* nick action` paragraph shared by the COMPACT/TWO_LINE ACTION rows. */
+/**
+ * Build the styled `* nick action` paragraph shared by every ACTION renderer. COMPACT/TWO_LINE keep
+ * the classic `* ` prefix; the COMFORTABLE bubble passes [includeStar] = false because its inline
+ * avatar already plays the emote-marker role.
+ */
 internal fun buildActionLine(
     sender: String,
     text: String,
@@ -942,8 +956,11 @@ internal fun buildActionLine(
     codeBackground: Color = Color.Unspecified,
     codeColor: Color = Color.Unspecified,
     senderLink: LinkAnnotation? = null,
+    includeStar: Boolean = true,
 ): AnnotatedString = buildAnnotatedString {
-    withStyle(SpanStyle(color = accentColor, fontStyle = FontStyle.Normal)) { append("* ") }
+    if (includeStar) {
+        withStyle(SpanStyle(color = accentColor, fontStyle = FontStyle.Normal)) { append("* ") }
+    }
     val senderStyle = SpanStyle(
         color = nameColor,
         fontWeight = FontWeight.Bold,
