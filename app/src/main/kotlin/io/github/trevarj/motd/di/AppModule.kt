@@ -58,6 +58,7 @@ import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ChannelCloseCoordinator
 import io.github.trevarj.motd.service.PendingChannelCloseCoordinator
 import io.github.trevarj.motd.service.AndroidChatSoundPlayer
+import io.github.trevarj.motd.service.AppVisibility
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistoryResyncCoordinator
@@ -247,6 +248,9 @@ internal abstract class AppModule {
     // -- service (WP5 / WP1 trivial) --
     @Binds @Singleton
     abstract fun foregroundBufferTracker(impl: ForegroundBufferTrackerImpl): ForegroundBufferTracker
+
+    @Binds @Singleton
+    abstract fun appVisibility(impl: AppVisibilityImpl): AppVisibility
 
     /** Durable channel PART retry worker; started when the chat list ViewModel is used. */
     @Binds @Singleton

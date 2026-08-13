@@ -282,3 +282,21 @@ object NoopForegroundBufferTracker : ForegroundBufferTracker {
     override val foregroundBufferId: StateFlow<Long?> = MutableStateFlow(null)
     override fun set(bufferId: Long?) = Unit
 }
+
+/**
+ * Whether the app itself is on screen, independent of which destination happens to be composed.
+ *
+ * Navigation composes exactly one destination on a phone, so a screen's own lifecycle says nothing
+ * about whether the user is still inside the app: opening a chat disposes the chat list. A pane
+ * whose data must be TRUE on the frame it is composed again therefore has to hold its observation
+ * against the process rather than against itself; this is that gate. Owned by the process
+ * lifecycle (WP1 impl), read by ViewModels (WP7).
+ */
+interface AppVisibility {
+    val onScreen: StateFlow<Boolean>
+}
+
+/** Always on screen: the default for fixtures and headless collaborators. */
+object AlwaysOnScreen : AppVisibility {
+    override val onScreen: StateFlow<Boolean> = MutableStateFlow(true)
+}

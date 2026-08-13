@@ -8,6 +8,7 @@ import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import coil.decode.VideoFrameDecoder
 import dagger.hilt.android.HiltAndroidApp
+import io.github.trevarj.motd.di.AppVisibilityImpl
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.push.PushInstanceCoordinator
 import io.github.trevarj.motd.push.PushLifecycleCoordinator
@@ -24,12 +25,16 @@ class MotdApplication : Application(), ImageLoaderFactory {
 
     @Inject lateinit var diagnosticLogger: DiagnosticLogger
 
+    // Process-wide "is the user looking at us", read by panes that navigation disposes.
+    @Inject lateinit var appVisibility: AppVisibilityImpl
+
     override fun onCreate() {
         super.onCreate()
         ComposeFoundationWorkarounds.apply()
         diagnosticLogger.record("app", "process_started") {
             mapOf("cold_start" to true)
         }
+        appVisibility.start()
         pushInstanceCoordinator.start()
         pushLifecycleCoordinator.start()
     }

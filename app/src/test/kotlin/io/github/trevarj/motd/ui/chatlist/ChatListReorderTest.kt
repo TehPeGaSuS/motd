@@ -19,6 +19,7 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.service.AlwaysOnScreen
 import io.github.trevarj.motd.service.BufferReadMarker
 import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ChannelCloseCoordinator
@@ -188,6 +189,7 @@ class ChatListReorderTest {
             override suspend fun markCompleted() = Unit
         },
         savedStateHandle = SavedStateHandle(),
+        appVisibility = AlwaysOnScreen,
     )
 
     private fun TestScope.collecting(viewModel: ChatListViewModel): Job =

@@ -17,6 +17,7 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.service.AppVisibility
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ChannelCloseCoordinator
 import io.github.trevarj.motd.service.HistoryResyncController
@@ -31,6 +32,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.SharingStarted.Companion.WhileSubscribed
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -133,6 +135,7 @@ class ChatListViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     onboardingPrefs: OnboardingPrefs,
     private val savedStateHandle: SavedStateHandle,
+    private val appVisibility: AppVisibility,
 ) : ViewModel() {
 
     init {
@@ -250,6 +253,31 @@ class ChatListViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = ChatListState(),
         )
+
+    /**
+     * Hold [state] hot for as long as the app is on screen, not merely while this pane is composed.
+     *
+     * Navigation composes one destination on a phone, so opening a chat DISPOSES the chat list and
+     * drops its only subscriber; five seconds later the whole combine is torn down. The StateFlow
+     * keeps serving the last snapshot it produced, which is the one from before the reader cleared
+     * the room — so returning composes the pane against stale data, paints the chat bold with its
+     * old unread count, and only swaps to the truth once a cold restart (a DataStore read plus the
+     * chat-list SQL and the networks query) delivers a fresh emission. That swap is the flash, and
+     * the wait for it is the delay before the chat reads as read.
+     *
+     * Holding it here is bounded on both sides: this ViewModel dies with the chat list's own
+     * back-stack entry, so nothing is kept warm once the user leaves that section of the app, and
+     * [AppVisibility] stops the queries whenever the app itself leaves the screen — which is the
+     * only case the subscription-scoped teardown was protecting.
+     *
+     * Declared after [state] on purpose: initializers run in declaration order, and an earlier one
+     * would capture a null.
+     */
+    init {
+        viewModelScope.launch {
+            appVisibility.onScreen.collectLatest { onScreen -> if (onScreen) state.collect {} }
+        }
+    }
 
     fun setPinned(bufferId: Long, pinned: Boolean) = setPinned(listOf(bufferId), pinned)
 
