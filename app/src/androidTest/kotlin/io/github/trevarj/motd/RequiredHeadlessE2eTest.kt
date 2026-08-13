@@ -35,9 +35,13 @@ import io.github.trevarj.motd.e2e.robots.NetworksRobot
 import io.github.trevarj.motd.service.MotdNotifications
 import java.io.File
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.runBlocking
@@ -55,6 +59,25 @@ import org.junit.runners.model.TestClass
 @Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class FastHeadlessE2e
+
+/**
+ * Headroom the Compose pump wait gets on top of the probe budget it hosts.
+ *
+ * The PROBE has to be the wait that expires. Its `AssertionError` carries `snapshots=/count=/
+ * oldest=/newest=`, which is what tells a genuinely stalled product apart from a green baseline; a
+ * `ComposeTimeoutException` would say only that a boolean never flipped.
+ */
+private const val COMPOSE_PUMP_GRACE_MS = 15_000L
+
+/**
+ * Budget for a wait on the history WINDOW reaching its terminal shape, shared by the probe and the
+ * Compose pump that hosts it.
+ *
+ * Not named for the post-open step alone: the post-recreate newest-200 wait is the same kind of wait
+ * — a directional paging restore driven by composition-scoped effects, at the same network scale —
+ * and calling that budget a "post-open settle" made the second site read like a copied constant.
+ */
+private const val HISTORY_WINDOW_SETTLE_TIMEOUT_MS = 45_000L
 
 @RunWith(AndroidJUnit4::class)
 @FastHeadlessE2e
@@ -320,7 +343,14 @@ class RequiredHeadlessE2eTest {
         // under-initialLoadSize store returns nextKey == null, which is unconditional Paging3
         // behavior — but it aims BELOW the oldest retained row, where this fixture has no token
         // rows, so it cannot move this count either way.
-        val postOpenWindow = runBlocking {
+        //
+        // Hosted through [awaitWhileComposing] rather than `runBlocking`, and that is not a style
+        // choice: everything this step waits for is produced by composition-scoped effects, which
+        // the compose rule can only run while the instrumentation thread is inside a Compose wait.
+        val postOpenWindow = awaitWhileComposing(
+            "settled post-open history window for buffer=$bufferId",
+            probeTimeoutMs = HISTORY_WINDOW_SETTLE_TIMEOUT_MS,
+        ) {
             runProbe.awaitStableRecentRows(
                 token = token,
                 bufferId = bufferId,
@@ -335,7 +365,11 @@ class RequiredHeadlessE2eTest {
                 // The three pages are one uninterrupted cascade now, but a slow hosted emulator can
                 // still quiesce between them. A longer quiet window keeps the settle off a
                 // pre-terminal snapshot that would hand the reopen divider stale oldest-row anchors.
+                // Wall-clock, on the probe's own dispatcher, not the rule's test clock.
                 stableMs = 4_000,
+                // Pinned rather than defaulted so the probe and the Compose pump hosting it are
+                // provably the same budget; see awaitWhileComposing.
+                timeoutMs = HISTORY_WINDOW_SETTLE_TIMEOUT_MS,
             )
         }
         // The reopen entry re-resolves against the grown island: its two oldest rows become the
@@ -392,7 +426,13 @@ class RequiredHeadlessE2eTest {
         timeline.assertMessageVisible(firstUnread.tag())
 
         timeline.scrollToBottom()
-        runBlocking {
+        // The write this waits for is issued by the viewport mark-read effect off the rendered
+        // newest anchor — both composition-scoped — so the thread that would block here is the same
+        // one that has to keep frames coming. Budget matches the helper's own withTimeout.
+        awaitWhileComposing(
+            "room marker advanced to the newest row for buffer=$bufferId",
+            probeTimeoutMs = 20_000,
+        ) {
             awaitMarkerAtLeast(bootstrap, bufferId, newest.anchor())
         }
         scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
@@ -440,14 +480,20 @@ class RequiredHeadlessE2eTest {
         scenario.scenario?.onActivity { it.recreate() }
         // Activity recreation replays the same deep entry from scratch on the same cold budget.
         timeline.assertMessageVisible(firstUnread.tag(), timeoutMs = 45_000)
-        // Directional paging restores older rows; search then exposes its exact newest-200 cap.
-        runBlocking {
+        // Directional paging restores older rows; search then exposes its exact newest-200 cap. The
+        // restore is driven by the recreated deep-jump viewport, so it too needs the test thread
+        // pumping frames rather than blocking on the result.
+        awaitWhileComposing(
+            "newest-200 search cap for buffer=$bufferId",
+            probeTimeoutMs = HISTORY_WINDOW_SETTLE_TIMEOUT_MS,
+        ) {
             runProbe.awaitRows(
                 token = token,
                 bufferId = bufferId,
                 count = 200,
                 expectedExtras = emptySet(),
                 expectedNewestOrdinal = 260,
+                timeoutMs = HISTORY_WINDOW_SETTLE_TIMEOUT_MS,
             )
         }
         milestones.record("notification_restore_stable", "buffer=$bufferId event=${firstUnread.id}")
@@ -502,6 +548,57 @@ class RequiredHeadlessE2eTest {
     private fun markerAtLeast(time: Long?, eventId: Long?, expected: TimelineAnchor): Boolean =
         time != null && eventId != null &&
             (time > expected.serverTime || (time == expected.serverTime && eventId >= expected.eventId))
+
+    /**
+     * Runs a readiness probe off the instrumentation thread while that thread keeps Compose running.
+     *
+     * `createEmptyComposeRule()` (androidx.compose.ui.test.junit4.v2) is not a passive observer of
+     * the app. Constructing it swaps the process-wide `WindowRecomposerPolicy` factory, so the
+     * ACTIVITY UNDER TEST composes on the rule's `TestMonotonicFrameClock` over a
+     * `StandardTestDispatcher` rather than on the Choreographer. That scheduler only advances while
+     * the instrumentation thread is inside a Compose/Espresso wait: `waitUntil` calls
+     * `MainTestClock.runCurrent()` and `advanceTimeByFrame()` once per 10 ms iteration, and
+     * `waitForIdle()` pumps until the app is idle and then stops.
+     *
+     * A bare `runBlocking { probe }` therefore parks the ONLY thread that can advance the app's
+     * frames, and every composition-scoped continuation queued after the last Compose wait is
+     * stranded for the whole wait: the entry-settle chain (its top-alignment loop suspends in
+     * `withFrameNanos` and has no timeout), the seam demand effect (its debounce is VIRTUAL time),
+     * the Paging generation watchers. Service-side work keeps running on real dispatchers —
+     * connections, `EventProcessor`, Room — so a probe reading Room still watches rows land while
+     * the UI that was supposed to ask for them cannot execute a line. That asymmetry is also why it
+     * fails intermittently: it turns on whether the app happened to be parked on a real-time link at
+     * the instant the last Compose wait called it idle.
+     *
+     * So the probe runs on a real dispatcher and the test thread sits in `waitUntil`, producing
+     * frames until the probe finishes. This weakens NOTHING:
+     *  * the probe is unchanged, and its assertion is still the one that decides the outcome;
+     *  * its quiet window and budget stay WALL-CLOCK — `debounce` resolves against the collector's
+     *    delay, which is [Dispatchers.Default] here and was `runBlocking`'s event loop before, never
+     *    a `TestCoroutineScheduler`;
+     *  * [COMPOSE_PUMP_GRACE_MS] keeps the pump strictly longer than the probe, so a real product
+     *    stall still fails inside the probe with its snapshot counts intact;
+     *  * the condition polls a [kotlinx.coroutines.Deferred] and touches no node, so — unlike a
+     *    `performScrollToNode` poll (see `BaseRobot.scrollContainerTo`) — the wait cannot move the
+     *    viewport whose demand is the thing under test.
+     *
+     * Do NOT simplify this back into `runBlocking { … }`. It reads as an equivalent wait and is not.
+     */
+    private fun <T> awaitWhileComposing(
+        description: String,
+        probeTimeoutMs: Long,
+        probe: suspend () -> T,
+    ): T {
+        val probeScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        val probed = probeScope.async { probe() }
+        return try {
+            compose.waitUntil(description, probeTimeoutMs + COMPOSE_PUMP_GRACE_MS) { probed.isCompleted }
+            // Completed either way by now, so this rethrows the probe's own AssertionError unchanged.
+            runBlocking { probed.await() }
+        } finally {
+            probeScope.cancel()
+        }
+    }
 
     private suspend fun awaitWallClockAfter(serverTime: Long) {
         // IRC read markers are timestamp-only and therefore include every message in the same
