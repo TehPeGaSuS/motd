@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.chat
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.visibility.CONVERSATION_KINDS
@@ -694,6 +695,133 @@ internal fun appendLiveEntryId(current: Set<Long>, arrived: Long?): Set<Long> =
 /** A disposed row consumes only its own entrance identity. */
 internal fun consumeLiveEntryId(current: Set<Long>, consumed: Long): Set<Long> = current - consumed
 
+/**
+ * A send in progress, presented as a bubble travelling from the composer into the timeline.
+ *
+ * [token] identifies one tap for the whole life of the flight. The durable row identity is only
+ * known once the send is accepted, so a flight launches with [eventIds] empty and adopts them a
+ * moment later; until then the ghost simply waits at the composer.
+ */
+data class OutgoingFlight(
+    val token: Long,
+    val text: String,
+    // Carried from the ViewModel, which still owns the reply at the tap instant. A reply's pending
+    // row draws its quoted mini-bubble from the first frame, so a ghost without it is the wrong
+    // height in flight and pops at the handoff.
+    val replySender: String? = null,
+    val replyText: String? = null,
+    /**
+     * The tap instant. A pending row inserted before it belongs to an earlier send however
+     * identical its text, so sending the same line twice in a row cannot make the second ghost
+     * capture the first one's still-unconfirmed row.
+     */
+    val launchedAtMs: Long,
+    val eventIds: Set<Long> = emptySet(),
+) {
+    /**
+     * Whether [message] is the row this ghost is standing in for.
+     *
+     * The pending row is written to Room before the send is accepted, so waiting for [eventIds]
+     * would let the row appear and play its own arrival animation first, then be yanked back
+     * under the ghost. Until the identities land, the row is recognised by what it looks like: an
+     * unconfirmed message of ours carrying exactly the text in flight.
+     */
+    fun matches(message: MessageEntity): Boolean = when {
+        eventIds.isNotEmpty() -> message.id in eventIds
+        // Pending rows are stamped with the wall clock at insert, which is always at or after the
+        // tap that produced them. Once confirmed a row can have its time rewritten by the server,
+        // but by then it has no pending label and only the identity branch above applies.
+        else -> message.isSelf && message.pendingLabel != null &&
+            message.serverTime >= launchedAtMs && message.text == text
+    }
+}
+
+/**
+ * Whether submitted text will be rewritten into a CTCP ACTION rather than sent as it stands.
+ *
+ * Mirrors the connection manager's own `startsWith("/me ")` rule, which strips the prefix and
+ * stores the row as an ACTION. A flight over that text would match no row and land on a bubble it
+ * does not resemble, so the send gesture skips the ghost for emotes.
+ */
+internal fun isActionCommand(text: String): Boolean = text.startsWith("/me ")
+
+/**
+ * Whether an accepted send produced exactly the one row a ghost is standing in for.
+ *
+ * The send pipeline may rewrite a submission before storing it -- a reply gains a `nick: ` prefix
+ * when the client tag is unavailable, and physical newlines split one submission into several rows.
+ * A ghost that claimed those would pull a row that has already begun its own entrance back to a
+ * closed gap, while showing text the row does not have. An unreported set of texts (a fake, or an
+ * older seam) is treated as matching.
+ */
+internal fun acceptedRowMatchesFlight(accepted: SendAcceptance.Accepted, sentText: String): Boolean =
+    accepted.eventIds.size == 1 &&
+        (accepted.storedTexts.isEmpty() || accepted.storedTexts.singleOrNull() == sentText)
+
+/** Begin a flight for one tap. A tap always replaces any earlier flight rather than queueing. */
+internal fun launchOutgoingFlight(
+    token: Long,
+    text: String,
+    replyTo: MessageEntity?,
+    nowMs: Long,
+): OutgoingFlight = OutgoingFlight(
+    token = token,
+    text = text,
+    replySender = replyTo?.sender,
+    replyText = replyTo?.text,
+    launchedAtMs = nowMs,
+)
+
+/**
+ * Predict [showsSender] for the row a flight is about to become, before that row exists.
+ *
+ * [newest] is the row that will be its older neighbor: the newest timeline entry the flight is not
+ * itself standing in for. The real grouping rule is run against a synthetic pending row rather than
+ * reimplemented, so the ghost's silhouette and the landing row's cannot resolve differently and
+ * a second message in a burst gets the tightened corner both before and after the handoff.
+ */
+internal fun predictFlightShowsSender(
+    newest: MessageEntity?,
+    selfNick: String,
+    normalizedSelf: String,
+    nowMs: Long,
+): Boolean = showsSender(
+    current = MessageEntity(
+        bufferId = newest?.bufferId ?: -1L,
+        serverTime = nowMs,
+        sender = selfNick,
+        normalizedActor = normalizedSelf,
+        kind = MessageKind.PRIVMSG,
+        text = "",
+        isSelf = true,
+        dedupKey = "",
+    ),
+    olderNeighbor = newest,
+)
+
+/**
+ * Adopt the durable row identities an accepted send produced. A stale token is ignored so a slow
+ * accept cannot retarget a newer tap's ghost, and an empty result settles the flight instead of
+ * leaving a ghost aimed at nothing.
+ */
+internal fun attachOutgoingFlightEvents(
+    current: OutgoingFlight?,
+    token: Long,
+    eventIds: Collection<Long>,
+): OutgoingFlight? = when {
+    current == null || current.token != token -> current
+    eventIds.isEmpty() -> null
+    else -> current.copy(eventIds = eventIds.toSet())
+}
+
+/**
+ * End a flight by token, whether it landed, was rejected, or gave up waiting for its row. The
+ * timeline reveals the landing row the moment its flight is gone, so this is the only way a row
+ * hidden behind a ghost comes back.
+ */
+internal fun settleOutgoingFlight(current: OutgoingFlight?, token: Long): OutgoingFlight? =
+    if (current?.token == token) null else current
+
 /** Replacing a collapsed system-run head is an in-place summary update, not a new visual row. */
 internal fun extendsSystemRun(
     liveEntryId: Long?,
@@ -1162,6 +1290,8 @@ sealed interface ChatUiEvent {
     data object ReactionTargetUnavailable : ChatUiEvent
     data object ReactionSendFailed : ChatUiEvent
     data object SendRejected : ChatUiEvent
+    /** A submission never reached the wire because the reserved draft no longer matched it. */
+    data object SendDropped : ChatUiEvent
     data object NotInChannel : ChatUiEvent
     data class ReplyJumpUnavailable(val request: ReplyJumpRequest) : ChatUiEvent
     data object ConversationLayoutWriteFailed : ChatUiEvent

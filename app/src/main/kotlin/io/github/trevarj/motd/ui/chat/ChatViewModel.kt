@@ -89,6 +89,7 @@ import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -168,6 +169,20 @@ private data class PreparedDraftSubmission(
     val snapshot: DraftSnapshot,
     val persisted: ComposerDraftEntity?,
 )
+
+/**
+ * Why a submission did or did not reserve the rendered draft.
+ *
+ * A bare null used to cover both refusals, which made a genuinely lost send indistinguishable from
+ * the deliberate duplicate-tap guard: the message never went out, the composer never cleared, and
+ * nothing was reported. [Duplicate] stays silent because the first tap is already on its way;
+ * [Stale] is a real loss and must put the text back and say so.
+ */
+private sealed interface DraftSubmissionOutcome {
+    data class Prepared(val submission: PreparedDraftSubmission) : DraftSubmissionOutcome
+    data object Duplicate : DraftSubmissionOutcome
+    data object Stale : DraftSubmissionOutcome
+}
 
 internal fun MessageEntity.toReplyPreviewData(): ReplyPreviewData = ReplyPreviewData(sender, text)
 
@@ -649,6 +664,14 @@ class ChatViewModel @Inject constructor(
     // A duplicate click can arrive before the UI has observed the accepted draft clear. Keep the
     // reservation with the draft state so every entry point gets the same exactly-once behavior.
     private val inFlightDraftSubmissions = mutableSetOf<DraftSubmissionKey>()
+    private val _outgoingFlight = MutableStateFlow<OutgoingFlight?>(null)
+
+    /**
+     * The send currently travelling from the composer into the timeline, or null. The screen reads
+     * this to fly a ghost bubble and to hold the landing row hidden until the ghost arrives.
+     */
+    val outgoingFlight: StateFlow<OutgoingFlight?> = _outgoingFlight.asStateFlow()
+    private var nextFlightToken = 0L
     private val _members = MutableStateFlow<List<MemberEntity>>(emptyList())
     private val _memberNicks = MutableStateFlow<List<String>>(emptyList())
     val memberNicks: StateFlow<List<String>> = _memberNicks.asStateFlow()
@@ -1288,9 +1311,19 @@ class ChatViewModel @Inject constructor(
                 // Abandon the stale one-shot positioning exactly as the newest FAB does — including
                 // the post-catch-up correction — since a divider entry is moot for a reader already
                 // conversing at the bottom.
+                // Launch the ghost before anything suspends, so it leaves the composer on the same
+                // frame as the tap that cleared it rather than after the durable write.
+                //
+                // An emote is deliberately not flown: the manager rewrites it into an ACTION row
+                // whose text has lost the `/me ` prefix, so the ghost would neither match its
+                // landing row nor look anything like the tinted action bubble it becomes.
+                val flight = if (isActionCommand(cmd.text)) null else launchFlight(cmd.text)
                 jumpToNewest()
                 val roomId = operationalBufferId.value
-                val submission = prepareDraftSubmission(raw) ?: return@launch
+                val submission = reserveDraftForSend(raw) ?: run {
+                    flight?.let(::abandonFlight)
+                    return@launch
+                }
                 try {
                     val result = connectionManager.sendMessage(
                         roomId,
@@ -1298,9 +1331,22 @@ class ChatViewModel @Inject constructor(
                         submission.snapshot.replyToEventId,
                     )
                     if (result is SendAcceptance.Accepted) {
+                        // The ghost can only aim at a row once the send has durable identities,
+                        // and only if the pipeline stored what the ghost is showing: a reply can
+                        // gain a `nick: ` prefix and newlines split one submission into several
+                        // rows. Claiming those would yank a row that is already animating in.
+                        flight?.let {
+                            if (acceptedRowMatchesFlight(result, cmd.text)) {
+                                attachFlightEvents(it, result.eventIds)
+                            } else {
+                                abandonFlight(it)
+                            }
+                        }
                         clearDraftSubmission(submission)
                         connectionManager.sendTyping(roomId, "done")
                     } else if (result is SendAcceptance.Rejected) {
+                        flight?.let(::abandonFlight)
+                        republishDraft()
                         val event = if (result.reason == SendRejectionReason.NOT_IN_CHANNEL) {
                             ChatUiEvent.NotInChannel
                         } else {
@@ -1326,14 +1372,17 @@ class ChatViewModel @Inject constructor(
             }
             is ChatCommand.Msg -> networkId?.let { nid ->
                 val target = connectionManager.ensureQueryBuffer(nid, cmd.nick)
-                val submission = prepareDraftSubmission(raw) ?: return@let
+                val submission = reserveDraftForSend(raw) ?: return@let
                 try {
                     when (connectionManager.sendMessage(target, cmd.text)) {
                         is SendAcceptance.Accepted -> {
                             clearDraftSubmission(submission)
                             onOpenBuffer(target)
                         }
-                        is SendAcceptance.Rejected -> uiEventQueue.enqueue(ChatUiEvent.SendRejected)
+                        is SendAcceptance.Rejected -> {
+                            republishDraft()
+                            uiEventQueue.enqueue(ChatUiEvent.SendRejected)
+                        }
                     }
                 } finally {
                     releaseDraftSubmission(submission.snapshot)
@@ -1427,7 +1476,7 @@ class ChatViewModel @Inject constructor(
             return
         }
         val client = connectionManager.clientFor(nid) ?: return
-        val submission = prepareDraftSubmission(raw) ?: return
+        val submission = reserveDraftForSend(raw) ?: return
         try {
             client.send(msg)
             clearDraftSubmission(submission)
@@ -1686,9 +1735,10 @@ class ChatViewModel @Inject constructor(
      * new edit used to recreate a draft just after an accepted send, which turned one rapid UI
      * activation into multiple real IRC messages.
      */
-    private suspend fun prepareDraftSubmission(raw: String): PreparedDraftSubmission? {
+    private suspend fun prepareDraftSubmission(raw: String): DraftSubmissionOutcome {
         draftHydrated.await()
         val result = CompletableDeferred<ComposerDraftEntity?>()
+        var duplicate = false
         val snapshot = synchronized(draftStateLock) {
             if (currentDraftText != raw) return@synchronized null
             val candidate = DraftSnapshot(
@@ -1698,20 +1748,77 @@ class ChatViewModel @Inject constructor(
                 revision = _composerDraft.value.revision,
             )
             val key = DraftSubmissionKey(candidate.roomId, candidate.revision)
-            if (!inFlightDraftSubmissions.add(key)) return@synchronized null
+            if (!inFlightDraftSubmissions.add(key)) {
+                duplicate = true
+                return@synchronized null
+            }
             if (draftCommands.trySend(DraftCommand.PrepareSubmission(candidate, result)).isFailure) {
                 inFlightDraftSubmissions.remove(key)
                 return@synchronized null
             }
             candidate
-        } ?: return null
+        } ?: return if (duplicate) DraftSubmissionOutcome.Duplicate else DraftSubmissionOutcome.Stale
         return try {
-            PreparedDraftSubmission(snapshot, result.await())
+            DraftSubmissionOutcome.Prepared(PreparedDraftSubmission(snapshot, result.await()))
         } catch (cancelled: CancellationException) {
             releaseDraftSubmission(snapshot)
             throw cancelled
         }
     }
+
+    /**
+     * Reserve the rendered draft for a send, or report the refusal. Returns null when the caller
+     * must abandon the submission, having already restored the composer and told the reader why.
+     *
+     * The composer empties on the tap frame rather than waiting for the durable clear, so a
+     * refusal that leaves the text only in this ViewModel would look like the message vanished.
+     */
+    private suspend fun reserveDraftForSend(raw: String): PreparedDraftSubmission? =
+        when (val outcome = prepareDraftSubmission(raw)) {
+            is DraftSubmissionOutcome.Prepared -> outcome.submission
+            // The first tap owns this revision and is already on the wire; restoring the text here
+            // would undo the clear that send is about to earn.
+            DraftSubmissionOutcome.Duplicate -> null
+            DraftSubmissionOutcome.Stale -> {
+                republishDraft()
+                uiEventQueue.enqueue(ChatUiEvent.SendDropped)
+                null
+            }
+        }
+
+    /**
+     * Re-publish the retained draft under a fresh revision so the composer restores text it
+     * optimistically cleared. The value is unchanged; only the revision the screen keys on moves.
+     */
+    private fun republishDraft() {
+        synchronized(draftStateLock) { advanceDraftRevisionLocked(hydrated = true) }
+    }
+
+    // --- outgoing send flight (composer bubble travelling into the timeline) ---
+
+    /** Begin a ghost for one tap, replacing any earlier one. Returns the token identifying it. */
+    private fun launchFlight(text: String): Long {
+        val token = ++nextFlightToken
+        // Read the reply here rather than in the UI: an accepted send clears it moments later, and
+        // the composer has already emptied, so the tap instant is the only place it is still true.
+        _outgoingFlight.value =
+            launchOutgoingFlight(token, text, replyTo.value, System.currentTimeMillis())
+        return token
+    }
+
+    private fun attachFlightEvents(token: Long, eventIds: Collection<Long>) {
+        _outgoingFlight.update { attachOutgoingFlightEvents(it, token, eventIds) }
+    }
+
+    private fun abandonFlight(token: Long) {
+        _outgoingFlight.update { settleOutgoingFlight(it, token) }
+    }
+
+    /**
+     * The ghost is done: it landed on its row, or it gave up waiting for one. Either way the row
+     * is revealed, so a stalled send can never hide a real row behind flight state.
+     */
+    fun onFlightSettled(token: Long) = abandonFlight(token)
 
     private fun releaseDraftSubmission(snapshot: DraftSnapshot) {
         synchronized(draftStateLock) {

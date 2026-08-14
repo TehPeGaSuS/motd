@@ -113,6 +113,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -198,6 +199,103 @@ class ChatViewModelTest {
         assertNull(clearedState.replyTo)
         assertNull(db.composerDraftDao().byRoom(channel.id))
         assertEquals("", clearedDraft.text)
+    }
+
+    @Test
+    fun `an accepted send flies a ghost at the row it produced`() = runTest {
+        val manager = FakeConnectionManager(network.id)
+        val vm = viewModel(channel, manager)
+        vm.state.first { it.buffer != null }
+        vm.saveDraft("answer")
+
+        vm.submit("answer", {}, {}).join()
+
+        val flight = vm.outgoingFlight.value
+        assertNotNull(flight)
+        assertEquals("answer", flight!!.text)
+        assertEquals(setOf(1L), flight.eventIds)
+
+        // Only the screen ends a flight, once the ghost has reached the row or given up on it.
+        vm.onFlightSettled(flight.token)
+        assertNull(vm.outgoingFlight.value)
+    }
+
+    @Test
+    fun `a rewritten send drops its ghost instead of claiming a row it does not match`() = runTest {
+        // The pipeline stores a reply as "alice: answer" when the client tag is unavailable. A
+        // ghost showing the bare text must not seize that row -- it is already animating in.
+        val manager = FakeConnectionManager(network.id, storedTexts = { listOf("alice: $it") })
+        val vm = viewModel(channel, manager)
+        vm.state.first { it.buffer != null }
+        vm.saveDraft("answer")
+
+        vm.submit("answer", {}, {}).join()
+
+        assertEquals(listOf(SentMessage(channel.id, "answer", null)), manager.messages)
+        assertNull(vm.outgoingFlight.value)
+        assertEquals("", vm.composerDraft.value.text)
+    }
+
+    @Test
+    fun `a send split across rows drops its ghost`() = runTest {
+        val manager = FakeConnectionManager(network.id, storedTexts = { it.split(" ") })
+        val vm = viewModel(channel, manager)
+        vm.state.first { it.buffer != null }
+        vm.saveDraft("two lines")
+
+        vm.submit("two lines", {}, {}).join()
+
+        assertNull(vm.outgoingFlight.value)
+        assertEquals("", vm.composerDraft.value.text)
+    }
+
+    @Test
+    fun `an emote never launches a ghost`() = runTest {
+        // The manager rewrites it into an ACTION row with the prefix stripped, so the ghost would
+        // match no row and land on a bubble it does not resemble.
+        val manager = FakeConnectionManager(network.id)
+        val vm = viewModel(channel, manager)
+        vm.state.first { it.buffer != null }
+        vm.saveDraft("/me waves")
+
+        vm.submit("/me waves", {}, {}).join()
+
+        assertEquals(listOf(SentMessage(channel.id, "/me waves", null)), manager.messages)
+        assertNull(vm.outgoingFlight.value)
+    }
+
+    @Test
+    fun `a rejected send drops its ghost and republishes the retained draft`() = runTest {
+        val manager = FakeConnectionManager(network.id, sendAccepted = false)
+        val vm = viewModel(channel, manager)
+        vm.state.first { it.buffer != null }
+        vm.saveDraft("answer")
+        val revisionBefore = vm.composerDraft.value.revision
+
+        vm.submit("answer", {}, {}).join()
+
+        // The composer emptied on the tap, so a rejection has to hand the text back explicitly.
+        assertNull(vm.outgoingFlight.value)
+        assertEquals("answer", vm.composerDraft.value.text)
+        assertTrue(vm.composerDraft.value.revision > revisionBefore)
+    }
+
+    @Test
+    fun `a submission the draft no longer matches is reported instead of dropped`() = runTest {
+        val manager = FakeConnectionManager(network.id)
+        val vm = viewModel(channel, manager)
+        vm.state.first { it.buffer != null }
+        vm.saveDraft("answer")
+        val revisionBefore = vm.composerDraft.value.revision
+
+        // A stale callback: the text offered no longer matches the draft this ViewModel holds.
+        vm.submit("something else", {}, {}).join()
+
+        assertTrue(manager.messages.isEmpty())
+        assertNull(vm.outgoingFlight.value)
+        assertEquals("answer", vm.composerDraft.value.text)
+        assertTrue(vm.composerDraft.value.revision > revisionBefore)
+        assertEquals(ChatUiEvent.SendDropped, vm.uiEvents.value.single().value)
     }
 
     @Test
@@ -2810,6 +2908,7 @@ class ChatViewModelTest {
         private val sendAccepted: Boolean = true,
         private val sendGate: CompletableDeferred<Unit>? = null,
         private val reactionError: Boolean = false,
+        private val storedTexts: ((String) -> List<String>)? = null,
         private val sendRejection: io.github.trevarj.motd.service.SendRejectionReason? = null,
         private val retryRejection: io.github.trevarj.motd.service.SendRejectionReason? = null,
         historyPending: Set<Long> = emptySet(),
@@ -2886,7 +2985,13 @@ class ChatViewModelTest {
             messages += SentMessage(bufferId, text, replyToEventId)
             messageStarted.complete(Unit)
             sendGate?.await()
-            return io.github.trevarj.motd.service.SendAcceptance.Accepted(listOf(1L))
+            // Mirror the real manager, which reports what it actually persisted: a reply can gain
+            // a visible prefix and newlines split one submission into several rows.
+            val stored = storedTexts?.invoke(text) ?: listOf(text)
+            return io.github.trevarj.motd.service.SendAcceptance.Accepted(
+                eventIds = List(stored.size) { it + 1L },
+                storedTexts = stored,
+            )
         }
         override suspend fun retryMessage(eventId: Long): io.github.trevarj.motd.service.SendAcceptance =
             retryRejection?.let {

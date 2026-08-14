@@ -342,6 +342,7 @@ internal suspend fun completeDurableAcceptance(
     eventIds: List<Long>,
     transition: suspend () -> ImmediateWireAcceptance,
     secondaryEffect: suspend () -> Unit,
+    storedTexts: List<String> = emptyList(),
 ): SendAcceptance.Accepted = withContext(NonCancellable) {
     val wireAcceptance = try {
         transition()
@@ -353,7 +354,7 @@ internal suspend fun completeDurableAcceptance(
     } catch (_: Exception) {
         // The durable timeline state is authoritative; presentation effects are best effort.
     }
-    SendAcceptance.Accepted(eventIds, wireAcceptance)
+    SendAcceptance.Accepted(eventIds, wireAcceptance, storedTexts)
 }
 
 private const val ACTION_OVERHEAD_BYTES = 9 // SOH + "ACTION " + SOH
@@ -1733,6 +1734,7 @@ class ConnectionManagerImpl @Inject constructor(
                     )
                 },
                 secondaryEffect = { notifyOutgoingAccepted(buffer.id) },
+                storedTexts = planned.map { it.chunk.displayText },
             )
         }
     }

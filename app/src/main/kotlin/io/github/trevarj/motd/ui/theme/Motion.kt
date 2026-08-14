@@ -25,6 +25,12 @@ object MotdMotion {
     const val ArchiveSettleMinimumDurationMs = 200
     const val ArchiveSettleMaximumDurationMs = 300
 
+    /**
+     * How long a launched ghost waits for its row before giving up. A send that is accepted but
+     * whose row never materializes must not hide that row indefinitely.
+     */
+    const val SendFlightTargetTimeoutMs = 1_200L
+
     private val StandardEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
     /** Quintic ease-out keeps the archive settle decisive without spring overshoot. */
     val archiveSettleEasing = Easing { fraction ->
@@ -99,6 +105,19 @@ object MotdMotion {
     val contentSize: FiniteAnimationSpec<IntSize> = spring(
         dampingRatio = Spring.DampingRatioNoBouncy,
         stiffness = SoftSpringStiffness,
+    )
+
+    /**
+     * The composer-to-bubble send flight, and the same value opening the gap the bubble lands in.
+     *
+     * Deliberately underdamped, unlike [softSpring]: a send should read as launched, so the bubble
+     * rises a few pixels past its slot and settles back. The gap clamps the same progress at 1,
+     * which is what leaves the overshoot visible on the bubble alone. Settles in roughly 300ms --
+     * quicker than iOS, to sit alongside this app's existing 140/210ms tempo rather than beside it.
+     */
+    val sendFlightSpring: FiniteAnimationSpec<Float> = spring(
+        dampingRatio = 0.8f,
+        stiffness = 380f,
     )
 
     /** Duration grows monotonically with the remaining fraction and remains within 200–300ms. */

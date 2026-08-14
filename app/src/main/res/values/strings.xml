@@ -26,6 +26,7 @@
     <string name="chatlist_no_networks_message">Add a network, or import a backup from Settings.</string>
     <string name="chatlist_archived_empty_title">No archived chats yet</string>
     <string name="chat_send_rejected">Couldn\'t save this message</string>
+    <string name="chat_send_dropped">Message not sent \u2014 try again</string>
     <string name="chat_not_in_channel">You\'re not in this channel</string>
     <string name="chat_parted_banner_rejoin">Rejoin</string>
     <string name="chat_parted_banner_text">You\'re not in %1$s</string>

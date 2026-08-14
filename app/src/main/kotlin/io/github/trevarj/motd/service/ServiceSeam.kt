@@ -35,6 +35,15 @@ sealed interface SendAcceptance {
     data class Accepted(
         val eventIds: List<TimelineEventId>,
         val immediateWireAcceptance: ImmediateWireAcceptance = ImmediateWireAcceptance.ACCEPTED,
+        /**
+         * The texts actually persisted for the accepted rows, in order.
+         *
+         * A submission is not always stored as it was typed: a reply gains a `nick: ` prefix when
+         * the client tag is unavailable, and physical newlines split one submission into several
+         * rows. Presentation that stands in for a row has to compare what was stored, not what was
+         * typed. Empty means unreported, which callers treat as matching.
+         */
+        val storedTexts: List<String> = emptyList(),
     ) : SendAcceptance
     data class Rejected(val reason: SendRejectionReason) : SendAcceptance
 }

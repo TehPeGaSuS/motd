@@ -86,6 +86,9 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -316,6 +319,9 @@ fun Composer(
     // measure phase, in lock-step with the ancestor `imePadding()`; a composition-phase value would
     // always trail measure by one frame of keyboard travel and resize the timeline viewport.
     imeHeightPx: Int? = null,
+    // Window bounds of the text field, reported on every layout pass. The chat screen flies a
+    // sent bubble out of exactly this rect, so it must be the field itself, not the whole panel.
+    onFieldPositioned: (Rect) -> Unit = {},
     autocomplete: (@Composable () -> Unit)? = null,
 ) {
     var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
@@ -534,7 +540,11 @@ fun Composer(
                             }
                         }
 
-                        Box(Modifier.weight(1f)) {
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .onGloballyPositioned { onFieldPositioned(it.boundsInWindow()) },
+                        ) {
                             ComposerTextField(
                                 value = value,
                                 onValueChange = onValueChange,

@@ -66,6 +66,51 @@ class ChatModelsTest {
             serverTime = 0L,
         )
 
+    @Test fun `a flight predicts the silhouette its landing row will resolve`() {
+        val now = 10_000L
+        // A second message in our own burst keeps the tightened corner. Predicting this wrong is
+        // what made the bubble change shape at the handoff.
+        val ownRecent = message(id = 5, sender = "me", self = true, serverTime = now - 1_000)
+        assertFalse(predictFlightShowsSender(ownRecent, "me", "me", now))
+
+        // Anything that breaks the group opens a new one, exactly as showsSender decides it.
+        assertTrue(predictFlightShowsSender(null, "me", "me", now))
+        assertTrue(predictFlightShowsSender(message(id = 5, sender = "alice"), "me", "me", now))
+        assertTrue(
+            predictFlightShowsSender(
+                ownRecent.copy(kind = MessageKind.ACTION),
+                "me",
+                "me",
+                now,
+            ),
+        )
+        assertTrue(
+            predictFlightShowsSender(
+                ownRecent.copy(kind = MessageKind.JOIN),
+                "me",
+                "me",
+                now,
+            ),
+        )
+        assertTrue(
+            predictFlightShowsSender(
+                ownRecent.copy(serverTime = now - GROUP_WINDOW_MS - 1),
+                "me",
+                "me",
+                now,
+            ),
+        )
+    }
+
+    @Test fun `an emote is recognised before it is flown`() {
+        // The manager rewrites these into ACTION rows with the prefix stripped, so a ghost built
+        // from the raw text would match no row and land on a bubble it does not resemble.
+        assertTrue(isActionCommand("/me waves"))
+        assertFalse(isActionCommand("/method call"))
+        assertFalse(isActionCommand("hello"))
+        assertFalse(isActionCommand("/me"))
+    }
+
     private fun message(
         kind: MessageKind = MessageKind.PRIVMSG,
         self: Boolean = false,

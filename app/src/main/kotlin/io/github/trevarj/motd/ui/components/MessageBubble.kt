@@ -116,8 +116,13 @@ internal fun messageBubbleRoleColors(
     else -> MessageBubbleRoleColors(scheme.surfaceContainerHigh, scheme.onSurface)
 }
 
-/** Measure against the containing chat pane, not the whole device window. */
-private fun Modifier.chatBubbleWidth(): Modifier = layout { measurable, constraints ->
+/**
+ * Measure against the containing chat pane, not the whole device window.
+ *
+ * Internal because the send-flight ghost has to lay out at exactly the width its landing bubble
+ * will take. Reimplementing the rule there would let the two drift apart silently.
+ */
+internal fun Modifier.chatBubbleWidth(): Modifier = layout { measurable, constraints ->
     val availableWidth = if (constraints.hasBoundedWidth) {
         constraints.maxWidth
     } else {

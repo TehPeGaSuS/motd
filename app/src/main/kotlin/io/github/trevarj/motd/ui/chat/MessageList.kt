@@ -55,10 +55,13 @@ import androidx.compose.runtime.withFrameMillis
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -268,6 +271,16 @@ fun MessageList(
     onAudioSeek: (AudioAttachment, Long) -> Unit = { _, _ -> },
     liveEntryIds: Set<Long> = emptySet(),
     onLiveEntryConsumed: (Long) -> Unit = {},
+    // The send currently travelling from the composer, if any. Its row is hidden and reports its
+    // bounds so the ghost knows where to land.
+    outgoingFlight: OutgoingFlight? = null,
+    // Rows a ghost has already delivered. Their arrival was the flight, so they must never also
+    // play the ordinary live-entrance reveal once the flight is gone.
+    flownRowIds: Set<Long> = emptySet(),
+    // The flight's progress, read in the layout phase so the landing row's gap opens on the same
+    // spring that carries the bubble. A lambda, so the value never enters composition here.
+    flightProgress: () -> Float = { 1f },
+    onFlightRowPositioned: (Long, Rect) -> Unit = { _, _ -> },
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
     replyPreview: (String) -> StateFlow<ReplyPreviewData?> = { MutableStateFlow(null) },
     onReplyPreviewClick: (String) -> Unit = {},
@@ -354,7 +367,15 @@ fun MessageList(
             // break whenever a gap happens to be bounded by an invite, a netsplit, or a transfer.
             if (msg.kind == MessageKind.INVITE) {
                 TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap) {
-                    LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
+                    LiveTimelineEntry(
+                        liveEntryIds,
+                        msg,
+                        onLiveEntryConsumed,
+                        outgoingFlight,
+                        flownRowIds,
+                        flightProgress,
+                        onFlightRowPositioned,
+                    ) {
                         InvitationCard(
                             message = msg,
                             onJoin = { onAcceptInvite(msg.id) },
@@ -367,7 +388,15 @@ fun MessageList(
 
             if (msg.kind == MessageKind.NETSPLIT || msg.kind == MessageKind.NETJOIN) {
                 TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap) {
-                    LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
+                    LiveTimelineEntry(
+                        liveEntryIds,
+                        msg,
+                        onLiveEntryConsumed,
+                        outgoingFlight,
+                        flownRowIds,
+                        flightProgress,
+                        onFlightRowPositioned,
+                    ) {
                         NetworkBatchPill(msg)
                     }
                 }
@@ -376,7 +405,15 @@ fun MessageList(
 
             if (msg.kind == MessageKind.DCC_TRANSFER) {
                 TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap) {
-                    LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
+                    LiveTimelineEntry(
+                        liveEntryIds,
+                        msg,
+                        onLiveEntryConsumed,
+                        outgoingFlight,
+                        flownRowIds,
+                        flightProgress,
+                        onFlightRowPositioned,
+                    ) {
                         val transferFlow = remember(msg.id) { dccTransfer(msg) }
                         val transfer by transferFlow.collectAsStateWithLifecycle()
                         DccTransferCard(
@@ -396,7 +433,15 @@ fun MessageList(
             // whose just-newer neighbor is not a system event.
             if (isSystemKind(msg.kind)) {
                 if (!isSystemRunChunkHead(msg.id, newer?.let { isSystemKind(it.kind) } == true)) return@items
-                LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
+                LiveTimelineEntry(
+                        liveEntryIds,
+                        msg,
+                        onLiveEntryConsumed,
+                        outgoingFlight,
+                        flownRowIds,
+                        flightProgress,
+                        onFlightRowPositioned,
+                    ) {
                     SystemEventRun(
                         items = items,
                         index = index,
@@ -424,7 +469,15 @@ fun MessageList(
             val isFool = foolsMode == FoolsMode.COLLAPSE &&
                 isFoolMessage(msg, fools, identityRules)
             if (isFool && !foolExpanded(msg.id)) {
-                LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed) {
+                LiveTimelineEntry(
+                        liveEntryIds,
+                        msg,
+                        onLiveEntryConsumed,
+                        outgoingFlight,
+                        flownRowIds,
+                        flightProgress,
+                        onFlightRowPositioned,
+                    ) {
                     FoolPlaceholderRow(
                         msg = msg,
                         older = older,
@@ -505,7 +558,16 @@ fun MessageList(
                     )
                 }
             }
-            LiveTimelineEntry(liveEntryIds, msg.id, onLiveEntryConsumed, rowContent)
+            LiveTimelineEntry(
+                liveEntryIds,
+                msg,
+                onLiveEntryConsumed,
+                outgoingFlight,
+                flownRowIds,
+                flightProgress,
+                onFlightRowPositioned,
+                rowContent,
+            )
         }
 
         // Append spinner / end-of-history / error affordances (plans/15 #27). This item sits at the
@@ -774,13 +836,65 @@ internal fun MessagePlaceholderRow(height: () -> Dp = { DEFAULT_TIMELINE_ROW_HEI
 @Composable
 private fun LiveTimelineEntry(
     liveEntryIds: Set<Long>,
-    messageId: Long,
+    message: MessageEntity,
     onConsumed: (Long) -> Unit,
+    outgoingFlight: OutgoingFlight?,
+    flownRowIds: Set<Long>,
+    flightProgress: () -> Float,
+    onFlightRowPositioned: (Long, Rect) -> Unit,
     content: @Composable () -> Unit,
 ) {
-    if (messageId in liveEntryIds) {
-        LiveMessageEntry(messageId = messageId, onConsumed = onConsumed, content = content)
-    } else {
+    when {
+        // A send flight owns this row's entrance: the bubble travelling from the composer *is* the
+        // animation, so the row waits underneath it rather than revealing itself as well. Checked
+        // before [flownRowIds], which this very row joins the moment it first reports its bounds.
+        outgoingFlight?.matches(message) == true ->
+            FlightLandingEntry(message.id, flightProgress, onFlightRowPositioned, content)
+        // Already delivered by a ghost. Its entrance is spent, so it renders plainly forever after
+        // even though the live-entrance set still names it.
+        message.id in flownRowIds -> content()
+        message.id in liveEntryIds ->
+            LiveMessageEntry(messageId = message.id, onConsumed = onConsumed, content = content)
+        else -> content()
+    }
+}
+
+/**
+ * The row a send flight lands on: the gap it will occupy, opening on the flight's own spring.
+ *
+ * It reveals from the bottom exactly as [LiveMessageEntry] does, so older rows glide up by the
+ * amount the arriving bubble is descending into -- the conversation makes room *with* the bubble
+ * instead of jumping open a full row height the instant Room inserts it. The row itself stays
+ * transparent because the ghost is drawing those pixels; it is the space that animates here.
+ *
+ * The progress read happens in the layout lambda, like [LiveMessageEntry]'s, so a frame invalidates
+ * this one row's layout and nothing recomposes.
+ */
+@Composable
+private fun FlightLandingEntry(
+    messageId: Long,
+    progress: () -> Float,
+    onPositioned: (Long, Rect) -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val latestOnPositioned = rememberUpdatedState(onPositioned)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clipToBounds()
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                // Clamped, so the spring's overshoot stays on the bubble alone: the gap opens to
+                // exactly one row and the bubble settles back into it.
+                val revealedHeight = (placeable.height * progress().coerceIn(0f, 1f)).toInt()
+                    .coerceIn(0, placeable.height)
+                layout(placeable.width, revealedHeight) {
+                    placeable.placeRelative(0, revealedHeight - placeable.height)
+                }
+            }
+            .graphicsLayer { alpha = 0f }
+            .onGloballyPositioned { latestOnPositioned.value(messageId, it.boundsInWindow()) },
+    ) {
         content()
     }
 }

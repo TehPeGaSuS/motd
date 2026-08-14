@@ -109,6 +109,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
@@ -120,6 +123,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -196,6 +200,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -385,6 +390,7 @@ fun ChatScreen(
     val localReadAnchor by viewModel.localReadAnchor.collectAsStateWithLifecycle()
     val rawNewestAnchor by viewModel.rawNewestAnchor.collectAsStateWithLifecycle()
     val composerDraft by viewModel.composerDraft.collectAsStateWithLifecycle()
+    val outgoingFlight by viewModel.outgoingFlight.collectAsStateWithLifecycle()
     // Timeline behavioral settings collected separately from ChatState (plans/13 §2.5).
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val hiddenFoolsRevealed by viewModel.hiddenFoolsRevealed.collectAsStateWithLifecycle()
@@ -494,6 +500,8 @@ fun ChatScreen(
         consumeSharedFile = viewModel::consumeSharedFile,
         composerDraft = composerDraft,
         onDraftChanged = viewModel::saveDraft,
+        outgoingFlight = outgoingFlight,
+        onFlightSettled = viewModel::onFlightSettled,
         mentionPrefill = mentionRequest,
         jumpTarget = jumpTarget,
         initialTarget = initialTarget,
@@ -664,6 +672,9 @@ fun ChatContent(
     consumeSharedFile: () -> PendingShare.File? = { null },
     composerDraft: ComposerDraftState = ComposerDraftState(),
     onDraftChanged: (String) -> Unit = {},
+    // The send currently travelling from the composer into the timeline, if any.
+    outgoingFlight: OutgoingFlight? = null,
+    onFlightSettled: (Long) -> Unit = {},
     // Immediate nick-sheet mention request. The nonce permits mentioning the same nick repeatedly.
     mentionPrefill: Pair<Long, String>? = null,
     jumpTarget: ChatPositionTarget? = null,
@@ -798,6 +809,59 @@ fun ChatContent(
     var composerText by remember(traceBufferId) {
         mutableStateOf(TextFieldValue(""))
     }
+    // Anchors for the send flight. Held in their own holder so the per-layout writes recompose the
+    // overlay that reads them and nothing else on this surface.
+    val flightAnchors = remember(traceBufferId) { SendFlightAnchors() }
+    // Rows a flight has already delivered. Their entrance was the ghost, so they must never also
+    // play the ordinary live-arrival reveal once the flight is gone.
+    var flownRowIds by remember(traceBufferId) { mutableStateOf(emptySet<Long>()) }
+    val selfNick = (state.connState as? IrcClientState.Ready)?.nick.orEmpty()
+    // The silhouette is decided at launch, before the pending row exists: predict whether the
+    // landing row opens a new group or continues our own burst, against the newest row the flight
+    // is not itself standing in for (its own row may already be in the pager by now).
+    val flightShowSender = remember(outgoingFlight?.token) {
+        val flight = outgoingFlight ?: return@remember true
+        if (selfNick.isEmpty()) return@remember true
+        val newest = (0 until minOf(items.itemCount, MAX_PLACEHOLDER_PROBES))
+            .asSequence()
+            .mapNotNull { items.peek(it) }
+            .firstOrNull { !flight.matches(it) }
+        predictFlightShowsSender(
+            newest = newest,
+            selfNick = selfNick,
+            normalizedSelf = nickNormalizer(selfNick),
+            nowMs = flight.launchedAtMs,
+        )
+    }
+    // One spring per tap, carrying the bubble and opening the gap it lands in.
+    val flightMotion = remember(outgoingFlight?.token) {
+        // Reset here rather than in the effect below: effects are dispatched on the frame clock
+        // and can run after the new tap's first draw, which would then read the previous flight's
+        // landing rect and start the ghost mid-timeline instead of at the composer.
+        flightAnchors.landingRow = null
+        SendFlightMotion()
+    }
+    val flightProgress = remember(flightMotion) { { flightMotion.progress.value } }
+    // Driven here rather than inside the overlay: the landing row's reveal must complete even if
+    // the ghost never gets a composer rect to launch from, or the row would stay collapsed.
+    LaunchedEffect(outgoingFlight?.token) {
+        val token = outgoingFlight?.token ?: return@LaunchedEffect
+        try {
+            val landing = withTimeoutOrNull(MotdMotion.SendFlightTargetTimeoutMs) {
+                snapshotFlow { flightAnchors.landingRow }.filterNotNull().first()
+            }
+            if (landing == null) {
+                // Nothing arrived to fly to. Open the gap outright so the row is whole when shown.
+                flightMotion.progress.snapTo(1f)
+            } else {
+                flightMotion.progress.animateTo(1f, MotdMotion.sendFlightSpring)
+            }
+        } finally {
+            // Also runs when this effect dies with the screen. A flight that outlived its UI would
+            // hide its row again and fly a ghost of a minutes-old message on the next visit.
+            onFlightSettled(token)
+        }
+    }
     var attachmentSheetOpen by rememberSaveable { mutableStateOf(false) }
     var uploadCurrentDraftDirectly by rememberSaveable { mutableStateOf(false) }
     // A file handed over by the share picker: open the upload confirmation sheet for it directly.
@@ -904,6 +968,7 @@ fun ChatContent(
             ChatUiEvent.ReactionTargetUnavailable -> stringResource(R.string.chat_react_failed)
             ChatUiEvent.ReactionSendFailed -> stringResource(R.string.chat_reaction_send_failed)
             ChatUiEvent.SendRejected -> stringResource(R.string.chat_send_rejected)
+            ChatUiEvent.SendDropped -> stringResource(R.string.chat_send_dropped)
             ChatUiEvent.NotInChannel -> stringResource(R.string.chat_not_in_channel)
             ChatUiEvent.ConversationLayoutWriteFailed -> stringResource(R.string.chat_layout_write_failed)
             ChatUiEvent.PresenceModeWriteFailed -> stringResource(R.string.chat_presence_write_failed)
@@ -1903,17 +1968,16 @@ fun ChatContent(
             // No composition-phase IME read here on purpose: the composer samples the animated inset
             // in its own measure phase, so the whole timeline stays skippable while the keyboard
             // animates instead of recomposing once per frame.
+            val conversationSpacing = remember(conversationLayout.effective) {
+                spacingFor(conversationLayout.effective)
+            }
             ConversationTypography(conversationFontScalePercent) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.weight(1f)) {
                     // Subtle IRC-themed wallpaper layered UNDER the message list only (never over the
                     // composer). NONE renders the plain theme background; MessageList is untouched.
                     ChatWallpaperBackground(chatWallpaper, modifier = Modifier.matchParentSize())
-                    CompositionLocalProvider(
-                        LocalSpacing provides remember(conversationLayout.effective) {
-                            spacingFor(conversationLayout.effective)
-                        },
-                    ) {
+                    CompositionLocalProvider(LocalSpacing provides conversationSpacing) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -1925,6 +1989,15 @@ fun ChatContent(
                     // Keyed like `liveEntryIds` itself, which is re-remembered per buffer.
                     val onLiveEntryConsumed = remember(state.buffer?.id) {
                         { id: Long -> liveEntryIds = consumeLiveEntryId(liveEntryIds, id) }
+                    }
+                    val onFlightRowPositioned = remember(flightAnchors) {
+                        { id: Long, bounds: Rect ->
+                            flightAnchors.reportLandingRow(id, bounds)
+                            // Recorded here rather than from the flight's event ids: this fires on
+                            // the row's first layout, before any accept could have named it. The
+                            // guard matters -- this runs on every frame of the reveal.
+                            if (id !in flownRowIds) flownRowIds = flownRowIds + id
+                        }
                     }
                     val onTimelineLongPress = remember {
                         { message: MessageEntity -> sheetTarget = message }
@@ -1970,6 +2043,10 @@ fun ChatContent(
                         listState = listState,
                         liveEntryIds = liveEntryIds,
                         onLiveEntryConsumed = onLiveEntryConsumed,
+                        outgoingFlight = outgoingFlight,
+                        flownRowIds = flownRowIds,
+                        flightProgress = flightProgress,
+                        onFlightRowPositioned = onFlightRowPositioned,
                         networkId = state.buffer?.networkId,
                         bufferId = state.buffer?.id,
                         conversationName = state.buffer?.displayName,
@@ -2020,6 +2097,33 @@ fun ChatContent(
                         onToggleFool = onToggleFool,
                         onSenderClick = onSenderClick,
                     )
+                    // The ghost lives inside the timeline pane, so the composer's own surface
+                    // occludes it and the bubble emerges from behind the input bar. The clip and
+                    // the coordinate origin sit on this stationary wrapper: clipping the ghost
+                    // itself would clip nothing, since its layer translation carries its bounds
+                    // along with its pixels. Being here also puts it under the same density and
+                    // typography providers the rows use.
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clipToBounds()
+                            // Layout-phase write only: the flight resolves the composer's and the
+                            // landing row's window rects against this origin.
+                            .onGloballyPositioned {
+                                flightAnchors.hostOrigin = it.positionInWindow()
+                            },
+                    ) {
+                        SendFlightOverlay(
+                            flight = outgoingFlight,
+                            anchors = flightAnchors,
+                            motion = flightMotion,
+                            selfNick = selfNick,
+                            showSender = flightShowSender,
+                            networkId = state.buffer?.networkId,
+                            knownNicks = knownNicks,
+                            identityRules = identityRules,
+                        )
+                    }
                     }
                     }
 
@@ -2177,6 +2281,11 @@ fun ChatContent(
                                     "long_draft=false"
                                 }
                                 onSubmit(text)
+                                // Empty the field on the tap frame. The ViewModel still owns the
+                                // durable draft and republishes it if the send never lands, so this
+                                // is presentation only -- notifying onDraftChanged here would count
+                                // as an edit and make the submission itself stale.
+                                composerText = TextFieldValue("")
                                 scope.launch {
                                     scrollToNewest(animate = true, reason = "composer_send_action")
                                 }
@@ -2184,6 +2293,7 @@ fun ChatContent(
                         }
                     },
                     enabled = composerEnabled,
+                    onFieldPositioned = { flightAnchors.composerField = it },
                     reply = state.replyTo?.let { ComposerReply(it.sender, it.text) },
                     onCancelReply = { onSetReply(null) },
                     // SERVER buffers send raw commands; hint that in the placeholder (plans/16 §5.6).
@@ -2261,6 +2371,7 @@ fun ChatContent(
                     AutoFollowTrace.record("long_draft_send_messages", traceBufferId, traceSessionId)
                     longDraftPrompt = false
                     onSubmit(composerText.text)
+                    composerText = TextFieldValue("")
                     scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }
                 }) { Text("Send as messages") }
                 androidx.compose.material3.TextButton(onClick = {
