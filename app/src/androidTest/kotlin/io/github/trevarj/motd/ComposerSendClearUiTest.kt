@@ -4,8 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.junit4.ComposeContentTestRule
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -34,7 +33,7 @@ import org.junit.Test
  */
 class ComposerSendClearUiTest {
     @get:Rule
-    val compose: ComposeContentTestRule = createComposeRule()
+    val compose = createAndroidComposeRule<ComposeHostActivity>()
 
     private val buffer = BufferEntity(
         id = 1,

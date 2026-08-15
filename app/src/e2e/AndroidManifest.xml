@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Test-only host for component instrumentation; see ComposeHostActivity. -->
+        <activity
+            android:name=".ComposeHostActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Motd"
+            android:windowSoftInputMode="adjustResize" />
+    </application>
+
+</manifest>
