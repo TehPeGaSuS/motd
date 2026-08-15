@@ -381,11 +381,23 @@ phase_a() {
     assert_tag_present onboarding_bouncer_discovery_refresh
     if reconnect_stack stop-soju; then
       _reconnect_restore_armed=true
-      sleep 2
-      scroll_forward_to_tag onboarding_bouncer_discovery_refresh 6 || true
-      tap_tag onboarding_bouncer_discovery_refresh
-      wait_for_tag onboarding_bouncer_discovery_error 20 || true
-      scroll_forward_to_tag onboarding_bouncer_discovery_error 6 || true
+      # A refresh issued before the app has observed the outage can still be answered from a
+      # connection that only looks alive: the socket write succeeds and, through the adb-reversed
+      # tunnel, the peer's absence takes a variable amount of time to surface. Rather than guess a
+      # settle time, keep asking until discovery admits the bouncer is gone.
+      _discovery_failed=false
+      for _discovery_try in 1 2 3 4 5 6; do
+        scroll_forward_to_tag onboarding_bouncer_discovery_refresh 6 || true
+        tap_tag onboarding_bouncer_discovery_refresh || true
+        wait_for_tag onboarding_bouncer_discovery_error 15 || true
+        scroll_forward_to_tag onboarding_bouncer_discovery_error 6 || true
+        dump || true
+        if [ -n "$(bounds_of_tag onboarding_bouncer_discovery_error)" ]; then
+          _discovery_failed=true
+          break
+        fi
+      done
+      [ "$_discovery_failed" = true ] || note "discovery never reported the outage; asserting anyway"
       assert_tag_present onboarding_bouncer_discovery_error
       # Retry belongs to the Failed state, so exercise it while the fixture is still down. Once
       # soju is back the ViewModel rebinds discovery on the Ready transition, which resolves
