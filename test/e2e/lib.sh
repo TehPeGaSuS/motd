@@ -386,13 +386,42 @@ long_press_tag_prefix_containing_text() {
 
 # --- text input ------------------------------------------------------------
 
+# _e2e_clear_field <count> — empty the focused text field by deleting up to
+# <count> characters on BOTH sides of the cursor. Never trust cursor
+# positioning: a center tap drops the caret mid-text, and KEYCODE_MOVE_END only
+# reaches the end of the current SOFT line, so on a wrapped multiline field
+# "MOVE_END + backspaces" deletes the head and leaves the tail (nightly step 33
+# saved "<probe> deterministic history" exactly this way). Backward then forward
+# deletes clear the field from any caret position.
+_e2e_clear_field() {
+  local n="$1" i
+  local dels=() fwds=()
+  for ((i = 0; i < n; i++)); do dels+=(67); fwds+=(112); done   # 67=DEL, 112=FORWARD_DEL
+  adb_shell input keyevent "${dels[@]}"
+  adb_shell input keyevent "${fwds[@]}"
+}
+
 # _e2e_send_text <text> — type text via adb `input text`, safely. adb `input
 # text` treats space as an argument separator and interprets a few characters
 # specially; we escape spaces as %s and backslash-escape the shell-significant
 # ASCII punctuation so arbitrary values (passwords, URLs) type verbatim.
+# Text containing anything outside printable ASCII cannot go through `input
+# text` at all and is routed through the clipboard instead.
 _e2e_send_text() {
   local text="$1" out=""
   local i ch
+  # Empty text is a valid no-op (Phase D may restore an empty original topic; the field was
+  # already cleared). A bare `input text` with no argument would error instead.
+  [ -n "$text" ] || return 0
+  # `input text` synthesizes key events via the device KeyCharacterMap, which
+  # has no key sequence for characters like U+2014; one such character makes
+  # the whole command abort and type NOTHING (the nightly's topic restoration
+  # failed exactly this way). Detect any non-printable-ASCII byte and use the
+  # clipboard path, which handles arbitrary unicode.
+  if LC_ALL=C printf '%s' "$text" | grep -q '[^ -~]'; then
+    _e2e_send_text_via_clipboard "$text"
+    return
+  fi
   for (( i=0; i<${#text}; i++ )); do
     ch="${text:$i:1}"
     case "$ch" in
@@ -405,6 +434,25 @@ _e2e_send_text() {
     esac
   done
   adb_shell input text "$out"
+}
+
+# _e2e_send_text_via_clipboard <text> — non-ASCII entry path. Hands the text
+# (base64, so it survives both shells verbatim) to the e2e build's
+# E2eClipboardReceiver, which puts it on the device clipboard, then presses
+# KEYCODE_PASTE; Compose's key mapping pastes it at the caret of the focused
+# field with no modifier key needed. Requires the :app e2e variant (the only
+# variant the emulator harness can install — debug/release are arm64-only).
+_e2e_send_text_via_clipboard() {
+  local b64
+  b64="$(printf '%s' "$1" | base64 | tr -d '\n')"
+  adb_shell am broadcast \
+    -n "${MOTD_PKG}/io.github.trevarj.motd.E2eClipboardReceiver" \
+    -a io.github.trevarj.motd.e2e.SET_CLIPBOARD \
+    --es text_b64 "$b64" >/dev/null 2>&1 || {
+    fail "clipboard broadcast failed; is the installed APK the e2e variant?"
+    return 1
+  }
+  adb_shell input keyevent 279   # KEYCODE_PASTE
 }
 
 # _e2e_input_by_fn <bounds-fn> <selector> <text> <label> — tap a field to focus
@@ -426,10 +474,8 @@ _e2e_input_by_fn() {
   # Give the IME a beat to attach focus before typing.
   sleep 1
   # Clear any pre-filled/default content (e.g. the Port field defaults to 6697) so typing
-  # REPLACES rather than appends. Move caret to end, then delete a generous run backward.
-  # 123=MOVE_END, 67=DEL; these fields are short (host/port/nick/user/pass).
-  adb_shell input keyevent 123
-  adb_shell input keyevent 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67
+  # REPLACES rather than appends. These fields are short (host/port/nick/user/pass).
+  _e2e_clear_field 40
   _e2e_send_text "$text"
   # Close the soft keyboard so subsequent dumps see the settled layout.
   adb_shell input keyevent 4   # KEYCODE_BACK

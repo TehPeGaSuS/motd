@@ -109,7 +109,7 @@ MOTD_ROOT_READY_LABEL="Connected as ${MOTD_SOJU_USER}"
 # lib.sh. Keep this journey-specific helper on the stable field tag, and accept an empty original
 # topic so Phase D can restore either seeded or manually configured channels.
 input_topic_draft() {
-  local text="$1" bounds xy i
+  local text="$1" bounds xy
   dump || { fail "dump failed locating topic draft"; return 1; }
   bounds="$(bounds_of_tag channelinfo_topic_edit_text)"
   if [ -z "$bounds" ]; then
@@ -120,11 +120,10 @@ input_topic_draft() {
   # shellcheck disable=SC2086 # _e2e_center intentionally returns x y
   adb_shell input tap $xy
   sleep 1
-  adb_shell input keyevent 123
-  local deletes=()
-  for ((i = 0; i < 160; i++)); do deletes+=(67); done
-  adb_shell input keyevent "${deletes[@]}"
-  _e2e_send_text "$text"
+  # The draft wraps across soft lines, so clearing must not assume the caret can be moved to the
+  # true end of the buffer; _e2e_clear_field deletes both directions from wherever the tap put it.
+  _e2e_clear_field 160
+  _e2e_send_text "$text" || { fail "could not type topic draft"; return 1; }
   adb_shell input keyevent 4
   ok "input topic draft <= \"${text}\""
 }
