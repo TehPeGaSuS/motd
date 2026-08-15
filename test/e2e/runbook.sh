@@ -371,13 +371,20 @@ phase_a() {
   if [ "$MOTD_RECONNECT_DRILL" != 1 ]; then
     note "MOTD_RECONNECT_DRILL=0 — leaving the connected bouncer session untouched"
   else
+    # Every reconnect appends to the connect screen's state log, so the discovery control and the
+    # import rows below it drift under the fold as this step drives the socket down and back up.
+    # The screen is a plain verticalScroll column; reach the control the way the settings steps do
+    # instead of asserting on whatever the first screenful happens to hold.
     wait_for_tag onboarding_bouncer_discovery_refresh 20 || true
+    scroll_forward_to_tag onboarding_bouncer_discovery_refresh 6 || true
     assert_tag_present onboarding_bouncer_discovery_refresh
     if reconnect_stack stop-soju; then
       _reconnect_restore_armed=true
       sleep 2
+      scroll_forward_to_tag onboarding_bouncer_discovery_refresh 6 || true
       tap_tag onboarding_bouncer_discovery_refresh
       wait_for_tag onboarding_bouncer_discovery_error 20 || true
+      scroll_forward_to_tag onboarding_bouncer_discovery_error 6 || true
       assert_tag_present onboarding_bouncer_discovery_error
       if reconnect_stack start-soju; then
         _reconnect_restore_armed=false
@@ -385,8 +392,10 @@ phase_a() {
         # host the attempt that lands after soju is listening can be a full backoff step away.
         # Budget for one more step than the outage itself costs; a healthy run matches immediately.
         if wait_for_text "$MOTD_ROOT_READY_LABEL" 60; then
+          scroll_forward_to_tag onboarding_bouncer_discovery_retry 8 || true
           tap_tag onboarding_bouncer_discovery_retry
           wait_for_tag onboarding_bouncer_discovery_refresh 25 || true
+          scroll_forward_to_tag onboarding_bouncer_discovery_refresh 8 || true
           assert_tag_present onboarding_bouncer_discovery_refresh
         else
           fail "bouncer did not reconnect before discovery retry"
@@ -408,6 +417,9 @@ phase_a() {
   # poll for the libera row rather than asserting immediately (confirmed on the bouncer:
   # BOUNCER NETWORK 2 name=libera state=connected).
   wait_for_text "libera" 25 || true
+  # Same fold problem as step 9: the reconnect drill above grows the state log, so the import rows
+  # sit below the first screenful by the time this step runs.
+  scroll_forward_to_text "libera" 8 || true
   assert_text "libera"
   # Select libera (rows default to unselected) so it is imported as a child network and later
   # phases have real buffers/channels to drive. The row is clickable and toggles its switch.
