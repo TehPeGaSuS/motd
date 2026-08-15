@@ -365,8 +365,9 @@ phase_a() {
 
   # 9. Discovery failure/retry. This is the real-stack authority for onboarding recovery: stop
   # only the ephemeral soju fixture after its initial empty-or-populated LIST has settled, force
-  # a refresh, and require the retained-row retry UI before restarting it. No remote network or
-  # local child is created until the existing libera fixture is selected below.
+  # a refresh, require the retained-row retry UI and exercise it while the fixture is still down,
+  # then restart soju and require discovery to recover on the reconnect alone. No remote network
+  # or local child is created until the existing libera fixture is selected below.
   step "Surface failed bouncer discovery and retry after soju restart"
   if [ "$MOTD_RECONNECT_DRILL" != 1 ]; then
     note "MOTD_RECONNECT_DRILL=0 — leaving the connected bouncer session untouched"
@@ -386,19 +387,30 @@ phase_a() {
       wait_for_tag onboarding_bouncer_discovery_error 20 || true
       scroll_forward_to_tag onboarding_bouncer_discovery_error 6 || true
       assert_tag_present onboarding_bouncer_discovery_error
+      # Retry belongs to the Failed state, so exercise it while the fixture is still down. Once
+      # soju is back the ViewModel rebinds discovery on the Ready transition, which resolves
+      # Failed to Loaded on its own and retires the button before a tap could land.
+      scroll_forward_to_tag onboarding_bouncer_discovery_retry 8 || true
+      assert_tag_present onboarding_bouncer_discovery_retry
+      tap_tag onboarding_bouncer_discovery_retry
+      # The client lookup gives up after 40x250ms, so a re-attempt against a dead fixture lands
+      # back on Failed well inside this budget.
+      wait_for_tag onboarding_bouncer_discovery_error 25 || true
+      scroll_forward_to_tag onboarding_bouncer_discovery_error 8 || true
+      assert_tag_present onboarding_bouncer_discovery_error
       if reconnect_stack start-soju; then
         _reconnect_restore_armed=false
         # The actor reconnects on its own exponential backoff (base 2s, ×2, jitter), so on a slow
         # host the attempt that lands after soju is listening can be a full backoff step away.
         # Budget for one more step than the outage itself costs; a healthy run matches immediately.
         if wait_for_text "$MOTD_ROOT_READY_LABEL" 60; then
-          scroll_forward_to_tag onboarding_bouncer_discovery_retry 8 || true
-          tap_tag onboarding_bouncer_discovery_retry
+          # Recovery is the app's job, not the user's: discovery must return to Loaded on the
+          # reconnect alone, with no further tap.
           wait_for_tag onboarding_bouncer_discovery_refresh 25 || true
           scroll_forward_to_tag onboarding_bouncer_discovery_refresh 8 || true
           assert_tag_present onboarding_bouncer_discovery_refresh
         else
-          fail "bouncer did not reconnect before discovery retry"
+          fail "bouncer did not recover discovery after reconnect"
         fi
       else
         fail "could not restart soju after discovery-failure exercise"
