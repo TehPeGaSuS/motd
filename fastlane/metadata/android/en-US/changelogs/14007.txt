@@ -1,0 +1,3 @@
+- Nick and avatar colors now come from the colors your theme actually ships, so Gruvbox nicks are Gruvbox colors and Nord nicks are Nord colors instead of near misses. Sender names stay readable on every surface without losing their hue.
+- Sending a message now flies it from the composer into the timeline.
+- Fixed history staying stale after opening the app from a notification.
