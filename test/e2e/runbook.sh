@@ -400,19 +400,14 @@ phase_a() {
       assert_tag_present onboarding_bouncer_discovery_error
       if reconnect_stack start-soju; then
         _reconnect_restore_armed=false
-        # The actor reconnects on its own exponential backoff (min(90s, 2s*2^attempt) * 0.7..1.3),
-        # so the attempt that lands after soju is listening can be a full step away. Exercising
-        # retry above keeps the fixture down ~10-25s longer than it used to be, which pushes the
-        # outage into a larger step, so budget accordingly. A healthy run matches immediately.
-        if wait_for_text "$MOTD_ROOT_READY_LABEL" 150; then
-          # Recovery is the app's job, not the user's: discovery must return to Loaded on the
-          # reconnect alone, with no further tap.
-          wait_for_tag onboarding_bouncer_discovery_refresh 25 || true
-          scroll_forward_to_tag onboarding_bouncer_discovery_refresh 8 || true
-          assert_tag_present onboarding_bouncer_discovery_refresh
-        else
-          fail "bouncer did not recover discovery after reconnect"
-        fi
+        # Recovery is the app's job, not the user's: discovery must return to Loaded on the
+        # reconnect alone, with no further tap. Wait on the control itself rather than on the
+        # ready label, which sits at the top of a page the scrolling above has moved out of the
+        # dump. The actor reconnects on its own exponential backoff (min(90s, 2s*2^attempt) *
+        # 0.7..1.3) and exercising retry keeps the fixture down longer, so budget a full step.
+        wait_for_tag onboarding_bouncer_discovery_refresh 150 || true
+        scroll_forward_to_tag onboarding_bouncer_discovery_refresh 8 || true
+        assert_tag_present onboarding_bouncer_discovery_refresh
       else
         fail "could not restart soju after discovery-failure exercise"
       fi
