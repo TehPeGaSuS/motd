@@ -142,6 +142,11 @@ do_register() {
       printf 'JOIN %s\r\n' "$channel"
       sleep 1
       printf 'CS REGISTER %s\r\n' "$channel"
+      # Registered ergo channels are +t, so only ops may set a topic. The app reaches ergo through
+      # soju as UP_ACCOUNT, which is not the founder; without a persistent op grant its TOPIC is
+      # rejected and the Channel Info journey can never observe an accepted write. AMODE applies
+      # on join, and register runs before soju connects, so the grant is in place by then.
+      printf 'CS AMODE %s +o %s\r\n' "$channel" "$UP_ACCOUNT"
       printf 'TOPIC %s :%s\r\n' "$channel" "$(fixture_topic "$channel")"
     done
     printf 'QUIT :channel ready\r\n'

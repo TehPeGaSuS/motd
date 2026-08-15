@@ -225,6 +225,19 @@ bounds_of_tag() {
 # bounds_of_tag_prefix "<testTag-prefix>" — first testTag whose resource-id begins with the
 # supplied stable prefix. This is for tags with a runtime database id suffix, where the harness
 # deliberately cannot know the id (for example onboarding_bouncer_switch_<netId>).
+# tag_enabled "<testTag>" — true when the node exists and is not a disabled control. A disabled
+# Compose Button keeps its bounds, so presence alone would tap a dead control and then wait for a
+# reaction that never comes. Callers must dump first, like the other bounds_* readers.
+tag_enabled() {
+  local tag="$1" esc
+  _e2e_have_dump || return 1
+  # shellcheck disable=SC2016 # single quotes are intentional: literal sed script
+  esc="$(printf '%s' "$tag" | sed 's/[][\.*^$(){}?+|/]/\\&/g')"
+  grep -oE "<node[^>]* resource-id=\"[^\"]*${esc}\"[^>]*>" "$_E2E_DUMP" 2>/dev/null \
+    | head -n1 \
+    | grep -q 'enabled="true"'
+}
+
 bounds_of_tag_prefix() {
   local prefix="$1"
   _e2e_have_dump || return 1

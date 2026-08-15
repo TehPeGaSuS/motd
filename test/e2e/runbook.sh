@@ -977,11 +977,21 @@ phase_f() {
   tap_tag network_settings_bouncer_networks
   wait_for_text "Soju Control Center" 10 || true
   assert_text "Soju Control Center"
-  if [ -n "$(bounds_of_tag bouncer_add_network)" ]; then
+  # `network create` arrives with BouncerServ capability discovery, so the control can still be
+  # disabled a moment after the screen opens. A disabled Compose Button keeps its bounds, so the
+  # old presence check tapped a dead control and then looked for a dialog that never opened.
+  for _bouncer_add_try in 1 2 3 4 5 6; do
+    dump || true
+    tag_enabled bouncer_add_network && break
+    sleep 1
+  done
+  if tag_enabled bouncer_add_network; then
     tap_tag bouncer_add_network
     wait_for_text "Server address" 5 || true
     assert_text "Server address"
     tap_text "Cancel"
+  else
+    note "bouncer did not offer 'network create'; skipping the add-network dialog"
   fi
   tap_tag bouncer_tab_channels
   assert_text "Channel controls"
