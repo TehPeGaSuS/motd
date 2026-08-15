@@ -24,8 +24,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.avatar.canonicalAvatarNick
 import io.github.trevarj.motd.ui.theme.LocalNickColors
-import io.github.trevarj.motd.ui.theme.colorHue
-import io.github.trevarj.motd.ui.theme.hslColor
+import io.github.trevarj.motd.ui.theme.identityRamp
 import kotlin.math.max
 
 /** A person and a network have distinct deterministic sprite seeds. */
@@ -269,12 +268,11 @@ private fun GeneratedAvatar(
     // Dark themes raise the disc one container step so the vivid sprite doesn't sit on a disc
     // that sinks into the row card; light themes keep the regular raised container.
     val base = if (dark) scheme.surfaceContainerHighest else scheme.surfaceContainerHigh
-    val palette = remember(primary, base, scheme.surfaceContainerLowest, dark) {
+    val palette = remember(primary, base, scheme.surfaceContainerLowest) {
         SpritePalette.from(
             primary = primary,
             base = base,
             panel = scheme.surfaceContainerLowest,
-            dark = dark,
         )
     }
     Canvas(modifier = modifier.size(avatarSize).clip(CircleShape)) {
@@ -318,23 +316,24 @@ private data class SpritePalette(
 ) {
     companion object {
         /**
-         * Vivid pixel-art ramp: shadow/mid/highlight rebuilt from the identity color's hue, so
-         * every sprite owns a saturated 3-step palette instead of a theme-washed tint. The disc
-         * ([base]) and visor ([panel]) stay Material neutrals, which is what keeps terminal themes
-         * and AMOLED coherent; the ramp is the one deliberate color identity.
+         * Pixel-art ramp stepped off the identity fill itself, at constant hue.
+         *
+         * This used to keep only [primary]'s hue and rebuild saturation and lightness from fixed
+         * vivid constants. That threw away the identity's lightness tier -- which is half of what
+         * distinguishes one name from another -- leaving the whole app roughly one avatar color per
+         * hue slot, and it overrode every muted theme with the same loud ramp. The disc ([base]) and
+         * visor ([panel]) stay Material neutrals, which is what keeps terminal themes and AMOLED
+         * coherent.
          */
-        fun from(primary: Color, base: Color, panel: Color, dark: Boolean): SpritePalette {
-            val hue = colorHue(primary)
-            val shade = if (dark) hslColor(hue, 0.62f, 0.30f) else hslColor(hue, 0.58f, 0.72f)
-            val mid = if (dark) hslColor(hue, 0.72f, 0.48f) else hslColor(hue, 0.70f, 0.50f)
-            val highlight = if (dark) hslColor(hue, 0.80f, 0.62f) else hslColor(hue, 0.72f, 0.42f)
+        fun from(primary: Color, base: Color, panel: Color): SpritePalette {
+            val ramp = identityRamp(primary)
             return SpritePalette(
                 base = base,
-                shade = shade,
-                primary = mid,
-                highlight = highlight,
+                shade = ramp.shade,
+                primary = ramp.mid,
+                highlight = ramp.highlight,
                 // Accessories/expressions draw over the head (highlight), not the torso.
-                ink = onColorFor(highlight),
+                ink = onColorFor(ramp.highlight),
                 panel = panel,
             )
         }

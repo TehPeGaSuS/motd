@@ -139,6 +139,9 @@ fun MotdTheme(
     val nickThemeColors = remember(colorScheme) {
         listOf(colorScheme.primary, colorScheme.tertiary, colorScheme.secondary).distinct()
     }
+    // Terminal and editor themes publish a real accent palette; identity colors are picked from it
+    // rather than synthesized, so a nick is always one of the theme's own colors.
+    val nickIdentityPalette = remember(effectivePreset) { themeIdentityPalette(effectivePreset) }
     // Style-only concerns (spacing, nick colors, avatar style) flow through CompositionLocals so
     // components never receive them as parameters (plans/13 plumbing split).
     val typography = remember(uiFontScalePercent) { scaledTypography(uiFontScalePercent) }
@@ -156,6 +159,7 @@ fun MotdTheme(
                 dark,
                 nickTextBackgrounds,
                 nickThemeColors,
+                nickIdentityPalette,
             ),
             LocalAvatarStyle provides avatarStyle,
             LocalMotdSemanticColors provides semanticColors(colorScheme, dark),

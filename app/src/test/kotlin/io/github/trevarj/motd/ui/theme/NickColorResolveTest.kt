@@ -1,11 +1,20 @@
 package io.github.trevarj.motd.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.isDark
+import io.github.trevarj.motd.data.prefs.isFixedPalette
 import io.github.trevarj.motd.data.prefs.nickColorPaletteFromPreference
+import kotlin.math.abs
+import kotlin.math.cbrt
+import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.sqrt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Nick-color resolution order + CLASSIC-palette equality with the legacy nickColor generator. */
@@ -85,7 +94,11 @@ class NickColorResolveTest {
         val warm = listOf(Color.Red, Color.Yellow, Color.Magenta)
         val cool = listOf(Color.Blue, Color.Cyan, Color.Green)
 
-        assertEquals(Color.Red, hueColor(0, false, NickColorPalette.THEME, warm))
+        // A picked hue is honored exactly; only lightness and chroma come from the theme.
+        assertEquals(210f, hueColor(210, false, NickColorPalette.THEME, warm).toOklch().hue, 1f)
+
+        // THEME no longer lerps the accent list, it anchors a hue wheel on the primary, so the
+        // same name lands on a different hue under a warm and a cool accent set.
         assertNotEquals(
             paletteNickColor("alice", false, NickColorPalette.THEME, warm),
             paletteNickColor("alice", false, NickColorPalette.THEME, cool),
@@ -108,6 +121,194 @@ class NickColorResolveTest {
         val scheme = NickColorScheme(enabled = false, palette = NickColorPalette.CLASSIC,
             overrides = emptyMap(), isDark = true)
         assertEquals(fallback, scheme.nick("alice", fallback))
-        assertEquals(paletteNickColor("alice", true, NickColorPalette.CLASSIC), scheme.avatar("alice"))
+        assertEquals(paletteNickFill("alice", true, NickColorPalette.CLASSIC), scheme.avatar("alice"))
+    }
+
+    // --- identity colors must come from the theme's own published palette -------------------
+
+    /** A 62-name crowd, the same one the palette study measured. */
+    private val crowd = listOf(
+        "alice", "bob", "trevor", "antti", "Lionyx", "morganw", "mango", "emily",
+        "rustacean", "pyBot", "k8s-admin", "dockerfan", "ChanServ", "wumpus", "lambda",
+        "quark", "moss", "roy", "jen", "denholm", "richmond", "zoe", "kai", "juno",
+        "vex", "nova", "orbit", "flux", "cinder", "pixel", "gonzo", "ada", "gr4ce",
+        "linus", "dennis", "ken", "bwk", "rob", "hopper", "lovelace", "turing",
+        "stallman", "torvalds", "carmack", "notch", "shodan", "glados", "wheatley",
+        "cortana", "hal9000", "tars", "case", "marvin", "bender", "data", "lore",
+        "alice_", "alice1", "bob1", "bob2", "trevor_", "nickserv2",
+    )
+
+    private class ThemeFixture(
+        val accents: List<Color>,
+        val backgrounds: List<Color>,
+        val identityPalette: List<Color>,
+        val isDark: Boolean,
+    )
+
+    private fun fixture(preset: ColorThemePreset): ThemeFixture {
+        val scheme = fixedThemeScheme(preset)!!
+        return ThemeFixture(
+            accents = listOf(scheme.primary, scheme.tertiary, scheme.secondary).distinct(),
+            backgrounds = listOf(
+                scheme.background, scheme.surface, scheme.surfaceContainerLow,
+                scheme.surfaceContainerHigh, scheme.surfaceContainerHighest,
+                scheme.primaryContainer, scheme.secondaryContainer, scheme.tertiaryContainer,
+            ).distinct(),
+            identityPalette = themeIdentityPalette(preset),
+            isDark = preset.isDark,
+        )
+    }
+
+    private fun themeNick(nick: String, f: ThemeFixture): Color = paletteNickColor(
+        nick, f.isDark, NickColorPalette.THEME, f.accents, f.backgrounds, f.identityPalette,
+    )
+
+    /** Circular hue distance in degrees, so 359.8 and 0.0 read as the same hue. */
+    private fun hueGap(a: Float, b: Float): Float {
+        val raw = abs(a - b) % 360f
+        return min(raw, 360f - raw)
+    }
+
+    /** CIE Lab deltaE 76; below 12 two identity colors are too close to tell apart at a glance. */
+    private fun deltaE(a: Color, b: Color): Double {
+        fun lab(c: Color): Triple<Double, Double, Double> {
+            fun lin(v: Float): Double {
+                val d = v.toDouble()
+                return if (d <= 0.04045) d / 12.92 else ((d + 0.055) / 1.055).pow(2.4)
+            }
+            val r = lin(c.red); val g = lin(c.green); val bl = lin(c.blue)
+            val x = (r * .4124 + g * .3576 + bl * .1805) / .95047
+            val y = r * .2126 + g * .7152 + bl * .0722
+            val z = (r * .0193 + g * .1192 + bl * .9505) / 1.08883
+            fun f(t: Double) = if (t > .008856) cbrt(t) else 7.787 * t + 16.0 / 116.0
+            return Triple(116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z)))
+        }
+        val (l1, a1, b1) = lab(a)
+        val (l2, a2, b2) = lab(b)
+        return sqrt((l1 - l2).pow(2) + (a1 - a2).pow(2) + (b1 - b2).pow(2))
+    }
+
+    private val fixedPresets = ColorThemePreset.entries.filter { it.isFixedPalette }
+
+    @Test
+    fun everyFixedTheme_publishesAUsableIdentityPalette() {
+        for (preset in fixedPresets) {
+            val palette = themeIdentityPalette(preset)
+            assertTrue("$preset declares no palette", palette.size >= 6)
+            for (color in palette) {
+                val lch = color.toOklch()
+                assertTrue("$preset has a near-neutral accent", lch.chroma >= 0.035f)
+                assertTrue("$preset accent lightness ${lch.lightness}", lch.lightness in 0.18f..0.95f)
+            }
+        }
+    }
+
+    @Test
+    fun avatarFill_isExactlyOneOfTheThemesOwnColors() {
+        // The disc has no contrast obligation, so it uses the published color untouched.
+        for (preset in fixedPresets) {
+            val f = fixture(preset)
+            for (nick in crowd) {
+                val fill = paletteNickFill(
+                    nick, f.isDark, NickColorPalette.THEME, f.accents, f.identityPalette,
+                )
+                assertTrue("$preset/$nick fill is not a declared color", fill in f.identityPalette)
+            }
+        }
+    }
+
+    @Test
+    fun nickText_staysOnAHueTheThemeDeclares() {
+        // The contrast fix may move lightness, but never hue -- this is the regression that made
+        // generated colors look foreign to the theme.
+        for (preset in fixedPresets) {
+            val f = fixture(preset)
+            val declared = f.identityPalette.map { it.toOklch().hue }
+            for (nick in crowd) {
+                val hue = themeNick(nick, f).toOklch().hue
+                val drift = declared.minOf { hueGap(hue, it) }
+                assertTrue("$preset/$nick drifted $drift deg off every declared hue", drift < 2f)
+            }
+        }
+    }
+
+    @Test
+    fun nickText_meetsContrastOnEverySurface() {
+        for (preset in fixedPresets) {
+            val f = fixture(preset)
+            for (nick in crowd) {
+                val worst = f.backgrounds.minOf { contrastRatio(themeNick(nick, f), it) }
+                assertTrue("$preset/$nick resolved to contrast $worst", worst >= 4.49)
+            }
+        }
+    }
+
+    @Test
+    fun nickColors_stayDistinguishableEvenOnMutedThemes() {
+        // Gruvbox, Zenburn and Nord have the narrowest palettes; they are the worst case.
+        for (preset in listOf(
+            ColorThemePreset.GRUVBOX_DARK, ColorThemePreset.ZENBURN, ColorThemePreset.NORD,
+        )) {
+            val f = fixture(preset)
+            val colors = crowd.map { themeNick(it, f) }
+            var confusable = 0
+            for (i in colors.indices) {
+                for (j in i + 1 until colors.size) {
+                    if (colors[i] != colors[j] && deltaE(colors[i], colors[j]) < 12) confusable++
+                }
+            }
+            assertTrue(
+                "$preset: $confusable confusable pairs of ${crowd.size * (crowd.size - 1) / 2}",
+                confusable < 350,
+            )
+        }
+    }
+
+    @Test
+    fun everyDeclaredColorGetsUsed() {
+        // The hash must reach the whole palette, not favour a prefix of it.
+        val f = fixture(ColorThemePreset.GRUVBOX_DARK)
+        val used = (0 until 4000).map {
+            paletteNickFill("user$it", f.isDark, NickColorPalette.THEME, f.accents, f.identityPalette)
+        }.toSet()
+        assertEquals(f.identityPalette.size, used.size)
+    }
+
+    @Test
+    fun themesWithoutAPublishedPalette_fallBackToTheHueWheel() {
+        // Material light/dark/AMOLED and dynamic color declare only three accents, so they keep the
+        // wheel -- Material's own way of widening a three-accent scheme.
+        assertTrue(themeIdentityPalette(ColorThemePreset.DARK).isEmpty())
+        val slots = mutableSetOf<Int>()
+        val tiers = mutableSetOf<Int>()
+        repeat(2000) { i ->
+            val coord = nickCoord("user$i")
+            slots += coord.hueSlot
+            tiers += coord.tier
+        }
+        assertEquals(NICK_HUE_SLOTS, slots.size)
+        assertEquals(NICK_TIER_COUNT, tiers.size)
+    }
+
+    @Test
+    fun contrastFix_preservesHue() {
+        // ensureContrast lerps toward black or white, which strips chroma and shifts hue. The
+        // lightness walk must leave the hue alone.
+        val f = fixture(ColorThemePreset.SOLARIZED_LIGHT)
+        for (hue in 0 until 360 step 15) {
+            val fixed = contrastSafeIdentity(0.85f, 0.9f, hue.toFloat(), f.backgrounds, isDark = false)
+            assertEquals("hue $hue drifted", 0f, hueGap(hue.toFloat(), fixed.toOklch().hue), 1.5f)
+        }
+    }
+
+    @Test
+    fun identityRamp_staysOnTheFillHue() {
+        for (hue in 0 until 360 step 30) {
+            val fill = oklchColorAt(0.55f, 0.9f, hue.toFloat())
+            val ramp = identityRamp(fill)
+            assertEquals(0f, hueGap(hue.toFloat(), ramp.shade.toOklch().hue), 2f)
+            assertEquals(0f, hueGap(hue.toFloat(), ramp.highlight.toOklch().hue), 2f)
+            assertTrue(ramp.shade.toOklch().lightness < ramp.highlight.toOklch().lightness)
+        }
     }
 }

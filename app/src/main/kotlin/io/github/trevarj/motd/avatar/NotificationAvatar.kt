@@ -8,17 +8,15 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.IconCompat
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.NickColorPalette
-import io.github.trevarj.motd.ui.theme.NICK_BIN_COUNT
-import io.github.trevarj.motd.ui.theme.NICK_BIN_HUES
-import io.github.trevarj.motd.ui.theme.nickBinLightness
-import io.github.trevarj.motd.ui.theme.nickBinSaturation
-import kotlin.math.abs
-import kotlin.math.floor
+import io.github.trevarj.motd.ui.theme.identityRamp
+import io.github.trevarj.motd.ui.theme.paletteNickColor
+import io.github.trevarj.motd.ui.theme.paletteNickFill
 
 private const val AVATAR_SIZE_PX = 64
 
@@ -66,14 +64,16 @@ private fun drawInitials(canvas: Canvas, paint: Paint, name: String, accent: Int
 }
 
 private fun drawIrcSprite(canvas: Canvas, paint: Paint, name: String, dark: Boolean) {
-    // Mirrors SpritePalette.from: vivid shadow/mid/highlight ramp from the nick hue over a neutral
+    // Mirrors SpritePalette.from: the ramp is stepped off the identity fill itself over a neutral
     // disc (one container step lighter in dark so the sprite doesn't sink into the shade tray).
-    val hue = notificationNickHue(name)
+    // Notifications render outside Compose and cannot read the active theme, so they stay on the
+    // theme-independent CLASSIC identity.
+    val ramp = identityRamp(paletteNickFill(canonicalAvatarNick(name), dark, NickColorPalette.CLASSIC))
     val base = if (dark) Color.rgb(54, 52, 59) else Color.rgb(243, 241, 248)
     val panel = if (dark) Color.rgb(18, 20, 23) else Color.WHITE
-    val shade = hslToColor(hue, if (dark) 0.62f else 0.58f, if (dark) 0.30f else 0.72f)
-    val mid = hslToColor(hue, if (dark) 0.72f else 0.70f, if (dark) 0.48f else 0.50f)
-    val highlight = hslToColor(hue, if (dark) 0.80f else 0.72f, if (dark) 0.62f else 0.42f)
+    val shade = ramp.shade.toArgb()
+    val mid = ramp.mid.toArgb()
+    val highlight = ramp.highlight.toArgb()
     val ink = onColorFor(highlight)
     val variant = stableVariant(name)
 
@@ -159,30 +159,10 @@ private fun avatarInitials(name: String): String {
     return chars.uppercase()
 }
 
-// Mirrors NickColor's CLASSIC curated bins (16 hues x 2 tiers, golden-ratio-multiplied seed) so
-// notification people match their in-app identity colors.
-private fun notificationNickBin(name: String): Int {
-    var hash = 0
-    for (char in canonicalAvatarNick(name)) hash = hash * 31 + char.code
-    val spread = abs(hash.toLong()) * 0.618033988749895
-    return ((spread - floor(spread)) * NICK_BIN_COUNT).toInt().coerceIn(0, NICK_BIN_COUNT - 1)
-}
-
-private fun notificationNickHue(name: String): Float =
-    NICK_BIN_HUES[notificationNickBin(name) % NICK_BIN_HUES.size]
-
-private fun notificationNickColor(name: String, dark: Boolean): Int {
-    val bin = notificationNickBin(name)
-    val bold = bin < NICK_BIN_HUES.size
-    return hslToColor(
-        notificationNickHue(name),
-        nickBinSaturation(NickColorPalette.CLASSIC, dark, bold),
-        nickBinLightness(NickColorPalette.CLASSIC, dark, bold),
-    )
-}
-
-private fun hslToColor(hue: Float, saturation: Float, lightness: Float): Int =
-    ColorUtils.HSLToColor(floatArrayOf(hue, saturation, lightness))
+// Reuse NickColor's CLASSIC resolvers directly so notification people match their in-app identity
+// colors; the canonical nick is passed in because these hash the string they are given.
+private fun notificationNickColor(name: String, dark: Boolean): Int =
+    paletteNickColor(canonicalAvatarNick(name), dark, NickColorPalette.CLASSIC).toArgb()
 
 private fun stableVariant(name: String): Int = canonicalAvatarNick(name).fold(0) { hash, char ->
     hash * 31 + char.code

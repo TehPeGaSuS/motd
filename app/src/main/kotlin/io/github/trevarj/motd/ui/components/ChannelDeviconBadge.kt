@@ -25,8 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdShapes
-import io.github.trevarj.motd.ui.theme.colorHue
-import io.github.trevarj.motd.ui.theme.hslColor
+import io.github.trevarj.motd.ui.theme.identityRamp
 import kotlin.math.min
 
 private const val DEVICON_VIEWPORT = 600f
@@ -220,13 +219,11 @@ internal fun IrcChannelBadge(
     modifier: Modifier = Modifier,
 ) {
     val glyph = remember(name) { matchedChannelDevicon(name) }
-    val primary = LocalNickColors.current.avatar(name)
-    val dark = isAppliedThemeDark()
-    // Same vivid ramp family as SpritePalette.from: solid mid-tone tile, one step brighter
-    // (dark) / deeper (light) border, and a guaranteed-contrast mark.
-    val hue = colorHue(primary)
-    val background = if (dark) hslColor(hue, 0.72f, 0.48f) else hslColor(hue, 0.70f, 0.50f)
-    val border = if (dark) hslColor(hue, 0.80f, 0.66f) else hslColor(hue, 0.72f, 0.34f)
+    val background = LocalNickColors.current.avatar(name)
+    // Same ramp as SpritePalette.from, so a channel tile and a nick sprite of the same identity
+    // agree: the fill itself is the tile, its highlight step is the border, and the mark takes
+    // whichever of black/white reads on the tile.
+    val border = remember(background) { identityRamp(background).highlight }
     val mark = onColorFor(background)
 
     Box(
