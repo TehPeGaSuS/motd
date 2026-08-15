@@ -114,6 +114,25 @@ class HistoryPageLoader @Inject constructor(
     internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
 
     /**
+     * Forget the wire gate for [networkId]; the network's connection is gone.
+     *
+     * [networkGates] is keyed by network and lives for the process, so this is the only thing that
+     * ever shrinks it: a deleted network would otherwise keep its semaphore forever, and a later
+     * connection reusing the id would inherit the retired connection's gate — including a permit
+     * held by a request that outlived its socket, which would make the successor's first fetch
+     * queue behind a page that is never coming.
+     *
+     * Safe against a fetch that is still inside the gate: [onWireLock] resolves its [WireGate] once
+     * and holds that reference for the whole permit, so dropping the map entry only means the next
+     * fetch builds a fresh gate. That is the same mechanic the width swap in [onWireLock] already
+     * depends on, and it is why a straggler on a dead socket cannot serialize against a live one —
+     * it is not on the same wire, so it must not be on the same gate.
+     */
+    fun releaseNetwork(networkId: Long) {
+        networkGates.remove(networkId)
+    }
+
+    /**
      * The identity a concurrent fetch may join.
      *
      * The key still omits the BOUNDARY, and for the original reason: two Paging generations of the

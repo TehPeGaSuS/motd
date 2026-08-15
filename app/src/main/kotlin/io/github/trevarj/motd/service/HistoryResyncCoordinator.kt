@@ -302,9 +302,15 @@ class HistoryResyncCoordinator @Inject constructor(
     // it, so a later reconnect's pass is never silenced by it.
     private val sessionTickets = AtomicLong()
     // Serializes retirement against a pass's terminal so a terminal cannot slip its republication
-    // between the tombstone and the clear. Always the OUTER lock: a session's own monitor is only
-    // ever taken inside it, never the reverse.
-    private val retireGuard = Any()
+    // between the tombstone and the clear, and arbitrates the per-network session slot: every read
+    // of [networkSessions] that decides who owns a network's aggregate progress entry, and every
+    // write that hands that slot over, happens under it. Always the OUTER lock: a session's own
+    // monitor is only ever taken inside it, never the reverse.
+    //
+    // Internal rather than private only so a test can hold it across an interleaving: the invariant
+    // it exists for is that an ownership decision and the publication it authorizes are one step,
+    // and no public entry point holds it long enough to prove that from the outside.
+    internal val retireGuard = Any()
     internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
     internal var targetsRequestLimit: Int = TARGETS_REQUEST_LIMIT
 
@@ -364,12 +370,16 @@ class HistoryResyncCoordinator @Inject constructor(
      * successor's session with the predecessor's give-up verdict would drop its queued buffers to
      * Idle mid-pass.
      */
-    fun settleNetworkPass(networkId: Long, result: HistoryResyncState, sourceIdentity: Any) {
-        val session = networkSessions[networkId] ?: return
-        if (!session.ownedBy(sourceIdentity)) return
-        if (!networkSessions.remove(networkId, session)) return
-        session.finish(result)
-    }
+    fun settleNetworkPass(networkId: Long, result: HistoryResyncState, sourceIdentity: Any): Unit =
+        // Under [retireGuard] like every other slot handover: the give-up verdict releases this
+        // network's progress header, and a successor may not register between the removal here and
+        // that release, or the successor's own header would be the one this call deletes.
+        synchronized(retireGuard) {
+            val session = networkSessions[networkId] ?: return@synchronized
+            if (!session.ownedBy(sourceIdentity)) return@synchronized
+            if (!networkSessions.remove(networkId, session)) return@synchronized
+            session.finish(result)
+        }
 
     /**
      * The network was taken offline deliberately (user disconnect or service shutdown). Nothing is
@@ -389,6 +399,13 @@ class HistoryResyncCoordinator @Inject constructor(
         networkSessions.remove(networkId)?.retire()
         clearAwaitingConnection(networkId)
         _passProgress.update { it - networkId }
+        // The loader's wire gates are keyed by network and live for the process, so a retirement is
+        // also the only moment anything can drop one. Without this the gate a deleted network built
+        // is never reclaimed, and — worse — a later connection reusing the id inherits the retired
+        // connection's semaphore, including a permit a request that outlived its socket still
+        // holds. Removal is safe against that straggler: it kept its own gate reference when it
+        // acquired, exactly as it does across the loader's existing width swap.
+        loader.releaseNetwork(networkId)
     }
 
     /**
@@ -594,6 +611,13 @@ class HistoryResyncCoordinator @Inject constructor(
             // unsettled buffer after the disconnect already cleared them. The guard is what makes
             // that check reliable — retireNetwork holds it across the clear.
             if (retireIfNetworkRetired()) return@synchronized
+            // Decided ONCE, and used for both the badge and the registration: painting a buffer
+            // AwaitingConnection without also registering it strands that badge for the process
+            // lifetime, because adoptAwaiting/clearAwaitingConnection/retireNetwork all clear by
+            // walking awaitingByNetwork and no later pass re-registers a buffer that closed in the
+            // meantime. When a successor already owns the slot its adoptAwaiting has run, so this
+            // pass's survivors are not waiting for a connection at all — they settle to Idle.
+            val owns = ownsNetworkSlot()
             val survivors = synchronized(monitor) {
                 val entries = generations.entries.toList()
                 generations.clear()
@@ -603,6 +627,10 @@ class HistoryResyncCoordinator @Inject constructor(
                     settled++
                     if (silenced.remove(bufferId)) {
                         // A permanently refused target is not waiting for anything; leave its badge.
+                        return@forEach
+                    }
+                    if (!owns) {
+                        finishSyncStatus(bufferId, generation, HistorySyncStatus.Idle)
                         return@forEach
                     }
                     finishSyncStatus(bufferId, generation, HistorySyncStatus.AwaitingConnection)
@@ -618,15 +646,59 @@ class HistoryResyncCoordinator @Inject constructor(
             }
         }
 
-        private fun publishProgress() {
-            val id = networkId ?: return
-            val snapshot = synchronized(monitor) { SyncPassProgress(total, settled) }
-            _passProgress.update { it + (id to snapshot) }
+        /**
+         * True when no OTHER session owns this network's slot.
+         *
+         * Per-buffer publications are arbitrated by the per-buffer generation counter, but the
+         * aggregate progress entry and the network-wide waiting set are keyed by network alone, so
+         * nothing stopped a superseded pass's terminal from deleting the live successor's header
+         * mid-pass. A terminal legitimately runs after its own session was removed from the map
+         * (see [endSession] and [settleNetworkPass]), so an empty slot counts as owned.
+         *
+         * Callers must hold [retireGuard]. Read outside it this is a check-then-act against a slot
+         * another thread is in the middle of handing over, which is not an ownership decision.
+         */
+        private fun ownsNetworkSlot(): Boolean {
+            val id = networkId ?: return false
+            val owner = networkSessions[id]
+            return owner == null || owner === this
         }
 
+        /**
+         * Publish this pass's aggregate counters, under the guard that arbitrates the slot.
+         *
+         * The guard is what makes the ownership decision and the mutation it authorizes one step.
+         * Deciding outside it lost updates in both directions: the slot is momentarily empty
+         * between a predecessor's [endSession] and its successor's [beginNetworkSession], so a
+         * predecessor could read "still mine", watch the successor register and publish its own
+         * (n, 0) header into that gap, and then overwrite that header with a stale count — or, from
+         * [releaseProgress], delete it outright, leaving a live pass with no header at all for as
+         * long as it had nothing further to emit.
+         */
+        private fun publishProgress() {
+            synchronized(retireGuard) {
+                val id = networkId ?: return
+                if (!ownsNetworkSlot()) return
+                val snapshot = synchronized(monitor) {
+                    // A retired pass publishes nothing at all. Its terminal already cleared this
+                    // header under the same guard, and the empty slot that terminal left behind
+                    // reads as "owned": without this check a publication that was already past its
+                    // own ownership decision would re-add the entry, and a retired network has no
+                    // later pass to clear it again.
+                    if (retiredLocked()) return
+                    SyncPassProgress(total, settled)
+                }
+                _passProgress.update { it + (id to snapshot) }
+            }
+        }
+
+        /** Drop this pass's header, under the same ownership guard as [publishProgress]. */
         private fun releaseProgress() {
-            val id = networkId ?: return
-            _passProgress.update { it - id }
+            synchronized(retireGuard) {
+                val id = networkId ?: return
+                if (!ownsNetworkSlot()) return
+                _passProgress.update { it - id }
+            }
         }
     }
 
@@ -1000,14 +1072,20 @@ class HistoryResyncCoordinator @Inject constructor(
      * Retire [session] from the per-network map (a newer pass may already have replaced it, which
      * the value-matched removal tolerates) and run its terminal. The terminal itself is always
      * safe: a superseded session's per-buffer generations no longer match, so it publishes nothing.
+     *
+     * Removal and terminal are one step under [retireGuard], which the terminal re-enters. Split,
+     * they left the slot briefly empty in front of a terminal that reads it: a successor that
+     * registered in that gap published a header this terminal then decided it still owned.
      */
     private fun endSession(
         networkId: Long,
         session: SyncStatusSession,
         terminal: (SyncStatusSession) -> Unit,
     ) {
-        networkSessions.remove(networkId, session)
-        terminal(session)
+        synchronized(retireGuard) {
+            networkSessions.remove(networkId, session)
+            terminal(session)
+        }
     }
 
     /**

@@ -515,6 +515,55 @@ class IrcClientTest {
     }
 
     @Test
+    fun `bouncer child without chathistory settles on unsupported once deferred caps land`() = runTest {
+        // ZNC shape: the authcid carries the '/' that marks a bouncer child, and the server never
+        // advertises draft/chathistory. Reporting NegotiatingOrOffline here never converged, so the
+        // Ready-session history gate that waits on it stayed held for the life of the connection.
+        val ft = FakeTransport()
+        val caps = fullLs.replace(" draft/chathistory", "")
+        val client = IrcClient(
+            config(sasl = SaslMechanism.PLAIN, saslUser = "motd/libera", saslPassword = "pw"),
+            ft.factory(),
+            clientScope(),
+        )
+        client.start()
+        runCurrent()
+        ft.feed(":srv CAP * LS :$caps")
+        runCurrent()
+        ft.feed(":srv CAP motd ACK :sasl batch message-tags server-time")
+        runCurrent()
+        ft.feed("AUTHENTICATE +")
+        runCurrent()
+        ft.feed(":srv 903 motd :SASL authentication successful")
+        runCurrent()
+        ft.feed(":srv 001 motd :Welcome")
+        runCurrent()
+
+        assertTrue(client.state.value is IrcClientState.Ready)
+        assertFalse(client.hasCap("draft/chathistory"))
+        assertTrue(client.pendingFeatureCaps.value.none { it.startsWith("draft/chathistory") })
+        assertEquals(HistoryAvailability.Unsupported, client.historyAvailability)
+    }
+
+    @Test
+    fun `chathistory awaiting its deferred cap ack still reads as negotiating`() = runTest {
+        // The window the old bouncer-child fallback actually existed for: the extension was
+        // requested and no ACK/NAK has landed yet, so "unsupported" would be a premature verdict.
+        val ft = FakeTransport()
+        val client = registered(ft, caps = fullLs.replace(" draft/chathistory", ""))
+        runCurrent()
+        assertEquals(HistoryAvailability.Unsupported, client.historyAvailability)
+
+        ft.feed(":srv CAP motd NEW :draft/chathistory")
+        runCurrent()
+        assertEquals(HistoryAvailability.NegotiatingOrOffline, client.historyAvailability)
+
+        ft.feed(":srv CAP motd ACK :draft/chathistory")
+        runCurrent()
+        assertTrue(client.historyAvailability is HistoryAvailability.Ready)
+    }
+
+    @Test
     fun `labeled chathistory reassembles nested batch`() = runTest {
         val ft = FakeTransport()
         val client = registered(ft)

@@ -172,7 +172,13 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        parseNotificationTarget(intent)?.let { notificationTarget = it }
+        warmNotificationEntry(
+            intent,
+            onTarget = { notificationTarget = it },
+            // The manager reconnects stale actors and throttles the checkpoint per connection, so
+            // repeated taps do not storm the wire.
+            onCheckpointHistory = { lifecycleScope.launch { connectionManager.checkpointHistory() } },
+        )
         acceptShareFrom(intent)
         acceptInvitationFrom(intent)
     }
@@ -214,26 +220,6 @@ class MainActivity : ComponentActivity() {
         if (messageId >= 0) lifecycleScope.launch { connectionManager.acceptInvite(messageId) }
     }
 
-    /**
-     * Extract the deep-jump target from a notification content intent, or null when the intent
-     * isn't one (e.g. a plain launcher launch). The msgid is optional — a null/missing msgid still
-     * opens the buffer and the AROUND fallback handles a not-yet-cached target.
-     */
-    private fun parseNotificationTarget(intent: Intent?): NotificationTarget? {
-        if (intent?.action != MotdNotifications.ACTION_OPEN_BUFFER &&
-            intent?.action != MotdNotifications.ACTION_ACCEPT_INVITE
-        ) return null
-        val bufferId = intent.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1L)
-        if (bufferId < 0) return null
-        return NotificationTarget(
-            bufferId = bufferId,
-            jumpToMsgid = intent.getStringExtra(MotdNotifications.EXTRA_JUMP_MSGID),
-            jumpToTime = intent.getLongExtra(MotdNotifications.EXTRA_JUMP_TIME, 0L),
-            jumpToEventId = intent.getLongExtra(MotdNotifications.EXTRA_EVENT_ID, -1L)
-                .takeIf { it >= 0L },
-        )
-    }
-
     /** Make at most one automatic POST_NOTIFICATIONS request; later denial routes to Settings. */
     private fun requestPostNotificationsIfNeeded() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
@@ -262,6 +248,47 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+/**
+ * Extract the deep-jump target from a notification content intent, or null when the intent isn't
+ * one (e.g. a plain launcher launch). The msgid is optional — a null/missing msgid still opens the
+ * buffer and the AROUND fallback handles a not-yet-cached target.
+ */
+internal fun parseNotificationTarget(intent: Intent?): NotificationTarget? {
+    if (intent?.action != MotdNotifications.ACTION_OPEN_BUFFER &&
+        intent?.action != MotdNotifications.ACTION_ACCEPT_INVITE
+    ) return null
+    val bufferId = intent.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1L)
+    if (bufferId < 0) return null
+    return NotificationTarget(
+        bufferId = bufferId,
+        jumpToMsgid = intent.getStringExtra(MotdNotifications.EXTRA_JUMP_MSGID),
+        jumpToTime = intent.getLongExtra(MotdNotifications.EXTRA_JUMP_TIME, 0L),
+        jumpToEventId = intent.getLongExtra(MotdNotifications.EXTRA_EVENT_ID, -1L)
+            .takeIf { it >= 0L },
+    )
+}
+
+/**
+ * Warm-start entry decision for a re-delivered intent.
+ *
+ * A notification content intent is both a deep jump and a history checkpoint: it is the one
+ * foreground entry ProcessLifecycleOwner never reports (the process was already foregrounded), so
+ * nothing else on this path re-checks what the server accepted while the process sat idle. Every
+ * other warm intent — a share, a plain launcher relaunch — is neither.
+ *
+ * Hoisted out of [MainActivity.onNewIntent] because that call site is only reachable with an
+ * instrumented activity, while the pairing itself is what the checkpoint depends on.
+ */
+internal fun warmNotificationEntry(
+    intent: Intent?,
+    onTarget: (NotificationTarget) -> Unit,
+    onCheckpointHistory: () -> Unit,
+) {
+    val target = parseNotificationTarget(intent) ?: return
+    onTarget(target)
+    onCheckpointHistory()
 }
 
 internal data class MainActivityUiState(

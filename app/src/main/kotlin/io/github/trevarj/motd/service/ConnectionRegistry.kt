@@ -223,6 +223,11 @@ internal class ConnectionRegistry(
                 cleanupJobs.forEach(Job::cancel)
                 observerJobs.clear()
                 pendingEchoJobs.clear()
+                // Generations MUST be invalidated before any stopAndJoin(): an actor's readyJob
+                // releases the history gate from a NonCancellable finally, which is a suspending
+                // round-trip back through THIS command loop. Invalidating first makes that release
+                // see a dead generation and short-circuit, so the loop never joins a child that is
+                // waiting on the loop. Reorder these two lines and shutdown deadlocks.
                 generations.invalidateAll()
                 callbackJobs.values.map { it.job }.forEach { it.cancelAndJoin() }
                 callbackJobs.clear()
@@ -398,6 +403,7 @@ internal class ConnectionRegistry(
             )
         ) return
 
+        // Invalidate before stopAndJoin -- see the ordering note in Command.Stop.
         generations.invalidate(row.id)
         existing?.actor?.stopAndJoin()
         val generation = generations.begin(row.id)
@@ -409,6 +415,7 @@ internal class ConnectionRegistry(
     }
 
     private suspend fun removeActor(networkId: Long, clearTerminal: Boolean) {
+        // Invalidate before stopAndJoin -- see the ordering note in Command.Stop.
         generations.invalidate(networkId)
         callbackJobs.filterValues { it.networkId == networkId }.toList().forEach { (token, callback) ->
             callback.job.cancelAndJoin()

@@ -1401,9 +1401,20 @@ class IrcClient(
     val historyAvailability: HistoryAvailability
         get() {
             if (_state.value !is IrcClientState.Ready) return HistoryAvailability.NegotiatingOrOffline
-            if (!hasCap("draft/chathistory")) {
-                val bouncerChild = config.bouncerNetId != null || config.saslUser?.contains('/') == true
-                return if (bouncerChild) {
+            if (!hasCap(CHATHISTORY_CAP)) {
+                // An absent CHATHISTORY is "not decided yet" only while the request for it is
+                // genuinely outstanding: a bouncer child publishes Ready before its deferred /
+                // post-BIND CAP ACK lands, and runtime CAP NEW can introduce the extension later.
+                // Once the deferred set settles without it, the answer is final.
+                //
+                // Deciding this from the login SHAPE instead (an authcid containing '/') pinned
+                // every ZNC network — which never advertises the extension at all — at
+                // NegotiatingOrOffline for the whole Ready session. That value never converged, so
+                // every waiter on it blocked forever instead of settling on "unsupported".
+                val awaitingCapDecision = _pendingFeatureCaps.value.any {
+                    it == CHATHISTORY_CAP || it.startsWith("$CHATHISTORY_CAP=")
+                }
+                return if (awaitingCapDecision) {
                     HistoryAvailability.NegotiatingOrOffline
                 } else {
                     HistoryAvailability.Unsupported
@@ -1493,6 +1504,7 @@ class IrcClient(
         const val CRITICAL_EVENT_CAPACITY = 4096
         const val OBSERVER_EVENT_CAPACITY = 4096
         const val DEFAULT_HISTORY_PAGE_LIMIT = 100
+        const val CHATHISTORY_CAP = "draft/chathistory"
     }
 }
 

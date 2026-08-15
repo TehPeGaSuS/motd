@@ -507,4 +507,40 @@ class ConnectionActorTest {
         assertTrue(!shouldApplyDozePushHandoff(false, false, DeliveryMode.UNIFIED_PUSH))
         assertTrue(!shouldApplyDozePushHandoff(false, true, DeliveryMode.PERSISTENT_SOCKET))
     }
+
+    @Test
+    fun persistentSocketArmsTheKeeperOnEveryForegroundWithAWantedNetwork() {
+        // The gap this closes: PERSISTENT_SOCKET only ever armed the service from
+        // MainActivity.onCreate, so a warm re-entry (notification tap via onNewIntent, or a return
+        // after the status notification's Stop) brought connections back with a freezable process.
+        assertTrue(
+            shouldArmForegroundKeeper(
+                deliveryMode = DeliveryMode.PERSISTENT_SOCKET,
+                hasWantedEmbeddedReality = false,
+                hasWantedNetwork = true,
+            ),
+        )
+        assertTrue(
+            !shouldArmForegroundKeeper(
+                deliveryMode = DeliveryMode.PERSISTENT_SOCKET,
+                hasWantedEmbeddedReality = false,
+                hasWantedNetwork = false,
+            ),
+        )
+        // UNIFIED_PUSH is unchanged: only embedded REALITY gets a keeper, and only while wanted.
+        assertTrue(
+            shouldArmForegroundKeeper(
+                deliveryMode = DeliveryMode.UNIFIED_PUSH,
+                hasWantedEmbeddedReality = true,
+                hasWantedNetwork = true,
+            ),
+        )
+        assertTrue(
+            !shouldArmForegroundKeeper(
+                deliveryMode = DeliveryMode.UNIFIED_PUSH,
+                hasWantedEmbeddedReality = false,
+                hasWantedNetwork = true,
+            ),
+        )
+    }
 }

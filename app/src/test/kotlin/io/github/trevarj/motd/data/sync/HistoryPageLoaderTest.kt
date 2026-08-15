@@ -650,6 +650,62 @@ class HistoryPageLoaderTest {
     }
 
     @Test
+    fun releasingARetiredNetworkLetsItsSuccessorPastAParkedRequest() = runTest {
+        // networkGates is keyed by network and lives for the process, so a request left parked on a
+        // socket that is already gone would otherwise gate the connection that replaces it — and a
+        // deleted network's semaphore would never be reclaimed at all. Retirement is the one moment
+        // anything drops a gate.
+        var entered = 0
+        val parked = CompletableDeferred<Unit>()
+        val history = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability =
+                HistoryAvailability.Ready(bothRefs, 100)
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                entered++
+                if (entered == 1) parked.await()
+                return messages(emptyList(), endOfHistory = true)
+            }
+        }
+
+        val predecessor = async {
+            loader.fetchMessages(
+                networkId, history, latestRequest("#chan"), bothRefs,
+                msgidAllowed = true, timeoutMs = 30_000,
+            )
+        }
+        runCurrent()
+        assertEquals(1, entered)
+
+        // Same connection, same gate: strict serialization is exactly what the gate is for.
+        val sameConnection = async {
+            loader.fetchMessages(
+                networkId, history, latestRequest("#other"), bothRefs,
+                msgidAllowed = true, timeoutMs = 30_000,
+            )
+        }
+        runCurrent()
+        assertEquals(1, entered)
+
+        // The connection is retired. Its replacement is a different wire, so it must not queue
+        // behind a page that is never coming.
+        loader.releaseNetwork(networkId)
+        val successor = async {
+            loader.fetchMessages(
+                networkId, history, latestRequest("#new"), bothRefs,
+                msgidAllowed = true, timeoutMs = 30_000,
+            )
+        }
+        runCurrent()
+        assertEquals(2, entered)
+        successor.await()
+
+        parked.complete(Unit)
+        predecessor.await()
+        sameConnection.await()
+        assertEquals(3, entered)
+    }
+
+    @Test
     fun timeoutWhileQueuedBehindAFullGateSurfacesAsRetryableFailure() = runTest {
         val requests = mutableListOf<String>()
         val history = object : HistoryPageLoader.HistorySource {

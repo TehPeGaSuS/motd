@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.service
 
 import android.annotation.SuppressLint
+import android.app.Notification
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -13,8 +14,10 @@ import kotlinx.coroutines.launch
 
 /**
  * Foreground-service keeper for the connection subsystem (plans/05). Thin [LifecycleService]:
- * onStartCommand → startForeground(status) + connectionManager.startAll(); onDestroy → stopAll().
- * START_STICKY so Android restarts it after a kill while PERSISTENT_SOCKET is in effect.
+ * onStartCommand → startForeground(status) + connectionManager.startAll(); explicit [ACTION_STOP] →
+ * stopAll() + stopSelf(). Service removal itself never stops the manager (see the note above the
+ * companion). START_STICKY so Android restarts it after a kill while PERSISTENT_SOCKET is in
+ * effect; a user-initiated stop returns START_NOT_STICKY instead.
  */
 @AndroidEntryPoint
 class IrcForegroundService : LifecycleService() {
@@ -50,11 +53,14 @@ class IrcForegroundService : LifecycleService() {
     // service in isolation, so the check is suppressed here rather than disabled project-wide.
     @SuppressLint("ForegroundServiceType")
     private fun startAsForeground() {
-        val notification = notifications.statusNotification(
-            connectedCount = 0,
-            reconnecting = false,
-            starting = true,
-        )
+        // Seeded from the CURRENT connection state rather than from a fixed "starting" shape.
+        // onStartCommand is re-entered on an already-running session — every app foreground re-arms
+        // the keeper under PERSISTENT_SOCKET, and START_STICKY redelivers after a kill — while
+        // connectionStates is a conflated StateFlow that emits nothing further on a stable session.
+        // A generic notification posted here therefore had nothing to repaint it: "Connected to 3
+        // networks" reverted to "Keeping chats connected" on every foreground and stayed there.
+        // Still correct for the cold start this was written for: an empty state map is "starting".
+        val notification = statusNotification(connectionManager.connectionStates.value)
         // FOREGROUND_SERVICE_TYPE_SPECIAL_USE is an API 34 constant; only pass the type on 34+.
         // On 29-33 use the 2-arg overload (the manifest still declares foregroundServiceType).
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -64,16 +70,18 @@ class IrcForegroundService : LifecycleService() {
         }
     }
 
-    private fun updateStatus(states: Map<Long, IrcClientState>) {
-        val connected = states.values.count { it is IrcClientState.Ready }
-        val reconnecting = states.values.any {
-            it is IrcClientState.Connecting || it is IrcClientState.Registering
-        }
-        val notification = notifications.statusNotification(
-            connectedCount = connected,
-            reconnecting = reconnecting && connected == 0,
-            starting = states.isEmpty(),
+    /** The one place connection state becomes a status notification, shared by both entry points. */
+    private fun statusNotification(states: Map<Long, IrcClientState>): Notification {
+        val shape = statusNotificationShape(states)
+        return notifications.statusNotification(
+            connectedCount = shape.connectedCount,
+            reconnecting = shape.reconnecting,
+            starting = shape.starting,
         )
+    }
+
+    private fun updateStatus(states: Map<Long, IrcClientState>) {
+        val notification = statusNotification(states)
         // POST_NOTIFICATIONS is only a runtime permission on API 33+; guard so lint's flow
         // analysis is satisfied and we don't attempt to post the status update without it.
         val canPost = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -95,4 +103,31 @@ class IrcForegroundService : LifecycleService() {
         const val STATUS_ID = 1
         const val ACTION_STOP = "io.github.trevarj.motd.service.STOP"
     }
+}
+
+/** The three arguments [MotdNotifications.statusNotification] takes, derived from live state. */
+internal data class StatusNotificationShape(
+    val connectedCount: Int,
+    val reconnecting: Boolean,
+    val starting: Boolean,
+)
+
+/**
+ * Connection state → status notification wording.
+ *
+ * "Starting" is the absence of any actor at all, not the act of (re-)starting the service: the
+ * service is entered again on a session that is already connected, and reporting that as starting
+ * is what reverted a truthful "Connected to N networks" to the generic text. Reconnecting is only
+ * reported while nothing is connected, so one flapping network cannot hide the others.
+ */
+internal fun statusNotificationShape(states: Map<Long, IrcClientState>): StatusNotificationShape {
+    val connected = states.values.count { it is IrcClientState.Ready }
+    val reconnecting = states.values.any {
+        it is IrcClientState.Connecting || it is IrcClientState.Registering
+    }
+    return StatusNotificationShape(
+        connectedCount = connected,
+        reconnecting = reconnecting && connected == 0,
+        starting = states.isEmpty(),
+    )
 }

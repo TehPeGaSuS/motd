@@ -504,7 +504,9 @@ class ConnectionManagerImpl @Inject constructor(
     // reconnect always re-verifies; elapsed-realtime because it keeps counting through Doze.
     private val completedCatchUps = java.util.concurrent.ConcurrentHashMap<Long, CompletedCatchUp>()
     // Foreground-verification passes only; the Ready-session pass stays inline (see launchCatchUp).
-    private val catchUpJobs = java.util.concurrent.ConcurrentHashMap<Long, Job>()
+    // The owning client is stored alongside the job: single flight is per CONNECTION, not merely
+    // per network, or a job pinned to a long-dead client outranks every later candidate.
+    private val catchUpJobs = java.util.concurrent.ConcurrentHashMap<Long, CatchUpJob>()
 
     @Volatile private var appForeground = false
     @Volatile private var deviceIdle = false
@@ -556,7 +558,16 @@ class ConnectionManagerImpl @Inject constructor(
                     } else {
                         backgroundRetention.cancel()
                         pushSuspendedIds.clear()
-                        reconcile(networkDao.observeAll().first())
+                        val all = networkDao.observeAll().first()
+                        reconcile(all)
+                        // Switching INTO PERSISTENT_SOCKET has to arm the keeper itself: this mode's
+                        // socket is only persistent while the service holds the process out of the
+                        // cached/frozen band, and MainActivity decides that once, in onCreate.
+                        // Guarded on appForeground because the switch is a user action taken in the
+                        // app, and Android 12+ rejects a foreground-service launch from background.
+                        if (appForeground && shouldArmKeeperOnForeground(mode, all)) {
+                            startForegroundKeeper()
+                        }
                     }
                 }
             }
@@ -640,17 +651,48 @@ class ConnectionManagerImpl @Inject constructor(
         startAll()
         val all = networkDao.observeAll().first()
         reconcile(all)
-        if (settings.settings.first().deliveryMode == DeliveryMode.UNIFIED_PUSH &&
-            hasWantedEmbeddedReality(all)
-        ) {
+        if (shouldArmKeeperOnForeground(settings.settings.first().deliveryMode, all)) {
             // Start while the app is visibly foreground. Android 12+ may reject a foreground-
             // service launch after onStop; pre-arming the thin keeper makes the subsequent grace
             // a real retention guarantee instead of relying on an unprotected process timer.
+            //
+            // Every foreground re-arms it, not just the cold one: MainActivity only decides this in
+            // onCreate, so a warm re-entry (a notification tap through onNewIntent, or a return
+            // after the user tapped the status notification's Stop) brought the connections back
+            // through [startAll] with no keeper behind them. A PERSISTENT_SOCKET session whose
+            // process is freezable the moment it backgrounds is exactly what the mode exists to
+            // prevent.
             startForegroundKeeper()
         }
+        foregroundHistoryCheckpoint()
+    }
+
+    /**
+     * The reconnect-then-verify pair every foreground entry runs, shared so the two entry points
+     * cannot drift apart.
+     *
+     * The order is the point: [verifyHistoryOnForeground] paints AwaitingConnection on every open
+     * buffer of a network that is not Ready, and that optimistic badge is only honest while
+     * something is actually driving the connection. [reconnectStale] is what wakes an actor parked
+     * in exponential backoff; without it in front, a warm entry could leave every buffer of a
+     * backing-off network waiting on nothing but that backoff's own expiry.
+     */
+    private suspend fun foregroundHistoryCheckpoint() {
         reconnectStale()
         verifyHistoryOnForeground()
     }
+
+    /** [startForegroundKeeper] precondition for a visibly-foreground process. */
+    private fun shouldArmKeeperOnForeground(mode: DeliveryMode, all: List<NetworkEntity>): Boolean =
+        shouldArmForegroundKeeper(
+            deliveryMode = mode,
+            hasWantedEmbeddedReality = hasWantedEmbeddedReality(all),
+            hasWantedNetwork = wantedNetworkIds(all, userIntents, connectionStates.value).isNotEmpty(),
+        )
+
+    // A warm notification tap is a foreground entry that ProcessLifecycleOwner never reports, so it
+    // runs the same reconnect-then-verify pair ON_START does rather than the verification alone.
+    override suspend fun checkpointHistory() = foregroundHistoryCheckpoint()
 
     /**
      * Every foreground is a history checkpoint, even when the socket survived Doze: a Ready
@@ -689,18 +731,45 @@ class ConnectionManagerImpl @Inject constructor(
      * coalescing rather than issuing the pass twice.
      */
     private fun launchCatchUp(networkId: Long, client: IrcClient) {
-        val candidate = scope.launch(start = CoroutineStart.LAZY) {
-            catchUpForConnection(networkId, client)
-        }
+        // The caller read [client] before this call, so the actor can have swapped in a replacement
+        // in between. A candidate pinned to that superseded connection would win ownership on
+        // identity, cancel the LIVE client's tracked pass, then exit on its own first loop check —
+        // leaving the network with no pass at all until the next checkpoint.
+        if (clientFor(networkId) !== client) return
+        val candidate = CatchUpJob(
+            client,
+            scope.launch(start = CoroutineStart.LAZY) { catchUpForConnection(networkId, client) },
+        )
+        // Recorded inside the atomic compute, cancelled outside it: ConcurrentHashMap.compute runs
+        // its remapping function under a bin lock, so it must not do anything that can block.
+        var displaced: CatchUpJob? = null
         val owner = catchUpJobs.compute(networkId) { _, existing ->
-            if (existing != null && existing.isActive) existing else candidate
+            chooseCatchUpOwner(existing, candidate).also { if (it !== existing) displaced = existing }
         }
+        // A pass pinned to a superseded connection has nothing left to verify; letting it run on
+        // would only re-attempt fetches against a dead socket behind its own replacement.
+        displaced?.job?.cancel()
         if (owner !== candidate) {
-            candidate.cancel()
+            candidate.job.cancel()
             return
         }
-        candidate.invokeOnCompletion { catchUpJobs.remove(networkId, candidate) }
-        candidate.start()
+        candidate.job.invokeOnCompletion { catchUpJobs.remove(networkId, candidate) }
+        candidate.job.start()
+    }
+
+    /**
+     * Cancel tracked verification passes for networks the wanted set no longer contains.
+     *
+     * These jobs run on the application scope, not the actor's, so actor teardown cannot stop them:
+     * a row deleted mid-pass or a Doze push hand-off (which retires actors through [reconcile]
+     * without going through [disconnect]) would otherwise leave the entry behind for the process
+     * lifetime. Cancelled, not retired: the pass's own abandon puts its buffers back into the
+     * optimistic waiting state, which backgrounding and Doze deliberately keep.
+     */
+    private fun cancelCatchUpsOutside(wantedIds: Set<Long>) {
+        catchUpJobs.keys.filterNot { it in wantedIds }.forEach { networkId ->
+            catchUpJobs.remove(networkId)?.job?.cancel()
+        }
     }
 
     /** Process background: retain embedded REALITY through a short app switch, even in Doze. */
@@ -792,7 +861,7 @@ class ConnectionManagerImpl @Inject constructor(
             // Service teardown resets sticky user intent (in-memory only).
             userIntents.clear()
             retiring.forEach { (networkId, client) ->
-                catchUpJobs.remove(networkId)?.cancelAndJoin()
+                catchUpJobs.remove(networkId)?.job?.cancelAndJoin()
                 historyResyncCoordinator.retireNetwork(networkId, client)
             }
             completedCatchUps.clear()
@@ -800,10 +869,10 @@ class ConnectionManagerImpl @Inject constructor(
             // never retired; retire them too so a catch-up racing shutdown can't leave badges
             // or progress painted.
             catchUpJobs.keys.filter { it !in retiring }.forEach { networkId ->
-                catchUpJobs.remove(networkId)?.cancelAndJoin()
+                catchUpJobs.remove(networkId)?.job?.cancelAndJoin()
                 historyResyncCoordinator.retireNetwork(networkId, null)
             }
-            catchUpJobs.values.forEach { it.cancel() }
+            catchUpJobs.values.forEach { it.job.cancel() }
             catchUpJobs.clear()
             pushSuspendedIds.clear()
             rosterRequests.values.forEach { it.cancel() }
@@ -843,7 +912,7 @@ class ConnectionManagerImpl @Inject constructor(
         registry.disconnect(networkId)
         // The verification loop is ours, not the actor's, so nothing else stops it; stop it before
         // retiring so it cannot start another attempt behind the retirement.
-        catchUpJobs.remove(networkId)?.cancelAndJoin()
+        catchUpJobs.remove(networkId)?.job?.cancelAndJoin()
         // A deliberate disconnect is the one case where "waiting for connection" is a lie: nothing
         // is coming. Backgrounding and Doze deliberately keep those entries.
         historyResyncCoordinator.retireNetwork(networkId, client)
@@ -886,6 +955,10 @@ class ConnectionManagerImpl @Inject constructor(
             wantedIds = wantedIds,
             awaitingCertTrust = _certPrompts.value.mapTo(mutableSetOf()) { it.networkId },
         )
+        // Reconcile is the only teardown path a deleted row or the Doze push hand-off takes, and
+        // neither goes through [disconnect] or [stopAll], the two places that used to be able to
+        // clear a tracked pass.
+        cancelCatchUpsOutside(wantedIds)
         deletedIds.forEach {
             eventProcessor.evictNetwork(it)
             _lagStates.update { states -> states - it }
@@ -1386,28 +1459,19 @@ class ConnectionManagerImpl @Inject constructor(
                 }
             }
             launch {
-                val historyReady = awaitHistoryReady(client)
-                // Marker settlement is entry-critical even when CHATHISTORY is unsupported: the
-                // frozen unread target must use the server marker before this gate is released.
-                initialReadMarkers.join()
-                if (!isCurrent()) return@launch
-                if (!historyReady) {
-                    if (isCurrent() && clientFor(row.id) === client) {
-                        registry.historyCatchUpFinished(row.id, generation)
-                    }
-                    return@launch
-                }
-                catchUpForConnection(row.id, client)
-                if (isCurrent() && clientFor(row.id) === client) {
-                    registry.historyCatchUpFinished(row.id, generation)
-                }
-                // Only after the user-facing catch-up gate releases: trickle in targets older than
-                // the initial-sync window. Cancelled with this Ready session; resumes durably.
-                if (isCurrent() && clientFor(row.id) === client) {
-                    historyResyncCoordinator.backfillTargets(row.id, client) {
-                        clientFor(row.id) === client
-                    }
-                }
+                runHistoryCatchUpSession(
+                    client = client,
+                    isCurrent = isCurrent,
+                    liveClient = { clientFor(row.id) },
+                    awaitReadMarkerSettlement = { initialReadMarkers.join() },
+                    releaseGate = { registry.historyCatchUpFinished(row.id, generation) },
+                    catchUp = { catchUpForConnection(row.id, client) },
+                    backfill = {
+                        historyResyncCoordinator.backfillTargets(row.id, client) {
+                            clientFor(row.id) === client
+                        }
+                    },
+                )
             }
             launch {
                 // A bouncer child publishes its post-BIND CAP ACK after the first Ready snapshot.
@@ -1459,11 +1523,26 @@ class ConnectionManagerImpl @Inject constructor(
             )) {
                 is HistoryResyncState.Failed -> {
                     if (result is HistoryResyncState.Incomplete && result.awaitsTargetClassification) {
-                        if (!client.targetClassificationReady.value) {
-                            client.targetClassificationReady.first { it }
+                        // Bounded, and with the ordinary retry budget behind it. A silent socket
+                        // stays Ready for the ~120s the ping watchdog allows, so this branch is
+                        // reachable on a connection that will never publish CHANTYPES at all; the
+                        // unbounded wait that used to sit here parked this pass on that dead
+                        // client's StateFlow for the rest of the process, and a job stuck in
+                        // [catchUpJobs] used to outrank — and cancel — every later candidate.
+                        val classified = awaitTargetClassification(client.targetClassificationReady)
+                        if (clientFor(networkId) !== client) return
+                        if (classified) continue
+                        if (attempt >= CATCH_UP_MAX_ATTEMPTS) {
+                            Log.w(
+                                TAG,
+                                "CHANTYPES never settled for network $networkId; giving up after " +
+                                    "$attempt attempts",
+                            )
+                            historyResyncCoordinator.settleNetworkPass(networkId, result, client)
+                            return
                         }
-                        if (clientFor(networkId) === client) continue
-                        return
+                        delay(catchUpRetryDelayMs(attempt++))
+                        continue
                     }
                     if (result is HistoryResyncState.Incomplete || result is HistoryResyncState.Capped) {
                         diagnostics.record("history", "catch_up_incomplete") {
@@ -1586,13 +1665,6 @@ class ConnectionManagerImpl @Inject constructor(
         }
     }
 
-    private suspend fun awaitCapabilityAvailable(client: IrcClient, capability: String) {
-        if (client.hasCap(capability)) return
-        client.state.filterIsInstance<IrcClientState.Ready>().first { ready ->
-            ready.caps.any { it == capability || it.startsWith("$capability=") }
-        }
-    }
-
     /**
      * Wait until either read-marker extension is negotiated. Soju offers `draft/read-marker`
      * (MARKREAD) and/or `soju.im/read` (READ); a server exposing only the soju fallback would leave
@@ -1619,18 +1691,6 @@ class ConnectionManagerImpl @Inject constructor(
     private fun isReadMarkerCap(cap: String): Boolean =
         cap == READ_MARKER_CAP || cap.startsWith("$READ_MARKER_CAP=") ||
             cap == SOJU_READ_CAP || cap.startsWith("$SOJU_READ_CAP=")
-
-    private suspend fun awaitHistoryReady(client: IrcClient): Boolean {
-        when (client.historyAvailability) {
-            is HistoryAvailability.Ready -> return true
-            HistoryAvailability.Unsupported -> return false
-            HistoryAvailability.NegotiatingOrOffline -> Unit
-        }
-        client.state.filterIsInstance<IrcClientState.Ready>().first {
-            client.historyAvailability !is HistoryAvailability.NegotiatingOrOffline
-        }
-        return client.historyAvailability is HistoryAvailability.Ready
-    }
 
     private suspend fun openBuffers(networkId: Long): List<OpenBufferTarget> =
         bufferDao.openTargets(networkId).map { OpenBufferTarget(it.id, it.name, it.pinned) }
@@ -2182,6 +2242,7 @@ class ConnectionManagerImpl @Inject constructor(
         // Stable logcat tag for reconnect catch-up failures.
         private const val TAG = "MotdCatchUp"
         const val READ_MARKER_CAP = "draft/read-marker"
+        const val CHATHISTORY_CAP = "draft/chathistory"
         const val SOJU_READ_CAP = "soju.im/read"
         const val WEBPUSH_CAP = "soju.im/webpush"
         const val READ_MARKER_RESPONSE_TIMEOUT_MS = 5_000L
@@ -2197,6 +2258,30 @@ class ConnectionManagerImpl @Inject constructor(
         fun shouldRunService(deliveryPersistent: Boolean, hasNetworks: Boolean): Boolean =
             deliveryPersistent && hasNetworks
     }
+}
+
+/**
+ * Whether a visibly-foreground process should have the thin keeper service running.
+ *
+ * PERSISTENT_SOCKET's socket is only actually persistent while the foreground service holds the
+ * process out of the cached/frozen band, and that decision used to be made once, in
+ * `MainActivity.onCreate`. Three reachable states then left a live socket with no service behind
+ * it: the first network added after that check, a runtime UNIFIED_PUSH → PERSISTENT_SOCKET switch,
+ * and a re-entry after the user tapped the status notification's Stop (singleTop routes that
+ * through `onNewIntent`, which never re-armed it). Under UNIFIED_PUSH the keeper is still only for
+ * embedded REALITY, whose transport cannot survive a frozen process during the background grace.
+ * Same pure-function testing style as [shouldApplyDozePushHandoff].
+ */
+internal fun shouldArmForegroundKeeper(
+    deliveryMode: DeliveryMode,
+    hasWantedEmbeddedReality: Boolean,
+    hasWantedNetwork: Boolean,
+): Boolean = when (deliveryMode) {
+    DeliveryMode.UNIFIED_PUSH -> hasWantedEmbeddedReality
+    DeliveryMode.PERSISTENT_SOCKET -> ConnectionManagerImpl.shouldRunService(
+        deliveryPersistent = true,
+        hasNetworks = hasWantedNetwork,
+    )
 }
 
 internal fun shouldApplyDozePushHandoff(
@@ -2253,6 +2338,279 @@ internal fun networksToRetire(known: Set<Long>, trackedCatchUps: Set<Long>): Set
 
 /** A catch-up pass that converged, tagged with the exact socket that served it. */
 internal data class CompletedCatchUp(val client: Any, val atElapsedMs: Long)
+
+/** A tracked foreground verification pass, tagged with the exact connection it verifies. */
+internal data class CatchUpJob(val client: Any, val job: Job)
+
+/**
+ * Single-flight ownership for [ConnectionManagerImpl.launchCatchUp].
+ *
+ * A live pass only outranks a new candidate when it is verifying the SAME connection; that is the
+ * case the single flight exists for, and the coordinator's own request coalescing handles the
+ * overlap. Keying ownership on the network alone let a job that could no longer make progress —
+ * one pinned to a client the actor already replaced — silently cancel every later candidate for
+ * that network, disabling foreground history verification until the process was killed. Same pure
+ * function testing style as [wantedNetworkIds] / [shouldRunForegroundVerification].
+ */
+internal fun chooseCatchUpOwner(existing: CatchUpJob?, candidate: CatchUpJob): CatchUpJob =
+    if (existing != null && existing.job.isActive && existing.client === candidate.client) {
+        existing
+    } else {
+        candidate
+    }
+
+/**
+ * Bounded wait for a connection's target classification (CHANTYPES / end of the registration burst).
+ *
+ * [IrcClient.targetClassificationReady] is a StateFlow on ONE client, and a client that dies before
+ * 005/376 arrives conflates its `stop()` write to the same `false` and then emits nothing ever
+ * again — a StateFlow has no completion signal, so an unbounded collector on it parks forever.
+ * Returns false on expiry so the caller falls back to its ordinary attempt-counted retry path
+ * instead of holding a process-lifetime coroutine open on a dead socket. The bound matches the one
+ * [HistoryResyncCoordinator.resyncNetwork] and `backfillTargets` already use.
+ */
+internal suspend fun awaitTargetClassification(
+    ready: StateFlow<Boolean>,
+    timeoutMs: Long = HistoryResyncCoordinator.TARGET_CLASSIFICATION_WAIT_TIMEOUT_MS,
+): Boolean {
+    if (ready.value) return true
+    return withTimeoutOrNull(timeoutMs) { ready.first { it } } ?: false
+}
+
+/**
+ * How long a Ready session waits for a terminal answer about `draft/chathistory` before releasing
+ * the entry gate. Generous, because it only ever elapses on a connection that left a deferred
+ * `CAP REQ` unanswered; the CAP NEW re-arm in [ConnectionManagerImpl.onReadySession] keeps the late
+ * case covered, so expiring here costs a delay rather than the catch-up itself.
+ */
+internal const val HISTORY_CAP_DECISION_TIMEOUT_MS = 15_000L
+
+/**
+ * How long the entry gate waits for read-marker convergence before releasing anyway. Marker
+ * settlement is entry-critical (the frozen unread target prefers the server marker), but a server
+ * that never answers its CAP REQ must not be able to hold chat entry for the whole Ready session.
+ */
+internal const val READ_MARKER_SETTLE_TIMEOUT_MS = 10_000L
+
+/** `draft/chathistory`, with or without a `=value` suffix. */
+internal fun isChatHistoryCap(cap: String): Boolean =
+    cap == ConnectionManagerImpl.CHATHISTORY_CAP ||
+        cap.startsWith("${ConnectionManagerImpl.CHATHISTORY_CAP}=")
+
+/**
+ * Wait for a terminal answer about CHATHISTORY on one connection.
+ *
+ * Settle-aware, in exactly the shape `awaitReadMarkerCapabilityDecision` uses, rather than a bare
+ * wait for the next Ready snapshot: a bouncer child publishes Ready before its post-BIND CAP ACK
+ * lands, but a server that simply does not offer the extension publishes no further snapshot at
+ * all, so a snapshot wait never returned there.
+ *
+ * And bounded, because settle-aware is still not enough on its own: [pendingFeatureCaps] only sheds
+ * a cap on ACK/NAK/DEL, so a deferred `CAP REQ :draft/chathistory` the server never answers strands
+ * the wait — and with it `historyCatchUpPending`, which every entry-critical wait in the chat screen
+ * blocks on — for the whole Ready session. That is C5's defect reached by a second route. On expiry
+ * the gate releases with a negative verdict and [rearmHistoryCatchUp] stays armed, so a late ACK
+ * still gets its catch-up.
+ *
+ * Same seam-injected testing style as [awaitTargetClassification].
+ */
+internal suspend fun awaitHistoryCapDecision(
+    availability: () -> HistoryAvailability,
+    pendingFeatureCaps: StateFlow<Set<String>>,
+    timeoutMs: Long = HISTORY_CAP_DECISION_TIMEOUT_MS,
+): Boolean {
+    when (availability()) {
+        is HistoryAvailability.Ready -> return true
+        HistoryAvailability.Unsupported -> return false
+        HistoryAvailability.NegotiatingOrOffline -> Unit
+    }
+    withTimeoutOrNull(timeoutMs) {
+        pendingFeatureCaps.first { pending ->
+            availability() !is HistoryAvailability.NegotiatingOrOffline ||
+                pending.none(::isChatHistoryCap)
+        }
+    }
+    return availability() is HistoryAvailability.Ready
+}
+
+/**
+ * One Ready session's entry decision for CHATHISTORY: settle the capability, release the
+ * user-facing gate, run the catch-up, then trickle the backfill.
+ *
+ * Extracted from [ConnectionManagerImpl.onReadySession] because the defects here live purely in the
+ * ORDER of those four steps, which no connection-level test can reach:
+ *
+ *  - [releaseGate] must fire exactly once and on EVERY exit, cancellation and an unexpected throw
+ *    included. `historyCatchUpPending` is what the chat screen's entry waits block on, so a gate
+ *    that outlives its branch is a permanently unreachable chat for the rest of the session.
+ *  - [claimed] must resolve at the DECISION, never at the end of the branch. The branch continues
+ *    into [backfill], a paced trickle that runs for as long as an account has targets; resolving
+ *    the claim behind it would leave [rearmHistoryCatchUp] queued behind a background job — the
+ *    exact stall the re-arm exists to prevent.
+ *  - [backfill] runs only behind a catch-up that actually happened. A connection with no CHATHISTORY
+ *    has nothing to enumerate, and starting it there only spends the classification wait to find
+ *    that out.
+ *
+ * [stillCurrent] is the caller's "this session still owns this connection" check; a false answer is
+ * not a failure, it just means someone else owns the work now.
+ */
+internal suspend fun decideHistoryCatchUp(
+    awaitHistoryReady: suspend () -> Boolean,
+    awaitReadMarkerSettlement: suspend () -> Unit,
+    stillCurrent: () -> Boolean,
+    claimed: CompletableDeferred<Boolean>,
+    releaseGate: suspend () -> Unit,
+    catchUp: suspend () -> Unit,
+    backfill: suspend () -> Unit,
+    readMarkerSettleTimeoutMs: Long = READ_MARKER_SETTLE_TIMEOUT_MS,
+) {
+    var gateReleased = false
+    suspend fun release() {
+        if (gateReleased) return
+        gateReleased = true
+        if (stillCurrent()) releaseGate()
+    }
+    try {
+        val historyReady = awaitHistoryReady()
+        // Marker settlement is entry-critical even when CHATHISTORY is unsupported: the frozen
+        // unread target must use the server marker before this gate is released. Bounded, because
+        // it is the LAST wait in front of the gate: awaitReadMarkerCapabilityDecision settles on
+        // pendingFeatureCaps, which only sheds a cap on ACK/NAK/DEL, so a bouncer that answers its
+        // post-welcome CAP REQ with nothing would hold chat entry for the whole Ready session --
+        // C5's symptom reached by a third route. On expiry the frozen unread target falls back to
+        // the local marker, and the read-marker waiter beside this branch still converges it later.
+        withTimeoutOrNull(readMarkerSettleTimeoutMs) { awaitReadMarkerSettlement() }
+        if (!stillCurrent()) return
+        if (!historyReady) {
+            release()
+            return
+        }
+        claimed.complete(true)
+        catchUp()
+        release()
+        // Only after the user-facing catch-up gate releases: trickle in targets older than the
+        // initial-sync window. Cancelled with this Ready session; resumes durably.
+        if (stillCurrent()) backfill()
+    } finally {
+        // A no-op once the claim above resolved it. Every other exit — an unsupported verdict, a
+        // superseded session, cancellation, a throw — means this session claimed no catch-up, which
+        // is exactly what re-arms the waiter.
+        claimed.complete(false)
+        // NonCancellable because the release is a registry round-trip, and cancellation is precisely
+        // the case that used to strand the gate.
+        withContext(NonCancellable) { release() }
+    }
+}
+
+/**
+ * The CAP NEW stand-in for an entry catch-up the decision declined.
+ *
+ * RegistrationStateMachine puts `draft/chathistory` in the PRE-bind CAP REQ set, so it never lands
+ * in the post-welcome deferred set [awaitHistoryCapDecision] settles on. A bouncer that advertises
+ * the extension only through a post-welcome CAP NEW therefore reached Ready with an empty pending
+ * set, settled on "unsupported", and skipped its Ready-session catch-up ENTIRELY — nothing was left
+ * to re-trigger when the ACK finally landed.
+ *
+ * Never runs when the decision already [claimed] the catch-up, so this cannot double-issue a pass;
+ * and it waits on [claimed] rather than on the decision branch's completion, so it is not queued
+ * behind that branch's backfill.
+ */
+internal suspend fun rearmHistoryCatchUp(
+    claimed: Deferred<Boolean>,
+    awaitCapability: suspend () -> Unit,
+    stillCurrent: () -> Boolean,
+    catchUp: suspend () -> Unit,
+    backfill: suspend () -> Unit,
+) {
+    if (claimed.await()) return
+    awaitCapability()
+    if (!stillCurrent()) return
+    catchUp()
+    // Same ordering the entry decision uses: the paced older-than-window trickle runs strictly
+    // after the catch-up, and only behind one that actually happened.
+    if (stillCurrent()) backfill()
+}
+
+/** Wait until [capability] is ACKed on this exact connection; returns immediately if it already is. */
+internal suspend fun awaitCapabilityAvailable(client: IrcClient, capability: String) {
+    if (client.hasCap(capability)) return
+    client.state.filterIsInstance<IrcClientState.Ready>().first { ready ->
+        ready.caps.any { it == capability || it.startsWith("$capability=") }
+    }
+}
+
+/** This connection's terminal answer about CHATHISTORY; see [awaitHistoryCapDecision]. */
+internal suspend fun awaitHistoryReady(client: IrcClient): Boolean =
+    awaitHistoryCapDecision({ client.historyAvailability }, client.pendingFeatureCaps)
+
+/**
+ * One Ready session's whole history catch-up: the entry decision and the CAP NEW re-arm that backs
+ * it up, wired to the connection they belong to.
+ *
+ * Extracted from [ConnectionManagerImpl.onReadySession] so the WIRING is reachable by a test with a
+ * real client, not only the two decisions it composes. What has to hold here is which connection
+ * property each branch consults — the entry decision settles on [IrcClient.historyAvailability] and
+ * [IrcClient.pendingFeatureCaps], the re-arm waits for `draft/chathistory` itself — and pointing
+ * either at something that never converges is silent: the session simply never catches up.
+ *
+ * [ownsConnection] is deliberately ONE predicate shared by both branches: the registry generation
+ * is live AND the actor has not swapped the client underneath us. Both halves matter — a pass
+ * pinned to a replaced client can no longer verify anything, and the entry gate is keyed on the
+ * generation.
+ *
+ * Both branches are left untracked in `catchUpJobs` on purpose. They are this Ready session's
+ * passes and must die with the session, whereas a tracked pass runs on the process-lifetime
+ * application scope and would outlive the connection it verifies. Overlap with a concurrent
+ * foreground verification is handled a layer down: the coordinator coalesces flights per
+ * (network, connection).
+ */
+internal suspend fun runHistoryCatchUpSession(
+    client: IrcClient,
+    isCurrent: () -> Boolean,
+    liveClient: () -> IrcClient?,
+    awaitReadMarkerSettlement: suspend () -> Unit,
+    releaseGate: suspend () -> Unit,
+    catchUp: suspend () -> Unit,
+    backfill: suspend () -> Unit,
+): Unit = coroutineScope {
+    // True once this session's entry decision has claimed the catch-up; false once it is known to
+    // have declined it. Completed at the DECISION rather than at the end of the branch, and never
+    // by awaiting the branch itself: the branch goes on to the paced backfill trickle, which runs
+    // for as long as an account has targets, and the CAP NEW re-arm must not queue behind it.
+    // Always completed, cancellation included, so the re-arm can never be stranded by the branch
+    // it observes.
+    val claimed = CompletableDeferred<Boolean>()
+    val ownsConnection = { isCurrent() && liveClient() === client }
+    launch {
+        decideHistoryCatchUp(
+            awaitHistoryReady = { awaitHistoryReady(client) },
+            awaitReadMarkerSettlement = awaitReadMarkerSettlement,
+            stillCurrent = ownsConnection,
+            claimed = claimed,
+            releaseGate = releaseGate,
+            catchUp = catchUp,
+            backfill = backfill,
+        )
+    }
+    // Runtime CAP NEW can introduce CHATHISTORY after the entry-critical decision, and
+    // RegistrationStateMachine puts chathistory in the PRE-bind CAP REQ set, so it is never in the
+    // post-welcome deferred set that [awaitHistoryReady] settles on: a bouncer that only advertises
+    // the extension later reached Ready with an empty pending set, decided "unsupported", and
+    // skipped this Ready session's catch-up entirely — not merely late. Deliberately OUTSIDE the
+    // entry gate: entry must never block on a capability that may never arrive.
+    launch {
+        rearmHistoryCatchUp(
+            claimed = claimed,
+            awaitCapability = { awaitCapabilityAvailable(client, ConnectionManagerImpl.CHATHISTORY_CAP) },
+            stillCurrent = ownsConnection,
+            catchUp = catchUp,
+            // The entry branch is the only other caller of the backfill, so without this an account
+            // that reaches history only through CAP NEW would never enumerate targets older than
+            // the initial-sync window at all — not late, never.
+            backfill = backfill,
+        )
+    }
+}
 
 /** Skip a foreground verification only when the same socket already converged very recently. */
 internal const val FOREGROUND_VERIFY_THROTTLE_MS = 30_000L

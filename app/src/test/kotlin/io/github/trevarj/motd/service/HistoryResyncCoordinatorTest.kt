@@ -48,20 +48,25 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -2877,6 +2882,52 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun retiringANetworkDropsTheLoadersWireGateForIt() = runTest {
+        // The loader's per-network gates are process-lifetime, and retirement is the only thing that
+        // reclaims one. Until it did, a request parked on the socket that just went away kept its
+        // permit, and the connection replacing it queued behind a page that was never coming.
+        val loader = HistoryPageLoader(processor)
+        coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader)
+        var entered = 0
+        val parked = CompletableDeferred<Unit>()
+        val refs = setOf(HistoryReferenceType.TIMESTAMP)
+        val source = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability = HistoryAvailability.Ready(refs, 100)
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                entered++
+                if (entered == 1) parked.await()
+                return ChatHistoryResponse.Messages(
+                    events = emptyList(),
+                    oldest = null,
+                    newest = null,
+                    endOfHistory = true,
+                )
+            }
+        }
+        fun latest(target: String) =
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = 50)
+
+        val stranded = async {
+            loader.fetchMessages(networkId, source, latest("#chan"), refs, msgidAllowed = false, timeoutMs = 30_000)
+        }
+        runCurrent()
+        assertEquals(1, entered)
+
+        coordinator.retireNetwork(networkId, null)
+
+        val successor = async {
+            loader.fetchMessages(networkId, source, latest("#chan"), refs, msgidAllowed = false, timeoutMs = 30_000)
+        }
+        runCurrent()
+        // The replacement connection is on the wire while the retired one's request is still parked.
+        assertEquals(2, entered)
+        successor.await()
+
+        parked.complete(Unit)
+        stranded.await()
+    }
+
+    @Test
     fun retiringWithoutAConnectionLeavesTheNextReconnectsPassPublishing() = runTest {
         // A retirement that could not name its connection covers the passes that already exist, not
         // the network: a later reconnect has to sync and paint statuses normally.
@@ -3000,6 +3051,179 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun abandoningASupersededPassKeepsTheSuccessorsProgressHeader() = runTest {
+        val stalePrepared = CompletableDeferred<Unit>()
+        val releaseStale = CompletableDeferred<Unit>()
+        var staleIsCurrent = true
+        val stale = FakeSource { FakeResponse(endOfHistory = true) }
+        var probes = 0
+        stale.onAvailability = {
+            // The per-target probe (the pass-open probe is the first): the session is registered
+            // and its progress published, and no wire permit is held yet, so the successor below
+            // can run its own pass to a terminal while this one is parked.
+            if (++probes == 2) {
+                stalePrepared.complete(Unit)
+                releaseStale.await()
+            }
+        }
+        val successor = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
+                else -> throw IOException("transport died mid-pass")
+            }
+        }
+
+        val stalePass = async {
+            coordinator.resyncNetwork(
+                networkId,
+                openTargets(bufferId to "#chan"),
+                stale,
+                isCurrent = { staleIsCurrent },
+            )
+        }
+        stalePrepared.await()
+        // The successor connection's pass takes the session slot and fails retryably, so its
+        // statuses and its frozen progress header are deliberately left painted for the retry.
+        val successorResult =
+            coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), successor)
+        assertTrue(successorResult is HistoryResyncState.Failed)
+        val frozen = coordinator.passProgress.value
+        assertEquals(mapOf(networkId to SyncPassProgress(total = 1, settled = 0)), frozen)
+
+        // Only now does the predecessor learn its connection was replaced, so its pass abandons.
+        // It owns nothing any more: deleting the aggregate progress entry here blanked the live
+        // successor's sync header, and re-registering its survivors stranded ids the successor's
+        // own adoption had already cleared.
+        staleIsCurrent = false
+        releaseStale.complete(Unit)
+        stalePass.await()
+
+        assertEquals(frozen, coordinator.passProgress.value)
+        assertEquals(mapOf(bufferId to HistorySyncStatus.Syncing), coordinator.syncStatuses.value)
+
+        // The retry loop's give-up verdict still settles the successor's own pass normally.
+        coordinator.settleNetworkPass(networkId, successorResult, successor)
+        assertEquals(emptyMap<Long, SyncPassProgress>(), coordinator.passProgress.value)
+    }
+
+    @Test
+    fun abandoningASupersededPassStrandsNoWaitingBadge() = runTest {
+        // The buffer the predecessor also held, and which closed before the successor's pass, so
+        // the successor never re-queues it and its own adoptAwaiting cannot clear it either.
+        val closedBufferId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "#closed",
+                displayName = "#closed",
+                type = BufferType.CHANNEL,
+            ),
+        )
+        val stalePrepared = CompletableDeferred<Unit>()
+        val releaseStale = CompletableDeferred<Unit>()
+        var staleIsCurrent = true
+        val stale = FakeSource { FakeResponse(endOfHistory = true) }
+        var probes = 0
+        stale.onAvailability = {
+            // Parked after registration, before any wire permit is held (see the sibling test).
+            if (++probes == 2) {
+                stalePrepared.complete(Unit)
+                releaseStale.await()
+            }
+        }
+        val successor = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
+                else -> throw IOException("transport died mid-pass")
+            }
+        }
+
+        val stalePass = async {
+            coordinator.resyncNetwork(
+                networkId,
+                openTargets(bufferId to "#chan", closedBufferId to "#closed"),
+                stale,
+                isCurrent = { staleIsCurrent },
+            )
+        }
+        stalePrepared.await()
+        // The successor's pass takes the slot with only the still-open buffer.
+        coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), successor)
+
+        staleIsCurrent = false
+        releaseStale.complete(Unit)
+        stalePass.await()
+
+        // Painting AwaitingConnection without registering it for adoption stranded the badge for
+        // the process lifetime: adoptAwaiting, clearAwaitingConnection and retireNetwork all clear
+        // by walking awaitingByNetwork, and no later pass re-queues a buffer that has closed.
+        assertNull(coordinator.syncStatuses.value[closedBufferId])
+        // A live successor owns the slot, so the predecessor may not repaint the open buffer either.
+        assertEquals(HistorySyncStatus.Syncing, coordinator.syncStatuses.value[bufferId])
+    }
+
+    /** Bounded spin for a condition another thread produces; the test dispatcher cannot drive it. */
+    private fun awaitOnAnotherThread(what: String, timeoutMs: Long = 5_000, condition: () -> Boolean) {
+        val deadline = System.nanoTime() + timeoutMs * 1_000_000L
+        while (!condition()) {
+            if (System.nanoTime() > deadline) fail("timed out waiting for $what")
+            Thread.sleep(2)
+        }
+    }
+
+    @Test
+    fun aPassProgressPublicationCannotInterleaveWithANetworkSlotHandover() = runBlocking {
+        // Real threads on purpose. The defect is a check-then-act: the pass decided it still owned
+        // its network's progress entry, and only then wrote it. Between those two steps the slot
+        // can change hands — a predecessor's endSession leaves it empty and the successor's
+        // beginNetworkSession takes it — so the write landed on a header the pass no longer owned,
+        // overwriting the successor's count or (from the release side) deleting it outright. A
+        // single-threaded test dispatcher can never interleave inside a non-suspending function.
+        //
+        // Holding the coordinator's own ownership guard here IS that handover: beginNetworkSession
+        // takes the same guard, so a real successor could not be driven concurrently and observed
+        // at the same time. What the assertion proves is that the publication does not slip past a
+        // slot transition in progress.
+        val onTheWire = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
+                else -> {
+                    onTheWire.complete(Unit)
+                    release.await()
+                    FakeResponse(listOf(message("m1", 100)), endOfHistory = true)
+                }
+            }
+        }
+
+        val pass = launch(Dispatchers.IO) {
+            coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), source)
+        }
+        withTimeout(10_000) { onTheWire.await() }
+        assertEquals(
+            mapOf(networkId to SyncPassProgress(total = 1, settled = 0)),
+            coordinator.passProgress.value,
+        )
+
+        synchronized(coordinator.retireGuard) {
+            release.complete(Unit)
+            // The per-buffer terminal is published from inside the session monitor, immediately
+            // before the aggregate publication, so observing it puts the pass at the guard.
+            awaitOnAnotherThread("the buffer to settle") {
+                coordinator.syncStatuses.value[bufferId] != HistorySyncStatus.Syncing
+            }
+            Thread.sleep(200)
+            assertEquals(
+                mapOf(networkId to SyncPassProgress(total = 1, settled = 0)),
+                coordinator.passProgress.value,
+            )
+        }
+
+        withTimeout(10_000) { pass.join() }
+        assertEquals(emptyMap<Long, SyncPassProgress>(), coordinator.passProgress.value)
+    }
+
+    @Test
     fun reconcileBufferPublishesNoAggregateProgress() = runTest {
         var duringFetch: Map<Long, SyncPassProgress>? = null
         val source = FakeSource {
@@ -3085,6 +3309,59 @@ class HistoryResyncCoordinatorTest {
         assertEquals(setOf(1L, 7L), networksToRetire(setOf(1L), setOf(7L)))
         assertEquals(setOf(7L), networksToRetire(emptySet(), setOf(7L)))
         assertEquals(emptySet<Long>(), networksToRetire(emptySet(), emptySet()))
+    }
+
+    @Test
+    fun catchUpOwnershipFollowsTheConnectionNotJustTheNetwork() {
+        val clientA = Any()
+        val clientB = Any()
+        val alive = Job()
+        val candidate = CatchUpJob(clientB, Job())
+
+        // The reproduction of the user-visible bug: a pass pinned to a client the actor already
+        // replaced must not outrank — and cancel — the live connection's verification. Keyed on the
+        // network alone this returned `existing`, silently disabling every later foreground
+        // verification for that network until the process was killed.
+        assertSame(candidate, chooseCatchUpOwner(CatchUpJob(clientA, alive), candidate))
+        // Same connection: that is exactly what the single flight exists for.
+        val sameClientCandidate = CatchUpJob(clientA, Job())
+        assertSame(
+            alive,
+            chooseCatchUpOwner(CatchUpJob(clientA, alive), sameClientCandidate).job,
+        )
+        // Nothing tracked, or a finished pass: the candidate always wins.
+        assertSame(candidate, chooseCatchUpOwner(null, candidate))
+        val completed = Job().apply { complete() }
+        assertSame(candidate, chooseCatchUpOwner(CatchUpJob(clientB, completed), candidate))
+        alive.cancel()
+    }
+
+    @Test
+    fun targetClassificationWaitGivesUpInsteadOfParkingOnADeadSocket() = runTest {
+        val ready = MutableStateFlow(false)
+        val outcome = async { awaitTargetClassification(ready) }
+        advanceTimeBy(HistoryResyncCoordinator.TARGET_CLASSIFICATION_WAIT_TIMEOUT_MS - 1)
+        runCurrent()
+        assertTrue(outcome.isActive)
+
+        // A client that dies before CHANTYPES/376 writes `false` over `false`, which a StateFlow
+        // conflates, and a StateFlow has no completion signal — so the unbounded collector that
+        // used to sit here could never be woken again.
+        advanceTimeBy(2)
+        runCurrent()
+        assertFalse(outcome.await())
+    }
+
+    @Test
+    fun targetClassificationWaitReturnsAsSoonAsTheBurstSettles() = runTest {
+        assertTrue(awaitTargetClassification(MutableStateFlow(true)))
+
+        val ready = MutableStateFlow(false)
+        val outcome = async { awaitTargetClassification(ready) }
+        runCurrent()
+        ready.value = true
+        runCurrent()
+        assertTrue(outcome.await())
     }
 
     private data class ForegroundVerificationCase(

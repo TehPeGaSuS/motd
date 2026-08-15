@@ -151,6 +151,23 @@ interface ConnectionManager {
      */
     suspend fun reconnectStale()
 
+    /**
+     * Run one history checkpoint over the connected networks, exactly as a process foreground does.
+     *
+     * A notification tapped while the app is ALREADY foregrounded is re-delivered to the running
+     * activity through `onNewIntent`, and no ProcessLifecycleOwner ON_START fires for it, so the
+     * ordinary foreground verification never runs for that entry. A burst of taps cannot storm the
+     * wire, but by two different mechanisms rather than one throttle: the VERIFICATION half is
+     * suppressed per connection by FOREGROUND_VERIFY_THROTTLE_MS, while the reconnect half below is
+     * bounded by conflation instead -- probeReady coalesces on the registry's pending flag and the
+     * actor coalesces again on its own, and reconcile is idempotent.
+     *
+     * "Exactly as a process foreground does" includes [reconnectStale]: the checkpoint paints
+     * waiting badges on networks that are not Ready, and this entry has no other way to wake an
+     * actor sitting out an exponential backoff behind them.
+     */
+    suspend fun checkpointHistory() = Unit
+
     /** Accepted means every chunk is durably represented, not necessarily written to the wire. */
     suspend fun sendMessage(
         bufferId: Long,
