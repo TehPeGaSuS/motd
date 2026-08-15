@@ -105,6 +105,41 @@ class IrcClientTest {
     }
 
     @Test
+    fun `bouncer list refuses to answer from cache when the link has gone silent`() = runTest {
+        val ft = FakeTransport()
+        val client = IrcClient(config(SaslMechanism.PLAIN, "alice", "s3cret"), ft.factory(), clientScope())
+        client.start()
+        runCurrent()
+        ft.feed(":srv CAP * LS :$fullLs")
+        runCurrent()
+        ft.feed(":srv CAP motd ACK :$fullLs")
+        runCurrent()
+        ft.feed("AUTHENTICATE +")
+        runCurrent()
+        ft.feed(":srv 903 motd :SASL authentication successful")
+        runCurrent()
+        ft.feed(":srv 001 motd :Welcome to the network")
+        ft.feed(":srv 005 motd PREFIX=(ov)@+ :are supported")
+        runCurrent()
+        assertTrue(client.state.value is IrcClientState.Ready)
+
+        // A populated snapshot is the case that used to answer without touching the socket at all.
+        ft.feed(":srv BOUNCER NETWORK 1 name=libera;state=connected")
+        runCurrent()
+        assertTrue(client.bouncerNetworks.value.isNotEmpty())
+
+        // The peer is gone but the OS has not failed the socket yet, so the LISTNETWORKS write
+        // still succeeds and nothing comes back. Returning the cached rows here would report a
+        // successful refresh against a bouncer that is no longer there.
+        try {
+            client.bouncerListNetworks()
+            fail("a refresh with no reply must not be answered from the cached snapshot")
+        } catch (error: IrcDisconnectedException) {
+            assertEquals("BOUNCER LISTNETWORKS", error.ircCommand)
+        }
+    }
+
+    @Test
     fun `unconfirmed bouncer add is a server rejection`() = runTest {
         val transport = FakeTransport()
         val client = IrcClient(config(), transport.factory(), clientScope())

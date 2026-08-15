@@ -1193,6 +1193,14 @@ class IrcClient(
         if (_bouncerNetworks.value.isEmpty()) {
             withTimeoutOrNull(2000) { while (_bouncerNetworks.value.isEmpty()) delay(50) }
         }
+        // A write into a socket the OS has not yet failed does not throw, and an already-populated
+        // snapshot needs no notification to answer with. An explicit refresh against a bouncer that
+        // has gone away would therefore report success and hand back stale rows. Confirm the link
+        // with the watchdog's own PING/grace first; a timeout also transitions the socket to
+        // Disconnected, so the owning actor starts reconnecting instead of waiting for the OS.
+        if (!probeLiveness(BOUNCER_LIST_PROBE_GRACE_MS)) {
+            throw IrcDisconnectedException("BOUNCER LISTNETWORKS", "no reply to a liveness probe")
+        }
         return snapshotBouncerNetworks()
     }
 
@@ -1497,6 +1505,8 @@ class IrcClient(
 
     private companion object {
         const val LABEL_TIMEOUT_MS = 30_000L
+        // Generous enough that a slow link answering a PING is not mistaken for a dead bouncer.
+        const val BOUNCER_LIST_PROBE_GRACE_MS = 5_000L
         const val LIST_TIMEOUT_MS = 15_000L
         const val LIST_DRAIN_WAIT_MS = 15_000L
         const val WEBPUSH_TIMEOUT_MS = 30_000L
