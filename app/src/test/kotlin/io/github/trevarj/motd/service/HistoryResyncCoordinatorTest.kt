@@ -3658,6 +3658,46 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun aRetryableVisibleWaveSkipsThePacedSweep() = runTest {
+        val names = (1..WAVE_ONE_LIMIT + 2).map { "#chan$it" }
+        val ids = insertChannels(names)
+        val source = FakeSource(supportsConcurrent = true) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
+                    targets = names.mapIndexed { index, name -> name to (900_000L - index * 1_000) },
+                    endOfHistory = true,
+                )
+                // The visible wave's first room inserts a row but still lands below what discovery
+                // advertised, which is the pass asking to be retried rather than a dead advertisement.
+                else -> FakeResponse(
+                    listOf(
+                        message(
+                            "m-${request.target}",
+                            if (request.target == names.first()) 800_000 else 900_000,
+                            target = request.target,
+                        ),
+                    ),
+                    endOfHistory = true,
+                )
+            }
+        }
+
+        val pass = async { coordinator.resyncNetwork(networkId, openTargets(ids.zip(names)), source) }
+        // Enough virtual time for the sweep to have finished, had it been started at all.
+        advanceTimeBy(HistoryResyncCoordinator.BACKFILL_SEED_PACE_MS * (names.size + 1))
+        val result = pass.await()
+
+        assertEquals(true, (result as? HistoryResyncState.Incomplete)?.retryRecommended)
+        val fetched = source.requests
+            .filter { it.subcommand == ChatHistoryRequest.Subcommand.LATEST }
+            .map { it.target }
+        // The retry is about to re-run this whole pass; pacing the overflow in front of it would
+        // delay the one timeline the reader is looking at by the length of the sweep.
+        assertEquals(WAVE_ONE_LIMIT, fetched.size)
+        assertEquals(emptyList<String>(), fetched.filter { it in names.drop(WAVE_ONE_LIMIT) })
+    }
+
+    @Test
     fun aTargetTimeoutNarrowsTheFanOutInsteadOfFailingThePass() = runTest {
         val names = listOf("#slow", "#fast")
         val ids = insertChannels(names)

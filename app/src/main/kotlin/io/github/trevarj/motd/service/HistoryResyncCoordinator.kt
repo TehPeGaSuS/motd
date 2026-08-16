@@ -1183,8 +1183,18 @@ class HistoryResyncCoordinator @Inject constructor(
                 targetPass.inserted,
                 retryRecommended = targetPass.retryRecommended,
             )
-            if (!waveOneState.isRetryableCatchUpFailure()) onCatchUpConverged?.invoke()
-            val overflow = sweepWaveTwo(networkId, plan.waveTwo, source, isCurrent, previousSync != null)
+            val waveOneConverged = !waveOneState.isRetryableCatchUpFailure()
+            if (waveOneConverged) onCatchUpConverged?.invoke()
+            // The sweep rides that same boundary: a retryable wave one is about to re-run this whole
+            // pass, and pacing the overflow in front of that retry delays the one timeline the reader
+            // is actually looking at by the length of the sweep. The overflow keeps its chat-list cue
+            // either way — discovery did not re-advertise it, so nothing retires it — and is seeded by
+            // the attempt that converges, by opening the chat, or by the paced backfill.
+            val overflow = if (waveOneConverged) {
+                sweepWaveTwo(networkId, plan.waveTwo, source, isCurrent, previousSync != null)
+            } else {
+                0
+            }
             // Wave two contributes what it inserted and nothing else. Its status must not reach
             // `retryRecommended`: a silent background sweep that reports "retry the whole pass"
             // would re-run full discovery for work the user never saw.
