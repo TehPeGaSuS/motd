@@ -1,0 +1,4 @@
+- Catching up after a reconnect is now tiered: open and recent chats refill first, the rest sweeps in quietly behind them, and unread badges appear as soon as the server says there is something new.
+- Fixed the app redialling every few seconds and reposting the same status notification while roaming between networks.
+- Uploads now refuse a file host your bouncer advertises on a different host, so your credentials cannot reach it.
+- Fixed background errors that could stall connecting.
