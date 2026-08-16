@@ -13,6 +13,9 @@ import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcClientState
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -29,13 +32,20 @@ class IrcForegroundService : LifecycleService() {
     @Inject lateinit var notifications: MotdNotifications
     @Inject lateinit var diagnostics: DiagnosticLogger
 
+    /**
+     * The shape currently on screen, whichever entry point put it there. Confined to the main
+     * thread: [onStartCommand] is a main-thread callback and [lifecycleScope] dispatches there.
+     */
+    private var postedShape: StatusNotificationShape? = null
+
     override fun onCreate() {
         super.onCreate()
-        // Reflect live connection state in the status notification.
+        // Reflect live connection state in the status notification, conflated on the wording rather
+        // than on the raw state map — see [statusNotificationShapes].
         lifecycleScope.launch {
-            (connectionManager as? ConnectionManagerImpl)?.connectionStates?.collect { states ->
-                updateStatus(states)
-            }
+            val states = (connectionManager as? ConnectionManagerImpl)?.connectionStates
+                ?: return@launch
+            statusNotificationShapes(states).collect { shape -> updateStatus(shape) }
         }
     }
 
@@ -64,8 +74,9 @@ class IrcForegroundService : LifecycleService() {
         // A generic notification posted here therefore had nothing to repaint it: "Connected to 3
         // networks" reverted to "Keeping chats connected" on every foreground and stayed there.
         // Still correct for the cold start this was written for: an empty state map is "starting".
-        val notification = statusNotification(connectionManager.connectionStates.value)
-        startForegroundSafely(diagnostics, source = "service") {
+        val shape = statusNotificationShape(connectionManager.connectionStates.value)
+        val notification = statusNotification(shape)
+        val started = startForegroundSafely(diagnostics, source = "service") {
             // FOREGROUND_SERVICE_TYPE_SPECIAL_USE is an API 34 constant; only pass the type on 34+.
             // On 29-33 use the 2-arg overload (the manifest still declares foregroundServiceType).
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -74,20 +85,25 @@ class IrcForegroundService : LifecycleService() {
                 startForeground(STATUS_ID, notification)
             }
         }
+        // startForeground posts STATUS_ID itself, so seed the shared dedupe state with what is now
+        // on screen. A refused start posts nothing and must leave the collector free to repost.
+        if (started) postedShape = shape
     }
 
     /** The one place connection state becomes a status notification, shared by both entry points. */
-    private fun statusNotification(states: Map<Long, IrcClientState>): Notification {
-        val shape = statusNotificationShape(states)
-        return notifications.statusNotification(
+    private fun statusNotification(shape: StatusNotificationShape): Notification =
+        notifications.statusNotification(
             connectedCount = shape.connectedCount,
             reconnecting = shape.reconnecting,
             starting = shape.starting,
         )
-    }
 
-    private fun updateStatus(states: Map<Long, IrcClientState>) {
-        val notification = statusNotification(states)
+    private fun updateStatus(shape: StatusNotificationShape) {
+        // [statusNotificationShapes] already drops the collector's own repeats; this second check is
+        // what makes both entry points share one dedupe state, since startAsForeground posts out of
+        // band from that flow.
+        if (shape == postedShape) return
+        val notification = statusNotification(shape)
         // POST_NOTIFICATIONS is only a runtime permission on API 33+; guard so lint's flow
         // analysis is satisfied and we don't attempt to post the status update without it.
         val canPost = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -95,9 +111,11 @@ class IrcForegroundService : LifecycleService() {
                 this, android.Manifest.permission.POST_NOTIFICATIONS,
             ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         if (canPost) {
-            runCatching {
+            val posted = runCatching {
                 androidx.core.app.NotificationManagerCompat.from(this).notify(STATUS_ID, notification)
-            }
+            }.isSuccess
+            // Only a notification that actually reached the shade may suppress the next repost.
+            if (posted) postedShape = shape
         }
     }
 
@@ -170,3 +188,15 @@ internal fun statusNotificationShape(states: Map<Long, IrcClientState>): StatusN
         starting = states.isEmpty(),
     )
 }
+
+/**
+ * Connection state → one emission per distinct piece of status wording.
+ *
+ * `connectionStates` republishes on every per-network transition and on every lag reading, while the
+ * notification reads exactly the three fields of [StatusNotificationShape]. Collecting it raw meant
+ * rebuilding and re-posting an identical notification for each of those, which is pure churn: the
+ * shade re-animates and the NotificationManager rate limiter is spent on nothing.
+ */
+internal fun statusNotificationShapes(
+    states: Flow<Map<Long, IrcClientState>>,
+): Flow<StatusNotificationShape> = states.map(::statusNotificationShape).distinctUntilChanged()

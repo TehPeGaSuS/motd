@@ -205,11 +205,60 @@ class ConnectionActorTest {
         conns.first().transition(IrcClientState.Disconnected)
         scope.testScheduler.runCurrent()
         assertEquals(1, conns.size)
-        // Fire onNetworkAvailable → wake immediately without waiting the full backoff.
-        actor.onNetworkAvailable()
+        // Fire onNetworkAvailable → wake without waiting the full 2.6s backoff. The woken dial is
+        // still spread by the wake stagger (1000ms at this jitter), well inside that backoff.
+        actor.onNetworkAvailable(WakeCause.Connectivity)
+        scope.testScheduler.runCurrent()
+        scope.testScheduler.advanceTimeBy(ConnectionActor.WAKE_STAGGER_MAX_MS)
         scope.testScheduler.runCurrent()
         assertTrue(conns.size >= 2)
         actor.stop()
+    }
+
+    /**
+     * The stagger itself: one wake releases every actor on the same scheduler tick, so the woken
+     * dial is offset by a jittered slice of [ConnectionActor.WAKE_STAGGER_MAX_MS] instead of firing
+     * with every sibling at once. Same injected `random` as the backoff jitter, so it is
+     * deterministic here and independent per actor in production.
+     */
+    @Test
+    fun wake_staggersTheWokenDialAcrossASmallWindow() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val conns = ArrayDeque<FakeConnection>()
+        val actor = ConnectionActor(
+            networkId = 1, scope = scope,
+            connectionFactory = { FakeConnection().also { conns.addLast(it) } },
+            onState = { _, _ -> }, onEvent = { _, _ -> }, onReady = {}, random = { 0.5 },
+        )
+        actor.start()
+        scope.testScheduler.runCurrent()
+        conns.first().transition(IrcClientState.Disconnected)
+        scope.testScheduler.runCurrent()
+
+        actor.onNetworkAvailable(WakeCause.Foreground)
+        scope.testScheduler.runCurrent()
+        // Half the window at jitter 0.5: the wake cut the backoff short but did not redial yet.
+        assertEquals(1, conns.size)
+        scope.testScheduler.advanceTimeBy(ConnectionActor.WAKE_STAGGER_MAX_MS / 2 - 1)
+        scope.testScheduler.runCurrent()
+        assertEquals(1, conns.size)
+        scope.testScheduler.advanceTimeBy(1)
+        scope.testScheduler.runCurrent()
+        assertEquals(2, conns.size)
+        actor.stop()
+
+        // The window bounds: a zero draw is a zero offset (the stagger spreads, it never adds a
+        // floor) and a full draw never exceeds the window.
+        val newActor = { draw: Double ->
+            ConnectionActor(
+                networkId = 1, scope = scope,
+                connectionFactory = { FakeConnection() },
+                onState = { _, _ -> }, onEvent = { _, _ -> }, onReady = {}, random = { draw },
+            )
+        }
+        assertEquals(0L, newActor(0.0).wakeStaggerMs())
+        assertEquals(ConnectionActor.WAKE_STAGGER_MAX_MS, newActor(1.0).wakeStaggerMs())
     }
 
     @Test
@@ -235,10 +284,12 @@ class ConnectionActorTest {
         }
         assertEquals(3, conns.size)
 
-        // The wake (connectivity/app-foreground) cuts the 8s wait short...
+        // The app-foreground wake cuts the 8s wait short (modulo the 500ms stagger at this jitter)...
         conns.last().transition(IrcClientState.Disconnected)
         scope.testScheduler.runCurrent()
-        actor.onNetworkAvailable()
+        actor.onNetworkAvailable(WakeCause.Foreground)
+        scope.testScheduler.runCurrent()
+        scope.testScheduler.advanceTimeBy(ConnectionActor.WAKE_STAGGER_MAX_MS / 2)
         scope.testScheduler.runCurrent()
         assertEquals(4, conns.size)
 
@@ -252,6 +303,116 @@ class ConnectionActorTest {
         scope.testScheduler.advanceTimeBy(1)
         scope.testScheduler.runCurrent()
         assertEquals(5, conns.size)
+        actor.stop()
+    }
+
+    /**
+     * The flapping-network redial storm this splits the wake cause for: Android delivers
+     * `onAvailable` repeatedly on an unstable network (Wi-Fi roaming, a captive portal reasserting
+     * itself) without a matching `onLost`. Treating each one as "the failures this escalation was
+     * built on are stale" pinned the attempt counter at 0, so the actor dialled a dead server every
+     * ~2s indefinitely. Without a loss to pair with, connectivity now only skips the remaining wait.
+     */
+    @Test
+    fun repeatedConnectivityWakes_withoutALoss_keepEscalatingTheBackoff() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val conns = ArrayDeque<FakeConnection>()
+        val actor = ConnectionActor(
+            networkId = 1, scope = scope,
+            connectionFactory = { FakeConnection().also { conns.addLast(it) } },
+            onState = { _, _ -> }, onEvent = { _, _ -> }, onReady = {}, random = { 0.5 }, // jitter 1.0
+        )
+        actor.start()
+        scope.testScheduler.runCurrent()
+
+        // Three failed dials, each one woken early by a bare onAvailable.
+        repeat(3) {
+            conns.last().transition(IrcClientState.Disconnected)
+            scope.testScheduler.runCurrent()
+            actor.onNetworkAvailable(WakeCause.Connectivity)
+            scope.testScheduler.runCurrent()
+            scope.testScheduler.advanceTimeBy(ConnectionActor.WAKE_STAGGER_MAX_MS / 2)
+            scope.testScheduler.runCurrent()
+        }
+        assertEquals(4, conns.size)
+
+        // The escalation survived all three: attempt 3 schedules 16s, not the 2s base.
+        conns.last().transition(IrcClientState.Disconnected)
+        scope.testScheduler.runCurrent()
+        scope.testScheduler.advanceTimeBy(15_999)
+        scope.testScheduler.runCurrent()
+        assertEquals(4, conns.size)
+        scope.testScheduler.advanceTimeBy(1)
+        scope.testScheduler.runCurrent()
+        assertEquals(5, conns.size)
+        actor.stop()
+    }
+
+    /**
+     * The other half of the connectivity contract: a real loss→available edge is exactly the case
+     * where the recorded failures ARE stale (they were dialled against a dead radio), so that wake
+     * still resets. The armed loss is consumed once, so the onAvailable duplicates Android emits
+     * after it do not each re-arm a reset.
+     */
+    @Test
+    fun connectivityWake_afterALoss_resetsBackoffEscalationOnce() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val conns = ArrayDeque<FakeConnection>()
+        val actor = ConnectionActor(
+            networkId = 1, scope = scope,
+            connectionFactory = { FakeConnection().also { conns.addLast(it) } },
+            onState = { _, _ -> }, onEvent = { _, _ -> }, onReady = {}, random = { 0.5 }, // jitter 1.0
+        )
+        actor.start()
+        scope.testScheduler.runCurrent()
+
+        // Escalate to attempt 2 by serving two full waits.
+        listOf(2_000L, 4_000L).forEach { delayMs ->
+            conns.last().transition(IrcClientState.Disconnected)
+            scope.testScheduler.runCurrent()
+            scope.testScheduler.advanceTimeBy(delayMs)
+            scope.testScheduler.runCurrent()
+        }
+        assertEquals(3, conns.size)
+
+        // The radio dropped and came back: the escalation is reset, so the next failure waits 2s.
+        conns.last().transition(IrcClientState.Disconnected)
+        scope.testScheduler.runCurrent()
+        actor.onNetworkLost()
+        actor.onNetworkAvailable(WakeCause.Connectivity)
+        scope.testScheduler.runCurrent()
+        scope.testScheduler.advanceTimeBy(ConnectionActor.WAKE_STAGGER_MAX_MS / 2)
+        scope.testScheduler.runCurrent()
+        assertEquals(4, conns.size)
+
+        conns.last().transition(IrcClientState.Disconnected)
+        scope.testScheduler.runCurrent()
+        scope.testScheduler.advanceTimeBy(1_999)
+        scope.testScheduler.runCurrent()
+        assertEquals(4, conns.size)
+        scope.testScheduler.advanceTimeBy(1)
+        scope.testScheduler.runCurrent()
+        assertEquals(5, conns.size)
+
+        // The loss was consumed by that first wake, so a second bare onAvailable only skips the
+        // wait: the failure after it serves the escalated 8s (attempt 2), not the 2s base again.
+        conns.last().transition(IrcClientState.Disconnected)
+        scope.testScheduler.runCurrent()
+        actor.onNetworkAvailable(WakeCause.Connectivity)
+        scope.testScheduler.runCurrent()
+        scope.testScheduler.advanceTimeBy(ConnectionActor.WAKE_STAGGER_MAX_MS / 2)
+        scope.testScheduler.runCurrent()
+        assertEquals(6, conns.size)
+        conns.last().transition(IrcClientState.Disconnected)
+        scope.testScheduler.runCurrent()
+        scope.testScheduler.advanceTimeBy(7_999)
+        scope.testScheduler.runCurrent()
+        assertEquals(6, conns.size)
+        scope.testScheduler.advanceTimeBy(1)
+        scope.testScheduler.runCurrent()
+        assertEquals(7, conns.size)
         actor.stop()
     }
 

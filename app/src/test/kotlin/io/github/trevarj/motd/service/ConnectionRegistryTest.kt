@@ -29,6 +29,8 @@ class ConnectionRegistryTest {
         var stops = 0
         var probes = 0
         var wakes = 0
+        val wakeCauses = mutableListOf<WakeCause>()
+        var losses = 0
 
         override fun start() {
             starts++
@@ -41,8 +43,8 @@ class ConnectionRegistryTest {
         }
 
         override suspend fun stopAndJoin() = stop()
-        override fun onNetworkAvailable() { wakes++ }
-        override fun onNetworkLost() = Unit
+        override fun onNetworkAvailable(cause: WakeCause) { wakes++; wakeCauses += cause }
+        override fun onNetworkLost() { losses++ }
         override fun probe() { probes++ }
     }
 
@@ -392,6 +394,45 @@ class ConnectionRegistryTest {
         assertEquals(1, created.getValue(retrying.id).wakes)
         assertEquals(0, created.getValue(ready.id).wakes)
         assertEquals(0, created.getValue(dead.id).wakes)
+        // Carried as Foreground: this wake is human-paced, so it is the one allowed to reset the
+        // actor's backoff escalation outright.
+        assertEquals(listOf(WakeCause.Foreground), created.getValue(retrying.id).wakeCauses)
+    }
+
+    /**
+     * Connectivity wakes every actor, including the Ready ones (their socket may be dead on a
+     * network that just changed), and carries the cause that only resets backoff on a real
+     * loss→available edge. Losing the distinction is what let a flapping network pin every actor's
+     * attempt counter at 0 and redial roughly every 2s forever.
+     */
+    @Test
+    fun connectivityCallbacks_reachEveryActor_taggedAsConnectivity() = runTest {
+        val created = mutableMapOf<Long, FakeActor>()
+        val registry = ConnectionRegistry(
+            backgroundScope,
+            actorFactory = { row, _ -> FakeActor().also { created[row.id] = it } },
+            isConfigurationFailure = { false },
+        )
+        val retrying = network(id = 1)
+        val ready = network(id = 2)
+        registry.beginStart()
+        registry.reconcile(listOf(retrying to "fp1", ready to "fp2"), setOf(retrying.id, ready.id), emptySet())
+        registry.actorState(
+            ready.id,
+            registry.snapshot.value.actors.getValue(ready.id).generation,
+            "fp2",
+            IrcClientState.Ready("me", emptySet(), emptyMap()),
+        )
+        runCurrent()
+
+        registry.networkLost()
+        registry.networkAvailable()
+        runCurrent()
+
+        listOf(retrying.id, ready.id).forEach { id ->
+            assertEquals(1, created.getValue(id).losses)
+            assertEquals(listOf(WakeCause.Connectivity), created.getValue(id).wakeCauses)
+        }
     }
 
     @Test

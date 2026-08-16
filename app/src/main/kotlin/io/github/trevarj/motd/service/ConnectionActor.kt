@@ -67,6 +67,28 @@ class IrcClientConnection(
 }
 
 /**
+ * Why a backing-off actor was told to retry now. Both causes cut the remaining backoff delay short;
+ * they differ only in whether they are allowed to reset the escalation the delay was built from.
+ */
+enum class WakeCause {
+    /**
+     * Android connectivity reported a default network (`ConnectivityManager.onAvailable`). Resets
+     * the escalation only on a genuine loss→available edge: a flapping network delivers onAvailable
+     * repeatedly without any loss in between, and resetting on each one pins the attempt counter at
+     * 0 and turns backoff into a permanent ~2s redial storm.
+     */
+    Connectivity,
+
+    /**
+     * The app was foregrounded (`ConnectionRegistry.wakeNonReady`, raised by
+     * `ConnectionManagerImpl.reconnectStale`). Always resets: after Doze the counter sits at the cap
+     * from dials that fast-failed against a dead radio, and this wake is human-paced, so it cannot
+     * storm.
+     */
+    Foreground,
+}
+
+/**
  * Drives one physical socket (plans/05). Owns the reconnect loop with exponential backoff, the
  * per-connection EventProcessor collector, catch-up, and network-callback fast-retry/fast-fail.
  *
@@ -81,7 +103,7 @@ internal interface ConnectionLifecycleActor {
     fun start()
     fun stop()
     suspend fun stopAndJoin()
-    fun onNetworkAvailable()
+    fun onNetworkAvailable(cause: WakeCause)
     fun onNetworkLost()
     /** Request one immediate probe when the current connection is Ready. Requests are conflated. */
     fun probe() = Unit
@@ -118,9 +140,20 @@ class ConnectionActor(
         private set
 
     private var job: Job? = null
-    private val retryNow = Channel<Unit>(Channel.CONFLATED)
+
+    /**
+     * Wake signals for a backing-off loop. The payload is whether the wake invalidates the current
+     * escalation; conflated like the channel itself, so back-to-back wakes keep the last cause.
+     */
+    private val retryNow = Channel<Boolean>(Channel.CONFLATED)
     private val probeNow = Channel<Unit>(Channel.CONFLATED)
     private val probeRequested = AtomicBoolean(false)
+
+    /**
+     * Armed by [onNetworkLost] and consumed by the next connectivity wake, so "connectivity is
+     * available" only counts as a loss→available edge once per actual loss.
+     */
+    private val connectivityLost = AtomicBoolean(false)
 
     /**
      * True while the reconnect loop coroutine is still running. Goes false once the loop returns —
@@ -158,11 +191,24 @@ class ConnectionActor(
      * Skip the remaining backoff delay and retry immediately. Named for its original caller (the
      * connectivity callback), but it is the actor's general "a retry is worth trying now" entry:
      * app-foreground recovery raises it too via `ConnectionRegistry.wakeNonReady()`.
+     *
+     * [cause] decides whether the escalation is also reset — see [WakeCause]. Both causes still cut
+     * the wait short, so a flapping network is redialled promptly; it just is not redialled from the
+     * 2s base forever.
      */
-    override fun onNetworkAvailable() { retryNow.trySend(Unit) }
+    override fun onNetworkAvailable(cause: WakeCause) {
+        val resetsBackoff = when (cause) {
+            WakeCause.Foreground -> true
+            WakeCause.Connectivity -> connectivityLost.getAndSet(false)
+        }
+        retryNow.trySend(resetsBackoff)
+    }
 
     /** Network lost: fast-fail the current connect attempt so backoff starts promptly. */
-    override fun onNetworkLost() { connection?.stop() }
+    override fun onNetworkLost() {
+        connectivityLost.set(true)
+        connection?.stop()
+    }
 
     /**
      * Queue one foreground liveness check. The request is consumed by the actor's connection loop,
@@ -233,15 +279,28 @@ class ConnectionActor(
                     onBackoff("scheduled", attempt, delayMs)
                     val scheduledFor = attempt
                     attempt++
-                    val wokeEarly = waitBeforeRetry(delayMs)
-                    onBackoff(if (wokeEarly) "woke_early" else "elapsed", scheduledFor, delayMs)
-                    if (wokeEarly) {
-                        // The wake signal (connectivity restored, app foregrounded) invalidates the
-                        // failures this escalation was built on: after Doze the counter sits at the
-                        // cap from dials that fast-failed against a dead network, and without this
-                        // reset one failed post-wake dial would serve the full ~90s cap as the
-                        // user's very next wait. Re-escalate from the base instead.
-                        attempt = 0
+                    val wake = waitBeforeRetry(delayMs)
+                    onBackoff(if (wake != null) "woke_early" else "elapsed", scheduledFor, delayMs)
+                    if (wake != null) {
+                        // One wake releases every actor on the same scheduler tick (the registry
+                        // hands it to each of them in a synchronous forEach), so without an offset a
+                        // bouncer root and all of its children redial through one endpoint
+                        // simultaneously. Spread the woken dials across a small window instead.
+                        val stagger = wakeStaggerMs()
+                        if (stagger > 0) {
+                            onBackoff("wake_stagger", scheduledFor, stagger)
+                            delay(stagger)
+                        }
+                        if (wake) {
+                            // A wake that carries a reset invalidates the failures this escalation
+                            // was built on: after Doze the counter sits at the cap from dials that
+                            // fast-failed against a dead network, and without this reset one failed
+                            // post-wake dial would serve the full ~90s cap as the user's very next
+                            // wait. Re-escalate from the base instead. A bare connectivity
+                            // onAvailable with no preceding loss carries no reset, so a flapping
+                            // network cannot pin the counter at 0 and dial every ~2s forever.
+                            attempt = 0
+                        }
                     }
                 }
             }
@@ -421,8 +480,8 @@ class ConnectionActor(
     }
 
     /**
-     * Wait for the backoff delay, waking early on [onNetworkAvailable]. Returns true if it woke on
-     * that signal rather than serving the full delay.
+     * Wait for the backoff delay, waking early on [onNetworkAvailable]. Returns null when the full
+     * delay was served, otherwise the wake's "resets the escalation" verdict (see [WakeCause]).
      *
      * [onNetworkAvailable] is the single wake entry, but it is not only raised by Android
      * connectivity: `ConnectionRegistry` also raises it for every non-Ready actor on
@@ -432,19 +491,21 @@ class ConnectionActor(
      * rebuilding the actor. Absent any of those, the delay is served in full, which is deliberate:
      * it is what keeps a genuinely-down server from being hammered.
      */
-    private suspend fun waitBeforeRetry(delayMs: Long): Boolean {
+    private suspend fun waitBeforeRetry(delayMs: Long): Boolean? {
+        // Signals raised while the previous dial was in flight had nothing waiting on them; drop
+        // them together with the reset they carried rather than let them cut a later wait short.
         while (retryNow.tryReceive().isSuccess) { /* drain stale signals */ }
         val timer = CoroutineScope(currentCoroutineContext()).launch { delay(delayMs) }
-        var wokeEarly = false
+        var wake: Boolean? = null
         try {
             select {
-                retryNow.onReceive { wokeEarly = true }
+                retryNow.onReceive { wake = it }
                 timer.onJoin { }
             }
         } finally {
             timer.cancelAndJoin()
         }
-        return wokeEarly
+        return wake
     }
 
     /** delay = min(cap, base * 2^attempt) * jitter(0.7..1.3). */
@@ -455,9 +516,18 @@ class ConnectionActor(
         return (capped * jitter).toLong()
     }
 
+    /**
+     * Per-wake offset in 0..[WAKE_STAGGER_MAX_MS], drawn from the same injected [random] the jitter
+     * uses so tests stay deterministic. Deliberately much shorter than the 2s backoff base: it
+     * de-synchronizes simultaneously-woken actors without measurably delaying the recovery the wake
+     * exists to deliver.
+     */
+    fun wakeStaggerMs(): Long = (WAKE_STAGGER_MAX_MS * random()).toLong()
+
     companion object {
         const val BASE_MS = 2_000L
         const val CAP_MS = 90_000L
+        const val WAKE_STAGGER_MAX_MS = 1_000L
         const val STABLE_RESET_MS = 5 * 60 * 1000L
         const val FOREGROUND_PROBE_GRACE_MS = 5_000L
         const val JITTER_LOW = 0.7

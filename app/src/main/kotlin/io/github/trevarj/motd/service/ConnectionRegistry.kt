@@ -412,11 +412,15 @@ internal class ConnectionRegistry(
                 callbackJobs.remove(command.token)
                 publish()
             }
-            Command.NetworkAvailable -> actors.values.forEach { it.actor.onNetworkAvailable() }
+            // The two wake sources stay distinguishable inside the actor: connectivity may only
+            // reset the backoff escalation on a real loss→available edge, while the (human-paced)
+            // foreground wake always does. See WakeCause.
+            Command.NetworkAvailable ->
+                actors.values.forEach { it.actor.onNetworkAvailable(WakeCause.Connectivity) }
             Command.NetworkLost -> actors.values.forEach { it.actor.onNetworkLost() }
             Command.WakeNonReady -> actors.forEach { (networkId, registered) ->
                 if (registered.actor.isAlive && states[networkId] !is IrcClientState.Ready) {
-                    registered.actor.onNetworkAvailable()
+                    registered.actor.onNetworkAvailable(WakeCause.Foreground)
                 }
             }
             Command.ProbeReady -> {

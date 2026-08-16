@@ -1,6 +1,9 @@
 package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.irc.event.IrcClientState
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -55,6 +58,43 @@ class StatusNotificationTextTest {
         assertEquals(
             "Keeping chats connected",
             statusNotificationText(connectedCount = 0, reconnecting = false, starting = true),
+        )
+    }
+
+    /**
+     * The service used to notify() on every connectionStates emission. That flow republishes on
+     * every per-network transition and every lag reading, so a stable two-network session reposted
+     * an identical notification continuously. Only a change in the three fields the wording is built
+     * from may reach the shade.
+     */
+    @Test
+    fun only_a_change_in_the_wording_reposts_the_status_notification() = runTest {
+        val two = mapOf(1L to ready("me"), 2L to ready("me"))
+        val shapes = statusNotificationShapes(
+            flowOf(
+                emptyMap(),
+                // Both networks come up, one at a time.
+                mapOf(1L to IrcClientState.Connecting),
+                mapOf(1L to ready("me"), 2L to IrcClientState.Connecting),
+                two,
+                // Republications that do not change the wording: an identical map, then a Ready
+                // snapshot mutated by a runtime CAP ACK.
+                two,
+                mapOf(1L to ready("me"), 2L to IrcClientState.Ready("me", setOf("batch"), emptyMap())),
+                // One network drops: the count changes, so this one must be posted.
+                mapOf(1L to ready("me"), 2L to IrcClientState.Connecting),
+            ),
+        ).toList()
+
+        assertEquals(
+            listOf(
+                StatusNotificationShape(connectedCount = 0, reconnecting = false, starting = true),
+                StatusNotificationShape(connectedCount = 0, reconnecting = true, starting = false),
+                StatusNotificationShape(connectedCount = 1, reconnecting = false, starting = false),
+                StatusNotificationShape(connectedCount = 2, reconnecting = false, starting = false),
+                StatusNotificationShape(connectedCount = 1, reconnecting = false, starting = false),
+            ),
+            shapes,
         )
     }
 
