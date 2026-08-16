@@ -3,8 +3,8 @@ package io.github.trevarj.motd.attachment
 import android.content.ContentResolver
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.audio.NetworkMediaRoute
-import io.github.trevarj.motd.audio.NetworkMediaRouteProvider
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import java.io.BufferedReader
@@ -49,7 +49,9 @@ internal object MultipartEncoding {
 class AttachmentUploaderImpl @Inject constructor(
     @ApplicationContext context: Context,
     private val connectionManager: ConnectionManager,
-    private val routeProvider: NetworkMediaRouteProvider,
+    // The narrow seam rather than the provider itself, so the file-host binding below is testable
+    // without standing up Room.
+    private val routeProvider: MediaRouteResolver,
 ) : AttachmentUploader {
     private val resolver: ContentResolver = context.contentResolver
 
@@ -170,12 +172,21 @@ class AttachmentUploaderImpl @Inject constructor(
             ?: throw UploadException("Choose a chat with a connected Soju file host.")
         val ready = connectionManager.connectionStates.value[networkId] as? IrcClientState.Ready
             ?: throw UploadException("This IRC network is not connected.")
-        val endpoint = sojuFileHostEndpoint(ready.isupport)
-            ?: throw UploadException("This IRC network is not advertising a Soju file host.")
         val route = routeProvider.routeForNetwork(networkId)
             ?: throw UploadException("No route for this network.")
         if (route.proxyError != null) throw UploadException(route.proxyError)
         return route.use {
+            // Bind the advertised endpoint to the host this network's credential belongs to BEFORE
+            // opening anything: both requests below authenticate, and the OPTIONS probe is the one
+            // that would leak the Authorization header first.
+            val endpoint = when (
+                val advertised = sojuFileHostEndpoint(ready.isupport, route.endpoint.host)
+            ) {
+                is SojuFileHostEndpoint.Usable -> advertised.url
+                is SojuFileHostEndpoint.OffHost -> throw UploadException(sojuOffHostMessage(advertised))
+                SojuFileHostEndpoint.Unavailable ->
+                    throw UploadException("This IRC network is not advertising a Soju file host.")
+            }
             val acceptPost = probeAcceptPost(route, endpoint)
             val connection = route.open(endpoint, authenticated = true).apply {
                 requestMethod = "POST"
@@ -310,11 +321,26 @@ class AttachmentUploaderImpl @Inject constructor(
     }
 }
 
+/**
+ * The URL a completed upload reports, resolved against the endpoint it was posted to.
+ *
+ * Shape-checked only, deliberately: this is the link that goes into the message, not a request the
+ * client authenticates, so a file host that serves its downloads from a CDN stays usable.
+ */
 internal fun resolveSojuLocation(endpoint: String, location: String): String {
     val resolved = URI(endpoint).resolve(location).toString()
-    return validateSojuFileHostEndpoint(resolved)
+    return httpsUploadUri(resolved)?.toString()
         ?: throw UploadException("Soju file host returned an invalid HTTPS URL.")
 }
+
+/**
+ * Refusal text for a file host advertised on a host other than the network's own.
+ *
+ * Names the advertised host so a misconfigured bouncer reads differently from a hostile one.
+ */
+internal fun sojuOffHostMessage(endpoint: SojuFileHostEndpoint.OffHost): String =
+    "This IRC network advertises a file host at ${endpoint.advertisedHost}, not ${endpoint.networkHost}. " +
+        "Refusing to send this network's credentials to another host."
 
 private fun String.sanitizeHeader(): String =
     replace("\\", "_").replace("\"", "_").replace("\r", "_").replace("\n", "_")

@@ -115,14 +115,72 @@ fun validateEndpoint(value: String): String? = runCatching {
     url.toString().trimEnd('/')
 }.getOrNull()
 
-fun sojuFileHostEndpoint(isupport: Map<String, String>): String? =
-    validateSojuFileHostEndpoint(isupport["soju.im/FILEHOST"])
+const val SOJU_FILEHOST_TOKEN = "soju.im/FILEHOST"
 
-fun validateSojuFileHostEndpoint(value: String?): String? = runCatching {
+/**
+ * An `https` URI with a host and no embedded credentials, or null when [value] is not one.
+ *
+ * Shape only: it deliberately says nothing about *which* host serves the URL, so it can never
+ * stand in for the credential binding [validateSojuFileHostEndpoint] performs.
+ */
+internal fun httpsUploadUri(value: String?): java.net.URI? = runCatching {
     val uri = java.net.URI(value?.trim()?.takeIf(String::isNotBlank) ?: return null)
     require(uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank() && uri.userInfo == null)
-    uri.toString()
+    uri
 }.getOrNull()
+
+/**
+ * How the `soju.im/FILEHOST` endpoint a network advertises resolved against the host that network
+ * is actually connected to.
+ */
+sealed interface SojuFileHostEndpoint {
+    /** Advertised, well formed, and served by the network's own host. */
+    data class Usable(val url: String) : SojuFileHostEndpoint
+
+    /**
+     * Advertised and well formed, but served by [advertisedHost] rather than [networkHost].
+     *
+     * An upload authenticates with the network's SASL credential, so following this endpoint would
+     * forward that credential to a third-party host the server merely named — with no pin and no
+     * consent. Refused instead.
+     */
+    data class OffHost(val advertisedHost: String, val networkHost: String) : SojuFileHostEndpoint
+
+    /** Not advertised at all, or not a usable https URL. */
+    data object Unavailable : SojuFileHostEndpoint
+}
+
+/**
+ * Whether [isupport] advertises a well-formed file host at all, whichever host serves it.
+ *
+ * Drives the upload sheet's offer only. The binding to the connected network's host is enforced on
+ * the upload path itself, where the credential is attached, so a misconfigured or hostile
+ * advertisement is refused with an explanation instead of silently disappearing from the sheet.
+ */
+fun sojuFileHostAdvertised(isupport: Map<String, String>): Boolean =
+    httpsUploadUri(isupport[SOJU_FILEHOST_TOKEN]) != null
+
+fun sojuFileHostEndpoint(isupport: Map<String, String>, networkHost: String): SojuFileHostEndpoint =
+    validateSojuFileHostEndpoint(isupport[SOJU_FILEHOST_TOKEN], networkHost)
+
+/**
+ * Resolve an advertised file-host endpoint against [networkHost], the host of the IRC endpoint the
+ * upload's credential belongs to.
+ *
+ * The host must match, case-insensitively. **Ports must not**: soju serves IRC and the file host
+ * from one process on two ports (`listen ircs://:6697` beside `listen https://:6696`), so a
+ * port-sensitive comparison would reject every real soju deployment.
+ */
+fun validateSojuFileHostEndpoint(value: String?, networkHost: String): SojuFileHostEndpoint {
+    val uri = httpsUploadUri(value) ?: return SojuFileHostEndpoint.Unavailable
+    val expected = networkHost.trim()
+    // Fails closed on an unknown network host: an endpoint we cannot bind is never usable.
+    return if (expected.isNotEmpty() && uri.host.equals(expected, ignoreCase = true)) {
+        SojuFileHostEndpoint.Usable(uri.toString())
+    } else {
+        SojuFileHostEndpoint.OffHost(advertisedHost = uri.host, networkHost = expected)
+    }
+}
 
 fun normalizedConfig(config: PasteBackendConfig): PasteBackendConfig {
     val customEndpoint = validateEndpoint(config.customEndpoint)

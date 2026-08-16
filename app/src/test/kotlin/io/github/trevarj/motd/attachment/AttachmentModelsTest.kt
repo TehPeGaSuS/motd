@@ -29,12 +29,60 @@ class AttachmentModelsTest {
 
     @Test fun sojuFileHostEndpointRequiresHttpsWithoutCredentials() {
         assertEquals(
-            "https://irc.example/uploads/",
-            sojuFileHostEndpoint(mapOf("soju.im/FILEHOST" to "https://irc.example/uploads/")),
+            SojuFileHostEndpoint.Usable("https://irc.example/uploads/"),
+            sojuFileHostEndpoint(mapOf(SOJU_FILEHOST_TOKEN to "https://irc.example/uploads/"), "irc.example"),
         )
-        assertNull(sojuFileHostEndpoint(emptyMap()))
-        assertNull(sojuFileHostEndpoint(mapOf("soju.im/FILEHOST" to "http://irc.example/uploads")))
-        assertNull(sojuFileHostEndpoint(mapOf("soju.im/FILEHOST" to "https://user:pass@irc.example/uploads")))
+        assertEquals(SojuFileHostEndpoint.Unavailable, sojuFileHostEndpoint(emptyMap(), "irc.example"))
+        assertEquals(
+            SojuFileHostEndpoint.Unavailable,
+            sojuFileHostEndpoint(mapOf(SOJU_FILEHOST_TOKEN to "http://irc.example/uploads"), "irc.example"),
+        )
+        assertEquals(
+            SojuFileHostEndpoint.Unavailable,
+            sojuFileHostEndpoint(mapOf(SOJU_FILEHOST_TOKEN to "https://user:pass@irc.example/uploads"), "irc.example"),
+        )
+    }
+
+    @Test fun sojuFileHostEndpointBindsToTheConnectedNetworkHost() {
+        // Host comparison is case-insensitive; the advertised URL is otherwise untouched.
+        assertEquals(
+            SojuFileHostEndpoint.Usable("https://IRC.Example/uploads"),
+            validateSojuFileHostEndpoint("https://IRC.Example/uploads", "irc.example"),
+        )
+        // soju serves IRC and the file host from one process on two ports, so the port must differ
+        // freely — a port-sensitive check would break every real deployment.
+        assertEquals(
+            SojuFileHostEndpoint.Usable("https://irc.example:6696/uploads"),
+            validateSojuFileHostEndpoint("https://irc.example:6696/uploads", "irc.example"),
+        )
+        // A server naming a third-party host is refused, and the advertised host is reported.
+        assertEquals(
+            SojuFileHostEndpoint.OffHost("evil.example", "irc.example"),
+            validateSojuFileHostEndpoint("https://evil.example/uploads", "irc.example"),
+        )
+        // A sibling subdomain is still another host.
+        assertEquals(
+            SojuFileHostEndpoint.OffHost("files.irc.example", "irc.example"),
+            validateSojuFileHostEndpoint("https://files.irc.example/uploads", "irc.example"),
+        )
+        // Fails closed when the network host is unknown rather than accepting anything.
+        assertEquals(
+            SojuFileHostEndpoint.OffHost("irc.example", ""),
+            validateSojuFileHostEndpoint("https://irc.example/uploads", "  "),
+        )
+    }
+
+    @Test fun sojuFileHostAdvertisementDrivesTheOfferOnly() {
+        assertTrue(sojuFileHostAdvertised(mapOf(SOJU_FILEHOST_TOKEN to "https://evil.example/uploads")))
+        assertFalse(sojuFileHostAdvertised(emptyMap()))
+        assertFalse(sojuFileHostAdvertised(mapOf(SOJU_FILEHOST_TOKEN to "http://irc.example/uploads")))
+        assertFalse(sojuFileHostAdvertised(mapOf(SOJU_FILEHOST_TOKEN to "https://user:pass@irc.example/uploads")))
+    }
+
+    @Test fun offHostRefusalNamesTheAdvertisedHost() {
+        val message = sojuOffHostMessage(SojuFileHostEndpoint.OffHost("evil.example", "irc.example"))
+        assertTrue(message.contains("evil.example"))
+        assertTrue(message.contains("irc.example"))
     }
 
     @Test fun sojuFileHostLocationResolvesRelativeHttpsUrls() {

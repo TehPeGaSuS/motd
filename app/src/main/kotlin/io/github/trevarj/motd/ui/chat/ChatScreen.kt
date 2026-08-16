@@ -154,7 +154,7 @@ import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.R
-import io.github.trevarj.motd.attachment.sojuFileHostEndpoint
+import io.github.trevarj.motd.attachment.sojuFileHostAdvertised
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
 import io.github.trevarj.motd.audio.AudioMetadata
@@ -2334,9 +2334,11 @@ fun ChatContent(
         open = attachmentSheetOpen,
         currentDraft = composerText.text,
         networkId = state.buffer?.networkId,
+        // Offer-only. The upload path binds the advertised endpoint to the connected network's own
+        // host and refuses an off-host one there, where the credential is actually attached.
         sojuFileHostAvailable = (state.connState as? IrcClientState.Ready)
             ?.isupport
-            ?.let(::sojuFileHostEndpoint) != null,
+            ?.let(::sojuFileHostAdvertised) == true,
         startWithCurrentDraft = uploadCurrentDraftDirectly,
         sharedFile = sharedFile,
         directFileTransferAvailable = state.buffer?.type == BufferType.QUERY &&
