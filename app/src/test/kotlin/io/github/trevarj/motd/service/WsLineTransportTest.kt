@@ -1,9 +1,7 @@
 package io.github.trevarj.motd.service
 
 import app.cash.turbine.test
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -32,6 +30,9 @@ class WsLineTransportTest {
     @Volatile private var serverSocket: WebSocket? = null
     private val opened = CountDownLatch(1)
 
+    // Counts the frames the server observed so a missing frame fails fast instead of hanging.
+    private val framesReceived = CountDownLatch(3)
+
     @Before
     fun setUp() {
         server = MockWebServer()
@@ -42,6 +43,7 @@ class WsLineTransportTest {
             }
             override fun onMessage(webSocket: WebSocket, text: String) {
                 received.add(text)
+                framesReceived.countDown()
             }
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 // Complete the close handshake so MockWebServer's queue drains on shutdown.
@@ -92,12 +94,9 @@ class WsLineTransportTest {
         // Any caller-supplied CRLF is stripped so the frame carries exactly the IRC line.
         transport.send("JOIN #a\r\n")
 
-        // Poll until the server observed all three frames.
-        withTimeout(5_000) {
-            withContext(Dispatchers.IO) {
-                while (received.size < 3) Thread.sleep(10)
-            }
-        }
+        // Wait until the server observed all three frames; a missing frame fails here with a message
+        // instead of spinning until the JUnit/Gradle timeout.
+        assertTrue("server did not observe 3 frames", framesReceived.await(5, TimeUnit.SECONDS))
         assertEquals(listOf("NICK motd", "USER motd 0 * :motd", "JOIN #a"), received.toList())
         transport.close()
     }
