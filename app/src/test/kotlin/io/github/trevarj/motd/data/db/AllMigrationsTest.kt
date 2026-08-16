@@ -6,12 +6,15 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
+import java.net.URL
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -120,6 +123,34 @@ class AllMigrationsTest {
         }
     }
 
+    /**
+     * The registered array is what `DbModule` hands Room on a real device, so a hop missing from it
+     * is a crash-on-upgrade. Room only proves the hops it is asked to walk; this pins the array to a
+     * gap-free, in-order 1 -> [DECLARED_VERSION] chain so a stray duplicate, an out-of-order entry,
+     * or a version bump with no matching migration fails here instead of in the field.
+     */
+    @Test
+    fun registeredMigrationsCoverEveryHopToTheDeclaredVersion() {
+        // Keeps DECLARED_VERSION honest: Room exports one schema per version, so a newer JSON means
+        // @Database moved on without this test.
+        assertNotNull(
+            "no exported schema for v$DECLARED_VERSION",
+            schemaResource(DECLARED_VERSION),
+        )
+        assertNull(
+            "MotdDatabase declares a version above $DECLARED_VERSION; " +
+                "bump DECLARED_VERSION and add the migration to ALL_MIGRATIONS",
+            schemaResource(DECLARED_VERSION + 1),
+        )
+        assertEquals(
+            (1 until DECLARED_VERSION).map { it to it + 1 },
+            ALL_MIGRATIONS.map { it.startVersion to it.endVersion },
+        )
+    }
+
+    private fun schemaResource(version: Int): URL? =
+        javaClass.classLoader?.getResource("${MotdDatabase::class.java.canonicalName}/$version.json")
+
     /** Creates the real v1 tables, indices, FTS triggers, and Room identity from the tracked JSON. */
     private fun createExportedVersion1(db: SupportSQLiteDatabase) {
         val resource = "${MotdDatabase::class.java.canonicalName}/1.json"
@@ -148,34 +179,12 @@ class AllMigrationsTest {
 
     private companion object {
         const val DB_NAME = "all-migrations-test.db"
-        val ALL_MIGRATIONS = arrayOf(
-            MIGRATION_1_2,
-            MIGRATION_2_3,
-            MIGRATION_3_4,
-            MIGRATION_4_5,
-            MIGRATION_5_6,
-            MIGRATION_6_7,
-            MIGRATION_7_8,
-            MIGRATION_8_9,
-            MIGRATION_9_10,
-            MIGRATION_10_11,
-            MIGRATION_11_12,
-            MIGRATION_12_13,
-            MIGRATION_13_14,
-            MIGRATION_14_15,
-            MIGRATION_15_16,
-            MIGRATION_16_17,
-            MIGRATION_17_18,
-            MIGRATION_18_19,
-            MIGRATION_19_20,
-            MIGRATION_20_21,
-            MIGRATION_21_22,
-            MIGRATION_22_23,
-            MIGRATION_23_24,
-            MIGRATION_24_25,
-            MIGRATION_25_26,
-            MIGRATION_26_27,
-            MIGRATION_27_28,
-        )
+
+        /**
+         * Mirrors `version = 28` on `@Database`. Room's annotation is CLASS-retained, so the
+         * declared version cannot be read reflectively; the exported schema JSON is the runtime
+         * witness for it instead.
+         */
+        const val DECLARED_VERSION = 28
     }
 }

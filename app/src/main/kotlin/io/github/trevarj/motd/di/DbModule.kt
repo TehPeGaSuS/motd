@@ -9,39 +9,13 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import io.github.trevarj.motd.data.db.ALL_MIGRATIONS
 import io.github.trevarj.motd.data.db.BufferDao
 import io.github.trevarj.motd.data.db.DccTransferDao
 import io.github.trevarj.motd.data.db.HistoryCursorDao
 import io.github.trevarj.motd.data.db.HistoryGapDao
 import io.github.trevarj.motd.data.db.MemberDao
 import io.github.trevarj.motd.data.db.MessageDao
-import io.github.trevarj.motd.data.db.MIGRATION_1_2
-import io.github.trevarj.motd.data.db.MIGRATION_2_3
-import io.github.trevarj.motd.data.db.MIGRATION_3_4
-import io.github.trevarj.motd.data.db.MIGRATION_4_5
-import io.github.trevarj.motd.data.db.MIGRATION_5_6
-import io.github.trevarj.motd.data.db.MIGRATION_6_7
-import io.github.trevarj.motd.data.db.MIGRATION_7_8
-import io.github.trevarj.motd.data.db.MIGRATION_8_9
-import io.github.trevarj.motd.data.db.MIGRATION_9_10
-import io.github.trevarj.motd.data.db.MIGRATION_10_11
-import io.github.trevarj.motd.data.db.MIGRATION_11_12
-import io.github.trevarj.motd.data.db.MIGRATION_12_13
-import io.github.trevarj.motd.data.db.MIGRATION_13_14
-import io.github.trevarj.motd.data.db.MIGRATION_14_15
-import io.github.trevarj.motd.data.db.MIGRATION_15_16
-import io.github.trevarj.motd.data.db.MIGRATION_16_17
-import io.github.trevarj.motd.data.db.MIGRATION_17_18
-import io.github.trevarj.motd.data.db.MIGRATION_18_19
-import io.github.trevarj.motd.data.db.MIGRATION_19_20
-import io.github.trevarj.motd.data.db.MIGRATION_20_21
-import io.github.trevarj.motd.data.db.MIGRATION_21_22
-import io.github.trevarj.motd.data.db.MIGRATION_22_23
-import io.github.trevarj.motd.data.db.MIGRATION_23_24
-import io.github.trevarj.motd.data.db.MIGRATION_24_25
-import io.github.trevarj.motd.data.db.MIGRATION_25_26
-import io.github.trevarj.motd.data.db.MIGRATION_26_27
-import io.github.trevarj.motd.data.db.MIGRATION_27_28
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
@@ -67,35 +41,9 @@ internal object DbModule {
         // v10 intentionally resets IRC-derived cache state while preserving saved networks and
         // credentials; every other registered upgrade remains non-destructive.
         Room.databaseBuilder(context, MotdDatabase::class.java, "motd.db")
-            .addMigrations(
-                MIGRATION_1_2,
-                MIGRATION_2_3,
-                MIGRATION_3_4,
-                MIGRATION_4_5,
-                MIGRATION_5_6,
-                MIGRATION_6_7,
-                MIGRATION_7_8,
-                MIGRATION_8_9,
-                MIGRATION_9_10,
-                MIGRATION_10_11,
-                MIGRATION_11_12,
-                MIGRATION_12_13,
-                MIGRATION_13_14,
-                MIGRATION_14_15,
-                MIGRATION_15_16,
-                MIGRATION_16_17,
-                MIGRATION_17_18,
-                MIGRATION_18_19,
-                MIGRATION_19_20,
-                MIGRATION_20_21,
-                MIGRATION_21_22,
-                MIGRATION_22_23,
-                MIGRATION_23_24,
-                MIGRATION_24_25,
-                MIGRATION_25_26,
-                MIGRATION_26_27,
-                MIGRATION_27_28,
-            )
+            // Shared with the migration tests so a newly added upgrade can never be registered in
+            // one place and forgotten in the other.
+            .addMigrations(*ALL_MIGRATIONS)
             // Downgrades only happen in dev when switching between branches with different schema
             // versions (e.g. the obfs branch's v3 vs main's v2); released builds only ever move the
             // version up. Wipe-and-recreate on downgrade instead of crashing on a missing migration.
