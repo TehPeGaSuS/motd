@@ -42,7 +42,9 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.sync.HistoryGapFiller
+import io.github.trevarj.motd.data.sync.HistoryPageLoader
 import io.github.trevarj.motd.data.sync.NoopHistoryGapFiller
+import io.github.trevarj.motd.data.sync.historySource
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dcc.DccTransferController
@@ -61,7 +63,6 @@ import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistorySyncStatus
-import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.service.SendRejectionReason
 import io.github.trevarj.motd.service.TypingTracker
@@ -222,7 +223,8 @@ class ChatViewModel @Inject constructor(
     private val draftStore: ComposerDraftStore,
     private val pendingShareStore: PendingShareStore,
     private val scrollPositionStore: ChatScrollPositionStore,
-    private val eventSink: IrcEventSink,
+    // The single wire-fetch primitive; the jump AROUND prefetch admits on its per-network wire gate.
+    private val historyPageLoader: HistoryPageLoader,
     private val settingsRepository: SettingsRepository,
     private val replyPrefs: ReplyPrefs,
     private val visibilityReader: MessageVisibilityReader,
@@ -1864,9 +1866,13 @@ class ChatViewModel @Inject constructor(
     private var jumpResolveJob: Job? = null
 
     /**
-     * CHATHISTORY AROUND fetch used by [ChatJumpResolver] when a msgid target is not yet local:
-     * requires a live client with `draft/chathistory`, prefers the opaque msgid selector, and
-     * persists the completed response and exact fallback request through the sole IRC→Room writer.
+     * CHATHISTORY AROUND fetch used by [ChatJumpResolver] when a msgid target is not yet local.
+     *
+     * Routed through [HistoryPageLoader] like every other history request: it shares the per-network
+     * wire gate (so a jump cannot race a catch-up page into the same timeline), coalesces with a
+     * concurrent jump to the same message, applies the msgid→timestamp fallback, and persists
+     * through the sole IRC→Room writer. A failure of any kind is reported to the resolver as "not
+     * fetched" so the jump resolves NotFound instead of stalling the entry gate.
      */
     private val resolver = ChatJumpResolver(
         messages = messageRepository,
@@ -1874,25 +1880,16 @@ class ChatViewModel @Inject constructor(
             val buffer = state.value.buffer ?: return@fetch false
             val networkId = buffer.networkId
             val client = connectionManager.clientFor(networkId) ?: return@fetch false
-            val availability = client.historyAvailability as? HistoryAvailability.Ready
-                ?: return@fetch false
             try {
-                fetchAroundHistoryPage(
+                historyPageLoader.loadAround(
+                    networkId = networkId,
+                    roomId = buffer.id,
                     target = name,
                     msgid = msgid,
                     timeMs = timeMs,
                     limit = limit,
-                    availability = availability,
-                    requestPage = client::chathistory,
-                    persistPage = { request, response ->
-                        eventSink.persistHistoryPage(
-                            networkId,
-                            request,
-                            response,
-                            expectedRoomId = buffer.id,
-                        )
-                    },
-                )
+                    source = client.historySource(),
+                ) is HistoryPageLoader.PageResult.Loaded
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {

@@ -34,7 +34,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 27,
+    version = 28,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -799,6 +799,20 @@ val MIGRATION_26_27 = object : Migration(26, 27) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("UPDATE buffers SET historyComplete = 0")
         db.execSQL("UPDATE history_cursors SET historyComplete = 0")
+    }
+}
+
+/**
+ * v27 -> v28 adds `buffers.advertisedLatestTime`, the newest activity CHATHISTORY TARGETS has
+ * advertised for a room.
+ *
+ * Purely additive and nullable, so every existing row keeps NULL and behaves exactly as it did:
+ * NULL contributes nothing to the chat-list activity sort and raises no advertised-unread cue. The
+ * first discovery pass after the upgrade fills in whatever the server currently advertises.
+ */
+val MIGRATION_27_28 = object : Migration(27, 28) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE buffers ADD COLUMN advertisedLatestTime INTEGER")
     }
 }
 

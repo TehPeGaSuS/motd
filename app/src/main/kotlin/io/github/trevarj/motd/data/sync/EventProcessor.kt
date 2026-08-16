@@ -66,6 +66,13 @@ data class ReplannedOutgoingPlan(
 
 internal data class PersistedHistoryPage(val roomId: RoomId, val inserted: Int)
 
+/**
+ * One CHATHISTORY TARGETS row already resolved to a known room: the server's newest-activity
+ * timestamp for it. Resolution belongs to the caller (only it knows the connection's normalization
+ * rules); the write belongs to [EventProcessor].
+ */
+internal data class AdvertisedActivity(val roomId: RoomId, val latestMessageTime: Long)
+
 /** Committed canonical order and freshly inserted row count of one playback batch. */
 internal data class PlaybackCommit(
     val order: List<TimelineEventId> = emptyList(),
@@ -807,6 +814,51 @@ class EventProcessor @Inject constructor(
             ?: return false
         return msgid == room.historyDiscardedThroughMsgid ||
             bufferDao.isDiscardedMessageId(room.id, msgid)
+    }
+
+    /**
+     * Record what a completed CHATHISTORY TARGETS page advertised as each room's newest activity.
+     *
+     * This is IRC-derived state, so it is written here and nowhere else. It is not message state:
+     * no row is created, nothing is ingested, and the values are a monotone high-water mark of what
+     * the server said. That is exactly what lets the chat list re-sort and badge from DISCOVERY
+     * instead of waiting for the per-room pages the pass has not fetched yet.
+     *
+     * One transaction for the whole page so the list re-sorts once, rather than once per target.
+     */
+    internal suspend fun recordAdvertisedActivity(
+        networkId: Long,
+        targets: List<AdvertisedActivity>,
+    ) {
+        if (targets.isEmpty()) return
+        sequencer.withNetwork(networkId) {
+            db.withTransaction {
+                targets.forEach { bufferDao.advanceAdvertisedLatest(it.roomId, it.latestMessageTime) }
+            }
+        }
+    }
+
+    /**
+     * Retire an advertisement the server itself has disproved, by clamping [roomId]'s advertised
+     * high-water mark down onto the newest row the room actually shows.
+     *
+     * The one exception to the column's forward-only rule, and driven by the same kind of response
+     * that writes it: a caller may only call this once a pass has proven the room is as current as
+     * CHATHISTORY will ever make it — the advertised instant is local, or replay refuses to return
+     * it at all (soju can index an event its replay never serves). Both leave the same residue: a
+     * timestamp above every visible row, describing an event the reader will never see. Left
+     * standing, it is a permanent count-less unread dot no mark-read can clear (the read anchor
+     * lands on the newest LOCAL row, which is below it) and a permanently inflated sort key.
+     *
+     * [provenLatest] is the advertisement the caller settled, and it bounds the clamp: anything the
+     * column holds above it came from a discovery this response says nothing about.
+     *
+     * Written here because it is the same IRC-derived column [recordAdvertisedActivity] owns.
+     */
+    internal suspend fun clampAdvertisedActivity(networkId: Long, roomId: RoomId, provenLatest: Long) {
+        sequencer.withNetwork(networkId) {
+            bufferDao.clampAdvertisedLatestToVisible(roomId, provenLatest)
+        }
     }
 
     /**

@@ -7,27 +7,21 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.repo.MessageRepository
+import io.github.trevarj.motd.data.sync.boundedToRequest
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
-import io.github.trevarj.motd.irc.client.HistoryAvailability
-import io.github.trevarj.motd.irc.client.HistoryReferenceType
-import io.github.trevarj.motd.irc.client.IrcCommandException
-import io.github.trevarj.motd.irc.client.IrcDisconnectedException
-import io.github.trevarj.motd.irc.client.IrcTimeoutException
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.event.messageContextOrNull
 import io.github.trevarj.motd.irc.proto.Prefix
-import java.io.IOException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -481,153 +475,9 @@ class ChatJumpResolverTest {
         assertEquals(0, (result as ChatJumpResolver.Result.Resolved).target.index)
     }
 
-    @Test fun `around fetch prefers and preserves opaque msgid then persists exact request`() = runTest {
-        val requests = mutableListOf<ChatHistoryRequest>()
-        var persisted: ChatHistoryRequest? = null
-        val page = ChatHistoryResponse.Messages(emptyList(), null, null, false, 0)
-
-        val completed = fetchAroundHistoryPage(
-            target = "#chan",
-            msgid = "MiXeD/opaque=Value",
-            timeMs = 200,
-            limit = 100,
-            availability = HistoryAvailability.Ready(
-                setOf(HistoryReferenceType.MSGID, HistoryReferenceType.TIMESTAMP),
-                pageLimit = 50,
-            ),
-            requestPage = { request ->
-                requests += request
-                page
-            },
-            persistPage = { request, _ -> persisted = request },
-        )
-
-        assertTrue(completed)
-        assertEquals(listOf("msgid=MiXeD/opaque=Value"), requests.map { it.bound1 })
-        assertEquals(requests.single(), persisted)
-        assertEquals(50, persisted?.limit)
-    }
-
-    @Test fun `around fetch falls back only from invalid msgid reference and persists fallback`() = runTest {
-        val requests = mutableListOf<ChatHistoryRequest>()
-        var persisted: ChatHistoryRequest? = null
-        val page = ChatHistoryResponse.Messages(emptyList(), null, null, false, 0)
-
-        fetchAroundHistoryPage(
-            target = "#chan",
-            msgid = "ExactCase",
-            timeMs = 200,
-            limit = 100,
-            availability = HistoryAvailability.Ready(
-                setOf(HistoryReferenceType.MSGID, HistoryReferenceType.TIMESTAMP),
-                pageLimit = 100,
-            ),
-            requestPage = { request ->
-                requests += request
-                if (requests.size == 1) {
-                    throw IrcCommandException("CHATHISTORY", "INVALID_MSGREFTYPE", "no msgid")
-                }
-                page
-            },
-            persistPage = { request, _ -> persisted = request },
-        )
-
-        assertEquals(
-            listOf("msgid=ExactCase", "timestamp=1970-01-01T00:00:00.200Z"),
-            requests.map { it.bound1 },
-        )
-        assertEquals(requests.last(), persisted)
-    }
-
-    @Test fun `around fetch bounds server overdelivery before persistence`() = runTest {
-        var persisted: ChatHistoryResponse.Messages? = null
-        val events = (1..100).map { index ->
-            IrcEvent.ChatMessage(
-                ctx = MessageContext("m$index", index.toLong(), null, "batch", null),
-                kind = IrcEvent.ChatKind.PRIVMSG,
-                source = Prefix("alice"),
-                target = "#chan",
-                text = "m$index",
-                isSelf = false,
-                replyToMsgid = null,
-            )
-        }
-        val page = ChatHistoryResponse.Messages(
-            events = events,
-            oldest = ChatHistoryReference("m1", 1),
-            newest = ChatHistoryReference("m100", 100),
-            endOfHistory = true,
-            primaryMessageCount = events.size,
-        )
-
-        val completed = fetchAroundHistoryPage(
-            target = "#chan",
-            msgid = "m50",
-            timeMs = 50,
-            limit = 2,
-            availability = HistoryAvailability.Ready(
-                setOf(HistoryReferenceType.MSGID, HistoryReferenceType.TIMESTAMP),
-                pageLimit = 100,
-            ),
-            requestPage = { page },
-            persistPage = { _, bounded -> persisted = bounded },
-        )
-
-        assertTrue(completed)
-        assertEquals(2, persisted?.primaryMessageCount)
-        assertEquals(listOf("m49", "m50"), persisted?.events?.mapNotNull { it.messageContextOrNull()?.msgid })
-        assertFalse(persisted?.endOfHistory ?: true)
-    }
-
-    @Test fun `timestamp fallback still centers overdelivery on the requested msgid`() = runTest {
-        var attempts = 0
-        var persisted: ChatHistoryResponse.Messages? = null
-        val events = (1..100).map { index ->
-            IrcEvent.ChatMessage(
-                ctx = MessageContext("m$index", 50, null, "batch", null),
-                kind = IrcEvent.ChatKind.PRIVMSG,
-                source = Prefix("alice"),
-                target = "#chan",
-                text = "m$index",
-                isSelf = false,
-                replyToMsgid = null,
-            )
-        }
-        val page = ChatHistoryResponse.Messages(
-            events = events,
-            oldest = ChatHistoryReference("m1", 50),
-            newest = ChatHistoryReference("m100", 50),
-            endOfHistory = true,
-            primaryMessageCount = events.size,
-        )
-
-        fetchAroundHistoryPage(
-            target = "#chan",
-            msgid = "m90",
-            timeMs = 50,
-            limit = 2,
-            availability = HistoryAvailability.Ready(
-                setOf(HistoryReferenceType.MSGID, HistoryReferenceType.TIMESTAMP),
-                pageLimit = 100,
-            ),
-            requestPage = {
-                attempts++
-                if (attempts == 1) {
-                    throw IrcCommandException("CHATHISTORY", "INVALID_MSGREFTYPE", "no msgid")
-                }
-                page
-            },
-            persistPage = { _, bounded -> persisted = bounded },
-        )
-
-        assertEquals(2, attempts)
-        assertEquals(
-            listOf("m89", "m90"),
-            persisted?.events?.mapNotNull { it.messageContextOrNull()?.msgid },
-        )
-    }
-
     @Test fun `resolver still finds exact target after around overdelivery is bounded`() = runTest {
+        // The loader owns the AROUND request itself; what the resolver depends on is that the
+        // window the loader persists still CONTAINS the requested message, so its retry lands.
         val repo = FakeMessageRepository()
         val events = (1..100).map { index ->
             IrcEvent.ChatMessage(
@@ -647,66 +497,30 @@ class ChatJumpResolverTest {
             endOfHistory = true,
             primaryMessageCount = events.size,
         )
-        val resolver = ChatJumpResolver(repo) { target, msgid, time, limit ->
-            fetchAroundHistoryPage(
-                target,
-                msgid,
-                time,
-                limit = 2.coerceAtMost(limit),
-                availability = HistoryAvailability.Ready(
-                    setOf(HistoryReferenceType.MSGID, HistoryReferenceType.TIMESTAMP),
-                    pageLimit = 100,
-                ),
-                requestPage = { response },
-                persistPage = { _, bounded ->
-                    bounded.events.mapNotNull { it.messageContextOrNull() }.forEachIndexed { offset, context ->
-                        repo.store += msg(
-                            id = (offset + 1).toLong(),
-                            bufferId = 7,
-                            serverTime = context.serverTime,
-                            msgid = checkNotNull(context.msgid),
-                        )
-                    }
-                },
+        val resolver = ChatJumpResolver(repo) { target, msgid, _, _ ->
+            val request = ChatHistoryRequest(
+                subcommand = ChatHistoryRequest.Subcommand.AROUND,
+                target = target,
+                bound1 = "msgid=$msgid",
+                limit = 2,
             )
+            response.boundedToRequest(request, preferredAroundMsgid = msgid)
+                .events
+                .mapNotNull { it.messageContextOrNull() }
+                .forEachIndexed { offset, context ->
+                    repo.store += msg(
+                        id = (offset + 1).toLong(),
+                        bufferId = 7,
+                        serverTime = context.serverTime,
+                        msgid = checkNotNull(context.msgid),
+                    )
+                }
+            true
         }
 
         val result = resolver.resolve(7, "m50", 50, "#chan")
 
         assertTrue(result is ChatJumpResolver.Result.Resolved)
         assertEquals("m50", (result as ChatJumpResolver.Result.Resolved).target.expectedMsgid)
-    }
-
-    @Test fun `around non-reference failures do not retry with timestamp`() = runTest {
-        listOf(
-            IrcTimeoutException("around"),
-            IrcDisconnectedException("CHATHISTORY", "lost connection"),
-            IOException("read failed"),
-            IrcCommandException("CHATHISTORY", "MESSAGE_ERROR", "request rejected"),
-        ).forEach { expected ->
-            val requests = mutableListOf<ChatHistoryRequest>()
-            var persisted = false
-            val failure = runCatching {
-                fetchAroundHistoryPage(
-                    target = "#chan",
-                    msgid = "ExactCase",
-                    timeMs = 200,
-                    limit = 100,
-                    availability = HistoryAvailability.Ready(
-                        setOf(HistoryReferenceType.MSGID, HistoryReferenceType.TIMESTAMP),
-                        pageLimit = 100,
-                    ),
-                    requestPage = { request ->
-                        requests += request
-                        throw expected
-                    },
-                    persistPage = { _, _ -> persisted = true },
-                )
-            }.exceptionOrNull()
-
-            assertTrue(failure === expected)
-            assertEquals(listOf("msgid=ExactCase"), requests.map { it.bound1 })
-            assertTrue(!persisted)
-        }
     }
 }

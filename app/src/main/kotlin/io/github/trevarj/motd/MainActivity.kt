@@ -175,9 +175,12 @@ class MainActivity : ComponentActivity() {
         warmNotificationEntry(
             intent,
             onTarget = { notificationTarget = it },
-            // The manager reconnects stale actors and throttles the checkpoint per connection, so
-            // repeated taps do not storm the wire.
-            onCheckpointHistory = { lifecycleScope.launch { connectionManager.checkpointHistory() } },
+            // The manager reconnects stale actors and skips the pass for any connection that never
+            // died, so repeated taps do not storm the wire. The tapped buffer is named so it is
+            // reconciled first rather than behind whatever the checkpoint decides.
+            onCheckpointHistory = { bufferId ->
+                lifecycleScope.launch { connectionManager.checkpointHistory(bufferId) }
+            },
         )
         acceptShareFrom(intent)
         acceptInvitationFrom(intent)
@@ -278,17 +281,21 @@ internal fun parseNotificationTarget(intent: Intent?): NotificationTarget? {
  * nothing else on this path re-checks what the server accepted while the process sat idle. Every
  * other warm intent — a share, a plain launcher relaunch — is neither.
  *
+ * The checkpoint is handed the TAPPED buffer, not just told to run: the one conversation the user
+ * is opening is the one that has to be current, and it must not be discovered somewhere inside a
+ * network-wide pass (or skipped entirely by a checkpoint that decides the socket never died).
+ *
  * Hoisted out of [MainActivity.onNewIntent] because that call site is only reachable with an
  * instrumented activity, while the pairing itself is what the checkpoint depends on.
  */
 internal fun warmNotificationEntry(
     intent: Intent?,
     onTarget: (NotificationTarget) -> Unit,
-    onCheckpointHistory: () -> Unit,
+    onCheckpointHistory: (bufferId: Long) -> Unit,
 ) {
     val target = parseNotificationTarget(intent) ?: return
     onTarget(target)
-    onCheckpointHistory()
+    onCheckpointHistory(target.bufferId)
 }
 
 internal data class MainActivityUiState(

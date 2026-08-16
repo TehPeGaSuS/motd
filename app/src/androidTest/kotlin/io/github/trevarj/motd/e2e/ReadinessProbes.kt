@@ -19,6 +19,15 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.withTimeout
 
+/**
+ * Waits for one buffer's history-sync episode: it must become active and then settle.
+ *
+ * `AwaitingConnection` counts as active on purpose — a foreground with no live connection is a real
+ * outage, and the badge it paints is part of the episode the caller is waiting out. Note that a
+ * catch-up pass publishes nothing at all until discovery proves a room changed, so "active" now
+ * begins at the first changed discovery page rather than at pass registration; a pass that finds
+ * nothing to fetch produces no episode to observe, by design.
+ */
 class HistorySyncProbe(
     private val history: HistoryResyncController,
     private val milestones: E2eMilestoneRecorder,

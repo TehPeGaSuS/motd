@@ -251,6 +251,18 @@ class RequiredHeadlessE2eTest {
         }
         runBlocking {
             coroutineScope {
+                // Subscribed BEFORE the reconnect, and it has to stay that way: the probe waits for
+                // this buffer to become active and then settle, and per-buffer status is a
+                // conflating StateFlow, so a late subscriber can miss the whole episode.
+                //
+                // The active window no longer opens when the pass starts. A catch-up pass is latent
+                // until CHATHISTORY TARGETS proves at least one room moved — a reconnect that finds
+                // nothing changed is not something the user should watch — so the first active
+                // status here is published at discovery's first changed page rather than at
+                // registration. This buffer IS changed (260 rows landed while the socket was down),
+                // so the episode still runs Queued -> Syncing -> settled, with a real round trip
+                // between the reveal and the settle. The 45s budget is unchanged and still covers
+                // one discovery round trip plus one newest page.
                 val historySettled = async(start = CoroutineStart.UNDISPATCHED) {
                     HistorySyncProbe(bootstrap.seams.history(), milestones).awaitCycle(bufferId)
                 }

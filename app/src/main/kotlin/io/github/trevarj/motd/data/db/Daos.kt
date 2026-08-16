@@ -165,7 +165,18 @@ interface BufferDao {
     // Unread/mention counts remain chat kinds only; self messages never count as unread.
     // Counts are capped at 1000 (the badge renders 999+) so a buffer holding a huge unread
     // backlog cannot turn every invalidation into a full-buffer scan.
-    // Sort: pinned first, then latest preview activity DESC (nulls last).
+    // Sort: pinned first, then latest KNOWN activity DESC (nulls last), where "known" is the newer
+    // of the local preview row and what CHATHISTORY TARGETS last advertised. Discovery therefore
+    // re-sorts the list on its first response, before any per-room page has been fetched.
+    // `advertisedUnread` is the count-less companion of that: the server says this room moved past
+    // both the read floor and everything held locally, but the rows are not here yet. It carries no
+    // number because discovery reports a timestamp, not a count, and it extinguishes itself when
+    // the fetched page or a mark-read catches the room up. Compared at SECOND granularity, exactly
+    // like `reachedAdvertisedTolerance` and the wave planner: stored server-time tags can carry
+    // second precision while TARGETS advertises milliseconds, and a strict comparison here would
+    // light the cue on rooms the pass has already proven converged. What no comparison can settle —
+    // an advertisement replay never serves — is retired at the source by
+    // `EventProcessor.clampAdvertisedActivity`.
     @Transaction
     @Query(
         """
@@ -254,7 +265,13 @@ interface BufferDao {
                        g.newerEventId > COALESCE(b.localReadAnchorEventId, 0)))))) OR
             (b.historyComplete = 0 AND b.oldestFetchedTime >
                 MAX(COALESCE(b.localReadAnchorTime, 0),
-                    COALESCE(b.localUnreadFloorTime, 0))) AS mentionCountIncomplete
+                    COALESCE(b.localUnreadFloorTime, 0))) AS mentionCountIncomplete,
+            (b.advertisedLatestTime IS NOT NULL
+                AND b.advertisedLatestTime / 1000 > MAX(COALESCE(b.localReadAnchorTime, 0),
+                    COALESCE(b.localUnreadFloorTime, 0)) / 1000
+                AND b.advertisedLatestTime / 1000 > COALESCE(lm.serverTime, 0) / 1000)
+                AS advertisedUnread,
+            b.advertisedLatestTime AS advertisedLatestTime
         FROM buffers b
         JOIN networks n ON n.id = b.networkId
         LEFT JOIN network_identity ni ON ni.networkId = b.networkId
@@ -267,8 +284,8 @@ interface BufferDao {
         WHERE b.type != 'SERVER' AND b.dismissed = 0
           AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL
         ORDER BY b.pinned DESC,
-                 (lastMessageTime IS NULL) ASC,
-                 lastMessageTime DESC,
+                 (MAX(COALESCE(lm.serverTime, 0), COALESCE(b.advertisedLatestTime, 0)) = 0) ASC,
+                 MAX(COALESCE(lm.serverTime, 0), COALESCE(b.advertisedLatestTime, 0)) DESC,
                  b.id DESC
         """
     )
@@ -587,6 +604,57 @@ interface BufferDao {
     @Query("UPDATE buffers SET readMarkerTime = :ts WHERE id = :id AND (readMarkerTime IS NULL OR readMarkerTime < :ts)")
     suspend fun advanceReadMarker(id: Long, ts: Long)
 
+    /**
+     * Forward-only high-water mark of what CHATHISTORY TARGETS advertised for this room.
+     *
+     * Guarded in SQL rather than by a read-modify-write: discovery pages from several passes (a
+     * reconnect catch-up and the paced backfill) can report the same room out of order, and the
+     * older report must not walk the sort key or the advertised-unread cue backwards.
+     */
+    @Query(
+        """UPDATE buffers SET advertisedLatestTime = :ts
+           WHERE id = :id AND (advertisedLatestTime IS NULL OR advertisedLatestTime < :ts)""",
+    )
+    suspend fun advanceAdvertisedLatest(id: RoomId, ts: Long)
+
+    /**
+     * Clamp the advertised high-water mark down onto this room's newest VISIBLE row (null when it
+     * has none) — the one downward move the column allows, and only for a caller holding a server
+     * response that proves the room can never reach the advertisement (see
+     * [io.github.trevarj.motd.data.sync.EventProcessor.clampAdvertisedActivity]).
+     *
+     * The subquery is `observeChatList`'s preview row, kind filter included, because the advertised
+     * cue is defined against exactly that row: TARGETS timestamps the newest SERVER event, which is
+     * routinely a JOIN or an event ingestion filters away, and a value stranded above the newest
+     * previewable row is an unread dot for something the list can never show.
+     *
+     * [provenLatest] is what the caller's response actually settled, and the column is left alone
+     * above it: a stored value from a newer discovery than this one has not been disproved by
+     * anything, and lowering it would be the backwards walk [advanceAdvertisedLatest] exists to
+     * prevent.
+     *
+     * The second-granularity guard is the cue's own comparison, so a room that is already converged
+     * within stored-timestamp precision is not written at all — and, since Room invalidates on rows
+     * actually updated, does not re-run the chat list for every settled target of every pass.
+     */
+    @Query(
+        """UPDATE buffers SET advertisedLatestTime = (
+               SELECT m.serverTime FROM messages m
+               WHERE m.bufferId = :id
+                 AND m.kind NOT IN ('JOIN', 'PART', 'QUIT', 'NETSPLIT', 'NETJOIN')
+               ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC
+               LIMIT 1)
+           WHERE id = :id AND advertisedLatestTime IS NOT NULL
+             AND advertisedLatestTime <= :provenLatest
+             AND advertisedLatestTime / 1000 > COALESCE((
+               SELECT m.serverTime FROM messages m
+               WHERE m.bufferId = :id
+                 AND m.kind NOT IN ('JOIN', 'PART', 'QUIT', 'NETSPLIT', 'NETJOIN')
+               ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC
+               LIMIT 1), 0) / 1000""",
+    )
+    suspend fun clampAdvertisedLatestToVisible(id: RoomId, provenLatest: Long)
+
     @Query(
         """UPDATE buffers SET localReadAnchorTime = :serverTime, localReadAnchorEventId = :eventId
            WHERE id = :id AND (
@@ -737,7 +805,31 @@ data class ChatListRow(
     val archived: Boolean = false,
     val unreadCountIncomplete: Boolean = false,
     val mentionCountIncomplete: Boolean = false,
+    /**
+     * CHATHISTORY TARGETS advertises activity newer than both the read floor and every row this
+     * device holds: there is something unread here whose rows have not arrived yet. Count-less by
+     * construction — discovery reports a timestamp, never a number.
+     */
+    val advertisedUnread: Boolean = false,
+    /** Raw advertised high-water mark; half of [activityTime], which is what the list sorts on. */
+    val advertisedLatestTime: Long? = null,
 )
+
+/**
+ * The recency this row sorts on: the newer of what is stored locally and what the server last
+ * advertised.
+ *
+ * A room whose backlog has not been fetched yet is still the most recent conversation on the
+ * account, and burying it under rooms with older-but-present messages is exactly the "reconnect
+ * reshuffles my list twice" effect the discovery-first badging exists to remove. Null only when
+ * neither is known.
+ */
+val ChatListRow.activityTime: Long?
+    get() = when {
+        lastMessageTime == null -> advertisedLatestTime
+        advertisedLatestTime == null -> lastMessageTime
+        else -> maxOf(lastMessageTime, advertisedLatestTime)
+    }
 
 /** Minimal query-buffer projection for MONITOR target selection. */
 data class MonitorQueryRow(

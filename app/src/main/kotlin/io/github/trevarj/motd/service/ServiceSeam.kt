@@ -157,16 +157,21 @@ interface ConnectionManager {
      * A notification tapped while the app is ALREADY foregrounded is re-delivered to the running
      * activity through `onNewIntent`, and no ProcessLifecycleOwner ON_START fires for it, so the
      * ordinary foreground verification never runs for that entry. A burst of taps cannot storm the
-     * wire, but by two different mechanisms rather than one throttle: the VERIFICATION half is
-     * suppressed per connection by FOREGROUND_VERIFY_THROTTLE_MS, while the reconnect half below is
-     * bounded by conflation instead -- probeReady coalesces on the registry's pending flag and the
-     * actor coalesces again on its own, and reconcile is idempotent.
+     * wire: the VERIFICATION half is skipped entirely for any connection that has stayed Ready
+     * since its own catch-up converged, while the reconnect half is bounded by conflation --
+     * probeReady coalesces on the registry's pending flag and the actor coalesces again on its own,
+     * and reconcile is idempotent.
      *
      * "Exactly as a process foreground does" includes [reconnectStale]: the checkpoint paints
      * waiting badges on networks that are not Ready, and this entry has no other way to wake an
      * actor sitting out an exponential backoff behind them.
+     *
+     * [focusBufferId] is the buffer a notification tap is opening. It is reconciled FIRST and on
+     * its own single-buffer request, so the conversation the user is looking at converges without
+     * waiting for whatever the network-wide checkpoint decides to do; a request-level permit
+     * interleaves it with any pass already on the wire.
      */
-    suspend fun checkpointHistory() = Unit
+    suspend fun checkpointHistory(focusBufferId: Long? = null) = Unit
 
     /** Accepted means every chunk is durably represented, not necessarily written to the wire. */
     suspend fun sendMessage(

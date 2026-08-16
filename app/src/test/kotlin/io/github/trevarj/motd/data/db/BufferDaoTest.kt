@@ -581,6 +581,160 @@ class BufferDaoTest {
     }
 
     @Test
+    fun `advertised activity is a forward-only high-water mark`() = runTest {
+        val bufDao = db.bufferDao()
+        val bid = bufDao.insert(buffer(networkId, "#advertised"))
+
+        bufDao.advanceAdvertisedLatest(bid, 500)
+        bufDao.advanceAdvertisedLatest(bid, 400)
+
+        assertEquals(500L, bufDao.rawById(bid)!!.advertisedLatestTime)
+
+        bufDao.advanceAdvertisedLatest(bid, 900)
+        assertEquals(900L, bufDao.rawById(bid)!!.advertisedLatestTime)
+    }
+
+    @Test
+    fun `advertised activity re-sorts the chat list ahead of rooms with older local rows`() = runTest {
+        val bufDao = db.bufferDao()
+        val msgDao = db.messageDao()
+        val recentLocal = bufDao.insert(buffer(networkId, "#local"))
+        val advertisedOnly = bufDao.insert(buffer(networkId, "#advertised"))
+        val quiet = bufDao.insert(buffer(networkId, "#quiet"))
+        msgDao.insertAll(listOf(message(recentLocal, "here", serverTime = 500, dedupKey = "local-1")))
+
+        // Discovery says #advertised moved more recently than anything this device holds. The rows
+        // have not been fetched, so the row's only recency signal is the advertisement.
+        bufDao.advanceAdvertisedLatest(advertisedOnly, 900)
+
+        val rows = bufDao.observeChatList().first()
+        assertEquals(listOf(advertisedOnly, recentLocal, quiet), rows.map { it.bufferId })
+        assertEquals(900L, rows.first().activityTime)
+        // A room nobody has said anything about still sorts last rather than at epoch-zero.
+        assertNull(rows.last().activityTime)
+    }
+
+    @Test
+    fun `advertised unread stands in for a count and extinguishes itself`() = runTest {
+        val bufDao = db.bufferDao()
+        val msgDao = db.messageDao()
+        val bid = bufDao.insert(buffer(networkId, "#pending"))
+        bufDao.advanceAdvertisedLatest(bid, 900_000)
+
+        val pending = bufDao.observeChatList().first().single()
+        assertTrue(pending.advertisedUnread)
+        assertEquals(0, pending.unreadCount)
+
+        // The pass fetches the page the advertisement was describing: the room now HAS the rows, so
+        // the cue is gone and an ordinary unread count takes over. No write cleared the column.
+        msgDao.insertAll(listOf(message(bid, "arrived", serverTime = 900_000, dedupKey = "pending-1")))
+        val fetched = bufDao.observeChatList().first().single()
+        assertFalse(fetched.advertisedUnread)
+        assertEquals(1, fetched.unreadCount)
+        assertEquals(900_000L, bufDao.rawById(bid)!!.advertisedLatestTime)
+    }
+
+    @Test
+    fun `an advertisement inside the stored row's second is already reached`() = runTest {
+        val bufDao = db.bufferDao()
+        val msgDao = db.messageDao()
+        val bid = bufDao.insert(buffer(networkId, "#precision"))
+        // The row this device stored carries a second-precision server-time tag; TARGETS advertised
+        // the same event in milliseconds. Compared strictly, that difference is a permanent unread
+        // dot on a room that is fully caught up — the reason every other advertised comparison in
+        // the app is made at second granularity.
+        msgDao.insertAll(listOf(message(bid, "tail", serverTime = 900_000, dedupKey = "precision-1")))
+        bufDao.advanceAdvertisedLatest(bid, 900_640)
+
+        assertFalse(bufDao.observeChatList().first().single().advertisedUnread)
+    }
+
+    @Test
+    fun `reading past an advertisement extinguishes its cue without any rows arriving`() = runTest {
+        val bufDao = db.bufferDao()
+        val bid = bufDao.insert(buffer(networkId, "#read"))
+        bufDao.advanceAdvertisedLatest(bid, 900_000)
+        assertTrue(bufDao.observeChatList().first().single().advertisedUnread)
+
+        // Mark-read past the advertised instant: whatever the server was describing is behind the
+        // reader now, so there is nothing pending to hint at.
+        bufDao.update(bufDao.rawById(bid)!!.copy(localReadAnchorTime = 900_000))
+
+        assertFalse(bufDao.observeChatList().first().single().advertisedUnread)
+    }
+
+    @Test
+    fun `clamping retires an advertisement the room can never show`() = runTest {
+        val bufDao = db.bufferDao()
+        val msgDao = db.messageDao()
+        val bid = bufDao.insert(buffer(networkId, "#unreachable"))
+        // Everything this room can show is at t=500s; the newest SERVER event is a JOIN at t=900s
+        // (or an event replay simply never returns). Mark-read cannot reach the advertisement — the
+        // anchor lands on the newest LOCAL row — so without the clamp the dot and the inflated sort
+        // key are permanent.
+        msgDao.insertAll(
+            listOf(
+                message(bid, "tail", serverTime = 500_000, dedupKey = "clamp-1"),
+                message(bid, "joined", serverTime = 900_000, dedupKey = "clamp-2", kind = MessageKind.JOIN),
+            ),
+        )
+        bufDao.advanceAdvertisedLatest(bid, 900_000)
+        assertTrue(bufDao.observeChatList().first().single().advertisedUnread)
+
+        bufDao.clampAdvertisedLatestToVisible(bid, provenLatest = 900_000)
+
+        val row = bufDao.observeChatList().first().single()
+        assertFalse(row.advertisedUnread)
+        // Clamped onto the room's newest VISIBLE row, so the sort key is the truth the list shows.
+        assertEquals(500_000L, bufDao.rawById(bid)!!.advertisedLatestTime)
+        assertEquals(500_000L, row.activityTime)
+    }
+
+    @Test
+    fun `clamping a room with nothing to show clears the advertisement entirely`() = runTest {
+        val bufDao = db.bufferDao()
+        val bid = bufDao.insert(buffer(networkId, "#empty"))
+        bufDao.advanceAdvertisedLatest(bid, 900_000)
+
+        bufDao.clampAdvertisedLatestToVisible(bid, provenLatest = 900_000)
+
+        assertNull(bufDao.rawById(bid)!!.advertisedLatestTime)
+        assertFalse(bufDao.observeChatList().first().single().advertisedUnread)
+    }
+
+    @Test
+    fun `clamping leaves a converged advertisement alone`() = runTest {
+        val bufDao = db.bufferDao()
+        val msgDao = db.messageDao()
+        val bid = bufDao.insert(buffer(networkId, "#pending-clamp"))
+        msgDao.insertAll(listOf(message(bid, "tail", serverTime = 900_000, dedupKey = "keep-1")))
+        // Within the stored row's second: the cue is already dark, and the high-water mark must not
+        // be rewritten (and the chat list must not be invalidated) for a room that is converged.
+        bufDao.advanceAdvertisedLatest(bid, 900_400)
+
+        bufDao.clampAdvertisedLatestToVisible(bid, provenLatest = 900_400)
+
+        assertEquals(900_400L, bufDao.rawById(bid)!!.advertisedLatestTime)
+    }
+
+    @Test
+    fun `clamping never lowers a value the caller's response says nothing about`() = runTest {
+        val bufDao = db.bufferDao()
+        val msgDao = db.messageDao()
+        val bid = bufDao.insert(buffer(networkId, "#newer-report"))
+        msgDao.insertAll(listOf(message(bid, "tail", serverTime = 500_000, dedupKey = "newer-1")))
+        // A newer discovery already advertised t=900s. A pass settling an OLDER advertisement has
+        // disproved nothing about it, and lowering it here would be the backwards walk the
+        // forward-only write exists to prevent.
+        bufDao.advanceAdvertisedLatest(bid, 900_000)
+
+        bufDao.clampAdvertisedLatestToVisible(bid, provenLatest = 600_000)
+
+        assertEquals(900_000L, bufDao.rawById(bid)!!.advertisedLatestTime)
+        assertTrue(bufDao.observeChatList().first().single().advertisedUnread)
+    }
+
+    @Test
     fun `unmute stays silent when the floor advance hides nothing`() = runTest {
         val bufDao = db.bufferDao()
         val msgDao = db.messageDao()

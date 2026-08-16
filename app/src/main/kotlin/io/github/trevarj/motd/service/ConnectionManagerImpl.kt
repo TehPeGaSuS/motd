@@ -3,7 +3,6 @@ package io.github.trevarj.motd.service
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
-import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.room.withTransaction
@@ -57,6 +56,7 @@ import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.push.WebPushRegistrar
 import io.github.trevarj.motd.push.PushHealthStore
 import io.github.trevarj.motd.push.pushSuspendedNetworkIds
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
@@ -93,6 +93,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.lang.ref.WeakReference
 import java.util.UUID
 
 internal data class OutgoingMessageChunk(
@@ -692,16 +693,52 @@ class ConnectionManagerImpl @Inject constructor(
 
     // A warm notification tap is a foreground entry that ProcessLifecycleOwner never reports, so it
     // runs the same reconnect-then-verify pair ON_START does rather than the verification alone.
-    override suspend fun checkpointHistory() = foregroundHistoryCheckpoint()
+    // The tapped buffer is reconciled first and independently: post trust-live-socket the network
+    // checkpoint usually decides there is nothing to do, and even when it does run a pass, the
+    // conversation the user just opened must not wait behind discovery.
+    override suspend fun checkpointHistory(focusBufferId: Long?) {
+        focusBufferId?.let(::reconcileFocusedBuffer)
+        foregroundHistoryCheckpoint()
+    }
 
     /**
-     * Every foreground is a history checkpoint, even when the socket survived Doze: a Ready
-     * connection proves nothing about what the server accepted while the process was frozen.
+     * Reconcile one tapped buffer immediately, on this coordinator's own scope.
+     *
+     * Deliberately launched rather than awaited: it is a single-buffer flight with its own request
+     * key, so it coalesces with a chat screen that is opening the same buffer, interleaves with any
+     * network pass at the loader's per-request permit, and must not delay the checkpoint behind it.
+     * A buffer whose network is not Ready is skipped — the reconnect's own catch-up pass will
+     * prioritize it anyway, because the wave plan orders the foreground buffer first.
+     */
+    private fun reconcileFocusedBuffer(bufferId: Long) {
+        scope.launch {
+            // Canonical, not raw: a notification can carry a room id that has since been merged
+            // into another, and reconciling the losing side would fetch into a room nothing reads.
+            val buffer = db.bufferDao().observeById(bufferId) ?: return@launch
+            val client = clientFor(buffer.networkId) ?: return@launch
+            if (registry.snapshot.value.states[buffer.networkId] !is IrcClientState.Ready) return@launch
+            historyResyncCoordinator.reconcileBuffer(buffer, client) {
+                clientFor(buffer.networkId) === client
+            }
+        }
+    }
+
+    /**
+     * A foreground is a history checkpoint only for connections that cannot vouch for themselves.
+     *
+     * A socket that has stayed Ready since its own catch-up converged received everything the
+     * server sent, live — there is nothing for a pass to discover, and running one anyway spent
+     * wire traffic and flashed sync chrome on essentially every app switch. The case the old
+     * time-based throttle was defending against is not silent at all: a server buffer that fills
+     * while the process is frozen stalls the socket, the ping watchdog kills it, and the
+     * reconnect's new client fails [shouldRunForegroundVerification]'s identity check, so its A1
+     * pass runs. [foregroundHistoryCheckpoint] runs `reconnectStale()` (and with it the registry's
+     * liveness probe) in front of this, which is what turns a silently-dead socket into that
+     * reconnect.
      *
      * Networks that are not Ready get the optimistic waiting state instead of a pass, so the list
      * shows queued feedback immediately; the reconnect this method follows adopts those entries
-     * when it finally runs a real pass. Ready networks run a normal catch-up pass unless one just
-     * completed on this very socket, which is the only case where re-verifying is pure waste.
+     * when it finally runs a real pass.
      */
     internal suspend fun verifyHistoryOnForeground() {
         val snapshot = registry.snapshot.value
@@ -718,7 +755,6 @@ class ConnectionManagerImpl @Inject constructor(
             val shouldVerify = shouldRunForegroundVerification(
                 recorded = completedCatchUps[networkId],
                 currentClient = client,
-                nowElapsedMs = SystemClock.elapsedRealtime(),
             )
             if (shouldVerify) launchCatchUp(networkId, client)
         }
@@ -726,9 +762,9 @@ class ConnectionManagerImpl @Inject constructor(
 
     /**
      * Per-network single flight for verification passes. The Ready-session catch-up at
-     * [onReadySession] deliberately stays inline (the history gate must not be released before it
-     * finishes); a same-client overlap between the two degrades to the coordinator's own request
-     * coalescing rather than issuing the pass twice.
+     * [onReadySession] deliberately stays inline (the history gate must not be released before that
+     * pass's visible wave converges); a same-client overlap between the two degrades to the
+     * coordinator's own request coalescing rather than issuing the pass twice.
      */
     private fun launchCatchUp(networkId: Long, client: IrcClient) {
         // The caller read [client] before this call, so the actor can have swapped in a replacement
@@ -1459,13 +1495,26 @@ class ConnectionManagerImpl @Inject constructor(
                 }
             }
             launch {
+                // One release per Ready session, whoever reaches it first. The catch-up hands the
+                // gate back as soon as its visible wave converges, so a chat opened during the
+                // paced overflow sweep is not held on the entry timeout by background work; the
+                // decision branch's own exit paths (unsupported verdict, cancellation, a throw)
+                // still guarantee the gate is released exactly once.
+                val releasedEntryGate = AtomicBoolean(false)
+                val releaseEntryGate: suspend () -> Unit = {
+                    if (releasedEntryGate.compareAndSet(false, true)) {
+                        registry.historyCatchUpFinished(row.id, generation)
+                    }
+                }
                 runHistoryCatchUpSession(
                     client = client,
                     isCurrent = isCurrent,
                     liveClient = { clientFor(row.id) },
                     awaitReadMarkerSettlement = { initialReadMarkers.join() },
-                    releaseGate = { registry.historyCatchUpFinished(row.id, generation) },
-                    catchUp = { catchUpForConnection(row.id, client) },
+                    releaseGate = releaseEntryGate,
+                    catchUp = {
+                        catchUpForConnection(row.id, client, onCatchUpConverged = releaseEntryGate)
+                    },
                     backfill = {
                         historyResyncCoordinator.backfillTargets(row.id, client) {
                             clientFor(row.id) === client
@@ -1508,8 +1557,23 @@ class ConnectionManagerImpl @Inject constructor(
      * Own reconnect catch-up for the lifetime of this exact client. Its caller already waited for
      * CHATHISTORY to appear, so this only retries actual transport/server failures.
      */
-    private suspend fun catchUpForConnection(networkId: Long, client: IrcClient) {
+    private suspend fun catchUpForConnection(
+        networkId: Long,
+        client: IrcClient,
+        // The Ready session's entry gate, handed back the moment the visible half of a pass has
+        // converged rather than at the end of the whole loop. Null for a verification pass, which
+        // owns no gate. See [HistoryResyncCoordinator.resyncNetwork]'s `onCatchUpConverged`.
+        onCatchUpConverged: (suspend () -> Unit)? = null,
+    ) {
         var attempt = 0
+        // Decided once, before the first attempt, and for the whole catch-up: whether this
+        // connection has ever proven itself. It is the same question the foreground checkpoint
+        // asks, and the answer is what separates a real outage — a reconnect, a first-ever sync of
+        // a fresh network — from a re-verification of a socket that already converged (the CAP NEW
+        // re-arm). Only the former may show the user sync chrome, and even then only if discovery
+        // reports something changed. Read before the loop because a converged attempt records
+        // itself, and a retry must not turn silent halfway through.
+        val chromeEligible = shouldRunForegroundVerification(completedCatchUps[networkId], client)
         while (clientFor(networkId) === client) {
             val buffers = openBuffers(networkId)
             // Read per attempt: the user can change the depth between a failure and its retry.
@@ -1520,6 +1584,8 @@ class ConnectionManagerImpl @Inject constructor(
                 client = client,
                 isCurrent = { clientFor(networkId) === client },
                 initialLookbackMs = initialLookbackMs,
+                chromeEligible = chromeEligible,
+                onCatchUpConverged = onCatchUpConverged,
             )) {
                 is HistoryResyncState.Failed -> {
                     if (result is HistoryResyncState.Incomplete && result.awaitsTargetClassification) {
@@ -1599,9 +1665,9 @@ class ConnectionManagerImpl @Inject constructor(
                             "result" to result::class.simpleName,
                         )
                     }
-                    // Only a pass that actually converged arms the foreground throttle.
-                    completedCatchUps[networkId] =
-                        CompletedCatchUp(client, SystemClock.elapsedRealtime())
+                    // Only a pass that actually converged lets this socket vouch for itself at the
+                    // next foreground; see [shouldRunForegroundVerification].
+                    completedCatchUps[networkId] = CompletedCatchUp(client)
                     return
                 }
             }
@@ -2336,8 +2402,20 @@ internal fun wantedNetworkUsesEmbeddedReality(
 internal fun networksToRetire(known: Set<Long>, trackedCatchUps: Set<Long>): Set<Long> =
     known + trackedCatchUps
 
-/** A catch-up pass that converged, tagged with the exact socket that served it. */
-internal data class CompletedCatchUp(val client: Any, val atElapsedMs: Long)
+/**
+ * A catch-up pass that converged, tagged with the exact socket that served it.
+ *
+ * The connection is held WEAKLY. This map is keyed by network and lives for the process, so a
+ * strong reference would pin a retired [IrcClient] — and everything it holds — for the whole
+ * lifetime of that network. Losing the referent is safe in the only direction that matters: a
+ * cleared reference reads as "not this connection", which re-verifies rather than skipping.
+ */
+internal class CompletedCatchUp(client: Any) {
+    private val client = WeakReference(client)
+
+    /** True when [candidate] is the exact connection whose pass converged. */
+    fun servedBy(candidate: Any): Boolean = client.get() === candidate
+}
 
 /** A tracked foreground verification pass, tagged with the exact connection it verifies. */
 internal data class CatchUpJob(val client: Any, val job: Job)
@@ -2442,7 +2520,9 @@ internal suspend fun awaitHistoryCapDecision(
  *
  *  - [releaseGate] must fire exactly once and on EVERY exit, cancellation and an unexpected throw
  *    included. `historyCatchUpPending` is what the chat screen's entry waits block on, so a gate
- *    that outlives its branch is a permanently unreachable chat for the rest of the session.
+ *    that outlives its branch is a permanently unreachable chat for the rest of the session. The
+ *    caller may share the same (idempotent) release with [catchUp], which hands it back as soon as
+ *    its visible wave converges; this branch releasing again afterwards is then a no-op.
  *  - [claimed] must resolve at the DECISION, never at the end of the branch. The branch continues
  *    into [backfill], a paced trickle that runs for as long as an account has targets; resolving
  *    the claim behind it would leave [rearmHistoryCatchUp] queued behind a background job — the
@@ -2612,22 +2692,20 @@ internal suspend fun runHistoryCatchUpSession(
     }
 }
 
-/** Skip a foreground verification only when the same socket already converged very recently. */
-internal const val FOREGROUND_VERIFY_THROTTLE_MS = 30_000L
-
 /**
- * A reconnect always re-verifies (a new client can never inherit the old one's proof), and so does
- * any foreground more than [FOREGROUND_VERIFY_THROTTLE_MS] after the last converged pass. The
- * throttle only suppresses the rapid app-switch case on an untouched socket. Times are elapsed
- * realtime, which keeps counting through Doze.
+ * Trust a socket that never died: verify only when THIS connection has no converged pass of its own.
+ *
+ * A continuously-Ready socket received everything the server sent, live, however long ago its pass
+ * converged — so elapsed time is not evidence of anything and no longer takes part in the decision.
+ * What used to justify the 30 s window (a frozen process might have missed lines) is covered by the
+ * connection identity instead: a server buffer that fills while the process is frozen kills the
+ * socket through the ping watchdog, the actor reconnects with a NEW client, and this predicate
+ * answers true for it. A reconnect can never inherit its predecessor's proof.
  */
 internal fun shouldRunForegroundVerification(
     recorded: CompletedCatchUp?,
     currentClient: Any,
-    nowElapsedMs: Long,
-): Boolean = recorded == null ||
-    recorded.client !== currentClient ||
-    nowElapsedMs - recorded.atElapsedMs >= FOREGROUND_VERIFY_THROTTLE_MS
+): Boolean = recorded == null || !recorded.servedBy(currentClient)
 
 internal fun catchUpRetryDelayMs(attempt: Int): Long =
     (2_000L * (1L shl attempt.coerceIn(0, 4))).coerceAtMost(30_000L)

@@ -117,9 +117,12 @@ class HistoryPageLoaderTest {
         }
     }
 
-    private suspend fun rowCount(): Int = db.messageDao().pagingSource(bufferId).load(
-        androidx.paging.PagingSource.LoadParams.Refresh(null, 100, false),
-    ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data.size }
+    /** Canonical rows newest-first, exactly as the timeline pages them. */
+    private suspend fun rows() = db.messageDao().pagingSource(bufferId).load(
+        androidx.paging.PagingSource.LoadParams.Refresh(null, 200, false),
+    ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data }
+
+    private suspend fun rowCount(): Int = rows().size
 
     private suspend fun loadOlder(
         history: HistoryPageLoader.HistorySource,
@@ -717,7 +720,8 @@ class HistoryPageLoaderTest {
             }
         }
 
-        val hung = (1..3).map { slot ->
+        val width = HistoryPageLoader.MAX_CONCURRENT_WIRE_REQUESTS
+        val hung = (1..width).map { slot ->
             async {
                 runCatching {
                     loader.fetchMessages(
@@ -728,7 +732,7 @@ class HistoryPageLoaderTest {
             }
         }
         runCurrent()
-        assertEquals(3, requests.size)
+        assertEquals(width, requests.size)
 
         // Every permit is held: the queued fetch's budget still bounds permit wait, surfacing as a
         // retryable transport failure instead of stretching behind the busy wire.
@@ -739,7 +743,248 @@ class HistoryPageLoaderTest {
             )
         }
         assertTrue(queued.exceptionOrNull() is IrcDisconnectedException)
-        assertEquals(3, requests.size)
+        assertEquals(width, requests.size)
         hung.forEach { it.cancelAndJoin() }
+    }
+
+    @Test
+    fun aTimedOutLatestFlightReportsOneTypedOutcomeToEveryJoiner() = runTest {
+        // The newest-page flight is shared by Paging's empty-store seed and the catch-up
+        // coordinator's per-target seed, and they need different things from a timeout: a retryable
+        // transport failure and a per-target timeout it can adapt its fan-out to. So the flight
+        // itself completes with ONE typed outcome and each caller classifies it — whichever of them
+        // happens to lead. The leader classifying for itself is how a Paging-led timeout used to
+        // reach the coordinator as a transport failure and abort a whole catch-up pass.
+        val requests = mutableListOf<String>()
+        val history = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability =
+                HistoryAvailability.Ready(bothRefs, 100, supportsConcurrentRequests = true)
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                requests += req.target
+                return awaitCancellation()
+            }
+        }
+        loader.requestTimeoutMs = 5_000
+
+        // Paging leads.
+        val paging = async {
+            runCatching {
+                loader.loadPage(networkId, bufferId, "#chan", HistoryPageLoader.Direction.LATEST, history)
+            }
+        }
+        runCurrent()
+        // The coordinator's seed joins the flight already on the wire.
+        val coordinator = async {
+            runCatching {
+                loader.fetchLatest(
+                    networkId, bufferId, "#chan", history, requestLimit = 50,
+                    referenceTypes = bothRefs, timeoutMs = 60_000, allowConcurrent = true,
+                )
+            }
+        }
+        runCurrent()
+        assertEquals(listOf("#chan"), requests)
+
+        testScheduler.advanceTimeBy(10_000)
+
+        // Paging's classification: a retryable transport failure, never a cancellation.
+        val pagingError = paging.await().exceptionOrNull()
+        assertTrue(pagingError is IrcDisconnectedException)
+        assertFalse(pagingError is CancellationException)
+        // The coordinator's: the typed marker its per-target timeout branch reads.
+        val joined = coordinator.await().exceptionOrNull()
+        assertTrue(joined is HistoryPageLoader.LatestFlightTimeoutException)
+        assertFalse(joined is CancellationException)
+        // A marker completion is not abandonment, so no follower re-leads the flight.
+        assertEquals(listOf("#chan"), requests)
+    }
+
+    // --- AROUND (deep link / reply quote), routed through the loader ---------------------------
+
+    /** Scripts one AROUND page centred on [msgid]; anything else answers empty. */
+    private fun aroundSource(
+        referenceTypes: Set<HistoryReferenceType> = bothRefs,
+        availability: HistoryAvailability? = null,
+        onRequest: suspend (ChatHistoryRequest) -> Unit = {},
+        respond: (ChatHistoryRequest) -> ChatHistoryResponse = { messages(emptyList()) },
+    ): Pair<HistoryPageLoader.HistorySource, MutableList<ChatHistoryRequest>> {
+        val seen = java.util.Collections.synchronizedList(mutableListOf<ChatHistoryRequest>())
+        val source = object : HistoryPageLoader.HistorySource {
+            override suspend fun availability(): HistoryAvailability =
+                availability ?: HistoryAvailability.Ready(referenceTypes, 100)
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                seen += req
+                onRequest(req)
+                return respond(req)
+            }
+        }
+        return source to seen
+    }
+
+    private suspend fun loadAround(
+        source: HistoryPageLoader.HistorySource,
+        msgid: String = "target",
+        timeMs: Long = 500,
+        limit: Int = 100,
+    ) = loader.loadAround(networkId, bufferId, "#chan", msgid, timeMs, limit, source)
+
+    @Test
+    fun aroundPersistsItsPageThroughTheLoader() = runTest {
+        val (source, requests) = aroundSource(
+            respond = { messages(listOf(chatMsg("older", 400), chatMsg("target", 500), chatMsg("newer", 600))) },
+        )
+
+        val result = loadAround(source)
+
+        assertTrue(result is HistoryPageLoader.PageResult.Loaded)
+        assertEquals(3, (result as HistoryPageLoader.PageResult.Loaded).insertedCount)
+        assertEquals(3, rowCount())
+        assertEquals(ChatHistoryRequest.Subcommand.AROUND, requests.single().subcommand)
+        // The opaque msgid selector is preferred whenever the server advertises it.
+        assertEquals("msgid=target", requests.single().bound1)
+    }
+
+    @Test
+    fun aroundGatesOnAvailabilityInsteadOfIssuingARequest() = runTest {
+        val (unsupported, unsupportedRequests) =
+            aroundSource(availability = HistoryAvailability.Unsupported)
+        assertEquals(HistoryPageLoader.PageResult.Unsupported, loadAround(unsupported))
+        assertTrue(unsupportedRequests.isEmpty())
+
+        val (offline, offlineRequests) =
+            aroundSource(availability = HistoryAvailability.NegotiatingOrOffline)
+        val result = loadAround(offline)
+        assertTrue(result is HistoryPageLoader.PageResult.Unavailable)
+        assertTrue(offlineRequests.isEmpty())
+    }
+
+    @Test
+    fun aroundWithoutAnAdvertisedAnchorFailsWithoutARequest() = runTest {
+        // Neither selector is advertised, so there is no anchor this server would accept.
+        val (source, requests) = aroundSource(referenceTypes = emptySet())
+
+        assertTrue(loadAround(source) is HistoryPageLoader.PageResult.Failed)
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test
+    fun aroundFallsBackToTheTimestampSelectorOnRuntimeMsgidRejection() = runTest {
+        val (source, requests) = aroundSource(
+            onRequest = { req ->
+                if (req.bound1.orEmpty().startsWith("msgid=")) {
+                    throw IrcCommandException("CHATHISTORY", "INVALID_MSGREFTYPE", "no msgid selectors")
+                }
+            },
+            respond = { messages(listOf(chatMsg("target", 500))) },
+        )
+
+        assertTrue(loadAround(source) is HistoryPageLoader.PageResult.Loaded)
+        assertEquals(
+            listOf("msgid=target", "timestamp=1970-01-01T00:00:00.500Z"),
+            requests.map { it.bound1 },
+        )
+        // The page persists against the request that actually produced it, not the rejected one.
+        assertEquals(1, rowCount())
+    }
+
+    @Test
+    fun concurrentJumpsToTheSameMessageCoalesceButDifferentAnchorsDoNot() = runTest {
+        val release = CompletableDeferred<Unit>()
+        val (source, requests) = aroundSource(
+            onRequest = { release.await() },
+            respond = { req ->
+                messages(listOf(chatMsg(req.bound1.orEmpty().removePrefix("msgid="), 500)))
+            },
+        )
+
+        val first = async { loadAround(source, msgid = "target") }
+        val joined = async { loadAround(source, msgid = "target") }
+        val other = async { loadAround(source, msgid = "elsewhere") }
+        runCurrent()
+        // Same anchor joins the in-flight fetch; a different anchor is a different interval and
+        // waits for its own turn on the wire rather than being credited with this page.
+        assertEquals(listOf("msgid=target"), requests.map { it.bound1 })
+
+        release.complete(Unit)
+        assertTrue(first.await() is HistoryPageLoader.PageResult.Loaded)
+        assertTrue(joined.await() is HistoryPageLoader.PageResult.Loaded)
+        assertTrue(other.await() is HistoryPageLoader.PageResult.Loaded)
+        assertEquals(listOf("msgid=target", "msgid=elsewhere"), requests.map { it.bound1 })
+    }
+
+    @Test
+    fun aroundMakesExactlyOneAttemptAndReportsATimeoutAsUnavailable() = runTest {
+        val (source, requests) = aroundSource(onRequest = { awaitCancellation() })
+        loader.requestTimeoutMs = 1_000
+
+        val result = loadAround(source)
+
+        // A jump either lands or reports not-found: a timeout must neither retry nor escape as a
+        // cancellation that would kill the caller's positioning job.
+        assertTrue(result is HistoryPageLoader.PageResult.Unavailable)
+        assertEquals(1, requests.size)
+    }
+
+    @Test
+    fun aroundPreservesTheOpaqueMsgidAndClampsToTheServerPageLimit() = runTest {
+        val (source, requests) = aroundSource(
+            availability = HistoryAvailability.Ready(bothRefs, pageLimit = 50),
+        )
+
+        loadAround(source, msgid = "MiXeD/opaque=Value", timeMs = 200, limit = 100)
+
+        // IRCv3 message references are opaque and case-sensitive; the request must not normalize it.
+        assertEquals("msgid=MiXeD/opaque=Value", requests.single().bound1)
+        assertEquals(50, requests.single().limit)
+    }
+
+    @Test
+    fun aroundBoundsServerOverdeliveryAroundTheRequestedMessageBeforePersistence() = runTest {
+        val overDelivered = messages((1..100).map { chatMsg("m$it", it.toLong()) }, endOfHistory = true)
+        val (source, _) = aroundSource(respond = { overDelivered })
+
+        val result = loadAround(source, msgid = "m50", timeMs = 50, limit = 2)
+
+        assertEquals(2, (result as HistoryPageLoader.PageResult.Loaded).primaryCount)
+        assertEquals(listOf("m50", "m49"), rows().map { it.msgid })
+        // The retained window is a durable route back to the discarded interval, never terminal.
+        assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
+    }
+
+    @Test
+    fun aroundTimestampFallbackStillCentersOverdeliveryOnTheRequestedMsgid() = runTest {
+        // Every row shares one timestamp, so only the preferred msgid can centre the window.
+        val overDelivered = messages((1..100).map { chatMsg("m$it", 50) }, endOfHistory = true)
+        val (source, requests) = aroundSource(
+            onRequest = { req ->
+                if (req.bound1.orEmpty().startsWith("msgid=")) {
+                    throw IrcCommandException("CHATHISTORY", "INVALID_MSGREFTYPE", "no msgid")
+                }
+            },
+            respond = { overDelivered },
+        )
+
+        loadAround(source, msgid = "m90", timeMs = 50, limit = 2)
+
+        assertEquals(2, requests.size)
+        assertEquals(setOf("m89", "m90"), rows().mapNotNull { it.msgid }.toSet())
+    }
+
+    @Test
+    fun aroundDoesNotRetryFailuresThatAreNotAMsgidReferenceRejection() = runTest {
+        listOf(
+            IrcDisconnectedException("CHATHISTORY", "lost connection"),
+            java.io.IOException("read failed"),
+            IrcCommandException("CHATHISTORY", "MESSAGE_ERROR", "request rejected"),
+        ).forEach { expected ->
+            val (source, requests) = aroundSource(onRequest = { throw expected })
+
+            val failure = runCatching { loadAround(source, msgid = "ExactCase", timeMs = 200) }
+                .exceptionOrNull()
+
+            assertSame(expected, failure)
+            assertEquals(listOf("msgid=ExactCase"), requests.map { it.bound1 })
+            assertEquals(0, rowCount())
+        }
     }
 }

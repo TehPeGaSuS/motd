@@ -56,6 +56,7 @@ import io.github.trevarj.motd.audio.parseAudioAttachments
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.service.PresenceState
+import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.MentionBadge
@@ -76,6 +77,11 @@ internal data class ChatListBadgeState(
     val mutedActivityIncomplete: Boolean = false,
     val mentionsIncomplete: Boolean = false,
     val unreadIncomplete: Boolean = false,
+    /**
+     * Discovery says this room has activity the device has not fetched yet, and no local row backs
+     * a count. Shown as a dot rather than a number: a count would be invented.
+     */
+    val advertisedActivity: Boolean = false,
 )
 
 internal enum class ChatListRowVisualState { DEFAULT, UNREAD, ACTIVE, SELECTED }
@@ -106,6 +112,12 @@ internal fun chatListRowContainer(
     ChatListRowVisualState.DEFAULT -> scheme.surface.copy(alpha = 0f)
 }
 
+/**
+ * The advertised cue only ever stands IN for a count, never beside one: once a real unread count
+ * exists the dot would be redundant noise, and by then the fetched rows have usually caught the
+ * room up anyway. A muted row keeps its subdued treatment and shows no advertised cue at all — the
+ * whole point of muting is not to be told about activity ahead of time.
+ */
 internal fun chatListBadgeState(row: ChatListRow): ChatListBadgeState =
     if (row.muted) {
         ChatListBadgeState(
@@ -118,6 +130,7 @@ internal fun chatListBadgeState(row: ChatListRow): ChatListBadgeState =
             unread = row.unreadCount.takeIf { it > 0 },
             mentionsIncomplete = row.mentionCountIncomplete,
             unreadIncomplete = row.unreadCountIncomplete,
+            advertisedActivity = row.advertisedUnread && row.unreadCount == 0,
         )
     }
 
@@ -397,6 +410,11 @@ fun ChatListRowItem(
                         count = count,
                         lowerBound = badges.unreadIncomplete,
                         modifier = Modifier.testTag("chatlist_row_unread_badge"),
+                    )
+                }
+                if (badges.advertisedActivity) {
+                    AdvertisedActivityDot(
+                        modifier = Modifier.testTag("chatlist_row_advertised_activity_dot"),
                     )
                 }
             }

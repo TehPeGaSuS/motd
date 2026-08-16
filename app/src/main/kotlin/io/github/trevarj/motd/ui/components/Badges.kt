@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
@@ -18,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -49,6 +51,29 @@ fun UnreadBadge(count: Int, modifier: Modifier = Modifier, lowerBound: Boolean =
         modifier = modifier,
         contentDescription = cd,
     )
+}
+
+/**
+ * Count-less unread cue: the server has advertised newer activity for this chat than the device
+ * holds, so there IS something unread but nothing local to count. Same primary color as
+ * [UnreadBadge] because it means the same thing to the reader; a dot rather than a pill because the
+ * only honest number here is none.
+ */
+@Composable
+fun AdvertisedActivityDot(modifier: Modifier = Modifier) {
+    val cd = stringResource(R.string.badge_unread_pending)
+    Box(
+        modifier = modifier
+            .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+            .clearAndSetSemantics { contentDescription = cd },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .background(MaterialTheme.colorScheme.primary, CircleShape),
+        )
+    }
 }
 
 /** Mention badge (secondary, "@" glyph). */

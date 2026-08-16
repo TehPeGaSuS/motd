@@ -22,6 +22,12 @@ internal const val SYNC_CHROME_MIN_VISIBLE_MS = 1_000L
 /**
  * Aggregate chat-list sync chrome: one gate driving both the pinned header and the per-row queued
  * cues, so the list never shows dimmed rings without the line that explains them.
+ *
+ * What reaches this gate is already filtered upstream, and deliberately so. A catch-up pass
+ * publishes progress only once it is both eligible (its connection actually died, or has never
+ * converged) and has proven from CHATHISTORY TARGETS that at least one room moved; a re-verification
+ * of a live socket, and a reconnect that finds nothing changed, publish nothing at all. So this
+ * class no longer has to decide whether a pass is worth showing — by the time it sees one, it is.
  */
 sealed interface ChatListSyncChrome {
     data object Hidden : ChatListSyncChrome

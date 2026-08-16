@@ -1131,6 +1131,8 @@
         <item quantity="one">At least %1$d mention</item>
         <item quantity="other">At least %1$d mentions</item>
     </plurals>
+    <!-- Count-less cue: the server advertised newer activity than this device has fetched. -->
+    <string name="badge_unread_pending">Unread messages not downloaded yet</string>
 
     <!-- Adaptive chat workspace -->
     <string name="chat_workspace_resize">Resize conversation list</string>

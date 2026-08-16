@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.prefs.NoopHistorySyncPrefs
+import io.github.trevarj.motd.data.sync.AdvertisedActivity
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.HistoryPageLoader
 import io.github.trevarj.motd.di.ApplicationScope
@@ -36,6 +37,8 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,8 +47,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 
@@ -270,13 +271,6 @@ class HistoryResyncCoordinator @Inject constructor(
         val highWater: Long?,
     )
 
-    private data class SyncTarget(
-        val knownBufferId: Long?,
-        val name: String,
-        val latestMessageTime: Long?,
-        val pinned: Boolean = false,
-    )
-
     // Cancellation is non-suspending, so registration and removal share a synchronous monitor.
     private val activeGuard = Any()
     private val activeFlights = LinkedHashMap<RequestSpec, ActiveFlight>()
@@ -414,11 +408,20 @@ class HistoryResyncCoordinator @Inject constructor(
      * OWN late pass, or one that predates an unnamed retirement — stays silent and never takes the
      * slot away from its successor.
      */
-    private fun beginNetworkSession(networkId: Long, sourceIdentity: Any): SyncStatusSession =
+    private fun beginNetworkSession(
+        networkId: Long,
+        sourceIdentity: Any,
+        chromeEligible: Boolean,
+    ): SyncStatusSession =
         synchronized(retireGuard) {
             // Drawn inside the guard, so a session created before a retirement always carries a
             // smaller ticket than that retirement recorded, and one created after always a larger.
-            val session = SyncStatusSession(networkId, sourceIdentity, sessionTickets.incrementAndGet())
+            val session = SyncStatusSession(
+                networkId,
+                sourceIdentity,
+                sessionTickets.incrementAndGet(),
+                chromeEligible,
+            )
             if (!session.networkRetired()) networkSessions[networkId] = session
             session
         }
@@ -453,6 +456,14 @@ class HistoryResyncCoordinator @Inject constructor(
      * bookkeeping is monitor-guarded; the cross-pass race — a manual retry superseding a reconnect
      * pass, or the reverse — is still arbitrated by the per-buffer generation counter, not by this
      * bookkeeping.
+     *
+     * A session can also run LATENT, which is how "sync chrome only for a real outage" is
+     * expressed. A latent session does everything a visible one does — it registers buffers, bumps
+     * their generations (so it still wins clobber races against a superseded pass), counts
+     * progress, and settles — but it publishes no Queued, no Syncing and no aggregate progress. It
+     * holds the current status of each buffer instead of a history of them, and [activate] releases
+     * that snapshot in one step. Terminals are never withheld: a failure the user could act on, or
+     * a permanently refused target, publishes whether the session was ever visible or not.
      */
     private inner class SyncStatusSession(
         // Null for a single-buffer reconcile: those publish no aggregate progress and have no
@@ -465,6 +476,10 @@ class HistoryResyncCoordinator @Inject constructor(
         // Creation order among network sessions, compared against an unnamed retirement's watermark.
         // A reconcile session has no ticket to lose: it is never covered by a network retirement.
         private val ticket: Long = Long.MAX_VALUE,
+        // False keeps this pass latent for its whole life: it is a re-verification of a connection
+        // that already converged, and there is nothing about it worth showing the user. True only
+        // means chrome is ALLOWED — [activate] still has to prove there is work to show.
+        private val chromeEligible: Boolean = true,
     ) {
         private val monitor = Any()
         // Registration order; an entry lives here until that buffer settles.
@@ -475,6 +490,14 @@ class HistoryResyncCoordinator @Inject constructor(
         // can still settle them) but their transient Queued/Syncing publications are suppressed:
         // re-refusing an Unavailable target every pass must produce zero visible churn.
         private val silenced = LinkedHashSet<Long>()
+        // Transient statuses withheld while latent, as a SNAPSHOT: one entry per buffer, overwritten
+        // rather than appended, so activating replays where each buffer is now instead of replaying
+        // a queue of states it has already left.
+        private val withheld = LinkedHashMap<Long, HistorySyncStatus>()
+        // A single-buffer reconcile (the retry pill, a JOIN seed, a notification tap) has nothing to
+        // discover and no wave to plan: it IS the work, so it is visible from its first frame. Only
+        // a network pass has to earn its chrome by finding something.
+        private var activated = networkId == null
         private var total = 0
         private var settled = 0
         // Set once this pass's network is taken offline deliberately. The pass keeps running in the
@@ -483,6 +506,52 @@ class HistoryResyncCoordinator @Inject constructor(
 
         /** True when [identity] is the connection that started this pass. */
         fun ownedBy(identity: Any): Boolean = sourceIdentity === identity
+
+        private fun latentLocked(): Boolean = !chromeEligible || !activated
+
+        /**
+         * Reveal this pass: discovery has proven there is something to fetch.
+         *
+         * Idempotent, and deliberately powerless on a session that is not [chromeEligible] — that
+         * one is re-verifying a connection which already converged, so its work is invisible by
+         * construction no matter what it finds.
+         */
+        fun activate() {
+            synchronized(monitor) {
+                if (!chromeEligible || activated || retiredLocked()) return
+                activated = true
+                // Replayed under the monitor, exactly as [syncing] publishes under it: releasing the
+                // lock first would let a terminal land between the snapshot and its replay, and the
+                // replayed Queued — same generation, so the guard accepts it — would resurrect a
+                // buffer that had already settled.
+                withheld.forEach { (bufferId, status) ->
+                    generations[bufferId]?.let { publishSyncStatus(bufferId, it, status) }
+                }
+                withheld.clear()
+            }
+            // Outside the monitor: [publishProgress] takes [retireGuard], which is always the outer
+            // lock of the two.
+            publishProgress()
+        }
+
+        /**
+         * Publish a transient status now, or hold it until [activate]. Callers must hold [monitor].
+         *
+         * The generation is taken and published exactly as a visible session would; only the
+         * emission waits. That is what keeps a latent pass's clobber protection intact — a
+         * superseded pass publishing late still loses the generation comparison.
+         */
+        private fun publishTransientLocked(
+            bufferId: Long,
+            generation: Long,
+            status: HistorySyncStatus,
+        ) {
+            if (latentLocked()) {
+                withheld[bufferId] = status
+            } else {
+                publishSyncStatus(bufferId, generation, status)
+            }
+        }
 
         /**
          * True when this pass's network is already retired under a tombstone that covers it. Latches
@@ -510,11 +579,15 @@ class HistoryResyncCoordinator @Inject constructor(
             if (retiredLocked()) return false
             if (generations.containsKey(bufferId)) return false
             val refused = _syncStatuses.value[bufferId] == HistorySyncStatus.Unavailable
-            generations[bufferId] = if (refused) {
+            // The generation is claimed here in every case — visible, latent, or silenced — because
+            // it is what arbitrates against a superseded pass's late publications, and a pass that
+            // is merely quiet still owns these buffers.
+            val generation = bumpSyncStatusGeneration(bufferId)
+            generations[bufferId] = generation
+            if (refused) {
                 silenced += bufferId
-                bumpSyncStatusGeneration(bufferId)
             } else {
-                beginSyncStatus(bufferId, HistorySyncStatus.Queued)
+                publishTransientLocked(bufferId, generation, HistorySyncStatus.Queued)
             }
             total++
             return true
@@ -526,7 +599,7 @@ class HistoryResyncCoordinator @Inject constructor(
                 val generation = generations[bufferId] ?: return
                 inFlight += bufferId
                 if (bufferId in silenced) return
-                publishSyncStatus(bufferId, generation, HistorySyncStatus.Syncing)
+                publishTransientLocked(bufferId, generation, HistorySyncStatus.Syncing)
             }
         }
 
@@ -540,7 +613,13 @@ class HistoryResyncCoordinator @Inject constructor(
             val generation = generations.remove(bufferId) ?: return false
             inFlight -= bufferId
             silenced -= bufferId
+            // Whatever this buffer was waiting to show, it is past it now.
+            withheld -= bufferId
             settled++
+            // Terminals are never withheld. An Idle terminal publishes nothing visible anyway (it
+            // removes an entry a latent pass never wrote), and a Partial/Failed/Unavailable one is
+            // the actionable outcome the retry affordance is built on — withholding that would make
+            // a quiet pass a silent one.
             finishSyncStatus(bufferId, generation, status)
             return true
         }
@@ -622,6 +701,9 @@ class HistoryResyncCoordinator @Inject constructor(
                 val entries = generations.entries.toList()
                 generations.clear()
                 inFlight.clear()
+                // Whatever this pass was holding back is moot: the connection it belonged to is
+                // gone, and the waiting badge below is the only honest thing left to say.
+                withheld.clear()
                 val waiting = mutableListOf<Long>()
                 entries.forEach { (bufferId, generation) ->
                     settled++
@@ -686,6 +768,9 @@ class HistoryResyncCoordinator @Inject constructor(
                     // own ownership decision would re-add the entry, and a retired network has no
                     // later pass to clear it again.
                     if (retiredLocked()) return
+                    // The header is the chat list's syncing banner. A latent pass has nothing to
+                    // announce; [activate] publishes the counters as they stand at that moment.
+                    if (latentLocked()) return
                     SyncPassProgress(total, settled)
                 }
                 _passProgress.update { it + (id to snapshot) }
@@ -811,6 +896,12 @@ class HistoryResyncCoordinator @Inject constructor(
         isCurrent: () -> Boolean,
         // null means "everything": the first pass enumerates from epoch and leaves no backfill.
         initialLookbackMs: Long? = INITIAL_SYNC_LOOKBACK_MS,
+        // False for a re-verification of a connection that already converged: such a pass may find
+        // work, but nothing it finds is worth interrupting the chat list to announce.
+        chromeEligible: Boolean = true,
+        // See the [resyncNetwork] overload below: fired when the visible half of the pass has
+        // converged, so the caller's entry gate does not span the paced sweep behind it.
+        onCatchUpConverged: (suspend () -> Unit)? = null,
     ): HistoryResyncState {
         if (!client.targetClassificationReady.value) {
             withTimeoutOrNull(TARGET_CLASSIFICATION_WAIT_TIMEOUT_MS) {
@@ -824,6 +915,8 @@ class HistoryResyncCoordinator @Inject constructor(
             ClientHistorySource(client),
             isCurrent,
             initialLookbackMs,
+            chromeEligible,
+            onCatchUpConverged,
         )
     }
 
@@ -928,12 +1021,23 @@ class HistoryResyncCoordinator @Inject constructor(
         )
     }
 
+    /**
+     * [onCatchUpConverged] is the pass telling its caller that the half a reader can see is done:
+     * wave one has settled, the watermark has advanced, and only the paced sweep is left. The
+     * Ready-session wiring hands its entry gate back here rather than at pass end, because that gate
+     * is network-scoped: on an account with dozens of changed rooms the sweep runs for tens of
+     * seconds, and a chat opened in that window — including one that settled in wave one — would sit
+     * on the entry timeout waiting for background work it has no stake in. Never fired for a pass
+     * the catch-up loop is going to retry, which is exactly when the gate should still be held.
+     */
     internal suspend fun resyncNetwork(
         networkId: Long,
         openBuffers: List<OpenBufferTarget>,
         source: HistorySource,
         isCurrent: () -> Boolean = { true },
         initialLookbackMs: Long? = INITIAL_SYNC_LOOKBACK_MS,
+        chromeEligible: Boolean = true,
+        onCatchUpConverged: (suspend () -> Unit)? = null,
     ): HistoryResyncState = coalesced(
         RequestSpec(
             RequestKey(networkId, null),
@@ -960,7 +1064,7 @@ class HistoryResyncCoordinator @Inject constructor(
             HistoryAvailability.NegotiatingOrOffline -> return@coalesced historyUnavailable()
             is HistoryAvailability.Ready -> availability
         }
-        val session = beginNetworkSession(networkId, identity)
+        val session = beginNetworkSession(networkId, identity, chromeEligible)
         session.queueAll(openBuffers.map { it.id })
         // Queued is already published over the optimistic waiting state; only buffers that closed
         // between the foreground mark and this pass still need clearing.
@@ -996,8 +1100,26 @@ class HistoryResyncCoordinator @Inject constructor(
                     source,
                     upper,
                     lower,
+                    // Badge and re-sort from discovery itself, page by page. The whole reason the
+                    // list used to feel slow on reconnect is that this information — which rooms
+                    // moved — arrives in the FIRST response, while the rows behind it arrive one
+                    // fan-out slot at a time.
+                    onPageEnd = { page, _ ->
+                        // Chrome can appear mid-discovery: the first page that names a room whose
+                        // tail moved is proof this pass has visible work, and waiting until the
+                        // whole window is enumerated to say so is what made the header arrive after
+                        // the rows it was supposed to explain.
+                        if (badgeAdvertisedActivity(networkId, page, source).isNotEmpty()) {
+                            session.activate()
+                        }
+                    },
                     allowConcurrent = ready.supportsConcurrentRequests,
-                )
+                ).also { terminal ->
+                    // The page that ends discovery gets no onPageEnd (it returns straight out), so
+                    // badge the accumulated set here. Re-badging what earlier pages already wrote
+                    // is a no-op: the column only ever moves forward.
+                    badgeAdvertisedActivity(networkId, terminal.targets, source)
+                }
             } else {
                 TargetDiscovery(
                     targets = emptyList(),
@@ -1009,15 +1131,32 @@ class HistoryResyncCoordinator @Inject constructor(
                 )
             }
             val mergedTargets = mergeSyncTargets(openBuffers, discovery.targets, source)
+            val candidates = classifyTargets(mergedTargets, source)
+            val plan = planCatchUpWaves(
+                candidates = candidates,
+                foregroundBufferId = foregroundBuffers.foregroundBufferId.value,
+            )
+            // A room discovery proved is already current gets no request and no spinner. Settling it
+            // up front is what stops a quiet account's reconnect from painting the whole list as
+            // "syncing" and then resolving every row to nothing.
+            plan.settledUnchanged.forEach { session.settle(it, HistorySyncStatus.Idle) }
+            // Same evidence, applied to the cue: discovery named these rooms and they have already
+            // reached what it named, so an advertised instant still standing above their newest
+            // visible row belongs to an event they will never show. Nothing else revisits them —
+            // that is the point of the unchanged partition — so this is where it is retired.
+            retireSettledAdvertisements(networkId, candidates)
+            // The badging hook above only sees rooms this device already has, so a discovered DM
+            // with no local room could not reveal the pass. This is the same question asked over
+            // the full plan: is there anything at all to fetch?
+            if (plan.waveOne.isNotEmpty()) session.activate()
             val targetPass = syncTargets(
                 networkId = networkId,
-                targets = mergedTargets,
+                targets = plan.waveOne,
                 source = source,
                 isCurrent = isCurrent,
                 hasDiscoveryWatermark = previousSync != null,
                 session = session,
             )
-            val inserted = targetPass.inserted
             val status = discovery.status.merge(targetPass.status)
             val highWater = maxHighWater(
                 previousSync,
@@ -1036,7 +1175,23 @@ class HistoryResyncCoordinator @Inject constructor(
             if (advanceWatermark && isCurrent() && highWater != null) {
                 syncPrefs.setLastSuccessfulSync(networkId, highWater)
             }
-            status.toState(inserted, retryRecommended = targetPass.retryRecommended)
+            // Strictly after the watermark, and deliberately: wave two is a paced sweep that can run
+            // for as long as the account has rooms, and the next reconnect's discovery window must
+            // not be held open behind it. The caller's entry gate is handed back on the same
+            // boundary and for the same reason.
+            val waveOneState = status.toState(
+                targetPass.inserted,
+                retryRecommended = targetPass.retryRecommended,
+            )
+            if (!waveOneState.isRetryableCatchUpFailure()) onCatchUpConverged?.invoke()
+            val overflow = sweepWaveTwo(networkId, plan.waveTwo, source, isCurrent, previousSync != null)
+            // Wave two contributes what it inserted and nothing else. Its status must not reach
+            // `retryRecommended`: a silent background sweep that reports "retry the whole pass"
+            // would re-run full discovery for work the user never saw.
+            status.toState(
+                targetPass.inserted + overflow,
+                retryRecommended = targetPass.retryRecommended,
+            )
         } catch (_: TimeoutCancellationException) {
             HistoryResyncState.Failed("History refresh timed out")
         } catch (cancelled: CancellationException) {
@@ -1217,6 +1372,60 @@ class HistoryResyncCoordinator @Inject constructor(
         }
     }
 
+    /**
+     * Publish one discovery page's advertised activity onto the rooms this device already knows.
+     *
+     * Silent by construction: it writes a timestamp, not unread state, so a room that moved
+     * re-sorts and shows the ordinary count-less unread cue immediately — no chrome, no spinner,
+     * and no claim about how many messages are waiting (discovery does not know).
+     *
+     * Rooms this device has never seen are skipped rather than created. Creating a room here would
+     * make DISCOVERY a writer of room identity; the pass's own per-target work already creates a
+     * query room when it fetches one, and there is nothing to re-sort for a room the list does not
+     * show yet.
+     *
+     * Returns the rooms this page reported as genuinely moved, so a caller can act on "discovery
+     * found something" without asking twice.
+     */
+    private suspend fun badgeAdvertisedActivity(
+        networkId: Long,
+        page: List<ChatHistoryTarget>,
+        source: HistorySource,
+    ): List<AdvertisedActivity> {
+        if (page.isEmpty()) return emptyList()
+        val changed = page.mapNotNull { target ->
+            val room = db.bufferDao().byName(networkId, source.normalizeTarget(target.name))
+                ?: return@mapNotNull null
+            val cursor = db.historyCursorDao().byRoom(room.id)
+            if (reachedAdvertised(cursor?.newestServerTime, target.latestMessageTime)) {
+                return@mapNotNull null
+            }
+            AdvertisedActivity(room.id, target.latestMessageTime)
+        }
+        processor.recordAdvertisedActivity(networkId, changed)
+        return changed
+    }
+
+    /**
+     * Retire the advertised-activity cue for every room the plan settled without fetching.
+     *
+     * Only rooms discovery described in THIS pass, and only up to what it described: the clamp is
+     * bounded by the advertisement it proves against, so a newer discovery's value is untouched.
+     * The write is skipped in SQL whenever the room's newest visible row already agrees, which on a
+     * quiet account is every one of them.
+     */
+    private suspend fun retireSettledAdvertisements(
+        networkId: Long,
+        candidates: List<CatchUpCandidate>,
+    ) {
+        candidates.forEach { candidate ->
+            if (candidate.changed) return@forEach
+            val roomId = candidate.target.knownBufferId ?: return@forEach
+            val advertised = candidate.target.latestMessageTime ?: return@forEach
+            processor.clampAdvertisedActivity(networkId, roomId, advertised)
+        }
+    }
+
     private fun mergeSyncTargets(
         openBuffers: List<OpenBufferTarget>,
         discovered: List<ChatHistoryTarget>,
@@ -1241,21 +1450,37 @@ class HistoryResyncCoordinator @Inject constructor(
             }
         }
         // Read at sort time, not at pass start: every catch-up retry attempt re-sorts, so switching
-        // chats mid-backoff re-prioritizes the newly visible conversation.
-        val foregroundBufferId = foregroundBuffers.foregroundBufferId.value
-        return targets.values.sortedWith(
-            // The fair semaphore admits in launch order, so this ordering decides who is in the
-            // first wave of concurrent requests: the open chat, then pinned rooms, then everything
-            // discovery advertised, newest first. `sortedWith` stability preserves the existing
-            // buffer-id order among the null-latest tail.
-            compareByDescending<SyncTarget> {
-                foregroundBufferId != null && it.knownBufferId == foregroundBufferId
-            }
-                .thenByDescending { it.pinned }
-                .thenByDescending { it.latestMessageTime != null }
-                .thenByDescending { it.latestMessageTime ?: Long.MIN_VALUE },
-        )
+        // chats mid-backoff re-prioritizes the newly visible conversation. The FIFO fan-out admits
+        // in launch order, so this ordering decides who is in the first wave of requests.
+        return targets.values.sortedWith(catchUpOrder(foregroundBuffers.foregroundBufferId.value))
     }
+
+    /**
+     * Ask, for every merged target, the one question the wave plan turns on: has it moved since we
+     * last fetched it? The cursor read is the reason this cannot live inside the pure planner.
+     */
+    private suspend fun classifyTargets(
+        targets: List<SyncTarget>,
+        source: HistorySource,
+    ): List<CatchUpCandidate> =
+        targets.map { target ->
+            val roomId = target.knownBufferId
+            val cursor = roomId?.let { db.historyCursorDao().byRoom(it) }
+            // A channel this device has no room for is one the user is not in: [syncOneTarget]
+            // refuses to fetch it (creating channel rooms from discovery would resurrect every
+            // channel the account ever had), so letting it look "changed" would only spend a
+            // wave-one slot to reach that same conclusion.
+            val unjoinedChannel = roomId == null && source.isChannelTarget(target.name)
+            CatchUpCandidate(
+                target = target,
+                changed = !unjoinedChannel && targetChanged(
+                    advertisedLatest = target.latestMessageTime,
+                    cursorNewest = cursor?.newestServerTime,
+                    // An unknown room has nothing stored at all, so it has never been fetched.
+                    hasCursor = cursor != null,
+                ),
+            )
+        }
 
     internal suspend fun reconcileBuffer(
         networkId: Long,
@@ -1294,6 +1519,10 @@ class HistoryResyncCoordinator @Inject constructor(
                 work.status.toState(work.inserted)
             } catch (_: TimeoutCancellationException) {
                 HistoryResyncState.Failed("History refresh timed out")
+            } catch (_: HistoryPageLoader.LatestFlightTimeoutException) {
+                // Same fact through the shared newest-page flight (this reconcile may have joined a
+                // catch-up pass's fetch, or led one it joined); the pill must read the same either way.
+                HistoryResyncState.Failed("History refresh timed out")
             } catch (cancelled: CancellationException) {
                 session.finish(HistoryResyncState.Idle)
                 throw cancelled
@@ -1305,6 +1534,38 @@ class HistoryResyncCoordinator @Inject constructor(
             session.finish(if (isCurrent()) result else HistoryResyncState.Idle)
             result
         }
+    }
+
+    /**
+     * Trickle in the changed rooms that did not fit the visible wave.
+     *
+     * Same fetches, three deliberate differences: paced like the background backfill so it cannot
+     * burst, silent (no session, so no chrome and no per-buffer status for work nobody asked to
+     * watch), and unable to fail the pass — a sweep that reported failure would ask the catch-up
+     * loop to re-run full discovery on the reader's behalf for rooms they are not looking at. A
+     * chat opened onto one of these rooms mid-sweep joins the in-flight fetch through the loader's
+     * LATEST flight rather than racing a second request onto the wire.
+     */
+    private suspend fun sweepWaveTwo(
+        networkId: Long,
+        targets: List<SyncTarget>,
+        source: HistorySource,
+        isCurrent: () -> Boolean,
+        hasDiscoveryWatermark: Boolean,
+    ): Int {
+        if (targets.isEmpty()) return 0
+        diagnostics.record("history", "catch_up_wave_two_started") {
+            mapOf("network_id" to networkId, "targets" to targets.size)
+        }
+        return syncTargets(
+            networkId = networkId,
+            targets = targets,
+            source = source,
+            isCurrent = isCurrent,
+            hasDiscoveryWatermark = hasDiscoveryWatermark,
+            session = null,
+            paceBetweenTargetsMs = BACKFILL_SEED_PACE_MS,
+        ).inserted
     }
 
     private suspend fun syncTargets(
@@ -1328,13 +1589,13 @@ class HistoryResyncCoordinator @Inject constructor(
             // pass may keep several targets on the wire. The coordinator-side permit is
             // load-bearing: a fetch's timeout starts when it is CALLED and includes gate wait, so
             // launching every target's fetch at once would start every timeout clock at once and
-            // mass-expire the tail of a large pass. [mergeSyncTargets] sorts newest-first and the
-            // fair semaphore admits in launch order, so the newest targets still start first.
-            val permits = Semaphore(HistoryPageLoader.MAX_CONCURRENT_WIRE_REQUESTS)
+            // mass-expire the tail of a large pass. The width adapts to what the server keeps up
+            // with, and admission is FIFO, so the ordering [mergeSyncTargets] chose survives.
+            val fanOut = AdaptiveFanOut()
             coroutineScope {
                 targets.map { targetSpec ->
                     async {
-                        permits.withPermit {
+                        fanOut.withSlot {
                             syncOneTarget(
                                 networkId = networkId,
                                 targetSpec = targetSpec,
@@ -1344,6 +1605,7 @@ class HistoryResyncCoordinator @Inject constructor(
                                 session = session,
                                 paceBeforeFetchMs = 0,
                                 allowConcurrent = true,
+                                fanOut = fanOut,
                             )
                         }
                     }
@@ -1391,6 +1653,8 @@ class HistoryResyncCoordinator @Inject constructor(
         session: SyncStatusSession?,
         paceBeforeFetchMs: Long,
         allowConcurrent: Boolean,
+        // Present only for a concurrent pass; the sequential driver has no width to adapt.
+        fanOut: AdaptiveFanOut? = null,
     ): TargetOutcome {
         if (!isCurrent()) throw StaleConnectionException()
         val target = targetSpec.name
@@ -1417,6 +1681,11 @@ class HistoryResyncCoordinator @Inject constructor(
         // page for every target they have already seeded.
         val advertisedLatest = targetSpec.latestMessageTime
         if (advertisedLatest != null && reachedAdvertised(roomCursor?.newestServerTime, advertisedLatest)) {
+            // Already converged, so this is the last chance to retire an advertisement the room can
+            // never show: no fetch will follow, and a value left above the newest visible row keeps
+            // a permanent unread dot and a permanently inflated sort key on a room with nothing in
+            // it. A no-op (and no invalidation) whenever the two already agree.
+            processor.clampAdvertisedActivity(networkId, canonicalRoomId, advertisedLatest)
             session?.settle(canonicalRoomId, HistorySyncStatus.Idle)
             return TargetOutcome()
         }
@@ -1449,7 +1718,17 @@ class HistoryResyncCoordinator @Inject constructor(
             // The server will never serve this target; a retry affordance would be a lie.
             session?.settle(canonicalRoomId, HistorySyncStatus.Unavailable)
             return TargetOutcome()
+        } catch (_: TimeoutCancellationException) {
+            return timedOutTarget(networkId, canonicalRoomId, fanOut)
+        } catch (_: HistoryPageLoader.LatestFlightTimeoutException) {
+            // The same timeout, reported by a shared LATEST flight rather than by this target's own
+            // withTimeout: a chat screen opening onto this room can be the flight's LEADER, and the
+            // typed marker is what keeps the leader's identity from deciding what this pass sees.
+            // Without it, a Paging-led timeout arrived here as a transport failure, missed the
+            // carve-out beside it, and aborted the whole pass — the mass abort it exists to remove.
+            return timedOutTarget(networkId, canonicalRoomId, fanOut)
         }
+        fanOut?.onSuccess()
         // TARGETS describes the newest server event, which may be a JOIN or an event that is
         // intentionally filtered/rerouted during ingestion. Count either a durable local event
         // or an event observed in this response as reaching it; relying on the chat cursor alone
@@ -1478,6 +1757,12 @@ class HistoryResyncCoordinator @Inject constructor(
             diagnostics.record("history", "advertised_latest_unreachable") {
                 mapOf("network_id" to networkId, "room_id" to canonicalRoomId)
             }
+            // Retire the advertisement with the same response that disproved it. Nothing else ever
+            // will: the room is settled Idle, no later page can reach that timestamp, and the
+            // discovery-first cue would otherwise sit on this row as an unread dot the reader
+            // cannot clear (mark-read anchors on the newest LOCAL row, which is below it) with the
+            // list sorting the room to the top on a message that does not exist here.
+            advertisedLatest?.let { processor.clampAdvertisedActivity(networkId, canonicalRoomId, it) }
             session?.settle(canonicalRoomId, HistorySyncStatus.Idle)
             return TargetOutcome(highWater = targetResult.highWater)
         }
@@ -1487,6 +1772,12 @@ class HistoryResyncCoordinator @Inject constructor(
             WorkStatus.Incomplete("CHATHISTORY did not reach the latest advertised message")
         } else {
             targetResult.status
+        }
+        // Converged against what discovery advertised: whatever is still above the room's newest
+        // visible row is an event this device is never going to show (a JOIN, a filtered or
+        // rerouted event), so the cue that stands in for its rows has nothing left to describe.
+        if (reachedAdvertisedLatest == true) {
+            advertisedLatest?.let { processor.clampAdvertisedActivity(networkId, canonicalRoomId, it) }
         }
         session?.settle(
             canonicalRoomId,
@@ -1504,6 +1795,35 @@ class HistoryResyncCoordinator @Inject constructor(
             status = effectiveStatus,
             highWater = targetResult.highWater,
             retryRecommended = reachedAdvertisedLatest == false,
+        )
+    }
+
+    /**
+     * One target ran out of its request budget — from its own `withTimeout` or from a shared LATEST
+     * flight it joined; the two are the same fact about the server and must be read the same way.
+     *
+     * Order matters: a sibling that failed cancels this coroutine too, and cancellation inside the
+     * fetch surfaces as a timeout it did not cause. Prove this coroutine is still alive BEFORE
+     * reading the timeout as evidence about the server, or one slow target would shrink the fan-out
+     * width once per cancelled sibling.
+     *
+     * One target running out of budget is not a failed pass. It used to be: the timeout escaped,
+     * every remaining target was skipped, and every open buffer wore the failure. It is reported as
+     * this target's own incompleteness and the pass's retry decides.
+     */
+    private suspend fun timedOutTarget(
+        networkId: Long,
+        roomId: Long,
+        fanOut: AdaptiveFanOut?,
+    ): TargetOutcome {
+        currentCoroutineContext().ensureActive()
+        fanOut?.onTimeout()
+        diagnostics.record("history", "target_history_timed_out") {
+            mapOf("network_id" to networkId, "room_id" to roomId)
+        }
+        return TargetOutcome(
+            status = WorkStatus.Incomplete("CHATHISTORY request timed out"),
+            retryRecommended = true,
         )
     }
 
@@ -1560,22 +1880,35 @@ class HistoryResyncCoordinator @Inject constructor(
                     allowConcurrent = allowConcurrent,
                 )
             }
-        val request = boundedLatest?.request ?: ChatHistoryRequest(
-            subcommand = ChatHistoryRequest.Subcommand.LATEST,
-            target = target,
-            limit = requestLimit,
-        )
-        val page = boundedLatest?.response ?: loader.fetchMessages(
-            networkId,
-            source,
-            request,
-            referenceTypes,
-            msgidAllowed,
-            requestTimeoutMs,
-            allowConcurrent = allowConcurrent,
-        )
-        if (!isCurrent()) throw StaleConnectionException()
-        val inserted = ingest(networkId, bufferId, request, page)
+        // The ordinary newest-page seed goes through the loader's shared LATEST flight, so a chat
+        // opened onto this room while the pass is reaching it joins this exact fetch instead of
+        // putting an identical request on the wire behind it. The dismissed-query variant below is
+        // deliberately excluded: its bounded floor makes it a different question about a different
+        // interval, and joining it to the plain seed would hand one of them the wrong page.
+        val request: ChatHistoryRequest
+        val page: ChatHistoryResponse.Messages
+        val inserted: Int
+        if (boundedLatest != null) {
+            request = boundedLatest.request
+            page = boundedLatest.response
+            if (!isCurrent()) throw StaleConnectionException()
+            inserted = ingest(networkId, bufferId, request, page)
+        } else {
+            val latest = loader.fetchLatest(
+                networkId = networkId,
+                roomId = bufferId,
+                target = target,
+                source = source,
+                requestLimit = requestLimit,
+                referenceTypes = referenceTypes,
+                timeoutMs = requestTimeoutMs,
+                allowConcurrent = allowConcurrent,
+            )
+            request = latest.request
+            page = latest.response
+            inserted = latest.inserted
+            if (!isCurrent()) throw StaleConnectionException()
+        }
         val highWater = page.highWater()
         if (page.isTerminalPage()) return WorkResult(highWater = highWater, inserted = inserted)
         if (page.oldest?.msgid == null && page.primaryMessageCount >= request.limit) {
@@ -1850,13 +2183,9 @@ class HistoryResyncCoordinator @Inject constructor(
 
     private fun maxHighWater(vararg values: Long?): Long? = values.filterNotNull().maxOrNull()
 
-    /**
-     * Advertised-latest comparisons tolerate sub-second precision differences: stored server-time
-     * tags can carry second precision while TARGETS advertises milliseconds, and a stored newest
-     * in the same second as the advertisement means the LATEST page already covered it.
-     */
+    /** See [reachedAdvertisedTolerance]; shared with the wave planner so the two cannot disagree. */
     private fun reachedAdvertised(stored: Long?, advertised: Long): Boolean =
-        stored != null && stored / 1000 >= advertised / 1000
+        reachedAdvertisedTolerance(stored, advertised)
 
     private class ClientHistorySource(private val client: IrcClient) : HistorySource {
         override suspend fun availability(): HistoryAvailability = client.historyAvailability

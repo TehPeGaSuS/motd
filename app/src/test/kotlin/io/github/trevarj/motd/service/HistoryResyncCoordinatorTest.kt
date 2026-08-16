@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.db.activityTime
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.HistoryPageLoader
@@ -29,10 +30,12 @@ import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.client.IrcCommandException
 import io.github.trevarj.motd.irc.client.IrcDisconnectedException
 import io.github.trevarj.motd.irc.client.IrcProtocolException
+import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.Prefix
+import io.github.trevarj.motd.ui.chat.entryHistoryReady
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -2086,7 +2089,8 @@ class HistoryResyncCoordinatorTest {
 
     @Test
     fun labeledResponsePassRunsTargetsInParallelBoundedByWireWidth() = runTest {
-        val names = listOf("#a", "#b", "#c", "#d", "#e")
+        val width = AdaptiveFanOut.INITIAL_WIDTH
+        val names = (1..width + 2).map { "#chan$it" }
         val ids = insertChannels(names)
         val entered = AtomicInteger()
         val wireWidthReached = CompletableDeferred<Unit>()
@@ -2095,7 +2099,7 @@ class HistoryResyncCoordinatorTest {
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
                 else -> {
-                    if (entered.incrementAndGet() == 3) wireWidthReached.complete(Unit)
+                    if (entered.incrementAndGet() == width) wireWidthReached.complete(Unit)
                     release.await()
                     FakeResponse(
                         listOf(message("m-${request.target}", 100, target = request.target)),
@@ -2108,13 +2112,13 @@ class HistoryResyncCoordinatorTest {
         val pass = async { coordinator.resyncNetwork(networkId, openTargets(ids.zip(names)), source) }
         wireWidthReached.await()
 
-        // Exactly the wire width is on the wire at once; the remaining targets wait on a permit.
+        // Exactly the starting fan-out width is on the wire at once; the rest wait for a slot.
         assertEquals(
-            3,
+            width,
             source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.LATEST },
         )
         release.complete(Unit)
-        assertEquals(HistoryResyncState.Updated(5), pass.await())
+        assertEquals(HistoryResyncState.Updated(names.size), pass.await())
         assertEquals(
             names.toSet(),
             source.requests
@@ -3368,54 +3372,619 @@ class HistoryResyncCoordinatorTest {
         val description: String,
         val recorded: CompletedCatchUp?,
         val client: Any,
-        val nowElapsedMs: Long,
         val expected: Boolean,
     )
 
     @Test
-    fun foregroundVerificationRunsUnlessTheSameSocketJustConverged() {
+    fun foregroundVerificationIsSkippedForAnySocketThatConvergedAndNeverDied() {
         val socket = Any()
         val replacement = Any()
-        val converged = CompletedCatchUp(socket, atElapsedMs = 1_000L)
+        val converged = CompletedCatchUp(socket)
         val cases = listOf(
-            ForegroundVerificationCase("no pass has ever converged", null, socket, 1_000L, true),
+            ForegroundVerificationCase("no pass has ever converged", null, socket, true),
+            ForegroundVerificationCase("same socket, converged moments ago", converged, socket, false),
+            // The whole point of the rework: elapsed time is not evidence. A socket that stayed
+            // Ready received everything live, so the pass is pure waste however long ago it ran.
             ForegroundVerificationCase(
-                "same socket, converged moments ago",
+                "same socket, converged long ago",
                 converged,
                 socket,
-                1_000L,
                 false,
-            ),
-            ForegroundVerificationCase(
-                "same socket, just inside the throttle window",
-                converged,
-                socket,
-                1_000L + FOREGROUND_VERIFY_THROTTLE_MS - 1,
-                false,
-            ),
-            ForegroundVerificationCase(
-                "same socket, throttle window elapsed",
-                converged,
-                socket,
-                1_000L + FOREGROUND_VERIFY_THROTTLE_MS,
-                true,
             ),
             // A reconnect can never inherit the old socket's proof, however recent it was.
-            ForegroundVerificationCase(
-                "reconnected socket inside the window",
-                converged,
-                replacement,
-                1_100L,
-                true,
-            ),
+            ForegroundVerificationCase("reconnected socket", converged, replacement, true),
         )
 
         cases.forEach { case ->
             assertEquals(
                 case.description,
                 case.expected,
-                shouldRunForegroundVerification(case.recorded, case.client, case.nowElapsedMs),
+                shouldRunForegroundVerification(case.recorded, case.client),
             )
         }
+    }
+
+    // --- discovery-first badging, wave planning, adaptive fan-out, latent chrome ---------------
+
+    /** Give [bufferId] a stored cursor, so the pass has something to compare an advertisement to. */
+    private suspend fun seedCursor(roomId: Long = bufferId, newestServerTime: Long) {
+        db.historyCursorDao().upsert(
+            HistoryCursorEntity(
+                roomId = roomId,
+                newestMsgid = "seeded",
+                newestServerTime = newestServerTime,
+                oldestMsgid = "seeded",
+                oldestServerTime = newestServerTime,
+            ),
+        )
+    }
+
+    @Test
+    fun discoveryBadgesTheChatListBeforeAnyPageIsFetched() = runTest {
+        seedCursor(newestServerTime = 100_000)
+        var advertisedAtFetch: Long? = null
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 900_000L), endOfHistory = true)
+                else -> {
+                    // The list already knows this room moved; the rows are only now being asked for.
+                    advertisedAtFetch = db.bufferDao().rawById(bufferId)?.advertisedLatestTime
+                    FakeResponse(listOf(message("tail", 900_000)), endOfHistory = true)
+                }
+            }
+        }
+
+        coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), source)
+
+        assertEquals(900_000L, advertisedAtFetch)
+        assertEquals(900_000L, db.bufferDao().rawById(bufferId)?.advertisedLatestTime)
+    }
+
+    @Test
+    fun advertisedActivityNeverMovesBackwards() = runTest {
+        db.bufferDao().advanceAdvertisedLatest(bufferId, 900_000)
+        seedCursor(newestServerTime = 100_000)
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                // An older report — a second pass, or the paced sweep — must not walk the sort key
+                // or the pending-unread cue back.
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 400_000L), endOfHistory = true)
+                else -> FakeResponse(listOf(message("tail", 400_000)), endOfHistory = true)
+            }
+        }
+
+        coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), source)
+
+        assertEquals(900_000L, db.bufferDao().rawById(bufferId)?.advertisedLatestTime)
+    }
+
+    @Test
+    fun anUnchangedRoomCostsNoWireRequestAndSettlesImmediately() = runTest {
+        // Discovery advertises exactly what this room's cursor already holds: there is nothing to
+        // fetch, and asking anyway is the redundant traffic the wave plan exists to remove.
+        seedCursor(newestServerTime = 500_000)
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 500_000L), endOfHistory = true)
+                else -> error("an unchanged room must not be fetched")
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), source)
+
+        assertEquals(HistoryResyncState.UpToDate, result)
+        assertEquals(
+            listOf(ChatHistoryRequest.Subcommand.TARGETS),
+            source.requests.map { it.subcommand },
+        )
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+        assertEquals(emptyMap<Long, SyncPassProgress>(), coordinator.passProgress.value)
+    }
+
+    @Test
+    fun aPassWithNothingToFetchShowsNoChromeAtAll() = runTest {
+        seedCursor(newestServerTime = 500_000)
+        val chrome = mutableListOf<Map<Long, SyncPassProgress>>()
+        val statuses = mutableListOf<Map<Long, HistorySyncStatus>>()
+        val source = FakeSource { request ->
+            chrome += coordinator.passProgress.value
+            statuses += coordinator.syncStatuses.value
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 500_000L), endOfHistory = true)
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), source)
+
+        // Not "settled quickly" — never painted. A reconnect the user did not notice must not
+        // announce itself, and the entry gate the chat screen waits on is a different mechanism
+        // entirely (the registry's historyCatchUpPending), so nothing about positioning changes.
+        assertTrue(chrome.all { it.isEmpty() })
+        assertTrue(statuses.all { it.isEmpty() })
+    }
+
+    @Test
+    fun aReVerificationOfAnAlreadyConvergedSocketStaysSilentEvenWithWorkToDo() = runTest {
+        val observed = mutableListOf<Map<Long, HistorySyncStatus>>()
+        val source = FakeSource { request ->
+            observed += coordinator.syncStatuses.value
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 900L), endOfHistory = true)
+                else -> FakeResponse(listOf(message("tail", 900)), endOfHistory = true)
+            }
+        }
+
+        val result = coordinator.resyncNetwork(
+            networkId,
+            openTargets(bufferId to "#chan"),
+            source,
+            chromeEligible = false,
+        )
+
+        // The work happened — the row landed — but a socket that already converged has nothing
+        // worth interrupting the list for, so no Queued and no Syncing was ever published.
+        assertEquals(HistoryResyncState.Updated(1), result)
+        assertTrue(db.messageDao().byMsgid(bufferId, "tail") != null)
+        assertTrue(observed.all { it.isEmpty() })
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+    }
+
+    @Test
+    fun chromeIsWithheldUntilDiscoveryProvesThereIsWorkThenReplaysCurrentStatus() = runTest {
+        var duringDiscovery: Map<Long, HistorySyncStatus>? = null
+        var whileSyncing: Map<Long, HistorySyncStatus>? = null
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> {
+                    // The pass has already registered its open buffer, but nothing is published yet:
+                    // it has not been shown that anything changed.
+                    duringDiscovery = coordinator.syncStatuses.value
+                    FakeResponse(targets = listOf("#chan" to 900_000L), endOfHistory = true)
+                }
+                else -> {
+                    whileSyncing = coordinator.syncStatuses.value
+                    FakeResponse(listOf(message("tail", 900_000)), endOfHistory = true)
+                }
+            }
+        }
+
+        coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), source)
+
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), duringDiscovery)
+        // Revealed once discovery reported a changed room, and the replay is the buffer's CURRENT
+        // status rather than a queue of the states it already left.
+        assertEquals(mapOf(bufferId to HistorySyncStatus.Syncing), whileSyncing)
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+    }
+
+    @Test
+    fun aTerminalFailurePublishesEvenWhileThePassIsStillLatent() = runTest {
+        // A latent pass is quiet, not silent: the affordance the retry pill is built on has to
+        // survive, or a permanently refused target would never be reported at all.
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(endOfHistory = true)
+                else -> throw IrcCommandException("CHATHISTORY", "INVALID_TARGET", "no history")
+            }
+        }
+
+        coordinator.resyncNetwork(
+            networkId,
+            openTargets(bufferId to "#chan"),
+            source,
+            chromeEligible = false,
+        )
+
+        assertEquals(HistorySyncStatus.Unavailable, coordinator.syncStatus(bufferId).first())
+    }
+
+    @Test
+    fun waveTwoSweepsTheOverflowSequentiallyAfterTheVisibleWave() = runTest {
+        val names = (1..WAVE_ONE_LIMIT + 3).map { "#chan$it" }
+        val ids = insertChannels(names)
+        val source = FakeSource(supportsConcurrent = true) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
+                    // Newest first by name index, so the wave-one cut is predictable.
+                    targets = names.mapIndexed { index, name -> name to (900_000L - index * 1_000) },
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(
+                    listOf(message("m-${request.target}", 900_000, target = request.target)),
+                    endOfHistory = true,
+                )
+            }
+        }
+
+        val result = async {
+            coordinator.resyncNetwork(networkId, openTargets(ids.zip(names)), source)
+        }
+        // Wave two is paced like the background backfill, so it only runs as virtual time advances.
+        advanceTimeBy(HistoryResyncCoordinator.BACKFILL_SEED_PACE_MS * (names.size + 1))
+        assertEquals(HistoryResyncState.Updated(names.size), result.await())
+
+        val fetched = source.requests
+            .filter { it.subcommand == ChatHistoryRequest.Subcommand.LATEST }
+            .map { it.target }
+        assertEquals(names.size, fetched.size)
+        // The visible wave is bounded; the rest is swept in the same priority order behind it.
+        assertEquals(names.take(WAVE_ONE_LIMIT).toSet(), fetched.take(WAVE_ONE_LIMIT).toSet())
+        assertEquals(names.drop(WAVE_ONE_LIMIT), fetched.drop(WAVE_ONE_LIMIT))
+        // The sweep is silent: it publishes no per-buffer status and no aggregate progress.
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+        assertEquals(emptyMap<Long, SyncPassProgress>(), coordinator.passProgress.value)
+    }
+
+    @Test
+    fun theWatermarkAdvancesBeforeThePacedSweepRuns() = runTest {
+        val names = (1..WAVE_ONE_LIMIT + 2).map { "#chan$it" }
+        val ids = insertChannels(names)
+        // Room persistence resumes on its own executor, so the pass's requests can be observed from
+        // more than one thread; the counter and the sample have to survive that.
+        val fetches = AtomicInteger()
+        val watermarkAtSweep = CompletableDeferred<Long?>()
+        val source = FakeSource(supportsConcurrent = true) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
+                    targets = names.mapIndexed { index, name -> name to (900_000L - index * 1_000) },
+                    endOfHistory = true,
+                )
+                else -> {
+                    if (fetches.incrementAndGet() > WAVE_ONE_LIMIT) {
+                        watermarkAtSweep.complete(syncPrefs.lastSuccessfulSync(networkId))
+                    }
+                    FakeResponse(
+                        listOf(message("m-${request.target}", 900_000, target = request.target)),
+                        endOfHistory = true,
+                    )
+                }
+            }
+        }
+
+        val pass = async { coordinator.resyncNetwork(networkId, openTargets(ids.zip(names)), source) }
+        advanceTimeBy(HistoryResyncCoordinator.BACKFILL_SEED_PACE_MS * (names.size + 1))
+        pass.await()
+
+        // The next reconnect's discovery window must not be held open behind a sweep that can run
+        // for as long as the account has rooms.
+        assertEquals(names.size, fetches.get())
+        assertEquals(900_000L, watermarkAtSweep.await())
+    }
+
+    @Test
+    fun aTargetTimeoutNarrowsTheFanOutInsteadOfFailingThePass() = runTest {
+        val names = listOf("#slow", "#fast")
+        val ids = insertChannels(names)
+        val source = FakeSource(supportsConcurrent = true) { request ->
+            when {
+                request.subcommand == ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = names.map { it to 900L }, endOfHistory = true)
+                request.target == "#slow" -> awaitCancellation()
+                else -> FakeResponse(
+                    listOf(message("m-fast", 900, target = "#fast")),
+                    endOfHistory = true,
+                )
+            }
+        }
+        coordinator.requestTimeoutMs = 5_000
+
+        val pass = async { coordinator.resyncNetwork(networkId, openTargets(ids.zip(names)), source) }
+        advanceTimeBy(10_000)
+        val result = pass.await()
+
+        // One target running out of budget used to abort the whole pass, skipping every remaining
+        // target and marking every open buffer failed. Now it is that target's own incompleteness,
+        // and the pass keeps its retry recommendation so the catch-up loop tries again.
+        assertTrue(result is HistoryResyncState.Incomplete)
+        assertTrue((result as HistoryResyncState.Incomplete).retryRecommended)
+        assertTrue(db.messageDao().byMsgid(ids[1], "m-fast") != null)
+    }
+
+    @Test
+    fun aStaleConnectionStillAbortsTheWholePass() = runTest {
+        // The timeout carve-out must not swallow the one failure that means "stop": a superseded
+        // connection has nothing left to fetch for.
+        val names = listOf("#a", "#b")
+        val ids = insertChannels(names)
+        var current = true
+        val source = FakeSource(supportsConcurrent = true) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = names.map { it to 900L }, endOfHistory = true)
+                else -> {
+                    current = false
+                    FakeResponse(
+                        listOf(message("m-${request.target}", 900, target = request.target)),
+                        endOfHistory = true,
+                    )
+                }
+            }
+        }
+
+        val result = coordinator.resyncNetwork(
+            networkId,
+            openTargets(ids.zip(names)),
+            source,
+            isCurrent = { current },
+        )
+
+        assertTrue(result is HistoryResyncState.Failed)
+    }
+
+    @Test
+    fun aChatOpeningMidPassJoinsTheSameNewestPageFetch() = runTest {
+        // Two askers, one question: the pass seeding this room and a chat screen opening onto it
+        // want the same newest page, and the second one used to put an identical request on the
+        // wire behind the first, guaranteed to insert nothing.
+        val loader = HistoryPageLoader(processor)
+        coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader)
+        val fetchStarted = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 900L), endOfHistory = true)
+                else -> {
+                    fetchStarted.complete(Unit)
+                    release.await()
+                    FakeResponse(listOf(message("tail", 900)), endOfHistory = true)
+                }
+            }
+        }
+
+        val pass = async { coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), source) }
+        fetchStarted.await()
+        val chatOpen = async {
+            loader.loadPage(
+                networkId,
+                bufferId,
+                "#chan",
+                HistoryPageLoader.Direction.LATEST,
+                source,
+            )
+        }
+        runCurrent()
+        release.complete(Unit)
+
+        assertEquals(HistoryResyncState.Updated(1), pass.await())
+        assertTrue(chatOpen.await() is HistoryPageLoader.PageResult.Loaded)
+        assertEquals(
+            listOf("TARGETS", "LATEST"),
+            source.requests.map { it.subcommand.name },
+        )
+    }
+
+    @Test
+    fun aSharedNewestPageTimeoutIsOneTargetsTimeoutAndPagingsRetryableFailure() = runTest {
+        // The coalescing from the test above, with the outcome it has to survive: the shared flight
+        // times out with a chat screen joined to it. Whichever caller LEADS must not decide what the
+        // other sees — a leader's timeout classified for Paging reached the pass as a transport
+        // failure, which is neither a target-scoped refusal nor a TimeoutCancellationException, so
+        // it escaped syncOneTarget, cancelled every sibling, and failed the whole pass; and a
+        // leader's timeout classified as cancellation let the Paging follower read the flight as
+        // abandoned and silently re-lead it onto a wire that just proved it is too slow.
+        val loader = HistoryPageLoader(processor)
+        coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader)
+        coordinator.requestTimeoutMs = 5_000
+        val names = listOf("#slow", "#fast")
+        val ids = insertChannels(names)
+        val leaderOnTheWire = CompletableDeferred<Unit>()
+        val source = FakeSource(supportsConcurrent = true) { request ->
+            when {
+                request.subcommand == ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = names.map { it to 900L }, endOfHistory = true)
+                request.target == "#slow" -> {
+                    leaderOnTheWire.complete(Unit)
+                    awaitCancellation()
+                }
+                else -> FakeResponse(
+                    listOf(message("m-fast", 900, target = "#fast")),
+                    endOfHistory = true,
+                )
+            }
+        }
+
+        val pass = async { coordinator.resyncNetwork(networkId, openTargets(ids.zip(names)), source) }
+        // The flight is registered before its request goes out, so a chat opened now joins it.
+        leaderOnTheWire.await()
+        val chatOpen = async {
+            runCatching {
+                loader.loadPage(networkId, ids[0], "#slow", HistoryPageLoader.Direction.LATEST, source)
+            }
+        }
+        runCurrent()
+        advanceTimeBy(10_000)
+        val result = pass.await()
+
+        // The pass reports the timeout as this target's incompleteness and keeps its retry
+        // recommendation; the sibling was never cancelled and its row landed.
+        assertTrue(result is HistoryResyncState.Incomplete)
+        assertTrue((result as HistoryResyncState.Incomplete).retryRecommended)
+        assertTrue(db.messageDao().byMsgid(ids[1], "m-fast") != null)
+        // The joiner gets Paging's own classification of the same fact: a retryable transport
+        // failure, never a cancellation, or the mediator would freeze this direction's LoadState.
+        val paging = chatOpen.await().exceptionOrNull()
+        assertTrue(paging is IrcDisconnectedException)
+        assertFalse(paging is CancellationException)
+        // And exactly one request: a timed-out flight must not be re-led by its followers.
+        assertEquals(1, source.requests.count { it.target == "#slow" })
+    }
+
+    @Test
+    fun anUnreachableAdvertisementIsRetiredInsteadOfHauntingTheChatList() = runTest {
+        // soju can index an event its replay never returns. Discovery badges the room, the LATEST
+        // fetch adds nothing, and the pass settles it Idle — after which nothing else will ever
+        // touch the advertisement: the room is converged, so no later wave fetches it, and mark-read
+        // anchors on the newest LOCAL row, which is below the advertised instant. Left standing it
+        // is a permanent unread dot and a permanently top-sorted row.
+        processor.process(networkId, message("tail", 500_000))
+        seedCursor(newestServerTime = 100_000)
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 900_000L), endOfHistory = true)
+                // LATEST is by definition the newest page and it returns nothing new.
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), source)
+
+        // Settled, not retried: chasing a timestamp the server will not serve never converges.
+        assertEquals(HistoryResyncState.UpToDate, result)
+        val row = db.bufferDao().observeChatList().first().single { it.bufferId == bufferId }
+        assertFalse(row.advertisedUnread)
+        // Clamped onto what the room can actually show, so the sort key is the truth too.
+        assertEquals(500_000L, db.bufferDao().rawById(bufferId)?.advertisedLatestTime)
+        assertEquals(500_000L, row.activityTime)
+    }
+
+    @Test
+    fun aConvergedRoomKeepsNoCueForAnEventItCanNeverShow() = runTest {
+        // The other half of the same invariant, on the path with no fetch at all: the cursor already
+        // reached the advertisement, so the pass skips the room — and the advertised instant is a
+        // JOIN, which the chat list never previews. Without the retirement the cue would be lit
+        // forever on a room that is fully caught up.
+        processor.process(networkId, message("tail", 500_000))
+        seedCursor(newestServerTime = 900_000)
+        db.bufferDao().advanceAdvertisedLatest(bufferId, 900_000)
+        assertTrue(db.bufferDao().observeChatList().first().single().advertisedUnread)
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 900_000L), endOfHistory = true)
+                else -> error("a converged room must not be fetched")
+            }
+        }
+
+        coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), source)
+
+        assertFalse(db.bufferDao().observeChatList().first().single().advertisedUnread)
+    }
+
+    @Test
+    fun theEntryGateIsHeldThroughAPassThatPaintsNothingAndHandedBackWhenItConverges() = runTest {
+        // Chrome and entry positioning are different mechanisms and must stay that way: this pass
+        // publishes no status and no progress at all, and the chat screen's entry gate — the
+        // registry's historyCatchUpPending, which the Ready session hands back through
+        // onCatchUpConverged — has to stay held for its whole visible wave regardless.
+        var pending = setOf(networkId)
+        fun activity() = ConnectionActivitySnapshot(
+            states = mapOf(networkId to IrcClientState.Ready("me", emptySet(), emptyMap())),
+            initializationComplete = true,
+            historyCatchUpPending = pending,
+        )
+        val entryReadyDuringPass = mutableListOf<Boolean>()
+        val paintedDuringPass = mutableListOf<Boolean>()
+        val source = FakeSource { request ->
+            entryReadyDuringPass += entryHistoryReady(activity(), networkId)
+            paintedDuringPass += coordinator.syncStatuses.value.isNotEmpty() ||
+                coordinator.passProgress.value.isNotEmpty()
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 900_000L), endOfHistory = true)
+                else -> FakeResponse(listOf(message("tail", 900_000)), endOfHistory = true)
+            }
+        }
+
+        coordinator.resyncNetwork(
+            networkId,
+            openTargets(bufferId to "#chan"),
+            source,
+            chromeEligible = false,
+            onCatchUpConverged = { pending = pending - networkId },
+        )
+
+        assertTrue(paintedDuringPass.none { it })
+        // Held across discovery AND the fetch: a room positioned mid-pass would otherwise enter
+        // against a store the pass is still writing.
+        assertEquals(listOf(false, false), entryReadyDuringPass)
+        assertTrue(entryHistoryReady(activity(), networkId))
+        assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+    }
+
+    @Test
+    fun theEntryGateIsHandedBackBeforeThePacedSweepRunsNotAfterIt() = runTest {
+        // The gate is network-scoped, so holding it across the overflow sweep makes a chat that
+        // settled in wave one wait on background work it has no stake in — up to the entry timeout
+        // on a large account. It is handed back on the same boundary as the watermark.
+        val names = (1..WAVE_ONE_LIMIT + 2).map { "#chan$it" }
+        val ids = insertChannels(names)
+        val fetches = AtomicInteger()
+        val gateAtSweep = CompletableDeferred<Boolean>()
+        var pending = true
+        val source = FakeSource(supportsConcurrent = true) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
+                    targets = names.mapIndexed { index, name -> name to (900_000L - index * 1_000) },
+                    endOfHistory = true,
+                )
+                else -> {
+                    if (fetches.incrementAndGet() > WAVE_ONE_LIMIT) gateAtSweep.complete(pending)
+                    FakeResponse(
+                        listOf(message("m-${request.target}", 900_000, target = request.target)),
+                        endOfHistory = true,
+                    )
+                }
+            }
+        }
+
+        val pass = async {
+            coordinator.resyncNetwork(
+                networkId,
+                openTargets(ids.zip(names)),
+                source,
+                onCatchUpConverged = { pending = false },
+            )
+        }
+        advanceTimeBy(HistoryResyncCoordinator.BACKFILL_SEED_PACE_MS * (names.size + 1))
+        pass.await()
+
+        assertEquals(names.size, fetches.get())
+        assertFalse(gateAtSweep.await())
+    }
+
+    @Test
+    fun aPassTheCatchUpLoopWillRetryKeepsItsEntryGate() = runTest {
+        // The converged signal is not "the pass returned": a pass that recommends a retry is one
+        // the catch-up loop runs again, and entry positioning must keep waiting through it.
+        var handedBack = false
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 900_000L), endOfHistory = true)
+                // The advertised message never arrives and rows DID land, so this is a genuine lag
+                // the pass should chase rather than a timestamp replay refuses to serve.
+                else -> FakeResponse(listOf(message("older", 500_000)), endOfHistory = true)
+            }
+        }
+
+        val result = coordinator.resyncNetwork(
+            networkId,
+            openTargets(bufferId to "#chan"),
+            source,
+            onCatchUpConverged = { handedBack = true },
+        )
+
+        assertTrue(result is HistoryResyncState.Incomplete)
+        assertTrue((result as HistoryResyncState.Incomplete).retryRecommended)
+        assertFalse(handedBack)
+    }
+
+    @Test
+    fun aClearedConnectionReferenceVerifiesRatherThanSkipping() {
+        // The record is weak so a retired client is not pinned for the network's lifetime; losing
+        // the referent must fail toward running the pass, never toward trusting a socket that is
+        // demonstrably gone.
+        val collected = CompletedCatchUp(Any())
+        System.gc()
+
+        assertTrue(shouldRunForegroundVerification(collected, Any()))
     }
 }

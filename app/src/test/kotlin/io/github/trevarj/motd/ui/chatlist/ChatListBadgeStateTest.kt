@@ -55,6 +55,34 @@ class ChatListBadgeStateTest {
         )
     }
 
+    @Test
+    fun advertised_activity_stands_in_for_a_count_the_device_does_not_have() {
+        val state = chatListBadgeState(
+            row(muted = false, unread = 0, mentions = 0).copy(advertisedUnread = true),
+        )
+
+        assertEquals(ChatListBadgeState(advertisedActivity = true), state)
+    }
+
+    @Test
+    fun a_real_unread_count_replaces_the_advertised_cue() {
+        // Once the rows are here the count is the better statement; showing both is noise.
+        val state = chatListBadgeState(
+            row(muted = false, unread = 2, mentions = 0).copy(advertisedUnread = true),
+        )
+
+        assertEquals(ChatListBadgeState(unread = 2), state)
+    }
+
+    @Test
+    fun a_muted_row_is_not_told_about_activity_it_has_not_fetched() {
+        val state = chatListBadgeState(
+            row(muted = true, unread = 0, mentions = 0).copy(advertisedUnread = true),
+        )
+
+        assertEquals(ChatListBadgeState(), state)
+    }
+
     private fun row(muted: Boolean, unread: Int, mentions: Int) = ChatListRow(
         bufferId = 1,
         networkId = 1,

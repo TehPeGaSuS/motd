@@ -47,6 +47,7 @@ import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.GapFillProgress
 import io.github.trevarj.motd.data.sync.HistoryGapFiller
+import io.github.trevarj.motd.data.sync.HistoryPageLoader
 import io.github.trevarj.motd.data.sync.NoopHistoryGapFiller
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
@@ -76,7 +77,6 @@ import io.github.trevarj.motd.service.HistoryResyncCoordinator
 import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.HistorySyncStatus
-import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.RosterLoadState
@@ -2824,7 +2824,6 @@ class ChatViewModelTest {
         // that wants to observe a fill at all has to hand one in.
         gapFiller: HistoryGapFiller = NoopHistoryGapFiller,
     ): ChatViewModel {
-        val eventSink: IrcEventSink = processor
         val routeState = mutableMapOf<String, Any>("bufferId" to routeBufferId)
         jumpToMsgid?.let { routeState["jumpToMsgid"] = it }
         if (jumpToTime > 0) routeState["jumpToTime"] = jumpToTime
@@ -2847,7 +2846,7 @@ class ChatViewModelTest {
             draftStore = ComposerDraftStore(db),
             pendingShareStore = PendingShareStore(),
             scrollPositionStore = scrollPositions,
-            eventSink = eventSink,
+            historyPageLoader = HistoryPageLoader(processor),
             settingsRepository = settings,
             replyPrefs = FakeReplyPrefs(),
             visibilityReader = MessageVisibilityReader(db),

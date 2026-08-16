@@ -190,6 +190,29 @@ data class RoomEntity(
     val layoutDensityOverride: LayoutDensity? = null,
     /** Null inherits the global presence-event preference for this durable conversation. */
     val presenceModeOverride: PresenceMode? = null,
+    /**
+     * Newest activity CHATHISTORY TARGETS advertised for this room, or null when discovery has
+     * never mentioned it. Written forward-only, by [io.github.trevarj.motd.data.sync.EventProcessor]
+     * alone, from a completed TARGETS page.
+     *
+     * It exists so a catch-up pass can re-sort and badge the chat list from DISCOVERY, before any
+     * per-room LATEST page lands — that first response already names every room whose server-side
+     * tail moved, and waiting for the fan-out to reach each one is what made a reconnect feel slow.
+     *
+     * It is a high-water mark of what the SERVER last said, not a piece of unread state: the
+     * derived "advertised but not yet fetched" cue extinguishes itself the moment the room's own
+     * newest row or read anchor catches up with it, so ordinary convergence needs no clearing write
+     * at all.
+     *
+     * It moves DOWN in exactly one case, and only from the response that forces it: a pass that has
+     * proven the room is as current as CHATHISTORY will make it clamps the value onto the newest
+     * row the room can actually show
+     * ([io.github.trevarj.motd.data.sync.EventProcessor.clampAdvertisedActivity]). TARGETS
+     * timestamps the newest SERVER event, which is routinely a JOIN or an event ingestion filters
+     * away, and soju can index an event replay never returns; without that clamp the residue is a
+     * permanent unread dot for a message that will never arrive.
+     */
+    val advertisedLatestTime: Long? = null,
 )
 
 /** Compatibility name retained while callers migrate to the canonical room vocabulary. */
