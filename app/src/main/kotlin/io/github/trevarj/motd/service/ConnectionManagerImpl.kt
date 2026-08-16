@@ -457,6 +457,7 @@ class ConnectionManagerImpl @Inject constructor(
         scope = scope,
         actorFactory = ::createActor,
         isConfigurationFailure = ::isConfigurationFailure,
+        diagnostics = diagnostics,
     )
 
     // Latest full network set, kept so buildClient can resolve a BOUNCER_CHILD's root row (its
@@ -866,12 +867,14 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     private fun startForegroundKeeper() {
-        runCatching {
+        // A refused keeper silently loses the EMBEDDED_REALITY retention guarantee, so the refusal
+        // is recorded and not only logged.
+        startForegroundSafely(diagnostics, source = "keeper") {
             ContextCompat.startForegroundService(
                 appContext,
                 android.content.Intent(appContext, IrcForegroundService::class.java),
             )
-        }.onFailure { Log.w(TAG, "unable to start socket fallback service", it) }
+        }
     }
 
     private fun stopForegroundKeeper() {

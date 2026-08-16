@@ -2,6 +2,7 @@ package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.diagnostics.RecordingDiagnostics
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.chat.entryHistoryReady
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -13,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -268,6 +270,63 @@ class ConnectionRegistryTest {
     }
 
     @Test
+    fun callbackFailure_isRecordedWithoutReachingTheCommandLoop() = runTest {
+        val diagnostics = RecordingDiagnostics()
+        val registry = ConnectionRegistry(
+            backgroundScope,
+            actorFactory = { _, _ -> FakeActor() },
+            isConfigurationFailure = { false },
+            diagnostics = diagnostics,
+        )
+        registry.beginStart()
+        registry.reconcile(listOf(network() to "fp"), setOf(1), emptySet())
+        val generation = registry.snapshot.value.actors.getValue(1).generation
+
+        assertFalse(registry.runIfCurrent(1, generation) { error("post-ready setup failed") })
+        runCurrent()
+
+        val recorded = diagnostics.events.single { it.event == "callback_failed" }
+        assertEquals("connections", recorded.component)
+        assertEquals(1L, recorded.fields["network_id"])
+        assertEquals("IllegalStateException", recorded.fields["error"])
+        // The swallow is the callback's own barrier: the command loop never sees the failure.
+        assertTrue(diagnostics.events.none { it.event == "command_failed" })
+    }
+
+    @Test
+    fun commandFailure_isContainedAndLeavesTheLoopServing() = runTest {
+        val diagnostics = RecordingDiagnostics()
+        var explode = true
+        val registry = ConnectionRegistry(
+            backgroundScope,
+            actorFactory = { _, _ -> if (explode) error("actor construction failed") else FakeActor() },
+            isConfigurationFailure = { false },
+            diagnostics = diagnostics,
+        )
+        registry.beginStart()
+
+        // Unguarded this never returns: the throw kills the loop, and the commands channel is
+        // UNLIMITED and never closed, so this reconcile parks on a deferred nobody completes.
+        // Bounded on virtual time so the regression reports as a wedge instead of a suite timeout.
+        withTimeout(WEDGE_TIMEOUT_MS) {
+            registry.reconcile(listOf(network() to "fp"), setOf(1), emptySet())
+        }
+        assertTrue(registry.snapshot.value.actors.isEmpty())
+
+        explode = false
+        registry.reconcile(listOf(network() to "fp"), setOf(1), emptySet())
+        assertTrue(registry.snapshot.value.actors.containsKey(1))
+        // A second waiting round-trip proves the loop is still draining, not just alive.
+        registry.disconnect(1)
+        assertTrue(registry.snapshot.value.actors.isEmpty())
+
+        val recorded = diagnostics.events.single { it.event == "command_failed" }
+        assertEquals("connections", recorded.component)
+        assertEquals("Reconcile", recorded.fields["command"])
+        assertEquals("IllegalStateException", recorded.fields["error"])
+    }
+
+    @Test
     fun foregroundProbe_targetsReadyActors_andConflatesRepeatedRequests() = runTest {
         val created = mutableListOf<FakeActor>()
         val registry = ConnectionRegistry(
@@ -421,5 +480,10 @@ class ConnectionRegistryTest {
 
         assertTrue(registry.snapshot.value.actors.isEmpty())
         assertTrue(registry.connectionStates.value.isEmpty())
+    }
+
+    private companion object {
+        /** Virtual-time bound for a request that a wedged command loop would never answer. */
+        const val WEDGE_TIMEOUT_MS = 5_000L
     }
 }

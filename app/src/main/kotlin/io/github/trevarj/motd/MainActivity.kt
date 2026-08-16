@@ -27,6 +27,7 @@ import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.AndroidEntryPoint
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.di.NotificationPermissionStatus
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
@@ -42,6 +43,7 @@ import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.IrcForegroundService
 import io.github.trevarj.motd.service.MotdNotifications
+import io.github.trevarj.motd.service.startForegroundSafely
 import io.github.trevarj.motd.ui.components.CertPromptViewModel
 import io.github.trevarj.motd.ui.components.CertTrustDialog
 import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
@@ -72,6 +74,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var connectionManager: ConnectionManager
     @Inject lateinit var notificationPermission: NotificationPermissionStatus
     @Inject lateinit var pendingShareStore: PendingShareStore
+    @Inject lateinit var diagnostics: DiagnosticLogger
 
     // POST_NOTIFICATIONS is a delivery concern: report its result immediately to Settings state.
     private val requestNotifications =
@@ -244,10 +247,16 @@ class MainActivity : ComponentActivity() {
                 settingsRepository.settings.first().deliveryMode == DeliveryMode.PERSISTENT_SOCKET
             val hasNetworks = db.networkDao().connectable().isNotEmpty()
             if (ConnectionManagerImpl.shouldRunService(persistent, hasNetworks)) {
-                ContextCompat.startForegroundService(
-                    this@MainActivity,
-                    Intent(this@MainActivity, IrcForegroundService::class.java),
-                )
+                // Two suspension points precede this call, so the activity may already be
+                // backgrounded by the time it runs — and Android 12+ answers a background start
+                // with ForegroundServiceStartNotAllowedException. Losing the keeper here is
+                // recoverable (the next foreground re-arms it); crashing on it is not.
+                startForegroundSafely(diagnostics, source = "activity") {
+                    ContextCompat.startForegroundService(
+                        this@MainActivity,
+                        Intent(this@MainActivity, IrcForegroundService::class.java),
+                    )
+                }
             }
         }
     }

@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcClientState
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -39,6 +40,7 @@ internal class ConnectionRegistry(
     private val scope: CoroutineScope,
     private val actorFactory: (NetworkEntity, Long) -> ConnectionLifecycleActor,
     private val isConfigurationFailure: (String) -> Boolean,
+    private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
 ) {
     private sealed interface Command {
         data class BeginStart(val result: CompletableDeferred<Boolean>) : Command
@@ -130,7 +132,60 @@ internal class ConnectionRegistry(
 
     init {
         scope.launch {
-            for (command in commands) handle(command)
+            for (command in commands) {
+                // Per-iteration containment, not decoration: [commands] is UNLIMITED and never
+                // closed, so a throw that kills this loop still lets every later [request] send
+                // successfully and then park forever on a CompletableDeferred nobody will
+                // complete. One bad command would wedge every connect/disconnect/reconcile for
+                // the process lifetime.
+                try {
+                    handle(command)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    diagnostics.record("connections", "command_failed") {
+                        mapOf(
+                            "command" to command::class.simpleName,
+                            "error" to error::class.simpleName,
+                        )
+                    }
+                    releaseWaiter(command)
+                }
+            }
+        }
+    }
+
+    /**
+     * Answer the failed command's waiter so surviving the throw is not just the loop's privilege.
+     *
+     * The caller is already parked inside [request]; leaving it there converts a contained failure
+     * back into the permanent wedge this guard exists to prevent. Every waiter settles on the same
+     * "it did not happen" answer the callback barrier in [Command.Callback] already gives.
+     * Completing exceptionally instead would only relocate the crash into the requester's scope.
+     */
+    private fun releaseWaiter(command: Command) {
+        when (command) {
+            is Command.BeginStart -> command.result.complete(false)
+            is Command.AttachObservers -> command.result.complete(Unit)
+            is Command.Stop -> command.result.complete(emptyList())
+            is Command.Reconcile -> command.result.complete(Unit)
+            is Command.Connect -> command.result.complete(Unit)
+            is Command.Disconnect -> command.result.complete(Unit)
+            is Command.ActorState -> command.result.complete(Unit)
+            is Command.HistoryCatchUpFinished -> command.result.complete(Unit)
+            is Command.Callback -> command.result.complete(false)
+            // Fire-and-forget commands have no waiter to release. Kept exhaustive on purpose: a
+            // new command with a result must decide its own contained answer here.
+            is Command.ActorConnection,
+            is Command.ActorStopped,
+            is Command.CallbackFinished,
+            is Command.ArmEchoTimeout,
+            is Command.EchoTimeoutFinished,
+            Command.NetworkAvailable,
+            Command.NetworkLost,
+            Command.WakeNonReady,
+            Command.ProbeReady,
+            -> Unit
         }
     }
 
@@ -333,7 +388,16 @@ internal class ConnectionRegistry(
                         }
                     } catch (cancelled: CancellationException) {
                         throw cancelled
-                    } catch (_: Exception) {
+                    } catch (error: Exception) {
+                        // Deliberate crash-containment barrier: a failed post-Ready Room write must
+                        // not take the process down. The write is still lost, so record it —
+                        // otherwise the loss is completely silent.
+                        diagnostics.record("connections", "callback_failed") {
+                            mapOf(
+                                "network_id" to command.networkId,
+                                "error" to error::class.simpleName,
+                            )
+                        }
                         command.result.complete(false)
                     } finally {
                         command.result.complete(false)

@@ -5,11 +5,14 @@ import android.app.Notification
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.util.Log
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcClientState
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
@@ -24,6 +27,7 @@ class IrcForegroundService : LifecycleService() {
 
     @Inject lateinit var connectionManager: ConnectionManager
     @Inject lateinit var notifications: MotdNotifications
+    @Inject lateinit var diagnostics: DiagnosticLogger
 
     override fun onCreate() {
         super.onCreate()
@@ -61,12 +65,14 @@ class IrcForegroundService : LifecycleService() {
         // networks" reverted to "Keeping chats connected" on every foreground and stayed there.
         // Still correct for the cold start this was written for: an empty state map is "starting".
         val notification = statusNotification(connectionManager.connectionStates.value)
-        // FOREGROUND_SERVICE_TYPE_SPECIAL_USE is an API 34 constant; only pass the type on 34+.
-        // On 29-33 use the 2-arg overload (the manifest still declares foregroundServiceType).
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(STATUS_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(STATUS_ID, notification)
+        startForegroundSafely(diagnostics, source = "service") {
+            // FOREGROUND_SERVICE_TYPE_SPECIAL_USE is an API 34 constant; only pass the type on 34+.
+            // On 29-33 use the 2-arg overload (the manifest still declares foregroundServiceType).
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(STATUS_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(STATUS_ID, notification)
+            }
         }
     }
 
@@ -103,6 +109,39 @@ class IrcForegroundService : LifecycleService() {
         const val STATUS_ID = 1
         const val ACTION_STOP = "io.github.trevarj.motd.service.STOP"
     }
+}
+
+private const val FOREGROUND_START_TAG = "ForegroundStart"
+
+/**
+ * Run a foreground-service start that the platform is allowed to refuse, and survive the refusal.
+ *
+ * Android 12+ throws `ForegroundServiceStartNotAllowedException` (and 14+ adds
+ * `MissingForegroundServiceTypeException`/`SecurityException`) whenever the caller is no longer
+ * eligible to hold a foreground service — a service entered from a background start, or an activity
+ * that was backgrounded while its launch coroutine suspended. Losing the socket keeper is a
+ * degradation; crashing the process over it is not, so the refusal is contained the same way
+ * `IrcForegroundService.updateStatus` already contains its `notify`. Recorded as well as logged
+ * because the diagnostic journal is where a keeper that never armed becomes explainable.
+ *
+ * Returns whether the start was accepted.
+ */
+internal fun startForegroundSafely(
+    diagnostics: DiagnosticLogger,
+    source: String,
+    start: () -> Unit,
+): Boolean = try {
+    start()
+    true
+} catch (cancelled: CancellationException) {
+    // Callers run inside coroutines; swallowing cancellation here would break their teardown.
+    throw cancelled
+} catch (error: Exception) {
+    Log.w(FOREGROUND_START_TAG, "foreground service start refused (source=$source)", error)
+    diagnostics.record("lifecycle", "foreground_start_refused") {
+        mapOf("source" to source, "error" to error::class.simpleName)
+    }
+    false
 }
 
 /** The three arguments [MotdNotifications.statusNotification] takes, derived from live state. */
