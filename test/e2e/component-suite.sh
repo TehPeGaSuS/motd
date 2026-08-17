@@ -8,7 +8,7 @@ REPO="$(cd "$E2E_DIR/../.." && pwd)"
 # sync-header cases + 2 composer send-clear cases + 3 title connectivity-cue cases + 5 gesture orb
 # cases (lab gating, docked orb, hold-to-ring, accessible dialog, accessible execute). The two
 # badge/unread cases were rewritten in place (coexistence, not substitution), so they add nothing.
-EXPECTED_CASES=106
+EXPECTED_CASES=107
 REAL_STACK_ANNOTATION=io.github.trevarj.motd.FastHeadlessE2e
 
 cd "$REPO"

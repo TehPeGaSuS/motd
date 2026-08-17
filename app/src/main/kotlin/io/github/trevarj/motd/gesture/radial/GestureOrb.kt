@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material3.Icon
@@ -97,6 +98,12 @@ internal fun GestureOrbTouchTarget(
         modifier = modifier
             .testTag(GESTURE_ORB_TAG)
             .size(RadialDimens.OrbTouchWidth, RadialDimens.OrbTouchHeight)
+            // The tab is docked inside the system back-gesture edge zone, and a radial drag toward
+            // the screen centre is byte-for-byte a back swipe. Without this exclusion the system
+            // dispatches a back alongside the menu gesture, and that back can pop the chat the
+            // released action is concurrently replacing — corrupting the NavHost transition into a
+            // blank screen. Excluding the touch target keeps the whole gesture ours.
+            .systemGestureExclusion()
             .onGloballyPositioned { origin.value = it.positionInRoot() }
             .pointerInput(Unit) {
                 coroutineScope {

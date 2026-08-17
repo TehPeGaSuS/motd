@@ -2,6 +2,7 @@ package io.github.trevarj.motd.gesture.radial
 
 import android.content.Context
 import android.view.accessibility.AccessibilityManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
@@ -122,6 +123,14 @@ internal fun GestureOrbSurface(
         if (menuVisible) return@LaunchedEffect
         delay(ORB_IDLE_FADE_DELAY_MILLIS)
         idle = true
+    }
+
+    // A back arriving while the ring is open (3-button nav, or an edge swipe the exclusion rect
+    // could not cover) must close the menu, never navigate underneath it: a pop racing the action a
+    // release is about to perform is how the NavHost transition was corrupted into a blank screen.
+    BackHandler(enabled = menuVisible) {
+        holdId++
+        menuVisible = false
     }
     val orbAlpha by animateFloatAsState(
         targetValue = if (idle) ORB_IDLE_ALPHA else 1f,

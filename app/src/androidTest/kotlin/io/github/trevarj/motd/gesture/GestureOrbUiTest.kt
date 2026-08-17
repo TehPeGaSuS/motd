@@ -6,7 +6,10 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.test.down
+import androidx.compose.ui.test.up
 import io.github.trevarj.motd.gesture.radial.GESTURE_MENU_A11Y_DIALOG_TAG
 import io.github.trevarj.motd.gesture.radial.GESTURE_MENU_SCRIM_TAG
 import io.github.trevarj.motd.gesture.radial.GESTURE_ORB_TAG
@@ -44,12 +47,15 @@ class GestureOrbUiTest {
         ),
     )
 
+    private var backDispatcher: OnBackPressedDispatcher? = null
+
     private fun setSurface(
         enabled: Boolean = true,
         accessible: Boolean = false,
         executed: MutableList<GestureAction> = mutableListOf(),
     ) {
         compose.setContent {
+            backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
             MotdTheme(dynamicColor = false) {
                 GestureOrbSurface(
                     enabled = enabled,
@@ -91,6 +97,28 @@ class GestureOrbUiTest {
         compose.onNodeWithTag(GESTURE_MENU_SCRIM_TAG).assertIsDisplayed()
         compose.onNodeWithTag(gestureMenuSliceTag("jump"), useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag(gestureMenuSliceTag("tools"), useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun backWhileTheRingIsOpen_closesItWithoutExecuting() {
+        val executed = mutableListOf<GestureAction>()
+        setSurface(executed = executed)
+
+        compose.onNodeWithTag(GESTURE_ORB_TAG).performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitUntil(WAIT_MILLIS) {
+            compose.onAllNodesWithTag(GESTURE_MENU_SCRIM_TAG).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // A back racing an open ring (3-button nav, or an edge swipe past the exclusion rect) must
+        // only dismiss the menu; navigating underneath the finger is how the blank-screen race began.
+        compose.runOnUiThread { backDispatcher!!.onBackPressed() }
+        compose.waitUntil(WAIT_MILLIS) {
+            compose.onAllNodesWithTag(GESTURE_MENU_SCRIM_TAG).fetchSemanticsNodes().isEmpty()
+        }
+        compose.onNodeWithTag(GESTURE_ORB_TAG).performTouchInput { up() }
+
+        assertEquals(emptyList<GestureAction>(), executed)
     }
 
     @Test
