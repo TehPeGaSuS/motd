@@ -140,7 +140,7 @@ class MessageRepositoryPagingTest {
 
         // The seam lands where the clamp used to cut, and only there: it takes the same projection
         // the old lower boundary took, so the cut is drawn in the position it was previously applied.
-        val seams = repository.observeTimelineSeams(bufferId).first()
+        val seams = repository.observeTimelineSeams(bufferId, MessageVisibilitySpec()).first()
         assertEquals(TimelineAnchor(100, newer.id, newer.timelineOrder), seams.single().position)
         val placements = page.data.mapIndexedNotNull { index, row ->
             seamAbove(row, page.data.getOrNull(index + 1), seams)?.let { row.text to it.gapId }

@@ -137,8 +137,16 @@ interface MessageRepository {
      *
      * A seam marks where a gap interrupts the stored stream. Whether a given seam ends up in a
      * rendered slot is decided per row by `seamAbove` against the materialized neighbors.
+     *
+     * [visibility] is the SAME spec the caller's [messages] stream runs, and is not optional: a
+     * seam's position has to be expressed in the coordinate space of the list that is actually
+     * presented, or a gap whose newer side is entirely filtered out lands above every visible row
+     * and stops being both drawable and demandable.
      */
-    fun observeTimelineSeams(bufferId: Long): Flow<List<TimelineSeam>> = flowOf(emptyList())
+    fun observeTimelineSeams(
+        bufferId: Long,
+        visibility: MessageVisibilitySpec,
+    ): Flow<List<TimelineSeam>> = flowOf(emptyList())
     /** Delete a locally-stored failed row by id, repairing any exact local read anchor. */
     suspend fun deleteMessage(id: Long)
 }

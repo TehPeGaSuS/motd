@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.HistoryGapDao
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.ReactionDao
 import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.history.GapAnchorResolver
 import io.github.trevarj.motd.data.history.TimelineSeam
@@ -18,6 +19,7 @@ import io.github.trevarj.motd.data.history.timelineSeams
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.countTimelineNewerQuery
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
+import io.github.trevarj.motd.data.visibility.newestPresentedMessageQuery
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
@@ -125,18 +127,42 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun deleteMessage(id: Long) = messageDao.deleteWithAnchorFallback(id)
 
     // Observe the room's stored gaps and resolve both edges against the local store, then project
-    // them through the seam role. Deliberately NOT derived from pagingContextFlow: that flow exists
-    // to key a Pager generation, and a seam list must not re-emit identically every time an
-    // unrelated identity or room field changes underneath it.
-    override fun observeTimelineSeams(bufferId: Long): Flow<List<TimelineSeam>> =
-        bufferDao.observe(bufferId).flatMapLatest { room ->
-            if (room == null) {
-                flowOf(emptyList())
-            } else {
-                historyGapDao.observeForRoom(room.id)
-                    .map { gaps -> timelineSeams(gapAnchors.resolve(room.id, gaps)) }
+    // them through the seam role and clamp them into the coordinate space of the list [visibility]
+    // actually presents (see [timelineSeams]).
+    //
+    // Derived from pagingContextFlow so the clamp runs the SAME predicate as the PagingSource, down
+    // to the network's identity rules — a clamp computed against a row the Pager hides would land
+    // the seam back above every presented row, which is the defect this exists to close. That flow
+    // is distinct-until-changed on (roomId, identityRules), so an unrelated room field changing
+    // underneath still does not re-emit or re-subscribe anything here.
+    override fun observeTimelineSeams(
+        bufferId: Long,
+        visibility: MessageVisibilitySpec,
+    ): Flow<List<TimelineSeam>> =
+        pagingContextFlow(bufferId).flatMapLatest { context ->
+            historyGapDao.observeForRoom(context.roomId).flatMapLatest { gaps ->
+                if (gaps.isEmpty()) {
+                    // No gap, no clamp to compute: the overwhelmingly common room never observes
+                    // the messages table for this at all.
+                    flowOf(emptyList())
+                } else {
+                    newestPresentedAnchor(context, visibility).map { newestPresented ->
+                        timelineSeams(gapAnchors.resolve(context.roomId, gaps), newestPresented)
+                    }
+                }
             }
         }.distinctUntilChanged()
+
+    /** The presented list's ceiling, re-read whenever a write could have moved it. */
+    private fun newestPresentedAnchor(
+        context: PagingContext,
+        visibility: MessageVisibilitySpec,
+    ): Flow<TimelineAnchor?> = messageDao
+        .observeRawMessage(
+            newestPresentedMessageQuery(context.roomId, visibility, context.identityRules),
+        )
+        .map { row -> row?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) } }
+        .distinctUntilChanged()
 
     private fun canonicalRoomIdFlow(bufferId: Long): Flow<Long> = bufferDao.observe(bufferId)
         .map { it?.id ?: bufferId }

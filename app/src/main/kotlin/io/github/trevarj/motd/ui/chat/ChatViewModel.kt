@@ -293,9 +293,13 @@ class ChatViewModel @Inject constructor(
      * A seam's position comes from the gap itself, so this list does not depend on where the
      * viewport is. Which seams land in a rendered slot is decided per row by [rowSeam] against the
      * neighbors Paging actually materialized.
+     *
+     * It DOES depend on the behavioral filter, and on the same [filterSpecs] the Pager is keyed
+     * from: a position is only comparable against rows the same spec admits, so changing the filter
+     * re-resolves the seams exactly as it re-creates the paging generation.
      */
     val timelineSeams: StateFlow<TimelineSeamState> = combine(
-        messageRepository.observeTimelineSeams(bufferId),
+        filterSpecs.flatMapLatest { messageRepository.observeTimelineSeams(bufferId, it) },
         gapFiller.fillsInFlight,
         historyUnavailable,
         failedGapIds,

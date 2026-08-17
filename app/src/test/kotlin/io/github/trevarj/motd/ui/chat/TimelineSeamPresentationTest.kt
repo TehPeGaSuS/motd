@@ -3,11 +3,14 @@ package io.github.trevarj.motd.ui.chat
 import androidx.paging.PagingSource
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
@@ -86,6 +89,24 @@ class TimelineSeamPresentationTest {
             listOf(message(roomId, text, serverTime = serverTime, dedupKey = text)),
         ).single()
 
+    /**
+     * A presence row for an actor who never speaks in this room, so [PresenceMode.SMART] — the
+     * default — excludes it from the presented timeline while it stays durable in Room.
+     */
+    private suspend fun insertPresence(text: String, serverTime: Long, kind: MessageKind): Long =
+        db.messageDao().insertAll(
+            listOf(
+                message(
+                    roomId,
+                    text,
+                    sender = "lurker",
+                    serverTime = serverTime,
+                    dedupKey = text,
+                    kind = kind,
+                ),
+            ),
+        ).single()
+
     private fun repository() = MessageRepositoryImpl(
         bufferDao = db.bufferDao(),
         networkIdentityDao = db.networkIdentityDao(),
@@ -96,9 +117,9 @@ class TimelineSeamPresentationTest {
     )
 
     /** Materialize the timeline exactly as the screen does (reverse layout: index 0 = newest). */
-    private suspend fun loadWindow(): List<MessageEntity> =
+    private suspend fun loadWindow(visibility: MessageVisibilitySpec = spec): List<MessageEntity> =
         (
-            db.messageDao().pagingSource(messagePagingQuery(roomId, spec)).load(
+            db.messageDao().pagingSource(messagePagingQuery(roomId, visibility)).load(
                 PagingSource.LoadParams.Refresh(key = null, loadSize = 50, placeholdersEnabled = true),
             ) as PagingSource.LoadResult.Page<Int, MessageEntity>
             ).data
@@ -121,13 +142,16 @@ class TimelineSeamPresentationTest {
      * (a caller that models nothing gets a tappable seam rather than an endless spinner), which is
      * not the case these placement tests are about.
      */
-    private suspend fun seamState(filling: Set<Long> = emptySet(), failed: Set<Long> = emptySet()) =
-        TimelineSeamState(
-            seams = repository().observeTimelineSeams(roomId).first(),
-            filling = filling,
-            historyUnavailable = false,
-            failed = failed,
-        )
+    private suspend fun seamState(
+        filling: Set<Long> = emptySet(),
+        failed: Set<Long> = emptySet(),
+        visibility: MessageVisibilitySpec = spec,
+    ) = TimelineSeamState(
+        seams = repository().observeTimelineSeams(roomId, visibility).first(),
+        filling = filling,
+        historyUnavailable = false,
+        failed = failed,
+    )
 
     // --- the wiring exists ------------------------------------------------------------------------
 
@@ -273,5 +297,103 @@ class TimelineSeamPresentationTest {
         val state = seamState()
         assertTrue("a filled gap publishes no seam", state.seams.isEmpty())
         assertEquals(emptyList<Pair<String, RowSeam>>(), renderedSeams(rows, state))
+    }
+
+    // --- a gap whose newer side the filter removes -------------------------------------------------
+    //
+    // The wedge, from a real install: reconnect catch-up fetched a page that was entirely JOIN/QUIT
+    // for actors who had not spoken, so PresenceMode.SMART excluded every row of it, and the gap
+    // recorded against that island had its newer edge above every PRESENTED row.
+    //
+    // Both consumers bound a seam by `position <= newest presented row`, so the seam matched
+    // nothing: no divider (seamAbove) and no demand (seamsWithinPrefetch), hence no hands-free fill
+    // and no tap to recover with, while the missing messages stayed fetchable the whole time. The
+    // install proved the mechanism from the other side — flipping that one setting to "show all"
+    // put the island back into the presentation and the gap filled immediately.
+    //
+    // Both halves are asserted together on purpose. A seam that renders but is never demanded still
+    // needs the reader to notice and tap it, and a seam that is demanded but never renders fetches
+    // with no spinner and no error surface.
+
+    /** Replace the fixture's gap with one whose newer edge lands on filtered-out presence rows. */
+    private suspend fun wedgeTheGapBehindHiddenPresenceRows(): Long {
+        db.historyGapDao().delete(db.historyGapDao().forRoom(roomId).single().id)
+        val island = listOf(
+            insertPresence("join-0", serverTime = 9_000, kind = MessageKind.JOIN),
+            insertPresence("quit-1", serverTime = 9_010, kind = MessageKind.QUIT),
+            insertPresence("join-2", serverTime = 9_020, kind = MessageKind.JOIN),
+        )
+        // Exactly the shape EventProcessor records for reconnect catch-up: the older edge is the
+        // newest row the client already held, the newer edge is the fetched page's OLDEST row.
+        return db.historyGapDao().insert(
+            HistoryGapEntity(
+                roomId = roomId,
+                olderMsgid = null,
+                olderServerTime = 5_010,
+                olderEventId = newest,
+                olderTimelineOrder = newest,
+                newerMsgid = null,
+                newerServerTime = 9_000,
+                newerEventId = island.first(),
+                newerTimelineOrder = island.first(),
+            ),
+        )
+    }
+
+    /** The viewport resting at the bottom of the timeline, which is where a room opens. */
+    private fun demand(rows: List<MessageEntity>, seams: TimelineSeamState): Set<Long> =
+        seamsWithinPrefetch(
+            firstVisibleIndex = 0,
+            lastVisibleIndex = rows.lastIndex,
+            itemCount = rows.size,
+            peek = { rows.getOrNull(it) },
+            seams = seams.seams,
+        )
+
+    @Test
+    fun `a gap hidden behind filtered presence rows still draws and still demands`() = runTest {
+        val gapId = wedgeTheGapBehindHiddenPresenceRows()
+        val rows = loadWindow()
+
+        // The precondition, stated rather than assumed: the whole newer side of the gap is gone
+        // from the presented list, so the newest row on screen is OLDER than the gap's newer edge.
+        assertEquals(listOf("new-2", "new-1", "old-2", "old-1"), rows.map { it.text })
+
+        val state = seamState()
+        // Drawn: the only slot the presented list has for it, at the top of the timeline. Raw
+        // geometry renders nothing at all here, which is the half of the defect the reader sees.
+        assertEquals(
+            "the gap must be drawn somewhere the reader can tap it",
+            listOf("new-2"),
+            renderedSeams(rows, state).map { it.first },
+        )
+        // Demanded: the autopilot has something to fill, so recovery does not depend on a tap.
+        assertEquals(
+            "the gap must be within loading reach of a viewport resting at the bottom",
+            setOf(gapId),
+            demand(rows, state),
+        )
+        // The mechanism behind both: the position is clamped into the presented coordinate space
+        // instead of naming the island's first row (serverTime 9_000), which no presented row
+        // reaches.
+        assertEquals(TimelineAnchor(5_010, newest, newest), state.seams.single().position)
+        assertEquals(HistoryGapState.Idle, renderedSeams(rows, state).single().second.state)
+    }
+
+    @Test
+    fun `showing all presence rows reaches the same gap through its raw position`() = runTest {
+        val gapId = wedgeTheGapBehindHiddenPresenceRows()
+        val showAll = MessageVisibilitySpec(presenceMode = PresenceMode.ALL)
+        val rows = loadWindow(showAll)
+        val state = seamState(visibility = showAll)
+
+        // The install's own experiment: with the island presented, the newest row is above the
+        // gap's newer edge, so nothing is clamped and the seam keeps its exact stored position.
+        assertEquals("join-2", rows.first().text)
+        assertEquals(9_000, state.seams.single().position.serverTime)
+        // Same gap, same two answers — under this spec from the raw position, under SMART from the
+        // clamped one. Whether history can be recovered must not depend on a presence setting.
+        assertEquals(listOf("join-0"), renderedSeams(rows, state).map { it.first })
+        assertEquals(setOf(gapId), demand(rows, state))
     }
 }

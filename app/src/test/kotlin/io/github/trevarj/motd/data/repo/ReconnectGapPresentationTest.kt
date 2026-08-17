@@ -256,7 +256,7 @@ class ReconnectGapPresentationTest {
         repository: MessageRepositoryImpl,
         presented: Presentation,
     ): List<Pair<String?, Long>> {
-        val seams = repository.observeTimelineSeams(bufferId).first()
+        val seams = repository.observeTimelineSeams(bufferId, MessageVisibilitySpec()).first()
         return presented.rows.mapIndexedNotNull { index, row ->
             row ?: return@mapIndexedNotNull null
             seamAbove(row, presented.rows.getOrNull(index + 1), seams)?.let { row.msgid to it.gapId }
@@ -523,7 +523,7 @@ class ReconnectGapPresentationTest {
         assertTrue("every seeded row stays reachable", windowContains(newest.id))
         // ...and the gap is not being ignored either: it publishes a seam, which is how the break is
         // shown now. A gap store that had simply stopped seeing gaps would also present every row.
-        assertEquals(1, repository.observeTimelineSeams(bufferId).first().size)
+        assertEquals(1, repository.observeTimelineSeams(bufferId, MessageVisibilitySpec()).first().size)
     }
 
     /**

@@ -209,6 +209,24 @@ internal fun messagePagingQuery(
     arrayOf(bufferId),
 )
 
+/**
+ * The single newest row [messagePagingQuery] would present, or none when the filter admits none.
+ *
+ * Deliberately the same predicate and the same ordering with `LIMIT 1`, because this IS the
+ * presented list's ceiling: timeline seams clamp against it so a gap edge resolved in raw
+ * message-store coordinates cannot come to rest above every row the reader can actually see.
+ */
+internal fun newestPresentedMessageQuery(
+    bufferId: Long,
+    spec: MessageVisibilitySpec,
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
+): SimpleSQLiteQuery = SimpleSQLiteQuery(
+    "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
+        "AND ${MessageVisibilitySql(spec, identityRules).timeline()} " +
+        "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1",
+    arrayOf(bufferId),
+)
+
 internal fun countTimelineNewerQuery(
     bufferId: Long,
     serverTime: Long,

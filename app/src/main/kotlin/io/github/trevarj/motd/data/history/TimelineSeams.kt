@@ -26,6 +26,33 @@ data class TimelineSeam(
 /**
  * The seams contributed by [gaps], ordered oldest-first by [TimelineSeam.position].
  *
+ * ## Why the position is clamped to the presented list
+ *
+ * [newestPresented] is the anchor of the newest row the timeline's OWN visibility query would
+ * present, or null when the caller cannot say (which keeps the raw geometry, unchanged).
+ *
+ * It is here because a gap edge resolves in RAW message-store coordinates while both consumers of a
+ * seam bound it against the FILTERED list the reader actually sees: [seamAbove] matches the
+ * half-open interval between two PRESENTED rows, and the viewport's prefetch demand takes its upper
+ * bound from the newest PRESENTED row. Those two coordinate spaces coincide right up until every row
+ * on a gap's newer side is filtered out, and then they do not: the raw position sits above every
+ * presented row, matches no interval, and the seam is simultaneously invisible and undemandable —
+ * no divider to tap and no hands-free fill, with the missing history sitting behind a break nothing
+ * can see or close. The observed case is a reconnect catch-up page that is 100% JOIN/QUIT under
+ * `PresenceMode.SMART`, whose actors never spoke, so the whole island is excluded from the
+ * presentation while remaining durable in Room; switching the same install to "show all" restored
+ * the presentation and the gap filled immediately, which is the same defect read from the other end.
+ *
+ * Clamping puts such a seam in the only slot the presented list has for it — above its newest row —
+ * which is a deliberate one-slot conservatism: the gap is really NEWER than that row, but there is
+ * no presented row on its newer side to host the divider, and drawing it one slot early is what the
+ * reader can act on. It is also self-correcting, because the first fetched page lands rows on the
+ * newer side and the seam resumes its exact slot.
+ *
+ * This is a CLAMP, not a re-projection. A seam already at or below [newestPresented] keeps the exact
+ * anchor [GapEdgeAnchor.asInclusiveLowerBound] gave it, so the cohort rule below is untouched and
+ * the two edge ROLES stay as distinct as they were.
+ *
  * ## Why the seam takes the WINDOW lower-bound projection
  *
  * A seam's position is `newer.asInclusiveLowerBound()` — the projection that answers "which rows sit
@@ -48,10 +75,23 @@ data class TimelineSeam(
  * shape of the bug fixed in `e91698a0`, so do not "harmonize" the two conventions;
  * `HistoryGapGeometryTest` fails loudly if anyone tries.
  */
-fun timelineSeams(gaps: List<ResolvedGap>): List<TimelineSeam> = gaps
-    .map { TimelineSeam(it.gap.id, it.newer.asInclusiveLowerBound(), it.gap.recoverable) }
+fun timelineSeams(
+    gaps: List<ResolvedGap>,
+    newestPresented: TimelineAnchor? = null,
+): List<TimelineSeam> = gaps
+    .map { resolved ->
+        val position = resolved.newer.asInclusiveLowerBound()
+        TimelineSeam(
+            resolved.gap.id,
+            // Only a seam sitting ABOVE the whole presented list moves; every other one is min'd
+            // with a bound it is already below and comes through untouched.
+            newestPresented?.let { minOf(position, it) } ?: position,
+            resolved.gap.recoverable,
+        )
+    }
     // gapId only breaks ties between two gaps resolving to the same position, so the order is
-    // total and stable regardless of how the caller happened to read the rows.
+    // total and stable regardless of how the caller happened to read the rows. Two clamped gaps
+    // land on the same row by construction, which is exactly the tie this already covers.
     .sortedWith(compareBy({ it.position }, { it.gapId }))
 
 /**

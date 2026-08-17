@@ -2632,7 +2632,7 @@ class ChatViewModelTest {
         // fixture was seeded wrong and the wiring assertions below mean nothing.
         val fixture = seedCatchUpSeam()
         val window = seamWindow()
-        val seams = seamRepository().observeTimelineSeams(channel.id).first()
+        val seams = seamRepository().observeTimelineSeams(channel.id, MessageVisibilitySpec()).first()
 
         assertEquals("both islands are materialized", 99, window.size)
         assertEquals(

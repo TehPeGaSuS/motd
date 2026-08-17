@@ -893,6 +893,14 @@ interface MessageDao {
     @RawQuery
     suspend fun rawMessage(query: SupportSQLiteQuery): MessageEntity?
 
+    /**
+     * As [rawMessage], but re-run whenever the row set changes. Seam placement needs the newest
+     * row a visibility predicate ADMITS, which moves on any insert rather than only on the gap
+     * table's own writes.
+     */
+    @RawQuery(observedEntities = [MessageEntity::class])
+    fun observeRawMessage(query: SupportSQLiteQuery): Flow<MessageEntity?>
+
     @RawQuery
     suspend fun rawCount(query: SupportSQLiteQuery): Int
 

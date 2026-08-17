@@ -179,6 +179,63 @@ class TimelineSeamsTest {
         assertNull(seamAbove(row(500, 10), null, emptyList()))
     }
 
+    // --- clamp into the presented list ----------------------------------------------------------
+
+    @Test
+    fun aSeamAboveEveryPresentedRowIsClampedOntoTheNewestOne() {
+        // The rows on this gap's newer side exist in Room but the visibility filter removed them —
+        // a reconnect catch-up page that is all JOIN/QUIT under smart presence. Raw geometry puts
+        // the seam at a row the reader cannot see, so it matches no interval and vanishes.
+        val presented = listOf(row(400, 9), row(300, 8))
+        val gap = resolvedGap(id = 1, newer = GapEdgeAnchor.Exact(TimelineAnchor(500, 12, 12)))
+
+        assertEquals(emptyList<Pair<Long, Long>>(), placements(presented, timelineSeams(listOf(gap))))
+
+        val clamped = timelineSeams(listOf(gap), newestPresented = TimelineAnchor(400, 9, 9))
+
+        assertEquals(TimelineAnchor(400, 9, 9), clamped.single().position)
+        assertEquals(listOf(9L to 1L), placements(presented, clamped))
+    }
+
+    @Test
+    fun aSeamTheFilterDidNotStrandKeepsItsExactPosition() {
+        // The clamp is a minimum, not a projection: a seam with any presented row at or above it is
+        // already placeable and must not be dragged down into the wrong slot.
+        val presented = listOf(row(600, 11), row(500, 10), row(400, 9))
+        val gap = resolvedGap(id = 4, newer = GapEdgeAnchor.Exact(TimelineAnchor(500, 10, 10)))
+
+        val clamped = timelineSeams(listOf(gap), newestPresented = TimelineAnchor(600, 11, 11))
+
+        assertEquals(TimelineAnchor(500, 10, 10), clamped.single().position)
+        assertEquals(listOf(10L to 4L), placements(presented, clamped))
+    }
+
+    @Test
+    fun theClampDoesNotSwitchAnUnidentifiableEdgeToTheFocusConvention() {
+        // Clamping answers "where can this be drawn", which is a different question from which
+        // sentinel an unlocatable edge takes. A ceiling here would split the equal-time cohort.
+        val edge = GapEdgeAnchor.TimeOnly(500)
+
+        val position = timelineSeams(
+            listOf(resolvedGap(id = 7, newer = edge)),
+            newestPresented = TimelineAnchor(900, 20, 20),
+        ).single().position
+
+        assertEquals(edge.asInclusiveLowerBound(), position)
+        assertNotEquals(edge.asFocusNewerPosition(), position)
+    }
+
+    @Test
+    fun anAbsentPresentedCeilingLeavesTheRawGeometryAlone() {
+        // A caller that cannot say what is presented gets exactly what it always got.
+        val gap = resolvedGap(id = 3, newer = GapEdgeAnchor.Exact(TimelineAnchor(500, 12, 12)))
+
+        assertEquals(
+            timelineSeams(listOf(gap)),
+            timelineSeams(listOf(gap), newestPresented = null),
+        )
+    }
+
     // --- multiple gaps --------------------------------------------------------------------------
 
     @Test
