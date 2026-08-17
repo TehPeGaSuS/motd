@@ -149,6 +149,7 @@ import io.github.trevarj.motd.ui.components.ConnectionBanner
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AudioPlaybackViewModel
 import io.github.trevarj.motd.ui.components.EmptyState
+import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.MotdMotion
@@ -182,6 +183,7 @@ fun ChatListScreen(
     // buffer's sync transition recomposes only its own row rather than the whole list.
     val syncIndicators by viewModel.syncIndicators.collectAsStateWithLifecycle()
     val syncChrome by viewModel.syncChrome.collectAsStateWithLifecycle()
+    val titleConnecting by viewModel.titleConnecting.collectAsStateWithLifecycle()
 
     // Fresh installs enter onboarding once state is loaded; a durable skip keeps the empty main UI.
     LaunchedEffect(state.loading, state.networks.isEmpty(), state.onboardingComplete) {
@@ -204,6 +206,7 @@ fun ChatListScreen(
         state = state,
         syncIndicators = syncIndicators,
         syncChrome = syncChrome,
+        titleConnecting = titleConnecting,
         snackbarHostState = snackbarHostState,
         audioPlaybackState = audioPlaybackState,
         onAudioToggle = audioViewModel::toggle,
@@ -271,6 +274,7 @@ fun ChatListContent(
     state: ChatListState,
     syncIndicators: Map<Long, ChatListSyncIndicator> = emptyMap(),
     syncChrome: ChatListSyncChrome = ChatListSyncChrome.Hidden,
+    titleConnecting: Boolean = false,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     audioPlaybackState: AudioPlaybackState = AudioPlaybackState(),
     onAudioToggle: () -> Unit = {},
@@ -424,13 +428,19 @@ fun ChatListContent(
                                     Text(text = stringResource(R.string.chatlist_archived_chats), fontWeight = FontWeight.Bold)
                                 // Scoped: show the network name so the active filter is legible.
                                 ChatListTopBarMode.SCOPED ->
-                                    Text(text = lastScopeName, fontWeight = FontWeight.Bold)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(text = lastScopeName, fontWeight = FontWeight.Bold)
+                                        ChatListTitleConnectingSpinner(visible = titleConnecting)
+                                    }
                                 // Use the platform typography instead of the stylized brand asset here.
                                 ChatListTopBarMode.DEFAULT ->
-                                    Text(
-                                        text = stringResource(R.string.app_name),
-                                        fontWeight = FontWeight.Bold,
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = stringResource(R.string.app_name),
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                        ChatListTitleConnectingSpinner(visible = titleConnecting)
+                                    }
                             }
                         }
                     },
@@ -1683,6 +1693,36 @@ private fun SelectableChatListRow(
                 syncIndicator = syncIndicator,
             )
         }
+    }
+}
+
+const val CHAT_LIST_TITLE_CONNECTING_TAG = "chatlist_title_connecting"
+
+/**
+ * The title's socket-establishment cue, in the chat title's `ChatTitleSyncSpinner` shape: a trailing 12 dp
+ * ring that fades beside the title text, never over the list. The text keeps its position — the
+ * cue only occupies trailing space, so appearing and settling shift no layout the reader is using.
+ *
+ * [visible] is the presenter-resolved value from [TitleConnectingPresenter], so this composable
+ * carries no timing of its own — a sub-grace reconnect never reaches it. No liveRegion, matching
+ * the chat title's spinner: reconnects recur, and announcing each would spam TalkBack; the
+ * ConnectionBanner remains the announcing surface for connection trouble.
+ */
+@Composable
+internal fun ChatListTitleConnectingSpinner(visible: Boolean, modifier: Modifier = Modifier) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn(MotdMotion.microFadeIn),
+        exit = fadeOut(MotdMotion.microFadeOut),
+    ) {
+        HistorySyncSpinner(
+            contentDescription = stringResource(R.string.chatlist_title_connecting),
+            // Padding inside the visibility scope so a settled connection leaves no gap.
+            modifier = Modifier
+                .padding(start = 8.dp)
+                .testTag(CHAT_LIST_TITLE_CONNECTING_TAG),
+        )
     }
 }
 

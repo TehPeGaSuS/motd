@@ -4,10 +4,10 @@ set -euo pipefail
 
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$E2E_DIR/../.." && pwd)"
-# 98: 89 + 3 new per-row sync cues (queued ring, waiting ring, unavailable glyph) + 4 aggregate
-# sync-header cases + 2 composer send-clear cases. The two badge/unread cases were rewritten in
-# place (coexistence, not substitution), so they add nothing.
-EXPECTED_CASES=98
+# 101: 89 + 3 new per-row sync cues (queued ring, waiting ring, unavailable glyph) + 4 aggregate
+# sync-header cases + 2 composer send-clear cases + 3 title connectivity-cue cases. The two
+# badge/unread cases were rewritten in place (coexistence, not substitution), so they add nothing.
+EXPECTED_CASES=101
 REAL_STACK_ANNOTATION=io.github.trevarj.motd.FastHeadlessE2e
 
 cd "$REPO"

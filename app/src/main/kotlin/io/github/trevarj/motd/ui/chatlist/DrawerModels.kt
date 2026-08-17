@@ -108,6 +108,25 @@ fun buildDrawerRows(
 }
 
 /**
+ * The network ids a selection covers (plans/16 §3.3): null when unscoped (everything); a
+ * DIRECT/BOUNCER_CHILD id covers only itself; a BOUNCER_ROOT id covers the root plus all its
+ * children. Shared by [scopeRows] and the title connectivity cue so "what the scoped list shows"
+ * and "which sockets the scoped title reports on" can never disagree.
+ */
+fun scopeNetworkIds(
+    selectedNetworkId: Long?,
+    networks: List<NetworkEntity>,
+): Set<Long>? {
+    if (selectedNetworkId == null) return null
+    val selected = networks.firstOrNull { it.id == selectedNetworkId }
+    return when (selected?.role) {
+        NetworkRole.BOUNCER_ROOT ->
+            networks.filter { it.parentId == selectedNetworkId }.map { it.id }.toSet() + selectedNetworkId
+        else -> setOf(selectedNetworkId)
+    }
+}
+
+/**
  * Filter the unified chat list by the selected network (plans/16 §3.3):
  * null = all rows (identity); a DIRECT/BOUNCER_CHILD id filters to that network; a BOUNCER_ROOT
  * id includes the root plus all its children's rows.
@@ -117,12 +136,6 @@ fun scopeRows(
     selectedNetworkId: Long?,
     networks: List<NetworkEntity>,
 ): List<ChatListRow> {
-    if (selectedNetworkId == null) return rows
-    val selected = networks.firstOrNull { it.id == selectedNetworkId }
-    val scopeIds = when (selected?.role) {
-        NetworkRole.BOUNCER_ROOT ->
-            networks.filter { it.parentId == selectedNetworkId }.map { it.id }.toSet() + selectedNetworkId
-        else -> setOf(selectedNetworkId)
-    }
+    val scopeIds = scopeNetworkIds(selectedNetworkId, networks) ?: return rows
     return rows.filter { it.networkId in scopeIds }
 }

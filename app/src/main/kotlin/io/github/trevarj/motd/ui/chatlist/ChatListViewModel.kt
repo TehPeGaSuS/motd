@@ -174,6 +174,23 @@ class ChatListViewModel @Inject constructor(
     // Scope selection survives config changes; null = unified list (default).
     private val selection = MutableStateFlow(savedStateHandle.get<Long?>(KEY_SELECTED))
 
+    // Title-bar connectivity cue, kept out of the [state] combine like the sync flows above so a
+    // socket transition never rebuilds the row list. connectionStates republishes on every caps/
+    // isupport re-snapshot of a Ready connection (the churn ef42ae77 conflated out of the status
+    // notification); collapsing to one boolean BEFORE the anti-flash windows keeps all of that from
+    // ever reaching composition. Scoped to the selected network's ids so a cue beside a network
+    // name reports only that network's sockets.
+    val titleConnecting: StateFlow<Boolean> = combine(
+        connectionManager.connectionStates,
+        networkRepository.observeNetworks(),
+        selection,
+    ) { states, networks, selected ->
+        titleConnectingSnapshot(states, scopeNetworkIds(selected, networks))
+    }
+        .distinctUntilChanged()
+        .presentTitleConnecting(SystemClock::elapsedRealtime)
+        .stateIn(viewModelScope, WhileSubscribed(5_000), false)
+
     // Manual drawer order the user is arranging or that Room has not published back yet. Null means
     // "stored order is authoritative"; see [pendingNetworkOrder] and [commitNetworkOrder].
     private val pendingOrder = MutableStateFlow<List<Long>?>(null)

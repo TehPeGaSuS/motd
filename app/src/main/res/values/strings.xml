@@ -20,6 +20,7 @@
     <string name="chatlist_sync_header_syncing">Syncing history…</string>
     <string name="chatlist_sync_header_count">%1$d/%2$d</string>
     <string name="chatlist_sync_header_waiting">Waiting for connection…</string>
+    <string name="chatlist_title_connecting">Connecting</string>
     <string name="chatlist_empty_title">No conversations yet</string>
     <string name="chatlist_empty_message">Connect to a network to start chatting.</string>
     <string name="chatlist_no_networks_title">No networks configured</string>

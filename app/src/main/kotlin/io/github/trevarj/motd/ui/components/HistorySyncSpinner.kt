@@ -9,8 +9,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 /**
- * The small indeterminate history-sync cue, shared by chat-list rows and the chat title bar so both
- * report an in-flight sync with the same mark.
+ * The small indeterminate in-progress cue, shared by chat-list rows, the chat title bar, and the
+ * chat-list title's connectivity indicator so they all report background work with the same mark.
  *
  * Deliberately unannounced beyond its content description: rows churn during a resync pass and a
  * chat's own sync restarts on every reconnect, so a live region here would spam TalkBack. Callers
