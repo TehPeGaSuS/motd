@@ -624,7 +624,7 @@ class ConnectionManagerImpl @Inject constructor(
         ) return
         if (backgroundRetention.isRetaining) return
         val all = networkDao.observeAll().first()
-        val wanted = wantedNetworkIds(all, userIntents, connectionStates.value)
+        val wanted = wantedNetworkIds(all, userIntents)
         val endpoints = pushPrefs.endpoints()
         val health = pushHealthStore.snapshot()
         val suspend = pushSuspendedNetworkIds(all, wanted, endpoints, health)
@@ -689,7 +689,7 @@ class ConnectionManagerImpl @Inject constructor(
         shouldArmForegroundKeeper(
             deliveryMode = mode,
             hasWantedEmbeddedReality = hasWantedEmbeddedReality(all),
-            hasWantedNetwork = wantedNetworkIds(all, userIntents, connectionStates.value).isNotEmpty(),
+            hasWantedNetwork = wantedNetworkIds(all, userIntents).isNotEmpty(),
         )
 
     // A warm notification tap is a foreground entry that ProcessLifecycleOwner never reports, so it
@@ -845,7 +845,7 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     private fun hasWantedEmbeddedReality(all: List<NetworkEntity>): Boolean =
-        wantedNetworkIds(all, userIntents, connectionStates.value).any { networkId ->
+        wantedNetworkIds(all, userIntents).any { networkId ->
             wantedNetworkUsesEmbeddedReality(networkId, all)
         }
 
@@ -856,7 +856,7 @@ class ConnectionManagerImpl @Inject constructor(
     private suspend fun releaseKeeperWhenPushCanOwnEverything() {
         if (appForeground || settings.settings.first().deliveryMode != DeliveryMode.UNIFIED_PUSH) return
         val all = networkDao.observeAll().first()
-        val wanted = wantedNetworkIds(all, userIntents, connectionStates.value)
+        val wanted = wantedNetworkIds(all, userIntents)
         val pushOwned = pushSuspendedNetworkIds(
             all,
             wanted,
@@ -980,7 +980,7 @@ class ConnectionManagerImpl @Inject constructor(
         val deletedIds = networksById.keys - all.mapTo(mutableSetOf()) { it.id }
         // Keep a synchronous lookup so buildClient can resolve a child's root bouncer row.
         networksById = all.associateBy { it.id }
-        val wantedIds = wantedNetworkIds(all, userIntents, registry.snapshot.value.states) - pushSuspendedIds
+        val wantedIds = wantedNetworkIds(all, userIntents) - pushSuspendedIds
         diagnostics.record("connections", "reconcile") {
             mapOf(
                 "configured" to all.size,
@@ -2995,18 +2995,22 @@ internal fun shouldRebuildActor(
 internal fun wantedNetworkIds(
     all: List<NetworkEntity>,
     userIntents: Map<Long, Boolean>,
-    states: Map<Long, IrcClientState> = emptyMap(),
 ): Set<Long> =
     all.asSequence()
         .filter { userIntents[it.id] ?: it.autoConnect }
+        // A BOUNCER_CHILD deliberately does NOT wait for its root's connection state (startup
+        // step 3B): a child is its own socket to the bouncer endpoint, selecting its upstream with
+        // the persisted account/network SASL authcid (buildChildConfig sets bouncerNetId = null),
+        // so everything it needs — endpoint, credentials, network name — lives in the DB rows.
+        // Children therefore dial in parallel with their roots on cold start instead of paying the
+        // root's full tunnel + registration serially first. When the shared endpoint is down they
+        // all fail together and each actor's exponential backoff bounds the probing; a child whose
+        // loop died terminally during an outage is revived by reviveChildrenOf on the root's
+        // Registering/Ready edges. Only an orphan (no parentId) stays excluded: it has no root row
+        // to inherit the bouncer endpoint from.
         .filter { it.role != NetworkRole.BOUNCER_CHILD || it.parentId != null }
-        .filter {
-            it.role != NetworkRole.BOUNCER_CHILD ||
-                states[it.parentId] is IrcClientState.Ready
-        }
         .map { it.id }
         .toSet()
-
 
 /**
  * BOUNCER_CHILD ids to revive when their [rootId] proves the bouncer endpoint reachable again
