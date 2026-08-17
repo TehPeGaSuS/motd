@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.settings.labs
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.agentwire.AgentwirePrefs
+import io.github.trevarj.motd.gesture.GestureMenuConfig
 import io.github.trevarj.motd.gesture.GesturePrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -70,9 +71,19 @@ class LabsViewModelTest {
 
     private class FakeGesturePrefs : GesturePrefs {
         val flag = MutableStateFlow(false)
+        val menuState = MutableStateFlow(GestureMenuConfig())
         override val enabled: Flow<Boolean> = flag
         override suspend fun setEnabled(enabled: Boolean) {
             flag.value = enabled
+        }
+
+        override val menu: Flow<GestureMenuConfig> = menuState
+        override suspend fun setMenu(config: GestureMenuConfig) {
+            menuState.value = config
+        }
+
+        override suspend fun replaceMenu(transform: (GestureMenuConfig) -> GestureMenuConfig) {
+            menuState.value = transform(menuState.value)
         }
     }
 

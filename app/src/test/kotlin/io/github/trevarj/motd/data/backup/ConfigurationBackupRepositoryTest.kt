@@ -14,10 +14,17 @@ import io.github.trevarj.motd.data.prefs.BouncerKindPrefsImpl
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
+import io.github.trevarj.motd.gesture.GestureMenuConfig
+import io.github.trevarj.motd.gesture.GestureNode
+import io.github.trevarj.motd.gesture.GesturePrefsImpl
+import io.github.trevarj.motd.gesture.removeNode
+import io.github.trevarj.motd.gesture.updateNode
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -120,6 +127,41 @@ class ConfigurationBackupRepositoryTest {
         assertEquals(emptyList<NetworkEntity>(), targetDb.networkDao().allNow())
     }
 
+    /**
+     * The gesture lab's on/off flag never travels, but an authored menu does — and only once it
+     * differs from the shipped tree, so a backup from an untouched install cannot pin a stale menu
+     * onto the device it is restored to.
+     */
+    @Test
+    fun gestureMenuTravelsOnlyWhenItDiffersFromTheDefault() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val gesturePrefs = GesturePrefsImpl(context)
+        val sourceDb = inMemoryDb()
+        val source = repository(sourceDb)
+
+        gesturePrefs.setMenu(GestureMenuConfig())
+        val untouched = source.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+        assertFalse(
+            source.preview(untouched, importMode = BackupImportMode.MERGE).settingGroups.contains("gesture menu"),
+        )
+
+        val edited = GestureMenuConfig()
+            .updateNode("default-away") { (it as GestureNode.Leaf).copy(label = "Step out") }
+            .removeNode("default-networks")
+        gesturePrefs.setMenu(edited)
+        val raw = source.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+
+        assertTrue(raw.contains("Step out"))
+        val target = repository(inMemoryDb())
+        assertTrue(target.preview(raw, importMode = BackupImportMode.MERGE).settingGroups.contains("gesture menu"))
+
+        gesturePrefs.setMenu(GestureMenuConfig())
+        target.import(raw, importMode = BackupImportMode.MERGE)
+
+        assertEquals(edited, gesturePrefs.menu.first())
+        gesturePrefs.setMenu(GestureMenuConfig())
+    }
+
     private fun repository(db: io.github.trevarj.motd.data.db.MotdDatabase): ConfigurationBackupRepositoryImpl {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val settings = DataStoreSettingsRepository(context)
@@ -133,6 +175,7 @@ class ConfigurationBackupRepositoryTest {
             voicePrefs = VoicePrefsImpl(context),
             avatarPrefs = AvatarPrefsImpl(context),
             bouncerKindPrefs = BouncerKindPrefsImpl(context),
+            gesturePrefs = GesturePrefsImpl(context),
         )
     }
 

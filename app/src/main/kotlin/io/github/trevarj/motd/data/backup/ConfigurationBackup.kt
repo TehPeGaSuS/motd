@@ -23,6 +23,8 @@ import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.networkIdentityKey
+import io.github.trevarj.motd.gesture.GestureMenuConfig
+import io.github.trevarj.motd.gesture.GesturePrefs
 import java.security.SecureRandom
 import java.util.Base64
 import javax.crypto.Cipher
@@ -91,6 +93,7 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
     private val voicePrefs: VoicePrefs,
     private val avatarPrefs: AvatarPrefs,
     private val bouncerKindPrefs: BouncerKindPrefs,
+    private val gesturePrefs: GesturePrefs,
 ) : ConfigurationBackupRepository {
     private val json = Json {
         encodeDefaults = true
@@ -243,6 +246,9 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
                 voice = voicePrefs.config.first(),
                 showSharedAvatars = avatarPrefs.config.first().showSharedAvatars,
                 selfAvatars = selfAvatars,
+                // The gesture lab's on/off flag stays out of backups; the menu graph is authored
+                // work and travels, but only once it differs from the built-in default.
+                gestureMenu = gesturePrefs.menu.first().takeIf { it != GestureMenuConfig() },
             ),
         )
     }
@@ -390,6 +396,7 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
             voicePrefs.replace(it)
         }
         settings.showSharedAvatars?.let { avatarPrefs.setShowSharedAvatars(it) }
+        settings.gestureMenu?.let { gesturePrefs.setMenu(it) }
     }
 
     private suspend fun applyRemappedNetworkPrefs(
@@ -494,6 +501,7 @@ private data class PortableSettings(
     val voice: VoiceConfig? = null,
     val showSharedAvatars: Boolean? = null,
     val selfAvatars: List<PortableSelfAvatar> = emptyList(),
+    val gestureMenu: GestureMenuConfig? = null,
 ) {
     fun groupNames(): List<String> = buildList {
         if (general != null) add("general")
@@ -503,6 +511,7 @@ private data class PortableSettings(
         if (attachments != null) add("uploads")
         if (voice != null) add("voice")
         if (showSharedAvatars != null || selfAvatars.isNotEmpty()) add("avatars")
+        if (gestureMenu != null) add("gesture menu")
     }
 }
 
