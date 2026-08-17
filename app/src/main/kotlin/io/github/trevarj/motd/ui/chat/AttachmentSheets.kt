@@ -94,6 +94,7 @@ import io.github.trevarj.motd.attachment.supports
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -348,6 +349,7 @@ private fun SourceSheet(
     onDeleteRecent: (UploadRecord) -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("attachment_source_sheet")) {
+        SheetSystemBars()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(stringResource(R.string.upload_add_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
             Text(stringResource(R.string.upload_add_subtitle), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -448,6 +450,7 @@ private fun RecentUploadRow(
 @Composable
 private fun TextPasteSheet(text: String, onTextChange: (String) -> Unit, onDismiss: () -> Unit, onContinue: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
+        SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(stringResource(R.string.upload_text_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(12.dp))
@@ -489,6 +492,7 @@ private fun ConfirmationSheet(
     }
     val sojuUnavailable = request.config.backend == AttachmentBackend.SOJU_FILEHOST && !sojuFileHostAvailable
     ModalBottomSheet(onDismissRequest = onDismiss) {
+        SheetSystemBars()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(stringResource(R.string.upload_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(12.dp))
@@ -552,6 +556,7 @@ private fun BackendPickerSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
+        SheetSystemBars()
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -645,6 +650,7 @@ private fun UploadPrivacyCard(config: PasteBackendConfig) {
 @Composable
 private fun UploadProgressSheet(progress: UploadProgress, onCancel: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onCancel, dragHandle = null) {
+        SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Outlined.CloudUpload, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(12.dp))

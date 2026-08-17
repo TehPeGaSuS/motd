@@ -15,6 +15,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 /** Per-conversation presence-event choice; mirrors [ConversationLayoutSheet]. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -25,6 +26,7 @@ fun PresenceModeSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("chat_presence_sheet")) {
+        SheetSystemBars()
         Text(text = stringResource(R.string.chat_presence_title))
         androidx.compose.foundation.layout.Column(Modifier.selectableGroup()) {
             PresenceOption(

@@ -72,6 +72,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.Search
+import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import kotlin.math.roundToInt
 
 /** Appearance category: theme, dynamic color, layout density, avatar style, nick colors, wallpaper. */
@@ -308,6 +309,7 @@ private fun ThemePickerSheet(
         themePresetLabelText(it).lowercase().contains(normalized)
     }
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("settings_theme_sheet")) {
+        SheetSystemBars()
         LazyColumn(
             Modifier.testTag("settings_theme_list").selectableGroup().heightIn(max = 680.dp).padding(bottom = 24.dp),
         ) {

@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import kotlin.math.roundToInt
 
 @Composable
@@ -86,6 +87,7 @@ private fun WallpaperEditorSheet(
 ) {
     var staged by remember(current) { mutableStateOf(current.normalized()) }
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("settings_wallpaper_sheet")) {
+        SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Text(stringResource(R.string.settings_wallpaper), style = MaterialTheme.typography.titleLarge)
             WallpaperPreview(staged, Modifier.fillMaxWidth().height(190.dp).padding(top = 14.dp))

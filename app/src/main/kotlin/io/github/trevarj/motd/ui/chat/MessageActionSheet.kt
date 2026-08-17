@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 /** Quick-reaction row shown at the top of the action sheet (plans/07). */
 val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢")
@@ -86,6 +87,7 @@ fun MessageActionSheet(
         // Root tag disambiguates from NickActionSheet when both could be open.
         modifier = Modifier.testTag("message_action_sheet"),
     ) {
+        SheetSystemBars()
         Column(modifier = Modifier.padding(bottom = 24.dp)) {
             if (!isServerBuffer) {
             // Quick reactions + "more".

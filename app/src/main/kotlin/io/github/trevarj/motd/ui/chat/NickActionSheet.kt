@@ -46,6 +46,7 @@ import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.ReasonPresetChips
 import io.github.trevarj.motd.service.PresenceState
+import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 /**
  * Shared nick bottom sheet (plans/16 §5.8), used from the chat timeline and ChannelInfo. Stateless:
@@ -86,6 +87,7 @@ fun NickActionSheet(
 
     // Root tag disambiguates from MessageActionSheet when both could be open.
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("nick_sheet")) {
+        SheetSystemBars()
         Column(modifier = Modifier.padding(bottom = 24.dp)) {
             // Header: avatar + nick + whois summary (or the fallback line when whois is unavailable).
             ListItem(

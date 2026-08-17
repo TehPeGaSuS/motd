@@ -17,9 +17,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
@@ -100,6 +104,29 @@ private tailrec fun Context.findComponentActivity(): ComponentActivity? = when (
     is ComponentActivity -> this
     is ContextWrapper -> baseContext.findComponentActivity()
     else -> null
+}
+
+/**
+ * Sync a ModalBottomSheet's dialog window with the app theme. M3 sheets live in their own window,
+ * which styles its system bars from the window theme rather than the activity's edge-to-edge
+ * setup, so a dark app palette otherwise gets a light nav-bar scrim under every sheet (and vice
+ * versa). Call from inside the sheet's content so LocalView resolves to the sheet's own window.
+ */
+@Composable
+fun SheetSystemBars() {
+    val view = LocalView.current
+    val darkBars = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    LaunchedEffect(view, darkBars) {
+        val window = (view.parent as? DialogWindowProvider)?.window ?: return@LaunchedEffect
+        @Suppress("DEPRECATION") // transparent bar color for pre-contrast-enforcement APIs
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
+        val controller = WindowCompat.getInsetsController(window, view)
+        controller.isAppearanceLightStatusBars = !darkBars
+        controller.isAppearanceLightNavigationBars = !darkBars
+    }
 }
 
 @Composable

@@ -49,6 +49,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.PersonOutline
+import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 /** Chat category: join/part/quit visibility, friends/fools management, and fools' message handling. */
 @Composable
@@ -315,6 +316,7 @@ private fun VoiceQualitySheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("settings_voice_quality_sheet")) {
+        SheetSystemBars()
         Column(Modifier.fillMaxWidth().selectableGroup()) {
             SubLabel(stringResource(R.string.settings_voice_quality))
             VoiceRecordingQuality.entries.forEach { quality ->

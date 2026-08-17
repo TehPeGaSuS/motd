@@ -14,6 +14,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -23,6 +24,7 @@ fun ConversationLayoutSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("chat_layout_sheet")) {
+        SheetSystemBars()
         Text(text = stringResource(R.string.chat_layout_title))
         androidx.compose.foundation.layout.Column(Modifier.selectableGroup()) {
             LayoutOption(

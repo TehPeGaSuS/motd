@@ -42,6 +42,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 /**
  * Bottom sheet with two actions: join a channel or start a query. Network selection is a dropdown
@@ -65,6 +66,7 @@ fun NewConversationSheet(
         sheetState = sheetState,
         modifier = Modifier.testTag("new_conversation_sheet"),
     ) {
+        SheetSystemBars()
         NewConversationSheetContent(
             networks = networks,
             preselectedNetworkId = preselectedNetworkId,

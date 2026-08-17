@@ -69,6 +69,7 @@ import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.ui.chat.formatBytes
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 private const val MAX_COLLAPSED_AUDIO_PLAYERS = 3
 
@@ -377,6 +378,7 @@ private fun AudioAttachmentPlayer(
 
     if (showDetails) {
         ModalBottomSheet(onDismissRequest = { showDetails = false }) {
+            SheetSystemBars()
             AudioDetailsSheet(
                 attachment = attachment,
                 origin = origin,

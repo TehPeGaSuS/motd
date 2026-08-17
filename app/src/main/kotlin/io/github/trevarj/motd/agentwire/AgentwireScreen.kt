@@ -69,6 +69,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.irc.agentwire.AgentwireTopicDefect
 import io.github.trevarj.motd.ui.components.Composer
+import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import kotlinx.serialization.json.JsonPrimitive
 
 @Composable
@@ -761,6 +762,7 @@ private fun AgentwireRequestCard(
 @Composable
 private fun AgentwireQueueSheet(state: AgentwireUiState, viewModel: AgentwireViewModel, dismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = dismiss) {
+        SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Queue", style = MaterialTheme.typography.titleLarge)
@@ -793,6 +795,7 @@ private fun AgentwireQuestionSheet(request: AgentwireRequest, viewModel: Agentwi
     val answers = remember(request.rid) { mutableStateMapOf<String, Set<String>>() }
     val customAnswers = remember(request.rid) { mutableStateMapOf<String, String>() }
     ModalBottomSheet(onDismissRequest = dismiss) {
+        SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Questions", style = MaterialTheme.typography.titleLarge)
             request.questions.forEach { question ->
@@ -879,6 +882,7 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
     val workspaceSessions = state.workspaceSessions.values.flatten()
     val rows = workspaceRows(state.workspaceChildren, expandedDirectories, workspaceSessions, search)
     ModalBottomSheet(onDismissRequest = dismiss) {
+        SheetSystemBars()
         LazyColumn(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { Text("Agent session", style = MaterialTheme.typography.titleLarge) }
             item {

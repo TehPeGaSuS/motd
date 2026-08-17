@@ -50,6 +50,7 @@ import io.github.trevarj.motd.audio.AudioPlaybackOrigin
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.audio.contextLabel
 import io.github.trevarj.motd.audio.formatAudioDuration
+import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -185,6 +186,7 @@ fun AudioMiniPlayer(
 
     if (showDetails) {
         ModalBottomSheet(onDismissRequest = { showDetails = false }) {
+            SheetSystemBars()
             AudioDetailsSheet(
                 attachment = attachment,
                 origin = state.origin,
