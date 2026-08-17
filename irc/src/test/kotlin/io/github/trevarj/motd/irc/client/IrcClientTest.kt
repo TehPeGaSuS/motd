@@ -961,6 +961,33 @@ class IrcClientTest {
     }
 
     @Test
+    fun `bouncer fallback sends deferred CAP REQs on the first post-ready line, not the ceiling`() = runTest {
+        val ft = FakeTransport()
+        val client = IrcClient(config(bouncerNetId = "42"), ft.factory(), clientScope())
+        client.start()
+        runCurrent()
+
+        ft.feed(":srv CAP * LS :$fullLs")
+        runCurrent()
+        val initialCaps = ft.sent.first { it.startsWith("CAP REQ :") }.substringAfter("CAP REQ :")
+        ft.feed(":srv CAP motd ACK :$initialCaps")
+        runCurrent()
+        // The pre-welcome CAP mutation marks the child Ready and queues the deferred feature REQs.
+        ft.feed(":srv CAP motd DEL :extended-monitor")
+        runCurrent()
+        assertTrue(client.state.value is IrcClientState.Ready)
+        assertTrue(ft.sent.none { it == "CAP REQ :draft/read-marker" })
+
+        // The welcome burst did not stall: the first post-registration line is proof the stream is
+        // flowing, so the deferred REQs go out now. No virtual time is advanced in this test, so a
+        // REQ appearing at all means it did NOT wait the FALLBACK_FEATURE_CAP_DELAY_MS ceiling.
+        ft.feed(":srv 005 motd CHANTYPES=# :are supported")
+        runCurrent()
+
+        assertTrue(ft.sent.any { it == "CAP REQ :draft/read-marker" })
+    }
+
+    @Test
     fun `bouncer fallback has message-tags before ready so typing works immediately`() = runTest {
         val ft = FakeTransport()
         val client = IrcClient(config(bouncerNetId = "42"), ft.factory(), clientScope())

@@ -8,6 +8,7 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.system.OsConstants
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.obfs.VlessLink
 import io.nekohasekai.libbox.CommandServer
 import io.nekohasekai.libbox.CommandServerHandler
@@ -43,13 +44,23 @@ interface LocalSocksEngine {
 }
 
 /**
- * Owns embedded-core instances for EMBEDDED_REALITY connections. A single VLESS link maps to one
- * libbox command server with a reference-counted SOCKS inbound; running multiple command servers in
- * the same app process can stall concurrent root/child bouncer registrations mid-stream.
+ * Owns embedded-core instances for EMBEDDED_REALITY connections. Each distinct (link, ownerKey)
+ * pair maps to its own libbox command server with a reference-counted SOCKS inbound; the
+ * connection layer keys the owner on the network row, so every physical IRC actor runs its own
+ * core. That per-actor split is deliberate (see `resolveTransportProxy`): sharing one inbound
+ * across a bouncer root and its children made the native core serialize their TLS streams at the
+ * capability transition, so both sessions looked Ready while post-registration writes vanished.
+ * Callers that pass no ownerKey (legacy/start) still share one core per identical link.
  */
 @Singleton
-class LocalSocksProvider private constructor(private val engineFactory: () -> LocalSocksEngine) {
-    @Inject constructor(@ApplicationContext context: Context) : this({ LibboxLocalSocksEngine(context) })
+class LocalSocksProvider private constructor(
+    private val engineFactory: () -> LocalSocksEngine,
+    private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
+) {
+    @Inject constructor(
+        @ApplicationContext context: Context,
+        diagnostics: DiagnosticLogger,
+    ) : this({ LibboxLocalSocksEngine(context) }, diagnostics)
 
     private data class ActiveCore(
         val engine: LocalSocksEngine,
@@ -60,9 +71,12 @@ class LocalSocksProvider private constructor(private val engineFactory: () -> Lo
     private val activeCores = LinkedHashMap<String, ActiveCore>()
 
     companion object {
-        /** Test seam: production construction is Hilt-only. */
-        internal fun forTest(engineFactory: () -> LocalSocksEngine): LocalSocksProvider =
-            LocalSocksProvider(engineFactory)
+        /** Test seam: production construction is Hilt-only. Diagnostics first so the factory
+         *  lambda stays trailing for the existing `forTest { ... }` call sites. */
+        internal fun forTest(
+            diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
+            engineFactory: () -> LocalSocksEngine,
+        ): LocalSocksProvider = LocalSocksProvider(engineFactory, diagnostics)
     }
 
     @Synchronized
@@ -87,8 +101,27 @@ class LocalSocksProvider private constructor(private val engineFactory: () -> Lo
             })
         }
         val engine = engineFactory()
-        return engine.start(configJson).mapCatching { port ->
+        // Wall time of the whole native bring-up (setup + command server + service load). This is
+        // the number the startup plan's pre-warm step is gated on; classification only — the link
+        // and endpoint never reach the journal.
+        val startedAtMs = System.nanoTime() / 1_000_000
+        return engine.start(configJson).onFailure { error ->
+            diagnostics.record("obfs", "core_start_failed") {
+                mapOf(
+                    "owner" to ownerKey,
+                    "error" to error::class.simpleName,
+                    "duration_ms" to (System.nanoTime() / 1_000_000 - startedAtMs),
+                )
+            }
+        }.mapCatching { port ->
             require(port in 1..65535) { "Embedded SOCKS provider returned invalid port" }
+            diagnostics.record("obfs", "core_start") {
+                mapOf(
+                    "owner" to ownerKey,
+                    "duration_ms" to (System.nanoTime() / 1_000_000 - startedAtMs),
+                    "active_cores" to activeCores.size + 1,
+                )
+            }
             val endpoint = LocalSocksEndpoint(port = port)
             activeCores[coreKey] = ActiveCore(engine, endpoint, refs = 1)
             var released = false

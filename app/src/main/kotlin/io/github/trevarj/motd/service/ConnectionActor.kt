@@ -406,9 +406,16 @@ class ConnectionActor(
                         onState(networkId, state)
                         return Outcome.Retry
                     }
-                    is IrcClientState.Registering,
-                    IrcClientState.Connecting,
-                    -> state = conn.state.first { it != state }
+                    is IrcClientState.Registering -> {
+                        // Transport is established (SOCKS/TCP/TLS all done) and IRC registration is
+                        // in flight. Forwarded — unlike Connecting, which the loop entered with —
+                        // so the diagnostic journal can split dial time from registration time and
+                        // the manager can revive bouncer children as soon as the shared endpoint
+                        // proves reachable (ConnectionManagerImpl.reviveChildrenOf).
+                        onState(networkId, state)
+                        state = conn.state.first { it != state }
+                    }
+                    IrcClientState.Connecting -> state = conn.state.first { it != state }
                 }
             }
         } finally {

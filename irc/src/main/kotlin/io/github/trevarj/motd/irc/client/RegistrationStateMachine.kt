@@ -19,6 +19,14 @@ internal class RegistrationStateMachine(
         data class Send(val line: String) : Action
         /** Our nick changed (initial, or after a 433 retry) — client must update self-nick. */
         data class SetNick(val nick: String) : Action
+        /**
+         * Send once the connection proves it is flowing again after registration — the first
+         * post-Complete server line — or after [delayMs] at the latest. The ceiling exists for the
+         * soju child fallback: the post-BIND capability mutation can stall the welcome burst on the
+         * embedded transport, and these deferred feature REQs must not be interleaved with that
+         * mutation window. A line arriving after Complete is proof the stall did not happen (or has
+         * cleared), so the client sends immediately then instead of blindly waiting the ceiling.
+         */
         data class SendDeferred(val line: String, val delayMs: Long) : Action
         data class Emit(val event: IrcEvent) : Action
         /** Registration succeeded. */

@@ -234,9 +234,20 @@ class IrcClient(
     // Set once registration completes; used to gate steady-state routing.
     @Volatile private var registered = false
 
+    /**
+     * Completed by the first server line dispatched AFTER registration, per connection. This is the
+     * "the stream is flowing again" proof [RegistrationStateMachine.Action.SendDeferred] waits on:
+     * the soju child fallback marks Ready from the pre-welcome CAP mutation, and its deferred
+     * feature `CAP REQ`s go out as soon as any later line lands instead of always waiting the full
+     * fallback ceiling. Replaced in [start] so a retry's waiter can never be satisfied by the
+     * previous connection's traffic.
+     */
+    @Volatile private var postRegistrationActivity = CompletableDeferred<Unit>()
+
     fun start() {
         stop()
         require(observerBufferCapacity > 0) { "observer buffer capacity must be positive" }
+        postRegistrationActivity = CompletableDeferred()
         val criticalEvents = Channel<IrcEvent>(CRITICAL_EVENT_CAPACITY)
         criticalEventChannel = criticalEvents
         nextObserverSequence = 0L
@@ -371,6 +382,9 @@ class IrcClient(
                         applyRegAction(a, t, criticalEvents, disconnectedPublished)
                     }
                 } else {
+                    // First post-registration line: release any deferred feature CAP REQs waiting
+                    // on proof the stream survived the registration fallback (see SendDeferred).
+                    postRegistrationActivity.complete(Unit)
                     dispatch(msg, t, criticalEvents)
                 }
             }
@@ -419,9 +433,17 @@ class IrcClient(
     ) {
         when (a) {
             is RegistrationStateMachine.Action.Send -> runCatching { sendSerialized(t, a.line) }
-            is RegistrationStateMachine.Action.SendDeferred -> scope.launch {
-                delay(a.delayMs)
-                if (transport === t) runCatching { sendSerialized(t, a.line) }
+            is RegistrationStateMachine.Action.SendDeferred -> {
+                // Capture this connection's activity signal; the field is replaced on restart, so
+                // a late waiter can never be released by the next connection's traffic (the
+                // transport identity check below guards the send itself either way).
+                val activity = postRegistrationActivity
+                scope.launch {
+                    // Send as soon as the post-Complete stream proves live, or at the fallback
+                    // ceiling — never earlier than the CAP-mutation window the ceiling protects.
+                    withTimeoutOrNull(a.delayMs) { activity.await() }
+                    if (transport === t) runCatching { sendSerialized(t, a.line) }
+                }
             }
             is RegistrationStateMachine.Action.Emit -> publish(criticalEvents, a.event)
             is RegistrationStateMachine.Action.SetNick -> selfNick.set(a.nick)

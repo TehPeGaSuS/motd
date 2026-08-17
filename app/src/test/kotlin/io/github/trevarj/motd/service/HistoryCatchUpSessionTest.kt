@@ -77,7 +77,6 @@ class HistoryCatchUpSessionTest {
         val branch = launch {
             decideHistoryCatchUp(
                 awaitHistoryReady = { true },
-                awaitReadMarkerSettlement = {},
                 stillCurrent = { true },
                 claimed = claimed,
                 releaseGate = {},
@@ -105,7 +104,6 @@ class HistoryCatchUpSessionTest {
         var released = 0
         decideHistoryCatchUp(
             awaitHistoryReady = { false },
-            awaitReadMarkerSettlement = {},
             stillCurrent = { true },
             claimed = claimed,
             releaseGate = { released++ },
@@ -124,7 +122,6 @@ class HistoryCatchUpSessionTest {
         runCatching {
             decideHistoryCatchUp(
                 awaitHistoryReady = { true },
-                awaitReadMarkerSettlement = {},
                 stillCurrent = { true },
                 claimed = claimed,
                 releaseGate = { released++ },
@@ -144,7 +141,6 @@ class HistoryCatchUpSessionTest {
         val branch = launch {
             decideHistoryCatchUp(
                 awaitHistoryReady = { awaitCancellation() },
-                awaitReadMarkerSettlement = {},
                 stillCurrent = { true },
                 claimed = claimed,
                 releaseGate = { released++ },
@@ -171,7 +167,6 @@ class HistoryCatchUpSessionTest {
         launch {
             decideHistoryCatchUp(
                 awaitHistoryReady = { false },
-                awaitReadMarkerSettlement = {},
                 stillCurrent = { true },
                 claimed = claimed,
                 releaseGate = {},
@@ -205,7 +200,6 @@ class HistoryCatchUpSessionTest {
         val branch = launch {
             decideHistoryCatchUp(
                 awaitHistoryReady = { true },
-                awaitReadMarkerSettlement = {},
                 stillCurrent = { true },
                 claimed = claimed,
                 releaseGate = {},
@@ -261,27 +255,84 @@ class HistoryCatchUpSessionTest {
         assertEquals(listOf("catchUp", "backfill"), order)
     }
 
+    // --- the entry gate's marker barrier (startup step 1) --------------------------------------
+
+    @Test
+    fun theCatchUpStartsWhileMarkersAreStillPendingAndTheGateWaitsForThem() = runTest {
+        // The step-1 reorder: fetches begin at Ready, but the gate — which chat entry blocks on —
+        // still requires marker settlement. Before the reorder the catch-up itself sat behind the
+        // marker wait, which on a bouncer child cost the whole deferred CAP round-trip per
+        // reconnect.
+        val markers = CompletableDeferred<Unit>()
+        val released = java.util.concurrent.atomic.AtomicBoolean(false)
+        var releases = 0
+        var caughtUp = false
+        val gate: suspend () -> Unit = {
+            releaseEntryGateAfterMarkers(
+                awaitMarkerSettlement = { markers.await() },
+                released = released,
+                release = { releases++ },
+            )
+        }
+        val branch = launch {
+            decideHistoryCatchUp(
+                awaitHistoryReady = { true },
+                stillCurrent = { true },
+                claimed = CompletableDeferred(),
+                releaseGate = gate,
+                catchUp = { caughtUp = true },
+                backfill = {},
+            )
+        }
+        runCurrent()
+
+        assertTrue(caughtUp)
+        assertEquals(0, releases)
+
+        markers.complete(Unit)
+        branch.join()
+        assertEquals(1, releases)
+    }
+
     @Test
     fun anUnansweredReadMarkerCapReqStillReleasesTheEntryGate() = runTest {
-        val claimed = CompletableDeferred<Boolean>()
-        var released = false
-        var caughtUp = false
+        // The bouncer answered the post-welcome read-marker CAP REQ with nothing at all. The
+        // settlement clock starts at Ready (the caller's async), so the gate is delayed by at most
+        // the bounded ceiling — chat entry must never be held for the whole Ready session.
+        val markerSettlement = async {
+            kotlinx.coroutines.withTimeoutOrNull(READ_MARKER_SETTLE_TIMEOUT_MS) {
+                CompletableDeferred<Unit>().await()
+            }
+        }
+        val released = java.util.concurrent.atomic.AtomicBoolean(false)
+        var releases = 0
 
-        decideHistoryCatchUp(
-            awaitHistoryReady = { true },
-            // The bouncer answered the post-welcome CAP REQ with nothing at all.
-            awaitReadMarkerSettlement = { CompletableDeferred<Unit>().await() },
-            stillCurrent = { true },
-            claimed = claimed,
-            releaseGate = { released = true },
-            catchUp = { caughtUp = true },
-            backfill = {},
-            readMarkerSettleTimeoutMs = 10_000L,
+        releaseEntryGateAfterMarkers(
+            awaitMarkerSettlement = { markerSettlement.join() },
+            released = released,
+            release = { releases++ },
         )
 
-        // Marker settlement is entry-critical but not unbounded: chat entry must not be held for
-        // the whole Ready session by a capability decision the server never makes.
-        assertTrue(released)
-        assertTrue(caughtUp)
+        assertEquals(1, releases)
+    }
+
+    @Test
+    fun theGateReleasesOnceAcrossConvergenceAndBranchExit() = runTest {
+        // The convergence callback and the decision branch's exit share one released flag; the
+        // second arrival must be a no-op, exactly like the pre-reorder AtomicBoolean closure.
+        val released = java.util.concurrent.atomic.AtomicBoolean(false)
+        var releases = 0
+        val gate: suspend () -> Unit = {
+            releaseEntryGateAfterMarkers(
+                awaitMarkerSettlement = {},
+                released = released,
+                release = { releases++ },
+            )
+        }
+
+        gate()
+        gate()
+
+        assertEquals(1, releases)
     }
 }

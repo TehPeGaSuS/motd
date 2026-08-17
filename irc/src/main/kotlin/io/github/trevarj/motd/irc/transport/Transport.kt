@@ -70,6 +70,15 @@ class OkioLineTransport(
      * direct path, so SNI + hostname verification still key on the real [host]:[port].
      */
     private val proxy: Proxy? = null,
+    /**
+     * Optional dial-phase observer: invoked with a phase name (`socket_connected` once the raw
+     * socket — including any SOCKS/tunnel path — is up, `tls_done` after the TLS handshake) and the
+     * milliseconds elapsed since [connect] began. A pure seam so the app layer can attribute dial
+     * time to transport establishment versus registration in its diagnostics journal; the default
+     * is silent and the module stays free of any logging dependency. Runs on the connect dispatcher
+     * — implementations must be cheap and non-throwing.
+     */
+    private val onConnectPhase: (phase: String, elapsedMs: Long) -> Unit = { _, _ -> },
 ) : IrcTransport {
 
     private companion object {
@@ -86,6 +95,7 @@ class OkioLineTransport(
 
     override suspend fun connect() {
         runInterruptible(Dispatchers.IO) {
+            val dialStartMs = System.nanoTime() / 1_000_000
             // Proxied path: Socket(proxy) + an UNRESOLVED destination forces remote DNS through the
             // SOCKS5 proxy (leak-free, .onion-capable). Direct path keeps the resolving address.
             val raw = if (proxy != null) Socket(proxy) else Socket()
@@ -97,6 +107,7 @@ class OkioLineTransport(
             raw.connect(dest, CONNECT_TIMEOUT_MS)
             raw.keepAlive = true
             raw.soTimeout = 0 // reads block; watchdog handles death.
+            onConnectPhase("socket_connected", System.nanoTime() / 1_000_000 - dialStartMs)
 
             val finalSocket: Socket = if (tls) {
                 val ctx = sslContext ?: SSLContext.getDefault()
@@ -109,6 +120,7 @@ class OkioLineTransport(
                     }
                 }
                 ssl.startHandshake()
+                onConnectPhase("tls_done", System.nanoTime() / 1_000_000 - dialStartMs)
                 ssl
             } else {
                 raw

@@ -44,7 +44,6 @@ class ReadySessionCatchUpWiringTest {
             client = client,
             isCurrent = isCurrent,
             liveClient = liveClient,
-            awaitReadMarkerSettlement = {},
             releaseGate = { recorder.gateReleases++ },
             catchUp = { recorder.catchUps++ },
             backfill = { recorder.backfills++ },

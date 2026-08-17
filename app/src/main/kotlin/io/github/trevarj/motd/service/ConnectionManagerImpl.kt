@@ -1026,6 +1026,17 @@ class ConnectionManagerImpl @Inject constructor(
                     }
                 }
                 registry.actorState(id, generation, fp, state)
+                // Startup step 3A: a root reaching Registering has already proven the bouncer
+                // endpoint reachable (tunnel + TCP + TLS done), which is all a dead child was
+                // waiting for — its own SASL bind needs nothing from the root's session. Launched
+                // so the actor's state pipeline never blocks on the registry round trips inside
+                // connect(); runIfCurrent drops the revival if this actor generation is replaced
+                // first. The Ready edge in onReadySession remains the self-heal for this same set.
+                if (state is IrcClientState.Registering && row.role == NetworkRole.BOUNCER_ROOT) {
+                    scope.launch {
+                        registry.runIfCurrent(id, generation) { reviveChildrenOf(id) }
+                    }
+                }
             },
             onEvent = { id, event ->
                 registry.runIfCurrent(id, generation) { handleConnectionEvent(id, event) }
@@ -1363,6 +1374,29 @@ class ConnectionManagerImpl @Inject constructor(
             (chunk.wireText.any { it == '\r' || it == '\n' } ||
                 chunk.wireText.toByteArray(Charsets.UTF_8).size > MAX_BYTES)
 
+    /**
+     * Revive this root's children that cannot recover on their own — absent, dead-looped, or
+     * terminally disconnected/failed ([childrenNeedingReconnect]). Called on the root's Registering
+     * edge (the earliest proof the shared bouncer endpoint is reachable this session: SOCKS/tunnel,
+     * TCP, and TLS all succeeded) and again on Ready as self-heal. A live child — Connecting,
+     * backing off, Registering, or Ready — is never touched, so repeated edges cannot storm the
+     * endpoint or interrupt a healthy session.
+     */
+    private suspend fun reviveChildrenOf(rootId: Long, isCurrent: () -> Boolean = { true }) {
+        val snapshot = registry.snapshot.value
+        val actorAlive = snapshot.actors.mapValues { (_, registered) -> registered.isAlive }
+        for (childId in childrenNeedingReconnect(
+            rootId = rootId,
+            all = networksById.values.toList(),
+            userIntents = userIntents,
+            actorAlive = actorAlive,
+            states = snapshot.states,
+        )) {
+            if (!isCurrent()) return
+            connect(childId)
+        }
+    }
+
     private suspend fun buildConnection(row: NetworkEntity): IrcClientConnection {
         // A BOUNCER_CHILD is a *bound connection to the bouncer*, not a direct socket to the
         // upstream network. Its own host/port/tls/SASL may carry the upstream server's details
@@ -1376,8 +1410,10 @@ class ConnectionManagerImpl @Inject constructor(
             null
         }
         val config = buildChildConfig(row, root)
-        // Obfuscation/proxy follows the transport endpoint too: a bound child tunnels through the
-        // bouncer root's socket, so it inherits the root's proxy (plans/20 Phase 1).
+        // Obfuscation/proxy follows the transport endpoint too: a bound child dials the same
+        // bouncer endpoint on its OWN socket (and, for EMBEDDED_REALITY, its own libbox core — see
+        // resolveTransportProxy), so it inherits the root's proxy CONFIGURATION, never its
+        // connection (plans/20 Phase 1).
         val endpoint = root ?: row
         val security = prepareTransportSecurity(
             host = config.host,
@@ -1398,6 +1434,14 @@ class ConnectionManagerImpl @Inject constructor(
             onCertUntrusted = { ex -> certFailures[row.id] = ex },
             proxy = proxyResolution.proxy,
             proxyConfigurationError = proxyResolution.error,
+            // Splits Connecting time into transport establishment (which contains the whole
+            // SOCKS/VLESS tunnel + remote TCP for obfuscated networks) and the TLS handshake.
+            // Classification only: phase name and duration — never the endpoint.
+            onConnectPhase = { phase, elapsedMs ->
+                diagnostics.record("connections", "dial_phase") {
+                    mapOf("network_id" to row.id, "phase" to phase, "elapsed_ms" to elapsedMs)
+                }
+            },
         )
         return IrcClientConnection(IrcClient(config, factory, scope), proxyResolution.release)
     }
@@ -1443,24 +1487,12 @@ class ConnectionManagerImpl @Inject constructor(
         if (enrollmentResult == EnrollmentJoinResult.FAILED) {
             Log.w(TAG, "One-shot Libera #motd JOIN write failed for network ${row.id}")
         }
-        // A BOUNCER_ROOT reaching Ready means bound children can establish BOUNCER BIND again.
-        // Only revive a wanted child that is absent, dead, or terminally disconnected/failed.
-        // A child that is still Connecting/Registering owns its own transition to Ready; rebuilding
-        // it here races registration. Rebuilding a healthy Ready child causes needless bouncer
-        // churn and can interrupt the foreground channel.
+        // Final self-heal for children whose loops died while the endpoint was down (startup
+        // step 3A/3B): the primary revival now runs on the root's Registering edge, but Ready is
+        // kept as the belt-and-braces pass — childrenNeedingReconnect makes both idempotent, so a
+        // child already dialing (or revived by the earlier edge) is never touched here.
         if (row.role == NetworkRole.BOUNCER_ROOT) {
-            val snapshot = registry.snapshot.value
-            val actorAlive = snapshot.actors.mapValues { (_, registered) -> registered.isAlive }
-            for (childId in childrenNeedingReconnect(
-                rootId = row.id,
-                all = networksById.values.toList(),
-                userIntents = userIntents,
-                actorAlive = actorAlive,
-                states = snapshot.states,
-            )) {
-                if (!isCurrent()) return
-                connect(childId)
-            }
+            reviveChildrenOf(row.id, isCurrent)
         }
         // A fresh direct socket has no channel membership. Restore only channels whose durable
         // self JOIN state is still true; explicit PART/KICK rows set joined=false. Bouncer children
@@ -1504,16 +1536,26 @@ class ConnectionManagerImpl @Inject constructor(
                 // decision branch's own exit paths (unsupported verdict, cancellation, a throw)
                 // still guarantee the gate is released exactly once.
                 val releasedEntryGate = AtomicBoolean(false)
+                // Startup step 1: the catch-up no longer waits for read markers, so the gate itself
+                // must. The settlement clock starts HERE, at Ready, not at each release attempt —
+                // a bouncer that never answers its read-marker CAP REQ can therefore delay the gate
+                // by at most the same ceiling the old pre-catch-up wait had. Joining a cancelled
+                // session's async returns immediately, so the NonCancellable exit release cannot
+                // park on it.
+                val markerSettlement = async {
+                    withTimeoutOrNull(READ_MARKER_SETTLE_TIMEOUT_MS) { initialReadMarkers.join() }
+                }
                 val releaseEntryGate: suspend () -> Unit = {
-                    if (releasedEntryGate.compareAndSet(false, true)) {
-                        registry.historyCatchUpFinished(row.id, generation)
-                    }
+                    releaseEntryGateAfterMarkers(
+                        awaitMarkerSettlement = { markerSettlement.join() },
+                        released = releasedEntryGate,
+                        release = { registry.historyCatchUpFinished(row.id, generation) },
+                    )
                 }
                 runHistoryCatchUpSession(
                     client = client,
                     isCurrent = isCurrent,
                     liveClient = { clientFor(row.id) },
-                    awaitReadMarkerSettlement = { initialReadMarkers.join() },
                     releaseGate = releaseEntryGate,
                     catchUp = {
                         catchUpForConnection(row.id, client, onCatchUpConverged = releaseEntryGate)
@@ -2473,6 +2515,29 @@ internal const val HISTORY_CAP_DECISION_TIMEOUT_MS = 15_000L
  */
 internal const val READ_MARKER_SETTLE_TIMEOUT_MS = 10_000L
 
+/**
+ * One Ready session's entry-gate release: the gate opens only when BOTH hold — the caller decided
+ * a release is due (the visible wave converged, the decision declined, or the branch exited) AND
+ * read markers settled or their bounded wait expired.
+ *
+ * This is where the marker barrier moved when the catch-up stopped waiting for it (startup step 1):
+ * CHATHISTORY fetches start at Ready, but the frozen unread target must still prefer the server
+ * marker, so chat ENTRY — which `historyCatchUpPending` gates — keeps the marker dependency. The
+ * caller starts [awaitMarkerSettlement]'s clock at Ready and bounds it with
+ * [READ_MARKER_SETTLE_TIMEOUT_MS], so a convergence release can be delayed by at most that ceiling.
+ * [released] makes the release idempotent across the convergence callback, the decision branch's
+ * exits, and its NonCancellable finally. Extracted so the both-conditions property is unit-testable
+ * without a Ready session.
+ */
+internal suspend fun releaseEntryGateAfterMarkers(
+    awaitMarkerSettlement: suspend () -> Unit,
+    released: AtomicBoolean,
+    release: suspend () -> Unit,
+) {
+    awaitMarkerSettlement()
+    if (released.compareAndSet(false, true)) release()
+}
+
 /** `draft/chathistory`, with or without a `=value` suffix. */
 internal fun isChatHistoryCap(cap: String): Boolean =
     cap == ConnectionManagerImpl.CHATHISTORY_CAP ||
@@ -2515,8 +2580,10 @@ internal suspend fun awaitHistoryCapDecision(
 }
 
 /**
- * One Ready session's entry decision for CHATHISTORY: settle the capability, release the
- * user-facing gate, run the catch-up, then trickle the backfill.
+ * One Ready session's entry decision for CHATHISTORY: settle the capability, run the catch-up,
+ * release the user-facing gate, then trickle the backfill. Read markers no longer sit in front of
+ * the catch-up (startup step 1); their entry-criticality lives inside the caller's gate closure —
+ * see [releaseEntryGateAfterMarkers].
  *
  * Extracted from [ConnectionManagerImpl.onReadySession] because the defects here live purely in the
  * ORDER of those four steps, which no connection-level test can reach:
@@ -2539,13 +2606,11 @@ internal suspend fun awaitHistoryCapDecision(
  */
 internal suspend fun decideHistoryCatchUp(
     awaitHistoryReady: suspend () -> Boolean,
-    awaitReadMarkerSettlement: suspend () -> Unit,
     stillCurrent: () -> Boolean,
     claimed: CompletableDeferred<Boolean>,
     releaseGate: suspend () -> Unit,
     catchUp: suspend () -> Unit,
     backfill: suspend () -> Unit,
-    readMarkerSettleTimeoutMs: Long = READ_MARKER_SETTLE_TIMEOUT_MS,
 ) {
     var gateReleased = false
     suspend fun release() {
@@ -2555,14 +2620,12 @@ internal suspend fun decideHistoryCatchUp(
     }
     try {
         val historyReady = awaitHistoryReady()
-        // Marker settlement is entry-critical even when CHATHISTORY is unsupported: the frozen
-        // unread target must use the server marker before this gate is released. Bounded, because
-        // it is the LAST wait in front of the gate: awaitReadMarkerCapabilityDecision settles on
-        // pendingFeatureCaps, which only sheds a cap on ACK/NAK/DEL, so a bouncer that answers its
-        // post-welcome CAP REQ with nothing would hold chat entry for the whole Ready session --
-        // C5's symptom reached by a third route. On expiry the frozen unread target falls back to
-        // the local marker, and the read-marker waiter beside this branch still converges it later.
-        withTimeoutOrNull(readMarkerSettleTimeoutMs) { awaitReadMarkerSettlement() }
+        // Read markers deliberately do NOT gate the branch anymore (startup step 1): the fetches
+        // start as soon as CHATHISTORY is decided, which on a bouncer child shaves the deferred
+        // post-welcome CAP round-trip off every reconnect's first page. Marker settlement remains
+        // entry-critical — the frozen unread target must still prefer the server marker — but that
+        // barrier lives in [releaseGate] itself ([releaseEntryGateAfterMarkers]), which every exit
+        // of this branch and the wave-convergence release both share.
         if (!stillCurrent()) return
         if (!historyReady) {
             release()
@@ -2651,7 +2714,6 @@ internal suspend fun runHistoryCatchUpSession(
     client: IrcClient,
     isCurrent: () -> Boolean,
     liveClient: () -> IrcClient?,
-    awaitReadMarkerSettlement: suspend () -> Unit,
     releaseGate: suspend () -> Unit,
     catchUp: suspend () -> Unit,
     backfill: suspend () -> Unit,
@@ -2667,7 +2729,6 @@ internal suspend fun runHistoryCatchUpSession(
     launch {
         decideHistoryCatchUp(
             awaitHistoryReady = { awaitHistoryReady(client) },
-            awaitReadMarkerSettlement = awaitReadMarkerSettlement,
             stillCurrent = ownsConnection,
             claimed = claimed,
             releaseGate = releaseGate,
@@ -2755,7 +2816,7 @@ internal suspend fun awaitReadMarkerResponse(
  * Pure wanted-set computation for [ConnectionManagerImpl.reconcile] (plans/16 §4), extracted for
  * unit tests. A network is wanted when the sticky user intent (if present) or, absent an intent,
  * its `autoConnect` flag is true — and it is not an orphan BOUNCER_CHILD (a child with no parentId
- * has no root connection to bind through and must be excluded).
+ * has no root row to inherit the bouncer endpoint and credentials from, so it can never dial).
  */
 /**
  * Build the [IrcClientConfig] for one network row (plans/05 §soju bouncer-networks). For a
@@ -2946,10 +3007,14 @@ internal fun wantedNetworkIds(
         .map { it.id }
         .toSet()
 
+
 /**
- * BOUNCER_CHILD ids to revive when their [rootId] transitions into Ready. A bound child tunnels
- * through the root's transport (BOUNCER BIND), so an absent, dead, or terminally
- * disconnected/failed child may need a fresh actor once its root is available. A child that is
+ * BOUNCER_CHILD ids to revive when their [rootId] proves the bouncer endpoint reachable again
+ * (its actor's Registering edge, and the Ready edge as final self-heal). A child is an independent
+ * socket to the same bouncer endpoint — not a stream inside the root's transport — so it is never
+ * blocked by the root protocol-wise; but an absent, dead, or terminally disconnected/failed child
+ * cannot recover on its own, and the root's successful dial is the cheapest proof that redialing
+ * the shared endpoint is worth it now. A child that is
  * Connecting, Registering, or Ready is deliberately excluded: its live loop owns that transition,
  * and forcing a rebuild would race registration or disconnect a healthy session.
  *

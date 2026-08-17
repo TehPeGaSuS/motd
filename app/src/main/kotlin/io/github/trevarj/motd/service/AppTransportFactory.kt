@@ -103,6 +103,13 @@ class AppTransportFactory(
      * maps connection errors onto its visible failed state.
      */
     private val proxyConfigurationError: String? = null,
+    /**
+     * Dial-phase observer forwarded to [OkioLineTransport] so the connection layer can journal how
+     * long the socket (including any SOCKS/VLESS tunnel) versus the TLS handshake took. Captured
+     * here like [clientCertAlias]/[proxy] so it need not thread through IrcClient; the WS transport
+     * is deliberately uninstrumented (it is not on the obfuscated bouncer path). Default silent.
+     */
+    private val onConnectPhase: (phase: String, elapsedMs: Long) -> Unit = { _, _ -> },
 ) : TransportFactory {
     override fun create(host: String, port: Int, tls: Boolean, wsUrl: String?, proxy: Proxy?): IrcTransport {
         // The per-network proxy captured at construction is the source of truth; the create() param
@@ -122,14 +129,22 @@ class AppTransportFactory(
         val policy = security.stsPolicy
         val effTls = tls || policy != null
         val effPort = policy?.port ?: port
-        if (!effTls) return OkioLineTransport(host, effPort, tls = false, proxy = effProxy)
+        if (!effTls) return OkioLineTransport(host, effPort, tls = false, proxy = effProxy, onConnectPhase = onConnectPhase)
 
         val pinned = security.tcpPin
         val trustManager = PinningTrustManager(host, effPort, pinned, onCertUntrusted)
         val sslContext = buildTlsContext(clientCertAlias, trustManager)
         // Pinned leaf → skip hostname verification (bare-IP certs); unpinned → enforce it. The proxy
         // (if any) tunnels the connection; TLS/SNI/pin still key on the real host:port through it.
-        return OkioLineTransport(host, effPort, tls = true, sslContext = sslContext, verifyHostname = pinned == null, proxy = effProxy)
+        return OkioLineTransport(
+            host,
+            effPort,
+            tls = true,
+            sslContext = sslContext,
+            verifyHostname = pinned == null,
+            proxy = effProxy,
+            onConnectPhase = onConnectPhase,
+        )
     }
 
     /**
