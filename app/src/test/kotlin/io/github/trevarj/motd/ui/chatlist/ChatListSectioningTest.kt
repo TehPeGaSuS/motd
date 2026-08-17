@@ -448,4 +448,44 @@ class ChatListSectioningTest {
         assertEquals(11, unreadActivityBeforeDisplayIndex(sections, foolsExpanded = false, 7))
         assertEquals(16, unreadActivityBeforeDisplayIndex(sections, foolsExpanded = true, 8))
     }
+
+    private fun invitation(id: Long, state: InviteState = InviteState.PENDING) = ChatListInvitation(
+        messageId = id, bufferId = 1, networkId = 1, networkName = "net",
+        inviter = "alice", channel = "#chan", text = "invite", state = state, serverTime = id,
+    )
+
+    @Test
+    fun `top item key mirrors the lazy column emit order`() {
+        val pinned = row(id = 1, name = "#pinned", type = BufferType.CHANNEL, pinned = true)
+        val friend = row(id = 2, name = "ally")
+        val regular = row(id = 3, name = "#chan", type = BufferType.CHANNEL)
+        val fool = row(id = 4, name = "troll")
+        fun sections(rows: List<ChatListRow>) = sectionChatList(rows, setOf("ally"), setOf("troll"))
+        val all = sections(listOf(pinned, friend, regular, fool))
+
+        assertEquals(1L, chatListTopItemKey(false, emptyList(), 0, all))
+        assertEquals("friends-header", chatListTopItemKey(false, emptyList(), 0, sections(listOf(friend, regular, fool))))
+        assertEquals(3L, chatListTopItemKey(false, emptyList(), 0, sections(listOf(regular, fool))))
+        assertEquals("fools-header", chatListTopItemKey(false, emptyList(), 0, sections(listOf(fool))))
+        assertEquals(null, chatListTopItemKey(false, emptyList(), 0, sections(emptyList())))
+        // An actionable invitations folder leads every chat tier.
+        assertEquals("invitations-folder", chatListTopItemKey(false, listOf(invitation(7)), 1, all))
+        // Invitation mode presents invitation rows (or the empty state), never chat rows.
+        assertEquals("invitation-7", chatListTopItemKey(true, listOf(invitation(7)), 1, all))
+        assertEquals("invitations-empty", chatListTopItemKey(true, emptyList(), 0, all))
+    }
+
+    @Test
+    fun `repin fires only for a changed top key while resting at the true top`() {
+        assertTrue(shouldRepinChatListTop(1L, 2L, canScrollBackward = false, scrollInProgress = false))
+        // Same top row: nothing was displaced.
+        assertFalse(shouldRepinChatListTop(1L, 1L, canScrollBackward = false, scrollInProgress = false))
+        // Away from the top the key anchor is the behavior the user wants.
+        assertFalse(shouldRepinChatListTop(1L, 2L, canScrollBackward = true, scrollInProgress = false))
+        // A repin cancels scrolls, so never fire during one.
+        assertFalse(shouldRepinChatListTop(1L, 2L, canScrollBackward = false, scrollInProgress = true))
+        // The list first appearing or emptying displaces nothing.
+        assertFalse(shouldRepinChatListTop(null, 2L, canScrollBackward = false, scrollInProgress = false))
+        assertFalse(shouldRepinChatListTop(1L, null, canScrollBackward = false, scrollInProgress = false))
+    }
 }

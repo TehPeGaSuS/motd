@@ -100,6 +100,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -874,6 +875,26 @@ private fun ChatList(
     val placementSpec = ChatListItemMotion.rememberPlacementSpec()
     val scope = rememberCoroutineScope()
     val actionableInvitationCount = invitations.count(ChatListInvitation::actionable)
+    // LazyColumn re-anchors to the first visible item's key when the dataset changes, so a row
+    // promoted to the top would land above a viewport resting at the true top and stay hidden
+    // until the user scrolls up to find it. Re-pin index 0 in the same remeasure that presents
+    // the new order: the promoted row surfaces in place and the rows it displaced spring down
+    // via their placement animation. Scroll state is peeked without observation because this is
+    // a same-frame decision, not a recomposition dependency.
+    val topItemKey = chatListTopItemKey(invitationMode, invitations, actionableInvitationCount, sections)
+    val topItemTracker = remember { ChatListTopItemTracker(topItemKey) }
+    if (topItemTracker.key != topItemKey) {
+        val repin = Snapshot.withoutReadObservation {
+            shouldRepinChatListTop(
+                previousTopKey = topItemTracker.key,
+                topKey = topItemKey,
+                canScrollBackward = listState.canScrollBackward,
+                scrollInProgress = listState.isScrollInProgress,
+            )
+        }
+        topItemTracker.key = topItemKey
+        if (repin) listState.requestScrollToItem(0)
+    }
     val hasActiveRows = rows.isNotEmpty() || actionableInvitationCount > 0
     val hasArchivedRows = archivedRows.isNotEmpty()
     val archiveFolderHeight = 56.dp

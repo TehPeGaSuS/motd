@@ -386,5 +386,50 @@ internal fun unreadActivityBeforeDisplayIndex(
     return unread.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 }
 
+/**
+ * Key of the first item the chat-list LazyColumn presents, mirroring the emit order in
+ * `ChatList`: invitation rows (or the empty state) in invitation mode, otherwise the invitations
+ * folder, pinned rows, friends header, friends, recent header, regular rows, then fools. The
+ * recent header can never be first because it requires an earlier visible tier. Must stay in
+ * lockstep with the LazyColumn content.
+ */
+internal fun chatListTopItemKey(
+    invitationMode: Boolean,
+    invitations: List<ChatListInvitation>,
+    actionableInvitationCount: Int,
+    sections: ChatListSections,
+): Any? = when {
+    invitationMode ->
+        invitations.firstOrNull()?.let { "invitation-${it.messageId}" } ?: "invitations-empty"
+    actionableInvitationCount > 0 -> "invitations-folder"
+    sections.pinned.isNotEmpty() -> sections.pinned.first().bufferId
+    sections.friends.isNotEmpty() -> "friends-header"
+    sections.regular.isNotEmpty() -> sections.regular.first().bufferId
+    sections.fools.isNotEmpty() -> "fools-header"
+    else -> null
+}
+
+/**
+ * Whether a change of the top item should re-pin the viewport to index 0. LazyColumn re-anchors
+ * to the first visible item's key across dataset changes, so without a re-pin a row promoted to
+ * the top lands above a viewport resting at the true top and stays hidden until the user scrolls
+ * up to find it. Only a resting true-top viewport re-pins: anywhere else the key anchor is the
+ * behavior the user wants, and `requestScrollToItem` would cancel a scroll in progress.
+ */
+internal fun shouldRepinChatListTop(
+    previousTopKey: Any?,
+    topKey: Any?,
+    canScrollBackward: Boolean,
+    scrollInProgress: Boolean,
+): Boolean =
+    previousTopKey != null &&
+        topKey != null &&
+        topKey != previousTopKey &&
+        !canScrollBackward &&
+        !scrollInProgress
+
+/** Plain mutable holder: composition-time change detection without a state backwards write. */
+internal class ChatListTopItemTracker(var key: Any?)
+
 private val ChatListRow.identityRules: IrcIdentityRules
     get() = IrcIdentityRules.from(caseMapping, chanTypes)
