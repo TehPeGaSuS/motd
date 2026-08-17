@@ -3,9 +3,10 @@ name: Showcase Screenshots
 # Manual refresh of the tracked public screenshots under screenshots/.
 #
 # Mirrors `./test/e2e/headless.sh showcase` on a hosted runner: it stands up the
-# showcase profile of the local soju+ergo stack (believable #guix/#debian/#emacs/
-# #rust channels and fictional nicks), boots a KVM-backed AOSP emulator, and
-# drives the production Compose screens through runbook.sh phases A and S.
+# showcase profile of the local soju+ergo stack (believable project channels and
+# fictional nicks), boots a KVM-backed AOSP emulator, drives the production
+# Compose screens through runbook.sh phases A and S (one Ayu Light and one Ayu
+# Dark capture pass), then merges each pair into the diagonal-split frames.
 #
 # The refreshed PNGs come back as a build artifact. Committing them stays a
 # maintainer action so the assets land in a signed commit.
@@ -105,8 +106,8 @@ jobs:
             adb reverse tcp:6697 tcp:6697
             adb reverse tcp:6696 tcp:6696
             adb reverse tcp:6667 tcp:6667
-            # Phase S picks the dark Modus Vivendi app preset itself; keep the
-            # system appearance out of the way so the frames stay deterministic.
+            # Phase S picks the Ayu app presets itself and re-pins uimode per
+            # capture pass; start from a known system appearance.
             adb shell cmd uimode night no || true
             # Deliberately no showcase-hold here. The stack's own showcase seed
             # already posted the fixture conversations and disconnected, so a
@@ -117,6 +118,11 @@ jobs:
             # are better without a live companion.
             adb install -r -g app/build/outputs/apk/e2e/app-e2e.apk
             ./test/e2e/runbook.sh
+
+      # Merge each light/dark pair into the tracked diagonal-split PNGs. The
+      # runner's preinstalled ImageMagick 6 is enough; the script needs no SDK.
+      - name: Composite the light/dark capture pairs
+        run: ./test/e2e/showcase-composite.sh screenshots
 
       - name: Upload refreshed screenshots
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -51,7 +51,7 @@ APP_NICK="${APP_NICK:-motdadb}"
 SEED_HOLD_SECONDS="${SEED_HOLD_SECONDS:-1}"
 PUSH_TOKEN="${PUSH_TOKEN:-motd-unifiedpush}"
 STACK_PROFILE="${MOTD_STACK_PROFILE:-default}"
-SHOWCASE_CHANNELS="${MOTD_SHOWCASE_CHANNELS:-#guix #debian #emacs #rust}"
+SHOWCASE_CHANNELS="${MOTD_SHOWCASE_CHANNELS:-#guix #debian #emacs #rust #python #nixos #linux #openbsd #postgres}"
 
 UP_ACCOUNT="${UP_ACCOUNT:-motd}"
 UP_PASS="${UP_PASS:-motdupstream}"
@@ -75,6 +75,11 @@ fixture_topic() {
     '#debian') printf '%s' 'Stable ideas, carefully shipped.' ;;
     '#emacs') printf '%s' 'The editor is the operating system.' ;;
     '#rust') printf '%s' 'Fearless concurrency, one borrow at a time.' ;;
+    '#python') printf '%s' 'Readable code, batteries included.' ;;
+    '#nixos') printf '%s' 'Declare the system, rebuild the world.' ;;
+    '#linux') printf '%s' 'Kernels, patches, and long changelogs.' ;;
+    '#openbsd') printf '%s' 'Correctness first, comments second.' ;;
+    '#postgres') printf '%s' 'Transactions you can trust.' ;;
     *) printf '%s' 'motd e2e seed channel — deterministic history' ;;
   esac
 }
@@ -179,6 +184,16 @@ do_showcase_seed() {
     printf 'NICK rustacean\r\n'
     printf 'PRIVMSG #rust :Borrow checker says hello from the afternoon build.\r\n'
     printf 'PRIVMSG #rust :The async tests are green; ship it when the tea is ready.\r\n'
+    printf 'NICK mona\r\n'
+    printf 'PRIVMSG #python :The type hints finally agree with the docstrings.\r\n'
+    printf 'NICK nixie\r\n'
+    printf 'PRIVMSG #nixos :One flake input bump and everything still builds.\r\n'
+    printf 'NICK tux\r\n'
+    printf 'PRIVMSG #linux :The scheduler patch reads better on the second pass.\r\n'
+    printf 'NICK puffy\r\n'
+    printf 'PRIVMSG #openbsd :Shipped the fix; the man page was the hard part.\r\n'
+    printf 'NICK slonik\r\n'
+    printf 'PRIVMSG #postgres :EXPLAIN ANALYZE says we are finally index-only.\r\n'
     printf 'NICK motdadb2\r\n'
     printf 'PRIVMSG #guix :See you around the next build.\r\n'
     hold_connection

@@ -812,11 +812,14 @@ screencap_step() {
 
 # capture_named_screenshot <name> — save one of the public showcase frames under
 # a stable filename. Unlike screencap_step, these captures are intentional
-# output consumed by README.md and the GitHub Pages site.
+# output: showcase-composite.sh merges each -light/-dark pair into the tracked
+# diagonal-split PNGs consumed by README.md and the GitHub Pages site.
 capture_named_screenshot() {
   local name="$1"
   case "$name" in
     chat-list|chat|file-uploader) ;;
+    chat-list-light|chat-light|file-uploader-light) ;;
+    chat-list-dark|chat-dark|file-uploader-dark) ;;
     *) fail "unknown showcase screenshot '$name'"; return 1 ;;
   esac
   mkdir -p "$E2E_SCREENSHOT_DIR"
@@ -826,6 +829,24 @@ capture_named_screenshot() {
     return 1
   fi
   echo "${_C_CYA}  showcase screenshot -> $f${_C_RST}" >&2
+}
+
+# enter_status_bar_demo — freeze SystemUI into its demo state: fixed 12:00
+# clock, full wifi/signal, full battery, no notification icons. Public
+# showcase frames stay legible and pixel-aligned between capture passes.
+enter_status_bar_demo() {
+  adb_shell settings put global sysui_demo_allowed 1 >/dev/null 2>&1 || true
+  adb_shell am broadcast -a com.android.systemui.demo -e command enter >/dev/null 2>&1 || true
+  adb_shell am broadcast -a com.android.systemui.demo -e command clock -e hhmm 1200 >/dev/null 2>&1 || true
+  adb_shell am broadcast -a com.android.systemui.demo -e command network -e wifi show -e level 4 -e fully true >/dev/null 2>&1 || true
+  adb_shell am broadcast -a com.android.systemui.demo -e command network -e mobile show -e datatype none -e level 4 >/dev/null 2>&1 || true
+  adb_shell am broadcast -a com.android.systemui.demo -e command battery -e level 100 -e plugged false >/dev/null 2>&1 || true
+  adb_shell am broadcast -a com.android.systemui.demo -e command notifications -e visible false >/dev/null 2>&1 || true
+}
+
+# exit_status_bar_demo — restore the live status bar.
+exit_status_bar_demo() {
+  adb_shell am broadcast -a com.android.systemui.demo -e command exit >/dev/null 2>&1 || true
 }
 
 # --- logging / step accounting --------------------------------------------

@@ -72,7 +72,7 @@ export ERGO_PORT
 export SOJU_PORT
 export SOJU_HTTP_PORT
 if [ "$STACK_PROFILE" = showcase ]; then
-  export MOTD_SHOWCASE_CHANNELS='#guix #debian #emacs #rust'
+  export MOTD_SHOWCASE_CHANNELS='#guix #debian #emacs #rust #python #nixos #linux #openbsd #postgres'
   export TEST_CHANNEL="${MOTD_STACK_CHANNEL:-#guix}"
 else
   export MOTD_SHOWCASE_CHANNELS=''

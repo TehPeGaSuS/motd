@@ -1751,32 +1751,31 @@ phase_r() {
 # ==========================================================================
 # Phase S — deterministic public showcase screenshots
 # ==========================================================================
-phase_s() {
-  echo ""
-  echo "${_C_CYA}########## Phase S: showcase screenshots ##########${_C_RST}"
+_showcase_apply_theme() {
+  local theme_row="$1" night="$2"
 
-  step "Pin the showcase appearance"
+  step "Pin the showcase appearance to $theme_row"
+  reset_to_chatlist || { fail "could not reach the chat list before selecting $theme_row"; return 1; }
   # Select a named app preset instead of relying on the emulator's system mode.
-  # This keeps the public frames dark and stable across host images.
+  # This keeps the public frames stable across host images.
   tap_desc "Settings"
   wait_for_text "Settings" 8 || true
   tap_tag settings_category_appearance
   wait_for_text "Appearance" 8 || true
   tap_tag settings_theme_picker
   wait_for_text "Search themes" 6 || true
-  # Filter on "Vivendi", not "Modus": the latter also keeps all four Modus
-  # Operandi rows, which push Modus Vivendi past the sheet's 680dp fold. The
-  # list is a LazyColumn, so an off-screen row is absent from the semantics
-  # tree entirely and no amount of waiting finds it. "Vivendi" drops every
-  # light row, leaving the target as the first entry under the dark group.
-  input_by_text_label "Search themes" "Vivendi"
+  # "Ayu" leaves only the three Ayu rows, well inside the sheet's 680dp fold.
+  # The list is a LazyColumn, so an off-screen row is absent from the semantics
+  # tree entirely and no amount of waiting finds it; the short filter keeps the
+  # target composed.
+  input_by_text_label "Search themes" "Ayu"
   # Address the row by text, not testTag. The sheet is its own Compose window,
   # so the Activity root's testTagsAsResourceId never reaches it and every node
   # inside dumps with an empty resource-id. UIAutomator matches text exactly,
-  # so "Modus Vivendi" cannot collide with the Tinted/Deuteranopia/Tritanopia
-  # variants, nor with the search field now holding "Vivendi".
-  wait_for_text "Modus Vivendi" 10 || true
-  tap_text "Modus Vivendi"
+  # so "Ayu Light" / "Ayu Dark" cannot collide with "Ayu Mirage" nor with the
+  # search field now holding "Ayu".
+  wait_for_text "$theme_row" 10 || true
+  tap_text "$theme_row"
   # The sheet is a separate Compose window. Do not start scrolling the
   # underlying Appearance page until its close affordance has disappeared.
   local _theme_wait
@@ -1790,34 +1789,47 @@ phase_s() {
   # sprites. Restarting avoids racing two navigation pops while the theme sheet is disappearing.
   # State only what happened. This line used to claim the theme was selected
   # even on a run whose tap had already failed, which read as success next to
-  # light-themed frames. The tap_tag above is the real gate: it fails the run,
+  # wrongly-themed frames. The tap_tag above is the real gate: it fails the run,
   # and a failed run never reaches the upload.
   note "theme sheet dismissed; showcase presentation defaults left at their post-wipe values"
   sleep 1
   adb_shell am force-stop "$MOTD_PKG"
-  reset_to_chatlist || { fail "could not return to chat list after applying showcase theme"; return 1; }
+  # Align the OS night mode with the selected palette so the launch window and
+  # anything else keyed off uiMode agree with the app theme on cold start.
+  adb_shell cmd uimode night "$night" >/dev/null 2>&1 || true
+  reset_to_chatlist || { fail "could not return to chat list after applying $theme_row"; return 1; }
   wait_for_desc "New conversation" 8 || true
   assert_no_crash
+}
 
-  step "Capture the multi-channel chat list"
-  for _showcase_channel in '#guix' '#debian' '#emacs' '#rust'; do
+# One capture pass over the three public frames; suffix is "light" or "dark".
+# showcase-composite.sh later merges each pair into the tracked diagonal-split
+# PNGs, so the two passes must show identical content and layout.
+_showcase_capture_pass() {
+  local suffix="$1"
+
+  step "Capture the multi-channel chat list ($suffix)"
+  # Only assert the six most recently seeded channels: the list now overfills
+  # the frame on purpose (no empty void), so the oldest rows may sit below the
+  # fold and outside the semantics tree.
+  for _showcase_channel in '#guix' '#postgres' '#openbsd' '#linux' '#nixos' '#python'; do
     wait_for_text "$_showcase_channel" 20 || true
     assert_text "$_showcase_channel"
   done
-  capture_named_screenshot "chat-list"
+  capture_named_screenshot "chat-list-$suffix"
   assert_no_crash
 
-  step "Capture a seeded conversation"
+  step "Capture a seeded conversation ($suffix)"
   tap_text '#guix'
   wait_for_text "See you around the next build." 15 || true
   # Chat bubbles expose the full message as one semantics node, while the
   # sender remains its own node. Assert exact nodes that survive line wrapping.
   assert_text "alice"
   assert_text "See you around the next build."
-  capture_named_screenshot "chat"
+  capture_named_screenshot "chat-$suffix"
   assert_no_crash
 
-  step "Capture the attachment source chooser"
+  step "Capture the attachment source chooser ($suffix)"
   input_tag chat_composer_field "A small note for the next build"
   tap_tag chat_composer_attachment
   wait_for_text "Share something" 8 || true
@@ -1826,8 +1838,25 @@ phase_s() {
   assert_text "File"
   assert_text "Current draft"
   assert_text "Text paste"
-  capture_named_screenshot "file-uploader"
+  capture_named_screenshot "file-uploader-$suffix"
   assert_no_crash
+}
+
+phase_s() {
+  echo ""
+  echo "${_C_CYA}########## Phase S: showcase screenshots ##########${_C_RST}"
+
+  # A clean, fixed status bar (12:00, full signal, no notification icons) keeps
+  # the frames legible and pixel-aligned between the light and dark passes.
+  enter_status_bar_demo
+
+  _showcase_apply_theme "Ayu Light" no || return 1
+  _showcase_capture_pass light
+
+  _showcase_apply_theme "Ayu Dark" yes || return 1
+  _showcase_capture_pass dark
+
+  exit_status_bar_demo
 }
 
 # ==========================================================================

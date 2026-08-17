@@ -113,8 +113,8 @@ configure_emulator() {
   # AOSP can surface benign SystemUI ANR dialogs while the host is packaging a large APK. They do
   # not represent the app under test and must not cover its semantics tree.
   adb_e shell settings put global hide_error_dialogs 1 >/dev/null
-  # Keep the system appearance stable; the showcase phase explicitly selects
-  # the dark Modus Vivendi app preset through the production settings screen.
+  # Keep the system appearance stable; the showcase phase selects Ayu presets
+  # through the production settings screen and re-pins uimode per capture pass.
   adb_e shell cmd uimode night no >/dev/null 2>&1 || true
   adb_e shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
 }
@@ -257,6 +257,8 @@ showcase() {
     E2E_OUT_DIR="$STATE_DIR/showcase-artifacts" \
     E2E_PHASES="${E2E_PHASES:-a s}" \
     nix develop "$REPO" -c "$E2E_DIR/runbook.sh"
+  log "compositing light/dark captures into diagonal-split screenshots"
+  nix develop "$REPO" -c "$E2E_DIR/showcase-composite.sh" "$screenshot_dir"
 }
 
 status() {
