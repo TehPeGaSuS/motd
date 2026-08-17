@@ -1812,7 +1812,7 @@ _showcase_capture_pass() {
   # Only assert the six most recently seeded channels: the list now overfills
   # the frame on purpose (no empty void), so the oldest rows may sit below the
   # fold and outside the semantics tree.
-  for _showcase_channel in '#guix' '#postgres' '#openbsd' '#linux' '#nixos' '#python'; do
+  for _showcase_channel in '#guix' '#sqlite' '#zig' '#postgres' '#openbsd' '#linux'; do
     wait_for_text "$_showcase_channel" 20 || true
     assert_text "$_showcase_channel"
   done

@@ -51,7 +51,7 @@ APP_NICK="${APP_NICK:-motdadb}"
 SEED_HOLD_SECONDS="${SEED_HOLD_SECONDS:-1}"
 PUSH_TOKEN="${PUSH_TOKEN:-motd-unifiedpush}"
 STACK_PROFILE="${MOTD_STACK_PROFILE:-default}"
-SHOWCASE_CHANNELS="${MOTD_SHOWCASE_CHANNELS:-#guix #debian #emacs #rust #python #nixos #linux #openbsd #postgres}"
+SHOWCASE_CHANNELS="${MOTD_SHOWCASE_CHANNELS:-#guix #debian #emacs #rust #python #nixos #linux #openbsd #postgres #zig #sqlite}"
 
 UP_ACCOUNT="${UP_ACCOUNT:-motd}"
 UP_PASS="${UP_PASS:-motdupstream}"
@@ -80,6 +80,8 @@ fixture_topic() {
     '#linux') printf '%s' 'Kernels, patches, and long changelogs.' ;;
     '#openbsd') printf '%s' 'Correctness first, comments second.' ;;
     '#postgres') printf '%s' 'Transactions you can trust.' ;;
+    '#zig') printf '%s' 'No hidden control flow, no hidden allocations.' ;;
+    '#sqlite') printf '%s' 'Small, fast, self-contained, reliable.' ;;
     *) printf '%s' 'motd e2e seed channel — deterministic history' ;;
   esac
 }
@@ -194,6 +196,10 @@ do_showcase_seed() {
     printf 'PRIVMSG #openbsd :Shipped the fix; the man page was the hard part.\r\n'
     printf 'NICK slonik\r\n'
     printf 'PRIVMSG #postgres :EXPLAIN ANALYZE says we are finally index-only.\r\n'
+    printf 'NICK ziggy\r\n'
+    printf 'PRIVMSG #zig :comptime carried the whole refactor again.\r\n'
+    printf 'NICK fiddle\r\n'
+    printf 'PRIVMSG #sqlite :One file, one billion rows, no complaints.\r\n'
     printf 'NICK motdadb2\r\n'
     printf 'PRIVMSG #guix :See you around the next build.\r\n'
     hold_connection
