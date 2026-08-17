@@ -25,6 +25,7 @@ import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.gesture.radial.OrbPlacement
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.BufferReadMarker
@@ -217,6 +218,35 @@ internal class FakeReadMarkers(private val withoutBoundary: Set<Long> = emptySet
                 eventId = if (complete) id else null,
             )
         }
+}
+
+internal class FakeGesturePrefs(
+    enabled: Boolean = false,
+    menu: GestureMenuConfig = GestureMenuConfig(),
+    orb: OrbPlacement = OrbPlacement(),
+) : GesturePrefs {
+    val enabledState = MutableStateFlow(enabled)
+    val menuState = MutableStateFlow(menu)
+    val orbState = MutableStateFlow(orb)
+
+    override val enabled: Flow<Boolean> = enabledState
+    override suspend fun setEnabled(enabled: Boolean) {
+        enabledState.value = enabled
+    }
+
+    override val menu: Flow<GestureMenuConfig> = menuState
+    override suspend fun setMenu(config: GestureMenuConfig) {
+        menuState.value = config
+    }
+
+    override suspend fun replaceMenu(transform: (GestureMenuConfig) -> GestureMenuConfig) {
+        menuState.value = transform(menuState.value)
+    }
+
+    override val orb: Flow<OrbPlacement> = orbState
+    override suspend fun setOrb(placement: OrbPlacement) {
+        orbState.value = placement
+    }
 }
 
 internal class FakeSettings(initial: Settings = Settings()) : SettingsRepository {

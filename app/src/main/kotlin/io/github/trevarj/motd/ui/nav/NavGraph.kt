@@ -375,7 +375,13 @@ private fun ChatListPane(
     )
 }
 
-private fun NavHostController.openChat(route: ChatRoute, replaceCurrentChat: Boolean) {
+/**
+ * Open [route], optionally replacing the chat already on the back stack.
+ *
+ * Internal rather than private because the gesture overlay performs its own chat jumps from outside
+ * the graph, and a second copy of this would be a second set of rules for the same navigation.
+ */
+internal fun NavHostController.openChat(route: ChatRoute, replaceCurrentChat: Boolean) {
     navigate(route) {
         if (replaceCurrentChat) popUpTo<ChatRoute> { inclusive = true }
         launchSingleTop = true

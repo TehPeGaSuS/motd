@@ -6,6 +6,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.gesture.radial.OrbPlacement
+import io.github.trevarj.motd.gesture.radial.decodeOrbPlacement
+import io.github.trevarj.motd.gesture.radial.encodeOrbPlacement
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
@@ -15,6 +18,7 @@ import kotlinx.coroutines.flow.map
 private val Context.gestureDataStore by preferencesDataStore("gesture_labs")
 private val ENABLED = booleanPreferencesKey("enabled_v1")
 private val MENU = stringPreferencesKey("menu_v1")
+private val ORB = stringPreferencesKey("orb_v1")
 
 @Singleton
 class GesturePrefsImpl @Inject constructor(
@@ -42,5 +46,11 @@ class GesturePrefsImpl @Inject constructor(
             val next = transform(decodeGestureMenu(prefs[MENU]))
             if (next == GestureMenuConfig()) prefs.remove(MENU) else prefs[MENU] = encodeGestureMenu(next)
         }
+    }
+
+    override val orb: Flow<OrbPlacement> = store.data.map { decodeOrbPlacement(it[ORB]) }
+
+    override suspend fun setOrb(placement: OrbPlacement) {
+        store.edit { it[ORB] = encodeOrbPlacement(placement) }
     }
 }

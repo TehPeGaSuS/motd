@@ -555,6 +555,12 @@
     <string name="gesture_away_default_message">Away</string>
     <string name="gesture_network_leaf_connect">%1$s · connect</string>
     <string name="gesture_network_leaf_disconnect">%1$s · disconnect</string>
+    <string name="gesture_orb_open">Gesture menu</string>
+    <string name="gesture_menu_more">More…</string>
+    <string name="gesture_away_leaf_back">Back</string>
+    <string name="gesture_menu_a11y_title">Gesture menu</string>
+    <string name="gesture_menu_a11y_up">Up one level</string>
+    <string name="gesture_menu_a11y_close">Close</string>
     <string name="settings_show_images">Show images and videos</string>
     <string name="settings_show_images_desc">Load inline images, videos, and preview thumbnails</string>
     <string name="settings_direct_media_proxied">Load previews over direct connection</string>

@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.agentwire.AgentwirePrefs
 import io.github.trevarj.motd.gesture.GestureMenuConfig
 import io.github.trevarj.motd.gesture.GesturePrefs
+import io.github.trevarj.motd.gesture.radial.OrbPlacement
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -84,6 +85,12 @@ class LabsViewModelTest {
 
         override suspend fun replaceMenu(transform: (GestureMenuConfig) -> GestureMenuConfig) {
             menuState.value = transform(menuState.value)
+        }
+
+        val orbState = MutableStateFlow(OrbPlacement())
+        override val orb: Flow<OrbPlacement> = orbState
+        override suspend fun setOrb(placement: OrbPlacement) {
+            orbState.value = placement
         }
     }
 

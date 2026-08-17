@@ -28,6 +28,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.di.NotificationPermissionStatus
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.gesture.radial.GestureOrbHost
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
@@ -165,6 +166,8 @@ class MainActivity : ComponentActivity() {
                         )
                         // Global TOFU cert-trust dialog host, above the whole navigation graph.
                         CertTrustDialogHost()
+                        // Labs gesture orb, above every destination and inert while the lab is off.
+                        GestureOrbHost(navController)
                     }
                 }
             }

@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.gesture
 
+import io.github.trevarj.motd.gesture.radial.OrbPlacement
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -27,4 +28,9 @@ interface GesturePrefs {
 
     /** Read-modify-write of the stored menu in one edit, so concurrent saves cannot lose each other. */
     suspend fun replaceMenu(transform: (GestureMenuConfig) -> GestureMenuConfig)
+
+    /** Where the resting orb tab sits. Device-local layout, so it stays out of backups too. */
+    val orb: Flow<OrbPlacement>
+
+    suspend fun setOrb(placement: OrbPlacement)
 }
