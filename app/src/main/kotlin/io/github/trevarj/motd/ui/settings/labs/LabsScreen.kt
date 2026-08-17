@@ -33,6 +33,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 @Composable
 fun LabsScreen(
     onBack: () -> Unit = {},
+    onOpenGestureMenu: () -> Unit = {},
     viewModel: LabsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -41,6 +42,7 @@ fun LabsScreen(
         onBack = onBack,
         onGesturesChanged = viewModel::setGesturesEnabled,
         onAgentwireChanged = viewModel::setAgentwireEnabled,
+        onOpenGestureMenu = onOpenGestureMenu,
     )
 }
 
@@ -50,6 +52,7 @@ fun LabsContent(
     onBack: () -> Unit,
     onGesturesChanged: (Boolean) -> Unit,
     onAgentwireChanged: (Boolean) -> Unit,
+    onOpenGestureMenu: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val agentwireUrl = stringResource(R.string.labs_agentwire_url)
@@ -73,18 +76,15 @@ fun LabsContent(
                 switchTag = "labs_gestures_switch",
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            // The editor arrives with the menu-graph work; the row stays visible but inert so the
-            // shape of the lab is discoverable.
+            // The menu graph is authored work that survives the lab being off, so the editor stays
+            // reachable whatever the switch says.
             ListItem(
-                headlineContent = {
-                    Text(
-                        stringResource(R.string.labs_gestures_configure),
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                    )
-                },
-                supportingContent = { Text(stringResource(R.string.labs_gestures_configure_soon)) },
+                headlineContent = { Text(stringResource(R.string.labs_gestures_configure)) },
+                supportingContent = { Text(stringResource(R.string.labs_gestures_configure_desc)) },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                modifier = Modifier.testTag("labs_gestures_configure"),
+                modifier = Modifier
+                    .clickable(onClick = onOpenGestureMenu)
+                    .testTag("labs_gestures_configure"),
             )
         }
         SettingsGroup(title = stringResource(R.string.labs_agentwire_section)) {

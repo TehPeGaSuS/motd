@@ -21,6 +21,8 @@ import kotlinx.serialization.Serializable
 @Serializable data object BackupRestoreRoute
 // Experimental features (gestures, Agentwire harness) live under their own category.
 @Serializable data object LabsRoute
+// The gesture lab's menu-graph editor, reached from Labs > Gestures > Configure menu.
+@Serializable data object GestureMenuEditorRoute
 @Serializable data class NetworkSettingsRoute(val networkId: Long)
 @Serializable data class NetworkToolsRoute(val networkId: Long)
 @Serializable data class SearchRoute(val bufferId: Long? = null)
