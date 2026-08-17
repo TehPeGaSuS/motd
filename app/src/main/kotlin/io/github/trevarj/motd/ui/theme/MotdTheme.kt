@@ -98,6 +98,15 @@ fun ConversationTypography(
 val LocalAvatarStyle: ProvidableCompositionLocal<AvatarStyle> =
     staticCompositionLocalOf { AvatarStyle.IRC_SPRITE }
 
+/**
+ * Opt-in marker for activities whose system bars [MotdTheme] may restyle.
+ *
+ * Restyling calls `enableEdgeToEdge`, which forces a window relayout. Only the real app shell wants
+ * that; in instrumentation hosts the relayout lands asynchronously to Compose idleness and can move
+ * content mid-gesture, which made precision multi-touch tests flake on slow CI devices.
+ */
+interface SystemBarThemeHost
+
 // Previews and Compose tests host content in a non-activity context; system-bar styling is
 // activity-only, so resolve to null there instead of requiring a ComponentActivity.
 private tailrec fun Context.findComponentActivity(): ComponentActivity? = when (this) {
@@ -169,7 +178,9 @@ fun MotdTheme(
     // enableEdgeToEdge() in onCreate keys off uiMode, which disagrees with any fixed palette
     // opposing it (light nav scrim and invisible status icons over a dark theme, and vice versa).
     // Re-applying here also keeps the bars in sync when the theme changes at runtime.
-    val activity = remember(context) { context.findComponentActivity() }
+    // Only hosts that opted in via [SystemBarThemeHost] get their window restyled: test hosts must
+    // never see the enableEdgeToEdge relayout race mid-gesture.
+    val activity = remember(context) { context.findComponentActivity()?.takeIf { it is SystemBarThemeHost } }
     LaunchedEffect(activity, dark) {
         if (activity == null) return@LaunchedEffect
         val barStyle = if (dark) {

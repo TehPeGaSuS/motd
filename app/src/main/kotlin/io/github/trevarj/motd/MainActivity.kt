@@ -56,6 +56,7 @@ import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.PendingShareStore
 import io.github.trevarj.motd.ui.share.parseSharedContent
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.SystemBarThemeHost
 import javax.inject.Inject
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
@@ -64,7 +65,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity(), SystemBarThemeHost {
 
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var appearancePrefs: AppearancePrefs
