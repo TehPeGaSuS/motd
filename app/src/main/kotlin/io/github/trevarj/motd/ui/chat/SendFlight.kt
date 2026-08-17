@@ -21,6 +21,7 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import kotlin.math.min
 
 /**
  * Where a send flight starts and where it ends, in the coordinates of the chat surface that hosts
@@ -59,7 +60,39 @@ internal class SendFlightAnchors {
  */
 @Stable
 internal class SendFlightMotion {
+    /** The flight proper: the bubble's travel into its slot and the gap opening beneath it. */
     val progress = Animatable(0f)
+
+    /**
+     * The immediate pre-landing rise, started on the tap frame before the pending row exists.
+     * Without it the ghost waits at the composer top -- occluded by the input bar -- for as long
+     * as the send takes to persist, so a slow send looked like a swallowed message. See
+     * [sendFlightGhostTop] for how it blends with [progress].
+     */
+    val lift = Animatable(0f)
+}
+
+/**
+ * The ghost's absolute top for one frame.
+ *
+ * While the landing row has not reported (and while the flight is still short of the hover line),
+ * the lift holds the bubble one bubble height above the composer top: visible in-flight feedback
+ * during however long persistence takes. The landing row's bottom edge is pinned to the foot of
+ * the reversed list while its gap opens upward, so the hover line coincides with the slot the row
+ * will occupy and the handoff from lift to flight cannot jump. min keeps whichever is higher,
+ * which also leaves the flight spring's deliberate overshoot visible.
+ */
+internal fun sendFlightGhostTop(
+    startTop: Float,
+    ghostHeight: Float,
+    landingBottom: Float?,
+    flightFraction: Float,
+    liftFraction: Float,
+): Float {
+    val hoverTop = startTop - ghostHeight * liftFraction
+    val flightTop = landingBottom?.let { startTop + (it - ghostHeight - startTop) * flightFraction }
+        ?: startTop
+    return min(hoverTop, flightTop)
 }
 
 /**
@@ -108,14 +141,16 @@ internal fun BoxScope.SendFlightOverlay(
             .align(Alignment.TopStart)
             .fillMaxWidth()
             .graphicsLayer {
-                val fraction = motion.progress.value
                 // Re-read the landing every frame rather than snapshotting it: the row's rect
                 // moves while the keyboard and the list settle, and a stale target lands crooked.
                 val landing = anchors.landingRow?.second?.let(anchors::local)
-                // The row's bottom edge is pinned to the foot of the reversed list while its gap
-                // opens upward, so this is the final resting top from the very first report.
-                val endTop = if (landing == null) start.top else landing.bottom - size.height
-                translationY = start.top + (endTop - start.top) * fraction
+                translationY = sendFlightGhostTop(
+                    startTop = start.top,
+                    ghostHeight = size.height,
+                    landingBottom = landing?.bottom,
+                    flightFraction = motion.progress.value,
+                    liftFraction = motion.lift.value,
+                )
             }
             .clearAndSetSemantics {},
     ) {

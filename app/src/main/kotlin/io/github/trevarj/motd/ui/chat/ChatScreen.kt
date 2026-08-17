@@ -847,14 +847,21 @@ fun ChatContent(
     LaunchedEffect(outgoingFlight?.token) {
         val token = outgoingFlight?.token ?: return@LaunchedEffect
         try {
+            // The lift starts on the tap frame, before the pending row exists: the ghost rises to
+            // its hover line above the composer while persistence runs, so a slow send stays
+            // visibly in flight. The flight spring itself still waits for the landing report,
+            // because the gap must open from zero on the frame the row first composes.
+            val liftJob = launch { flightMotion.lift.animateTo(1f, MotdMotion.sendFlightSpring) }
             val landing = withTimeoutOrNull(MotdMotion.SendFlightTargetTimeoutMs) {
                 snapshotFlow { flightAnchors.landingRow }.filterNotNull().first()
             }
             if (landing == null) {
                 // Nothing arrived to fly to. Open the gap outright so the row is whole when shown.
+                liftJob.cancel()
                 flightMotion.progress.snapTo(1f)
             } else {
                 flightMotion.progress.animateTo(1f, MotdMotion.sendFlightSpring)
+                liftJob.join()
             }
         } finally {
             // Also runs when this effect dies with the screen. A flight that outlived its UI would

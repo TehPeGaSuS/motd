@@ -1838,60 +1838,67 @@ class ConnectionManagerImpl @Inject constructor(
         if (buffer.type == BufferType.CHANNEL && !buffer.joined && buffer.pendingCloseAt == null) {
             return@sending SendAcceptance.Rejected(SendRejectionReason.NOT_IN_CHANNEL)
         }
+        val client = clientFor(buffer.networkId)
+        val ready = client?.state?.value as? IrcClientState.Ready
+        val parentId: Long? = replyToEventId
+        val canonicalParent: MessageEntity? = if (parentId != null) {
+            messageDao.byCanonicalId(parentId)
+        } else {
+            null
+        }
+        val parent: MessageEntity? = canonicalParent
+            ?.takeIf { candidate: MessageEntity -> candidate.bufferId == buffer.id }
+        val replyTagAllowed = parent?.msgid != null && ready != null &&
+            canSendClientTag(ready.caps, ready.isupport, "+reply")
+        val delivery = prepareReplyDelivery(
+            text = text,
+            replyToMsgid = parent?.msgid,
+            parentSender = parent?.sender,
+            bufferType = buffer.type,
+            visibleChannelPrefix = parent?.let { replyPrefs.config.first().visibleChannelPrefix } == true,
+            replyTagAllowed = replyTagAllowed,
+        )
+        val isBouncerServ = buffer.ircTarget.equals("BouncerServ", ignoreCase = true)
+        val preferLogicalMultiline = client != null &&
+            ready != null &&
+            !isBouncerServ &&
+            !delivery.text.replace("\r\n", "\n").replace('\r', '\n').startsWith("/me ") &&
+            client.canSendMultilineMessage(delivery.text)
+        val chunks = prepareOutgoingMessageChunks(
+            delivery.text,
+            isBouncerServ,
+            preferLogicalMultiline = preferLogicalMultiline,
+        )
+        if (chunks.isEmpty()) {
+            return@sending SendAcceptance.Rejected(SendRejectionReason.INVALID_CONTENT)
+        }
+        val planned = chunks.map { chunk ->
+            PlannedOutgoingChunk(chunk, newOutgoingLabel())
+        }
+        currentCoroutineContext().ensureActive()
+        // Persisted outside the send lock on purpose: the pending row's visibility must not queue
+        // behind another send's wire write, whose blocking flush can wedge for seconds on a
+        // degraded socket. The insert is already per-network serialized by the event sequencer,
+        // and if two rapid sends race persist order against wire order below, the rows are
+        // label-bound and re-timed by the authoritative echo, so the timeline settles to wire
+        // order either way.
+        val durable = try {
+            withContext(NonCancellable) {
+                eventProcessor.persistOutgoingPlan(
+                    bufferId = buffer.id,
+                    sender = ready?.nick ?: client?.config?.nick
+                        ?: networkDao.byId(buffer.networkId)?.nick.orEmpty(),
+                    events = planned.map { OutgoingEventPlan(it.label, it.chunk.displayText, it.chunk.kind) },
+                    replyToEventId = parent?.id,
+                    replyToMsgid = parent?.msgid,
+                )
+            }
+        } catch (_: Exception) {
+            return@sending SendAcceptance.Rejected(SendRejectionReason.PERSISTENCE_FAILED)
+        }
+        val eventIds = durable.map { it.eventId }
+        // The lock now serializes only the wire: frames from concurrent sends must not interleave.
         sendLocks.getOrPut(buffer.networkId) { Mutex() }.withLock {
-            val client = clientFor(buffer.networkId)
-            val ready = client?.state?.value as? IrcClientState.Ready
-            val parentId: Long? = replyToEventId
-            val canonicalParent: MessageEntity? = if (parentId != null) {
-                messageDao.byCanonicalId(parentId)
-            } else {
-                null
-            }
-            val parent: MessageEntity? = canonicalParent
-                ?.takeIf { candidate: MessageEntity -> candidate.bufferId == buffer.id }
-            val replyTagAllowed = parent?.msgid != null && ready != null &&
-                canSendClientTag(ready.caps, ready.isupport, "+reply")
-            val delivery = prepareReplyDelivery(
-                text = text,
-                replyToMsgid = parent?.msgid,
-                parentSender = parent?.sender,
-                bufferType = buffer.type,
-                visibleChannelPrefix = parent?.let { replyPrefs.config.first().visibleChannelPrefix } == true,
-                replyTagAllowed = replyTagAllowed,
-            )
-            val isBouncerServ = buffer.ircTarget.equals("BouncerServ", ignoreCase = true)
-            val preferLogicalMultiline = client != null &&
-                ready != null &&
-                !isBouncerServ &&
-                !delivery.text.replace("\r\n", "\n").replace('\r', '\n').startsWith("/me ") &&
-                client.canSendMultilineMessage(delivery.text)
-            val chunks = prepareOutgoingMessageChunks(
-                delivery.text,
-                isBouncerServ,
-                preferLogicalMultiline = preferLogicalMultiline,
-            )
-            if (chunks.isEmpty()) {
-                return@withLock SendAcceptance.Rejected(SendRejectionReason.INVALID_CONTENT)
-            }
-            val planned = chunks.map { chunk ->
-                PlannedOutgoingChunk(chunk, newOutgoingLabel())
-            }
-            currentCoroutineContext().ensureActive()
-            val durable = try {
-                withContext(NonCancellable) {
-                    eventProcessor.persistOutgoingPlan(
-                        bufferId = buffer.id,
-                        sender = ready?.nick ?: client?.config?.nick
-                            ?: networkDao.byId(buffer.networkId)?.nick.orEmpty(),
-                        events = planned.map { OutgoingEventPlan(it.label, it.chunk.displayText, it.chunk.kind) },
-                        replyToEventId = parent?.id,
-                        replyToMsgid = parent?.msgid,
-                    )
-                }
-            } catch (_: Exception) {
-                return@withLock SendAcceptance.Rejected(SendRejectionReason.PERSISTENCE_FAILED)
-            }
-            val eventIds = durable.map { it.eventId }
             completeDurableAcceptance(
                 eventIds = eventIds,
                 transition = {
