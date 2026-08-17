@@ -1786,17 +1786,19 @@ _showcase_apply_theme() {
   done
   wait_for_text "Appearance" 6 || true
   # Phase A cleared app data, so the production defaults already pin comfortable bubbles and IRC
-  # sprites. Restarting avoids racing two navigation pops while the theme sheet is disappearing.
-  # State only what happened. This line used to claim the theme was selected
-  # even on a run whose tap had already failed, which read as success next to
-  # wrongly-themed frames. The tap_tag above is the real gate: it fails the run,
-  # and a failed run never reaches the upload.
+  # sprites. State only what happened. This line used to claim the theme was
+  # selected even on a run whose tap had already failed, which read as success
+  # next to wrongly-themed frames. The tap_tag above is the real gate: it fails
+  # the run, and a failed run never reaches the upload.
   note "theme sheet dismissed; showcase presentation defaults left at their post-wipe values"
   sleep 1
-  adb_shell am force-stop "$MOTD_PKG"
-  # Align the OS night mode with the selected palette so the launch window and
-  # anything else keyed off uiMode agree with the app theme on cold start.
+  # Align the OS night mode with the selected palette (recreates the activity,
+  # not the process). Deliberately no force-stop: the theme applies live, and a
+  # process restart reconnects the bouncer, appending join/mode events to the
+  # dark pass that the light pass never saw — which breaks the pixel alignment
+  # the diagonal composite depends on.
   adb_shell cmd uimode night "$night" >/dev/null 2>&1 || true
+  sleep 2
   reset_to_chatlist || { fail "could not return to chat list after applying $theme_row"; return 1; }
   wait_for_desc "New conversation" 8 || true
   assert_no_crash
