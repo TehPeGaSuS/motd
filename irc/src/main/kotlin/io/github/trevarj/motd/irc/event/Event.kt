@@ -119,6 +119,14 @@ sealed interface IrcEvent {
     }
     data class NamesStarted(val channel: String) : IrcEvent
     data class AwayChanged(val nick: String, val awayMessage: String?) : IrcEvent
+    /**
+     * Server-confirmed change of OUR OWN away state (305 RPL_UNAWAY / 306 RPL_NOWAWAY).
+     *
+     * [text] is the server's informational line with our nick already dropped, so consumers can
+     * render it verbatim. Neither numeric carries the away message itself; the sender is the only
+     * one who knows it.
+     */
+    data class SelfAwayChanged(val isAway: Boolean, val text: String) : IrcEvent
     data class AccountChanged(val nick: String, val account: String?) : IrcEvent
     data class HostChanged(val nick: String, val newUser: String, val newHost: String) : IrcEvent
     data class RealnameChanged(val nick: String, val realname: String) : IrcEvent

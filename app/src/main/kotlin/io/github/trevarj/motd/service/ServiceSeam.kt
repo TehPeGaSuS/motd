@@ -95,6 +95,7 @@ internal fun rosterStateAfterExplicitRefresh(completed: Boolean): RosterLoadStat
 private val EMPTY_ROSTER_STATES: StateFlow<Map<Long, RosterLoadState>> = MutableStateFlow(emptyMap())
 private val EMPTY_PRESENCE_STATES: StateFlow<Map<PresenceKey, PresenceState>> = MutableStateFlow(emptyMap())
 private val EMPTY_LAG_STATES: StateFlow<Map<Long, Long?>> = MutableStateFlow(emptyMap())
+private val EMPTY_SELF_AWAY_STATES: StateFlow<Map<Long, String?>> = MutableStateFlow(emptyMap())
 data class ConnectionActivitySnapshot(
     val states: Map<Long, IrcClientState> = emptyMap(),
     val progressing: Map<Long, Boolean> = emptyMap(),
@@ -131,6 +132,16 @@ interface ConnectionManager {
     /** Latest PING/PONG round-trip latency (ms) per network id; null = unknown/disconnected (#34). */
     val lagStates: StateFlow<Map<Long, Long?>> get() = EMPTY_LAG_STATES
     val channelJoinOutcomes: Flow<ChannelJoinOutcome> get() = emptyFlow()
+
+    /**
+     * Our own server-confirmed away state per network id.
+     *
+     * A present key means the server told us we are away; the value is the away message when this
+     * device is the one that set it, and null otherwise (306 RPL_NOWAWAY carries no message, so an
+     * away set from another bouncer client is only known as "away"). Keys are authoritative,
+     * values are best effort. Never updated optimistically.
+     */
+    val selfAwayStates: StateFlow<Map<Long, String?>> get() = EMPTY_SELF_AWAY_STATES
 
     /** Live client for a connected network, null otherwise. */
     fun clientFor(networkId: Long): IrcClient?
@@ -225,6 +236,12 @@ interface ConnectionManager {
      * they opt into an accepted write.
      */
     suspend fun setChannelTopic(bufferId: Long, topic: String): Boolean = false
+
+    /**
+     * Write an AWAY command. A null/blank [message] is "back". [selfAwayStates] only moves when the
+     * server confirms with 305/306, so a write that never reaches the wire cannot desync the state.
+     */
+    suspend fun setAway(networkId: Long, message: String? = null) = Unit
 
     /** True when this network's live client can run a server-side soju SEARCH right now. */
     fun serverSearchAvailable(networkId: Long): Boolean = clientFor(networkId)?.searchAvailable == true

@@ -484,6 +484,11 @@ class ConnectionManagerImpl @Inject constructor(
 
     private val _lagStates = MutableStateFlow<Map<Long, Long?>>(emptyMap())
     override val lagStates: StateFlow<Map<Long, Long?>> = _lagStates.asStateFlow()
+
+    private val _selfAwayStates = MutableStateFlow<Map<Long, String?>>(emptyMap())
+    override val selfAwayStates: StateFlow<Map<Long, String?>> = _selfAwayStates.asStateFlow()
+    /** Away text this device last wrote, attached to the state once the server confirms with 306. */
+    private val pendingAwayMessages = java.util.concurrent.ConcurrentHashMap<Long, String>()
     private val monitoredTargets = java.util.concurrent.ConcurrentHashMap<Long, Map<String, String>>()
     private val monitorInitialized = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
     private val monitorLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
@@ -922,6 +927,8 @@ class ConnectionManagerImpl @Inject constructor(
             monitorLocks.clear()
             _presenceStates.value = emptyMap()
             _lagStates.value = emptyMap()
+            pendingAwayMessages.clear()
+            _selfAwayStates.value = emptyMap()
             eventProcessor.shutdown()
         }
     }
@@ -1082,6 +1089,7 @@ class ConnectionManagerImpl @Inject constructor(
     private suspend fun handleConnectionEvent(networkId: Long, event: IrcEvent) {
         avatarCoordinator.onEvent(networkId, event)
         eventProcessor.process(networkId, event)
+        applySelfAway(networkId, event)
         channelJoinOutcome(networkId, event, clientFor(networkId)?.isupport?.identityRules ?: IrcIdentityRules())
             ?.let { _channelJoinOutcomes.emit(it) }
         when (event) {
@@ -1307,6 +1315,45 @@ class ConnectionManagerImpl @Inject constructor(
         monitoredTargets.remove(networkId)
         monitorInitialized.remove(networkId)
         _presenceStates.update { current -> invalidatePresenceState(current, networkId) }
+        // Our own away state is server-confirmed; a connection that is gone confirms nothing.
+        pendingAwayMessages.remove(networkId)
+        _selfAwayStates.update { current -> current - networkId }
+    }
+
+    /** Fold one event into the server-confirmed self-away state (never optimistic). */
+    private fun applySelfAway(networkId: Long, event: IrcEvent) {
+        if (!affectsSelfAway(event)) return
+        val client = clientFor(networkId)
+        val isupport = client?.isupport
+        val normalize: (String) -> String =
+            if (isupport != null) isupport::normalize else { value -> value.lowercase() }
+        val selfNick = (client?.state?.value as? IrcClientState.Ready)?.nick
+        val pending = pendingAwayMessages[networkId]
+        _selfAwayStates.update { current ->
+            selfAwayAfterEvent(current, networkId, event, pending, selfNick, normalize)
+        }
+        // The confirmation consumed the pending text either way: 305 means we are back, 306 means
+        // the message (if any) is now published in the state.
+        if (event is IrcEvent.SelfAwayChanged) pendingAwayMessages.remove(networkId)
+    }
+
+    override suspend fun setAway(networkId: Long, message: String?) {
+        val client = clientFor(networkId) ?: return
+        val text = message?.takeIf { it.isNotBlank() }
+        if (text == null) pendingAwayMessages.remove(networkId) else pendingAwayMessages[networkId] = text
+        try {
+            client.send(
+                io.github.trevarj.motd.irc.proto.IrcMessage(command = "AWAY", params = listOfNotNull(text)),
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (e: Exception) {
+            // Nothing reached the wire, so no confirmation is coming; drop the unpublished text.
+            pendingAwayMessages.remove(networkId)
+            diagnostics.record("connections", "away_write_failed") {
+                mapOf("network_id" to networkId, "error" to e::class.simpleName)
+            }
+        }
     }
 
     private fun fingerprint(row: NetworkEntity): String = networkFingerprint(

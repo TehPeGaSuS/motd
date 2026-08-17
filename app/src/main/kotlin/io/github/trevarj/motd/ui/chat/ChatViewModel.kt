@@ -1405,10 +1405,10 @@ class ChatViewModel @Inject constructor(
                 connectionManager.clientFor(nid)
                     ?.send(IrcMessage(command = "TOPIC", params = listOf(channel, cmd.topic)))
             }
-            // `/away [msg]` — confirmations (305/306) land in the SERVER buffer via §5.6.3.
+            // `/away [msg]` and `/back` — the seam owns the write so the server-confirmed self-away
+            // state stays in one place. Confirmations (305/306) still land in the SERVER buffer.
             is ChatCommand.Away -> networkId?.let { nid ->
-                connectionManager.clientFor(nid)
-                    ?.send(IrcMessage(command = "AWAY", params = listOfNotNull(cmd.message)))
+                connectionManager.setAway(nid, cmd.message)
             }
             is ChatCommand.Notice -> networkId?.let { nid ->
                 connectionManager.clientFor(nid)

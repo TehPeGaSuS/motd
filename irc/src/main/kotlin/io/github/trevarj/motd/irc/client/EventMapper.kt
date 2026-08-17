@@ -145,6 +145,12 @@ class EventMapper(
                 val nick = msg.source?.nick ?: return IrcEvent.Raw(msg)
                 IrcEvent.AwayChanged(nick, msg.params.getOrNull(0))
             }
+            // 305 RPL_UNAWAY / 306 RPL_NOWAWAY confirm our own away state. params[0] is our nick;
+            // drop it so the remaining text can be rendered verbatim.
+            "305", "306" -> IrcEvent.SelfAwayChanged(
+                isAway = msg.command == "306",
+                text = msg.params.drop(1).joinToString(" ").trim(),
+            )
             "ACCOUNT" -> {
                 val nick = msg.source?.nick ?: return IrcEvent.Raw(msg)
                 val acct = msg.params.getOrNull(0)

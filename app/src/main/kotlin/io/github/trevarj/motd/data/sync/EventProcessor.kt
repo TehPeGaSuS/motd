@@ -331,6 +331,7 @@ class EventProcessor @Inject constructor(
                 EventOrigin.PUSH -> Unit
             }
             is IrcEvent.AwayChanged -> if (origin.mutatesSessionState) upsertUser(networkId, event.nick) { it.copy(away = event.awayMessage != null) }
+            is IrcEvent.SelfAwayChanged -> if (origin == EventOrigin.LIVE) onSelfAwayChanged(networkId, event)
             is IrcEvent.AccountChanged -> if (origin.mutatesSessionState) onAccountChanged(networkId, event)
             is IrcEvent.HostChanged -> if (origin.mutatesSessionState) upsertUser(networkId, event.nick) { it.copy(hostmask = "${event.newUser}@${event.newHost}") }
             is IrcEvent.RealnameChanged -> if (origin.mutatesSessionState) upsertUser(networkId, event.nick) { it.copy(realname = event.realname) }
@@ -2800,6 +2801,16 @@ class EventProcessor @Inject constructor(
         return true
     }
 
+    /**
+     * Own away confirmation (305/306) → SERVER buffer, exactly as the Raw whitelist used to render
+     * it before these numerics became a typed event. Live-only, like every other SERVER_INFO line.
+     */
+    private suspend fun onSelfAwayChanged(networkId: Long, e: IrcEvent.SelfAwayChanged) {
+        val st = stateFor(networkId)
+        val bufferId = ensureServerBuffer(networkId, st)
+        insertSystem(bufferId, serverCtx(), MessageKind.SERVER_INFO, "", e.text)
+    }
+
     /** Disconnected marker → SERVER buffer for cheap in-history reconnect visibility. */
     private suspend fun onDisconnected(networkId: Long, e: IrcEvent.Disconnected) {
         rosterSnapshots.keys.removeAll { it.networkId == networkId }
@@ -3450,16 +3461,17 @@ class EventProcessor @Inject constructor(
     private companion object {
         /**
          * Informational numerics persisted to the SERVER buffer as SERVER_INFO (plans/16 §5.6.3):
-         * welcome (001..004), lusers (251..255, 265, 266), motd (375, 372, 376), away toggled
-         * (305, 306), RPL_AWAY (301), and the WHOIS set (311, 312, 317, 318, 319, 330, 338) as a
-         * fallback surface when labeled-response is missing. LIST numerics (321/322/323) are
-         * deliberately excluded so a browse never floods the buffer.
+         * welcome (001..004), lusers (251..255, 265, 266), motd (375, 372, 376), RPL_AWAY (301),
+         * and the WHOIS set (311, 312, 317, 318, 319, 330, 338) as a fallback surface when
+         * labeled-response is missing. LIST numerics (321/322/323) are deliberately excluded so a
+         * browse never floods the buffer. Own away confirmations (305/306) are no longer Raw: they
+         * map to [IrcEvent.SelfAwayChanged] and render the identical line from that branch.
          */
         val SERVER_INFO_NUMERICS: Set<String> = setOf(
             "001", "002", "003", "004",
             "251", "252", "253", "254", "255", "265", "266",
             "375", "372", "376",
-            "305", "306", "301",
+            "301",
             "311", "312", "317", "318", "319", "330", "338",
         )
 
