@@ -86,6 +86,7 @@ import io.github.trevarj.motd.ui.share.PendingShareStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
@@ -397,6 +398,27 @@ class ChatViewModelTest {
 
         assertEquals(listOf(SentMessage(channel.id, link, null)), manager.messages)
         assertEquals("", vm.composerDraft.value.text)
+    }
+
+    @Test
+    fun `a prefill pushed at the open chat arrives as composer prefill text`() = runTest {
+        // The gesture orb inserts into the visible conversation without navigating: delivery rides
+        // composerPrefills alone, so this chain must work with the screen already collecting.
+        val drafts = ComposerDraftStore(db)
+        val vm = viewModel(channel, FakeConnectionManager(network.id), drafts = drafts)
+        advanceUntilIdle()
+
+        val received = mutableListOf<String>()
+        val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+            vm.composerPrefills.collect { received += it }
+        }
+        drafts.push(channel.id, "on my way ")
+        runCurrent()
+        collector.cancel()
+
+        assertEquals(listOf("on my way "), received)
+        // Delivered means consumed: entry hydration later must not append it a second time.
+        assertEquals(null, drafts.consume(channel.id))
     }
 
     @Test
@@ -2823,6 +2845,8 @@ class ChatViewModelTest {
         // The seam the timeline's history rule ends at. The production default is a Noop, so a test
         // that wants to observe a fill at all has to hand one in.
         gapFiller: HistoryGapFiller = NoopHistoryGapFiller,
+        // Injectable so a test can push prefills at the exact store instance the VM listens to.
+        drafts: ComposerDraftStore = ComposerDraftStore(db),
     ): ChatViewModel {
         val routeState = mutableMapOf<String, Any>("bufferId" to routeBufferId)
         jumpToMsgid?.let { routeState["jumpToMsgid"] = it }
@@ -2843,7 +2867,7 @@ class ChatViewModelTest {
             linkPreviewRepository = object : LinkPreviewRepository {
                 override suspend fun preview(url: String, networkId: Long?): LinkPreview? = null
             },
-            draftStore = ComposerDraftStore(db),
+            draftStore = drafts,
             pendingShareStore = PendingShareStore(),
             scrollPositionStore = scrollPositions,
             historyPageLoader = HistoryPageLoader(processor),

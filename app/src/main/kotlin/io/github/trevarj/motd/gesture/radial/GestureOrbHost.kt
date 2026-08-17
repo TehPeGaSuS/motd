@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import androidx.navigation.toRoute
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.resolveAutoPalette
@@ -43,6 +44,7 @@ import io.github.trevarj.motd.ui.nav.ChannelInfoRoute
 import io.github.trevarj.motd.ui.nav.ChatListRoute
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import io.github.trevarj.motd.ui.nav.SearchRoute
+import io.github.trevarj.motd.ui.nav.isChatRoutePattern
 import io.github.trevarj.motd.ui.nav.openChat
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.themeIdentityPalette
@@ -275,9 +277,14 @@ private fun HapticFeedback.perform(update: RadialUpdate) {
 /** Perform one gesture navigation request on the graph. */
 private fun NavHostController.perform(request: GestureNavRequest) {
     when (request) {
-        // Never replaces the open chat: the orb is a jump between conversations, and losing the one
-        // behind it would turn every jump into a one-way trip.
-        is GestureNavRequest.OpenChat -> openChat(ChatRoute(request.bufferId), replaceCurrentChat = false)
+        // A jump to the chat already on screen is a no-op (prefill delivery arrives through
+        // ComposerDraftStore.prefillPushes, not re-entry). Any other chat must replace the open
+        // one: a launchSingleTop re-navigation to an on-top ChatRoute never updates its
+        // arguments, so a non-replacing jump from inside a chat would be silently swallowed.
+        is GestureNavRequest.OpenChat ->
+            if (shouldPerformChatJump(currentChatBufferId(), request.bufferId)) {
+                openChat(ChatRoute(request.bufferId), replaceCurrentChat = true)
+            }
         GestureNavRequest.OpenSearch -> navigate(SearchRoute())
         is GestureNavRequest.OpenChannelInfo -> navigate(ChannelInfoRoute(request.bufferId))
         GestureNavRequest.OpenChatList -> navigate(ChatListRoute) {
@@ -285,3 +292,14 @@ private fun NavHostController.perform(request: GestureNavRequest) {
         }
     }
 }
+
+/** The buffer of the ChatRoute on top of the back stack, or null when another screen is on top. */
+private fun NavHostController.currentChatBufferId(): Long? {
+    val entry = currentBackStackEntry ?: return null
+    if (!isChatRoutePattern(entry.destination.route)) return null
+    return runCatching { entry.toRoute<ChatRoute>().bufferId }.getOrNull()
+}
+
+/** False only when the requested chat is the one already on top — then navigating is pure churn. */
+internal fun shouldPerformChatJump(currentChatBufferId: Long?, targetBufferId: Long): Boolean =
+    currentChatBufferId != targetBufferId
