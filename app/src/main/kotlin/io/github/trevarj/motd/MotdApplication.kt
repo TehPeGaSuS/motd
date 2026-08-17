@@ -12,6 +12,7 @@ import io.github.trevarj.motd.di.AppVisibilityImpl
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.push.PushInstanceCoordinator
 import io.github.trevarj.motd.push.PushLifecycleCoordinator
+import io.github.trevarj.motd.service.AutoAwayCoordinator
 import io.github.trevarj.motd.ui.ComposeFoundationWorkarounds
 import javax.inject.Inject
 
@@ -22,6 +23,9 @@ class MotdApplication : Application(), ImageLoaderFactory {
     @Inject lateinit var pushInstanceCoordinator: PushInstanceCoordinator
 
     @Inject lateinit var pushLifecycleCoordinator: PushLifecycleCoordinator
+
+    // Backgrounded-for-long-enough → AWAY on every connected network, and back on return.
+    @Inject lateinit var autoAwayCoordinator: AutoAwayCoordinator
 
     @Inject lateinit var diagnosticLogger: DiagnosticLogger
 
@@ -37,6 +41,7 @@ class MotdApplication : Application(), ImageLoaderFactory {
         appVisibility.start()
         pushInstanceCoordinator.start()
         pushLifecycleCoordinator.start()
+        autoAwayCoordinator.start()
     }
 
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)

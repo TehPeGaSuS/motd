@@ -530,6 +530,17 @@
     <string name="chat_presence_global_summary">Current global setting: %1$s</string>
     <string name="chat_presence_overflow_summary">Current: %1$s</string>
     <string name="chat_presence_write_failed">Couldn\'t save presence setting</string>
+    <string name="settings_auto_away_section">Auto-away</string>
+    <string name="settings_auto_away">Away when backgrounded</string>
+    <string name="settings_auto_away_desc">Mark yourself away on every connected network after the app has been in the background for a while, and back when you return.</string>
+    <string name="settings_auto_away_delay">Delay before going away</string>
+    <plurals name="settings_auto_away_minutes">
+        <item quantity="one">%1$d minute</item>
+        <item quantity="other">%1$d minutes</item>
+    </plurals>
+    <string name="settings_auto_away_message_title">Away message</string>
+    <string name="settings_auto_away_message_hint">Leave blank to use the default</string>
+    <string name="auto_away_default_message">Away (auto)</string>
     <string name="settings_show_images">Show images and videos</string>
     <string name="settings_show_images_desc">Load inline images, videos, and preview thumbnails</string>
     <string name="settings_direct_media_proxied">Load previews over direct connection</string>

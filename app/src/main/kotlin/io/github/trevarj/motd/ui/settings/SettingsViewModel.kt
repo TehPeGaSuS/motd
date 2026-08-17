@@ -189,6 +189,18 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.setPresenceMode(mode)
     }
 
+    fun setAutoAwayEnabled(enabled: Boolean) = viewModelScope.launch {
+        settingsRepository.setAutoAwayEnabled(enabled)
+    }
+
+    fun setAutoAwayMinutes(minutes: Int) = viewModelScope.launch {
+        settingsRepository.setAutoAwayMinutes(minutes)
+    }
+
+    fun setAutoAwayMessage(message: String) = viewModelScope.launch {
+        settingsRepository.setAutoAwayMessage(message)
+    }
+
     fun setWallpaper(selection: WallpaperSelection) = viewModelScope.launch {
         appearancePrefs.setWallpaper(selection)
     }

@@ -8,11 +8,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -31,8 +34,10 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.VoiceConfig
 import io.github.trevarj.motd.audio.VoiceRecordingQuality
+import io.github.trevarj.motd.data.prefs.AUTO_AWAY_MINUTE_CHOICES
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.service.autoAwayText
 import io.github.trevarj.motd.ui.chat.presenceModeDescription
 import io.github.trevarj.motd.ui.chat.presenceModeLabel
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
@@ -78,6 +83,9 @@ fun ChatSettingsScreen(
         onOpenFools = onOpenFools,
         onOpenDirectConnections = onOpenDirectConnections,
         onPresenceMode = viewModel::setPresenceMode,
+        onAutoAwayEnabled = viewModel::setAutoAwayEnabled,
+        onAutoAwayMinutes = viewModel::setAutoAwayMinutes,
+        onAutoAwayMessage = viewModel::setAutoAwayMessage,
         onFoolsMode = viewModel::setFoolsMode,
         onShowComposerEmoji = viewModel::setShowComposerEmoji,
         onChatSoundsEnabled = viewModel::setChatSoundsEnabled,
@@ -105,6 +113,9 @@ fun ChatSettingsContent(
     onOpenFools: () -> Unit,
     onOpenDirectConnections: () -> Unit,
     onPresenceMode: (PresenceMode) -> Unit,
+    onAutoAwayEnabled: (Boolean) -> Unit,
+    onAutoAwayMinutes: (Int) -> Unit,
+    onAutoAwayMessage: (String) -> Unit,
     onFoolsMode: (FoolsMode) -> Unit,
     onShowComposerEmoji: (Boolean) -> Unit,
     onChatSoundsEnabled: (Boolean) -> Unit,
@@ -119,6 +130,8 @@ fun ChatSettingsContent(
     onClearAudioCache: () -> Unit,
 ) {
     var qualitySheetOpen by remember { mutableStateOf(false) }
+    var awayMessageDialogOpen by remember { mutableStateOf(false) }
+    val defaultAwayMessage = stringResource(R.string.auto_away_default_message)
     SettingsScaffold(title = stringResource(R.string.settings_chat), onBack = onBack) {
         SettingsGroup(title = stringResource(R.string.settings_messages_section)) {
             SubLabel(stringResource(R.string.settings_presence_title))
@@ -154,6 +167,32 @@ fun ChatSettingsContent(
                 checked = avatars.showSharedAvatars,
                 onCheckedChange = onShowSharedAvatars,
                 switchTag = "settings_switch_show_shared_avatars",
+            )
+        }
+        // Deliberately after the message-display group: the presence radios stay the first thing on
+        // this screen, which is what the required E2E journey asserts without scrolling.
+        SettingsGroup(title = stringResource(R.string.settings_auto_away_section)) {
+            SwitchRow(
+                title = stringResource(R.string.settings_auto_away),
+                subtitle = stringResource(R.string.settings_auto_away_desc),
+                checked = settings.autoAwayEnabled,
+                onCheckedChange = onAutoAwayEnabled,
+                switchTag = "settings_auto_away_switch",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SubLabel(stringResource(R.string.settings_auto_away_delay))
+            AutoAwayDelayGroup(
+                current = settings.autoAwayMinutes,
+                enabled = settings.autoAwayEnabled,
+                onSelect = onAutoAwayMinutes,
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_auto_away_message_title)) },
+                supportingContent = { Text(autoAwayText(settings.autoAwayMessage, defaultAwayMessage)) },
+                modifier = Modifier
+                    .clickable(enabled = settings.autoAwayEnabled) { awayMessageDialogOpen = true }
+                    .testTag("settings_auto_away_message"),
             )
         }
         SettingsGroup(title = stringResource(R.string.settings_composer_section)) {
@@ -245,6 +284,17 @@ fun ChatSettingsContent(
             FoolsModeGroup(current = settings.foolsMode, onSelect = onFoolsMode)
         }
     }
+    if (awayMessageDialogOpen) {
+        AutoAwayMessageDialog(
+            initial = settings.autoAwayMessage,
+            placeholder = defaultAwayMessage,
+            onSave = {
+                onAutoAwayMessage(it)
+                awayMessageDialogOpen = false
+            },
+            onDismiss = { awayMessageDialogOpen = false },
+        )
+    }
     if (qualitySheetOpen) {
         VoiceQualitySheet(
             selected = voice.quality,
@@ -292,6 +342,59 @@ private fun voiceQualityDescription(quality: VoiceRecordingQuality): String = wh
     VoiceRecordingQuality.DATA_SAVER -> "Opus 24 kbps · AAC 32 kbps"
     VoiceRecordingQuality.BALANCED -> "Opus 48 kbps · AAC 64 kbps"
     VoiceRecordingQuality.HIGH -> "Opus 64 kbps · AAC 96 kbps"
+}
+
+/** Background delay before auto-away fires. Disabled (but visible) while the feature is off. */
+@Composable
+private fun AutoAwayDelayGroup(current: Int, enabled: Boolean, onSelect: (Int) -> Unit) {
+    Column(Modifier.selectableGroup()) {
+        AUTO_AWAY_MINUTE_CHOICES.forEach { minutes ->
+            RadioRow(
+                label = pluralStringResource(R.plurals.settings_auto_away_minutes, minutes, minutes),
+                selected = current == minutes,
+                enabled = enabled,
+                onClick = { onSelect(minutes) },
+                modifier = Modifier.testTag("settings_auto_away_minutes_$minutes"),
+            )
+        }
+    }
+}
+
+/** Blank keeps the localized default, which the field advertises as its placeholder. */
+@Composable
+private fun AutoAwayMessageDialog(
+    initial: String,
+    placeholder: String,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_auto_away_message_title)) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                placeholder = { Text(placeholder) },
+                supportingText = { Text(stringResource(R.string.settings_auto_away_message_hint)) },
+                modifier = Modifier.fillMaxWidth().testTag("settings_auto_away_message_field"),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(text) },
+                modifier = Modifier.testTag("settings_auto_away_message_save"),
+            ) {
+                Text(stringResource(R.string.action_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        },
+        modifier = Modifier.testTag("settings_auto_away_message_dialog"),
+    )
 }
 
 /** Global presence-event choice. A conversation can override it from its own overflow menu. */
@@ -344,7 +447,9 @@ private fun ChatSettingsPreview() {
             voice = VoiceConfig(),
             avatars = AvatarConfig(),
             onBack = {}, onOpenFriends = {}, onOpenFools = {}, onOpenDirectConnections = {},
-            onPresenceMode = {}, onFoolsMode = {}, onShowComposerEmoji = {},
+            onPresenceMode = {},
+            onAutoAwayEnabled = {}, onAutoAwayMinutes = {}, onAutoAwayMessage = {},
+            onFoolsMode = {}, onShowComposerEmoji = {},
             onChatSoundsEnabled = {},
             onVisibleReplyPrefix = {},
             onShowImages = {}, onShowLinkPreviews = {}, onDirectMediaOnProxiedNetworks = {},

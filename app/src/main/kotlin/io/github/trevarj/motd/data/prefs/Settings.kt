@@ -71,6 +71,19 @@ enum class HistorySyncDepth(val lookbackMs: Long?) {
     EVERYTHING(null),
 }
 
+/**
+ * Background delays offered for auto-away, in minutes. The stored value is coerced onto this list so
+ * a hand-edited or future-build preference can never arm an unexpected timer.
+ */
+val AUTO_AWAY_MINUTE_CHOICES: List<Int> = listOf(1, 5, 10, 15, 30, 60)
+
+/** Default auto-away delay: the choice used until the user picks another one. */
+const val DEFAULT_AUTO_AWAY_MINUTES: Int = 10
+
+/** Snap a stored/incoming delay onto [AUTO_AWAY_MINUTE_CHOICES]; anything unknown takes the default. */
+internal fun autoAwayMinutesFromPreference(saved: Int?): Int =
+    saved?.takeIf { it in AUTO_AWAY_MINUTE_CHOICES } ?: DEFAULT_AUTO_AWAY_MINUTES
+
 /** Which visual style to use for nick avatars. IRC sprites are the default for new users. */
 enum class AvatarStyle { MONOGRAM, INITIALS, IRC_SPRITE }
 
@@ -122,6 +135,12 @@ data class Settings(
     val chatSoundsEnabled: Boolean = true,
     /** Window the first history sync of a network enumerates; chosen during soju onboarding. */
     val historySyncDepth: HistorySyncDepth = HistorySyncDepth.MONTH,
+    /** Mark yourself away on every connected network while the app stays in the background. */
+    val autoAwayEnabled: Boolean = false,
+    /** How long the app must stay backgrounded before auto-away fires (minutes). */
+    val autoAwayMinutes: Int = DEFAULT_AUTO_AWAY_MINUTES,
+    /** Away text written by auto-away; blank means "use the localized default". */
+    val autoAwayMessage: String = "",
 )
 
 /** Canonical key for friends/fools/override lookups: trimmed + lowercased.
@@ -163,6 +182,11 @@ interface SettingsRepository {
     suspend fun setShowComposerEmoji(show: Boolean)
     suspend fun setChatSoundsEnabled(enabled: Boolean)
     suspend fun setHistorySyncDepth(d: HistorySyncDepth)
+    suspend fun setAutoAwayEnabled(enabled: Boolean)
+    /** [minutes] is coerced onto [AUTO_AWAY_MINUTE_CHOICES]. */
+    suspend fun setAutoAwayMinutes(minutes: Int)
+    /** Blank keeps the localized default message. */
+    suspend fun setAutoAwayMessage(message: String)
 }
 
 /** Webpush endpoint + client keypair persistence (DataStore). Implemented by WP4 alongside

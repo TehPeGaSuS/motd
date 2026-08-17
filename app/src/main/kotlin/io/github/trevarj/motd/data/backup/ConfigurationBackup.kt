@@ -367,6 +367,9 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
             settingsRepository.setShowComposerEmoji(it.showComposerEmoji)
             settingsRepository.setChatSoundsEnabled(it.chatSoundsEnabled)
             settingsRepository.setHistorySyncDepth(it.historySyncDepth)
+            settingsRepository.setAutoAwayEnabled(it.autoAwayEnabled)
+            settingsRepository.setAutoAwayMinutes(it.autoAwayMinutes)
+            settingsRepository.setAutoAwayMessage(it.autoAwayMessage)
         }
         settings.appearance?.let {
             appearancePrefs.setTheme(it.theme)

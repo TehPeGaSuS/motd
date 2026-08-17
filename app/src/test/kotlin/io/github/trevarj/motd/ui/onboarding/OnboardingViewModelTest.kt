@@ -151,6 +151,9 @@ class OnboardingViewModelTest {
             historySyncDepth = d
             log?.add("depth:${d.name}")
         }
+        override suspend fun setAutoAwayEnabled(enabled: Boolean) = Unit
+        override suspend fun setAutoAwayMinutes(minutes: Int) = Unit
+        override suspend fun setAutoAwayMessage(message: String) = Unit
     }
 
     private suspend fun TestScope.readyBouncer(

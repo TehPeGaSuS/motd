@@ -52,6 +52,9 @@ internal object PrefKeys {
     val SHOW_COMPOSER_EMOJI = stringPreferencesKey("show_composer_emoji")
     val CHAT_SOUNDS_ENABLED = stringPreferencesKey("chat_sounds_enabled")
     val HISTORY_SYNC_DEPTH = stringPreferencesKey("history_sync_depth")
+    val AUTO_AWAY_ENABLED = stringPreferencesKey("auto_away_enabled")
+    val AUTO_AWAY_MINUTES = stringPreferencesKey("auto_away_minutes")
+    val AUTO_AWAY_MESSAGE = stringPreferencesKey("auto_away_message")
 }
 
 // -- Round 4 nick-set / hue-override JSON codecs (top-level + internal so they are unit-testable
@@ -125,6 +128,9 @@ class DataStoreSettingsRepository @Inject constructor(
             historySyncDepth = prefs[PrefKeys.HISTORY_SYNC_DEPTH]
                 ?.let { runCatching { HistorySyncDepth.valueOf(it) }.getOrNull() }
                 ?: HistorySyncDepth.MONTH,
+            autoAwayEnabled = prefs[PrefKeys.AUTO_AWAY_ENABLED]?.toBooleanStrictOrNull() ?: false,
+            autoAwayMinutes = autoAwayMinutesFromPreference(prefs[PrefKeys.AUTO_AWAY_MINUTES]?.toIntOrNull()),
+            autoAwayMessage = prefs[PrefKeys.AUTO_AWAY_MESSAGE].orEmpty(),
         )
     }
 
@@ -262,6 +268,25 @@ class DataStoreSettingsRepository @Inject constructor(
 
     override suspend fun setHistorySyncDepth(d: HistorySyncDepth) {
         store.edit { it[PrefKeys.HISTORY_SYNC_DEPTH] = d.name }
+    }
+
+    override suspend fun setAutoAwayEnabled(enabled: Boolean) {
+        store.edit { it[PrefKeys.AUTO_AWAY_ENABLED] = enabled.toString() }
+    }
+
+    /** Coerced on write as well as on read: an off-list delay must never reach the coordinator. */
+    override suspend fun setAutoAwayMinutes(minutes: Int) {
+        val choice = autoAwayMinutesFromPreference(minutes)
+        store.edit { it[PrefKeys.AUTO_AWAY_MINUTES] = choice.toString() }
+    }
+
+    /** Blank clears the key so the localized default applies again. */
+    override suspend fun setAutoAwayMessage(message: String) {
+        val trimmed = message.trim()
+        store.edit {
+            if (trimmed.isEmpty()) it.remove(PrefKeys.AUTO_AWAY_MESSAGE)
+            else it[PrefKeys.AUTO_AWAY_MESSAGE] = trimmed
+        }
     }
 
     // Empty set removes its key (mirrors setEndpointFor); non-empty writes the JSON array.
