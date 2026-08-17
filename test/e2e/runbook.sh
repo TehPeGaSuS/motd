@@ -1751,8 +1751,14 @@ phase_r() {
 # ==========================================================================
 # Phase S — deterministic public showcase screenshots
 # ==========================================================================
+# _showcase_apply_theme <row-text> <night yes|no> [restart]
+# Pass "restart" only before the FIRST capture pass: the relaunch rebuilds the
+# timeline from Room (nick-change pills, sender headers, and the reconnect
+# join/mode noise folded into the collapsed summary pill). Later passes must
+# switch live — a second restart reconnects the bouncer and appends join/mode
+# events only those frames see, breaking the composite's pixel alignment.
 _showcase_apply_theme() {
-  local theme_row="$1" night="$2"
+  local theme_row="$1" night="$2" restart="${3:-}"
 
   step "Pin the showcase appearance to $theme_row"
   reset_to_chatlist || { fail "could not reach the chat list before selecting $theme_row"; return 1; }
@@ -1792,11 +1798,9 @@ _showcase_apply_theme() {
   # the run, and a failed run never reaches the upload.
   note "theme sheet dismissed; showcase presentation defaults left at their post-wipe values"
   sleep 1
+  [ "$restart" = restart ] && adb_shell am force-stop "$MOTD_PKG"
   # Align the OS night mode with the selected palette (recreates the activity,
-  # not the process). Deliberately no force-stop: the theme applies live, and a
-  # process restart reconnects the bouncer, appending join/mode events to the
-  # dark pass that the light pass never saw — which breaks the pixel alignment
-  # the diagonal composite depends on.
+  # not the process, so a live switch appends no connection events).
   adb_shell cmd uimode night "$night" >/dev/null 2>&1 || true
   sleep 2
   reset_to_chatlist || { fail "could not return to chat list after applying $theme_row"; return 1; }
@@ -1852,7 +1856,7 @@ phase_s() {
   # the frames legible and pixel-aligned between the light and dark passes.
   enter_status_bar_demo
 
-  _showcase_apply_theme "Ayu Light" no || return 1
+  _showcase_apply_theme "Ayu Light" no restart || return 1
   _showcase_capture_pass light
 
   _showcase_apply_theme "Ayu Dark" yes || return 1
