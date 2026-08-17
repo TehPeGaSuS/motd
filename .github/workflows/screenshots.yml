@@ -119,10 +119,11 @@ jobs:
             adb install -r -g app/build/outputs/apk/e2e/app-e2e.apk
             ./test/e2e/runbook.sh
 
-      # Merge each light/dark pair into the tracked diagonal-split PNGs. The
-      # runner's preinstalled ImageMagick 6 is enough; the script needs no SDK.
+      # Merge each light/dark pair into the tracked diagonal-split PNGs.
+      # Hosted runners no longer ship ImageMagick, so pull it from the flake's
+      # pinned nixpkgs (binary-cached; far cheaper than the Android dev shell).
       - name: Composite the light/dark capture pairs
-        run: ./test/e2e/showcase-composite.sh screenshots
+        run: nix shell --inputs-from . nixpkgs#imagemagick -c ./test/e2e/showcase-composite.sh screenshots
 
       - name: Upload refreshed screenshots
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
