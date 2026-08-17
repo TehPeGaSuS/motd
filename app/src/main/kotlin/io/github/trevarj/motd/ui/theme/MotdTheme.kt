@@ -1,6 +1,11 @@
 package io.github.trevarj.motd.ui.theme
 
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Build
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -8,6 +13,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -88,6 +94,14 @@ fun ConversationTypography(
 val LocalAvatarStyle: ProvidableCompositionLocal<AvatarStyle> =
     staticCompositionLocalOf { AvatarStyle.IRC_SPRITE }
 
+// Previews and Compose tests host content in a non-activity context; system-bar styling is
+// activity-only, so resolve to null there instead of requiring a ComponentActivity.
+private tailrec fun Context.findComponentActivity(): ComponentActivity? = when (this) {
+    is ComponentActivity -> this
+    is ContextWrapper -> baseContext.findComponentActivity()
+    else -> null
+}
+
 @Composable
 fun MotdTheme(
     themePreset: ColorThemePreset = ColorThemePreset.SYSTEM,
@@ -124,6 +138,24 @@ fun MotdTheme(
     }
     val useTrueBlack = dark && (trueBlack || themePreset == ColorThemePreset.AMOLED)
     val colorScheme = if (useTrueBlack) resolvedScheme.withTrueBlackSurfaces() else resolvedScheme
+    // System bars must follow the resolved palette, not the OS night mode: the bare
+    // enableEdgeToEdge() in onCreate keys off uiMode, which disagrees with any fixed palette
+    // opposing it (light nav scrim and invisible status icons over a dark theme, and vice versa).
+    // Re-applying here also keeps the bars in sync when the theme changes at runtime.
+    val activity = remember(context) { context.findComponentActivity() }
+    LaunchedEffect(activity, dark) {
+        if (activity == null) return@LaunchedEffect
+        val barStyle = if (dark) {
+            SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        } else {
+            SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+        }
+        activity.enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Let the root Surface background show through instead of the automatic nav scrim.
+            activity.window.isNavigationBarContrastEnforced = false
+        }
+    }
     val nickTextBackgrounds = remember(colorScheme) {
         listOf(
             colorScheme.background,
