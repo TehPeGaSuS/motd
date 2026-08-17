@@ -2,6 +2,7 @@ package io.github.trevarj.motd.e2e.robots
 
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
@@ -27,12 +28,22 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
     fun isPresent(tag: String): Boolean =
         compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
 
-    fun awaitTag(tag: String, timeoutMs: Long = 10_000) {
+    // 30s, not 10s: on cold 2-core CI runners the first composition of a screen can outlast 10s
+    // (the onboarding SERVER→AUTH page did exactly that), and a journey that would have passed in
+    // second 11 is a flake, not a signal. Genuine failures still surface well inside the job budget.
+    fun awaitTag(tag: String, timeoutMs: Long = 30_000) {
         compose.waitUntil(timeoutMs) { isPresent(tag) }
     }
 
     fun click(tag: String) {
         awaitTag(tag)
+        // A click on a still-disabled control is a silent no-op that only surfaces as a downstream
+        // timeout (e.g. a gated wizard Next); wait for enablement so the tap provably lands.
+        compose.waitUntil(10_000) {
+            runCatching {
+                compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsEnabled()
+            }.isSuccess
+        }
         compose.onNodeWithTag(tag, useUnmergedTree = true).performClick()
     }
 
