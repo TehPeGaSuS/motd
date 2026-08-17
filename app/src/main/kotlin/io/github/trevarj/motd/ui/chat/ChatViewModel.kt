@@ -79,6 +79,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.first
@@ -222,6 +223,8 @@ class ChatViewModel @Inject constructor(
     private val audioPlaybackController: AudioPlaybackController,
     private val draftStore: ComposerDraftStore,
     private val pendingShareStore: PendingShareStore,
+    // Gesture-orb hand-off; the plain default keeps hand-built call sites free of another store.
+    private val attachmentRequestStore: AttachmentRequestStore = AttachmentRequestStore(),
     private val scrollPositionStore: ChatScrollPositionStore,
     // The single wire-fetch primitive; the jump AROUND prefetch admits on its per-network wire gate.
     private val historyPageLoader: HistoryPageLoader,
@@ -1630,9 +1633,30 @@ class ChatViewModel @Inject constructor(
     /** Consume-once composer prefill queued by ChannelInfo before popping back; null when none. */
     fun consumePrefill(): String? = draftStore.consume(operationalBufferId.value)
 
+    /**
+     * Prefills queued for this conversation *while it is already open*.
+     *
+     * [consumePrefill] above covers the queue-then-navigate case, which is every prefill that comes
+     * with a screen entry. The gesture orb can also aim one at the chat under it, and navigating
+     * there is `launchSingleTop`: no entry effect re-runs, so nothing would ever drain the queue.
+     * Cold on purpose — the text stays queued until a screen is actually collecting and can apply it.
+     */
+    val composerPrefills: Flow<String> = draftStore.prefillPushes
+        .filter { it == operationalBufferId.value }
+        .mapNotNull { draftStore.consume(it) }
+
     /** Consume-once shared file routed here by the share picker; the screen opens the upload sheet. */
     fun consumeSharedFile(): PendingShare.File? =
         pendingShareStore.consumeFile(operationalBufferId.value)
+
+    /** Consume-once attachment-sheet request queued for this conversation before it was entered. */
+    fun consumeAttachmentRequest(): Boolean =
+        attachmentRequestStore.consume(operationalBufferId.value)
+
+    /** Attachment-sheet requests aimed at this conversation while it is already open. */
+    val attachmentSheetRequests: Flow<Unit> = attachmentRequestStore.requests
+        .filter { it == operationalBufferId.value && attachmentRequestStore.consume(it) }
+        .map { }
 
     fun saveDraft(text: String) {
         synchronized(draftStateLock) {

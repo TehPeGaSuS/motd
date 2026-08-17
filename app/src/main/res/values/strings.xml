@@ -552,6 +552,9 @@
     <string name="settings_auto_away_message_title">Away message</string>
     <string name="settings_auto_away_message_hint">Leave blank to use the default</string>
     <string name="auto_away_default_message">Away (auto)</string>
+    <string name="gesture_away_default_message">Away</string>
+    <string name="gesture_network_leaf_connect">%1$s · connect</string>
+    <string name="gesture_network_leaf_disconnect">%1$s · disconnect</string>
     <string name="settings_show_images">Show images and videos</string>
     <string name="settings_show_images_desc">Load inline images, videos, and preview thumbnails</string>
     <string name="settings_direct_media_proxied">Load previews over direct connection</string>

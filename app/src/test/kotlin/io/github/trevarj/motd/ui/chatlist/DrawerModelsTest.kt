@@ -5,6 +5,7 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.service.unreadBufferIds
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue

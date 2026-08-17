@@ -7,6 +7,7 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.InvitationEventRow
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MonitorQueryRow
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkBufferToolRow
 import io.github.trevarj.motd.data.db.NetworkEntity
@@ -66,6 +67,23 @@ object NoopNetworkIgnoreRepository : NetworkIgnoreRepository {
 
 interface BufferRepository {
     fun observeChatList(): Flow<List<ChatListRow>>
+
+    /**
+     * Existing QUERY conversations, newest activity first once ordered by the caller.
+     *
+     * Same projection MONITOR reconciliation uses, exposed above Room for the gesture menu's
+     * "recent DMs" ring: it carries identity and recency only, which is all a DM entry needs.
+     */
+    fun observeQueryConversations(): Flow<List<MonitorQueryRow>> = flowOf(emptyList())
+
+    /**
+     * Winner id for [id] after durable room redirects, or null when the room is gone.
+     *
+     * A stored id can outlive the row it names — a merged QUERY leaves a redirect behind — so any
+     * id that was persisted elsewhere (a gesture menu action, a notification) has to be resolved
+     * before it is opened or written to. The default keeps lightweight fakes source-compatible.
+     */
+    suspend fun canonicalBufferId(id: Long): Long? = id
     /** Canonical live invitation events, including resolved rows retained for user context. */
     fun observeInvitations(): Flow<List<InvitationEventRow>> = flowOf(emptyList())
     /** Normalized CHANNEL names confirmed by EventProcessor self-JOIN persistence. */

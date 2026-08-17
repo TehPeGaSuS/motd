@@ -25,6 +25,8 @@ import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
+import io.github.trevarj.motd.service.markChatsRead
+import io.github.trevarj.motd.service.unreadBufferIds
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -452,18 +454,7 @@ class ChatListViewModel @Inject constructor(
     fun markCurrentScopeRead() {
         val bufferIds = unreadBufferIds(state.value.rows)
         if (bufferIds.isEmpty()) return
-        viewModelScope.launch {
-            readMarkerRepository.latestIncoming(bufferIds).forEach { marker ->
-                val timestamp = marker.timestamp ?: return@forEach
-                val eventId = marker.eventId ?: return@forEach
-                runCatching {
-                    connectionManager.markRead(
-                        marker.bufferId,
-                        io.github.trevarj.motd.data.db.TimelineAnchor(timestamp, eventId),
-                    )
-                }
-            }
-        }
+        viewModelScope.launch { markChatsRead(bufferIds, readMarkerRepository, connectionManager) }
     }
 
     private fun setSelection(networkId: Long?) {
@@ -490,14 +481,6 @@ internal fun toChatListInvitation(event: InvitationEventRow): ChatListInvitation
         serverTime = event.serverTime,
     )
 }
-
-/** Pure selection seam: muted/SERVER/zero-unread rows never participate in mark-all. */
-internal fun unreadBufferIds(rows: List<ChatListRow>): List<Long> = rows
-    .asSequence()
-    .filter { !it.muted && it.type != BufferType.SERVER && it.unreadCount > 0 }
-    .map { it.bufferId }
-    .distinct()
-    .toList()
 
 /** Pending archive writes should move rows immediately, then disappear once Room agrees. */
 internal fun applyArchiveOverrides(

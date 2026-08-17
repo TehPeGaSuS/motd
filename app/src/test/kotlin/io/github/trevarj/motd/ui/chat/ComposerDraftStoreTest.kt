@@ -7,6 +7,10 @@ import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -18,6 +22,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class ComposerDraftStoreTest {
     private lateinit var db: MotdDatabase
@@ -41,6 +46,36 @@ class ComposerDraftStoreTest {
         store.push(roomId, "bob: ")
         assertEquals("alice: bob: ", store.consume(roomId))
         assertNull(store.consume(roomId))
+    }
+
+    @Test
+    fun `every push announces its buffer so an already-open chat can drain it`() = runTest {
+        val seen = mutableListOf<Long>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            store.prefillPushes.collect { seen += it }
+        }
+        runCurrent()
+
+        store.push(roomId, "alice: ")
+        store.push(roomId + 1, "bob: ")
+        runCurrent()
+
+        assertEquals(listOf(roomId, roomId + 1), seen)
+    }
+
+    @Test
+    fun `a push nobody was listening for still leaves the prefill queued`() = runTest {
+        store.push(roomId, "alice: ")
+
+        val seen = mutableListOf<Long>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            store.prefillPushes.collect { seen += it }
+        }
+        runCurrent()
+
+        // No replay: the announcement is gone, but the text it announced is not.
+        assertTrue(seen.isEmpty())
+        assertEquals("alice: ", store.consume(roomId))
     }
 
     @Test

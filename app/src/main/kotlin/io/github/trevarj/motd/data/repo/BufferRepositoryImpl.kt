@@ -6,6 +6,7 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MemberDao
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageDao
+import io.github.trevarj.motd.data.db.MonitorQueryRow
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
@@ -33,6 +34,11 @@ class BufferRepositoryImpl @Inject constructor(
         bufferDao.observeChatList(),
         settings.settings.map(MessageVisibilitySpec::from).distinctUntilChanged(),
     ) { rows, spec -> visibilityReader.resolveChatList(rows, spec) }
+
+    override fun observeQueryConversations(): Flow<List<MonitorQueryRow>> =
+        bufferDao.observeMonitorQueryRows().distinctUntilChanged()
+
+    override suspend fun canonicalBufferId(id: Long): Long? = bufferDao.canonicalId(id)
 
     override fun observeInvitations() = messageDao.observeInvitations()
 

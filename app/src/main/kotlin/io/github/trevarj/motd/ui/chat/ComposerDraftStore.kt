@@ -7,7 +7,11 @@ import io.github.trevarj.motd.data.db.TimelineEventId
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.flatMapLatest
 
 /** Room-backed composer state; only transient navigation prefills remain process-local. */
@@ -16,6 +20,25 @@ class ComposerDraftStore @Inject constructor(
     private val db: MotdDatabase,
 ) {
     private val prefills = ConcurrentHashMap<Long, String>()
+
+    private val _prefillPushes = MutableSharedFlow<Long>(
+        extraBufferCapacity = PREFILL_PUSH_BUFFER,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /**
+     * Buffer ids whose queued prefill just grew.
+     *
+     * The consume-on-entry path below only drains a prefill when a chat screen is *composed*, which
+     * covers the "queue it, then navigate" case. It cannot cover a prefill aimed at the chat that is
+     * already open: navigating there is `launchSingleTop`, so no entry effect re-runs and the queued
+     * text would sit here until the user happened to leave and come back. An open chat therefore
+     * listens for pushes instead of waiting to be entered.
+     *
+     * Replay is deliberately zero: a screen that was not listening yet has not missed anything,
+     * because the prefill itself is still queued for it to consume on entry.
+     */
+    val prefillPushes: SharedFlow<Long> = _prefillPushes.asSharedFlow()
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun observe(bufferId: Long): Flow<ComposerDraftEntity?> =
@@ -73,11 +96,17 @@ class ComposerDraftStore @Inject constructor(
         ) == 1
     }
 
-    /** Append [text] to any queued prefill for [bufferId]. */
+    /** Append [text] to any queued prefill for [bufferId] and announce it on [prefillPushes]. */
     fun push(bufferId: Long, text: String) {
         prefills.merge(bufferId, text) { old, new -> old + new }
+        _prefillPushes.tryEmit(bufferId)
     }
 
     /** Return and remove the queued prefill for [bufferId]. */
     fun consume(bufferId: Long): String? = prefills.remove(bufferId)
+
+    private companion object {
+        /** A prefill is one user gesture; a handful in flight is already more than realistic. */
+        const val PREFILL_PUSH_BUFFER = 8
+    }
 }

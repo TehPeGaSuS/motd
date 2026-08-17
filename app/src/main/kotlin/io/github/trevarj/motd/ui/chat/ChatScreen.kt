@@ -198,8 +198,10 @@ import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.spacingFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
@@ -306,6 +308,11 @@ fun ChatScreen(
         }
     }
     var mentionRequest by remember { mutableStateOf<Pair<Long, String>?>(null) }
+    // A prefill aimed at this conversation while it is already open (gesture orb). It arrives as
+    // text rather than as an entry to drain, and rides the same append path as a nick-sheet mention.
+    LaunchedEffect(viewModel) {
+        viewModel.composerPrefills.collect { mentionRequest = System.nanoTime() to it }
+    }
     val state by viewModel.state.collectAsStateWithLifecycle()
     // Collect paging off the frame-aligned AndroidUiDispatcher. Bounded-window paging swaps the
     // whole Pager when a persisted older page recedes the gap edge, which emits two PagingData
@@ -498,6 +505,8 @@ fun ChatScreen(
         onVoiceNoticeDismissed = voiceViewModel::clearNotice,
         consumePrefill = viewModel::consumePrefill,
         consumeSharedFile = viewModel::consumeSharedFile,
+        consumeAttachmentRequest = viewModel::consumeAttachmentRequest,
+        attachmentSheetRequests = viewModel.attachmentSheetRequests,
         composerDraft = composerDraft,
         onDraftChanged = viewModel::saveDraft,
         outgoingFlight = outgoingFlight,
@@ -670,6 +679,10 @@ fun ChatContent(
     consumePrefill: () -> String? = { null },
     // Consume-once file routed here by the share picker; opens the upload confirmation sheet.
     consumeSharedFile: () -> PendingShare.File? = { null },
+    // Consume-once attachment request queued (by the gesture orb) before this screen was entered.
+    consumeAttachmentRequest: () -> Boolean = { false },
+    // The same request aimed at this conversation while it is already open; see ChatViewModel.
+    attachmentSheetRequests: Flow<Unit> = emptyFlow(),
     composerDraft: ComposerDraftState = ComposerDraftState(),
     onDraftChanged: (String) -> Unit = {},
     // The send currently travelling from the composer into the timeline, if any.
@@ -877,6 +890,18 @@ fun ChatContent(
         if (traceBufferId == null) return@LaunchedEffect
         consumeSharedFile()?.let { file ->
             sharedFile = file
+            uploadCurrentDraftDirectly = false
+            attachmentSheetOpen = true
+        }
+        if (consumeAttachmentRequest()) {
+            sharedFile = null
+            uploadCurrentDraftDirectly = false
+            attachmentSheetOpen = true
+        }
+    }
+    LaunchedEffect(attachmentSheetRequests) {
+        attachmentSheetRequests.collect {
+            sharedFile = null
             uploadCurrentDraftDirectly = false
             attachmentSheetOpen = true
         }
