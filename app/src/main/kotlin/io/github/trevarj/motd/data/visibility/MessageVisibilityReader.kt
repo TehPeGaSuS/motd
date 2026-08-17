@@ -1,7 +1,6 @@
 package io.github.trevarj.motd.data.visibility
 
 import androidx.sqlite.db.SimpleSQLiteQuery
-import io.github.trevarj.motd.data.db.activityTime
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
@@ -251,12 +250,12 @@ class MessageVisibilityReader @Inject constructor(
     ): List<ChatListRow> {
         if (spec.fools.isEmpty()) return rows
         val resolved = rows.map { row -> resolveChatListRow(row, spec) }
-        // Same key the SQL projection orders on, so hiding a fool re-sorts the list without also
-        // silently changing what "most recent" means for a room whose backlog is still advertised.
+        // Same key the SQL projection orders on (stored rows only, never the advertised high-water
+        // mark), so hiding a fool re-sorts the list without changing what "most recent" means.
         return resolved.sortedWith(
             compareByDescending<ChatListRow> { it.pinned }
-                .thenBy { it.activityTime == null }
-                .thenByDescending { it.activityTime ?: Long.MIN_VALUE }
+                .thenBy { it.lastMessageTime == null }
+                .thenByDescending { it.lastMessageTime ?: Long.MIN_VALUE }
                 .thenByDescending { it.bufferId },
         )
     }

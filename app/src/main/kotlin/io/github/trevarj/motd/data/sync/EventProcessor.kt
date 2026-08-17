@@ -821,10 +821,12 @@ class EventProcessor @Inject constructor(
      *
      * This is IRC-derived state, so it is written here and nowhere else. It is not message state:
      * no row is created, nothing is ingested, and the values are a monotone high-water mark of what
-     * the server said. That is exactly what lets the chat list re-sort and badge from DISCOVERY
-     * instead of waiting for the per-room pages the pass has not fetched yet.
+     * the server said. That is exactly what lets the chat list badge from DISCOVERY instead of
+     * waiting for the per-room pages the pass has not fetched yet. Deliberately a badge and never a
+     * sort input: an advertisement can describe an event this device will never show, and ordering
+     * on it would bounce the row up and back once the fetch resolves with nothing visible.
      *
-     * One transaction for the whole page so the list re-sorts once, rather than once per target.
+     * One transaction for the whole page so the list invalidates once, rather than once per target.
      */
     internal suspend fun recordAdvertisedActivity(
         networkId: Long,
@@ -848,7 +850,7 @@ class EventProcessor @Inject constructor(
      * it at all (soju can index an event its replay never serves). Both leave the same residue: a
      * timestamp above every visible row, describing an event the reader will never see. Left
      * standing, it is a permanent count-less unread dot no mark-read can clear (the read anchor
-     * lands on the newest LOCAL row, which is below it) and a permanently inflated sort key.
+     * lands on the newest LOCAL row, which is below it).
      *
      * [provenLatest] is the advertisement the caller settled, and it bounds the clamp: anything the
      * column holds above it came from a discovery this response says nothing about.

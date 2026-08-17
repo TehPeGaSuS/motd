@@ -270,8 +270,7 @@ interface BufferDao {
                 AND b.advertisedLatestTime / 1000 > MAX(COALESCE(b.localReadAnchorTime, 0),
                     COALESCE(b.localUnreadFloorTime, 0)) / 1000
                 AND b.advertisedLatestTime / 1000 > COALESCE(lm.serverTime, 0) / 1000)
-                AS advertisedUnread,
-            b.advertisedLatestTime AS advertisedLatestTime
+                AS advertisedUnread
         FROM buffers b
         JOIN networks n ON n.id = b.networkId
         LEFT JOIN network_identity ni ON ni.networkId = b.networkId
@@ -284,8 +283,8 @@ interface BufferDao {
         WHERE b.type != 'SERVER' AND b.dismissed = 0
           AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL
         ORDER BY b.pinned DESC,
-                 (MAX(COALESCE(lm.serverTime, 0), COALESCE(b.advertisedLatestTime, 0)) = 0) ASC,
-                 MAX(COALESCE(lm.serverTime, 0), COALESCE(b.advertisedLatestTime, 0)) DESC,
+                 (COALESCE(lm.serverTime, 0) = 0) ASC,
+                 COALESCE(lm.serverTime, 0) DESC,
                  b.id DESC
         """
     )
@@ -808,28 +807,13 @@ data class ChatListRow(
     /**
      * CHATHISTORY TARGETS advertises activity newer than both the read floor and every row this
      * device holds: there is something unread here whose rows have not arrived yet. Count-less by
-     * construction — discovery reports a timestamp, never a number.
+     * construction — discovery reports a timestamp, never a number. A badge only: the list sorts on
+     * stored rows alone, because an advertisement can describe an event this device will never show
+     * (a JOIN, a filtered event) and promoting on it bounces the row back down once the fetch
+     * proves that.
      */
     val advertisedUnread: Boolean = false,
-    /** Raw advertised high-water mark; half of [activityTime], which is what the list sorts on. */
-    val advertisedLatestTime: Long? = null,
 )
-
-/**
- * The recency this row sorts on: the newer of what is stored locally and what the server last
- * advertised.
- *
- * A room whose backlog has not been fetched yet is still the most recent conversation on the
- * account, and burying it under rooms with older-but-present messages is exactly the "reconnect
- * reshuffles my list twice" effect the discovery-first badging exists to remove. Null only when
- * neither is known.
- */
-val ChatListRow.activityTime: Long?
-    get() = when {
-        lastMessageTime == null -> advertisedLatestTime
-        advertisedLatestTime == null -> lastMessageTime
-        else -> maxOf(lastMessageTime, advertisedLatestTime)
-    }
 
 /** Minimal query-buffer projection for MONITOR target selection. */
 data class MonitorQueryRow(

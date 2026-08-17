@@ -14,7 +14,6 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
-import io.github.trevarj.motd.data.db.activityTime
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.HistoryPageLoader
@@ -3862,7 +3861,7 @@ class HistoryResyncCoordinatorTest {
         // fetch adds nothing, and the pass settles it Idle — after which nothing else will ever
         // touch the advertisement: the room is converged, so no later wave fetches it, and mark-read
         // anchors on the newest LOCAL row, which is below the advertised instant. Left standing it
-        // is a permanent unread dot and a permanently top-sorted row.
+        // is a permanent unread dot.
         processor.process(networkId, message("tail", 500_000))
         seedCursor(newestServerTime = 100_000)
         val source = FakeSource { request ->
@@ -3880,9 +3879,9 @@ class HistoryResyncCoordinatorTest {
         assertEquals(HistoryResyncState.UpToDate, result)
         val row = db.bufferDao().observeChatList().first().single { it.bufferId == bufferId }
         assertFalse(row.advertisedUnread)
-        // Clamped onto what the room can actually show, so the sort key is the truth too.
+        // Clamped onto what the room can actually show.
         assertEquals(500_000L, db.bufferDao().rawById(bufferId)?.advertisedLatestTime)
-        assertEquals(500_000L, row.activityTime)
+        assertEquals(500_000L, row.lastMessageTime)
     }
 
     @Test

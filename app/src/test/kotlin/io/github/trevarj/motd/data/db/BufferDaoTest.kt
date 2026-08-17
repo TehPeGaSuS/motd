@@ -595,23 +595,36 @@ class BufferDaoTest {
     }
 
     @Test
-    fun `advertised activity re-sorts the chat list ahead of rooms with older local rows`() = runTest {
+    fun `advertised activity badges without re-sorting until real rows arrive`() = runTest {
         val bufDao = db.bufferDao()
         val msgDao = db.messageDao()
         val recentLocal = bufDao.insert(buffer(networkId, "#local"))
         val advertisedOnly = bufDao.insert(buffer(networkId, "#advertised"))
         val quiet = bufDao.insert(buffer(networkId, "#quiet"))
-        msgDao.insertAll(listOf(message(recentLocal, "here", serverTime = 500, dedupKey = "local-1")))
+        msgDao.insertAll(
+            listOf(
+                message(recentLocal, "here", serverTime = 500_000, dedupKey = "local-1"),
+                message(advertisedOnly, "old", serverTime = 100_000, dedupKey = "adv-0"),
+            ),
+        )
 
-        // Discovery says #advertised moved more recently than anything this device holds. The rows
-        // have not been fetched, so the row's only recency signal is the advertisement.
-        bufDao.advanceAdvertisedLatest(advertisedOnly, 900)
+        // Discovery says #advertised moved more recently than anything this device holds, but the
+        // advertisement may describe an event this device will never show. Until the fetch lands a
+        // visible row, the row keeps its place and only wears the count-less dot.
+        bufDao.advanceAdvertisedLatest(advertisedOnly, 900_000)
 
         val rows = bufDao.observeChatList().first()
-        assertEquals(listOf(advertisedOnly, recentLocal, quiet), rows.map { it.bufferId })
-        assertEquals(900L, rows.first().activityTime)
-        // A room nobody has said anything about still sorts last rather than at epoch-zero.
-        assertNull(rows.last().activityTime)
+        assertEquals(listOf(recentLocal, advertisedOnly, quiet), rows.map { it.bufferId })
+        assertTrue(rows[1].advertisedUnread)
+        // A room with no rows at all still sorts last rather than at epoch-zero.
+        assertNull(rows.last().lastMessageTime)
+
+        // The fetch delivers the advertised activity as an actual row: NOW the room is promoted.
+        msgDao.insertAll(listOf(message(advertisedOnly, "arrived", serverTime = 900_000, dedupKey = "adv-1")))
+        assertEquals(
+            listOf(advertisedOnly, recentLocal, quiet),
+            bufDao.observeChatList().first().map { it.bufferId },
+        )
     }
 
     @Test
@@ -670,8 +683,7 @@ class BufferDaoTest {
         val bid = bufDao.insert(buffer(networkId, "#unreachable"))
         // Everything this room can show is at t=500s; the newest SERVER event is a JOIN at t=900s
         // (or an event replay simply never returns). Mark-read cannot reach the advertisement — the
-        // anchor lands on the newest LOCAL row — so without the clamp the dot and the inflated sort
-        // key are permanent.
+        // anchor lands on the newest LOCAL row — so without the clamp the dot is permanent.
         msgDao.insertAll(
             listOf(
                 message(bid, "tail", serverTime = 500_000, dedupKey = "clamp-1"),
@@ -685,9 +697,9 @@ class BufferDaoTest {
 
         val row = bufDao.observeChatList().first().single()
         assertFalse(row.advertisedUnread)
-        // Clamped onto the room's newest VISIBLE row, so the sort key is the truth the list shows.
+        // Clamped onto the room's newest VISIBLE row, matching the truth the list shows.
         assertEquals(500_000L, bufDao.rawById(bid)!!.advertisedLatestTime)
-        assertEquals(500_000L, row.activityTime)
+        assertEquals(500_000L, row.lastMessageTime)
     }
 
     @Test

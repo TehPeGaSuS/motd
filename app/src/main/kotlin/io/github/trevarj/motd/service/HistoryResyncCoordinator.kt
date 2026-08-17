@@ -1693,8 +1693,8 @@ class HistoryResyncCoordinator @Inject constructor(
         if (advertisedLatest != null && reachedAdvertised(roomCursor?.newestServerTime, advertisedLatest)) {
             // Already converged, so this is the last chance to retire an advertisement the room can
             // never show: no fetch will follow, and a value left above the newest visible row keeps
-            // a permanent unread dot and a permanently inflated sort key on a room with nothing in
-            // it. A no-op (and no invalidation) whenever the two already agree.
+            // a permanent unread dot on a room with nothing in it. A no-op (and no invalidation)
+            // whenever the two already agree.
             processor.clampAdvertisedActivity(networkId, canonicalRoomId, advertisedLatest)
             session?.settle(canonicalRoomId, HistorySyncStatus.Idle)
             return TargetOutcome()
@@ -1770,8 +1770,7 @@ class HistoryResyncCoordinator @Inject constructor(
             // Retire the advertisement with the same response that disproved it. Nothing else ever
             // will: the room is settled Idle, no later page can reach that timestamp, and the
             // discovery-first cue would otherwise sit on this row as an unread dot the reader
-            // cannot clear (mark-read anchors on the newest LOCAL row, which is below it) with the
-            // list sorting the room to the top on a message that does not exist here.
+            // cannot clear (mark-read anchors on the newest LOCAL row, which is below it).
             advertisedLatest?.let { processor.clampAdvertisedActivity(networkId, canonicalRoomId, it) }
             session?.settle(canonicalRoomId, HistorySyncStatus.Idle)
             return TargetOutcome(highWater = targetResult.highWater)
