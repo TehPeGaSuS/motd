@@ -1,0 +1,124 @@
+package io.github.trevarj.motd.ui.settings.labs
+
+import android.content.Intent
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.settings.SettingsGroup
+import io.github.trevarj.motd.ui.settings.SettingsScaffold
+import io.github.trevarj.motd.ui.settings.SwitchRow
+import io.github.trevarj.motd.ui.theme.MotdTheme
+
+/**
+ * Labs category: experimental features, each behind its own switch. Lab flags live in their own
+ * stores and are excluded from configuration backup, so enabling a lab is always a local decision.
+ */
+@Composable
+fun LabsScreen(
+    onBack: () -> Unit = {},
+    viewModel: LabsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    LabsContent(
+        state = state,
+        onBack = onBack,
+        onGesturesChanged = viewModel::setGesturesEnabled,
+        onAgentwireChanged = viewModel::setAgentwireEnabled,
+    )
+}
+
+@Composable
+fun LabsContent(
+    state: LabsUiState,
+    onBack: () -> Unit,
+    onGesturesChanged: (Boolean) -> Unit,
+    onAgentwireChanged: (Boolean) -> Unit,
+) {
+    val context = LocalContext.current
+    val agentwireUrl = stringResource(R.string.labs_agentwire_url)
+    SettingsScaffold(
+        title = stringResource(R.string.settings_labs),
+        onBack = onBack,
+        modifier = Modifier.testTag("screen_labs"),
+    ) {
+        Text(
+            text = stringResource(R.string.labs_intro),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
+        SettingsGroup(title = stringResource(R.string.labs_gestures_section)) {
+            SwitchRow(
+                title = stringResource(R.string.labs_gestures),
+                subtitle = stringResource(R.string.labs_gestures_desc),
+                checked = state.gesturesEnabled,
+                onCheckedChange = onGesturesChanged,
+                switchTag = "labs_gestures_switch",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            // The editor arrives with the menu-graph work; the row stays visible but inert so the
+            // shape of the lab is discoverable.
+            ListItem(
+                headlineContent = {
+                    Text(
+                        stringResource(R.string.labs_gestures_configure),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                    )
+                },
+                supportingContent = { Text(stringResource(R.string.labs_gestures_configure_soon)) },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier.testTag("labs_gestures_configure"),
+            )
+        }
+        SettingsGroup(title = stringResource(R.string.labs_agentwire_section)) {
+            SwitchRow(
+                title = stringResource(R.string.labs_agentwire),
+                subtitle = stringResource(R.string.labs_agentwire_desc),
+                checked = state.agentwireEnabled,
+                onCheckedChange = onAgentwireChanged,
+                switchTag = "labs_agentwire_switch",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.labs_agentwire_repo)) },
+                supportingContent = { Text(agentwireUrl) },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier
+                    .clickable {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, agentwireUrl.toUri()))
+                    }
+                    .testTag("labs_agentwire_repo"),
+            )
+        }
+    }
+}
+
+@Preview
+@Composable
+private fun LabsScreenPreview() {
+    MotdTheme {
+        LabsContent(
+            state = LabsUiState(gesturesEnabled = true),
+            onBack = {},
+            onGesturesChanged = {},
+            onAgentwireChanged = {},
+        )
+    }
+}

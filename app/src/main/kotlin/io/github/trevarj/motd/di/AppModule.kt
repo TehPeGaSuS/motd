@@ -93,6 +93,8 @@ import io.github.trevarj.motd.avatar.AvatarStore
 import io.github.trevarj.motd.avatar.AvatarStoreImpl
 import io.github.trevarj.motd.bouncer.BouncerServClient
 import io.github.trevarj.motd.bouncer.BouncerServClientImpl
+import io.github.trevarj.motd.gesture.GesturePrefs
+import io.github.trevarj.motd.gesture.GesturePrefsImpl
 import io.github.trevarj.motd.ui.onboarding.ConnectionManagerOnboardingBouncerOperations
 import io.github.trevarj.motd.ui.onboarding.OnboardingBouncerOperations
 import io.github.trevarj.motd.bouncer.BouncerServSessionProvider
@@ -178,6 +180,10 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun voicePrefs(impl: VoicePrefsImpl): VoicePrefs
+
+    /** Gesture lab store; kept out of configuration backup like the Agentwire lab flag. */
+    @Binds @Singleton
+    abstract fun gesturePrefs(impl: GesturePrefsImpl): GesturePrefs
 
     @Binds @Singleton
     abstract fun voiceRecorder(impl: AndroidVoiceRecorder): VoiceRecorder

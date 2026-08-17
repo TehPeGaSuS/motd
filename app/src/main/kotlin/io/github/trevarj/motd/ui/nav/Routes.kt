@@ -19,6 +19,8 @@ import kotlinx.serialization.Serializable
 @Serializable data object DeliverySettingsRoute
 @Serializable data object NetworksSettingsRoute
 @Serializable data object BackupRestoreRoute
+// Experimental features (gestures, Agentwire harness) live under their own category.
+@Serializable data object LabsRoute
 @Serializable data class NetworkSettingsRoute(val networkId: Long)
 @Serializable data class NetworkToolsRoute(val networkId: Long)
 @Serializable data class SearchRoute(val bufferId: Long? = null)

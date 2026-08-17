@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.SettingsBackupRestore
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -79,6 +80,7 @@ fun SettingsScreen(
     onOpenDelivery: () -> Unit = {},
     onOpenNetworks: () -> Unit = {},
     onOpenBackupRestore: () -> Unit = {},
+    onOpenLabs: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
 ) {
     var localPage by rememberSaveable { mutableStateOf(SettingsLocalPage.ROOT) }
@@ -122,6 +124,7 @@ fun SettingsScreen(
                 onOpenNetworks = onOpenNetworks,
                 onOpenUploads = { localPage = SettingsLocalPage.UPLOADS },
                 onOpenBackupRestore = onOpenBackupRestore,
+                onOpenLabs = onOpenLabs,
                 onOpenAbout = onOpenAbout,
             )
         }
@@ -140,6 +143,7 @@ fun SettingsContent(
     onOpenNetworks: () -> Unit,
     onOpenUploads: () -> Unit,
     onOpenBackupRestore: () -> Unit,
+    onOpenLabs: () -> Unit,
     onOpenAbout: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -200,6 +204,14 @@ fun SettingsContent(
                     summary = stringResource(R.string.settings_backup_restore_summary),
                     modifier = Modifier.testTag("settings_category_backup_restore"),
                     onClick = onOpenBackupRestore,
+                )
+                CategoryDivider()
+                CategoryRow(
+                    icon = Icons.Outlined.Science,
+                    title = stringResource(R.string.settings_labs),
+                    summary = stringResource(R.string.settings_labs_summary),
+                    modifier = Modifier.testTag("settings_category_labs"),
+                    onClick = onOpenLabs,
                 )
                 CategoryDivider()
                 CategoryRow(
@@ -458,7 +470,7 @@ private fun SettingsContentPreview() {
         SettingsContent(
             onBack = {}, onOpenAppearance = {}, onOpenChat = {},
             onOpenDelivery = {}, onOpenNetworks = {}, onOpenUploads = {},
-            onOpenBackupRestore = {}, onOpenAbout = {},
+            onOpenBackupRestore = {}, onOpenLabs = {}, onOpenAbout = {},
         )
     }
 }

@@ -40,6 +40,7 @@ import io.github.trevarj.motd.ui.settings.NetworksSettingsScreen
 import io.github.trevarj.motd.ui.settings.NickListKind
 import io.github.trevarj.motd.ui.settings.SettingsScreen
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkScreen
+import io.github.trevarj.motd.ui.settings.labs.LabsScreen
 import io.github.trevarj.motd.ui.settings.bouncer.BouncerNetworksScreen
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.SharePickerScreen
@@ -205,6 +206,7 @@ fun MotdNavGraph(
                 onOpenDelivery = { navController.navigate(DeliverySettingsRoute) },
                 onOpenNetworks = { navController.navigate(NetworksSettingsRoute) },
                 onOpenBackupRestore = { navController.navigate(BackupRestoreRoute) },
+                onOpenLabs = { navController.navigate(LabsRoute) },
                 onOpenAbout = { navController.navigate(AboutRoute) },
             )
         }
@@ -237,6 +239,9 @@ fun MotdNavGraph(
         }
         composable<BackupRestoreRoute> {
             BackupRestoreScreen(onBack = { navController.popBackStack() })
+        }
+        composable<LabsRoute> {
+            LabsScreen(onBack = { navController.popBackStack() })
         }
         composable<FriendsRoute> {
             ManageNicksScreen(NickListKind.FRIENDS, onBack = { navController.popBackStack() })

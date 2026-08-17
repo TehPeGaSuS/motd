@@ -6,7 +6,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import io.github.trevarj.motd.agentwire.AgentwirePrefs
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.di.IoDispatcher
 import java.io.IOException
@@ -23,7 +22,6 @@ import kotlinx.coroutines.withContext
 
 data class AboutDiagnosticsUiState(
     val enabled: Boolean = false,
-    val agentwireEnabled: Boolean = false,
     val exporting: Boolean = false,
     val exportResult: ExportResult? = null,
 )
@@ -34,25 +32,19 @@ enum class ExportResult { SUCCESS, FAILURE }
 class AboutViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val diagnosticLogger: DiagnosticLogger,
-    private val agentwirePrefs: AgentwirePrefs,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
     private val exportState = MutableStateFlow(AboutDiagnosticsUiState())
 
     val state: StateFlow<AboutDiagnosticsUiState> = combine(
         diagnosticLogger.enabled,
-        agentwirePrefs.enabled,
         exportState,
-    ) { enabled, agentwireEnabled, export -> export.copy(enabled = enabled, agentwireEnabled = agentwireEnabled) }
+    ) { enabled, export -> export.copy(enabled = enabled) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AboutDiagnosticsUiState())
 
     fun setDiagnosticLoggingEnabled(enabled: Boolean) {
         diagnosticLogger.setEnabled(enabled)
         exportState.update { it.copy(exportResult = null) }
-    }
-
-    fun setAgentwireEnabled(enabled: Boolean) {
-        viewModelScope.launch { agentwirePrefs.setEnabled(enabled) }
     }
 
     fun export(uri: Uri) {

@@ -200,6 +200,20 @@
     <string name="settings_backup_restore">Backup and restore</string>
     <string name="settings_backup_restore_summary">Export networks and settings or import them on this device.</string>
     <string name="settings_about_summary">Version %1$s · Diagnostics, license, and project links.</string>
+    <!-- Labs (experimental features) -->
+    <string name="settings_labs">Labs</string>
+    <string name="settings_labs_summary">Try experimental features. Off by default and kept out of backups.</string>
+    <string name="labs_intro">Experimental work in progress. Labs stay off until you switch them on here, and they are never enabled by restoring a backup.</string>
+    <string name="labs_gestures_section">Gestures</string>
+    <string name="labs_gestures">Gesture orb</string>
+    <string name="labs_gestures_desc">Dock a small orb at the screen edge; press and hold it to fan out a radial menu of chat actions.</string>
+    <string name="labs_gestures_configure">Configure menu</string>
+    <string name="labs_gestures_configure_soon">The menu editor is not available yet.</string>
+    <string name="labs_agentwire_section">Agentwire</string>
+    <string name="labs_agentwire">Agentwire harness</string>
+    <string name="labs_agentwire_desc">Show the experimental agent harness in channels activated by an Agentwire v1 topic. Off by default.</string>
+    <string name="labs_agentwire_repo">Repo</string>
+    <string name="labs_agentwire_url" translatable="false">https://github.com/trevarj/agentwire</string>
     <string name="settings_upload_destination">Default destination</string>
     <string name="settings_upload_termbin_warning">Termbin sends text without encryption to a public service. Never upload passwords or private information.</string>
     <string name="settings_upload_endpoint">Service endpoint</string>
@@ -354,10 +368,7 @@
     <string name="about_diagnostic_logging">Diagnostic logging</string>
     <string name="about_diagnostic_logging_summary">Records bounded technical traces for connections, sync, push, and message handling. Message contents, credentials, and personal identifiers are excluded. Turning it on starts a fresh log.</string>
     <string name="about_labs">Labs</string>
-    <string name="about_agentwire">Agentwire harness</string>
-    <string name="about_agentwire_summary">Show the experimental agent harness in channels activated by an Agentwire v1 topic. Off by default.</string>
-    <string name="about_agentwire_repo">Repo</string>
-    <string name="about_agentwire_url" translatable="false">https://github.com/trevarj/agentwire</string>
+    <string name="about_labs_moved">Experimental features moved to Settings › Labs.</string>
     <string name="about_export_diagnostics">Export diagnostic log</string>
     <string name="about_export_diagnostics_summary">Save the captured trace as a text file to share when reporting a problem.</string>
     <string name="about_export_diagnostics_success">Diagnostic log saved.</string>
