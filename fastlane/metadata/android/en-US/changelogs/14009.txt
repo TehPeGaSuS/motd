@@ -1,0 +1,5 @@
+- New in Labs: a gesture orb. Hold the floating tab to fan out a radial menu and jump to chats, mention friends, insert snippets, toggle away, and more — fully editable in a new menu editor.
+- New Labs home under Settings collects experiments in one place.
+- Auto-away: optionally mark yourself away after the app sits idle, and back when you return.
+- Faster reconnects: bouncer networks now dial alongside their root.
+- Fixes to unread ordering, sent-message visibility, and system bar colors.
