@@ -120,6 +120,17 @@ object MotdMotion {
         stiffness = 380f,
     )
 
+    /**
+     * The morph send lab's transformation: field text into bubble (surface growth, ink and
+     * alignment transfer). Deliberately slower than [sendFlightSpring] and a bounded tween, not
+     * a spring: the growth is the entire point of the presentation, and riding the flight's own
+     * 300ms spring compressed it below the threshold where it read as a transformation at all.
+     */
+    val sendMorphGrow: FiniteAnimationSpec<Float> = tween(
+        durationMillis = 420,
+        easing = StandardEasing,
+    )
+
     /** Duration grows monotonically with the remaining fraction and remains within 200–300ms. */
     fun archiveSettleDurationMillis(remainingFraction: Float): Int =
         (ArchiveSettleMinimumDurationMs +

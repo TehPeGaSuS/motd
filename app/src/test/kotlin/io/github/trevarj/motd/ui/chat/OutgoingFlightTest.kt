@@ -162,11 +162,13 @@ class OutgoingFlightTest {
     }
 
     @Test
-    fun `the morph swap dissolves the stand-in across the flight's first half`() {
+    fun `the morph swap dissolves the stand-in across the flight's back half`() {
+        // The stand-in carries the visible transformation, so it must survive the flight's first
+        // half; the replica must still be whole (swap = 1) before the landing handoff at 1.0.
         assertEquals(0f, sendFlightMorphSwap(0f), 0.001f)
-        assertEquals(0f, sendFlightMorphSwap(0.15f), 0.001f)
-        assertEquals(0.5f, sendFlightMorphSwap(0.35f), 0.001f)
-        assertEquals(1f, sendFlightMorphSwap(0.55f), 0.001f)
+        assertEquals(0f, sendFlightMorphSwap(0.45f), 0.001f)
+        assertEquals(0.5f, sendFlightMorphSwap(0.65f), 0.001f)
+        assertEquals(1f, sendFlightMorphSwap(0.85f), 0.001f)
         assertEquals(1f, sendFlightMorphSwap(1.1f), 0.001f)
     }
 

@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +23,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -35,6 +37,7 @@ import io.github.trevarj.motd.ui.components.chatBubbleWidth
 import io.github.trevarj.motd.ui.components.messageBubbleRoleColors
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.theme.LocalSpacing
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlin.math.max
 import kotlin.math.min
 
@@ -182,12 +185,13 @@ internal fun sendFlightGhostTop(
  */
 /**
  * How much of the morph stand-in has been replaced by the real bubble replica, from the flight
- * fraction. Smoothstepped over the flight's first half so the metadata line and linkified body
- * arrive while the bubble is moving (motion masks the dissolve) and the replica is whole well
- * before it must pixel-match the landing row.
+ * fraction. Smoothstepped over the flight's BACK half: the stand-in is where the transformation
+ * plays out, and an earlier window dissolved it before the growth registered as a transformation
+ * at all. Complete by 0.85 so the replica is whole before it must pixel-match the landing row,
+ * with the still-moving bubble masking the metadata line's arrival.
  */
 internal fun sendFlightMorphSwap(flightFraction: Float): Float {
-    val t = ((flightFraction - 0.15f) / 0.4f).coerceIn(0f, 1f)
+    val t = ((flightFraction - 0.45f) / 0.4f).coerceIn(0f, 1f)
     return t * t * (3f - 2f * t)
 }
 
@@ -287,11 +291,13 @@ internal fun BoxScope.SendFlightOverlay(
  *
  * On the tap frame the stand-in's text is pinned glyph-for-glyph over the composer field's text
  * (both render the same `bodyLarge` under [ConversationTypography]), so clearing the field does
- * not visibly remove the line -- ownership just changes. As the lift rises, the text slides from
- * the field's left-aligned origin to the bubble's resting alignment while the bubble surface
- * fades in beneath it and the text color crossfades from field ink to bubble ink. Mid-flight the
- * whole stand-in dissolves into the real [MessageBubble] replica ([sendFlightMorphSwap]), which
- * brings the metadata line and linkified body and owns the landing.
+ * not visibly remove the line -- ownership just changes. The transformation runs on its own
+ * clock ([MotdMotion.sendMorphGrow], slower than the flight springs): the text slides from the
+ * field's left-aligned origin to the bubble's resting alignment while the bubble surface
+ * inflates in beneath it (alpha leading scale, so the growth is visible rather than a plain
+ * fade) and the text color crossfades from field ink to bubble ink. In the flight's back half
+ * the whole stand-in dissolves into the real [MessageBubble] replica ([sendFlightMorphSwap]),
+ * which brings the metadata line and linkified body and owns the landing.
  *
  * Every animated value is read in a draw-phase lambda; the stand-in never recomposes per frame.
  * A multi-line draft may re-wrap where the bubble is narrower than the field; the first glyph
@@ -305,6 +311,13 @@ private fun MorphingGhost(
     showSender: Boolean,
 ) {
     val spacing = LocalSpacing.current
+    // The transformation's own clock, started on the tap frame like the lift. Riding the lift
+    // spring compressed slide, tint, and growth into ~300ms alongside the rise, which read as
+    // "the bubble flies" rather than "the text becomes a bubble".
+    val morph = remember(flight.token) { Animatable(0f) }
+    LaunchedEffect(flight.token) {
+        morph.animateTo(1f, MotdMotion.sendMorphGrow)
+    }
     val roles = messageBubbleRoleColors(
         MaterialTheme.colorScheme,
         isSelf = true,
@@ -337,19 +350,24 @@ private fun MorphingGhost(
                     // Slide from the field's text origin to the bubble's natural alignment.
                     val delta = textDelta
                     if (delta != null) {
-                        val remaining = 1f - min(1f, motion.lift.value)
+                        val remaining = 1f - min(1f, morph.value)
                         translationX = delta.x * remaining
                         translationY = delta.y * remaining
                     }
                 }
                 .drawBehind {
-                    // The bubble surface growing in around the line; drawn, not composed, so
-                    // the fade costs one layer invalidation per frame.
-                    drawOutline(
-                        outline = shape.createOutline(size, layoutDirection, this),
-                        color = roles.container,
-                        alpha = min(1f, motion.lift.value),
-                    )
+                    // The bubble surface inflating around the line; drawn, not composed, so a
+                    // frame costs one layer invalidation. Alpha leads the scale (fully opaque by
+                    // ~60% of the morph) so the eye reads a surface GROWING to its final size,
+                    // not a finished bubble fading in.
+                    val m = min(1f, morph.value)
+                    scale(0.85f + 0.15f * m) {
+                        drawOutline(
+                            outline = shape.createOutline(size, layoutDirection, this@drawBehind),
+                            color = roles.container,
+                            alpha = min(1f, m * 1.6f),
+                        )
+                    }
                 }
                 .padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
         ) {
@@ -367,13 +385,13 @@ private fun MorphingGhost(
                             }
                         }
                     }
-                    .graphicsLayer { alpha = 1f - min(1f, motion.lift.value) },
+                    .graphicsLayer { alpha = 1f - min(1f, morph.value) },
             )
             Text(
                 text = flight.text,
                 style = MaterialTheme.typography.bodyLarge,
                 color = roles.content,
-                modifier = Modifier.graphicsLayer { alpha = min(1f, motion.lift.value) },
+                modifier = Modifier.graphicsLayer { alpha = min(1f, morph.value) },
             )
         }
     }
