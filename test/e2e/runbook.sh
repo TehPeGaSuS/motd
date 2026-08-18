@@ -376,8 +376,7 @@ phase_a() {
     # The screen is a plain verticalScroll column; reach the control the way the settings steps do
     # instead of asserting on whatever the first screenful happens to hold.
     wait_for_tag onboarding_bouncer_discovery_refresh 20 || true
-    scroll_forward_to_tag onboarding_bouncer_discovery_refresh 6 || true
-    assert_tag_present onboarding_bouncer_discovery_refresh
+    assert_tag_present_scrolling onboarding_bouncer_discovery_refresh 6
     if reconnect_stack stop-soju; then
       _reconnect_restore_armed=true
       # A refresh issued before the app has observed the outage can still be answered from a
@@ -397,18 +396,16 @@ phase_a() {
         fi
       done
       [ "$_discovery_failed" = true ] || note "discovery never reported the outage; asserting anyway"
-      assert_tag_present onboarding_bouncer_discovery_error
+      assert_tag_present_scrolling onboarding_bouncer_discovery_error 8
       # Retry belongs to the Failed state, so exercise it while the fixture is still down. Once
       # soju is back the ViewModel rebinds discovery on the Ready transition, which resolves
       # Failed to Loaded on its own and retires the button before a tap could land.
-      scroll_forward_to_tag onboarding_bouncer_discovery_retry 8 || true
-      assert_tag_present onboarding_bouncer_discovery_retry
-      tap_tag onboarding_bouncer_discovery_retry
+      assert_tag_present_scrolling onboarding_bouncer_discovery_retry 8
+      tap_tag_scrolling onboarding_bouncer_discovery_retry 4
       # The client lookup gives up after 40x250ms, so a re-attempt against a dead fixture lands
       # back on Failed well inside this budget.
       wait_for_tag onboarding_bouncer_discovery_error 25 || true
-      scroll_forward_to_tag onboarding_bouncer_discovery_error 8 || true
-      assert_tag_present onboarding_bouncer_discovery_error
+      assert_tag_present_scrolling onboarding_bouncer_discovery_error 8
       if reconnect_stack start-soju; then
         _reconnect_restore_armed=false
         # Recovery is the app's job, not the user's: discovery must return to Loaded on the
@@ -417,8 +414,7 @@ phase_a() {
         # dump. The actor reconnects on its own exponential backoff (min(90s, 2s*2^attempt) *
         # 0.7..1.3) and exercising retry keeps the fixture down longer, so budget a full step.
         wait_for_tag onboarding_bouncer_discovery_refresh 150 || true
-        scroll_forward_to_tag onboarding_bouncer_discovery_refresh 8 || true
-        assert_tag_present onboarding_bouncer_discovery_refresh
+        assert_tag_present_scrolling onboarding_bouncer_discovery_refresh 8
       else
         fail "could not restart soju after discovery-failure exercise"
       fi
@@ -967,8 +963,7 @@ phase_f() {
   tap_tag_prefix settings_network_row_
   wait_for_text "Connect automatically" 6 || true
   assert_text "Connect automatically"
-  scroll_forward_to_tag network_settings_bouncer_networks 12 || true
-  assert_tag_present network_settings_bouncer_networks
+  assert_tag_present_scrolling network_settings_bouncer_networks 12
   assert_no_crash
 
   # 44. Bouncer networks (root).

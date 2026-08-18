@@ -331,6 +331,16 @@ tap_desc() { _e2e_tap_bounds_fn bounds_of_desc "$1" "desc"; }
 # tap_tag "<testTag>" — tap by resource-id (Compose testTag).
 tap_tag() { _e2e_tap_bounds_fn bounds_of_tag "$1" "tag"; }
 
+# tap_tag_scrolling "<testTag>" [tries] — tap_tag for the same drifting screens that need
+# assert_tag_present_scrolling. tap_tag takes its own dump and fails hard when the target is not in
+# it, so on a screen that is still appending content a control asserted a moment ago can slide out
+# of the viewport before the tap resolves. Chase it first, then tap.
+tap_tag_scrolling() {
+  local tag="$1" tries="${2:-6}"
+  scroll_forward_to_tag "$tag" "$tries" || true
+  tap_tag "$tag"
+}
+
 # tap_tag_prefix "<testTag-prefix>" — tap the first runtime-id-suffixed stable tag.
 tap_tag_prefix() { _e2e_tap_bounds_fn bounds_of_tag_prefix "$1" "tag prefix"; }
 
@@ -558,6 +568,24 @@ assert_tag_present() {
   local tag="$1"
   dump || { fail "dump failed asserting tag '${tag}'"; return 1; }
   if [ -n "$(bounds_of_tag "$tag")" ]; then
+    ok "present: tag '${tag}'"
+  else
+    screencap_step "missing_tag_$(_e2e_slug "$tag")"
+    fail "expected tag absent: '${tag}'"
+  fi
+}
+
+# assert_tag_present_scrolling "<testTag>" [tries] — assert a tag on a screen whose content keeps
+# moving while the check runs. scroll_forward_to_tag followed by assert_tag_present is a race on
+# such a screen: each takes its own dump, and content appended between the two can push the target
+# back out of the viewport, so the assert re-dumps and reports a tag the screen still holds as
+# absent. The connect screen is the case that forced this — every reconnect appends to its state
+# log, and step 9 of the runbook drives the socket down and back up while asserting on discovery
+# controls. Scroll and re-check inside one assertion so a target that drifts off is simply chased
+# again, and count the check exactly once.
+assert_tag_present_scrolling() {
+  local tag="$1" tries="${2:-6}"
+  if scroll_forward_to_tag "$tag" "$tries"; then
     ok "present: tag '${tag}'"
   else
     screencap_step "missing_tag_$(_e2e_slug "$tag")"
