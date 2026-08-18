@@ -111,6 +111,13 @@ class SettingsViewModel @Inject constructor(
     val customFontFile: File?
         get() = customFontStore.installedFile()
 
+    /**
+     * Bumps on every successful import, including a same-name re-import that leaves
+     * [io.github.trevarj.motd.data.prefs.AppearanceConfig.customFontName] unchanged — lets the
+     * font-picker preview re-key off something other than the (possibly unchanged) display name.
+     */
+    val fontRevision: StateFlow<Long> = customFontStore.revision
+
     private val networkPrefs = combine(
         networkRepository.observeNetworks(),
         bouncerKindPrefs.zncNetworkIds,

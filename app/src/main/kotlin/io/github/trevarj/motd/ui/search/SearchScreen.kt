@@ -392,7 +392,10 @@ private fun SearchRow(
     // Search results always show a time (independent of the in-chat "show timestamps" toggle);
     // only its 12h/24h format follows the user's preference.
     val context = LocalContext.current
-    val is24Hour = resolveIs24Hour(LocalTimestampConfig.current.format, DateFormat.is24HourFormat(context))
+    // Reads a system setting via a Binder call; memoize per row rather than re-querying on every
+    // recomposition (this composable is invoked once per visible result row).
+    val is24HourDevice = remember(context) { DateFormat.is24HourFormat(context) }
+    val is24Hour = resolveIs24Hour(LocalTimestampConfig.current.format, is24HourDevice)
     Row(
         modifier = Modifier
             .fillMaxWidth()

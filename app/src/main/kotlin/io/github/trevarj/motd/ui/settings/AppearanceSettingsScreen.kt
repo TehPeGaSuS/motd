@@ -112,10 +112,16 @@ fun AppearanceSettingsScreen(
             }
         }
     }
+    // Re-read the on-disk font whenever the display name changes or the revision bumps: a
+    // same-name re-import changes no persisted state, so the name alone would miss it.
+    val fontRevision by viewModel.fontRevision.collectAsStateWithLifecycle()
+    val customFontFile = remember(state.appearance.customFontName, fontRevision) {
+        viewModel.customFontFile
+    }
     AppearanceSettingsContent(
         settings = state.settings,
         appearance = state.appearance,
-        customFontFile = viewModel.customFontFile,
+        customFontFile = customFontFile,
         onBack = onBack,
         onOpenNickColors = onOpenNickColors,
         onThemePreset = viewModel::setThemePreset,

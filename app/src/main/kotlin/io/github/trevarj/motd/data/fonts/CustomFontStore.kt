@@ -10,7 +10,10 @@ import java.io.File
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 
 private const val MAX_FONT_BYTES = 30L * 1024 * 1024
@@ -29,6 +32,13 @@ class CustomFontStore @Inject constructor(
     /** Fixed on-disk location for the imported font; extension is irrelevant to Typeface. */
     val fontFile: File = File(fontsDir, "custom_font.ttf")
 
+    // Bumps whenever import() replaces the font file on disk, independent of the persisted
+    // display name — a re-import with an unchanged display name otherwise leaves nothing for
+    // callers to key a `remember` on, so the theme keeps the stale FontFamily until an unrelated
+    // recomposition happens to re-read the file.
+    private val _revision = MutableStateFlow(installedFile()?.lastModified() ?: 0L)
+    val revision: StateFlow<Long> = _revision
+
     /** The installed font file, or null if nothing has been imported (or it was removed). */
     fun installedFile(): File? = fontFile.takeIf { it.exists() }
 
@@ -44,11 +54,9 @@ class CustomFontStore @Inject constructor(
                 tempFile.outputStream().use { output -> input.copyToLimited(output, MAX_FONT_BYTES) }
             } ?: return@withContext Result.failure(IOException("Could not open the selected file."))
             if (copiedBytes > MAX_FONT_BYTES) {
-                tempFile.delete()
                 return@withContext Result.failure(IOException("Font file is too large."))
             }
             if (!tempFile.hasFontMagicNumber()) {
-                tempFile.delete()
                 return@withContext Result.failure(IOException("Not a valid font file."))
             }
             // Typeface.Builder.build() is documented to return null for bytes it can't parse as a
@@ -58,18 +66,26 @@ class CustomFontStore @Inject constructor(
             // File without actually decoding it, so the sniff is the gate that's guaranteed real.
             val decoded = runCatching { Typeface.Builder(tempFile).build() }.getOrNull()
             if (decoded == null) {
-                tempFile.delete()
                 return@withContext Result.failure(IOException("Not a valid font file."))
             }
             val displayName = resolveDisplayName(uri)
             if (!tempFile.renameTo(fontFile)) {
-                tempFile.delete()
                 return@withContext Result.failure(IOException("Could not install the font file."))
             }
+            // Monotonic regardless of filesystem mtime granularity, so two imports landing in the
+            // same tick (e.g. a rapid same-name re-import) still produce distinct revisions.
+            _revision.value = maxOf(fontFile.lastModified(), _revision.value + 1)
             Result.success(displayName)
-        } catch (io: IOException) {
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            // openInputStream can throw SecurityException on a revoked grant and content-provider
+            // streams can throw arbitrary unchecked exceptions; both must resolve through the
+            // Result contract like an IOException rather than escaping into the caller's launch.
+            Result.failure(error)
+        } finally {
+            // No-op if already renamed to fontFile, or if nothing was ever written.
             tempFile.delete()
-            Result.failure(io)
         }
     }
 
@@ -88,10 +104,15 @@ class CustomFontStore @Inject constructor(
         cursor?.use {
             if (it.moveToFirst()) {
                 val nameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (nameIndex >= 0) it.getString(nameIndex)?.let { name -> return name }
+                // A provider can answer DISPLAY_NAME with "" (blank, not null). Treating that as a
+                // name would persist an empty customFontName while CUSTOM stays selected, which the
+                // picker reads as "nothing imported" and re-launches the picker instead of selecting.
+                if (nameIndex >= 0) {
+                    it.getString(nameIndex)?.takeIf { name -> name.isNotBlank() }?.let { name -> return name }
+                }
             }
         }
-        return uri.lastPathSegment ?: "Custom font"
+        return uri.lastPathSegment?.takeIf { it.isNotBlank() } ?: "Custom font"
     }
 }
 

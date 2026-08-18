@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -191,7 +192,10 @@ fun ChatListRowItem(
     // The chat-list time always shows regardless of the in-chat "show timestamps" toggle; only its
     // 12h/24h format follows the user's preference (AUTO falls back to the device setting).
     val context = LocalContext.current
-    val is24Hour = resolveIs24Hour(LocalTimestampConfig.current.format, DateFormat.is24HourFormat(context))
+    // Reads a system setting via a Binder call; memoize per row rather than re-querying on every
+    // recomposition (this composable is invoked once per visible row).
+    val is24HourDevice = remember(context) { DateFormat.is24HourFormat(context) }
+    val is24Hour = resolveIs24Hour(LocalTimestampConfig.current.format, is24HourDevice)
     val queryPresence = presence.takeIf { row.type == BufferType.QUERY }
     val badges = chatListBadgeState(row)
     val isUnread = !row.muted && row.unreadCount > 0

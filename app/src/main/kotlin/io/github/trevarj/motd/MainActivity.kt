@@ -134,8 +134,12 @@ class MainActivity : ComponentActivity(), SystemBarThemeHost {
             val settings = uiState.settings
             val appearance = uiState.appearance
             // Re-check the on-disk font whenever the imported name changes (a fresh import or a
-            // backup restore that cleared it); CustomFontStore itself has no reactive stream.
-            val customFontFile = remember(appearance.customFontName) { customFontStore.installedFile() }
+            // backup restore that cleared it), or when CustomFontStore's revision bumps (a
+            // same-name re-import changes no persisted state, so the name alone would miss it).
+            val fontRevision by customFontStore.revision.collectAsStateWithLifecycle()
+            val customFontFile = remember(appearance.customFontName, fontRevision) {
+                customFontStore.installedFile()
+            }
             MotdTheme(
                 themePreset = appearance.theme,
                 trueBlack = appearance.trueBlack,

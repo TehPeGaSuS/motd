@@ -236,10 +236,14 @@ class MotdNotifications @Inject constructor(
         reconnecting: Boolean,
         starting: Boolean = false,
     ): Notification {
+        // Explicit component: getLaunchIntentForPackage resolves to the enabled launcher
+        // activity-alias, and switching icons (feat(appearance): selectable launcher icon
+        // variants) disables that alias, dead-ending an already-posted PendingIntent.
         val contentIntent = PendingIntent.getActivity(
             context, 0,
-            context.packageManager.getLaunchIntentForPackage(context.packageName)
-                ?: Intent(),
+            Intent(context, MainActivity::class.java)
+                .setAction(Intent.ACTION_MAIN)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val stopIntent = PendingIntent.getService(
