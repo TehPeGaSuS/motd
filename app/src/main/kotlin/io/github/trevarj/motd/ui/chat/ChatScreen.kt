@@ -865,6 +865,10 @@ fun ChatContent(
         // landing rect and start the ghost mid-timeline instead of at the composer.
         flightAnchors.landingRow = null
         flightAnchors.ghostHeight = 0f
+        // The field still holds its pre-clear (possibly multi-line) rect during this
+        // composition; layout shrinks it afterwards, and composerShrink() measures against
+        // this pinned height.
+        flightAnchors.launchFieldHeight = flightAnchors.composerField?.height ?: 0f
         SendFlightMotion()
     }
     val flightProgress = remember(flightMotion) { { flightMotion.progress.value } }
@@ -2043,6 +2047,7 @@ fun ChatContent(
                         runwayHeight = flightAnchors.ghostHeight + gapPx,
                         liftFraction = flightMotion.lift.value,
                         revealedGap = revealed,
+                        footDrop = flightAnchors.composerShrink(),
                     )
                 }
                 shift

@@ -79,6 +79,19 @@ internal class SendFlightAnchors {
      * already sees the real value, so at worst the runway's first frame targets only the gap).
      */
     var ghostHeight by mutableStateOf(0f)
+    /**
+     * The composer field's height on the tap frame, pinned alongside the motion reset. A
+     * multi-line draft collapses the field to one line when it clears, which grows the timeline
+     * pane and drops the list foot by the difference on that same frame; [composerShrink] feeds
+     * that drop into the runway and hover so the vacated-space math survives the collapse.
+     */
+    var launchFieldHeight by mutableStateOf(0f)
+
+    /** How much the composer has shrunk since the tap frame (0 while it has not). */
+    fun composerShrink(): Float {
+        val current = composerField?.height ?: return 0f
+        return max(0f, launchFieldHeight - current)
+    }
 
     fun reportLandingRow(eventId: Long, bounds: Rect) {
         landingRow = eventId to bounds
@@ -137,6 +150,13 @@ internal fun sendFlightEntryFade(liftFraction: Float): Float {
  * mispredicted runway height self-corrects here too -- both terms are animated, so the error
  * drains through the springs instead of jumping.
  *
+ * [footDrop] is how far the list foot fell when a multi-line composer collapsed on the tap
+ * frame ([SendFlightAnchors.composerShrink]). It is absorbed into the shift IMMEDIATELY -- not
+ * on the spring -- so the neighbour never visibly drops toward the collapsed bar; from there
+ * the spring carries the remaining (runway - drop) of travel, and the reveal drains the whole
+ * shift exactly as before. Without this term a long message's ghost outran the vacated space
+ * by the collapse amount and rode over the neighbour on both presentations.
+ *
  * The lift fraction is capped at 1 so the flight spring's deliberate bounce stays on the
  * bubble; an underdamped shift would nod the entire conversation.
  */
@@ -144,16 +164,18 @@ internal fun sendFlightListShift(
     runwayHeight: Float,
     liftFraction: Float,
     revealedGap: Float,
-): Float = max(0f, runwayHeight * min(liftFraction, 1f) - revealedGap)
+    footDrop: Float = 0f,
+): Float = max(0f, footDrop + (runwayHeight - footDrop) * min(liftFraction, 1f) - revealedGap)
 
 /**
  * The ghost's absolute top for one frame.
  *
  * While the landing row has not reported (and while the flight is still short of the hover
- * line), the lift holds the bubble one bubble height above the composer top: full-height
- * in-flight feedback during however long persistence takes. The runway ([sendFlightListShift])
- * opens beneath it on the same spring, and always faster -- the runway target exceeds the
- * ghost height by the group gap, and the hover additionally trails by the composer offset --
+ * line), the lift holds the bubble in-flight feedback above the composer. The hover rise is the
+ * ghost height LESS [footDrop]: a collapsing multi-line composer already moved the resting slot
+ * down by the drop, so a full-height rise from the pinned (pre-collapse) field top would
+ * overshoot the slot by exactly that amount and poke into the neighbour above. The runway
+ * ([sendFlightListShift]) opens beneath the reduced rise on the same spring and always faster,
  * so the hover sits in vacated space by construction. min keeps whichever of hover and flight
  * is higher, so the flight takes over smoothly once it climbs past the hover line.
  *
@@ -172,8 +194,9 @@ internal fun sendFlightGhostTop(
     landingBottom: Float?,
     flightFraction: Float,
     liftFraction: Float,
+    footDrop: Float = 0f,
 ): Float {
-    val hoverTop = startTop - ghostHeight * liftFraction
+    val hoverTop = startTop - max(0f, ghostHeight - footDrop) * liftFraction
     val restingFoot = landingBottom?.plus(listShift) ?: return hoverTop
     val flightTop = startTop + (restingFoot - ghostHeight - startTop) * flightFraction
     val flooredFlight = landingTop?.let { max(flightTop, it) } ?: flightTop
@@ -260,6 +283,7 @@ internal fun BoxScope.SendFlightOverlay(
                     landingBottom = landing?.bottom,
                     flightFraction = motion.progress.value,
                     liftFraction = motion.lift.value,
+                    footDrop = anchors.composerShrink(),
                 )
             }
             .clearAndSetSemantics {},

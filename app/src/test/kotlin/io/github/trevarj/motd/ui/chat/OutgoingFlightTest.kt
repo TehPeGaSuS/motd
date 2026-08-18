@@ -123,6 +123,32 @@ class OutgoingFlightTest {
     }
 
     @Test
+    fun `a collapsing composer's foot drop is absorbed by the shift immediately`() {
+        // A 3-line draft (field shrinks 40px on the tap frame) with a 200px ghost, runway 206:
+        // the shift starts at the full drop so the neighbour never dips toward the collapsed
+        // bar, springs up the remaining travel, and drains through the reveal as usual.
+        assertEquals(40f, sendFlightListShift(206f, 0f, 0f, footDrop = 40f), 0.001f)
+        assertEquals(123f, sendFlightListShift(206f, 0.5f, 0f, footDrop = 40f), 0.001f)
+        assertEquals(206f, sendFlightListShift(206f, 1f, 0f, footDrop = 40f), 0.001f)
+        assertEquals(0f, sendFlightListShift(206f, 1f, 206f, footDrop = 40f), 0.001f)
+        // A short message after a huge draft (drop exceeds the runway): the neighbour is held,
+        // then eased DOWN to its genuinely lower resting slot rather than jumped.
+        assertEquals(80f, sendFlightListShift(66f, 0f, 0f, footDrop = 80f), 0.001f)
+        assertEquals(66f, sendFlightListShift(66f, 1f, 0f, footDrop = 80f), 0.001f)
+        assertEquals(0f, sendFlightListShift(66f, 1f, 66f, footDrop = 80f), 0.001f)
+    }
+
+    @Test
+    fun `the hover rise is shortened by the foot drop so a tall ghost cannot overshoot its slot`() {
+        // Pinned field top 900, ghost 200, field collapsed by 40: the resting slot sits 40 lower
+        // than a fixed-foot rise assumes, so the full hover is 160, not 200.
+        assertEquals(820f, sendFlightGhostTop(900f, 200f, 40f, null, null, 0f, 0.5f, footDrop = 40f), 0.001f)
+        assertEquals(740f, sendFlightGhostTop(900f, 200f, 80f, null, null, 0f, 1f, footDrop = 40f), 0.001f)
+        // A drop taller than the ghost pins the hover at the field: the slot is BELOW the start.
+        assertEquals(900f, sendFlightGhostTop(900f, 60f, 0f, null, null, 0f, 1f, footDrop = 80f), 0.001f)
+    }
+
+    @Test
     fun `the runway handoff keeps the total vacated space continuous`() {
         // The neighbour's edge sits at shift + revealed below its resting spot; across the whole
         // handoff that total is max(runway, revealed), so it can only grow, never dip.
