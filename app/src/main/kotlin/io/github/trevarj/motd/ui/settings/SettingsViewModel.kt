@@ -247,6 +247,10 @@ class SettingsViewModel @Inject constructor(
         appearancePrefs.setBubbleCornerStyle(style)
     }
 
+    fun setLauncherIcon(icon: io.github.trevarj.motd.data.prefs.LauncherIcon) = viewModelScope.launch {
+        appearancePrefs.setLauncherIcon(icon)
+    }
+
     /** Import [uri] as the app-wide custom font; on success it also becomes the active choice. */
     fun importCustomFont(uri: Uri) = viewModelScope.launch {
         val result = customFontStore.import(uri)

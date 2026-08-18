@@ -1221,6 +1221,15 @@
     <string name="settings_wallpaper_apply">Apply wallpaper</string>
     <string name="settings_wallpaper_cancel">Cancel</string>
 
+    <string name="settings_app_icon_section">App icon</string>
+    <string name="settings_app_icon_default">Default</string>
+    <string name="settings_app_icon_mono">Mono</string>
+    <string name="settings_app_icon_terminal">Terminal</string>
+    <string name="settings_app_icon_gruvbox">Gruvbox</string>
+    <string name="settings_app_icon_catppuccin">Catppuccin</string>
+    <string name="settings_app_icon_nord">Nord</string>
+    <string name="settings_app_icon_light">Light</string>
+
     <!-- Avatar style picker -->
     <string name="settings_avatar_style">Avatar style</string>
     <string name="settings_avatar_monogram">Monogram</string>

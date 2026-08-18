@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#006C70</color>
+
+    <!-- Launcher icon variant backgrounds (Appearance > App icon). Do not repurpose
+         ic_launcher_background above: the splash screen keys off it directly. -->
+    <color name="ic_launcher_background_mono">#0B0B0D</color>
+    <color name="ic_launcher_background_terminal">#0A0F0A</color>
+    <color name="ic_launcher_background_gruvbox">#282828</color>
+    <color name="ic_launcher_background_catppuccin">#1E1E2E</color>
+    <color name="ic_launcher_background_nord">#2E3440</color>
+    <color name="ic_launcher_background_light">#FAF4ED</color>
 </resources>

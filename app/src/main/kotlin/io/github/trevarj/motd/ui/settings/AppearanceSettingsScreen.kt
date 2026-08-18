@@ -22,9 +22,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
@@ -45,11 +47,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.tooling.preview.Preview
@@ -59,6 +64,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.FontChoice
+import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
@@ -129,6 +135,7 @@ fun AppearanceSettingsScreen(
         onTimeFormat = viewModel::setTimeFormat,
         onMessageSpacing = viewModel::setMessageSpacing,
         onBubbleCornerStyle = viewModel::setBubbleCornerStyle,
+        onLauncherIcon = viewModel::setLauncherIcon,
     )
 }
 
@@ -154,6 +161,7 @@ fun AppearanceSettingsContent(
     onTimeFormat: (TimeFormat) -> Unit,
     onMessageSpacing: (io.github.trevarj.motd.data.prefs.MessageSpacing) -> Unit,
     onBubbleCornerStyle: (io.github.trevarj.motd.data.prefs.BubbleCornerStyle) -> Unit,
+    onLauncherIcon: (LauncherIcon) -> Unit,
     customFontFile: File? = null,
     onImportCustomFont: (Uri) -> Unit = {},
 ) {
@@ -287,6 +295,9 @@ fun AppearanceSettingsContent(
         }
         SettingsGroup(title = stringResource(R.string.settings_wallpaper)) {
             ChatWallpaperPicker(current = appearance.wallpaper, onApply = onWallpaper)
+        }
+        SettingsGroup(title = stringResource(R.string.settings_app_icon_section)) {
+            LauncherIconGroup(current = appearance.launcherIcon, onSelect = onLauncherIcon)
         }
     }
     if (showThemeSheet) {
@@ -813,6 +824,66 @@ private fun BubbleCornerStyleGroup(
 }
 
 @Composable
+private fun LauncherIconGroup(current: LauncherIcon, onSelect: (LauncherIcon) -> Unit) {
+    Column(Modifier.selectableGroup()) {
+        LauncherIcon.entries.forEach { icon ->
+            RadioRow(
+                label = stringResource(launcherIconLabelRes(icon)),
+                selected = current == icon,
+                enabled = true,
+                onClick = { onSelect(icon) },
+                modifier = Modifier.testTag("settings_app_icon_${icon.name.lowercase()}"),
+                trailing = { LauncherIconPreview(icon) },
+            )
+        }
+    }
+}
+
+/** ~36dp circular swatch of the variant's background color with its launcher mark centered on top. */
+@Composable
+private fun LauncherIconPreview(icon: LauncherIcon) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(colorResource(launcherIconBackgroundColorRes(icon))),
+    ) {
+        Image(
+            painter = painterResource(launcherIconForegroundDrawableRes(icon)),
+            contentDescription = null,
+            modifier = Modifier
+                .size(36.dp)
+                .padding(4.dp),
+        )
+    }
+}
+
+private fun launcherIconLabelRes(icon: LauncherIcon): Int = when (icon) {
+    LauncherIcon.DEFAULT -> R.string.settings_app_icon_default
+    LauncherIcon.MONO -> R.string.settings_app_icon_mono
+    LauncherIcon.TERMINAL -> R.string.settings_app_icon_terminal
+    LauncherIcon.GRUVBOX -> R.string.settings_app_icon_gruvbox
+    LauncherIcon.CATPPUCCIN -> R.string.settings_app_icon_catppuccin
+    LauncherIcon.NORD -> R.string.settings_app_icon_nord
+    LauncherIcon.LIGHT -> R.string.settings_app_icon_light
+}
+
+private fun launcherIconBackgroundColorRes(icon: LauncherIcon): Int = when (icon) {
+    LauncherIcon.DEFAULT -> R.color.ic_launcher_background
+    LauncherIcon.MONO -> R.color.ic_launcher_background_mono
+    LauncherIcon.TERMINAL -> R.color.ic_launcher_background_terminal
+    LauncherIcon.GRUVBOX -> R.color.ic_launcher_background_gruvbox
+    LauncherIcon.CATPPUCCIN -> R.color.ic_launcher_background_catppuccin
+    LauncherIcon.NORD -> R.color.ic_launcher_background_nord
+    LauncherIcon.LIGHT -> R.color.ic_launcher_background_light
+}
+
+private fun launcherIconForegroundDrawableRes(icon: LauncherIcon): Int = when (icon) {
+    LauncherIcon.TERMINAL -> R.drawable.ic_launcher_foreground_terminal
+    else -> R.drawable.ic_launcher_foreground
+}
+
+@Composable
 private fun PaletteGroup(
     current: NickColorPalette,
     enabled: Boolean,
@@ -852,6 +923,7 @@ private fun AppearanceSettingsPreview() {
             onTimeFormat = {},
             onMessageSpacing = {},
             onBubbleCornerStyle = {},
+            onLauncherIcon = {},
         )
     }
 }
@@ -872,6 +944,7 @@ private fun AppearanceSettingsMinTextPreview() {
             onTimeFormat = {},
             onMessageSpacing = {},
             onBubbleCornerStyle = {},
+            onLauncherIcon = {},
         )
     }
 }
@@ -892,6 +965,7 @@ private fun AppearanceSettingsMaxTextPreview() {
             onTimeFormat = {},
             onMessageSpacing = {},
             onBubbleCornerStyle = {},
+            onLauncherIcon = {},
         )
     }
 }

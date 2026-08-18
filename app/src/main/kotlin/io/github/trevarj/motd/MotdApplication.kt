@@ -8,6 +8,9 @@ import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import coil.decode.VideoFrameDecoder
 import dagger.hilt.android.HiltAndroidApp
+import io.github.trevarj.motd.appearance.LauncherIconController
+import io.github.trevarj.motd.data.prefs.AppearancePrefs
+import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.di.AppVisibilityImpl
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.push.PushInstanceCoordinator
@@ -15,6 +18,11 @@ import io.github.trevarj.motd.push.PushLifecycleCoordinator
 import io.github.trevarj.motd.service.AutoAwayCoordinator
 import io.github.trevarj.motd.ui.ComposeFoundationWorkarounds
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 
 @HiltAndroidApp
 class MotdApplication : Application(), ImageLoaderFactory {
@@ -32,6 +40,14 @@ class MotdApplication : Application(), ImageLoaderFactory {
     // Process-wide "is the user looking at us", read by panes that navigation disposes.
     @Inject lateinit var appVisibility: AppVisibilityImpl
 
+    @Inject lateinit var appearancePrefs: AppearancePrefs
+
+    @Inject lateinit var launcherIconController: LauncherIconController
+
+    @ApplicationScope
+    @Inject
+    lateinit var applicationScope: CoroutineScope
+
     override fun onCreate() {
         super.onCreate()
         ComposeFoundationWorkarounds.apply()
@@ -42,6 +58,11 @@ class MotdApplication : Application(), ImageLoaderFactory {
         pushInstanceCoordinator.start()
         pushLifecycleCoordinator.start()
         autoAwayCoordinator.start()
+        appearancePrefs.config
+            .map { it.launcherIcon }
+            .distinctUntilChanged()
+            .onEach(launcherIconController::apply)
+            .launchIn(applicationScope)
     }
 
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
