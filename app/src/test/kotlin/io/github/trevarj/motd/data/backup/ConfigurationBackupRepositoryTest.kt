@@ -11,9 +11,14 @@ import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefsImpl
+import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.FontChoice
+import io.github.trevarj.motd.data.prefs.LauncherIcon
+import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
+import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.gesture.GestureMenuConfig
 import io.github.trevarj.motd.gesture.GestureNode
 import io.github.trevarj.motd.gesture.GesturePrefsImpl
@@ -160,6 +165,44 @@ class ConfigurationBackupRepositoryTest {
 
         assertEquals(edited, gesturePrefs.menu.first())
         gesturePrefs.setMenu(GestureMenuConfig())
+    }
+
+    /** Stage-1 appearance fields (font, timestamps, spacing, bubbles, launcher icon) travel with a backup. */
+    @Test
+    fun newAppearanceFieldsRoundTripThroughExportAndImport() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val appearancePrefs = AppearancePrefsImpl(context)
+        val source = repository(inMemoryDb())
+
+        appearancePrefs.setFontChoice(FontChoice.JETBRAINS_MONO)
+        appearancePrefs.setShowTimestamps(false)
+        appearancePrefs.setTimeFormat(TimeFormat.H24)
+        appearancePrefs.setMessageSpacing(MessageSpacing.RELAXED)
+        appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.SQUARE)
+        appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
+        // Only the display name travels; the font binary itself is not part of the backup payload.
+        appearancePrefs.setCustomFontName("Iosevka Term.ttf")
+
+        val raw = source.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+
+        appearancePrefs.setFontChoice(FontChoice.SYSTEM)
+        appearancePrefs.setShowTimestamps(true)
+        appearancePrefs.setTimeFormat(TimeFormat.AUTO)
+        appearancePrefs.setMessageSpacing(MessageSpacing.DEFAULT)
+        appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.ROUNDED)
+        appearancePrefs.setLauncherIcon(LauncherIcon.DEFAULT)
+        appearancePrefs.setCustomFontName("")
+
+        source.import(raw, importMode = BackupImportMode.MERGE)
+
+        val config = appearancePrefs.config.first()
+        assertEquals(FontChoice.JETBRAINS_MONO, config.fontChoice)
+        assertEquals(false, config.showTimestamps)
+        assertEquals(TimeFormat.H24, config.timeFormat)
+        assertEquals(MessageSpacing.RELAXED, config.messageSpacing)
+        assertEquals(BubbleCornerStyle.SQUARE, config.bubbleCornerStyle)
+        assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
+        assertEquals("Iosevka Term.ttf", config.customFontName)
     }
 
     private fun repository(db: io.github.trevarj.motd.data.db.MotdDatabase): ConfigurationBackupRepositoryImpl {

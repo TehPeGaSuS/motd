@@ -430,6 +430,8 @@ fun ChatScreen(
         onHiddenFoolsRevealedChange = viewModel::setHiddenFoolsRevealed,
         chatWallpaper = appearance.wallpaper,
         conversationFontScalePercent = appearance.conversationFontScalePercent,
+        messageSpacing = appearance.messageSpacing,
+        bubbleCornerStyle = appearance.bubbleCornerStyle,
         showComposerEmoji = settings.showComposerEmoji,
         visibleReplyPrefix = replyConfig.visibleChannelPrefix,
         showImages = contentPreviews.showImages && directMediaAllowed,
@@ -662,6 +664,10 @@ fun ChatContent(
     onHiddenFoolsRevealedChange: (Boolean) -> Unit = {},
     chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection = io.github.trevarj.motd.data.prefs.WallpaperSelection(),
     conversationFontScalePercent: Int = io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT,
+    messageSpacing: io.github.trevarj.motd.data.prefs.MessageSpacing =
+        io.github.trevarj.motd.data.prefs.MessageSpacing.DEFAULT,
+    bubbleCornerStyle: io.github.trevarj.motd.data.prefs.BubbleCornerStyle =
+        io.github.trevarj.motd.data.prefs.BubbleCornerStyle.ROUNDED,
     showComposerEmoji: Boolean = true,
     visibleReplyPrefix: Boolean = false,
     showImages: Boolean = true,
@@ -2001,8 +2007,8 @@ fun ChatContent(
             // No composition-phase IME read here on purpose: the composer samples the animated inset
             // in its own measure phase, so the whole timeline stays skippable while the keyboard
             // animates instead of recomposing once per frame.
-            val conversationSpacing = remember(conversationLayout.effective) {
-                spacingFor(conversationLayout.effective)
+            val conversationSpacing = remember(conversationLayout.effective, messageSpacing, bubbleCornerStyle) {
+                spacingFor(conversationLayout.effective, messageSpacing, bubbleCornerStyle)
             }
             ConversationTypography(conversationFontScalePercent) {
             Column(modifier = Modifier.fillMaxSize()) {

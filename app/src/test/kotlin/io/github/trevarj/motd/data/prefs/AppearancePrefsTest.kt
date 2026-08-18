@@ -1,6 +1,8 @@
 package io.github.trevarj.motd.data.prefs
 
 import android.content.Context
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -23,6 +25,63 @@ class AppearancePrefsTest {
             ),
             AppearanceConfig(),
         )
+        // New stage-1 fields keep sane defaults when absent from the store (data-class defaults,
+        // not read through prefs.config here since the DataStore singleton is shared across the
+        // test methods in this class).
+        assertEquals(FontChoice.SYSTEM, AppearanceConfig().fontChoice)
+        assertEquals(true, AppearanceConfig().showTimestamps)
+        assertEquals(TimeFormat.AUTO, AppearanceConfig().timeFormat)
+        assertEquals(MessageSpacing.DEFAULT, AppearanceConfig().messageSpacing)
+        assertEquals(BubbleCornerStyle.ROUNDED, AppearanceConfig().bubbleCornerStyle)
+        assertEquals(LauncherIcon.DEFAULT, AppearanceConfig().launcherIcon)
+        assertEquals("", AppearanceConfig().customFontName)
+    }
+
+    @Test fun newAppearanceFields_roundTripNonDefaultValues() = runTest {
+        prefs.setFontChoice(FontChoice.JETBRAINS_MONO)
+        prefs.setShowTimestamps(false)
+        prefs.setTimeFormat(TimeFormat.H24)
+        prefs.setMessageSpacing(MessageSpacing.RELAXED)
+        prefs.setBubbleCornerStyle(BubbleCornerStyle.SQUARE)
+        prefs.setLauncherIcon(LauncherIcon.GRUVBOX)
+
+        val config = prefs.config.first()
+        assertEquals(FontChoice.JETBRAINS_MONO, config.fontChoice)
+        assertEquals(false, config.showTimestamps)
+        assertEquals(TimeFormat.H24, config.timeFormat)
+        assertEquals(MessageSpacing.RELAXED, config.messageSpacing)
+        assertEquals(BubbleCornerStyle.SQUARE, config.bubbleCornerStyle)
+        assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
+    }
+
+    @Test fun customFontName_roundTrips() = runTest {
+        // The data-class default (empty) is covered by defaults_areSystemAndChatterAtEighty; this
+        // DataStore instance is shared across every test method in this class (see that test's
+        // comment), so a leading "reads empty" assertion here would be order-dependent.
+        prefs.setCustomFontName("Iosevka Term.ttf")
+        assertEquals("Iosevka Term.ttf", prefs.config.first().customFontName)
+        prefs.setFontChoice(FontChoice.CUSTOM)
+        assertEquals(FontChoice.CUSTOM, prefs.config.first().fontChoice)
+        prefs.setCustomFontName("")
+        assertEquals("", prefs.config.first().customFontName)
+    }
+
+    @Test fun garbageStoredEnumStrings_decodeToDefaults() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.appearanceDataStore.edit {
+            it[stringPreferencesKey("font_choice_v1")] = "not-a-font"
+            it[stringPreferencesKey("time_format_v1")] = "not-a-format"
+            it[stringPreferencesKey("message_spacing_v1")] = "not-a-spacing"
+            it[stringPreferencesKey("bubble_corner_style_v1")] = "not-a-style"
+            it[stringPreferencesKey("launcher_icon_v1")] = "not-an-icon"
+        }
+
+        val config = prefs.config.first()
+        assertEquals(FontChoice.SYSTEM, config.fontChoice)
+        assertEquals(TimeFormat.AUTO, config.timeFormat)
+        assertEquals(MessageSpacing.DEFAULT, config.messageSpacing)
+        assertEquals(BubbleCornerStyle.ROUNDED, config.bubbleCornerStyle)
+        assertEquals(LauncherIcon.DEFAULT, config.launcherIcon)
     }
 
     @Test fun themeAndWallpaper_roundTrip() = runTest {

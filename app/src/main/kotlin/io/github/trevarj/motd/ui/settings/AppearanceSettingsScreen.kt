@@ -1,5 +1,9 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -34,12 +38,14 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -52,9 +58,11 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.systemPartner
@@ -68,11 +76,15 @@ import io.github.trevarj.motd.ui.components.IrcSpriteAvatar
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.MotdShapes
+import io.github.trevarj.motd.ui.theme.fontFamily
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.TextFields
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.rememberAppFontFamily
+import java.io.File
 import kotlin.math.roundToInt
 
 /** Appearance category: theme, dynamic color, layout density, avatar style, nick colors, wallpaper. */
@@ -83,9 +95,21 @@ fun AppearanceSettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val importFailedMessage = stringResource(R.string.settings_font_custom_invalid)
+    // Success is already visible in the picker row (it selects and shows the file name); only the
+    // failure case needs a transient nudge, mirroring the audio-cache-clear Toast pattern.
+    LaunchedEffect(viewModel, context, importFailedMessage) {
+        viewModel.customFontImportEvents.collect { event ->
+            if (event == CustomFontImportEvent.FAILED) {
+                Toast.makeText(context, importFailedMessage, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     AppearanceSettingsContent(
         settings = state.settings,
         appearance = state.appearance,
+        customFontFile = viewModel.customFontFile,
         onBack = onBack,
         onOpenNickColors = onOpenNickColors,
         onThemePreset = viewModel::setThemePreset,
@@ -99,6 +123,12 @@ fun AppearanceSettingsScreen(
         onWallpaper = viewModel::setWallpaper,
         onUiFontScale = viewModel::setUiFontScale,
         onConversationFontScale = viewModel::setConversationFontScale,
+        onFontChoice = viewModel::setFontChoice,
+        onImportCustomFont = viewModel::importCustomFont,
+        onShowTimestamps = viewModel::setShowTimestamps,
+        onTimeFormat = viewModel::setTimeFormat,
+        onMessageSpacing = viewModel::setMessageSpacing,
+        onBubbleCornerStyle = viewModel::setBubbleCornerStyle,
     )
 }
 
@@ -119,8 +149,16 @@ fun AppearanceSettingsContent(
     onWallpaper: (io.github.trevarj.motd.data.prefs.WallpaperSelection) -> Unit,
     onUiFontScale: (Int) -> Unit,
     onConversationFontScale: (Int) -> Unit,
+    onFontChoice: (FontChoice) -> Unit,
+    onShowTimestamps: (Boolean) -> Unit,
+    onTimeFormat: (TimeFormat) -> Unit,
+    onMessageSpacing: (io.github.trevarj.motd.data.prefs.MessageSpacing) -> Unit,
+    onBubbleCornerStyle: (io.github.trevarj.motd.data.prefs.BubbleCornerStyle) -> Unit,
+    customFontFile: File? = null,
+    onImportCustomFont: (Uri) -> Unit = {},
 ) {
     var showThemeSheet by rememberSaveable { mutableStateOf(false) }
+    var showFontSheet by rememberSaveable { mutableStateOf(false) }
     val followSystemAvailable = appearance.theme.systemPartner != null
     val trueBlackAvailable = appearance.theme == ColorThemePreset.SYSTEM ||
         appearance.theme.isDark || (appearance.followSystem && followSystemAvailable)
@@ -199,6 +237,14 @@ fun AppearanceSettingsContent(
             )
         }
         SettingsGroup(title = stringResource(R.string.settings_layout_section)) {
+            SettingsNavigationRow(
+                icon = Icons.Outlined.TextFields,
+                title = stringResource(R.string.settings_app_font),
+                value = fontChoiceLabel(appearance.fontChoice),
+                onClick = { showFontSheet = true },
+                modifier = Modifier.testTag("settings_font_picker"),
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             FontScaleSlider(
                 title = stringResource(R.string.settings_ui_font_size),
                 description = stringResource(R.string.settings_ui_font_size_desc),
@@ -221,6 +267,24 @@ fun AppearanceSettingsContent(
             SubLabel(stringResource(R.string.settings_avatar_style))
             AvatarStyleGroup(current = settings.avatarStyle, onSelect = onAvatarStyle)
         }
+        SettingsGroup(title = stringResource(R.string.settings_appearance_messages_section)) {
+            SwitchRow(
+                title = stringResource(R.string.settings_show_timestamps),
+                subtitle = stringResource(R.string.settings_show_timestamps_desc),
+                checked = appearance.showTimestamps,
+                onCheckedChange = onShowTimestamps,
+                switchTag = "settings_switch_show_timestamps",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SubLabel(stringResource(R.string.settings_time_format))
+            TimeFormatGroup(current = appearance.timeFormat, onSelect = onTimeFormat)
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SubLabel(stringResource(R.string.settings_message_spacing))
+            MessageSpacingGroup(current = appearance.messageSpacing, onSelect = onMessageSpacing)
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SubLabel(stringResource(R.string.settings_bubble_corners))
+            BubbleCornerStyleGroup(current = appearance.bubbleCornerStyle, onSelect = onBubbleCornerStyle)
+        }
         SettingsGroup(title = stringResource(R.string.settings_wallpaper)) {
             ChatWallpaperPicker(current = appearance.wallpaper, onApply = onWallpaper)
         }
@@ -232,6 +296,16 @@ fun AppearanceSettingsContent(
             dynamicColor = settings.dynamicColor,
             onSelect = onThemePreset,
             onDismiss = { showThemeSheet = false },
+        )
+    }
+    if (showFontSheet) {
+        FontPickerSheet(
+            current = appearance.fontChoice,
+            customFontName = appearance.customFontName,
+            customFontFile = customFontFile,
+            onSelect = onFontChoice,
+            onImportCustomFont = onImportCustomFont,
+            onDismiss = { showFontSheet = false },
         )
     }
 }
@@ -408,6 +482,106 @@ private fun ThemeRadioRow(
     )
 }
 
+/** Mime types accepted by the custom-font document picker; broad because OEM providers vary. */
+private val CUSTOM_FONT_MIME_TYPES = arrayOf(
+    "font/ttf",
+    "font/otf",
+    "font/*",
+    "application/x-font-ttf",
+    "application/octet-stream",
+)
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun FontPickerSheet(
+    current: FontChoice,
+    customFontName: String,
+    customFontFile: File?,
+    onSelect: (FontChoice) -> Unit,
+    onImportCustomFont: (Uri) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(onImportCustomFont)
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("settings_font_sheet")) {
+        SheetSystemBars()
+        Column(Modifier.selectableGroup().padding(bottom = 24.dp)) {
+            Text(stringResource(R.string.settings_app_font), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
+            FontChoice.entries.forEach { choice ->
+                if (choice == FontChoice.CUSTOM) {
+                    CustomFontRow(
+                        selected = current == choice,
+                        customFontName = customFontName,
+                        customFontFile = customFontFile,
+                        onClick = {
+                            if (customFontName.isEmpty()) {
+                                launcher.launch(CUSTOM_FONT_MIME_TYPES)
+                            } else {
+                                onSelect(choice)
+                            }
+                        },
+                        onChange = { launcher.launch(CUSTOM_FONT_MIME_TYPES) },
+                    )
+                } else {
+                    RadioRow(
+                        label = fontChoiceLabel(choice),
+                        selected = current == choice,
+                        enabled = true,
+                        onClick = { onSelect(choice) },
+                        modifier = Modifier.testTag("settings_font_${choice.name.lowercase()}"),
+                        trailing = {
+                            Text("Aa 0O1lI", fontFamily = choice.fontFamily())
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CustomFontRow(
+    selected: Boolean,
+    customFontName: String,
+    customFontFile: File?,
+    onClick: () -> Unit,
+    onChange: () -> Unit,
+) {
+    val imported = customFontName.isNotEmpty()
+    val previewFamily = rememberAppFontFamily(FontChoice.CUSTOM, customFontFile)
+    RadioRow(
+        label = stringResource(R.string.settings_font_custom),
+        subtitle = if (imported) customFontName else stringResource(R.string.settings_font_custom_none),
+        selected = selected,
+        enabled = true,
+        onClick = onClick,
+        modifier = Modifier.testTag("settings_font_custom"),
+        trailing = {
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("Aa 0O1lI", fontFamily = previewFamily)
+                if (imported) {
+                    TextButton(onClick = onChange) {
+                        Text(stringResource(R.string.settings_font_custom_change))
+                    }
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun fontChoiceLabel(choice: FontChoice): String = stringResource(
+    when (choice) {
+        FontChoice.SYSTEM -> R.string.settings_font_system
+        FontChoice.SANS -> R.string.settings_font_sans
+        FontChoice.SERIF -> R.string.settings_font_serif
+        FontChoice.MONOSPACE -> R.string.settings_font_mono
+        FontChoice.JETBRAINS_MONO -> R.string.settings_font_jetbrains_mono
+        FontChoice.CUSTOM -> R.string.settings_font_custom
+    },
+)
+
 @Composable
 private fun themePresetLabel(mode: ColorThemePreset): String = stringResource(themePresetLabelRes(mode))
 
@@ -564,6 +738,80 @@ private fun DensityGroup(current: LayoutDensity, onSelect: (LayoutDensity) -> Un
 }
 
 @Composable
+private fun TimeFormatGroup(current: TimeFormat, onSelect: (TimeFormat) -> Unit) {
+    // Always enabled: the chat list keeps using the format even while message timestamps are hidden.
+    val options = listOf(
+        TimeFormat.AUTO to R.string.settings_time_format_auto,
+        TimeFormat.H12 to R.string.settings_time_format_h12,
+        TimeFormat.H24 to R.string.settings_time_format_h24,
+    )
+    Column(Modifier.selectableGroup()) {
+        options.forEach { (format, labelRes) ->
+            RadioRow(
+                label = stringResource(labelRes),
+                selected = current == format,
+                enabled = true,
+                onClick = { onSelect(format) },
+                modifier = Modifier.testTag("settings_time_format_${format.name.lowercase()}"),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MessageSpacingGroup(
+    current: io.github.trevarj.motd.data.prefs.MessageSpacing,
+    onSelect: (io.github.trevarj.motd.data.prefs.MessageSpacing) -> Unit,
+) {
+    val options = listOf(
+        io.github.trevarj.motd.data.prefs.MessageSpacing.COMPACT to R.string.settings_message_spacing_compact,
+        io.github.trevarj.motd.data.prefs.MessageSpacing.DEFAULT to R.string.settings_message_spacing_default,
+        io.github.trevarj.motd.data.prefs.MessageSpacing.RELAXED to R.string.settings_message_spacing_relaxed,
+    )
+    Column(Modifier.selectableGroup()) {
+        options.forEach { (spacing, labelRes) ->
+            RadioRow(
+                label = stringResource(labelRes),
+                selected = current == spacing,
+                enabled = true,
+                onClick = { onSelect(spacing) },
+                modifier = Modifier.testTag("settings_message_spacing_${spacing.name.lowercase()}"),
+            )
+        }
+    }
+}
+
+@Composable
+private fun BubbleCornerStyleGroup(
+    current: io.github.trevarj.motd.data.prefs.BubbleCornerStyle,
+    onSelect: (io.github.trevarj.motd.data.prefs.BubbleCornerStyle) -> Unit,
+) {
+    // Applies to the Comfortable bubble layout only; the note lives on the first (default) option,
+    // mirroring the AvatarStyleGroup pattern where only the relevant option carries a subtitle.
+    val options = listOf(
+        Triple(
+            io.github.trevarj.motd.data.prefs.BubbleCornerStyle.ROUNDED,
+            R.string.settings_bubble_corner_rounded,
+            R.string.settings_bubble_corners_desc,
+        ),
+        Triple(io.github.trevarj.motd.data.prefs.BubbleCornerStyle.SUBTLE, R.string.settings_bubble_corner_subtle, null),
+        Triple(io.github.trevarj.motd.data.prefs.BubbleCornerStyle.SQUARE, R.string.settings_bubble_corner_square, null),
+    )
+    Column(Modifier.selectableGroup()) {
+        options.forEach { (style, labelRes, subtitleRes) ->
+            RadioRow(
+                label = stringResource(labelRes),
+                subtitle = subtitleRes?.let { stringResource(it) },
+                selected = current == style,
+                enabled = true,
+                onClick = { onSelect(style) },
+                modifier = Modifier.testTag("settings_bubble_corner_${style.name.lowercase()}"),
+            )
+        }
+    }
+}
+
+@Composable
 private fun PaletteGroup(
     current: NickColorPalette,
     enabled: Boolean,
@@ -598,6 +846,11 @@ private fun AppearanceSettingsPreview() {
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
             onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
             onConversationFontScale = {},
+            onFontChoice = {},
+            onShowTimestamps = {},
+            onTimeFormat = {},
+            onMessageSpacing = {},
+            onBubbleCornerStyle = {},
         )
     }
 }
@@ -613,6 +866,11 @@ private fun AppearanceSettingsMinTextPreview() {
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
             onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
             onConversationFontScale = {},
+            onFontChoice = {},
+            onShowTimestamps = {},
+            onTimeFormat = {},
+            onMessageSpacing = {},
+            onBubbleCornerStyle = {},
         )
     }
 }
@@ -628,6 +886,11 @@ private fun AppearanceSettingsMaxTextPreview() {
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
             onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
             onConversationFontScale = {},
+            onFontChoice = {},
+            onShowTimestamps = {},
+            onTimeFormat = {},
+            onMessageSpacing = {},
+            onBubbleCornerStyle = {},
         )
     }
 }

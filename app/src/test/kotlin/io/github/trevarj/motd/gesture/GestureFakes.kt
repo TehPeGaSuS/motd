@@ -12,16 +12,21 @@ import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncDepth
+import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
+import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
@@ -196,6 +201,13 @@ internal class FakeAppearance(initial: AppearanceConfig = AppearanceConfig()) : 
     override suspend fun setWallpaper(selection: WallpaperSelection) = Unit
     override suspend fun setUiFontScale(percent: Int) = Unit
     override suspend fun setConversationFontScale(percent: Int) = Unit
+    override suspend fun setFontChoice(choice: FontChoice) = Unit
+    override suspend fun setShowTimestamps(enabled: Boolean) = Unit
+    override suspend fun setTimeFormat(format: TimeFormat) = Unit
+    override suspend fun setMessageSpacing(spacing: MessageSpacing) = Unit
+    override suspend fun setBubbleCornerStyle(style: BubbleCornerStyle) = Unit
+    override suspend fun setLauncherIcon(icon: LauncherIcon) = Unit
+    override suspend fun setCustomFontName(name: String) = Unit
 }
 
 internal class FakeForegroundBuffer(initial: Long? = null) : ForegroundBufferTracker {

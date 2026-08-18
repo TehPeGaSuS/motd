@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -8,6 +9,7 @@ import io.github.trevarj.motd.audio.VoiceConfig
 import io.github.trevarj.motd.audio.VoicePrefs
 import io.github.trevarj.motd.audio.VoiceRecordingQuality
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.fonts.CustomFontStore
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
@@ -17,6 +19,7 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
@@ -24,6 +27,7 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
+import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.avatar.AvatarConfig
@@ -31,6 +35,7 @@ import io.github.trevarj.motd.avatar.AvatarController
 import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.push.PushDistributorController
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -68,6 +73,7 @@ private data class NetworkPrefs(
 )
 
 enum class AudioCacheClearEvent { CLEARED, FAILED }
+enum class CustomFontImportEvent { IMPORTED, FAILED }
 
 internal suspend fun audioCacheClearEvent(clear: suspend () -> Unit): AudioCacheClearEvent = try {
     clear()
@@ -91,11 +97,19 @@ class SettingsViewModel @Inject constructor(
     private val avatarPrefs: AvatarPrefs,
     private val avatarController: AvatarController,
     private val pushDistributorController: PushDistributorController,
+    private val customFontStore: CustomFontStore,
     private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
 ) : ViewModel() {
 
     private val _audioCacheClearEvents = MutableSharedFlow<AudioCacheClearEvent>()
     val audioCacheClearEvents: SharedFlow<AudioCacheClearEvent> = _audioCacheClearEvents.asSharedFlow()
+
+    private val _customFontImportEvents = MutableSharedFlow<CustomFontImportEvent>()
+    val customFontImportEvents: SharedFlow<CustomFontImportEvent> = _customFontImportEvents.asSharedFlow()
+
+    /** Current on-disk custom font, for the picker's live preview; null until one is imported. */
+    val customFontFile: File?
+        get() = customFontStore.installedFile()
 
     private val networkPrefs = combine(
         networkRepository.observeNetworks(),
@@ -211,6 +225,38 @@ class SettingsViewModel @Inject constructor(
 
     fun setConversationFontScale(percent: Int) = viewModelScope.launch {
         appearancePrefs.setConversationFontScale(percent)
+    }
+
+    fun setFontChoice(choice: FontChoice) = viewModelScope.launch {
+        appearancePrefs.setFontChoice(choice)
+    }
+
+    fun setShowTimestamps(enabled: Boolean) = viewModelScope.launch {
+        appearancePrefs.setShowTimestamps(enabled)
+    }
+
+    fun setTimeFormat(format: TimeFormat) = viewModelScope.launch {
+        appearancePrefs.setTimeFormat(format)
+    }
+
+    fun setMessageSpacing(spacing: io.github.trevarj.motd.data.prefs.MessageSpacing) = viewModelScope.launch {
+        appearancePrefs.setMessageSpacing(spacing)
+    }
+
+    fun setBubbleCornerStyle(style: io.github.trevarj.motd.data.prefs.BubbleCornerStyle) = viewModelScope.launch {
+        appearancePrefs.setBubbleCornerStyle(style)
+    }
+
+    /** Import [uri] as the app-wide custom font; on success it also becomes the active choice. */
+    fun importCustomFont(uri: Uri) = viewModelScope.launch {
+        val result = customFontStore.import(uri)
+        result.onSuccess { name ->
+            appearancePrefs.setCustomFontName(name)
+            appearancePrefs.setFontChoice(FontChoice.CUSTOM)
+        }
+        _customFontImportEvents.emit(
+            if (result.isSuccess) CustomFontImportEvent.IMPORTED else CustomFontImportEvent.FAILED,
+        )
     }
 
     fun setFoolsMode(mode: FoolsMode) = viewModelScope.launch {

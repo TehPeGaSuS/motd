@@ -21,14 +21,20 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
+import java.io.File
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT
+import io.github.trevarj.motd.data.prefs.FontChoice
+import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.normalizeFontScalePercent
 import io.github.trevarj.motd.data.prefs.resolveAutoPalette
@@ -82,7 +88,10 @@ fun ConversationTypography(
     scalePercent: Int,
     content: @Composable () -> Unit,
 ) {
-    val typography = remember(scalePercent) { scaledConversationTypography(scalePercent) }
+    val family = LocalAppFontFamily.current
+    val typography = remember(scalePercent, family) {
+        scaledConversationTypography(scalePercent, BaseTypography.withFontFamily(family))
+    }
     MaterialTheme(
         colorScheme = MaterialTheme.colorScheme,
         shapes = MaterialTheme.shapes,
@@ -97,6 +106,16 @@ fun ConversationTypography(
  */
 val LocalAvatarStyle: ProvidableCompositionLocal<AvatarStyle> =
     staticCompositionLocalOf { AvatarStyle.IRC_SPRITE }
+
+/** CompositionLocal carrying the active app-wide font family; null means the platform default. */
+val LocalAppFontFamily: ProvidableCompositionLocal<FontFamily?> = staticCompositionLocalOf { null }
+
+/** Whether message timestamps are shown and, when shown, which 12h/24h format they resolve to. */
+data class TimestampConfig(val show: Boolean = true, val format: TimeFormat = TimeFormat.AUTO)
+
+/** CompositionLocal carrying the active timestamp display config; defaults to always-shown/AUTO. */
+val LocalTimestampConfig: ProvidableCompositionLocal<TimestampConfig> =
+    staticCompositionLocalOf { TimestampConfig() }
 
 /**
  * Opt-in marker for activities whose system bars [MotdTheme] may restyle.
@@ -151,6 +170,13 @@ fun MotdTheme(
     nickColorOverrides: Map<String, Int> = emptyMap(),
     avatarStyle: AvatarStyle = AvatarStyle.IRC_SPRITE,
     uiFontScalePercent: Int = DEFAULT_FONT_SCALE_PERCENT,
+    fontChoice: FontChoice = FontChoice.SYSTEM,
+    // Only meaningful when fontChoice is CUSTOM; see rememberAppFontFamily. Optional so every
+    // existing call site (incl. previews) is unaffected.
+    customFontFile: File? = null,
+    timestampConfig: TimestampConfig = TimestampConfig(),
+    messageSpacing: MessageSpacing = MessageSpacing.DEFAULT,
+    bubbleCornerStyle: BubbleCornerStyle = BubbleCornerStyle.ROUNDED,
     content: @Composable () -> Unit,
 ) {
     // Read composable environment values unconditionally. Changing between dynamic/system and a
@@ -214,14 +240,17 @@ fun MotdTheme(
     val nickIdentityPalette = remember(effectivePreset) { themeIdentityPalette(effectivePreset) }
     // Style-only concerns (spacing, nick colors, avatar style) flow through CompositionLocals so
     // components never receive them as parameters (plans/13 plumbing split).
-    val typography = remember(uiFontScalePercent) { scaledTypography(uiFontScalePercent) }
+    val appFontFamily = rememberAppFontFamily(fontChoice, customFontFile)
+    val typography = remember(uiFontScalePercent, fontChoice, appFontFamily) {
+        scaledTypography(uiFontScalePercent, BaseTypography.withFontFamily(appFontFamily))
+    }
     MaterialTheme(
         colorScheme = colorScheme,
         shapes = MotdMaterialShapes,
         typography = typography,
     ) {
         CompositionLocalProvider(
-            LocalSpacing provides spacingFor(layoutDensity),
+            LocalSpacing provides spacingFor(layoutDensity, messageSpacing, bubbleCornerStyle),
             LocalNickColors provides NickColorScheme(
                 nickColorsEnabled,
                 nickColorPalette,
@@ -232,6 +261,8 @@ fun MotdTheme(
                 nickIdentityPalette,
             ),
             LocalAvatarStyle provides avatarStyle,
+            LocalAppFontFamily provides appFontFamily,
+            LocalTimestampConfig provides timestampConfig,
             LocalMotdSemanticColors provides semanticColors(colorScheme, dark),
             content = content,
         )

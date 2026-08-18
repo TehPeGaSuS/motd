@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import android.text.format.DateFormat
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -34,6 +35,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -58,6 +60,7 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.resolveIs24Hour
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MutedActivityBadge
@@ -66,6 +69,7 @@ import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
+import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -183,6 +187,10 @@ fun ChatListRowItem(
     // Resolved per-nick color (also used to tint the friend star), matching sender coloring.
     val nickColor = LocalNickColors.current.nick(row.displayName, MaterialTheme.colorScheme.onSurfaceVariant)
     val spacing = LocalSpacing.current
+    // The chat-list time always shows regardless of the in-chat "show timestamps" toggle; only its
+    // 12h/24h format follows the user's preference (AUTO falls back to the device setting).
+    val context = LocalContext.current
+    val is24Hour = resolveIs24Hour(LocalTimestampConfig.current.format, DateFormat.is24HourFormat(context))
     val queryPresence = presence.takeIf { row.type == BufferType.QUERY }
     val badges = chatListBadgeState(row)
     val isUnread = !row.muted && row.unreadCount > 0
@@ -385,7 +393,7 @@ fun ChatListRowItem(
         ) {
             row.lastMessageTime?.let { time ->
                 Text(
-                    text = relativeChatTime(time),
+                    text = relativeChatTime(time, is24Hour = is24Hour),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

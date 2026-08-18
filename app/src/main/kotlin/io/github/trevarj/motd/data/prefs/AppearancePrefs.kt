@@ -101,6 +101,12 @@ fun resolveAutoPalette(
 
 enum class ChatWallpaperPreset { NONE, CHATTER, CHANNELS, TERMINAL, RELAY, SIGNALS, PIXELS }
 
+enum class FontChoice { SYSTEM, SANS, SERIF, MONOSPACE, JETBRAINS_MONO, CUSTOM }
+enum class TimeFormat { AUTO, H12, H24 }
+enum class MessageSpacing { COMPACT, DEFAULT, RELAXED }
+enum class BubbleCornerStyle { ROUNDED, SUBTLE, SQUARE }
+enum class LauncherIcon { DEFAULT, MONO, TERMINAL, GRUVBOX, CATPPUCCIN, NORD, LIGHT }
+
 @Serializable
 data class WallpaperSelection(
     val preset: ChatWallpaperPreset = ChatWallpaperPreset.CHATTER,
@@ -117,6 +123,15 @@ data class AppearanceConfig(
     val conversationFontScalePercent: Int = DEFAULT_FONT_SCALE_PERCENT,
     val trueBlack: Boolean = false,
     val followSystem: Boolean = false,
+    val fontChoice: FontChoice = FontChoice.SYSTEM,
+    val showTimestamps: Boolean = true,
+    val timeFormat: TimeFormat = TimeFormat.AUTO,
+    val messageSpacing: MessageSpacing = MessageSpacing.DEFAULT,
+    val bubbleCornerStyle: BubbleCornerStyle = BubbleCornerStyle.ROUNDED,
+    val launcherIcon: LauncherIcon = LauncherIcon.DEFAULT,
+    // Display name of a user-imported custom font file; empty means nothing imported. The font
+    // binary itself lives in CustomFontStore, not DataStore or backups.
+    val customFontName: String = "",
 )
 
 interface AppearancePrefs {
@@ -127,6 +142,13 @@ interface AppearancePrefs {
     suspend fun setWallpaper(selection: WallpaperSelection)
     suspend fun setUiFontScale(percent: Int)
     suspend fun setConversationFontScale(percent: Int)
+    suspend fun setFontChoice(choice: FontChoice)
+    suspend fun setShowTimestamps(enabled: Boolean)
+    suspend fun setTimeFormat(format: TimeFormat)
+    suspend fun setMessageSpacing(spacing: MessageSpacing)
+    suspend fun setBubbleCornerStyle(style: BubbleCornerStyle)
+    suspend fun setLauncherIcon(icon: LauncherIcon)
+    suspend fun setCustomFontName(name: String)
 }
 
 const val DEFAULT_WALLPAPER_INTENSITY = 80

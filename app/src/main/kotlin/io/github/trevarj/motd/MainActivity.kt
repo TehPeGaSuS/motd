@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
@@ -26,6 +27,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.AndroidEntryPoint
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.fonts.CustomFontStore
 import io.github.trevarj.motd.di.NotificationPermissionStatus
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.gesture.radial.GestureOrbHost
@@ -57,6 +59,7 @@ import io.github.trevarj.motd.ui.share.PendingShareStore
 import io.github.trevarj.motd.ui.share.parseSharedContent
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SystemBarThemeHost
+import io.github.trevarj.motd.ui.theme.TimestampConfig
 import javax.inject.Inject
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
@@ -72,6 +75,7 @@ class MainActivity : ComponentActivity(), SystemBarThemeHost {
     @Inject lateinit var avatarPrefs: AvatarPrefs
     @Inject lateinit var avatarStore: AvatarStore
     @Inject lateinit var contentPreviewPrefs: ContentPreviewPrefs
+    @Inject lateinit var customFontStore: CustomFontStore
     @Inject lateinit var db: MotdDatabase
     @Inject lateinit var connectionManager: ConnectionManager
     @Inject lateinit var notificationPermission: NotificationPermissionStatus
@@ -129,6 +133,9 @@ class MainActivity : ComponentActivity(), SystemBarThemeHost {
             val uiState by rootUiState.collectAsStateWithLifecycle()
             val settings = uiState.settings
             val appearance = uiState.appearance
+            // Re-check the on-disk font whenever the imported name changes (a fresh import or a
+            // backup restore that cleared it); CustomFontStore itself has no reactive stream.
+            val customFontFile = remember(appearance.customFontName) { customFontStore.installedFile() }
             MotdTheme(
                 themePreset = appearance.theme,
                 trueBlack = appearance.trueBlack,
@@ -140,6 +147,11 @@ class MainActivity : ComponentActivity(), SystemBarThemeHost {
                 nickColorOverrides = settings.nickColorOverrides,
                 avatarStyle = settings.avatarStyle,
                 uiFontScalePercent = appearance.uiFontScalePercent,
+                fontChoice = appearance.fontChoice,
+                customFontFile = customFontFile,
+                timestampConfig = TimestampConfig(appearance.showTimestamps, appearance.timeFormat),
+                messageSpacing = appearance.messageSpacing,
+                bubbleCornerStyle = appearance.bubbleCornerStyle,
             ) {
                 CompositionLocalProvider(
                     LocalRemoteAvatars provides RemoteAvatarState(

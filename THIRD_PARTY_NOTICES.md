@@ -71,3 +71,22 @@ The `#guix` channel badge is a simplified monochrome derivative of the
 Felipe López Acevedo, from `guix-artwork.git`, attributed under
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
+## Bundled font: JetBrains Mono
+
+The app bundles the variable-weight upright and italic builds of
+[JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), pinned at
+release **v2.304**. Copyright 2020 The JetBrains Mono Project Authors
+(https://github.com/JetBrains/JetBrainsMono), licensed under the
+[SIL Open Font License, Version 1.1](https://scripts.sil.org/OFL).
+
+- Bundled files:
+  - `app/src/main/res/font/jetbrains_mono_wght.ttf` (from
+    `fonts/variable/JetBrainsMono[wght].ttf`)
+  - `app/src/main/res/font/jetbrains_mono_italic_wght.ttf` (from
+    `fonts/variable/JetBrainsMono-Italic[wght].ttf`)
+- License copy: [`third_party/fonts/jetbrains-mono/OFL.txt`](third_party/fonts/jetbrains-mono/OFL.txt)
+- Source archive:
+  [`JetBrainsMono-2.304.zip`](https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip)
+- Source archive SHA-256:
+  `6f6376c6ed2960ea8a963cd7387ec9d76e3f629125bc33d1fdcd7eb7012f7bbf`
+

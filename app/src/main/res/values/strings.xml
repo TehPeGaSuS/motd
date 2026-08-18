@@ -664,6 +664,22 @@
     <string name="settings_clear_audio_cache_desc">Remove downloaded audio and decrypted temporary playback files.</string>
     <string name="settings_audio_cache_cleared">Audio cache cleared</string>
     <string name="settings_audio_cache_clear_failed">Couldn\'t clear audio cache</string>
+    <string name="settings_appearance_messages_section">Messages</string>
+    <string name="settings_show_timestamps">Show timestamps</string>
+    <string name="settings_show_timestamps_desc">Show the time next to each message</string>
+    <string name="settings_time_format">Time format</string>
+    <string name="settings_time_format_auto">System default</string>
+    <string name="settings_time_format_h12">12-hour</string>
+    <string name="settings_time_format_h24">24-hour</string>
+    <string name="settings_message_spacing">Message spacing</string>
+    <string name="settings_message_spacing_compact">Compact</string>
+    <string name="settings_message_spacing_default">Default</string>
+    <string name="settings_message_spacing_relaxed">Relaxed</string>
+    <string name="settings_bubble_corners">Bubble corners</string>
+    <string name="settings_bubble_corner_rounded">Rounded</string>
+    <string name="settings_bubble_corner_subtle">Subtle</string>
+    <string name="settings_bubble_corner_square">Square</string>
+    <string name="settings_bubble_corners_desc">Applies to the Comfortable layout</string>
     <string name="settings_wallpaper">Chat wallpaper</string>
     <string name="settings_wallpaper_none">None</string>
     <string name="settings_people">People</string>
@@ -1237,4 +1253,16 @@
     <string name="chat_workspace_resize">Resize conversation list</string>
     <string name="chat_workspace_empty_title">Choose a conversation</string>
     <string name="chat_workspace_empty_message">Messages will appear here without hiding your chat list.</string>
+
+    <!-- App font picker -->
+    <string name="settings_app_font">App font</string>
+    <string name="settings_font_system">System default</string>
+    <string name="settings_font_sans">Sans serif</string>
+    <string name="settings_font_serif">Serif</string>
+    <string name="settings_font_mono">Monospace</string>
+    <string name="settings_font_jetbrains_mono">JetBrains Mono</string>
+    <string name="settings_font_custom">Custom font</string>
+    <string name="settings_font_custom_none">No font imported — tap to choose a file</string>
+    <string name="settings_font_custom_change">Change</string>
+    <string name="settings_font_custom_invalid">Couldn\'t load that font file</string>
 </resources>

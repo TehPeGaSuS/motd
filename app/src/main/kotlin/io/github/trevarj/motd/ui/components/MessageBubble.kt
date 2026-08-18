@@ -67,6 +67,7 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.extractUrls
@@ -74,6 +75,7 @@ import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.parseInlineCode
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
+import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
@@ -368,8 +370,8 @@ fun MessageBubble(
     )
     val bubbleColor = bubbleRoles.container
     val textColor = bubbleRoles.content
-    // Tighten the inner grouped edge while retaining the shared 20dp outer silhouette.
-    val groupedCorner = 6.dp
+    // Tighten the inner grouped edge while retaining the shared outer silhouette.
+    val groupedCorner = spacing.bubbleGroupedCorner
     val topCorner = if (showSender) spacing.bubbleCorner else groupedCorner
     val shape = if (isSelf) {
         RoundedCornerShape(topStart = spacing.bubbleCorner, topEnd = topCorner, bottomEnd = groupedCorner, bottomStart = spacing.bubbleCorner)
@@ -520,12 +522,14 @@ fun MessageBubble(
                     failed = failed,
                     contentColor = metadataColor,
                 )
-                Text(
-                    text = displayedTime,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = metadataColor,
-                    modifier = Modifier.align(Alignment.CenterVertically),
-                )
+                if (LocalTimestampConfig.current.show) {
+                    Text(
+                        text = displayedTime,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = metadataColor,
+                        modifier = Modifier.align(Alignment.CenterVertically),
+                    )
+                }
             }
 
             ReactionRow(reactions = reactions, onReact = onReact)
@@ -605,7 +609,7 @@ private fun ComfortableActionBubble(
 
     // Tighten the inner (grouped) top corner like an ordinary bubble. ACTION always opens a new
     // group (showsSender), so this is the full corner in practice, but mirror the bubble logic.
-    val groupedCorner = 6.dp
+    val groupedCorner = spacing.bubbleGroupedCorner
     val topCorner = if (showSender) spacing.bubbleCorner else groupedCorner
     val shape = if (isSelf) {
         RoundedCornerShape(topStart = spacing.bubbleCorner, topEnd = topCorner, bottomEnd = groupedCorner, bottomStart = spacing.bubbleCorner)
@@ -699,11 +703,13 @@ private fun ComfortableActionBubble(
                         failed = failed,
                         contentColor = metadataColor,
                     )
-                    Text(
-                        text = formattedTime,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = metadataColor,
-                    )
+                    if (LocalTimestampConfig.current.show) {
+                        Text(
+                            text = formattedTime,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = metadataColor,
+                        )
+                    }
                 }
             }
 
@@ -865,15 +871,17 @@ private fun ActionMessageRow(
                     modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
                 ) {
                     MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
-                    Text(
-                        text = formattedTime,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (failed) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
+                    if (LocalTimestampConfig.current.show) {
+                        Text(
+                            text = formattedTime,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (failed) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
                 }
             }
 
@@ -1114,12 +1122,14 @@ private fun TwoLineMessageRow(
                     modifier = Modifier.padding(start = 6.dp),
                 ) {
                     MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
-                    Text(
-                        text = formattedTime,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (failed) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    if (LocalTimestampConfig.current.show) {
+                        Text(
+                            text = formattedTime,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (failed) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -1542,14 +1552,34 @@ internal fun formatTime(ms: Long): String {
 internal fun rememberMessageTimeFormatter(): (Long) -> String {
     val context = LocalContext.current
     val locale = LocalLocale.current.platformLocale
+    val timeFormat = LocalTimestampConfig.current.format
     val is24 = remember(context, locale) { DateFormat.is24HourFormat(context) }
-    val formatter = remember(is24, locale) {
-        // getTimeFormat honors the 12/24h system setting; not thread-safe but only used on the UI thread.
-        DateFormat.getTimeFormat(context) ?: JavaDateFormat.getTimeInstance(JavaDateFormat.SHORT)
+    val formatter = remember(is24, locale, timeFormat) {
+        when (timeFormat) {
+            // getTimeFormat honors the 12/24h system setting; not thread-safe but only used on the
+            // UI thread.
+            TimeFormat.AUTO -> DateFormat.getTimeFormat(context)
+                ?: JavaDateFormat.getTimeInstance(JavaDateFormat.SHORT)
+            TimeFormat.H24 -> java.text.SimpleDateFormat("HH:mm", locale)
+            TimeFormat.H12 -> java.text.SimpleDateFormat(
+                DateFormat.getBestDateTimePattern(locale, "hm"),
+                locale,
+            )
+        }
     }
     return remember(formatter) {
         { ms: Long -> formatter.format(java.util.Date(ms)) }
     }
+}
+
+/**
+ * Resolves the user's [TimeFormat] preference to a concrete 12h/24h boolean, given the device's
+ * own 12h/24h setting for the AUTO case. Pure and Context-free so it's directly unit-testable.
+ */
+internal fun resolveIs24Hour(format: TimeFormat, deviceIs24: Boolean): Boolean = when (format) {
+    TimeFormat.AUTO -> deviceIs24
+    TimeFormat.H12 -> false
+    TimeFormat.H24 -> true
 }
 
 @Preview

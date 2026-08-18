@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.search
 
+import android.text.format.DateFormat
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -45,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -62,6 +64,8 @@ import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.repo.SearchCoverage
 import io.github.trevarj.motd.ui.chatlist.relativeChatTime
 import io.github.trevarj.motd.ui.components.EmptyState
+import io.github.trevarj.motd.ui.components.resolveIs24Hour
+import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -385,6 +389,10 @@ private fun SearchRow(
     tag: String,
     onClick: () -> Unit,
 ) {
+    // Search results always show a time (independent of the in-chat "show timestamps" toggle);
+    // only its 12h/24h format follows the user's preference.
+    val context = LocalContext.current
+    val is24Hour = resolveIs24Hour(LocalTimestampConfig.current.format, DateFormat.is24HourFormat(context))
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -408,7 +416,7 @@ private fun SearchRow(
         // A server hit without a time tag carries 0; render nothing rather than the epoch.
         if (serverTime > 0) {
             Text(
-                text = relativeChatTime(serverTime),
+                text = relativeChatTime(serverTime, is24Hour = is24Hour),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.align(Alignment.Top),

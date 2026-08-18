@@ -384,6 +384,15 @@ class ConfigurationBackupRepositoryImpl @Inject constructor(
             appearancePrefs.setWallpaper(it.wallpaper)
             appearancePrefs.setUiFontScale(it.uiFontScalePercent)
             appearancePrefs.setConversationFontScale(it.conversationFontScalePercent)
+            appearancePrefs.setFontChoice(it.fontChoice)
+            appearancePrefs.setShowTimestamps(it.showTimestamps)
+            appearancePrefs.setTimeFormat(it.timeFormat)
+            appearancePrefs.setMessageSpacing(it.messageSpacing)
+            appearancePrefs.setBubbleCornerStyle(it.bubbleCornerStyle)
+            appearancePrefs.setLauncherIcon(it.launcherIcon)
+            // The font binary itself is not backed up; only the display name travels. A restored
+            // CUSTOM choice falls back to system until the user re-imports the file (see AppFonts).
+            appearancePrefs.setCustomFontName(it.customFontName)
         }
         settings.contentPreviews?.let {
             contentPreviewPrefs.setShowImages(it.showImages)

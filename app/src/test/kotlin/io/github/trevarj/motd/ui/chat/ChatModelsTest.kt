@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.repo.MESSAGE_PAGING_CONFIG
 import io.github.trevarj.motd.data.sync.GapFillProgress
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
@@ -717,6 +718,11 @@ class ChatModelsTest {
         // COMPACT tokens are 0 => no gap regardless of grouping.
         assertEquals(0.dp, bubbleGap(showSender = false, hasOlder = true, compact))
         assertEquals(0.dp, bubbleGap(showSender = true, hasOlder = true, compact))
+
+        // RELAXED message spacing (1.75x) scales the COMFORTABLE burst/break gaps through unchanged.
+        val relaxed = spacingFor(LayoutDensity.COMFORTABLE, MessageSpacing.RELAXED)
+        assertEquals(3.5.dp, bubbleGap(showSender = false, hasOlder = true, relaxed))
+        assertEquals(14.dp, bubbleGap(showSender = true, hasOlder = true, relaxed))
     }
 
     @Test fun `typed UI queue replays in order and acknowledges by stable id`() {

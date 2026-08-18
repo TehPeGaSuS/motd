@@ -2,8 +2,10 @@ package io.github.trevarj.motd.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 class FontScaleTest {
@@ -62,6 +64,39 @@ class FontScaleTest {
                 scaledStyle.letterSpacing,
             )
         }
+    }
+
+    @Test
+    fun with_font_family_null_is_identity() {
+        val base = Typography()
+        assertSame(base, base.withFontFamily(null))
+    }
+
+    @Test
+    fun with_font_family_sets_family_on_every_role_without_touching_size() {
+        val base = Typography()
+        val withFamily = base.withFontFamily(FontFamily.Monospace)
+
+        typographyStyles(base).zip(typographyStyles(withFamily)).forEachIndexed { index, (baseStyle, familyStyle) ->
+            assertEquals("font family for role $index", FontFamily.Monospace, familyStyle.fontFamily)
+            assertEquals("font size for role $index", baseStyle.fontSize, familyStyle.fontSize)
+            assertEquals("line height for role $index", baseStyle.lineHeight, familyStyle.lineHeight)
+            assertEquals("letter spacing for role $index", baseStyle.letterSpacing, familyStyle.letterSpacing)
+        }
+    }
+
+    @Test
+    fun scaling_and_font_family_commute() {
+        val base = Typography()
+        val scaleThenFamily = scaledTypography(140, base).withFontFamily(FontFamily.Monospace)
+        val familyThenScale = scaledTypography(140, base.withFontFamily(FontFamily.Monospace))
+
+        typographyStyles(scaleThenFamily).zip(typographyStyles(familyThenScale))
+            .forEachIndexed { index, (a, b) ->
+                assertEquals("font family for role $index", a.fontFamily, b.fontFamily)
+                assertEquals("font size for role $index", a.fontSize, b.fontSize)
+                assertEquals("line height for role $index", a.lineHeight, b.lineHeight)
+            }
     }
 
     private fun typographyStyles(typography: Typography): List<TextStyle> = listOf(
