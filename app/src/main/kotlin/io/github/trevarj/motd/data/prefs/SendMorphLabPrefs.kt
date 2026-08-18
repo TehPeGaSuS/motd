@@ -18,11 +18,11 @@ private val ENABLED = booleanPreferencesKey("enabled_v1")
  * restoring normal configuration cannot enable this lab; off means the shipped flight animation.
  */
 @Singleton
-class SendMorphLabPrefs @Inject constructor(@ApplicationContext context: Context) {
+open class SendMorphLabPrefs @Inject constructor(@ApplicationContext context: Context) {
     private val store = context.sendMorphLabDataStore
-    val enabled: Flow<Boolean> = store.data.map { it[ENABLED] ?: false }
+    open val enabled: Flow<Boolean> = store.data.map { it[ENABLED] ?: false }
 
-    suspend fun setEnabled(enabled: Boolean) {
+    open suspend fun setEnabled(enabled: Boolean) {
         store.edit { it[ENABLED] = enabled }
     }
 }

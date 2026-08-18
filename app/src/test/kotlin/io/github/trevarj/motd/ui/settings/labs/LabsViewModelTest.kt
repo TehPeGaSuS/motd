@@ -29,7 +29,7 @@ class LabsViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val gestures = FakeGesturePrefs()
     private val agentwire = FakeAgentwirePrefs()
-    private val sendMorph = SendMorphLabPrefs(ApplicationProvider.getApplicationContext<Context>())
+    private val sendMorph = FakeSendMorphLabPrefs()
 
     @Before fun setUp() {
         Dispatchers.setMain(dispatcher)
@@ -114,5 +114,19 @@ class LabsViewModelTest {
         }
 
         override suspend fun deviceId(): String = "device-under-test"
+    }
+
+    /**
+     * The real store is DataStore-backed and its delegate caches one instance per classloader, so
+     * a shared instance outlives the Robolectric environment that created it and stalls
+     * [LabsViewModel]'s combine for every later test in this class.
+     */
+    private class FakeSendMorphLabPrefs :
+        SendMorphLabPrefs(ApplicationProvider.getApplicationContext<Context>()) {
+        val flag = MutableStateFlow(false)
+        override val enabled: Flow<Boolean> = flag
+        override suspend fun setEnabled(enabled: Boolean) {
+            flag.value = enabled
+        }
     }
 }
