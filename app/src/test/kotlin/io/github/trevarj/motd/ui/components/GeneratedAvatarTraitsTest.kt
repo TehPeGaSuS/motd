@@ -67,6 +67,7 @@ class GeneratedAvatarTraitsTest {
         assertEquals(AvatarStyle.IRC_SPRITE, avatarStyleFromPreference("unknown"))
         assertEquals(AvatarStyle.MONOGRAM, avatarStyleFromPreference("MONOGRAM"))
         assertEquals(AvatarStyle.INITIALS, avatarStyleFromPreference("INITIALS"))
+        assertEquals(AvatarStyle.NONE, avatarStyleFromPreference("NONE"))
     }
 
     @Test fun network_badges_use_a_prominent_network_symbol() {

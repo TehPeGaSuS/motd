@@ -90,13 +90,22 @@ internal fun onColorFor(bg: Color): Color =
     bestOnColor(bg)
 
 /**
+ * True when the user chose [AvatarStyle.NONE]. [Avatar] then renders nothing at all, but call sites
+ * must check this themselves too: hiding the avatar only pays off if the row also drops the gap,
+ * spacer, or indent that was reserved for it.
+ */
+@Composable
+@ReadOnlyComposable
+fun avatarsHidden(): Boolean = LocalAvatarStyle.current == AvatarStyle.NONE
+
+/**
  * Nick avatar with semantic shape: channels render as rounded squares ([MotdShapes.channelAvatar])
  * and queries/people as circles, across every style. [AvatarStyle.MONOGRAM] is a quiet
  * theme-tinted disc with a single initial; [AvatarStyle.INITIALS] is the bolder solid nick-color
  * chip with two initials; and [AvatarStyle.IRC_SPRITE] (default) renders deterministic IRC robot
  * sprites for people. Project-named channels instead receive a matched Devicons mark, with a
- * neutral IRC fallback. All styles take their identity color from [name] via the current
- * LocalNickColors scheme.
+ * neutral IRC fallback. [AvatarStyle.NONE] renders nothing and occupies no space. All other styles
+ * take their identity color from [name] via the current LocalNickColors scheme.
  *
  * [isChannel] uses the name as-is (channels keep the leading `#`); queries fall back to their nick.
  */
@@ -111,16 +120,21 @@ fun Avatar(
 ) {
     // Avatars keep their generated/override color even when nick coloring is disabled (an all-gray
     // avatar column would be unusable, plans/13 confirmed decision #5); avatar() ignores the flag.
+    val style = LocalAvatarStyle.current
+    // Hide means hide: return before the sizing Box so this composable reserves no space at all,
+    // and so no remote override sneaks an image back in.
+    if (style == AvatarStyle.NONE) return
     val nick = LocalNickColors.current.avatar(name)
     val shape: Shape = if (isChannel) MotdShapes.channelAvatar else CircleShape
     Box(modifier = modifier.size(size), contentAlignment = Alignment.Center) {
-        when (LocalAvatarStyle.current) {
+        when (style) {
             AvatarStyle.MONOGRAM -> MonogramAvatar(name, nick, size, isChannel, shape, Modifier)
             AvatarStyle.INITIALS -> InitialsAvatar(name, nick, size, isChannel, shape, Modifier)
             AvatarStyle.IRC_SPRITE -> {
                 if (isChannel) IrcChannelBadge(name, size, Modifier)
                 else IrcSpriteAvatar(name, size, Modifier)
             }
+            AvatarStyle.NONE -> {}
         }
         LocalRemoteAvatars.current.url(networkId, name, account, size.value.toInt())?.let { url ->
             // The deterministic local avatar stays underneath, so failed/cancelled loads fall

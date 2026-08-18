@@ -680,6 +680,7 @@ private fun AvatarStyleGroup(current: AvatarStyle, onSelect: (AvatarStyle) -> Un
             R.string.settings_avatar_irc_sprite,
             R.string.settings_avatar_irc_sprite_desc,
         ),
+        Triple(AvatarStyle.NONE, R.string.settings_avatar_none, R.string.settings_avatar_none_desc),
     )
     Column(Modifier.selectableGroup()) {
         options.forEach { (style, labelRes, subtitleRes) ->

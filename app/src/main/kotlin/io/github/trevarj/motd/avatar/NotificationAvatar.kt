@@ -22,8 +22,8 @@ private const val AVATAR_SIZE_PX = 64
 
 /**
  * System UI renders notification people from bitmaps rather than the app's Compose tree. Keep the
- * three selectable avatar treatments recognizable at notification scale without loading remote
- * content while posting an incoming message.
+ * selectable avatar treatments recognizable at notification scale without loading remote content
+ * while posting an incoming message.
  */
 internal fun notificationAvatarIcon(context: Context, name: String, style: AvatarStyle): IconCompat =
     IconCompat.createWithBitmap(notificationAvatarBitmap(context, name, style))
@@ -39,6 +39,9 @@ internal fun notificationAvatarBitmap(context: Context, name: String, style: Ava
             AvatarStyle.MONOGRAM -> drawMonogram(canvas, paint, name, accent, dark)
             AvatarStyle.INITIALS -> drawInitials(canvas, paint, name, accent)
             AvatarStyle.IRC_SPRITE -> drawIrcSprite(canvas, paint, name, dark)
+            // System UI always needs a person icon; "hide avatars" is an in-app choice, so fall
+            // back to the plainest treatment rather than posting a blank square.
+            AvatarStyle.NONE -> drawInitials(canvas, paint, name, accent)
         }
     }
 }

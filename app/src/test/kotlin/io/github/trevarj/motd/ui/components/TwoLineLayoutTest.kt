@@ -18,4 +18,11 @@ class TwoLineLayoutTest {
         assertEquals(20.dp, spacing.bubbleAvatar)
         assertEquals(26.dp, twoLineBodyIndent(spacing))
     }
+
+    @Test
+    fun hidden_avatars_align_the_body_with_the_header_nick() {
+        val spacing = spacingFor(LayoutDensity.TWO_LINE)
+
+        assertEquals(0.dp, twoLineBodyIndent(spacing, avatarsHidden = true))
+    }
 }

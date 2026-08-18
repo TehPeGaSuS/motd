@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -20,5 +21,14 @@ class NotificationAvatarTest {
         assertEquals(64, monogram.width)
         assertEquals(64, initials.width)
         assertEquals(64, sprite.width)
+    }
+
+    /** Hiding avatars is an in-app choice; system UI still needs a person icon to post. */
+    @Test fun notificationAvatar_fallsBackToInitialsWhenAvatarsAreHidden() {
+        val hidden = notificationAvatarBitmap(context, "alice", AvatarStyle.NONE)
+        val initials = notificationAvatarBitmap(context, "alice", AvatarStyle.INITIALS)
+
+        assertEquals(64, hidden.width)
+        assertTrue(hidden.sameAs(initials))
     }
 }

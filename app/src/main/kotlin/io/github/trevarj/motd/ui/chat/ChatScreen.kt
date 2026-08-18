@@ -182,6 +182,7 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
@@ -1847,13 +1848,17 @@ fun ChatContent(
                             .testTag("chat_title"),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Avatar(
-                            name = buffer?.displayName ?: "",
-                            size = MotdSizes.headerAvatar,
-                            isChannel = buffer?.type == BufferType.CHANNEL,
-                            networkId = buffer?.networkId,
-                        )
-                        Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
+                        val hideAvatar = avatarsHidden()
+                        if (!hideAvatar) {
+                            Avatar(
+                                name = buffer?.displayName ?: "",
+                                size = MotdSizes.headerAvatar,
+                                isChannel = buffer?.type == BufferType.CHANNEL,
+                                networkId = buffer?.networkId,
+                            )
+                        }
+                        // The 10dp gap only separates the title from the avatar beside it.
+                        Column(modifier = Modifier.padding(start = if (hideAvatar) 0.dp else 10.dp).weight(1f)) {
                             Text(
                                 text = buffer?.displayName ?: "",
                                 style = MaterialTheme.typography.titleMedium,

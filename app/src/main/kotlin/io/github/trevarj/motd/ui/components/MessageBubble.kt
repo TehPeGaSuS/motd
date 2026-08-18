@@ -386,8 +386,9 @@ fun MessageBubble(
         ),
         horizontalArrangement = if (isSelf) Arrangement.End else Arrangement.Start,
     ) {
-        // Left avatar column for others, only on a group's first bubble.
-        if (!isSelf) {
+        // Left avatar column for others, only on a group's first bubble. With avatars hidden the
+        // whole column goes, spacer included, so bubbles use the full row width.
+        if (!isSelf && !avatarsHidden()) {
             if (showSender) {
                 val avatarMod = Modifier.padding(end = 8.dp, top = 2.dp)
                     .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
@@ -618,15 +619,17 @@ private fun ComfortableActionBubble(
     }
 
     // One flowing `nick action` paragraph: bold upright tappable nick, italic rich-text body. No
-    // `* ` prefix — the inline avatar is the emote marker in this layout.
+    // `* ` prefix — the inline avatar is the emote marker in this layout. When avatars are hidden
+    // the marker would vanish with them, so the classic `* ` prefix comes back instead.
+    val hideAvatar = avatarsHidden()
     val actionLine = remember(
         sender, text, nameColor, bodyColor, linkColor, friendTint, mentionsActive, mentionColor,
-        codeBackground, codeColor, senderLink,
+        codeBackground, codeColor, senderLink, hideAvatar,
     ) {
         buildActionLine(
             sender = sender,
             text = text,
-            accentColor = Color.Unspecified,
+            accentColor = bodyColor,
             nameColor = nameColor,
             bodyColor = bodyColor,
             linkColor = linkColor,
@@ -636,7 +639,7 @@ private fun ComfortableActionBubble(
             codeBackground = codeBackground,
             codeColor = codeColor,
             senderLink = senderLink,
-            includeStar = false,
+            includeStar = hideAvatar,
         )
     }
 
@@ -669,17 +672,19 @@ private fun ComfortableActionBubble(
             reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
             Row(verticalAlignment = Alignment.Top) {
-                val avatarMod = Modifier
-                    .padding(end = 6.dp, top = 2.dp)
-                    .size(20.dp)
-                    .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
-                Avatar(
-                    name = sender,
-                    size = 20.dp,
-                    modifier = avatarMod,
-                    networkId = networkId,
-                    account = senderAccount,
-                )
+                if (!hideAvatar) {
+                    val avatarMod = Modifier
+                        .padding(end = 6.dp, top = 2.dp)
+                        .size(20.dp)
+                        .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
+                    Avatar(
+                        name = sender,
+                        size = 20.dp,
+                        modifier = avatarMod,
+                        networkId = networkId,
+                        account = senderAccount,
+                    )
+                }
                 Text(
                     text = actionLine,
                     style = MaterialTheme.typography.bodyLarge.copy(
@@ -1059,6 +1064,7 @@ private fun TwoLineMessageRow(
     onSenderClick: (() -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
+    val hideAvatar = avatarsHidden()
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val bodyColor = MaterialTheme.colorScheme.onSurface
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
@@ -1090,17 +1096,19 @@ private fun TwoLineMessageRow(
         // message. Continuations (showSender == false) omit the header and indent the body under it.
         if (showSender) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Center the small avatar against the header line rather than top-pinning it.
-                val avatarMod = Modifier.padding(end = 6.dp)
-                    .align(Alignment.CenterVertically)
-                    .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
-                Avatar(
-                    name = sender,
-                    size = spacing.bubbleAvatar,
-                    modifier = avatarMod,
-                    networkId = networkId,
-                    account = senderAccount,
-                )
+                if (!hideAvatar) {
+                    // Center the small avatar against the header line rather than top-pinning it.
+                    val avatarMod = Modifier.padding(end = 6.dp)
+                        .align(Alignment.CenterVertically)
+                        .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
+                    Avatar(
+                        name = sender,
+                        size = spacing.bubbleAvatar,
+                        modifier = avatarMod,
+                        networkId = networkId,
+                        account = senderAccount,
+                    )
+                }
                 Text(
                     text = sender,
                     color = nameColor,
@@ -1137,7 +1145,7 @@ private fun TwoLineMessageRow(
         // Line 2 always starts under the nick text column. The previous first-row special case
         // started at the row edge while continuations reserved the avatar, producing a visible
         // zig-zag and misaligning rich children within the same sender group.
-        val bodyIndent = twoLineBodyIndent(spacing)
+        val bodyIndent = twoLineBodyIndent(spacing, hideAvatar)
         Column(
             modifier = Modifier
                 .padding(
@@ -1210,9 +1218,14 @@ private fun TwoLineMessageRow(
     }
 }
 
-/** Horizontal start shared by first and grouped TWO_LINE bodies: avatar width plus header gap. */
-internal fun twoLineBodyIndent(spacing: io.github.trevarj.motd.ui.theme.MotdSpacing) =
-    spacing.bubbleAvatar + 6.dp
+/**
+ * Horizontal start shared by first and grouped TWO_LINE bodies: avatar width plus header gap. With
+ * avatars hidden there is nothing to clear, so the body aligns flush with the header nick.
+ */
+internal fun twoLineBodyIndent(
+    spacing: io.github.trevarj.motd.ui.theme.MotdSpacing,
+    avatarsHidden: Boolean = false,
+) = if (avatarsHidden) 0.dp else spacing.bubbleAvatar + 6.dp
 
 /**
  * Delivery status of an own message, in priority order. IRC has no per-recipient read receipt

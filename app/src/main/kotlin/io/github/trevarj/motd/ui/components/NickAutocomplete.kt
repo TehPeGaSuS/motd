@@ -51,7 +51,7 @@ fun AutocompletePanel(
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (!isCommand) {
+                    if (!isCommand && !avatarsHidden()) {
                         Avatar(
                             name = candidate,
                             size = 24.dp,

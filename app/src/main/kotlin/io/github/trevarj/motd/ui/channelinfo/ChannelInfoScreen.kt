@@ -73,6 +73,7 @@ import io.github.trevarj.motd.ui.chat.LagTone
 import io.github.trevarj.motd.ui.chat.NickActionSheet
 import io.github.trevarj.motd.ui.chat.lagTone
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -594,17 +595,21 @@ private fun ChannelHeader(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         val name = buffer?.displayName ?: ""
-        Avatar(
-            name = name,
-            size = 88.dp,
-            isChannel = buffer?.type == BufferType.CHANNEL,
-            networkId = buffer?.networkId,
-        )
+        val hideAvatar = avatarsHidden()
+        if (!hideAvatar) {
+            Avatar(
+                name = name,
+                size = 88.dp,
+                isChannel = buffer?.type == BufferType.CHANNEL,
+                networkId = buffer?.networkId,
+            )
+        }
         Text(
             text = name,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 12.dp),
+            // The 12dp gap only exists to separate the name from the avatar above it.
+            modifier = Modifier.padding(top = if (hideAvatar) 0.dp else 12.dp),
         )
         // Topic + edit affordance (CHANNEL buffers only). Shown even when the topic is blank so an
         // op can set an initial topic (plans/16 §5.8).
@@ -721,7 +726,12 @@ private fun MemberRow(
 ) {
     ListItem(
         headlineContent = { Text(member.prefixes.take(1) + member.nick) },
-        leadingContent = { Avatar(name = member.nick, size = 36.dp, networkId = networkId) },
+        // Dropping the whole slot (rather than an empty one) lets the nick start at the content edge.
+        leadingContent = if (avatarsHidden()) {
+            null
+        } else {
+            { Avatar(name = member.nick, size = 36.dp, networkId = networkId) }
+        },
         trailingContent = if (isFriend) {
             {
                 Icon(

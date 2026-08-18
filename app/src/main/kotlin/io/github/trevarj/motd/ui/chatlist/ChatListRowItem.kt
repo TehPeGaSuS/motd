@@ -60,6 +60,7 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.resolveIs24Hour
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.MentionBadge
@@ -203,6 +204,7 @@ fun ChatListRowItem(
         label = "chatlist_row_container",
     )
     val activeIndicator = MaterialTheme.colorScheme.primary
+    val hideAvatar = avatarsHidden()
     val presenceDescription = queryPresence?.let {
         stringResource(
             when (it) {
@@ -245,16 +247,27 @@ fun ChatListRowItem(
             .padding(horizontal = 12.dp, vertical = spacing.chatListVPad),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PresenceAvatar(
-            name = row.displayName,
-            isChannel = row.type == BufferType.CHANNEL,
-            networkId = row.networkId,
-            presence = queryPresence,
-            size = spacing.chatListAvatar,
-        )
-        Spacer(Modifier.width(12.dp))
+        if (!hideAvatar) {
+            PresenceAvatar(
+                name = row.displayName,
+                isChannel = row.type == BufferType.CHANNEL,
+                networkId = row.networkId,
+                presence = queryPresence,
+                size = spacing.chatListAvatar,
+            )
+            Spacer(Modifier.width(12.dp))
+        }
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // The presence dot loses its avatar anchor when avatars are hidden, so it leads the
+                // title line instead: query presence stays visible either way.
+                if (hideAvatar && queryPresence != null) {
+                    PresenceBadge(
+                        visual = presenceBadgeVisual(queryPresence),
+                        tag = "chatlist_presence_${queryPresence.name.lowercase()}",
+                        modifier = Modifier.padding(end = 6.dp),
+                    )
+                }
                 // Quiet raised surface behind a non-muted friend's name.
                 val nameModifier = if (isFriend && !row.muted) {
                     Modifier
@@ -438,6 +451,11 @@ internal fun presenceBadgeVisual(presence: PresenceState): PresenceBadgeVisual =
     PresenceState.UNKNOWN -> PresenceBadgeVisual.UNKNOWN
 }
 
+/**
+ * Avatar with the query presence dot overlaid on its corner. With avatars hidden the box collapses
+ * and the dot is re-anchored inline by the caller, since presence is row state that must survive
+ * losing its anchor.
+ */
 @Composable
 private fun PresenceAvatar(
     name: String,

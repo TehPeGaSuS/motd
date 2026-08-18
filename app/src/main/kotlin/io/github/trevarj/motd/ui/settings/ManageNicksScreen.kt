@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -203,17 +204,23 @@ fun ManageNicksContent(
                         }
                         ListItem(
                             headlineContent = { Text(nick) },
-                            leadingContent = {
-                                if (state.kind == NickListKind.COLORS) {
-                                    // Color chip previewing the resolved override color.
-                                    Box(
-                                        modifier = Modifier
-                                            .size(20.dp)
-                                            .clip(CircleShape)
-                                            .background(scheme.hue(state.overrides[nick] ?: 0)),
-                                    )
-                                } else {
-                                    Avatar(name = nick, size = 36.dp)
+                            // The color list keeps its chip (it is the point of the row); the friends
+                            // list drops the slot entirely when avatars are hidden.
+                            leadingContent = if (state.kind != NickListKind.COLORS && avatarsHidden()) {
+                                null
+                            } else {
+                                {
+                                    if (state.kind == NickListKind.COLORS) {
+                                        // Color chip previewing the resolved override color.
+                                        Box(
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .clip(CircleShape)
+                                                .background(scheme.hue(state.overrides[nick] ?: 0)),
+                                        )
+                                    } else {
+                                        Avatar(name = nick, size = 36.dp)
+                                    }
                                 }
                             },
                             trailingContent = {

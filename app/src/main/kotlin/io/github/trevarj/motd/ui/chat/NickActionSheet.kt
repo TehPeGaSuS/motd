@@ -44,6 +44,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.channelinfo.BanTargetDialog
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.ReasonPresetChips
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
@@ -93,7 +94,11 @@ fun NickActionSheet(
             ListItem(
                 headlineContent = { Text(nick) },
                 supportingContent = { WhoisSummary(whois, presence) },
-                leadingContent = { Avatar(name = nick, size = 40.dp, networkId = networkId) },
+                leadingContent = if (avatarsHidden()) {
+                    null
+                } else {
+                    { Avatar(name = nick, size = 40.dp, networkId = networkId) }
+                },
             )
             HorizontalDivider()
 

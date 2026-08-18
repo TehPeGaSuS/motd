@@ -84,8 +84,12 @@ const val DEFAULT_AUTO_AWAY_MINUTES: Int = 10
 internal fun autoAwayMinutesFromPreference(saved: Int?): Int =
     saved?.takeIf { it in AUTO_AWAY_MINUTE_CHOICES } ?: DEFAULT_AUTO_AWAY_MINUTES
 
-/** Which visual style to use for nick avatars. IRC sprites are the default for new users. */
-enum class AvatarStyle { MONOGRAM, INITIALS, IRC_SPRITE }
+/**
+ * Which visual style to use for nick avatars. IRC sprites are the default for new users; [NONE]
+ * hides avatars in the UI entirely (notifications still need an icon, so they fall back to
+ * initials).
+ */
+enum class AvatarStyle { MONOGRAM, INITIALS, IRC_SPRITE, NONE }
 
 /** Decode a saved choice while defaulting installations without one to IRC sprites. */
 internal fun avatarStyleFromPreference(saved: String?): AvatarStyle =
