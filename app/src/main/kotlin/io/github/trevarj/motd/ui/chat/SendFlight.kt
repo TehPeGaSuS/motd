@@ -16,6 +16,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.MessageBubble
@@ -74,35 +75,45 @@ internal class SendFlightMotion {
 }
 
 /**
+ * How far the lift raises the ghost above the composer field's top while the row is persisting:
+ * enough for the bubble's crown to peek over the input bar as in-flight feedback, small enough
+ * that it stays inside the timeline's foot padding instead of covering the newest bubble. The
+ * full-height hover this replaces put the ghost exactly where the neighbour above still was,
+ * which read as the send covering another sender's text.
+ */
+internal val SendFlightHoverPeek = 24.dp
+
+/**
  * The ghost's absolute top for one frame.
  *
  * While the landing row has not reported (and while the flight is still short of the hover line),
- * the lift holds the bubble one bubble height above the composer top: visible in-flight feedback
- * during however long persistence takes. The landing row's bottom edge is pinned to the foot of
- * the reversed list while its gap opens upward, so the hover line coincides with the slot the row
- * will occupy and the handoff from lift to flight cannot jump. min keeps whichever is higher.
+ * the lift holds the bubble a small peek ([peekHeight]) above the composer top: visible in-flight
+ * feedback during however long persistence takes, without rising into the neighbour above. min
+ * keeps whichever of hover and flight is higher, so the flight takes over the moment it passes
+ * the peek line -- both terms are continuous, so the handoff cannot jump.
  *
- * Once the landing exists, [landingTop] -- the top of its reported rect, which parent clipping
- * limits to the gap actually opened so far -- floors the result. The lift starts on the tap frame
- * but the gap can only open once persistence lands the row, so the hover otherwise outruns the
- * vacated space and the opaque ghost slides over the bottom of the neighbour above; over another
- * sender's bubble that reads as the send covering their text. The floor makes the ghost ride the
- * gap's edge instead, and it also bounds the flight spring's deliberate overshoot at the group
- * gap the row opened rather than letting the bounce poke into the neighbour.
+ * The flight term is floored at [landingTop] -- the top of the landing's reported rect, which
+ * parent clipping limits to the gap actually opened so far. The flight path starts below the
+ * list foot and shares the gap's spring, so the floor is a safety net, not the driver: it only
+ * bites when the spring's overshoot would poke the bubble past the gap into the neighbour, and
+ * then by at most the overshoot itself. The hover is deliberately NOT floored: at the frame the
+ * landing first reports, the gap is still zero-height, and flooring the already-lifted hover
+ * there snapped the ghost down to the foot in one frame -- a visible jolt.
  */
 internal fun sendFlightGhostTop(
     startTop: Float,
     ghostHeight: Float,
+    peekHeight: Float,
     landingTop: Float?,
     landingBottom: Float?,
     flightFraction: Float,
     liftFraction: Float,
 ): Float {
-    val hoverTop = startTop - ghostHeight * liftFraction
+    val hoverTop = startTop - min(ghostHeight, peekHeight) * liftFraction
     val flightTop = landingBottom?.let { startTop + (it - ghostHeight - startTop) * flightFraction }
-        ?: startTop
-    val unclamped = min(hoverTop, flightTop)
-    return if (landingTop == null) unclamped else max(unclamped, landingTop)
+        ?: return hoverTop
+    val flooredFlight = landingTop?.let { max(flightTop, it) } ?: flightTop
+    return min(hoverTop, flooredFlight)
 }
 
 /**
@@ -157,6 +168,7 @@ internal fun BoxScope.SendFlightOverlay(
                 translationY = sendFlightGhostTop(
                     startTop = start.top,
                     ghostHeight = size.height,
+                    peekHeight = SendFlightHoverPeek.toPx(),
                     landingTop = landing?.top,
                     landingBottom = landing?.bottom,
                     flightFraction = motion.progress.value,
