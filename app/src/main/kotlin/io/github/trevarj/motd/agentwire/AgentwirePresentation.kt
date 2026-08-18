@@ -1,0 +1,184 @@
+package io.github.trevarj.motd.agentwire
+
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
+import io.github.trevarj.motd.ui.chat.AUTOSCROLL_BOTTOM_TOLERANCE_PX
+import java.util.Calendar
+
+/**
+ * Pure presentation logic for the agentwire timeline: display-row grouping, follow/auto-scroll
+ * intent, head+tail truncation, and timestamps. Nothing here touches composition state, so every
+ * decision stays unit-testable without a Compose host.
+ */
+
+/** Fold consecutive settled tools only when the run is at least this long. */
+internal const val MIN_TOOL_RUN = 2
+
+internal sealed interface AgentwireDisplayRow {
+    /** Stable LazyColumn key, derived from [AgentwireTimelineItem.timelineKey]. */
+    val key: String
+
+    /** Any non-tool timeline item, rendered as a full card. */
+    data class Card(val item: AgentwireTimelineItem) : AgentwireDisplayRow {
+        override val key: String get() = "card:${item.timelineKey()}"
+    }
+
+    /** A single tool (including the currently running one), rendered as one compact row. */
+    data class Tool(val item: AgentwireTimelineItem) : AgentwireDisplayRow {
+        override val key: String get() = "tool:${item.timelineKey()}"
+    }
+
+    /** At least [MIN_TOOL_RUN] consecutive settled tools folded behind one summary header. */
+    data class ToolRun(val tools: List<AgentwireTimelineItem>) : AgentwireDisplayRow {
+        // Keyed on the first tool so the key survives the run growing at its tail (the live case).
+        override val key: String get() = "run:${tools.first().timelineKey()}"
+        val failedCount: Int get() = tools.count { it.success == false }
+    }
+}
+
+/**
+ * Derive the rendered rows from the raw timeline. `request.opened` is suppressed entirely: the
+ * trailing [AgentwireUiState.requests] block is the single interactive surface for pending
+ * approvals, and `request.resolved` remains inline as the historical record.
+ */
+internal fun agentwireDisplayRows(timeline: List<AgentwireTimelineItem>): List<AgentwireDisplayRow> {
+    val rows = ArrayList<AgentwireDisplayRow>(timeline.size)
+    val pending = ArrayList<AgentwireTimelineItem>()
+    fun flush() {
+        when {
+            pending.size >= MIN_TOOL_RUN -> rows.add(AgentwireDisplayRow.ToolRun(pending.toList()))
+            pending.size == 1 -> rows.add(AgentwireDisplayRow.Tool(pending.single()))
+        }
+        pending.clear()
+    }
+    timeline.forEach { item ->
+        when {
+            item.kind == "request.opened" -> Unit
+            item.kind.startsWith("tool.") && !item.running -> pending.add(item)
+            item.kind.startsWith("tool.") -> {
+                // A running tool always stays its own visible row at the tail of the fold.
+                flush()
+                rows.add(AgentwireDisplayRow.Tool(item))
+            }
+            else -> {
+                flush()
+                rows.add(AgentwireDisplayRow.Card(item))
+            }
+        }
+    }
+    flush()
+    return rows
+}
+
+/**
+ * Growth fingerprint of the followable content. [contentLength] is what makes a streaming
+ * `assistant.delta` (body grows, row count does not) count as growth; sync/error/queue header
+ * items are deliberately excluded so they never yank the viewport.
+ */
+internal data class AgentwireTimelineStamp(val rowCount: Int, val contentLength: Long)
+
+internal fun agentwireTimelineStamp(
+    timeline: List<AgentwireTimelineItem>,
+    requestCount: Int,
+): AgentwireTimelineStamp = AgentwireTimelineStamp(
+    rowCount = timeline.size + requestCount,
+    contentLength = timeline.sumOf { (it.body?.length ?: 0).toLong() },
+)
+
+/**
+ * Tracks the user's decision to follow live arrivals independently from the list's transient
+ * physical position, mirroring the chat screen's AutoFollowTracker for a top-down non-Paging
+ * list. Programmatic scrolls never clear the intent; a user scroll that settles at the bottom
+ * re-arms it.
+ */
+internal class AgentwireAutoFollow(initialStamp: AgentwireTimelineStamp) {
+    var following: Boolean = true
+        private set
+
+    private var stamp = initialStamp
+
+    /** The last row count consumed by [onTimelineChanged]; lets callers compute arrival deltas. */
+    val presentedRowCount: Int
+        get() = stamp.rowCount
+
+    /** Consume a session rebind's first snapshot without treating it as a live arrival. */
+    fun reset(stamp: AgentwireTimelineStamp, atBottom: Boolean) {
+        this.stamp = stamp
+        following = atBottom
+    }
+
+    /** Explicit send/FAB actions opt back into following the newest row. */
+    fun requestFollow() {
+        following = true
+    }
+
+    fun onScrollStateChanged(scrolling: Boolean, programmatic: Boolean, atBottom: Boolean) {
+        if (programmatic) return
+        following = if (scrolling) false else atBottom
+    }
+
+    /** Record the new stamp and return whether the caller should scroll to the bottom. */
+    fun onTimelineChanged(new: AgentwireTimelineStamp): Boolean {
+        val grew = new.rowCount > stamp.rowCount ||
+            (new.rowCount == stamp.rowCount && new.contentLength > stamp.contentLength)
+        // An empty-to-populated transition is initial load, not a live arrival.
+        val follow = following && stamp.rowCount > 0 && grew
+        stamp = new
+        return follow
+    }
+}
+
+/**
+ * "At bottom" for the top-down timeline: the last item is visible and its bottom edge sits within
+ * the shared autoscroll tolerance of the viewport end. Relies on the trailing spacer being the
+ * final list item.
+ */
+internal fun isAtTimelineBottom(layoutInfo: LazyListLayoutInfo): Boolean {
+    val last = layoutInfo.visibleItemsInfo.lastOrNull() ?: return true
+    if (last.index != layoutInfo.totalItemsCount - 1) return false
+    return last.offset + last.size <= layoutInfo.viewportEndOffset + AUTOSCROLL_BOTTOM_TOLERANCE_PX
+}
+
+internal const val AGENTWIRE_HEAD_LINES = 8
+internal const val AGENTWIRE_TAIL_LINES = 8
+
+/** Never hide fewer lines than this: a marker that conceals two lines is worse than the lines. */
+internal const val AGENTWIRE_MIN_HIDDEN_LINES = 4
+
+internal data class TruncatedLines(
+    val head: List<String>,
+    /** 0 means no truncation: everything is in [head] and [tail] is empty. */
+    val hiddenCount: Int,
+    val tail: List<String>,
+)
+
+/** Keep the head and tail of long output; the tail carries a command's verdict. */
+internal fun truncateMiddle(
+    lines: List<String>,
+    head: Int = AGENTWIRE_HEAD_LINES,
+    tail: Int = AGENTWIRE_TAIL_LINES,
+): TruncatedLines {
+    if (lines.size < head + tail + AGENTWIRE_MIN_HIDDEN_LINES) {
+        return TruncatedLines(head = lines, hiddenCount = 0, tail = emptyList())
+    }
+    return TruncatedLines(
+        head = lines.take(head),
+        hiddenCount = lines.size - head - tail,
+        tail = lines.takeLast(tail),
+    )
+}
+
+/**
+ * Fixed clock-time stamp, not a relative one: this screen has no ticking recomposition source, so
+ * "5m ago" would silently go stale.
+ */
+internal fun agentwireTimestamp(atMs: Long, nowMs: Long = System.currentTimeMillis()): String {
+    val at = Calendar.getInstance().apply { timeInMillis = atMs }
+    val now = Calendar.getInstance().apply { timeInMillis = nowMs }
+    val sameDay = at.get(Calendar.YEAR) == now.get(Calendar.YEAR) &&
+        at.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR)
+    val hour = at.get(Calendar.HOUR_OF_DAY)
+    val minute = at.get(Calendar.MINUTE)
+    val time = "%02d:%02d".format(hour, minute)
+    if (sameDay) return time
+    return "%02d/%02d $time".format(at.get(Calendar.DAY_OF_MONTH), at.get(Calendar.MONTH) + 1)
+}

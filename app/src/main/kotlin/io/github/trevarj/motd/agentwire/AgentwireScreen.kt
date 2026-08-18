@@ -1,8 +1,12 @@
 package io.github.trevarj.motd.agentwire
 
 import android.annotation.SuppressLint
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,9 +23,12 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -32,6 +39,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -51,25 +59,40 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.irc.agentwire.AgentwireTopicDefect
+import io.github.trevarj.motd.ui.chat.ScrollToBottomFab
+import io.github.trevarj.motd.ui.chat.shouldShowNewestFab
 import io.github.trevarj.motd.ui.components.Composer
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 
 @Composable
@@ -156,6 +179,59 @@ private fun AgentwireScreen(
     var composer by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val stamp = agentwireTimelineStamp(state.timeline, state.requests.size)
+    val autoFollow = remember { AgentwireAutoFollow(stamp) }
+    // Distinguishes our own scroll animations from user drags so auto-follow intent survives them.
+    var programmaticScrolls by remember { mutableIntStateOf(0) }
+    var newItems by remember { mutableIntStateOf(0) }
+    // Fold overrides for rows and their body sections, keyed on stable timeline keys so an
+    // explicit user toggle survives tool lifecycle transitions. Reset with the bound session.
+    val expandedKeys = remember(state.activeSid) { mutableStateMapOf<String, Boolean>() }
+    val rows = remember(state.timeline) { agentwireDisplayRows(state.timeline) }
+
+    // A plain animateScrollToItem(last) parks at the TOP of a taller-than-viewport streaming
+    // card, so a second phase closes any remaining gap to the last item's bottom edge.
+    suspend fun scrollToTimelineBottom(animate: Boolean) {
+        autoFollow.requestFollow()
+        newItems = 0
+        programmaticScrolls++
+        try {
+            val last = listState.layoutInfo.totalItemsCount - 1
+            if (last < 0) return
+            if (animate) listState.animateScrollToItem(last) else listState.scrollToItem(last)
+            val info = listState.layoutInfo.visibleItemsInfo.lastOrNull() ?: return
+            val overshoot = info.offset + info.size - listState.layoutInfo.viewportEndOffset
+            if (overshoot > 0) {
+                if (animate) listState.animateScrollBy(overshoot.toFloat()) else listState.scrollBy(overshoot.toFloat())
+            }
+        } finally {
+            programmaticScrolls--
+        }
+    }
+
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            val atBottom = isAtTimelineBottom(listState.layoutInfo)
+            autoFollow.onScrollStateChanged(scrolling, programmaticScrolls > 0, atBottom)
+            if (!scrolling && atBottom) newItems = 0
+        }
+    }
+    LaunchedEffect(stamp) {
+        val wasFollowing = autoFollow.following
+        val previousCount = autoFollow.presentedRowCount
+        if (autoFollow.onTimelineChanged(stamp)) {
+            scrollToTimelineBottom(animate = true)
+        } else if (!wasFollowing && stamp.rowCount > previousCount) {
+            newItems += stamp.rowCount - previousCount
+        }
+    }
+    LaunchedEffect(state.activeSid) {
+        autoFollow.reset(agentwireTimelineStamp(state.timeline, state.requests.size), atBottom = true)
+        newItems = 0
+        scrollToTimelineBottom(animate = false)
+    }
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
         topBar = {
@@ -209,79 +285,102 @@ private fun AgentwireScreen(
                 AgentwireBlocked(state)
             } else {
                 Column(Modifier.fillMaxSize()) {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().weight(1f).testTag("agentwire_timeline"),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        when (val sync = state.sync) {
-                            is AgentwireSyncState.Syncing -> item {
-                                LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Box(Modifier.fillMaxWidth().weight(1f)) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize().testTag("agentwire_timeline"),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            when (val sync = state.sync) {
+                                is AgentwireSyncState.Syncing -> item {
+                                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                                }
+                                is AgentwireSyncState.Failed -> item {
+                                    AgentwireSyncFailureCard(
+                                        sync = sync,
+                                        channel = state.channel,
+                                        onRetry = viewModel::retrySync,
+                                    )
+                                }
+                                is AgentwireSyncState.NotJoined -> item {
+                                    AgentwireNotJoinedCard(state.channel, viewModel::joinAgentwireChannel)
+                                }
+                                else -> Unit
                             }
-                            is AgentwireSyncState.Failed -> item {
-                                AgentwireSyncFailureCard(
-                                    sync = sync,
-                                    channel = state.channel,
-                                    onRetry = viewModel::retrySync,
-                                )
-                            }
-                            is AgentwireSyncState.NotJoined -> item {
-                                AgentwireNotJoinedCard(state.channel, viewModel::joinAgentwireChannel)
-                            }
-                            else -> Unit
-                        }
-                        if (!state.connected && state.timeline.isEmpty()) item {
-                            Card(Modifier.fillMaxWidth().padding(16.dp)) {
-                                Column(Modifier.padding(16.dp)) {
-                                    Text("Agentwire is offline", style = MaterialTheme.typography.titleMedium)
-                                    Text("Structured state will be rebuilt after reconnecting.")
-                                    TextButton(onClick = viewModel::viewTranscript) { Text("View IRC transcript") }
+                            if (!state.connected && state.timeline.isEmpty()) item {
+                                Card(Modifier.fillMaxWidth().padding(16.dp)) {
+                                    Column(Modifier.padding(16.dp)) {
+                                        Text("Agentwire is offline", style = MaterialTheme.typography.titleMedium)
+                                        Text("Structured state will be rebuilt after reconnecting.")
+                                        TextButton(onClick = viewModel::viewTranscript) { Text("View IRC transcript") }
+                                    }
                                 }
                             }
-                        }
-                        if (state.error != null) item {
-                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(state.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                                TextButton(onClick = viewModel::clearError) { Text("Dismiss") }
+                            if (state.error != null) item {
+                                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(state.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                                    TextButton(onClick = viewModel::clearError) { Text("Dismiss") }
+                                }
                             }
-                        }
-                        if (state.historyLoading || state.olderHistoryAvailable) item {
-                            TextButton(
-                                onClick = viewModel::loadOlderHistory,
-                                enabled = !state.historyLoading,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text(if (state.historyLoading) "Loading history…" else "Load older history")
+                            if (state.historyLoading || state.olderHistoryAvailable) item {
+                                TextButton(
+                                    onClick = viewModel::loadOlderHistory,
+                                    enabled = !state.historyLoading,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(if (state.historyLoading) "Loading history…" else "Load older history")
+                                }
                             }
-                        }
-                        items(state.timeline, key = AgentwireTimelineItem::id) { item ->
-                            AgentwireTimelineCard(item, state.actionStatus[item.id])
-                        }
-                        items(state.requests, key = AgentwireRequest::rid) { request ->
-                            AgentwireRequestCard(request, request.sid == null || request.sid == state.activeSid, viewModel) {
-                                questionRequestId = request.rid
-                                sheet = AgentwireSheet.QUESTION
+                            items(rows, key = AgentwireDisplayRow::key) { row ->
+                                when (row) {
+                                    is AgentwireDisplayRow.Card -> AgentwireTimelineCard(
+                                        item = row.item,
+                                        actionStatus = state.actionStatus[row.item.id],
+                                        expandedOverride = expandedKeys[row.key],
+                                        onToggleExpanded = { expandedKeys[row.key] = it },
+                                    )
+                                    is AgentwireDisplayRow.Tool -> AgentwireToolCard(row.item, row.key, expandedKeys)
+                                    is AgentwireDisplayRow.ToolRun -> AgentwireToolRunCard(row, expandedKeys)
+                                }
                             }
-                        }
-                        if (state.queue.isNotEmpty()) item {
-                            Surface(
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                modifier = Modifier.fillMaxWidth().clickable { sheet = AgentwireSheet.QUEUE },
-                            ) {
-                                Text(
-                                    "${state.queue.size} queued  •  tap to edit",
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                    style = MaterialTheme.typography.labelLarge,
-                                )
+                            items(state.requests, key = AgentwireRequest::rid) { request ->
+                                AgentwireRequestCard(request, request.sid == null || request.sid == state.activeSid, viewModel) {
+                                    questionRequestId = request.rid
+                                    sheet = AgentwireSheet.QUESTION
+                                }
                             }
+                            if (state.queue.isNotEmpty()) item {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    modifier = Modifier.fillMaxWidth().clickable { sheet = AgentwireSheet.QUEUE },
+                                ) {
+                                    Text(
+                                        "${state.queue.size} queued  •  tap to edit",
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                        style = MaterialTheme.typography.labelLarge,
+                                    )
+                                }
+                            }
+                            item { Spacer(Modifier.height(8.dp)) }
                         }
-                        item { Spacer(Modifier.height(8.dp)) }
+                        AgentwireTimelineFab(
+                            listState = listState,
+                            autoScrolling = programmaticScrolls > 0,
+                            newItems = newItems,
+                            onJump = { scope.launch { scrollToTimelineBottom(animate = true) } },
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                        )
                     }
                     if (state.gate == AgentwireGate.ACTIVE) {
                         AgentwireComposer(
                             value = composer,
                             state = state,
                             onValueChange = { composer = it },
-                            onSend = { viewModel.submit(composer.text); composer = TextFieldValue("") },
+                            onSend = {
+                                viewModel.submit(composer.text)
+                                composer = TextFieldValue("")
+                                scope.launch { scrollToTimelineBottom(animate = true) }
+                            },
                             onCancel = viewModel::cancelTurn,
                         )
                     }
@@ -525,9 +624,16 @@ private fun AgentwireComposer(
 
 @SuppressLint("HardcodedText")
 @Composable
-private fun AgentwireTimelineCard(item: AgentwireTimelineItem, actionStatus: String?) {
-    var expanded by remember(item.running) { mutableStateOf(item.running || item.kind == "assistant.completed") }
-    val collapsible = item.kind.startsWith("tool.") || item.kind == "plan.updated" || item.kind == "usage.updated"
+private fun AgentwireTimelineCard(
+    item: AgentwireTimelineItem,
+    actionStatus: String?,
+    expandedOverride: Boolean?,
+    onToggleExpanded: (Boolean) -> Unit,
+) {
+    // Tool kinds never reach this card; they render as compact rows. The override is the user's
+    // explicit fold choice, hoisted so it survives the item's lifecycle transitions.
+    val collapsible = item.kind == "plan.updated" || item.kind == "usage.updated"
+    val expanded = expandedOverride ?: (item.running || item.kind == "assistant.completed")
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
         colors = CardDefaults.cardColors(
@@ -535,19 +641,31 @@ private fun AgentwireTimelineCard(item: AgentwireTimelineItem, actionStatus: Str
             else MaterialTheme.colorScheme.surfaceContainerLow,
         ),
     ) {
-        Column(Modifier.fillMaxWidth().clickable(enabled = collapsible) { expanded = !expanded }.padding(12.dp)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .then(
+                    if (collapsible) Modifier.semantics {
+                        role = Role.Button
+                        stateDescription = if (expanded) "Expanded" else "Collapsed"
+                    } else Modifier,
+                )
+                .clickable(enabled = collapsible) { onToggleExpanded(!expanded) }
+                .padding(12.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     item.title,
                     modifier = Modifier.weight(1f),
                     fontWeight = FontWeight.SemiBold,
+                    color = if (item.success == false) MaterialTheme.colorScheme.error else Color.Unspecified,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 val metadata = listOfNotNull(
                     actionStatus,
-                    item.tid?.take(8),
                     if (item.historical) "history" else null,
+                    agentwireTimestamp(item.at),
                 ).joinToString(" • ")
                 if (metadata.isNotEmpty()) {
                     Text(
@@ -555,6 +673,7 @@ private fun AgentwireTimelineCard(item: AgentwireTimelineItem, actionStatus: Str
                         modifier = Modifier.padding(start = 8.dp),
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         softWrap = false,
                     )
@@ -562,20 +681,172 @@ private fun AgentwireTimelineCard(item: AgentwireTimelineItem, actionStatus: Str
             }
             if (item.running) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
             if (!collapsible || expanded) {
-                if (item.kind.startsWith("tool.")) {
-                    AgentwireToolBody(item)
-                } else {
-                    item.body?.let {
-                        Text(
-                            it,
-                            modifier = Modifier.padding(top = 8.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
+                item.body?.let {
+                    Text(
+                        it,
+                        modifier = Modifier.padding(top = 8.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
             }
             if (collapsible && !expanded) {
-                Text("Tap to expand", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("▸ Tap to expand", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/** The scroll-to-bottom affordance, isolated so the hot layout read restarts only this scope. */
+@Composable
+private fun AgentwireTimelineFab(
+    listState: LazyListState,
+    autoScrolling: Boolean,
+    newItems: Int,
+    onJump: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val atBottom by remember(listState) { derivedStateOf { isAtTimelineBottom(listState.layoutInfo) } }
+    ScrollToBottomFab(
+        visible = shouldShowNewestFab(atBottom, autoScrolling),
+        unread = newItems,
+        mentionPending = false,
+        onClick = onJump,
+        onLongClick = onJump,
+        modifier = modifier,
+    )
+}
+
+@SuppressLint("HardcodedText")
+@Composable
+private fun AgentwireToolStatusGlyph(item: AgentwireTimelineItem) {
+    when {
+        item.running -> CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+        else -> {
+            val (glyph, color) = when (item.success) {
+                true -> "✓" to MaterialTheme.colorScheme.tertiary
+                false -> "✗" to MaterialTheme.colorScheme.error
+                null -> "·" to MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Text(glyph, style = MaterialTheme.typography.labelLarge, fontFamily = FontFamily.Monospace, color = color)
+        }
+    }
+}
+
+/** One compact line per tool call; tapping it unfolds the full body (command/output/diff). */
+@SuppressLint("HardcodedText")
+@Composable
+private fun AgentwireToolRow(
+    item: AgentwireTimelineItem,
+    rowKey: String,
+    expandedKeys: SnapshotStateMap<String, Boolean>,
+) {
+    val expanded = expandedKeys[rowKey] ?: item.running
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .semantics {
+                role = Role.Button
+                stateDescription = if (expanded) "Expanded" else "Collapsed"
+            }
+            .clickable { expandedKeys[rowKey] = !expanded }
+            .padding(vertical = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AgentwireToolStatusGlyph(item)
+            Text(
+                item.title,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val exitCode = item.data.int("exitCode")
+            val failed = exitCode != null && exitCode != 0
+            Text(
+                if (failed) "exit $exitCode" else agentwireTimestamp(item.at),
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (expanded) AgentwireToolBody(item, rowKey, expandedKeys)
+    }
+}
+
+/** A single tool call outside a foldable run — usually the one currently running. */
+@Composable
+private fun AgentwireToolCard(
+    item: AgentwireTimelineItem,
+    rowKey: String,
+    expandedKeys: SnapshotStateMap<String, Boolean>,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+            AgentwireToolRow(item, rowKey, expandedKeys)
+            if (item.running) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+        }
+    }
+}
+
+/** Consecutive settled tools folded behind one summary header, SystemEventPill-style. */
+@SuppressLint("HardcodedText")
+@Composable
+private fun AgentwireToolRunCard(
+    run: AgentwireDisplayRow.ToolRun,
+    expandedKeys: SnapshotStateMap<String, Boolean>,
+) {
+    val expanded = expandedKeys[run.key] ?: false
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .animateContentSize(animationSpec = MotdMotion.contentSize)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .semantics {
+                        role = Role.Button
+                        stateDescription = if (expanded) "Expanded" else "Collapsed"
+                    }
+                    .clickable { expandedKeys[run.key] = !expanded }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    if (expanded) "▾" else "▸",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "Ran ${run.tools.size} tools",
+                    modifier = Modifier.weight(1f),
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (run.failedCount > 0) {
+                    Text(
+                        "${run.failedCount} failed",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+            if (expanded) {
+                run.tools.forEach { tool ->
+                    // Same key a standalone Tool row would get, so a row's body expansion
+                    // survives the run growing or the tool leaving the fold.
+                    AgentwireToolRow(tool, "tool:${tool.timelineKey()}", expandedKeys)
+                }
             }
         }
     }
@@ -583,7 +854,11 @@ private fun AgentwireTimelineCard(item: AgentwireTimelineItem, actionStatus: Str
 
 @SuppressLint("HardcodedText")
 @Composable
-private fun AgentwireToolBody(item: AgentwireTimelineItem) {
+private fun AgentwireToolBody(
+    item: AgentwireTimelineItem,
+    rowKey: String,
+    expandedKeys: SnapshotStateMap<String, Boolean>,
+) {
     val command = item.data.string("input")
     val output = item.data.string("output")
     val diff = item.data.string("diff")
@@ -593,9 +868,9 @@ private fun AgentwireToolBody(item: AgentwireTimelineItem) {
     ).joinToString(" · ").ifBlank { null }
 
     Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        command?.let { ToolTextSection("Command", it) }
-        output?.let { ToolTextSection("Output", it) }
-        diff?.let { AgentwireGitDiff(item.id, it) }
+        command?.let { ToolTextSection("Command", it, "$rowKey#command", expandedKeys) }
+        output?.let { ToolTextSection("Output", it, "$rowKey#output", expandedKeys) }
+        diff?.let { AgentwireGitDiff(item.id, it, "$rowKey#diff", expandedKeys) }
         status?.let {
             Text(it, style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace)
         }
@@ -609,13 +884,55 @@ private fun AgentwireToolBody(item: AgentwireTimelineItem) {
     }
 }
 
+/** Centered tap target for revealing/hiding the truncated middle of long content. */
+@Composable
+private fun HiddenLinesMarker(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+    )
+}
+
 @SuppressLint("HardcodedText")
 @Composable
-private fun ToolTextSection(label: String, content: String) {
+private fun ToolTextSection(
+    label: String,
+    content: String,
+    sectionKey: String,
+    expandedKeys: SnapshotStateMap<String, Boolean>,
+) {
+    val truncated = remember(content) { truncateMiddle(content.lines()) }
+    val showAll = expandedKeys[sectionKey] ?: false
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-        SelectionContainer {
-            Text(content, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+        if (truncated.hiddenCount == 0 || showAll) {
+            SelectionContainer {
+                Text(content, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+            }
+            if (truncated.hiddenCount > 0) {
+                HiddenLinesMarker("Show fewer lines") { expandedKeys[sectionKey] = false }
+            }
+        } else {
+            SelectionContainer {
+                Text(
+                    truncated.head.joinToString("\n"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            HiddenLinesMarker("… ${truncated.hiddenCount} lines hidden — tap to show …") {
+                expandedKeys[sectionKey] = true
+            }
+            SelectionContainer {
+                Text(
+                    truncated.tail.joinToString("\n"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
         }
     }
 }
@@ -661,8 +978,17 @@ private fun diffLineKind(line: String): DiffLineKind = when {
 
 @SuppressLint("HardcodedText")
 @Composable
-private fun AgentwireGitDiff(itemId: String, diff: String) {
+private fun AgentwireGitDiff(
+    itemId: String,
+    diff: String,
+    sectionKey: String,
+    expandedKeys: SnapshotStateMap<String, Boolean>,
+) {
     val normalizedDiff = normalizeAgentwireDiff(diff)
+    val truncated = remember(normalizedDiff) { truncateMiddle(normalizedDiff.lines()) }
+    val showAll = expandedKeys[sectionKey] ?: false
+    // One scroll state shared by the head and tail blocks so they pan together.
+    val lineScroll = rememberScrollState()
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text("Diff", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
         Surface(
@@ -670,46 +996,60 @@ private fun AgentwireGitDiff(itemId: String, diff: String) {
             shape = MaterialTheme.shapes.small,
             color = MaterialTheme.colorScheme.surfaceContainerHighest,
         ) {
-            SelectionContainer {
-                Column(
-                    Modifier
-                        .horizontalScroll(rememberScrollState())
-                        .padding(vertical = 6.dp),
-                ) {
-                    normalizedDiff.lines().forEach { line ->
-                        val kind = diffLineKind(line)
-                        val background = when (kind) {
-                            DiffLineKind.ADDED -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f)
-                            DiffLineKind.REMOVED -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
-                            DiffLineKind.HUNK -> MaterialTheme.colorScheme.secondaryContainer
-                            DiffLineKind.HEADER -> MaterialTheme.colorScheme.surfaceVariant
-                            else -> MaterialTheme.colorScheme.surfaceContainerHighest
-                        }
-                        val color = when (kind) {
-                            DiffLineKind.ADDED -> MaterialTheme.colorScheme.onTertiaryContainer
-                            DiffLineKind.REMOVED -> MaterialTheme.colorScheme.onErrorContainer
-                            DiffLineKind.HUNK -> MaterialTheme.colorScheme.onSecondaryContainer
-                            DiffLineKind.META -> MaterialTheme.colorScheme.onSurfaceVariant
-                            else -> MaterialTheme.colorScheme.onSurface
-                        }
-                        Text(
-                            text = line.ifEmpty { " " },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(background)
-                                .padding(horizontal = 8.dp, vertical = 1.dp),
-                            color = color,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = if (kind == DiffLineKind.HEADER || kind == DiffLineKind.HUNK) {
-                                FontWeight.SemiBold
-                            } else {
-                                FontWeight.Normal
-                            },
-                            softWrap = false,
-                        )
+            Column(Modifier.padding(vertical = 6.dp)) {
+                if (truncated.hiddenCount == 0 || showAll) {
+                    AgentwireDiffLines(normalizedDiff.lines(), lineScroll)
+                    if (truncated.hiddenCount > 0) {
+                        HiddenLinesMarker("Show fewer lines") { expandedKeys[sectionKey] = false }
                     }
+                } else {
+                    AgentwireDiffLines(truncated.head, lineScroll)
+                    HiddenLinesMarker("… ${truncated.hiddenCount} lines hidden — tap to show …") {
+                        expandedKeys[sectionKey] = true
+                    }
+                    AgentwireDiffLines(truncated.tail, lineScroll)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentwireDiffLines(lines: List<String>, scroll: ScrollState) {
+    SelectionContainer {
+        Column(Modifier.horizontalScroll(scroll)) {
+            lines.forEach { line ->
+                val kind = diffLineKind(line)
+                val background = when (kind) {
+                    DiffLineKind.ADDED -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f)
+                    DiffLineKind.REMOVED -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
+                    DiffLineKind.HUNK -> MaterialTheme.colorScheme.secondaryContainer
+                    DiffLineKind.HEADER -> MaterialTheme.colorScheme.surfaceVariant
+                    else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                }
+                val color = when (kind) {
+                    DiffLineKind.ADDED -> MaterialTheme.colorScheme.onTertiaryContainer
+                    DiffLineKind.REMOVED -> MaterialTheme.colorScheme.onErrorContainer
+                    DiffLineKind.HUNK -> MaterialTheme.colorScheme.onSecondaryContainer
+                    DiffLineKind.META -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> MaterialTheme.colorScheme.onSurface
+                }
+                Text(
+                    text = line.ifEmpty { " " },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(background)
+                        .padding(horizontal = 8.dp, vertical = 1.dp),
+                    color = color,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = if (kind == DiffLineKind.HEADER || kind == DiffLineKind.HUNK) {
+                        FontWeight.SemiBold
+                    } else {
+                        FontWeight.Normal
+                    },
+                    softWrap = false,
+                )
             }
         }
     }

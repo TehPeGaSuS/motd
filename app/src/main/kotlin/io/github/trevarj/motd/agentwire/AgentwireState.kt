@@ -600,7 +600,13 @@ private fun List<AgentwireTimelineItem>.upsert(item: AgentwireTimelineItem): Lis
     else toMutableList().also { it[existing] = item }
 }
 
-private fun AgentwireTimelineItem.stableTimelineId(): String? {
+/**
+ * The LazyColumn key: stable across a tool/assistant item's lifecycle transitions, unlike [id],
+ * which changes with every envelope and would dispose the row's composition state mid-flight.
+ */
+internal fun AgentwireTimelineItem.timelineKey(): String = stableTimelineId() ?: id
+
+internal fun AgentwireTimelineItem.stableTimelineId(): String? {
     if (kind == "user.prompt") return "prompt:$sid:${backendItemId ?: id}"
     return tid?.let { turnId ->
         when {
