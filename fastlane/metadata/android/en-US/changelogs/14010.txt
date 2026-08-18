@@ -1,0 +1,5 @@
+- Appearance settings expanded: pick a font (including your own imported one), choose timestamp style, tune message spacing, and set bubble corner roundness.
+- Choose a launcher icon variant for the home screen.
+- New "None" avatar style hides avatars entirely.
+- Sending a message now flies the text into place instead of popping in. A morph variant is available under Labs > Chat.
+- Agentwire: tool runs fold away and the timeline follows the bottom.
