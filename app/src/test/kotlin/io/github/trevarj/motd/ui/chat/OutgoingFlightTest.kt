@@ -162,6 +162,15 @@ class OutgoingFlightTest {
     }
 
     @Test
+    fun `the flight replica materializes over the composer on the lift's first stretch`() {
+        assertEquals(0f, sendFlightEntryFade(0f), 0.001f)
+        assertEquals(0.5f, sendFlightEntryFade(0.175f), 0.001f)
+        assertEquals(1f, sendFlightEntryFade(0.35f), 0.001f)
+        // The lift spring's overshoot never pushes the fade past opaque.
+        assertEquals(1f, sendFlightEntryFade(1.015f), 0.001f)
+    }
+
+    @Test
     fun `the morph swap dissolves the stand-in across the flight's back half`() {
         // The stand-in carries the visible transformation, so it must survive the flight's first
         // half; the replica must still be whole (swap = 1) before the landing handoff at 1.0.

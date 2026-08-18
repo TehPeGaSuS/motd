@@ -2023,7 +2023,32 @@ fun ChatContent(
             val conversationSpacing = remember(conversationLayout.effective, messageSpacing, bubbleCornerStyle) {
                 spacingFor(conversationLayout.effective, messageSpacing, bubbleCornerStyle)
             }
+            // The runway: how far the whole timeline slides up while a flight is airborne, so
+            // vacated space exists under the ghost from the tap frame onward. Hoisted to this
+            // scope because both the timeline (deep in the pane) and the ghost overlay (a
+            // sibling drawn over the composer) read it. Deferred lambda: read only in the
+            // list's layer and the ghost's, never composed.
+            val density = LocalDensity.current
+            val flightListShift = remember(
+                outgoingFlight?.token, conversationSpacing, density,
+            ) {
+                val active = outgoingFlight != null
+                val gapPx = with(density) {
+                    bubbleGap(flightShowSender, items.itemCount > 0, conversationSpacing).toPx()
+                }
+                val shift: () -> Float = shift@{
+                    if (!active) return@shift 0f
+                    val revealed = flightAnchors.landingRow?.second?.height ?: 0f
+                    sendFlightListShift(
+                        runwayHeight = flightAnchors.ghostHeight + gapPx,
+                        liftFraction = flightMotion.lift.value,
+                        revealedGap = revealed,
+                    )
+                }
+                shift
+            }
             ConversationTypography(conversationFontScalePercent) {
+            Box(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.weight(1f)) {
                     // Subtle IRC-themed wallpaper layered UNDER the message list only (never over the
@@ -2053,30 +2078,6 @@ fun ChatContent(
                             // guard matters -- this runs on every frame of the reveal.
                             if (id !in flownRowIds) flownRowIds = flownRowIds + id
                         }
-                    }
-                    // The runway: how far the whole timeline slides up while a flight is
-                    // airborne, so vacated space exists under the ghost from the tap frame
-                    // onward. Built here rather than beside the motion state because the
-                    // predicted group gap needs the conversation's spacing tokens. Deferred
-                    // lambda: read only in the list's layer and the ghost's, never composed.
-                    val density = LocalDensity.current
-                    val flightListShift = remember(
-                        outgoingFlight?.token, conversationSpacing, density,
-                    ) {
-                        val active = outgoingFlight != null
-                        val gapPx = with(density) {
-                            bubbleGap(flightShowSender, items.itemCount > 0, conversationSpacing).toPx()
-                        }
-                        val shift: () -> Float = shift@{
-                            if (!active) return@shift 0f
-                            val revealed = flightAnchors.landingRow?.second?.height ?: 0f
-                            sendFlightListShift(
-                                runwayHeight = flightAnchors.ghostHeight + gapPx,
-                                liftFraction = flightMotion.lift.value,
-                                revealedGap = revealed,
-                            )
-                        }
-                        shift
                     }
                     val onTimelineLongPress = remember {
                         { message: MessageEntity -> sheetTarget = message }
@@ -2177,35 +2178,6 @@ fun ChatContent(
                         onToggleFool = onToggleFool,
                         onSenderClick = onSenderClick,
                     )
-                    // The ghost lives inside the timeline pane, so the composer's own surface
-                    // occludes it and the bubble emerges from behind the input bar. The clip and
-                    // the coordinate origin sit on this stationary wrapper: clipping the ghost
-                    // itself would clip nothing, since its layer translation carries its bounds
-                    // along with its pixels. Being here also puts it under the same density and
-                    // typography providers the rows use.
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .clipToBounds()
-                            // Layout-phase write only: the flight resolves the composer's and the
-                            // landing row's window rects against this origin.
-                            .onGloballyPositioned {
-                                flightAnchors.hostOrigin = it.positionInWindow()
-                            },
-                    ) {
-                        SendFlightOverlay(
-                            flight = outgoingFlight,
-                            anchors = flightAnchors,
-                            motion = flightMotion,
-                            listShift = flightListShift,
-                            style = sendAnimation,
-                            selfNick = selfNick,
-                            showSender = flightShowSender,
-                            networkId = state.buffer?.networkId,
-                            knownNicks = knownNicks,
-                            identityRules = identityRules,
-                        )
-                    }
                     }
                     }
 
@@ -2380,10 +2352,13 @@ fun ChatContent(
                     reply = state.replyTo?.let { ComposerReply(it.sender, it.text) },
                     onCancelReply = { onSetReply(null) },
                     // SERVER buffers send raw commands; hint that in the placeholder (plans/16 §5.6).
-                    placeholder = if (isServerBuffer) {
-                        stringResource(R.string.chat_server_composer_hint)
-                    } else {
-                        stringResource(R.string.chat_composer_placeholder)
+                    // Held blank while a flight is airborne: the ghost is born over the input box
+                    // at exactly the field-text origin, and the placeholder appearing beneath the
+                    // departing line read as two texts fighting for the same spot.
+                    placeholder = when {
+                        outgoingFlight != null -> ""
+                        isServerBuffer -> stringResource(R.string.chat_server_composer_hint)
+                        else -> stringResource(R.string.chat_composer_placeholder)
                     },
                     showEmojiButton = showComposerEmoji,
                     onAttachment = { uploadCurrentDraftDirectly = false; attachmentSheetOpen = true },
@@ -2408,6 +2383,39 @@ fun ChatContent(
                         }
                     } else null,
                 )
+            }
+            // The ghost overlay draws ABOVE the composer layer: a sent bubble materializes over
+            // the input box -- the morph pins its stand-in text to the still-warm field text --
+            // and then rides up into the timeline, instead of being born occluded behind the
+            // input bar. The clip and the coordinate origin sit on this stationary wrapper:
+            // clipping the ghost itself would clip nothing, since its layer translation carries
+            // its bounds along with its pixels. The spacing provider mirrors the timeline
+            // pane's, so the replica renders under exactly the tokens the rows use.
+            CompositionLocalProvider(LocalSpacing provides conversationSpacing) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clipToBounds()
+                    // Layout-phase write only: the flight resolves the composer's and the
+                    // landing row's window rects against this origin.
+                    .onGloballyPositioned {
+                        flightAnchors.hostOrigin = it.positionInWindow()
+                    },
+            ) {
+                SendFlightOverlay(
+                    flight = outgoingFlight,
+                    anchors = flightAnchors,
+                    motion = flightMotion,
+                    listShift = flightListShift,
+                    style = sendAnimation,
+                    selfNick = selfNick,
+                    showSender = flightShowSender,
+                    networkId = state.buffer?.networkId,
+                    knownNicks = knownNicks,
+                    identityRules = identityRules,
+                )
+            }
+            }
             }
             }
         }

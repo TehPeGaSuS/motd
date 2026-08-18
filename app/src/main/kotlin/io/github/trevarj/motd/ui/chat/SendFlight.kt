@@ -102,11 +102,24 @@ internal class SendFlightMotion {
 
     /**
      * The immediate pre-landing rise, started on the tap frame before the pending row exists.
-     * Without it the ghost waits at the composer top -- occluded by the input bar -- for as long
-     * as the send takes to persist, so a slow send looked like a swallowed message. See
-     * [sendFlightGhostTop] for how it blends with [progress].
+     * It carries the ghost's birth over the input box -- the flight replica's materialization
+     * fade ([sendFlightEntryFade]) and the hover rise both read it -- so a slow send stays
+     * visibly in flight for however long persistence takes. See [sendFlightGhostTop] for how it
+     * blends with [progress].
      */
     val lift = Animatable(0f)
+}
+
+/**
+ * The flight replica's materialization over the composer, from the lift fraction. The overlay
+ * draws above the input bar, so without this the finished bubble would pop in fully opaque on
+ * the tap frame; instead it fades in across the lift's first stretch, while still over the
+ * input box, and then rides up whole. The timeout path animates the lift back down, which also
+ * dissolves the ghost through this same ramp.
+ */
+internal fun sendFlightEntryFade(liftFraction: Float): Float {
+    val t = (liftFraction / 0.35f).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
 }
 
 /**
@@ -176,8 +189,9 @@ internal fun sendFlightGhostTop(
  * and status/time line, so the replica cannot drift from its landing row by construction. A
  * hand-copied bubble had already drifted on three of those axes.
  *
- * Only `translationY` animates. Nothing scales, so the text is rasterised once and never distorts,
- * and the handoff to the real row is a swap between identical pixels.
+ * The replica animates `translationY` and a birth fade only. Nothing scales, so the text is
+ * rasterised once and never distorts, and the handoff to the real row is a swap between
+ * identical pixels.
  *
  * The ghost is invisible to the semantics tree ([clearAndSetSemantics], which clears the whole
  * subtree including the bubble's own click semantics). Its text duplicates a real row's, and a
@@ -250,14 +264,15 @@ internal fun BoxScope.SendFlightOverlay(
             }
             .clearAndSetSemantics {},
     ) {
-        // The real row's replica. Under the morph it fades in mid-flight over the stand-in; it
-        // is always the layer that lands, so the handoff to the real row stays a swap between
-        // identical pixels in both presentations.
+        // The real row's replica. Under the morph it dissolves in mid-flight over the stand-in;
+        // under the plain flight it materializes over the composer on the lift's first stretch.
+        // It is always the layer that lands, so the handoff to the real row stays a swap
+        // between identical pixels in both presentations.
         Box(
             modifier = if (morph) {
                 Modifier.graphicsLayer { alpha = sendFlightMorphSwap(motion.progress.value) }
             } else {
-                Modifier
+                Modifier.graphicsLayer { alpha = sendFlightEntryFade(motion.lift.value) }
             },
         ) {
             MessageBubble(
