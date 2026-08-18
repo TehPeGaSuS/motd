@@ -42,6 +42,7 @@ fun LabsScreen(
         onBack = onBack,
         onGesturesChanged = viewModel::setGesturesEnabled,
         onAgentwireChanged = viewModel::setAgentwireEnabled,
+        onSendMorphChanged = viewModel::setSendMorphEnabled,
         onOpenGestureMenu = onOpenGestureMenu,
     )
 }
@@ -52,6 +53,7 @@ fun LabsContent(
     onBack: () -> Unit,
     onGesturesChanged: (Boolean) -> Unit,
     onAgentwireChanged: (Boolean) -> Unit,
+    onSendMorphChanged: (Boolean) -> Unit = {},
     onOpenGestureMenu: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -85,6 +87,15 @@ fun LabsContent(
                 modifier = Modifier
                     .clickable(onClick = onOpenGestureMenu)
                     .testTag("labs_gestures_configure"),
+            )
+        }
+        SettingsGroup(title = stringResource(R.string.labs_chat_section)) {
+            SwitchRow(
+                title = stringResource(R.string.labs_send_morph),
+                subtitle = stringResource(R.string.labs_send_morph_desc),
+                checked = state.sendMorphEnabled,
+                onCheckedChange = onSendMorphChanged,
+                switchTag = "labs_send_morph_switch",
             )
         }
         SettingsGroup(title = stringResource(R.string.labs_agentwire_section)) {

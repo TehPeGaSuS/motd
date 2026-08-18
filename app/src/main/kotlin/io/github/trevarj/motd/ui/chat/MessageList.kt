@@ -281,6 +281,9 @@ fun MessageList(
     // spring that carries the bubble. A lambda, so the value never enters composition here.
     flightProgress: () -> Float = { 1f },
     onFlightRowPositioned: (Long, Rect) -> Unit = { _, _ -> },
+    // The send-flight runway: how far the whole list slides up while a ghost is airborne, read
+    // in the draw phase like [flightProgress] so a frame moves one layer and composes nothing.
+    listShift: () -> Float = { 0f },
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
     replyPreview: (String) -> StateFlow<ReplyPreviewData?> = { MutableStateFlow(null) },
     onReplyPreviewClick: (String) -> Unit = {},
@@ -335,6 +338,9 @@ fun MessageList(
         // the older end triggers Paging APPEND via the prefetch window, no gesture plumbing needed.
         modifier = modifier
             .fillMaxSize()
+            // The runway: while a sent bubble is airborne the whole timeline yields upward so
+            // vacated space exists at the foot before the landing row can open its own gap.
+            .graphicsLayer { translationY = -listShift() }
             .testTag("chat_timeline"),
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {

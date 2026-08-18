@@ -116,6 +116,7 @@ import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -400,6 +401,7 @@ fun ChatScreen(
     val rawNewestAnchor by viewModel.rawNewestAnchor.collectAsStateWithLifecycle()
     val composerDraft by viewModel.composerDraft.collectAsStateWithLifecycle()
     val outgoingFlight by viewModel.outgoingFlight.collectAsStateWithLifecycle()
+    val sendMorphEnabled by viewModel.sendMorphEnabled.collectAsStateWithLifecycle()
     // Timeline behavioral settings collected separately from ChatState (plans/13 §2.5).
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val hiddenFoolsRevealed by viewModel.hiddenFoolsRevealed.collectAsStateWithLifecycle()
@@ -433,6 +435,7 @@ fun ChatScreen(
         conversationFontScalePercent = appearance.conversationFontScalePercent,
         messageSpacing = appearance.messageSpacing,
         bubbleCornerStyle = appearance.bubbleCornerStyle,
+        sendAnimation = if (sendMorphEnabled) SendAnimationStyle.MORPH else SendAnimationStyle.FLIGHT,
         showComposerEmoji = settings.showComposerEmoji,
         visibleReplyPrefix = replyConfig.visibleChannelPrefix,
         showImages = contentPreviews.showImages && directMediaAllowed,
@@ -669,6 +672,7 @@ fun ChatContent(
         io.github.trevarj.motd.data.prefs.MessageSpacing.DEFAULT,
     bubbleCornerStyle: io.github.trevarj.motd.data.prefs.BubbleCornerStyle =
         io.github.trevarj.motd.data.prefs.BubbleCornerStyle.ROUNDED,
+    sendAnimation: SendAnimationStyle = SendAnimationStyle.FLIGHT,
     showComposerEmoji: Boolean = true,
     visibleReplyPrefix: Boolean = false,
     showImages: Boolean = true,
@@ -860,6 +864,7 @@ fun ChatContent(
         // and can run after the new tap's first draw, which would then read the previous flight's
         // landing rect and start the ghost mid-timeline instead of at the composer.
         flightAnchors.landingRow = null
+        flightAnchors.ghostHeight = 0f
         SendFlightMotion()
     }
     val flightProgress = remember(flightMotion) { { flightMotion.progress.value } }
@@ -877,9 +882,12 @@ fun ChatContent(
                 snapshotFlow { flightAnchors.landingRow }.filterNotNull().first()
             }
             if (landing == null) {
-                // Nothing arrived to fly to. Open the gap outright so the row is whole when shown.
+                // Nothing arrived to fly to. Open the gap outright so the row is whole when
+                // shown, and lower the lift again so the runway the tap opened closes on the
+                // same spring instead of snapping shut when the flight settles.
                 liftJob.cancel()
                 flightMotion.progress.snapTo(1f)
+                flightMotion.lift.animateTo(0f, MotdMotion.sendFlightSpring)
             } else {
                 flightMotion.progress.animateTo(1f, MotdMotion.sendFlightSpring)
                 liftJob.join()
@@ -2025,6 +2033,9 @@ fun ChatContent(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
+                            // The runway slides the whole timeline up past this pane's top edge;
+                            // without the clip those rows would paint over the app bar.
+                            .clipToBounds()
                             .testTag("chat_layout_effective_${conversationLayout.effective.name.lowercase()}"),
                     ) {
                     // Keep the timeline's callbacks stable. A freshly allocated lambda on every
@@ -2042,6 +2053,30 @@ fun ChatContent(
                             // guard matters -- this runs on every frame of the reveal.
                             if (id !in flownRowIds) flownRowIds = flownRowIds + id
                         }
+                    }
+                    // The runway: how far the whole timeline slides up while a flight is
+                    // airborne, so vacated space exists under the ghost from the tap frame
+                    // onward. Built here rather than beside the motion state because the
+                    // predicted group gap needs the conversation's spacing tokens. Deferred
+                    // lambda: read only in the list's layer and the ghost's, never composed.
+                    val density = LocalDensity.current
+                    val flightListShift = remember(
+                        outgoingFlight?.token, conversationSpacing, density,
+                    ) {
+                        val active = outgoingFlight != null
+                        val gapPx = with(density) {
+                            bubbleGap(flightShowSender, items.itemCount > 0, conversationSpacing).toPx()
+                        }
+                        val shift: () -> Float = shift@{
+                            if (!active) return@shift 0f
+                            val revealed = flightAnchors.landingRow?.second?.height ?: 0f
+                            sendFlightListShift(
+                                runwayHeight = flightAnchors.ghostHeight + gapPx,
+                                liftFraction = flightMotion.lift.value,
+                                revealedGap = revealed,
+                            )
+                        }
+                        shift
                     }
                     val onTimelineLongPress = remember {
                         { message: MessageEntity -> sheetTarget = message }
@@ -2091,6 +2126,7 @@ fun ChatContent(
                         flownRowIds = flownRowIds,
                         flightProgress = flightProgress,
                         onFlightRowPositioned = onFlightRowPositioned,
+                        listShift = flightListShift,
                         networkId = state.buffer?.networkId,
                         bufferId = state.buffer?.id,
                         conversationName = state.buffer?.displayName,
@@ -2161,6 +2197,8 @@ fun ChatContent(
                             flight = outgoingFlight,
                             anchors = flightAnchors,
                             motion = flightMotion,
+                            listShift = flightListShift,
+                            style = sendAnimation,
                             selfNick = selfNick,
                             showSender = flightShowSender,
                             networkId = state.buffer?.networkId,
@@ -2338,6 +2376,7 @@ fun ChatContent(
                     },
                     enabled = composerEnabled,
                     onFieldPositioned = { flightAnchors.composerField = it },
+                    onFieldTextPositioned = { flightAnchors.composerTextOrigin = it },
                     reply = state.replyTo?.let { ComposerReply(it.sender, it.text) },
                     onCancelReply = { onSetReply(null) },
                     // SERVER buffers send raw commands; hint that in the placeholder (plans/16 §5.6).

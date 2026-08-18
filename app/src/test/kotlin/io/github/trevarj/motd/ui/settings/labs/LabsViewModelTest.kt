@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.settings.labs
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.agentwire.AgentwirePrefs
+import io.github.trevarj.motd.data.prefs.SendMorphLabPrefs
 import io.github.trevarj.motd.gesture.GestureMenuConfig
 import io.github.trevarj.motd.gesture.GesturePrefs
 import io.github.trevarj.motd.gesture.radial.OrbPlacement
@@ -28,6 +29,7 @@ class LabsViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val gestures = FakeGesturePrefs()
     private val agentwire = FakeAgentwirePrefs()
+    private val sendMorph = SendMorphLabPrefs(ApplicationProvider.getApplicationContext<Context>())
 
     @Before fun setUp() {
         Dispatchers.setMain(dispatcher)
@@ -37,10 +39,19 @@ class LabsViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun vm() = LabsViewModel(gestures, agentwire)
+    private fun vm() = LabsViewModel(gestures, agentwire, sendMorph)
 
     @Test fun bothLabsStartOff() = runTest {
         assertEquals(LabsUiState(gesturesEnabled = false, agentwireEnabled = false), vm().state.first())
+    }
+
+    @Test fun sendMorphToggle_roundTripsThroughItsOwnStore() = runTest {
+        val model = vm()
+        model.setSendMorphEnabled(true)
+        assertEquals(true, model.state.first { it.sendMorphEnabled }.sendMorphEnabled)
+        assertEquals(true, sendMorph.enabled.first())
+        model.setSendMorphEnabled(false)
+        assertEquals(false, model.state.first { !it.sendMorphEnabled }.sendMorphEnabled)
     }
 
     @Test fun gestureToggle_writesOnlyTheGestureStore() = runTest {

@@ -1,9 +1,15 @@
 package io.github.trevarj.motd.ui.chat
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -12,18 +18,32 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
+import io.github.trevarj.motd.ui.components.chatBubbleWidth
+import io.github.trevarj.motd.ui.components.messageBubbleRoleColors
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import io.github.trevarj.motd.ui.theme.LocalSpacing
 import kotlin.math.max
 import kotlin.math.min
+
+/**
+ * How a sent message reaches the timeline: FLIGHT rises the finished bubble from the composer
+ * into its slot; MORPH keeps the typed line in place and grows the bubble around it first.
+ * MORPH is a lab behind [io.github.trevarj.motd.data.prefs.SendMorphLabPrefs]; FLIGHT ships.
+ */
+enum class SendAnimationStyle { FLIGHT, MORPH }
 
 /**
  * Where a send flight starts and where it ends, in the coordinates of the chat surface that hosts
@@ -42,8 +62,20 @@ internal class SendFlightAnchors {
      */
     var hostOrigin by mutableStateOf(Offset.Zero)
     var composerField by mutableStateOf<Rect?>(null)
+    /**
+     * The composer field's inner text origin (window coords): where the first glyph of the draft
+     * is drawn. The morph presentation aligns its own text here on the tap frame so the typed
+     * line visually never moves when the field clears.
+     */
+    var composerTextOrigin by mutableStateOf<Offset?>(null)
     /** The landing row, keyed by event id so a report can be traced back to the row that made it. */
     var landingRow by mutableStateOf<Pair<Long, Rect>?>(null)
+    /**
+     * The ghost's measured height, written from the overlay's layout pass. Sizes the runway the
+     * timeline opens under the flight; 0 until the overlay has laid out (the same frame's draw
+     * already sees the real value, so at worst the runway's first frame targets only the gap).
+     */
+    var ghostHeight by mutableStateOf(0f)
 
     fun reportLandingRow(eventId: Long, bounds: Rect) {
         landingRow = eventId to bounds
@@ -75,43 +107,59 @@ internal class SendFlightMotion {
 }
 
 /**
- * How far the lift raises the ghost above the composer field's top while the row is persisting:
- * enough for the bubble's crown to peek over the input bar as in-flight feedback, small enough
- * that it stays inside the timeline's foot padding instead of covering the newest bubble. The
- * full-height hover this replaces put the ghost exactly where the neighbour above still was,
- * which read as the send covering another sender's text.
+ * How far up the timeline slides while a flight is airborne: the runway.
+ *
+ * The runway is what makes full-height in-flight feedback safe. The landing row -- and with it
+ * the gap the flight aims for -- can only exist once persistence completes, so on the tap frame
+ * there is nowhere vacated for the bubble to rise into. Sliding the whole list up by the
+ * predicted landing-row height ([runwayHeight] = measured ghost height + predicted group gap),
+ * on the same spring as the lift, opens that space in lockstep with the rising bubble.
+ *
+ * Once the row lands its gap starts absorbing the runway: the reveal grows inside the list
+ * while the shift shrinks by the same amount, so the neighbour's edge moves continuously and
+ * ownership of the vacated space transfers to the ordinary gap mechanism without a seam. A
+ * mispredicted runway height self-corrects here too -- both terms are animated, so the error
+ * drains through the springs instead of jumping.
+ *
+ * The lift fraction is capped at 1 so the flight spring's deliberate bounce stays on the
+ * bubble; an underdamped shift would nod the entire conversation.
  */
-internal val SendFlightHoverPeek = 24.dp
+internal fun sendFlightListShift(
+    runwayHeight: Float,
+    liftFraction: Float,
+    revealedGap: Float,
+): Float = max(0f, runwayHeight * min(liftFraction, 1f) - revealedGap)
 
 /**
  * The ghost's absolute top for one frame.
  *
- * While the landing row has not reported (and while the flight is still short of the hover line),
- * the lift holds the bubble a small peek ([peekHeight]) above the composer top: visible in-flight
- * feedback during however long persistence takes, without rising into the neighbour above. min
- * keeps whichever of hover and flight is higher, so the flight takes over the moment it passes
- * the peek line -- both terms are continuous, so the handoff cannot jump.
+ * While the landing row has not reported (and while the flight is still short of the hover
+ * line), the lift holds the bubble one bubble height above the composer top: full-height
+ * in-flight feedback during however long persistence takes. The runway ([sendFlightListShift])
+ * opens beneath it on the same spring, and always faster -- the runway target exceeds the
+ * ghost height by the group gap, and the hover additionally trails by the composer offset --
+ * so the hover sits in vacated space by construction. min keeps whichever of hover and flight
+ * is higher, so the flight takes over smoothly once it climbs past the hover line.
  *
- * The flight term is floored at [landingTop] -- the top of the landing's reported rect, which
- * parent clipping limits to the gap actually opened so far. The flight path starts below the
- * list foot and shares the gap's spring, so the floor is a safety net, not the driver: it only
- * bites when the spring's overshoot would poke the bubble past the gap into the neighbour, and
- * then by at most the overshoot itself. The hover is deliberately NOT floored: at the frame the
- * landing first reports, the gap is still zero-height, and flooring the already-lifted hover
- * there snapped the ghost down to the foot in one frame -- a visible jolt.
+ * The flight aims at the row's *resting* foot: the reported [landingBottom] is a visual
+ * coordinate that rides the runway shift, so [listShift] is added back to keep the target
+ * stationary while the shift drains. The flight term is floored at [landingTop] (the reported
+ * rect is clipped to the opened gap, and its coordinates already include the shift): a safety
+ * net that only bites when the spring's overshoot would poke the bubble past the vacated edge
+ * into the neighbour, and then by at most the overshoot itself.
  */
 internal fun sendFlightGhostTop(
     startTop: Float,
     ghostHeight: Float,
-    peekHeight: Float,
+    listShift: Float,
     landingTop: Float?,
     landingBottom: Float?,
     flightFraction: Float,
     liftFraction: Float,
 ): Float {
-    val hoverTop = startTop - min(ghostHeight, peekHeight) * liftFraction
-    val flightTop = landingBottom?.let { startTop + (it - ghostHeight - startTop) * flightFraction }
-        ?: return hoverTop
+    val hoverTop = startTop - ghostHeight * liftFraction
+    val restingFoot = landingBottom?.plus(listShift) ?: return hoverTop
+    val flightTop = startTop + (restingFoot - ghostHeight - startTop) * flightFraction
     val flooredFlight = landingTop?.let { max(flightTop, it) } ?: flightTop
     return min(hoverTop, flooredFlight)
 }
@@ -132,11 +180,24 @@ internal fun sendFlightGhostTop(
  * subtree including the bubble's own click semantics). Its text duplicates a real row's, and a
  * second match would make every `onNodeWithText` assertion in chat ambiguous.
  */
+/**
+ * How much of the morph stand-in has been replaced by the real bubble replica, from the flight
+ * fraction. Smoothstepped over the flight's first half so the metadata line and linkified body
+ * arrive while the bubble is moving (motion masks the dissolve) and the replica is whole well
+ * before it must pixel-match the landing row.
+ */
+internal fun sendFlightMorphSwap(flightFraction: Float): Float {
+    val t = ((flightFraction - 0.15f) / 0.4f).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
 @Composable
 internal fun BoxScope.SendFlightOverlay(
     flight: OutgoingFlight?,
     anchors: SendFlightAnchors,
     motion: SendFlightMotion,
+    listShift: () -> Float,
+    style: SendAnimationStyle,
     selfNick: String,
     showSender: Boolean,
     networkId: Long?,
@@ -156,11 +217,19 @@ internal fun BoxScope.SendFlightOverlay(
     val formatTime = rememberMessageTimeFormatter()
     val launchedAt = flight.launchedAtMs
     val time = remember(flight.token, formatTime) { formatTime(launchedAt) }
+    val spacing = LocalSpacing.current
+    // The morph needs a bubble to grow around a bare line of text: COMPACT and TWO_LINE render
+    // text rows rather than bubbles, and a reply puts a quote block above the body that the
+    // stand-in cannot represent. Those flights fall back to the plain bubble presentation.
+    val morph = style == SendAnimationStyle.MORPH && !spacing.compact && !spacing.twoLine &&
+        flight.replyText == null
 
     Box(
         modifier = Modifier
             .align(Alignment.TopStart)
             .fillMaxWidth()
+            // Layout-phase write: sizes the runway the timeline opens under this flight.
+            .onSizeChanged { anchors.ghostHeight = it.height.toFloat() }
             .graphicsLayer {
                 // Re-read the landing every frame rather than snapshotting it: the row's rect
                 // moves while the keyboard and the list settle, and a stale target lands crooked.
@@ -168,7 +237,7 @@ internal fun BoxScope.SendFlightOverlay(
                 translationY = sendFlightGhostTop(
                     startTop = start.top,
                     ghostHeight = size.height,
-                    peekHeight = SendFlightHoverPeek.toPx(),
+                    listShift = listShift(),
                     landingTop = landing?.top,
                     landingBottom = landing?.bottom,
                     flightFraction = motion.progress.value,
@@ -177,19 +246,135 @@ internal fun BoxScope.SendFlightOverlay(
             }
             .clearAndSetSemantics {},
     ) {
-        MessageBubble(
-            sender = selfNick,
-            text = flight.text,
-            timeMs = launchedAt,
-            isSelf = true,
-            kind = MessageKind.PRIVMSG,
-            showSender = showSender,
-            networkId = networkId,
-            formattedTime = time,
-            pending = true,
-            reply = flight.replyText?.let { ReplyPreviewData(flight.replySender.orEmpty(), it) },
-            knownNicks = knownNicks,
-            identityRules = identityRules,
-        )
+        // The real row's replica. Under the morph it fades in mid-flight over the stand-in; it
+        // is always the layer that lands, so the handoff to the real row stays a swap between
+        // identical pixels in both presentations.
+        Box(
+            modifier = if (morph) {
+                Modifier.graphicsLayer { alpha = sendFlightMorphSwap(motion.progress.value) }
+            } else {
+                Modifier
+            },
+        ) {
+            MessageBubble(
+                sender = selfNick,
+                text = flight.text,
+                timeMs = launchedAt,
+                isSelf = true,
+                kind = MessageKind.PRIVMSG,
+                showSender = showSender,
+                networkId = networkId,
+                formattedTime = time,
+                pending = true,
+                reply = flight.replyText?.let { ReplyPreviewData(flight.replySender.orEmpty(), it) },
+                knownNicks = knownNicks,
+                identityRules = identityRules,
+            )
+        }
+        if (morph) {
+            MorphingGhost(
+                flight = flight,
+                anchors = anchors,
+                motion = motion,
+                showSender = showSender,
+            )
+        }
+    }
+}
+
+/**
+ * The morph presentation's stand-in: the typed line itself, with the bubble growing around it.
+ *
+ * On the tap frame the stand-in's text is pinned glyph-for-glyph over the composer field's text
+ * (both render the same `bodyLarge` under [ConversationTypography]), so clearing the field does
+ * not visibly remove the line -- ownership just changes. As the lift rises, the text slides from
+ * the field's left-aligned origin to the bubble's resting alignment while the bubble surface
+ * fades in beneath it and the text color crossfades from field ink to bubble ink. Mid-flight the
+ * whole stand-in dissolves into the real [MessageBubble] replica ([sendFlightMorphSwap]), which
+ * brings the metadata line and linkified body and owns the landing.
+ *
+ * Every animated value is read in a draw-phase lambda; the stand-in never recomposes per frame.
+ * A multi-line draft may re-wrap where the bubble is narrower than the field; the first glyph
+ * stays pinned, which keeps the illusion for the dominant single-line send.
+ */
+@Composable
+private fun MorphingGhost(
+    flight: OutgoingFlight,
+    anchors: SendFlightAnchors,
+    motion: SendFlightMotion,
+    showSender: Boolean,
+) {
+    val spacing = LocalSpacing.current
+    val roles = messageBubbleRoleColors(
+        MaterialTheme.colorScheme,
+        isSelf = true,
+        mentionHighlighted = false,
+        kind = MessageKind.PRIVMSG,
+    )
+    val fieldInk = MaterialTheme.colorScheme.onSurface
+    val topCorner = if (showSender) spacing.bubbleCorner else spacing.bubbleGroupedCorner
+    val shape = RoundedCornerShape(
+        topStart = spacing.bubbleCorner,
+        topEnd = topCorner,
+        bottomEnd = spacing.bubbleGroupedCorner,
+        bottomStart = spacing.bubbleCorner,
+    )
+    // Field-text origin minus the stand-in text's own untranslated origin, pinned on the first
+    // laid-out frame (the slide layer is still at identity then, so the measurement is clean).
+    var textDelta by remember(flight.token) { mutableStateOf<Offset?>(null) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = spacing.messageOuterHPad, vertical = spacing.bubbleRowVPad)
+            .graphicsLayer { alpha = 1f - sendFlightMorphSwap(motion.progress.value) },
+        horizontalArrangement = Arrangement.End,
+    ) {
+        Box(
+            modifier = Modifier
+                .chatBubbleWidth()
+                .graphicsLayer {
+                    // Slide from the field's text origin to the bubble's natural alignment.
+                    val delta = textDelta
+                    if (delta != null) {
+                        val remaining = 1f - min(1f, motion.lift.value)
+                        translationX = delta.x * remaining
+                        translationY = delta.y * remaining
+                    }
+                }
+                .drawBehind {
+                    // The bubble surface growing in around the line; drawn, not composed, so
+                    // the fade costs one layer invalidation per frame.
+                    drawOutline(
+                        outline = shape.createOutline(size, layoutDirection, this),
+                        color = roles.container,
+                        alpha = min(1f, motion.lift.value),
+                    )
+                }
+                .padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
+        ) {
+            // Two identical layouts crossfading ink: text cannot recolor in the draw phase, and
+            // the pair keeps the glyphs themselves perfectly still while the color transfers.
+            Text(
+                text = flight.text,
+                style = MaterialTheme.typography.bodyLarge,
+                color = fieldInk,
+                modifier = Modifier
+                    .onGloballyPositioned {
+                        if (textDelta == null) {
+                            anchors.composerTextOrigin?.let { origin ->
+                                textDelta = origin - it.positionInWindow()
+                            }
+                        }
+                    }
+                    .graphicsLayer { alpha = 1f - min(1f, motion.lift.value) },
+            )
+            Text(
+                text = flight.text,
+                style = MaterialTheme.typography.bodyLarge,
+                color = roles.content,
+                modifier = Modifier.graphicsLayer { alpha = min(1f, motion.lift.value) },
+            )
+        }
     }
 }

@@ -109,33 +109,65 @@ class OutgoingFlightTest {
     }
 
     @Test
-    fun `with no landing the lift hovers the ghost a small peek above the composer`() {
-        // Composer top at 900, ghost 60 tall, peek 24: fully lifted the crown shows 24px, never
-        // the bubble's own height -- the neighbour above has not moved yet.
-        assertEquals(900f, sendFlightGhostTop(900f, 60f, 24f, null, null, 0f, 0f), 0.001f)
-        assertEquals(888f, sendFlightGhostTop(900f, 60f, 24f, null, null, 0f, 0.5f), 0.001f)
-        assertEquals(876f, sendFlightGhostTop(900f, 60f, 24f, null, null, 0f, 1f), 0.001f)
-        // A bubble shorter than the peek caps at its own height.
-        assertEquals(884f, sendFlightGhostTop(900f, 16f, 24f, null, null, 0f, 1f), 0.001f)
+    fun `the runway opens with the lift and the landing gap absorbs it`() {
+        // Runway target 66 (ghost 60 + gap 6): opens in lockstep with the lift...
+        assertEquals(0f, sendFlightListShift(66f, 0f, 0f), 0.001f)
+        assertEquals(33f, sendFlightListShift(66f, 0.5f, 0f), 0.001f)
+        assertEquals(66f, sendFlightListShift(66f, 1f, 0f), 0.001f)
+        // ...and drains as the landing row's own gap reveals, clamped at closed.
+        assertEquals(46f, sendFlightListShift(66f, 1f, 20f), 0.001f)
+        assertEquals(0f, sendFlightListShift(66f, 1f, 66f), 0.001f)
+        assertEquals(0f, sendFlightListShift(66f, 1f, 80f), 0.001f)
+        // The lift spring's overshoot stays on the bubble; the timeline never nods past target.
+        assertEquals(66f, sendFlightListShift(66f, 1.1f, 0f), 0.001f)
     }
 
     @Test
-    fun `a landing report leaves the hovering ghost in place instead of jolting it down`() {
-        // The gap is still zero-height on the frame the row first reports (top == bottom == 900).
-        // Flooring the whole blend there yanked a fully lifted ghost from 876 to the foot in one
-        // frame; the hover term stays unfloored, so the position is continuous across the report.
-        assertEquals(876f, sendFlightGhostTop(900f, 60f, 24f, 900f, 900f, 0f, 1f), 0.001f)
-        // The flight takes over smoothly once it passes the peek line, riding the gap's spring.
-        assertEquals(870f, sendFlightGhostTop(900f, 60f, 24f, 870f, 900f, 0.5f, 1f), 0.001f)
-        assertEquals(840f, sendFlightGhostTop(900f, 60f, 24f, 840f, 900f, 1f, 1f), 0.001f)
+    fun `the runway handoff keeps the total vacated space continuous`() {
+        // The neighbour's edge sits at shift + revealed below its resting spot; across the whole
+        // handoff that total is max(runway, revealed), so it can only grow, never dip.
+        var previous = 0f
+        for (revealed in listOf(0f, 10f, 30f, 50f, 66f, 70f)) {
+            val total = sendFlightListShift(66f, 1f, revealed) + revealed
+            assertTrue(total >= previous)
+            previous = total
+        }
+    }
+
+    @Test
+    fun `with no landing the lift hovers the ghost one bubble height above the composer`() {
+        // Composer top at 900, ghost 60 tall: the runway has vacated more than a bubble height
+        // beneath it, so the full-height hover rides entirely in empty space.
+        assertEquals(900f, sendFlightGhostTop(900f, 60f, 0f, null, null, 0f, 0f), 0.001f)
+        assertEquals(870f, sendFlightGhostTop(900f, 60f, 33f, null, null, 0f, 0.5f), 0.001f)
+        assertEquals(840f, sendFlightGhostTop(900f, 60f, 66f, null, null, 0f, 1f), 0.001f)
+    }
+
+    @Test
+    fun `the flight aims at the resting foot, not the shifted one`() {
+        // The reported landing rides the runway shift (reported bottom 834 = resting 900 - 66),
+        // so the target adds the shift back and stays stationary while the shift drains.
+        assertEquals(840f, sendFlightGhostTop(900f, 60f, 66f, 768f, 834f, 1f, 1f), 0.001f)
+        assertEquals(840f, sendFlightGhostTop(900f, 60f, 33f, 834f, 867f, 1f, 1f), 0.001f)
+        assertEquals(840f, sendFlightGhostTop(900f, 60f, 0f, 834f, 900f, 1f, 1f), 0.001f)
     }
 
     @Test
     fun `the flight spring's overshoot is bounded by the gap the row opened`() {
-        // A break-gap landing (row 70 tall, gap top 830) leaves room for the 6px overshoot.
-        assertEquals(834f, sendFlightGhostTop(900f, 60f, 24f, 830f, 900f, 1.1f, 1f), 0.001f)
-        // A burst landing exactly the ghost's height does not: the bounce stops at the neighbour.
-        assertEquals(840f, sendFlightGhostTop(900f, 60f, 24f, 840f, 900f, 1.1f, 1f), 0.001f)
+        // A break-gap landing (row 66 tall, gap top 834) leaves room for the 6px overshoot.
+        assertEquals(834f, sendFlightGhostTop(900f, 60f, 0f, 834f, 900f, 1.1f, 1f), 0.001f)
+        // A burst landing exactly the ghost's height does not: the bounce stops at the vacated
+        // edge instead of poking into the neighbour.
+        assertEquals(840f, sendFlightGhostTop(900f, 60f, 0f, 840f, 900f, 1.1f, 1f), 0.001f)
+    }
+
+    @Test
+    fun `the morph swap dissolves the stand-in across the flight's first half`() {
+        assertEquals(0f, sendFlightMorphSwap(0f), 0.001f)
+        assertEquals(0f, sendFlightMorphSwap(0.15f), 0.001f)
+        assertEquals(0.5f, sendFlightMorphSwap(0.35f), 0.001f)
+        assertEquals(1f, sendFlightMorphSwap(0.55f), 0.001f)
+        assertEquals(1f, sendFlightMorphSwap(1.1f), 0.001f)
     }
 
     private fun accepted(eventIds: List<Long>, storedTexts: List<String>) =

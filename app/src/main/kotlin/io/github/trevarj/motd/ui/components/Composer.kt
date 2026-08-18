@@ -86,9 +86,11 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -322,6 +324,9 @@ fun Composer(
     // Window bounds of the text field, reported on every layout pass. The chat screen flies a
     // sent bubble out of exactly this rect, so it must be the field itself, not the whole panel.
     onFieldPositioned: (Rect) -> Unit = {},
+    // Window origin of the draft text itself (inside the field's decoration padding). The morph
+    // send animation pins its stand-in line to this point so the typed glyphs never visibly move.
+    onFieldTextPositioned: (Offset) -> Unit = {},
     autocomplete: (@Composable () -> Unit)? = null,
 ) {
     var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
@@ -552,6 +557,7 @@ fun Composer(
                                 onFocusChanged = { inputFocused = it },
                                 onFocused = { dismissEmojiPicker() },
                                 modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                                onTextPositioned = onFieldTextPositioned,
                             )
 
                             // A physical tap on the text field while the picker is open should
@@ -896,6 +902,7 @@ private fun ComposerTextField(
     onFocusChanged: (Boolean) -> Unit,
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
+    onTextPositioned: (Offset) -> Unit = {},
 ) {
     BasicTextField(
         value = value,
@@ -924,7 +931,12 @@ private fun ComposerTextField(
                 if (value.text.isEmpty()) {
                     Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                inner()
+                // The draft text's own origin, distinct from the field bounds above: the morph
+                // send animation pins its stand-in line to the first glyph, so decoration padding
+                // must not be baked into the report.
+                Box(Modifier.onGloballyPositioned { onTextPositioned(it.positionInWindow()) }) {
+                    inner()
+                }
             }
         },
     )
