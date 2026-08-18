@@ -111,25 +111,29 @@ class OutgoingFlightTest {
     @Test
     fun `with no landing the lift hovers the ghost one bubble height above the composer`() {
         // Composer top at 900, ghost 60 tall: fully lifted it rests at 840, occluded at 0 lift.
-        assertEquals(900f, sendFlightGhostTop(900f, 60f, null, 0f, 0f), 0.001f)
-        assertEquals(870f, sendFlightGhostTop(900f, 60f, null, 0f, 0.5f), 0.001f)
-        assertEquals(840f, sendFlightGhostTop(900f, 60f, null, 0f, 1f), 0.001f)
+        assertEquals(900f, sendFlightGhostTop(900f, 60f, null, null, 0f, 0f), 0.001f)
+        assertEquals(870f, sendFlightGhostTop(900f, 60f, null, null, 0f, 0.5f), 0.001f)
+        assertEquals(840f, sendFlightGhostTop(900f, 60f, null, null, 0f, 1f), 0.001f)
     }
 
     @Test
-    fun `a landing report hands over from hover to flight without a jump`() {
-        // The landing slot's bottom sits at the composer top, so the resting flight top equals
-        // the hover line and the blend is continuous at every fraction pairing.
-        assertEquals(840f, sendFlightGhostTop(900f, 60f, 900f, 0f, 1f), 0.001f)
-        assertEquals(840f, sendFlightGhostTop(900f, 60f, 900f, 0.5f, 1f), 0.001f)
-        assertEquals(840f, sendFlightGhostTop(900f, 60f, 900f, 1f, 1f), 0.001f)
+    fun `the ghost never rises above the gap the landing row has opened`() {
+        // Landing bottom pinned at the composer top (900); the reported rect's top is the gap
+        // opened so far. A finished lift alone would hold the ghost at 840, over the neighbour
+        // above -- the gap's edge wins until the reveal catches up.
+        assertEquals(900f, sendFlightGhostTop(900f, 60f, 900f, 900f, 0f, 1f), 0.001f)
+        assertEquals(870f, sendFlightGhostTop(900f, 60f, 870f, 900f, 0.5f, 1f), 0.001f)
+        assertEquals(840f, sendFlightGhostTop(900f, 60f, 840f, 900f, 1f, 1f), 0.001f)
         // Before the lift finishes, an advancing flight takes over as soon as it is higher.
-        assertEquals(870f, sendFlightGhostTop(900f, 60f, 900f, 0.5f, 0.25f), 0.001f)
+        assertEquals(870f, sendFlightGhostTop(900f, 60f, 870f, 900f, 0.5f, 0.25f), 0.001f)
     }
 
     @Test
-    fun `the flight spring's overshoot stays visible above the hover line`() {
-        assertEquals(834f, sendFlightGhostTop(900f, 60f, 900f, 1.1f, 1f), 0.001f)
+    fun `the flight spring's overshoot is bounded by the gap the row opened`() {
+        // A break-gap landing (row 70 tall, gap top 830) leaves room for the 6px overshoot.
+        assertEquals(834f, sendFlightGhostTop(900f, 60f, 830f, 900f, 1.1f, 1f), 0.001f)
+        // A burst landing exactly the ghost's height does not: the bounce stops at the neighbour.
+        assertEquals(840f, sendFlightGhostTop(900f, 60f, 840f, 900f, 1.1f, 1f), 0.001f)
     }
 
     private fun accepted(eventIds: List<Long>, storedTexts: List<String>) =

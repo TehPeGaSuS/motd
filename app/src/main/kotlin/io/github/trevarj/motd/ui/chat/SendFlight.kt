@@ -21,6 +21,7 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import kotlin.math.max
 import kotlin.math.min
 
 /**
@@ -79,12 +80,20 @@ internal class SendFlightMotion {
  * the lift holds the bubble one bubble height above the composer top: visible in-flight feedback
  * during however long persistence takes. The landing row's bottom edge is pinned to the foot of
  * the reversed list while its gap opens upward, so the hover line coincides with the slot the row
- * will occupy and the handoff from lift to flight cannot jump. min keeps whichever is higher,
- * which also leaves the flight spring's deliberate overshoot visible.
+ * will occupy and the handoff from lift to flight cannot jump. min keeps whichever is higher.
+ *
+ * Once the landing exists, [landingTop] -- the top of its reported rect, which parent clipping
+ * limits to the gap actually opened so far -- floors the result. The lift starts on the tap frame
+ * but the gap can only open once persistence lands the row, so the hover otherwise outruns the
+ * vacated space and the opaque ghost slides over the bottom of the neighbour above; over another
+ * sender's bubble that reads as the send covering their text. The floor makes the ghost ride the
+ * gap's edge instead, and it also bounds the flight spring's deliberate overshoot at the group
+ * gap the row opened rather than letting the bounce poke into the neighbour.
  */
 internal fun sendFlightGhostTop(
     startTop: Float,
     ghostHeight: Float,
+    landingTop: Float?,
     landingBottom: Float?,
     flightFraction: Float,
     liftFraction: Float,
@@ -92,7 +101,8 @@ internal fun sendFlightGhostTop(
     val hoverTop = startTop - ghostHeight * liftFraction
     val flightTop = landingBottom?.let { startTop + (it - ghostHeight - startTop) * flightFraction }
         ?: startTop
-    return min(hoverTop, flightTop)
+    val unclamped = min(hoverTop, flightTop)
+    return if (landingTop == null) unclamped else max(unclamped, landingTop)
 }
 
 /**
@@ -147,6 +157,7 @@ internal fun BoxScope.SendFlightOverlay(
                 translationY = sendFlightGhostTop(
                     startTop = start.top,
                     ghostHeight = size.height,
+                    landingTop = landing?.top,
                     landingBottom = landing?.bottom,
                     flightFraction = motion.progress.value,
                     liftFraction = motion.lift.value,
