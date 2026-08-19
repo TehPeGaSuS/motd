@@ -55,6 +55,16 @@ internal fun lottieStrokeColor(argb: Int, keyPath: KeyPath): LottieDynamicProper
     LottieDynamicProperty(LottieProperty.STROKE_COLOR, keyPath, argb)
 
 /**
+ * A fill recolor pinned to an ARGB [Int], the sibling of [lottieStrokeColor] for filled shapes.
+ *
+ * [LottieProperty.COLOR] is the fill/solid-layer color; [LottieProperty.STROKE_COLOR] only reaches
+ * stroke contents, so a filled asset recolored through the stroke helper silently keeps the
+ * placeholder color baked into its JSON. The same positional-value rule applies: never a lambda.
+ */
+internal fun lottieFillColor(argb: Int, keyPath: KeyPath): LottieDynamicProperty<Int> =
+    LottieDynamicProperty(LottieProperty.COLOR, keyPath, argb)
+
+/**
  * Resolves the platform animator duration scale for the whole tree. Provided by [MotdTheme].
  *
  * The recomposer publishes a [MotionDurationScale] on every real window (and the Compose test rules
