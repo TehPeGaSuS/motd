@@ -70,11 +70,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import com.airbnb.lottie.LottieProperty
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.LottieDynamicProperties
-import com.airbnb.lottie.compose.LottieDynamicProperty
 import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.airbnb.lottie.model.KeyPath
@@ -87,6 +85,7 @@ import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.parseInlineCode
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
+import io.github.trevarj.motd.ui.theme.lottieStrokeColor
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
@@ -1336,14 +1335,8 @@ private fun DeliveryIcon(status: MsgStatus, contentColor: Color) {
         // force a keypath re-resolution plus an extra draw pass.
         LottieDynamicProperties(
             listOf(
-                LottieDynamicProperty(
-                    LottieProperty.STROKE_COLOR,
-                    KeyPath("clock", "**"),
-                ) { strokeColor },
-                LottieDynamicProperty(
-                    LottieProperty.STROKE_COLOR,
-                    KeyPath("check", "**"),
-                ) { strokeColor },
+                lottieStrokeColor(strokeColor, KeyPath("clock", "**")),
+                lottieStrokeColor(strokeColor, KeyPath("check", "**")),
             ),
         )
     }

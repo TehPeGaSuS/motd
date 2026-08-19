@@ -69,11 +69,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import com.airbnb.lottie.LottieProperty
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.LottieDynamicProperties
-import com.airbnb.lottie.compose.LottieDynamicProperty
 import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.airbnb.lottie.model.KeyPath
@@ -89,6 +87,7 @@ import io.github.trevarj.motd.ui.settings.PasswordField
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetPicker
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
+import io.github.trevarj.motd.ui.theme.lottieStrokeColor
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -317,7 +316,7 @@ private fun WelcomeHeroMark() {
         // than through rememberLottieDynamicProperty, which keys on the vararg array's identity.
         LottieDynamicProperties(
             listOf(
-                LottieDynamicProperty(LottieProperty.STROKE_COLOR, KeyPath("**")) { strokeColor },
+                lottieStrokeColor(strokeColor, KeyPath("**")),
             ),
         )
     }

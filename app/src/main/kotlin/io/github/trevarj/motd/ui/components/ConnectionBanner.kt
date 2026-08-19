@@ -34,19 +34,18 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.airbnb.lottie.LottieProperty
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieClipSpec
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.LottieConstants
 import com.airbnb.lottie.compose.LottieDynamicProperties
-import com.airbnb.lottie.compose.LottieDynamicProperty
 import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.airbnb.lottie.model.KeyPath
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
+import io.github.trevarj.motd.ui.theme.lottieStrokeColor
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.delay
@@ -241,8 +240,8 @@ private fun ConnectionStateGlyph(progress: Float) {
         // The arc keeps the banner's existing progress ink; the check earns the theme accent.
         LottieDynamicProperties(
             listOf(
-                LottieDynamicProperty(LottieProperty.STROKE_COLOR, KeyPath("arc", "**")) { arcColor },
-                LottieDynamicProperty(LottieProperty.STROKE_COLOR, KeyPath("check", "**")) { checkColor },
+                lottieStrokeColor(arcColor, KeyPath("arc", "**")),
+                lottieStrokeColor(checkColor, KeyPath("check", "**")),
             ),
         )
     }

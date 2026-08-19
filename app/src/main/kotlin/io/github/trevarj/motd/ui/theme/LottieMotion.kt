@@ -7,6 +7,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.platform.LocalContext
+import com.airbnb.lottie.LottieProperty
+import com.airbnb.lottie.compose.LottieDynamicProperty
+import com.airbnb.lottie.model.KeyPath
 
 /**
  * The animator-scale gate shared by every Lottie call site.
@@ -40,6 +43,16 @@ object MotdLottieMotion {
  * previews and any tree composed outside the theme still animate.
  */
 internal val LocalLottieMotionEnabled = staticCompositionLocalOf { true }
+
+/**
+ * A stroke recolor pinned to an ARGB [Int].
+ *
+ * The typed return matters: [LottieDynamicProperty]'s only public constructor takes the value
+ * positionally, and handing it a trailing lambda instead silently widens `T` to `Any` -- the lambda
+ * object itself becomes the stored color and Lottie's cast to Integer crashes on first draw.
+ */
+internal fun lottieStrokeColor(argb: Int, keyPath: KeyPath): LottieDynamicProperty<Int> =
+    LottieDynamicProperty(LottieProperty.STROKE_COLOR, keyPath, argb)
 
 /**
  * Resolves the platform animator duration scale for the whole tree. Provided by [MotdTheme].
