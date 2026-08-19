@@ -107,6 +107,39 @@ import kotlin.math.roundToInt
  *   translates the entire list (`MessageList.kt:343`). Gate A passes only if the bubble can cross
  *   the composer/timeline boundary unsheared while the wrapper still contains the translated list.
  *
+ * ## Viewport: the landing slot must stay on screen
+ *
+ * Neither Gate A criterion is judgeable unless the row the ghost is flying TO is inside the pane
+ * for the whole flight. A match whose target is parked below the fold produces no observable
+ * motion, and that reads as "the API did not animate" when in fact the bench gave it nowhere to
+ * go. So the bench reproduces production's live edge rather than inventing a topology:
+ *
+ * - **Same shape as `MessageList.kt`.** `reverseLayout = true`, newest row at index 0, drawn at the
+ *   foot of the pane directly above the composer divider. Resting at index 0 / offset 0 *is* the
+ *   live edge, and an insert at the head therefore lands in a slot the maintainer is already
+ *   looking at.
+ * - **The seed overflows the pane** in every configuration the bench can be put in (controls
+ *   expanded, IME up). A list shorter than its viewport is bottom-packed but has no live edge to
+ *   pin, and it never reaches the top of the pane, so the runway would overflow nothing and the
+ *   `clipToBounds` toggle would look inert.
+ * - **The head insert is re-pinned.** `LazyListState` re-anchors the viewport by KEY: inserting at
+ *   index 0 moves the key that owned the first visible slot to index 1 and the viewport follows it,
+ *   parking the brand-new landing row just past the foot of the pane with only its top few pixels
+ *   showing. (That was this bench's original defect, and `ChatListScrollPlacementTest` pins the
+ *   same foundation behavior for the chat list.) Production corrects it with
+ *   `listState.requestScrollToItem(0)` applied to the same remeasure that presents the insert
+ *   (`ChatScreen.kt:1711`, `ChatListScreen.kt:886`); so does [SpikeTimeline], from the composition
+ *   that presents the new head, plus once more on the tap so a flight launched after the maintainer
+ *   scrolled up still has a visible target.
+ *
+ * The pin is deliberately not an `animateScrollToItem`. A scroll animation running alongside the
+ * flight would drag the target bounds under the match and confound criterion 1 ("did it animate to
+ * the late row") with criterion 2 ("did it retarget"). `requestScrollToItem` consumes no frames: it
+ * is an anchor correction the next measure pass applies, indistinguishable in a recording from the
+ * row simply appearing where it belongs. Unlike production the bench pins unconditionally instead
+ * of gating on auto-follow, because following the live edge is the only state Gate A is asked
+ * about.
+ *
  * ## Controls
  *
  * - **Variant** -- `A shared element` (question 1) or `B animateItem` (question 2). Variant A wraps
@@ -201,6 +234,13 @@ private data class SpikeFlight(val text: String, val rowId: Long)
 private data class SpikeGhostKey(val rowId: Long)
 
 /**
+ * Plain mutable holder for the newest row's id, so the live-edge re-pin in [SpikeTimeline] can
+ * detect a head change during composition without a state backwards write. Mirrors
+ * `ChatListTopItemTracker`.
+ */
+private class SpikeHeadTracker(var id: Long?)
+
+/**
  * Everything the harness mutates, in one holder so the surface composables take three parameters
  * instead of fifteen. Mirrors the shape of `SendFlightAnchors`: geometry is reported in window
  * coordinates from `onGloballyPositioned`, because the composer and a timeline row share no local
@@ -246,6 +286,10 @@ private class SpikeState {
         draft = ""
         ghostVisible = true
         runwayOpen = true
+        // Take off from the live edge even if the maintainer scrolled up to inspect the clip: the
+        // landing slot has to be on screen before the ghost has anywhere to fly to. A same-frame
+        // anchor correction, never an animated scroll -- see the file KDoc.
+        listState.requestScrollToItem(0)
         flight = SpikeFlight(text = text, rowId = nextId)
     }
 
@@ -264,7 +308,25 @@ private class SpikeState {
     fun scaled(baseMs: Int): Int = baseMs * slowMotion
 }
 
+/**
+ * The seeded timeline, newest first: index 0 is the newest row, and [SpikeTimeline]'s
+ * `reverseLayout` draws it at the foot of the pane directly above the composer divider.
+ *
+ * Deliberately long enough to overflow the pane with the controls expanded and the IME up. Two
+ * things depend on that overflow: the resting viewport is a genuine live edge (index 0 at offset 0
+ * with content above it) rather than a short bottom-packed list, and the timeline reaches the top
+ * of the pane so the runway's translation has something for `clipToBounds` to clip.
+ */
 private fun seedRows(): List<SpikeRow> = listOf(
+    SpikeRow(18, "otherwise the runway would have nothing to overflow", false),
+    SpikeRow(17, "the seed is long enough to overflow the pane, too", true),
+    SpikeRow(16, "same correction production applies when a message lands", true),
+    SpikeRow(15, "so the bench re-pins index 0 in the same remeasure", false),
+    SpikeRow(14, "which is exactly what a head insert does to it", true),
+    SpikeRow(13, "unless the viewport keeps following the old first key", false),
+    SpikeRow(12, "right above the composer divider, in view", true),
+    SpikeRow(11, "index 0, which reverseLayout draws at the foot", false),
+    SpikeRow(10, "so where does a landing row actually end up", true),
     SpikeRow(9, "and that is why the runway exists", false),
     SpikeRow(8, "the row does not exist yet when the bubble takes off", true),
     SpikeRow(7, "wait, it flies into a row that has not been persisted?", false),
@@ -382,8 +444,12 @@ private fun SpikeSurface(
 }
 
 /**
- * The reversed timeline. Index 0 renders at the bottom, so a send inserts at the head and every
- * older row is displaced upward -- the displacement variant B asks `Modifier.animateItem` to carry.
+ * The reversed timeline, in `MessageList.kt`'s topology: `reverseLayout = true` with index 0 at the
+ * bottom, so a send inserts at the head and every older row is displaced upward -- the displacement
+ * variant B asks `Modifier.animateItem` to carry. The list rests at index 0 / offset 0, which under
+ * that topology is the live edge: the newest row sits at the foot of the pane, so the slot a flight
+ * lands in is already on screen. Keeping it there across the insert is the re-pin below; see the
+ * file KDoc's viewport section for why that needs doing at all.
  *
  * The `graphicsLayer` translation is the harness's runway, in the same place production puts its
  * own (`MessageList.kt:343`): on the LazyColumn, so the whole timeline yields upward as a unit and
@@ -398,6 +464,27 @@ private fun SpikeTimeline(
     modifier: Modifier = Modifier,
 ) {
     val flightRowId = state.flight?.rowId
+    // Read the presented list HERE, in the timeline's own composition, and let the item lambdas
+    // capture that value: the re-pin below then runs in the same composition that hands the new
+    // head to the lazy layout, so the measure pass that first presents the insert is the one that
+    // honors it. (Pinning from the driver's coroutine instead is a frame too early at a 0 ms
+    // insert delay -- the request is consumed by a measure that has not seen the new row yet, and
+    // the key anchor wins the one that has.)
+    val rows = state.rows
+    // LazyColumn re-anchors to the first visible item's KEY across dataset changes, so a head
+    // insert carries the viewport along with the OLD head and parks the brand-new landing row just
+    // past the foot of the pane. Re-pin index 0 in the same remeasure that presents the insert --
+    // the production wiring, in both places it appears (`ChatScreen.kt:1711` for a live message,
+    // `ChatListScreen.kt:886` for a promoted conversation). Unconditional here, unlike production's
+    // auto-follow gate: the live edge is the only viewport Gate A can be judged from.
+    val headId = rows.firstOrNull()?.id
+    val headTracker = remember { SpikeHeadTracker(headId) }
+    if (headTracker.id != headId) {
+        // Nothing to re-pin into or out of an empty timeline; `clear` must not fight the layout.
+        val repin = headTracker.id != null && headId != null
+        headTracker.id = headId
+        if (repin) state.listState.requestScrollToItem(0)
+    }
     val boundsTransform = rememberSpikeBoundsTransform(state.slowMotion)
     val placementMs = state.scaled(RowPlacementMs)
     val placementSpec: FiniteAnimationSpec<IntOffset> = remember(placementMs) {
@@ -411,7 +498,7 @@ private fun SpikeTimeline(
         reverseLayout = true,
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
-        items(items = state.rows, key = { it.id }) { row ->
+        items(items = rows, key = { it.id }) { row ->
             if (sharedScope != null && row.id == flightRowId) {
                 // Variant A's landing endpoint. It composes late -- that is the whole point -- and
                 // is born already visible, taking the match over from the ghost in the same frame.
@@ -455,6 +542,12 @@ private fun SpikeTimeline(
  * Placement is a layout-phase [Modifier.offset], not a `graphicsLayer` translation: the shared
  * element resolves bounds from layout coordinates, and a harness that moved the ghost in the draw
  * phase would hand the match a take-off point the ghost was never actually at.
+ *
+ * Only the composer field's TOP is used. Horizontally the ghost is a full-width row whose bubble
+ * takes its timeline alignment (right, for a `fromSelf` bubble), so it parks over the send button
+ * rather than over the field -- which is production's anchoring exactly (`SendFlight.kt:268-271`,
+ * whose ghost is likewise `align(TopStart).fillMaxWidth()` around a right-aligned `MessageBubble`)
+ * and is what makes the take-off and the landing share one horizontal axis.
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
