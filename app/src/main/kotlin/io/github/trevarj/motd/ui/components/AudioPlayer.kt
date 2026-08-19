@@ -144,7 +144,7 @@ fun AudioAttachmentPlayers(
                         Text("+${attachments.size - MAX_COLLAPSED_AUDIO_PLAYERS}")
                     }
                 }
-                ReactionRow(reactions = reactions, onReact = onReact)
+                ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf)
             }
         }
     }

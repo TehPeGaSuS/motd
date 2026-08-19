@@ -184,7 +184,7 @@ internal fun CompactMessageRow(
         }
 
         // Reactions on the next line (kept, just compact).
-        ReactionRow(reactions = reactions, onReact = onReact)
+        ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf)
     }
 }
 
