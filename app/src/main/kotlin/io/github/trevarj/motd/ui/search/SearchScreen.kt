@@ -268,6 +268,9 @@ fun SearchContent(
                         icon = Icons.Outlined.SearchOff,
                         title = stringResource(R.string.search_empty_title),
                         message = stringResource(emptyMessage(visibleState)),
+                        // A result list with nothing in it, like the chat list's own empty state.
+                        // Prompt and error panes keep the icon: they are not empty lists.
+                        ghostRows = true,
                     )
 
                     SearchPane.RESULTS -> SearchResults(
@@ -475,6 +478,7 @@ private fun ServerSearchSection(
                 icon = Icons.Outlined.SearchOff,
                 title = stringResource(R.string.search_server_empty_title),
                 message = stringResource(R.string.search_server_empty_message),
+                ghostRows = true,
             )
         } else {
             Text(

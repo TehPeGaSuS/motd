@@ -2282,6 +2282,7 @@ fun ChatContent(
                             icon = Icons.Outlined.Forum,
                             title = stringResource(R.string.chat_empty_title),
                             message = stringResource(R.string.chat_empty_message),
+                            ghostRows = true,
                         )
                     }
 

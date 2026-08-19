@@ -599,6 +599,8 @@ fun ChatListContent(
                             },
                             actionLabel = if (noNetworks) stringResource(R.string.drawer_add_network) else null,
                             onAction = if (noNetworks) onOpenAddNetwork else null,
+                            // The list that has no rows is exactly what the ghost rows stand in for.
+                            ghostRows = true,
                         )
                     } else {
                         ChatList(
