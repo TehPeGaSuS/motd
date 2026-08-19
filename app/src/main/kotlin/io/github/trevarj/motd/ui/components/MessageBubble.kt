@@ -24,8 +24,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -34,11 +34,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -547,7 +545,7 @@ fun MessageBubble(
                 }
             }
 
-            ReactionRow(reactions = reactions, onReact = onReact)
+            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf)
         }
     }
 }
@@ -756,7 +754,7 @@ private fun ComfortableActionBubble(
                 }
             }
 
-            ReactionRow(reactions = reactions, onReact = onReact)
+            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf)
         }
     }
 }
@@ -928,7 +926,7 @@ private fun ActionMessageRow(
                 }
             }
 
-            ReactionRow(reactions = reactions, onReact = onReact)
+            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf)
         }
     }
 }
@@ -1227,7 +1225,7 @@ private fun TwoLineMessageRow(
                 }
             }
 
-            ReactionRow(reactions = reactions, onReact = onReact)
+            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf)
         }
     }
 }
@@ -1261,11 +1259,40 @@ internal fun messageStatus(isSelf: Boolean, pending: Boolean, failed: Boolean): 
 }
 
 /**
- * Renders the single leading status glyph (clock / error / sent-check) for the timestamp row.
+ * The two one-shot morphs the status glyph can owe, one grammar with two endings: the pending clock
+ * rotates out and either the delivery check or the failure cross rotates in.
  *
- * Only the failure glyph swaps through [AnimatedContent]. Clock and check are two beats of the one
- * [R.raw.status_delivered] asset, so the pending -> sent step is a morph inside a single stable node
- * rather than a cross-fade between two glyphs.
+ * Two sibling assets rather than one multi-beat asset. Their frame ranges are identical (0..23,
+ * clock at frame 0, settled glyph at the last), so the call site needs no clip spec, no per-beat
+ * parked frame and no beat-dependent progress arithmetic -- only which raw resource and which
+ * second keypath to recolor. The delivery asset and its pinned frame range are untouched.
+ */
+internal enum class StatusMorph(val rawRes: Int, val glyphLayer: String) {
+    DELIVERED(R.raw.status_delivered, "check"),
+    FAILED(R.raw.status_failed, "cross"),
+}
+
+/**
+ * Which morph, if any, a status change owes.
+ *
+ * Both endings go through [MotdLottieMotion.playOnceOnTransition], so a row first observed already
+ * sent or already failed -- scrollback -- plays nothing and renders its settled vector instead.
+ * A retry that lands as sent still earns the delivery morph: it left [MsgStatus.SENT] and returned.
+ */
+internal fun statusMorph(previous: MsgStatus?, current: MsgStatus): StatusMorph? = when {
+    MotdLottieMotion.playOnceOnTransition(previous, current, MsgStatus.SENT) -> StatusMorph.DELIVERED
+    MotdLottieMotion.playOnceOnTransition(previous, current, MsgStatus.FAILED) -> StatusMorph.FAILED
+    else -> null
+}
+
+/**
+ * Renders the single leading status glyph (clock / cross / sent-check) for the timestamp row.
+ *
+ * A row that actually transitions morphs in place through one Lottie node; everything else -- fresh
+ * and scrollback rows, animations-off, a failure retried back to pending -- keeps the static vector
+ * glyphs and swaps them through [AnimatedContent], exactly as before Lottie existed. The morph is
+ * itself the transition, so it deliberately renders outside that [AnimatedContent] rather than
+ * being cross-faded away halfway through.
  */
 @Composable
 internal fun MessageStatusIcon(
@@ -1276,6 +1303,23 @@ internal fun MessageStatusIcon(
 ) {
     val status = messageStatus(isSelf, pending, failed)
     if (status == MsgStatus.NONE) return
+
+    val motionEnabled = LocalLottieMotionEnabled.current
+    // Hoisted above the AnimatedContent below: the pending clock and the failure cross live on
+    // opposite sides of that swap, and per-branch state would forget the transition between them.
+    val latch = remember { StatusMorphLatch() }
+    // Decided during composition, not in an effect. An effect resolves one frame late, and that
+    // frame is enough for AnimatedContent to start cross-fading toward the static failure glyph
+    // before the morph tears it back out. Plain fields, not snapshot state: this is derived from
+    // `status`, which already invalidates this scope, so observing it would only add a pass.
+    val morph = latch.advance(status, motionEnabled)
+    if (morph != null) {
+        // A fresh animatable per beat. Without the key, a direct failed-to-sent step (a late echo
+        // arriving after a reconnect, with no pending in between) would reuse the finished
+        // animatable, whose progress is already 1, and the cross would snap to a check.
+        key(morph) { StatusMorphIcon(morph, contentColor) }
+        return
+    }
 
     AnimatedContent(
         targetState = status == MsgStatus.FAILED,
@@ -1288,70 +1332,80 @@ internal fun MessageStatusIcon(
         },
         label = "message_status",
     ) { showFailure ->
-        if (showFailure) FailedIcon() else DeliveryIcon(status, contentColor)
+        // Mounting Lottie for these would flash a differently proportioned mark for a frame on
+        // every row scrolled in, and would keep a LottieDrawable alive per row. Only the row that
+        // actually morphs pays for one.
+        when {
+            showFailure -> FailedIcon()
+            status == MsgStatus.SENT -> SentIcon(contentColor)
+            else -> PendingIcon(contentColor)
+        }
     }
 }
 
 /**
- * The delivery tick. Frame 0 of the asset is the pending clock and its last frame is the check; the
- * pending -> sent transition plays the morph between them exactly once. A row composed fresh while
- * already sent (scrollback, or a retry that lands as sent) parks on the settled last frame instead
- * of replaying, and the platform animator scale can suppress the morph entirely.
+ * Per-row memory of the last status rendered, and the beat that status change earned.
+ *
+ * Once chosen, a beat is latched until the status moves again, so the morph stays mounted on its
+ * settled last frame instead of being swapped for a static glyph the instant it finishes.
+ */
+private class StatusMorphLatch {
+    private var previous: MsgStatus? = null
+    private var morph: StatusMorph? = null
+
+    fun advance(status: MsgStatus, motionEnabled: Boolean): StatusMorph? {
+        if (previous != status) {
+            morph = if (motionEnabled) statusMorph(previous, status) else null
+            previous = status
+        }
+        return morph
+    }
+}
+
+/**
+ * One clock-out/glyph-in morph. Frame 0 of either asset is the pending clock and its last frame is
+ * the settled glyph, so the whole composition is the beat and it plays exactly once.
  */
 @Composable
-private fun DeliveryIcon(status: MsgStatus, contentColor: Color) {
-    val sent = status == MsgStatus.SENT
-    val motionEnabled = LocalLottieMotionEnabled.current
-    var previousSent by remember { mutableStateOf<Boolean?>(null) }
-    var playing by remember { mutableStateOf(false) }
-    LaunchedEffect(sent) {
-        playing = motionEnabled &&
-            MotdLottieMotion.playOnceOnTransition(previousSent, sent, target = true)
-        previousSent = sent
-    }
-    if (!playing) {
-        // Everything that cannot animate keeps the vector glyph: fresh and scrollback rows, retries
-        // that land already sent, and animations-off. Mounting Lottie for them would flash a
-        // differently proportioned mark for a frame on every row scrolled in, and would keep a
-        // LottieDrawable alive per row. Only the row that actually morphs pays for one.
-        if (sent) SentIcon(contentColor) else PendingIcon(contentColor)
-        return
-    }
-    val composition by rememberLottieComposition(
-        LottieCompositionSpec.RawRes(R.raw.status_delivered),
-    )
+private fun StatusMorphIcon(morph: StatusMorph, contentColor: Color) {
+    val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(morph.rawRes))
     val progress by animateLottieCompositionAsState(
         composition = composition,
         isPlaying = true,
         iterations = 1,
         restartOnPlay = false,
     )
-    // Both glyphs read as metadata, so they take the timestamp row's own ink rather than the theme
+    // The clock reads as metadata, so it keeps the timestamp row's own ink rather than the theme
     // accent: an own bubble is already primaryContainer and an accent check would sit on top of it.
-    val strokeColor = contentColor.toArgb()
-    val dynamicProperties = remember(strokeColor) {
+    // The cross earns the same error tint the static [FailedIcon] carries.
+    val clockColor = contentColor.toArgb()
+    val glyphColor = when (morph) {
+        StatusMorph.DELIVERED -> contentColor
+        StatusMorph.FAILED -> MaterialTheme.colorScheme.error
+    }.toArgb()
+    val dynamicProperties = remember(morph, clockColor, glyphColor) {
         // Built directly rather than through rememberLottieDynamicProperty: that helper keys on the
         // vararg keypath array's identity, so every recomposition would rebuild the properties and
         // force a keypath re-resolution plus an extra draw pass.
         LottieDynamicProperties(
             listOf(
-                lottieStrokeColor(strokeColor, KeyPath("clock", "**")),
-                lottieStrokeColor(strokeColor, KeyPath("check", "**")),
+                lottieStrokeColor(clockColor, KeyPath("clock", "**")),
+                lottieStrokeColor(glyphColor, KeyPath(morph.glyphLayer, "**")),
             ),
         )
     }
-    val description = stringResource(if (sent) R.string.chat_sent else R.string.chat_sending)
+    val description = stringResource(
+        when (morph) {
+            StatusMorph.DELIVERED -> R.string.chat_sent
+            StatusMorph.FAILED -> R.string.chat_failed
+        },
+    )
     LottieAnimation(
         composition = composition,
-        progress = {
-            when {
-                // The effect that flipped `playing` also updates previousSent; until it does, park
-                // on the pre-transition frame rather than letting the morph start from its end.
-                previousSent != null && previousSent != sent -> if (sent) 0f else 1f
-                sent -> progress
-                else -> 0f
-            }
-        },
+        // No parked pre-transition frame is needed: the beat is chosen during the same composition
+        // that first renders the new status, and `key(morph)` above hands it a fresh animatable, so
+        // frame 0 is always the pending clock.
+        progress = { progress },
         dynamicProperties = dynamicProperties,
         modifier = Modifier
             .padding(end = 4.dp)
@@ -1388,17 +1442,23 @@ internal fun PendingIcon(contentColor: Color = MaterialTheme.colorScheme.onSurfa
     )
 }
 
-/** Small error glyph shown next to the timestamp of a failed message. */
+/**
+ * Small error glyph shown next to the timestamp of a failed message.
+ *
+ * A cross, in the same 12dp slot as the clock and the check, because that is where
+ * [StatusMorph.FAILED] settles: a row that morphed clock-to-cross and is then scrolled back to must
+ * show the mark it morphed into, not a differently shaped badge in a wider slot.
+ */
 @Composable
 internal fun FailedIcon() {
     Icon(
-        Icons.Filled.Error,
+        Icons.Filled.Close,
         contentDescription = stringResource(R.string.chat_failed),
         tint = MaterialTheme.colorScheme.error,
         modifier = Modifier
             .padding(end = 4.dp)
-            .heightIn(max = 14.dp)
-            .width(14.dp),
+            .heightIn(max = 12.dp)
+            .width(12.dp),
     )
 }
 
