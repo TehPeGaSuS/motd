@@ -264,6 +264,8 @@ fun MotdTheme(
             LocalAppFontFamily provides appFontFamily,
             LocalTimestampConfig provides timestampConfig,
             LocalMotdSemanticColors provides semanticColors(colorScheme, dark),
+            // Resolved once here: the timeline mounts a delivery tick per own row.
+            LocalLottieMotionEnabled provides resolveLottieMotionEnabled(),
             content = content,
         )
     }
