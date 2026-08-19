@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Debug-only send-animation API spike bench; see SendSpikeActivity/SendSpikeHarness.
+             Exported without an intent filter on purpose: the adb shell uid must be able to start
+             it, it stays out of the launcher, and this build type is never shipped. -->
+        <!-- configChanges: the bench holds its timeline, scroll position, and control settings in
+             plain composition state. Handling rotation here is cheaper than making every knob a
+             rememberSaveable, and the maintainer rotating the device mid-evaluation must not lose
+             the state under observation. -->
+        <activity
+            android:name=".spike.SendSpikeActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout"
+            android:exported="true"
+            android:theme="@style/Theme.Motd"
+            android:windowSoftInputMode="adjustResize" />
+    </application>
+
+</manifest>
