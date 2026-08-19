@@ -34,7 +34,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +47,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
@@ -65,6 +70,14 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import com.airbnb.lottie.LottieProperty
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.LottieDynamicProperties
+import com.airbnb.lottie.compose.LottieDynamicProperty
+import com.airbnb.lottie.compose.animateLottieCompositionAsState
+import com.airbnb.lottie.compose.rememberLottieComposition
+import com.airbnb.lottie.model.KeyPath
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.TimeFormat
@@ -73,9 +86,11 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.parseInlineCode
+import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
+import io.github.trevarj.motd.ui.theme.MotdLottieMotion
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
@@ -1246,7 +1261,13 @@ internal fun messageStatus(isSelf: Boolean, pending: Boolean, failed: Boolean): 
     else -> MsgStatus.NONE
 }
 
-/** Renders the single leading status glyph (clock / error / sent-check) for the timestamp row. */
+/**
+ * Renders the single leading status glyph (clock / error / sent-check) for the timestamp row.
+ *
+ * Only the failure glyph swaps through [AnimatedContent]. Clock and check are two beats of the one
+ * [R.raw.status_delivered] asset, so the pending -> sent step is a morph inside a single stable node
+ * rather than a cross-fade between two glyphs.
+ */
 @Composable
 internal fun MessageStatusIcon(
     isSelf: Boolean,
@@ -1258,7 +1279,7 @@ internal fun MessageStatusIcon(
     if (status == MsgStatus.NONE) return
 
     AnimatedContent(
-        targetState = status,
+        targetState = status == MsgStatus.FAILED,
         transitionSpec = {
             (fadeIn(MotdMotion.microFadeIn) + scaleIn(initialScale = 0.85f, animationSpec = MotdMotion.softSpring))
                 .togetherWith(
@@ -1267,14 +1288,83 @@ internal fun MessageStatusIcon(
                 )
         },
         label = "message_status",
-    ) { status ->
-        when (status) {
-            MsgStatus.FAILED -> FailedIcon()
-            MsgStatus.PENDING -> PendingIcon(contentColor)
-            MsgStatus.SENT -> SentIcon(contentColor)
-            MsgStatus.NONE -> Unit
-        }
+    ) { showFailure ->
+        if (showFailure) FailedIcon() else DeliveryIcon(status, contentColor)
     }
+}
+
+/**
+ * The delivery tick. Frame 0 of the asset is the pending clock and its last frame is the check; the
+ * pending -> sent transition plays the morph between them exactly once. A row composed fresh while
+ * already sent (scrollback, or a retry that lands as sent) parks on the settled last frame instead
+ * of replaying, and the platform animator scale can suppress the morph entirely.
+ */
+@Composable
+private fun DeliveryIcon(status: MsgStatus, contentColor: Color) {
+    val sent = status == MsgStatus.SENT
+    val motionEnabled = LocalLottieMotionEnabled.current
+    var previousSent by remember { mutableStateOf<Boolean?>(null) }
+    var playing by remember { mutableStateOf(false) }
+    LaunchedEffect(sent) {
+        playing = motionEnabled &&
+            MotdLottieMotion.playOnceOnTransition(previousSent, sent, target = true)
+        previousSent = sent
+    }
+    if (!playing) {
+        // Everything that cannot animate keeps the vector glyph: fresh and scrollback rows, retries
+        // that land already sent, and animations-off. Mounting Lottie for them would flash a
+        // differently proportioned mark for a frame on every row scrolled in, and would keep a
+        // LottieDrawable alive per row. Only the row that actually morphs pays for one.
+        if (sent) SentIcon(contentColor) else PendingIcon(contentColor)
+        return
+    }
+    val composition by rememberLottieComposition(
+        LottieCompositionSpec.RawRes(R.raw.status_delivered),
+    )
+    val progress by animateLottieCompositionAsState(
+        composition = composition,
+        isPlaying = true,
+        iterations = 1,
+        restartOnPlay = false,
+    )
+    // Both glyphs read as metadata, so they take the timestamp row's own ink rather than the theme
+    // accent: an own bubble is already primaryContainer and an accent check would sit on top of it.
+    val strokeColor = contentColor.toArgb()
+    val dynamicProperties = remember(strokeColor) {
+        // Built directly rather than through rememberLottieDynamicProperty: that helper keys on the
+        // vararg keypath array's identity, so every recomposition would rebuild the properties and
+        // force a keypath re-resolution plus an extra draw pass.
+        LottieDynamicProperties(
+            listOf(
+                LottieDynamicProperty(
+                    LottieProperty.STROKE_COLOR,
+                    KeyPath("clock", "**"),
+                ) { strokeColor },
+                LottieDynamicProperty(
+                    LottieProperty.STROKE_COLOR,
+                    KeyPath("check", "**"),
+                ) { strokeColor },
+            ),
+        )
+    }
+    val description = stringResource(if (sent) R.string.chat_sent else R.string.chat_sending)
+    LottieAnimation(
+        composition = composition,
+        progress = {
+            when {
+                // The effect that flipped `playing` also updates previousSent; until it does, park
+                // on the pre-transition frame rather than letting the morph start from its end.
+                previousSent != null && previousSent != sent -> if (sent) 0f else 1f
+                sent -> progress
+                else -> 0f
+            }
+        },
+        dynamicProperties = dynamicProperties,
+        modifier = Modifier
+            .padding(end = 4.dp)
+            .size(12.dp)
+            .semantics { contentDescription = description },
+    )
 }
 
 /** Small check glyph shown next to the timestamp once the bouncer has echoed an own message back. */
