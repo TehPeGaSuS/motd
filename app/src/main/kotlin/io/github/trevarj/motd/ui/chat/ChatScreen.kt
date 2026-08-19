@@ -98,6 +98,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -130,6 +131,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -963,6 +965,54 @@ fun ChatContent(
     // The first Paging emission after entry settlement reflects data loaded for the target, not a
     // live arrival. Consume it without auto-follow so an unread target remains on screen.
     var suppressNextAutoFollow by remember { mutableStateOf(!entryInitiallySettled) }
+
+    // Veil over the timeline while entry positioning settles, so the entry frames (the bottom of
+    // the buffer, then the alignment passes) are never shown before the divider lands. One-shot per
+    // composition, and the composition is per-ChatRoute: entering another buffer is a new route, so
+    // nothing that happens within a visit -- a republished post-catch-up repair, a re-resolve -- can
+    // re-engage it. A restored visit that already knows where it landed starts lifted.
+    val latestEntryState by rememberUpdatedState(entryState)
+    var entryVeilLifted by remember {
+        mutableStateOf(
+            shouldLiftEntryVeil(
+                initialPositionSettled = entryInitiallySettled,
+                entryUnresolved = entryState is EntryPositionState.Unresolved,
+                timedOut = false,
+            ),
+        )
+    }
+    // The overlay outlives the lift by the length of the fade; see the veil at the list call site.
+    var entryVeilCleared by remember { mutableStateOf(entryVeilLifted) }
+    LaunchedEffect(Unit) {
+        if (entryVeilLifted) return@LaunchedEffect
+        // Bounded wait: a slow or offline entry degrades to today's visible correction rather than
+        // a stuck blank pane.
+        val resolved = withTimeoutOrNull(ENTRY_VEIL_TIMEOUT_MS) {
+            snapshotFlow {
+                val entry = latestEntryState
+                // Both statements of settlement: the screen's own flag reveals a frame or two
+                // earlier, and the entry state carries it when the flag's keyed remember is
+                // rebuilt by the very transition that settles it.
+                val settled = initialPositionSettled || entry is EntryPositionState.Settled
+                settled to (entry is EntryPositionState.Unresolved)
+            }.first { (settled, unresolved) ->
+                shouldLiftEntryVeil(settled, unresolved, timedOut = false)
+            }
+        }
+        entryVeilLifted = shouldLiftEntryVeil(
+            initialPositionSettled = resolved?.first == true,
+            entryUnresolved = resolved?.second == true,
+            timedOut = resolved == null,
+        )
+        AutoFollowTrace.record("entry_veil_lifted", traceBufferId, traceSessionId) {
+            val reason = when {
+                resolved == null -> "timeout"
+                resolved.first -> "settled"
+                else -> "unresolved"
+            }
+            "reason=$reason item_count=${items.itemCount}"
+        }
+    }
 
     var prefillConsumed by remember(traceBufferId) { mutableStateOf(false) }
 
@@ -2123,6 +2173,19 @@ fun ChatContent(
                             }
                         }
                     }
+                    // Entry veil: the list is transparent until entry positioning settles, then
+                    // fades in. The animated value is read inside the graphicsLayer lambda so the
+                    // fade never recomposes the timeline subtree. Starting lifted (a restored
+                    // visit) initializes at 1f, so there is no fade-in on re-entry -- which is also
+                    // why the overlay's own gate is seeded from the initial state rather than
+                    // waiting for a finish callback that never fires.
+                    val veilAlpha by animateFloatAsState(
+                        targetValue = if (entryVeilLifted) 1f else 0f,
+                        animationSpec = MotdMotion.fadeIn,
+                        label = "chat_entry_veil_alpha",
+                        finishedListener = { entryVeilCleared = true },
+                    )
+                    Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = veilAlpha }) {
                     MessageList(
                         items = items,
                         listState = listState,
@@ -2183,6 +2246,27 @@ fun ChatContent(
                         onToggleFool = onToggleFool,
                         onSenderClick = onSenderClick,
                     )
+                    }
+                    // Swallow input until the fade has actually finished, not merely started: a
+                    // barely-visible list is still a list, and a drag or long-press landing on a row
+                    // the user cannot see yet is the same bug as one landing on a hidden row. Gated
+                    // on a boolean rather than on veilAlpha directly so the reveal costs two
+                    // recompositions instead of one per animation frame.
+                    if (!entryVeilCleared) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .testTag(CHAT_ENTRY_VEIL_TAG)
+                                .pointerInput(Unit) {
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            awaitPointerEvent(PointerEventPass.Initial)
+                                                .changes.forEach { it.consume() }
+                                        }
+                                    }
+                                },
+                        )
+                    }
                     }
                     }
 
@@ -2768,6 +2852,9 @@ const val CHAT_HISTORY_SYNC_FAILURE_TAG = "chat_history_sync_indicator"
 const val CHAT_HISTORY_SYNC_RETRY_TAG = "chat_history_sync_retry"
 const val CHAT_TITLE_SYNC_SPINNER_TAG = "chat_title_sync_spinner"
 const val CHAT_HISTORY_PARTIAL_CHIP_TAG = "chat_history_partial_chip"
+
+/** Present exactly while the entry veil hides the timeline, so a test can wait the reveal out. */
+const val CHAT_ENTRY_VEIL_TAG = "chat_entry_veil"
 
 internal val HistorySyncStatus.isActive: Boolean
     get() = this == HistorySyncStatus.Queued || this == HistorySyncStatus.Syncing

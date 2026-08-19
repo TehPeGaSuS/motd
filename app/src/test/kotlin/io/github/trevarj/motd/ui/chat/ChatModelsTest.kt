@@ -630,6 +630,27 @@ class ChatModelsTest {
         )
     }
 
+    @Test fun `entry veil stays down until positioning resolves one way or another`() {
+        // Pending entry with no timeout: the timeline stays hidden rather than flashing the bottom.
+        assertFalse(
+            shouldLiftEntryVeil(
+                initialPositionSettled = false,
+                entryUnresolved = false,
+                timedOut = false,
+            ),
+        )
+        // Each release path lifts independently.
+        assertTrue(
+            shouldLiftEntryVeil(initialPositionSettled = true, entryUnresolved = false, timedOut = false),
+        )
+        assertTrue(
+            shouldLiftEntryVeil(initialPositionSettled = false, entryUnresolved = true, timedOut = false),
+        )
+        assertTrue(
+            shouldLiftEntryVeil(initialPositionSettled = false, entryUnresolved = false, timedOut = true),
+        )
+    }
+
     @Test fun `composer does not need member nicks for blank text or command hints`() {
         assertFalse(composerNeedsMemberNicks(TextFieldValue("")))
         assertFalse(composerNeedsMemberNicks(TextFieldValue("/jo", TextRange(3))))

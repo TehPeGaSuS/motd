@@ -76,6 +76,9 @@ fun ChatContentPreviewBody(
             connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
         ),
         items = items,
+        // Static previews never run LaunchedEffects, so entry would stay Pending and the entry
+        // veil would render every preview as a blank pane. Preview the settled screen.
+        entryState = EntryPositionState.Settled,
         composerEnabled = true,
         onBack = {}, onOpenChannelInfo = {}, onOpenSearch = {}, onOpenImage = {},
         nickNormalizer = { it.lowercase() },

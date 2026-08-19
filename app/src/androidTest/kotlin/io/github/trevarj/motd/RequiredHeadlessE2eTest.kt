@@ -463,6 +463,9 @@ class RequiredHeadlessE2eTest {
                     .putExtra(MotdNotifications.EXTRA_EVENT_ID, firstUnread.id),
             )
         }
+        // Entry is veiled until positioning settles, and ui-test cannot see alpha, so wait the veil
+        // out first: otherwise the row assertion below is satisfied by a pane the user cannot see.
+        timeline.awaitEntryVeilLifted(timeoutMs = 45_000)
         // The notification deep jump is a cold cross-activity entry: a new route, a fresh Pager
         // generation, a placeholder request at a GLOBAL index ~260 rows deep in the one unbounded
         // timeline, its materialization, and the entry scroll must all complete before the row is
@@ -490,7 +493,9 @@ class RequiredHeadlessE2eTest {
         // would move the pinned 199/200 row counts above, so the split is intentional.
         timeline.assertNotAtConversationBottom()
         scenario.scenario?.onActivity { it.recreate() }
-        // Activity recreation replays the same deep entry from scratch on the same cold budget.
+        // Activity recreation replays the same deep entry from scratch on the same cold budget,
+        // veil included.
+        timeline.awaitEntryVeilLifted(timeoutMs = 45_000)
         timeline.assertMessageVisible(firstUnread.tag(), timeoutMs = 45_000)
         // Directional paging restores older rows; search then exposes its exact newest-200 cap. The
         // restore is driven by the recreated deep-jump viewport, so it too needs the test thread

@@ -19,6 +19,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.trevarj.motd.e2e.TimelineDiagnostics
+import io.github.trevarj.motd.ui.chat.CHAT_ENTRY_VEIL_TAG
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_LOADING_TAG
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_MORE_TAG
 import io.github.trevarj.motd.ui.components.CHAT_GAP_DIVIDER_TAG
@@ -137,6 +138,14 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         }
     }
 
+    /**
+     * The chat timeline is veiled (alpha 0) until entry positioning settles, and ui-test geometry
+     * and `assertIsDisplayed` both ignore `graphicsLayer` alpha, so every entry assertion would
+     * pass against an invisible pane. Node presence is observable where alpha is not, so wait the
+     * veil out: it leaves the composition only once the reveal has finished.
+     */
+    fun awaitEntryVeilLifted(timeoutMs: Long = 30_000) = awaitTagGone(CHAT_ENTRY_VEIL_TAG, timeoutMs)
+
     fun assertUnreadEntry(
         firstTag: String,
         secondTag: String,
@@ -144,6 +153,7 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         timeoutMs: Long = 30_000,
     ) {
         rule.waitForIdle()
+        awaitEntryVeilLifted(timeoutMs)
         // Atomic history publication can leave Paging materializing the bounded entry window for
         // longer than the generic component timeout on a cold hosted emulator.
         awaitTag("chat_read_marker_divider", timeoutMs)

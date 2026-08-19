@@ -562,6 +562,25 @@ internal const val TARGET_MATERIALIZATION_TIMEOUT_MS = 30_000L
 internal const val TOP_ALIGNMENT_TOLERANCE_PX = 1
 
 /**
+ * Upper bound on how long the timeline stays veiled while entry positioning settles. Entry work is
+ * asynchronous (anchor resolution, a suspending scroll, then the top-alignment passes), so showing
+ * the list immediately flashes the bottom of the buffer before the divider lands. The bound keeps a
+ * slow or offline entry degrading to today's visible correction instead of a stuck blank pane, and
+ * stays well under the ENTRY_HISTORY_READY_TIMEOUT_MS ceiling the ViewModel applies to its own hold.
+ */
+internal const val ENTRY_VEIL_TIMEOUT_MS = 1_500L
+
+/**
+ * Reveal rule for the entry veil. Settlement is the happy path; an unresolved entry has no target
+ * left to land on, and the timeout is the safety valve. Pure so the routing is unit-testable.
+ */
+internal fun shouldLiftEntryVeil(
+    initialPositionSettled: Boolean,
+    entryUnresolved: Boolean,
+    timedOut: Boolean,
+): Boolean = initialPositionSettled || entryUnresolved || timedOut
+
+/**
  * Upper bound on measure-correct passes when snapping the entry row to the viewport top. One pass
  * suffices on a quiet layout; a pass whose scroll a racing Paging generation presentation clamps is
  * observed on the next frame and re-corrected. The cap keeps a layout that legitimately cannot

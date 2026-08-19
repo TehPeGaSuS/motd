@@ -35,6 +35,11 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
         compose.waitUntil(timeoutMs) { isPresent(tag) }
     }
 
+    /** The inverse wait, for transient nodes that leave the composition when their state clears. */
+    fun awaitTagGone(tag: String, timeoutMs: Long = 30_000) {
+        compose.waitUntil(timeoutMs) { !isPresent(tag) }
+    }
+
     fun click(tag: String) {
         awaitTag(tag)
         // A click on a still-disabled control is a silent no-op that only surfaces as a downstream
