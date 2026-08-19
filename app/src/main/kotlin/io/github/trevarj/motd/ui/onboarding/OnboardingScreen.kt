@@ -50,8 +50,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -64,6 +69,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.airbnb.lottie.LottieProperty
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.LottieDynamicProperties
+import com.airbnb.lottie.compose.LottieDynamicProperty
+import com.airbnb.lottie.compose.animateLottieCompositionAsState
+import com.airbnb.lottie.compose.rememberLottieComposition
+import com.airbnb.lottie.model.KeyPath
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.bouncer.BouncerKind
 import io.github.trevarj.motd.bouncer.SojuLoginForm
@@ -75,6 +88,7 @@ import io.github.trevarj.motd.ui.settings.NetworkForm
 import io.github.trevarj.motd.ui.settings.PasswordField
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetPicker
+import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -247,12 +261,15 @@ private fun WelcomePage() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        // Brand hero above the welcome copy.
+        // Brand hero above the welcome copy: the mark draws itself on, the wordmark under it is
+        // the same static lockup geometry the stacked hero vector used.
+        WelcomeHeroMark()
+        Spacer(Modifier.height(16.dp))
         Image(
-            painter = painterResource(R.drawable.motd_onboarding_hero),
+            painter = painterResource(R.drawable.motd_onboarding_wordmark),
             contentDescription = null,
             colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
-            modifier = Modifier.width(220.dp).height(129.dp),
+            modifier = Modifier.width(91.dp).height(31.dp),
         )
         Spacer(Modifier.height(24.dp))
         Text(
@@ -269,6 +286,47 @@ private fun WelcomePage() {
             modifier = Modifier.padding(top = 12.dp),
         )
     }
+}
+
+/**
+ * The welcome hero's one-shot entrance: the bubble mark strokes itself on, then its message rays
+ * stagger in. Plays once per entry into the screen and never loops; a recreation (rotation, process
+ * death) restores the settled last frame rather than replaying the entrance under the user, and the
+ * platform animator scale can suppress it entirely.
+ */
+@Composable
+private fun WelcomeHeroMark() {
+    val composition by rememberLottieComposition(
+        LottieCompositionSpec.RawRes(R.raw.onboarding_hero),
+    )
+    var played by rememberSaveable { mutableStateOf(false) }
+    val motionEnabled = LocalLottieMotionEnabled.current
+    // animateLottieCompositionAsState rather than a bare LottieAnimatable: it divides the speed by
+    // the system animator scale, so a device set to half speed slows the entrance instead of
+    // ignoring the magnitude and only honouring the off switch.
+    val progress by animateLottieCompositionAsState(
+        composition = composition,
+        isPlaying = motionEnabled && !played,
+        iterations = 1,
+    )
+    // Keyed on the boolean, not the frame value, so the effect is not relaunched every frame.
+    LaunchedEffect(progress >= 1f) { if (progress >= 1f) played = true }
+    val strokeColor = MaterialTheme.colorScheme.onSurface.toArgb()
+    val dynamicProperties = remember(strokeColor) {
+        // Every stroke is the same ink the static lockup was tinted with. Built directly rather
+        // than through rememberLottieDynamicProperty, which keys on the vararg array's identity.
+        LottieDynamicProperties(
+            listOf(
+                LottieDynamicProperty(LottieProperty.STROKE_COLOR, KeyPath("**")) { strokeColor },
+            ),
+        )
+    }
+    LottieAnimation(
+        composition = composition,
+        progress = { if (played || !motionEnabled) 1f else progress },
+        dynamicProperties = dynamicProperties,
+        modifier = Modifier.width(68.dp).height(66.dp),
+    )
 }
 
 @Composable

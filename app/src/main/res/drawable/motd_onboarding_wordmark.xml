@@ -1,24 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Theme-tinted stacked lockup. Roboto Bold outlines match the platform wordmark used by the
-     title bar, drawer, and About screen. -->
+<!-- Theme-tinted wordmark, cropped to the glyph bounds. Same Roboto Bold outlines the stacked
+     onboarding lockup used, with the bubble mark lifted out: the mark is now drawn on by
+     res/raw/onboarding_hero.json above this. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="200dp"
-    android:height="117dp"
-    android:viewportWidth="535"
-    android:viewportHeight="313">
+    android:width="91dp"
+    android:height="31dp"
+    android:viewportWidth="222.31"
+    android:viewportHeight="75.98">
     <group
-        android:translateX="178"
-        android:translateY="1"
-        android:scaleX="0.92"
-        android:scaleY="0.92">
-        <path
-            android:fillColor="#FF000000"
-            android:fillType="evenOdd"
-            android:pathData="M48,24H144C164,24 180,40 180,60V122C180,142 164,158 144,158H76L38,182 48,152C29,147 16,130 16,110V60C16,40 30,24 48,24ZM107.8,48.3C110,43.4 115.8,41.2 120.7,43.4C125.6,45.6 127.8,51.4 125.6,56.3L88.2,134.7C86,139.6 80.2,141.8 75.3,139.6C70.4,137.4 68.2,131.6 70.4,126.7Z" />
-    </group>
-    <group
-        android:translateX="150.9"
-        android:translateY="289"
+        android:translateX="-5.42"
+        android:translateY="75"
         android:scaleX="0.048828125"
         android:scaleY="-0.048828125">
         <path android:fillColor="#FF000000" android:pathData="M400,858V0H111V1082H382ZM359,579H280Q280,692 307.5,787.5Q335,883 388.5,953.5Q442,1024 521,1063Q600,1102 704,1102Q776,1102 836,1080.5Q896,1059 939.5,1013.5Q983,968 1007,895.5Q1031,823 1031,722V0H743V690Q743,764 723,804Q703,844 666.5,860Q630,876 579,876Q523,876 481.5,853Q440,830 413,789.5Q386,749 372.5,695Q359,641 359,579ZM1004,612 901,599Q901,705 927.5,796Q954,887 1006.5,956Q1059,1025 1137,1063.5Q1215,1102 1317,1102Q1395,1102 1459,1079.5Q1523,1057 1568.5,1008.5Q1614,960 1638.5,882Q1663,804 1663,691V0H1374V691Q1374,766 1354.5,805.5Q1335,845 1298.5,860.5Q1262,876 1212,876Q1160,876 1121,855.5Q1082,835 1056,799Q1030,763 1017,715.5Q1004,668 1004,612Z" />
