@@ -403,7 +403,6 @@ fun ChatScreen(
     val rawNewestAnchor by viewModel.rawNewestAnchor.collectAsStateWithLifecycle()
     val composerDraft by viewModel.composerDraft.collectAsStateWithLifecycle()
     val outgoingFlight by viewModel.outgoingFlight.collectAsStateWithLifecycle()
-    val sendMorphEnabled by viewModel.sendMorphEnabled.collectAsStateWithLifecycle()
     // Timeline behavioral settings collected separately from ChatState (plans/13 §2.5).
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val hiddenFoolsRevealed by viewModel.hiddenFoolsRevealed.collectAsStateWithLifecycle()
@@ -437,7 +436,6 @@ fun ChatScreen(
         conversationFontScalePercent = appearance.conversationFontScalePercent,
         messageSpacing = appearance.messageSpacing,
         bubbleCornerStyle = appearance.bubbleCornerStyle,
-        sendAnimation = if (sendMorphEnabled) SendAnimationStyle.MORPH else SendAnimationStyle.FLIGHT,
         showComposerEmoji = settings.showComposerEmoji,
         visibleReplyPrefix = replyConfig.visibleChannelPrefix,
         showImages = contentPreviews.showImages && directMediaAllowed,
@@ -674,7 +672,6 @@ fun ChatContent(
         io.github.trevarj.motd.data.prefs.MessageSpacing.DEFAULT,
     bubbleCornerStyle: io.github.trevarj.motd.data.prefs.BubbleCornerStyle =
         io.github.trevarj.motd.data.prefs.BubbleCornerStyle.ROUNDED,
-    sendAnimation: SendAnimationStyle = SendAnimationStyle.FLIGHT,
     showComposerEmoji: Boolean = true,
     visibleReplyPrefix: Boolean = false,
     showImages: Boolean = true,
@@ -2497,7 +2494,6 @@ fun ChatContent(
                     anchors = flightAnchors,
                     motion = flightMotion,
                     listShift = flightListShift,
-                    style = sendAnimation,
                     selfNick = selfNick,
                     showSender = flightShowSender,
                     networkId = state.buffer?.networkId,

@@ -41,12 +41,13 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlin.math.max
 import kotlin.math.min
 
-/**
- * How a sent message reaches the timeline: FLIGHT rises the finished bubble from the composer
- * into its slot; MORPH keeps the typed line in place and grows the bubble around it first.
- * MORPH is a lab behind [io.github.trevarj.motd.data.prefs.SendMorphLabPrefs]; FLIGHT ships.
+/*
+ * How a sent message reaches the timeline: the finished bubble rises from the composer into its
+ * slot, and over the first part of that flight the typed line stays put while a bubble grows
+ * around it (the morph). The morph is a presentation layer on the same flight transport, not an
+ * alternative to it. It needs a bare line of text to grow around, so the layouts that have none
+ * skip it (see SendFlightOverlay) and show the plain bubble ghost riding the identical flight.
  */
-enum class SendAnimationStyle { FLIGHT, MORPH }
 
 /**
  * Where a send flight starts and where it ends, in the coordinates of the chat surface that hosts
@@ -238,7 +239,6 @@ internal fun BoxScope.SendFlightOverlay(
     anchors: SendFlightAnchors,
     motion: SendFlightMotion,
     listShift: () -> Float,
-    style: SendAnimationStyle,
     selfNick: String,
     showSender: Boolean,
     networkId: Long?,
@@ -261,9 +261,8 @@ internal fun BoxScope.SendFlightOverlay(
     val spacing = LocalSpacing.current
     // The morph needs a bubble to grow around a bare line of text: COMPACT and TWO_LINE render
     // text rows rather than bubbles, and a reply puts a quote block above the body that the
-    // stand-in cannot represent. Those flights fall back to the plain bubble presentation.
-    val morph = style == SendAnimationStyle.MORPH && !spacing.compact && !spacing.twoLine &&
-        flight.replyText == null
+    // stand-in cannot represent. Those flights show the plain bubble ghost instead.
+    val morph = !spacing.compact && !spacing.twoLine && flight.replyText == null
 
     Box(
         modifier = Modifier

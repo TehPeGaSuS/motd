@@ -41,7 +41,6 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
-import io.github.trevarj.motd.data.prefs.SendMorphLabPrefs
 import io.github.trevarj.motd.data.sync.HistoryGapFiller
 import io.github.trevarj.motd.data.sync.HistoryPageLoader
 import io.github.trevarj.motd.data.sync.NoopHistoryGapFiller
@@ -231,7 +230,6 @@ class ChatViewModel @Inject constructor(
     private val historyPageLoader: HistoryPageLoader,
     private val settingsRepository: SettingsRepository,
     private val replyPrefs: ReplyPrefs,
-    private val sendMorphLabPrefs: SendMorphLabPrefs,
     private val visibilityReader: MessageVisibilityReader,
     private val historyResyncCoordinator: HistoryResyncController,
     private val userDao: UserDao,
@@ -651,10 +649,6 @@ class ChatViewModel @Inject constructor(
     /** Full settings for the timeline (friends/fools/foolsMode/nick styling); collected in the screen. */
     val settings: StateFlow<Settings> = settingsRepository.settings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Settings())
-
-    /** The morph send-animation lab switch; off means the shipped flight presentation. */
-    val sendMorphEnabled: StateFlow<Boolean> = sendMorphLabPrefs.enabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     fun setHiddenFoolsRevealed(revealed: Boolean) {
         _hiddenFoolsRevealed.value = revealed

@@ -209,9 +209,6 @@
     <string name="labs_gestures_desc">Dock a small orb at the screen edge; press and hold it to fan out a radial menu of chat actions.</string>
     <string name="labs_gestures_configure">Configure menu</string>
     <string name="labs_gestures_configure_desc">Edit the rings, slices, and actions the orb fans out.</string>
-    <string name="labs_chat_section">Chat</string>
-    <string name="labs_send_morph">Morph send animation</string>
-    <string name="labs_send_morph_desc">Sent text stays put while a bubble grows around it, instead of the finished bubble rising from the composer.</string>
     <string name="labs_agentwire_section">Agentwire</string>
     <string name="labs_agentwire">Agentwire harness</string>
     <string name="labs_agentwire_desc">Show the experimental agent harness in channels activated by an Agentwire v1 topic. Off by default.</string>

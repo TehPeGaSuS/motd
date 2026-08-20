@@ -30,7 +30,6 @@ import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.FoolsMode
-import io.github.trevarj.motd.data.prefs.SendMorphLabPrefs
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.ReplyConfig
@@ -2874,7 +2873,6 @@ class ChatViewModelTest {
             historyPageLoader = HistoryPageLoader(processor),
             settingsRepository = settings,
             replyPrefs = FakeReplyPrefs(),
-            sendMorphLabPrefs = SendMorphLabPrefs(ApplicationProvider.getApplicationContext()),
             visibilityReader = MessageVisibilityReader(db),
             historyResyncCoordinator = history,
             userDao = db.userDao(),

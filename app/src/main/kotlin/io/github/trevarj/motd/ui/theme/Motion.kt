@@ -121,7 +121,7 @@ object MotdMotion {
     )
 
     /**
-     * The morph send lab's transformation: field text into bubble (surface growth, ink and
+     * The send morph's transformation: field text into bubble (surface growth, ink and
      * alignment transfer). Deliberately slower than [sendFlightSpring] and a bounded tween, not
      * a spring: the growth is the entire point of the presentation, and riding the flight's own
      * 300ms spring compressed it below the threshold where it read as a transformation at all.
