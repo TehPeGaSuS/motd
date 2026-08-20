@@ -26,6 +26,13 @@ class ChannelDeviconBadgeTest {
         assertNull(matchedChannelDevicon("#general-chat"))
     }
 
+    @Test fun the_packaged_catalog_resource_loads_every_mark() {
+        // Guards the java-resource read: a missing or truncated channel-devicons.json would
+        // otherwise degrade silently to "no channel ever matches an icon".
+        assertEquals(308, ChannelDeviconCatalog.marks.size)
+        assertEquals(308 + ChannelDevicon.entries.size, allChannelMarks.size)
+    }
+
     @Test fun every_bundled_channel_mark_has_parseable_vector_source() {
         allChannelMarks.forEach { mark ->
             assertTrue("${mark.markName} should contain parseable path data", mark.hasParseablePathData())
