@@ -23,6 +23,12 @@ import org.robolectric.annotation.GraphicsMode
  * incoming constraint is already pinned to the parent's width and the cap has nothing left to
  * narrow. On a phone the two orders look identical, which is exactly why this needs a test on a
  * container far wider than the cap.
+ *
+ * Lives in `testDebug` rather than `test`: [createComposeRule] launches a `ComponentActivity`, which
+ * only the debug manifest declares (androidx's ui-test-manifest is debug-scoped). In `test` this
+ * passes under `testDebugUnitTest` and fails `testReleaseUnitTest` with an unresolved-activity
+ * intent, which only the release-parity run catches. [ChatListScrollPlacementTest] sits here for the
+ * same reason.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
