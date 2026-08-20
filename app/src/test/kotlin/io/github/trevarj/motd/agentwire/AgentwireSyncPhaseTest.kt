@@ -30,6 +30,7 @@ import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.SendAcceptance
+import io.github.trevarj.motd.testing.NoopConnectionManager
 import java.io.OutputStream
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -410,31 +411,16 @@ class AgentwireSyncPhaseTest {
         override suspend fun deleteBuffer(id: Long) = Unit
     }
 
-    private class FakeConnections(private val client: IrcClient?) : ConnectionManager {
+    private class FakeConnections(private val client: IrcClient?) : NoopConnectionManager() {
         val joins = mutableListOf<Pair<Long, String>>()
         override val connectionStates = MutableStateFlow(
             mapOf<Long, IrcClientState>(NETWORK_ID to IrcClientState.Ready("me", AGENTWIRE_REQUIRED_CAPS, emptyMap())),
         )
         override fun clientFor(networkId: Long): IrcClient? = client.takeIf { networkId == NETWORK_ID }
-        override suspend fun startAll() = Unit
-        override suspend fun stopAll() = Unit
-        override suspend fun connect(networkId: Long) = Unit
-        override suspend fun disconnect(networkId: Long) = Unit
-        override suspend fun reconnectStale() = Unit
-        override suspend fun sendMessage(bufferId: Long, text: String, replyToEventId: Long?) =
-            SendAcceptance.Accepted(emptyList())
-        override suspend fun sendTyping(bufferId: Long, state: String) = Unit
-        override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) = Unit
         override suspend fun joinChannel(networkId: Long, channel: String, key: String?) {
             joins += networkId to channel
         }
-        override suspend fun partChannel(bufferId: Long, reason: String?) = Unit
         override suspend fun ensureQueryBuffer(networkId: Long, nick: String) = 0L
         override suspend fun ensureServerBuffer(networkId: Long) = 0L
-        override suspend fun markRead(bufferId: Long, anchor: TimelineAnchor) = Unit
-        override suspend fun evaluatePushMode() = Unit
-        override val certPrompts = MutableStateFlow<List<CertPrompt>>(emptyList())
-        override suspend fun trustCert(prompt: CertPrompt) = Unit
-        override fun dismissCertPrompt(prompt: CertPrompt) = Unit
     }
 }

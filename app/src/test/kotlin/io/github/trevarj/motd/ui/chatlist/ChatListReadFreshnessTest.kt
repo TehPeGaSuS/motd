@@ -30,6 +30,7 @@ import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
+import io.github.trevarj.motd.testing.NoopConnectionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -84,30 +85,14 @@ class ChatListReadFreshnessTest {
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = emptyList()
     }
 
-    private class FakeConnectionManager : ConnectionManager {
+    private class FakeConnectionManager : NoopConnectionManager() {
         override val connectionStates = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
-        override fun clientFor(networkId: Long): IrcClient? = null
-        override suspend fun startAll() = Unit
-        override suspend fun stopAll() = Unit
-        override suspend fun connect(networkId: Long) = Unit
-        override suspend fun disconnect(networkId: Long) = Unit
-        override suspend fun reconnectStale() = Unit
-        override suspend fun sendMessage(bufferId: Long, text: String, replyToEventId: Long?) =
-            io.github.trevarj.motd.service.SendAcceptance.Accepted(emptyList())
-        override suspend fun sendTyping(bufferId: Long, state: String) = Unit
-        override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) = Unit
-        override suspend fun joinChannel(networkId: Long, channel: String, key: String?) = Unit
-        override suspend fun partChannel(bufferId: Long, reason: String?) = Unit
         override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 0
         override suspend fun ensureServerBuffer(networkId: Long): Long = 0
         override suspend fun markRead(
             bufferId: Long,
             anchor: io.github.trevarj.motd.data.db.TimelineAnchor,
         ) = Unit
-        override suspend fun evaluatePushMode() = Unit
-        override val certPrompts = MutableStateFlow<List<CertPrompt>>(emptyList())
-        override suspend fun trustCert(prompt: CertPrompt) = Unit
-        override fun dismissCertPrompt(prompt: CertPrompt) = Unit
     }
 
     private class FakeSettingsRepository : SettingsRepository {

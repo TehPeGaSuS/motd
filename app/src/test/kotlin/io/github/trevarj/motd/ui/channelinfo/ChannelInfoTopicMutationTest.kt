@@ -23,6 +23,7 @@ import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.SendAcceptance
+import io.github.trevarj.motd.testing.NoopConnectionManager
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -224,23 +225,9 @@ class ChannelInfoTopicMutationTest {
         private val gate: CompletableDeferred<Boolean>? = null,
         private val partAccepted: Boolean = false,
         private val partFailure: Throwable? = null,
-    ) : ConnectionManager {
-        override val connectionStates: StateFlow<Map<Long, IrcClientState>> = MutableStateFlow(emptyMap())
-        override val certPrompts = MutableStateFlow<List<CertPrompt>>(emptyList())
+    ) : NoopConnectionManager() {
         val attempts = mutableListOf<Pair<Long, String>>()
 
-        override fun clientFor(networkId: Long): IrcClient? = null
-        override suspend fun startAll() = Unit
-        override suspend fun stopAll() = Unit
-        override suspend fun connect(networkId: Long) = Unit
-        override suspend fun disconnect(networkId: Long) = Unit
-        override suspend fun reconnectStale() = Unit
-        override suspend fun sendMessage(bufferId: Long, text: String, replyToEventId: Long?) =
-            SendAcceptance.Accepted(emptyList())
-        override suspend fun sendTyping(bufferId: Long, state: String) = Unit
-        override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) = Unit
-        override suspend fun joinChannel(networkId: Long, channel: String, key: String?) = Unit
-        override suspend fun partChannel(bufferId: Long, reason: String?) = Unit
         val partAttempts = mutableListOf<Long>()
         override suspend fun partChannelForClose(bufferId: Long, reason: String?): Boolean {
             partAttempts += bufferId
@@ -254,10 +241,6 @@ class ChannelInfoTopicMutationTest {
         }
         override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 0
         override suspend fun ensureServerBuffer(networkId: Long): Long = 0
-        override suspend fun markRead(bufferId: Long, anchor: io.github.trevarj.motd.data.db.TimelineAnchor) = Unit
-        override suspend fun evaluatePushMode() = Unit
-        override suspend fun trustCert(prompt: CertPrompt) = Unit
-        override fun dismissCertPrompt(prompt: CertPrompt) = Unit
     }
 
     private class FakeSettingsRepository : SettingsRepository {

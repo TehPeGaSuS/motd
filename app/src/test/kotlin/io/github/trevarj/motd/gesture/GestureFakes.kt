@@ -42,6 +42,7 @@ import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import io.github.trevarj.motd.service.SendAcceptance
+import io.github.trevarj.motd.testing.NoopConnectionManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -90,8 +91,7 @@ internal fun testNetwork(id: Long, name: String = "net$id"): NetworkEntity = Net
     realname = "me",
 )
 
-internal class FakeConnections : ConnectionManager {
-    val states = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
+internal class FakeConnections : NoopConnectionManager() {
     val away = MutableStateFlow<Map<Long, String?>>(emptyMap())
     val presence = MutableStateFlow<Map<PresenceKey, PresenceState>>(emptyMap())
 
@@ -105,7 +105,6 @@ internal class FakeConnections : ConnectionManager {
     /** Buffer id handed back by [ensureQueryBuffer]; null makes the call fail like a dead socket. */
     var queryBufferId: Long? = 42L
 
-    override val connectionStates: StateFlow<Map<Long, IrcClientState>> = states
     override val selfAwayStates: StateFlow<Map<Long, String?>> = away
     override val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> = presence
 
@@ -113,9 +112,6 @@ internal class FakeConnections : ConnectionManager {
         awayWrites += networkId to message
     }
 
-    override fun clientFor(networkId: Long): IrcClient? = null
-    override suspend fun startAll() = Unit
-    override suspend fun stopAll() = Unit
     override suspend fun connect(networkId: Long) {
         connected += networkId
     }
@@ -124,17 +120,11 @@ internal class FakeConnections : ConnectionManager {
         disconnected += networkId
     }
 
-    override suspend fun reconnectStale() = Unit
-    override suspend fun sendMessage(bufferId: Long, text: String, replyToEventId: Long?) =
-        SendAcceptance.Accepted(emptyList())
 
-    override suspend fun sendTyping(bufferId: Long, state: String) = Unit
-    override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) = Unit
     override suspend fun joinChannel(networkId: Long, channel: String, key: String?) {
         joins += Triple(networkId, channel, key)
     }
 
-    override suspend fun partChannel(bufferId: Long, reason: String?) = Unit
     override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long {
         queries += networkId to nick
         return queryBufferId ?: error("no live client")
@@ -145,10 +135,6 @@ internal class FakeConnections : ConnectionManager {
         marked += bufferId to anchor
     }
 
-    override suspend fun evaluatePushMode() = Unit
-    override val certPrompts = MutableStateFlow<List<CertPrompt>>(emptyList())
-    override suspend fun trustCert(prompt: CertPrompt) = Unit
-    override fun dismissCertPrompt(prompt: CertPrompt) = Unit
 }
 
 internal class FakeBuffers : BufferRepository {

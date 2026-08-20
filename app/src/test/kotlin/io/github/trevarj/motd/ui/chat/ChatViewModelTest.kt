@@ -81,6 +81,7 @@ import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.service.TypingTracker
+import io.github.trevarj.motd.testing.NoopConnectionManager
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.share.PendingShareStore
 import kotlinx.coroutines.Dispatchers
@@ -2941,7 +2942,7 @@ class ChatViewModelTest {
          * does for a network with no live client.
          */
         private val historyAvailability: HistoryAvailability = HistoryAvailability.NegotiatingOrOffline,
-    ) : ConnectionManager {
+    ) : NoopConnectionManager() {
         private var currentClient: IrcClient? = client
         override val connectionStates = MutableStateFlow(mapOf(networkId to state))
         override val connectionActivity = MutableStateFlow(
@@ -2951,10 +2952,6 @@ class ChatViewModelTest {
                 historyCatchUpPending = historyPending,
             ),
         )
-        override val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> =
-            MutableStateFlow(emptyMap())
-        override val rosterStates: StateFlow<Map<Long, RosterLoadState>> = MutableStateFlow(emptyMap())
-        override val certPrompts = MutableStateFlow<List<CertPrompt>>(emptyList())
         val messages = mutableListOf<SentMessage>()
         val reactions = mutableListOf<SentReaction>()
         val typing = mutableListOf<Pair<Long, String>>()
@@ -2991,11 +2988,6 @@ class ChatViewModelTest {
 
         override fun clientFor(networkId: Long): IrcClient? = currentClient
         override fun historyAvailabilityFor(networkId: Long): HistoryAvailability = historyAvailability
-        override suspend fun startAll() = Unit
-        override suspend fun stopAll() = Unit
-        override suspend fun connect(networkId: Long) = Unit
-        override suspend fun disconnect(networkId: Long) = Unit
-        override suspend fun reconnectStale() = Unit
         override suspend fun sendMessage(bufferId: Long, text: String, replyToEventId: Long?): io.github.trevarj.motd.service.SendAcceptance {
             sendRejection?.let {
                 return io.github.trevarj.motd.service.SendAcceptance.Rejected(it)
@@ -3045,12 +3037,6 @@ class ChatViewModelTest {
         override suspend fun markRead(bufferId: Long, anchor: TimelineAnchor) {
             readMarkers += bufferId to anchor
         }
-        override suspend fun evaluatePushMode() = Unit
-        override suspend fun trustCert(prompt: CertPrompt) = Unit
-        override fun dismissCertPrompt(prompt: CertPrompt) = Unit
-        override suspend fun requestMembers(bufferId: Long, force: Boolean) = Unit
-        override suspend fun acceptInvite(messageId: Long) = Unit
-        override suspend fun dismissInvite(messageId: Long) = Unit
     }
 
     private class FakeHistoryResyncController(

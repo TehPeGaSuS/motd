@@ -41,6 +41,7 @@ import androidx.paging.LoadType
 import androidx.paging.PagingConfig
 import androidx.paging.PagingState
 import io.github.trevarj.motd.data.db.HistoryCursorEntity
+import io.github.trevarj.motd.testing.NoopConnectionManager
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -632,28 +633,7 @@ class RecentPagingAppendReproTest {
     }
 
     /** No live clients: every driver here is handed its scripted source explicitly. */
-    private object NoClientConnectionManager : ConnectionManager {
-        override val connectionStates: StateFlow<Map<Long, IrcClientState>> = MutableStateFlow(emptyMap())
-        override fun clientFor(networkId: Long): IrcClient? = null
-        override suspend fun startAll() = Unit
-        override suspend fun stopAll() = Unit
-        override suspend fun connect(networkId: Long) = Unit
-        override suspend fun disconnect(networkId: Long) = Unit
-        override suspend fun reconnectStale() = Unit
-        override suspend fun sendMessage(bufferId: Long, text: String, replyToEventId: Long?) =
-            SendAcceptance.Accepted(emptyList())
-        override suspend fun sendTyping(bufferId: Long, state: String) = Unit
-        override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) = Unit
-        override suspend fun joinChannel(networkId: Long, channel: String, key: String?) = Unit
-        override suspend fun partChannel(bufferId: Long, reason: String?) = Unit
-        override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 0L
-        override suspend fun ensureServerBuffer(networkId: Long): Long = 0L
-        override suspend fun markRead(bufferId: Long, anchor: TimelineAnchor) = Unit
-        override suspend fun evaluatePushMode() = Unit
-        override val certPrompts: StateFlow<List<CertPrompt>> = MutableStateFlow(emptyList())
-        override suspend fun trustCert(prompt: CertPrompt) = Unit
-        override fun dismissCertPrompt(prompt: CertPrompt) = Unit
-    }
+    private object NoClientConnectionManager : NoopConnectionManager()
 
     private companion object {
         /**

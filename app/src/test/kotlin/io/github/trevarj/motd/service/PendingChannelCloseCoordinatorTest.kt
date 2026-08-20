@@ -9,6 +9,7 @@ import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.testing.NoopConnectionManager
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -186,25 +187,12 @@ class PendingChannelCloseCoordinatorTest {
         retryWait = retryWait,
     )
 
-    private class FakeConnections : ConnectionManager {
-        val states = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
+    private class FakeConnections : NoopConnectionManager() {
         val parts = mutableListOf<Long>()
         val partAttempted = CompletableDeferred<Unit>()
         val secondPartAttempted = CompletableDeferred<Unit>()
         var failPart = false
         var reportPartSuccess = true
-        override val connectionStates: StateFlow<Map<Long, IrcClientState>> = states
-        override fun clientFor(networkId: Long): IrcClient? = null
-        override suspend fun startAll() = Unit
-        override suspend fun stopAll() = Unit
-        override suspend fun connect(networkId: Long) = Unit
-        override suspend fun disconnect(networkId: Long) = Unit
-        override suspend fun reconnectStale() = Unit
-        override suspend fun sendMessage(bufferId: Long, text: String, replyToEventId: Long?) =
-            SendAcceptance.Accepted(emptyList())
-        override suspend fun sendTyping(bufferId: Long, state: String) = Unit
-        override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) = Unit
-        override suspend fun joinChannel(networkId: Long, channel: String, key: String?) = Unit
         override suspend fun partChannel(bufferId: Long, reason: String?) {
             parts += bufferId
             if (failPart) error("send failed")
@@ -218,11 +206,6 @@ class PendingChannelCloseCoordinatorTest {
         }
         override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 0
         override suspend fun ensureServerBuffer(networkId: Long): Long = 0
-        override suspend fun markRead(bufferId: Long, anchor: io.github.trevarj.motd.data.db.TimelineAnchor) = Unit
-        override suspend fun evaluatePushMode() = Unit
-        override val certPrompts = MutableStateFlow<List<CertPrompt>>(emptyList())
-        override suspend fun trustCert(prompt: CertPrompt) = Unit
-        override fun dismissCertPrompt(prompt: CertPrompt) = Unit
     }
 
     private fun directNetwork(
