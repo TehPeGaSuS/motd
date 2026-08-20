@@ -79,7 +79,6 @@ import io.github.trevarj.motd.audio.NetworkMediaRouteProvider
 import io.github.trevarj.motd.audio.VoiceMessageSender
 import io.github.trevarj.motd.audio.VoiceMessageSenderImpl
 import io.github.trevarj.motd.audio.VoicePrefs
-import io.github.trevarj.motd.audio.VoicePrefsImpl
 import io.github.trevarj.motd.audio.VoiceRecorder
 import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
@@ -168,7 +167,7 @@ internal abstract class AppModule {
     @Binds @Singleton
     abstract fun pushPrefs(impl: DataStoreSettingsRepository): PushPrefs
 
-    /** TOFU cert-pin store (plans/12); same DataStore-backed impl. */
+    /** TOFU cert-pin store; same DataStore-backed impl. */
     @Binds @Singleton
     abstract fun certTrustStore(impl: DataStoreSettingsRepository): CertTrustStore
 
@@ -177,9 +176,6 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun attachmentUploader(impl: AttachmentUploaderImpl): AttachmentUploader
-
-    @Binds @Singleton
-    abstract fun voicePrefs(impl: VoicePrefsImpl): VoicePrefs
 
     /** Gesture lab store; kept out of configuration backup like the Agentwire lab flag. */
     @Binds @Singleton

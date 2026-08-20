@@ -3,7 +3,7 @@ package io.github.trevarj.motd.data.backup
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
-import io.github.trevarj.motd.audio.VoicePrefsImpl
+import io.github.trevarj.motd.audio.VoicePrefs
 import io.github.trevarj.motd.avatar.AvatarPrefsImpl
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -215,7 +215,7 @@ class ConfigurationBackupRepositoryTest {
             contentPreviewPrefs = ContentPreviewPrefsImpl(context),
             replyPrefs = ReplyPrefsImpl(context),
             attachmentPrefs = AttachmentPrefsImpl(context),
-            voicePrefs = VoicePrefsImpl(context),
+            voicePrefs = VoicePrefs(context),
             avatarPrefs = AvatarPrefsImpl(context),
             bouncerKindPrefs = BouncerKindPrefsImpl(context),
             gesturePrefs = GesturePrefsImpl(context),
