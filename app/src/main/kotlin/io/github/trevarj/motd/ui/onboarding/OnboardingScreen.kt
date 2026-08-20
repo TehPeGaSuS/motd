@@ -56,6 +56,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -148,8 +149,12 @@ fun OnboardingContent(
     val steps = OnboardingStep.entries
     val pagerState = rememberPagerState(pageCount = { steps.size })
 
-    // Keep the pager synced to the reducer-driven step.
+    // Keep the pager synced to the reducer-driven step. Drop field focus first: a focused field
+    // keeps issuing cursor bring-into-view requests, and those target the pager's own scrollable,
+    // so they can cancel this page animation and snap the wizard back to the step being left.
+    val focusManager = LocalFocusManager.current
     LaunchedEffect(state.step) {
+        focusManager.clearFocus(force = true)
         pagerState.animateScrollToPage(steps.indexOf(state.step))
     }
 
