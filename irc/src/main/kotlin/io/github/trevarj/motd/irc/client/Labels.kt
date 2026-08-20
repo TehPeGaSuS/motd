@@ -37,7 +37,7 @@ internal fun requireValidChatLabel(label: String) {
  * loop feeds every inbound message through [route] which completes the deferred once the
  * response is fully assembled.
  *
- * Completion rules (plans/02):
+ * Completion rules:
  *  - a labelled message that does NOT open a batch  → single-message response.
  *  - `BATCH +ref <type> ...` carrying the label     → buffer every `batch=ref` line
  *    (nested batches reassembled recursively) until `BATCH -ref`, complete with the list.

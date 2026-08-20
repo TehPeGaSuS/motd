@@ -60,6 +60,4 @@ flowchart TD
 - `irc/src/main/` — protocol, client state machine, extensions, and transport.
 
 Repository policy and task workflows live in [`AGENTS.md`](AGENTS.md) and
-[`.agents/`](.agents/README.md). Historical design documents under
-[`plans/`](plans/README.md) explain original intent but are not current
-contracts.
+[`.agents/`](.agents/README.md).

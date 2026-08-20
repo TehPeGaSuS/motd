@@ -57,7 +57,7 @@ fun NewConversationSheet(
     onDismiss: () -> Unit,
     onJoinChannel: (networkId: Long, channel: String) -> Unit,
     onMessageUser: (networkId: Long, nick: String) -> Unit,
-    // Round 5 (plans/16 §3.5): seed the network from the active scope + browse entry.
+    // Round 5: seed the network from the active scope + browse entry.
     preselectedNetworkId: Long? = null,
     onBrowseChannels: (networkId: Long) -> Unit = {},
 ) {

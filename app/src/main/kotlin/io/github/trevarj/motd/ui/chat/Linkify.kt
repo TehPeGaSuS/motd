@@ -58,7 +58,7 @@ fun extractUrls(text: String): List<String> =
 /**
  * Trim trailing punctuation that commonly abuts a URL in prose. A closing `)` is only stripped when
  * the URL contains no matching `(` — otherwise Wikipedia-style paths like `…/Foo_(bar)` would break
- * (plans/15 #29). Brackets/braces get the same balance check.
+ *. Brackets/braces get the same balance check.
  */
 internal fun trimUrl(raw: String): String {
     var url = raw

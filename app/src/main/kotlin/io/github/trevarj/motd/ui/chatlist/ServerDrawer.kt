@@ -80,7 +80,7 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /**
- * Server-drawer content (plans/16 §3.1). Stateless: takes the built [DrawerRow]s + rollups and
+ * Server-drawer content. Stateless: takes the built [DrawerRow]s + rollups and
  * emits selection / connectivity / nav callbacks. Hosted by [ChatListScreen] inside a
  * `ModalNavigationDrawer`; previewable without a ViewModel.
  */

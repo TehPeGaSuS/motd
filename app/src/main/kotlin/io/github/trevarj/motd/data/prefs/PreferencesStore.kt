@@ -36,7 +36,7 @@ internal object PrefKeys {
     val PUSH_KEYS = stringPreferencesKey("push_keys")
     val STS_POLICIES = stringPreferencesKey("sts_policies")
     val CERT_PINS = stringPreferencesKey("cert_pins")
-    // Round 4 (plans/13)
+    // Round 4
     val LAYOUT_DENSITY = stringPreferencesKey("layout_density")
     val NICK_COLORS_ENABLED = stringPreferencesKey("nick_colors_enabled")
     val NICK_COLOR_PALETTE = stringPreferencesKey("nick_color_palette")
@@ -146,7 +146,7 @@ class DataStoreSettingsRepository @Inject constructor(
         store.edit { it[PrefKeys.DELIVERY_MODE] = m.name }
     }
 
-    // -- Round 4 (plans/13): appearance/behavior settings --
+    // -- Round 4: appearance/behavior settings --
 
     override suspend fun setLayoutDensity(d: LayoutDensity) {
         store.edit { it[PrefKeys.LAYOUT_DENSITY] = d.name }

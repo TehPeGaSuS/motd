@@ -240,7 +240,7 @@
     <string name="network_settings_display_name">Network name</string>
     <string name="network_settings_ws_url">WebSocket URL (wss://)</string>
     <string name="network_settings_ws_url_desc">Optional. Tunnels IRC over a WebSocket (e.g. wss://bnc.example.com:443/) to look like ordinary HTTPS and bypass networks that block IRC. Requires a WebSocket listener on your soju server. Leave blank for a normal TCP/TLS connection.</string>
-    <!-- Connection / Obfuscation (plans/20 Phase 1): opt-in SOCKS5 / Tor proxy. -->
+    <!-- Connection / Obfuscation: opt-in SOCKS5 / Tor proxy. -->
     <string name="network_settings_obfs_section_desc">Route this network through a proxy to bypass censorship. Opt-in and may add latency. The strongest options (Tor .onion bouncer, VLESS+REALITY) require setup on your own soju server.</string>
     <string name="network_settings_obfs_mode_none">Direct (no proxy)</string>
     <string name="network_settings_obfs_mode_socks5">SOCKS5 proxy</string>
@@ -374,7 +374,7 @@
     <string name="about_export_diagnostics_success">Diagnostic log saved.</string>
     <string name="about_export_diagnostics_failure">Could not save the diagnostic log.</string>
 
-    <!-- Chat components (WP7 review, plans/15 #25) -->
+    <!-- Chat components (WP7 review) -->
     <string name="chat_typing_one">%1$s is typing…</string>
     <string name="chat_typing_two">%1$s and %2$s are typing…</string>
     <string name="chat_typing_many">%1$s, %2$s and others are typing…</string>
@@ -452,7 +452,7 @@
     <string name="share_picker_title">Share to…</string>
     <string name="share_picker_empty">No conversations yet</string>
     <string name="share_picker_search">Search</string>
-    <!-- Chat screen / message list (plans/15 #25) -->
+    <!-- Chat screen / message list -->
     <string name="chat_back">Back</string>
     <string name="chat_open_channel_info">Open channel info</string>
     <string name="chat_open_nick_details">Open nick details</string>
@@ -504,7 +504,7 @@
     <string name="image_viewer_save_failed">Couldn\'t save image</string>
     <string name="image_viewer_load_failed">Couldn\'t load image</string>
 
-    <!-- Round 4: customizable UI settings (plans/13). Consumers land in WP-U1/U2/U3; each entry is
+    <!-- Round 4: customizable UI settings. Consumers land in WP-U1/U2/U3; each entry is
          tagged so lint (warningsAsErrors) stays green mid-wave.
          WP-U4 strips the markers once the usages exist. -->
     <string name="settings_density">Message style</string>
@@ -714,7 +714,7 @@
         <item quantity="other">%d nicks</item>
     </plurals>
 
-    <!-- Round 5: app shell / multi-server UX (plans/16). Consumers land across WP-V1..WP-V4; every
+    <!-- Round 5: app shell / multi-server UX. Consumers land across WP-V1..WP-V4; every
          entry with a still-absent consumer is tagged so lint
          (warningsAsErrors) stays green mid-wave. WP-V5 strips the markers once the usages exist.
          The three *_title strings are consumed now by the WP-V0 screen stubs, so they carry no marker. -->

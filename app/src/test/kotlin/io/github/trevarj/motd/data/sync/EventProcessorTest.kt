@@ -2239,7 +2239,7 @@ class EventProcessorTest {
         assertEquals("childNick", child.nick)
     }
 
-    // --- Round 5: server buffer routing (plans/16 §5.6) ---
+    // --- Round 5: server buffer routing ---
 
     private suspend fun serverBuffer() = db.bufferDao().byName(networkId, "*")
 
@@ -2475,7 +2475,7 @@ class EventProcessorTest {
         assertTrue(row.text.contains("<redacted>"))
     }
 
-    // --- own-message single-row across the three echo scenarios (plans/03/04, bug 4) ---
+    // --- own-message single-row across the three echo scenarios ---
 
     /** Buffer id for a self-send target, creating the query/channel buffer as onChat would. */
     private suspend fun selfBuffer(target: String): Long {

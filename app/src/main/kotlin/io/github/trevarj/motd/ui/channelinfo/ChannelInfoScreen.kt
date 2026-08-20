@@ -160,7 +160,7 @@ fun ChannelInfoScreen(
         onQueryChange = viewModel::setQuery,
     )
 
-    // Nick sheet (plans/16 §5.8): shared with the chat timeline. Moderation shown only when op.
+    // Nick sheet: shared with the chat timeline. Moderation shown only when op.
     nickSheet?.let { sheet ->
         NickActionSheet(
             nick = sheet.nick,
@@ -222,7 +222,7 @@ fun ChannelInfoContent(
 ) {
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var showTopicEdit by remember { mutableStateOf(false) }
-    // Fools section is collapsed by default; state is local to the screen (plans/13 §3.6).
+    // Fools section is collapsed by default; state is local to the screen.
     var foolsExpanded by remember { mutableStateOf(false) }
     val buffer = state.buffer
     // Visible query lives in local IME state so keystrokes aren't dropped and the cursor is
@@ -480,7 +480,7 @@ fun ChannelInfoContent(
         )
     }
 
-    // Topic edit (plans/16 §5.8): a multiline dialog prefilled with the current topic. Always
+    // Topic edit: a multiline dialog prefilled with the current topic. Always
     // offered for CHANNEL buffers; a 482 (no privileges) lands in the server buffer.
     if (showTopicEdit && buffer != null) {
         TopicEditDialog(
@@ -612,7 +612,7 @@ private fun ChannelHeader(
             modifier = Modifier.padding(top = if (hideAvatar) 0.dp else 12.dp),
         )
         // Topic + edit affordance (CHANNEL buffers only). Shown even when the topic is blank so an
-        // op can set an initial topic (plans/16 §5.8).
+        // op can set an initial topic.
         if (buffer?.type == BufferType.CHANNEL) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,

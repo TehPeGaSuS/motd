@@ -585,9 +585,9 @@ fun buildNetworkEntity(
     name: String = server.host,
     parentId: Long? = null,
     bouncerNetId: String? = null,
-    // Opt-in IRC-over-WebSocket endpoint (plans/19 §3.3); null keeps the TCP/TLS transport.
+    // Opt-in IRC-over-WebSocket endpoint; null keeps the TCP/TLS transport.
     wsUrl: String? = null,
-    // Opt-in obfuscation/proxy (plans/20 Phase 1). NONE persists null (direct); SOCKS5/TOR/REALITY
+    // Opt-in obfuscation/proxy. NONE persists null (direct); SOCKS5/TOR/REALITY
     // persist the mode + proxy host/port.
     obfsMode: ObfsMode = ObfsMode.NONE,
     proxyHost: String? = null,

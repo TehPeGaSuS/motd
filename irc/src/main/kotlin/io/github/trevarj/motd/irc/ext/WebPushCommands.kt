@@ -3,7 +3,7 @@ package io.github.trevarj.motd.irc.ext
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import java.util.Base64
 
-/** Builds soju `WEBPUSH` command lines (plans/03 soju.im/webpush). */
+/** Builds soju `WEBPUSH` command lines (soju.im/webpush). */
 internal object WebPushCommands {
     private val b64url = Base64.getUrlEncoder().withoutPadding()
 

@@ -85,7 +85,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 fun NetworkSettingsScreen(
     networkId: Long,
     onBack: () -> Unit = {},
-    // Round 5 (plans/16): soju bouncer manager + server-messages buffer.
+    // Round 5: soju bouncer manager + server-messages buffer.
     onOpenBouncerNetworks: (Long) -> Unit = {},
     onOpenBuffer: (Long) -> Unit = {},
     onOpenNetworkTools: (Long) -> Unit = {},
@@ -516,7 +516,7 @@ private fun InitialAwayField(
 }
 
 /**
- * Collapsible "Connection / Obfuscation" section (plans/20 Phase 1). Off by default: a header row
+ * Collapsible "Connection / Obfuscation" section. Off by default: a header row
  * with an expand toggle reveals the mode selector; SOCKS5 reveals host/port and embedded REALITY
  * accepts only a share link. The header always exposes the current value and expansion affordance.
  */

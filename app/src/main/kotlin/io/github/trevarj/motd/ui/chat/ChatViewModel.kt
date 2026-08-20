@@ -116,7 +116,7 @@ private const val MAX_REPLY_PREVIEW_CACHE = 128
 private const val MAX_REACTION_WINDOW_MSGIDS = 500
 
 /**
- * Single UI state for the chat screen (plans/07). `pagingFlow` is the cached message stream;
+ * Single UI state for the chat screen. `pagingFlow` is the cached message stream;
  * `replyTo`/`typingNicks`/`connState` drive the composer + header. `members` feeds autocomplete.
  */
 data class ChatState(
@@ -191,7 +191,7 @@ internal fun MessageEntity.toReplyPreviewData(): ReplyPreviewData = ReplyPreview
 /**
  * Wire text for resending a failed row. An ACTION is stored with its `/me ` prefix stripped, so
  * re-prefix it; the manager rewrites `/me ` back into a CTCP ACTION. Non-ACTION kinds resend
- * verbatim (plans/15 #10).
+ * verbatim.
  */
 fun resendText(kind: io.github.trevarj.motd.data.db.MessageKind, text: String): String =
     if (kind == io.github.trevarj.motd.data.db.MessageKind.ACTION) "/me $text" else text
@@ -265,7 +265,7 @@ class ChatViewModel @Inject constructor(
         route.jumpToTime > 0 || route.jumpToEventId != null || route.jumpToMsgid != null
 
     // Behavioral filter (JPQ visibility + fools HIDE). Distinct so unrelated settings edits don't
-    // re-emit the paging stream (plans/13 §2.5). ChatState is untouched — the screen collects
+    // re-emit the paging stream. ChatState is untouched — the screen collects
     // [settings] separately (mirrors R1 keeping the 5-ary combine stable).
     private val _hiddenFoolsRevealed = MutableStateFlow(false)
     val hiddenFoolsRevealed: StateFlow<Boolean> = _hiddenFoolsRevealed.asStateFlow()
@@ -942,7 +942,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch { connectionManager.requestMembers(operationalBufferId.value) }
     }
 
-    // --- reactions aggregation (plans/15 #5, #18) ---
+    // --- reactions aggregation ---
 
     /** Msgids from the bounded loaded Paging window, supplied by the screen on page changes. */
     private val visibleMsgids = MutableStateFlow<List<String>>(emptyList())
@@ -1022,7 +1022,7 @@ class ChatViewModel @Inject constructor(
         .map { it?.toReplyPreviewData() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), initialValue)
 
-    // --- read marker snapshot (plans/15 #2) ---
+    // --- read marker snapshot ---
 
     // Frozen on buffer entry so the "New messages" divider keeps a stable boundary instead of
     // flashing/vanishing as markRead advances the live marker. Used ONLY for the divider now.
@@ -1103,7 +1103,7 @@ class ChatViewModel @Inject constructor(
         )
     }
 
-    // --- lifecycle: foreground tracker + mark-read (plans/07) ---
+    // --- lifecycle: foreground tracker + mark-read ---
 
     fun onResume() {
         AutoFollowTrace.record("chat_resume", operationalBufferId.value)
@@ -1247,7 +1247,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** Delete a failed local row without resending (action-sheet delete affordance, plans/15 #10). */
+    /** Delete a failed local row without resending (action-sheet delete affordance). */
     fun deleteFailed(message: MessageEntity) = viewModelScope.launch {
         messageRepository.deleteMessage(message.id)
     }
@@ -1299,7 +1299,7 @@ class ChatViewModel @Inject constructor(
      * Parse [raw] and execute the resulting [ChatCommand]. `onOpenBuffer` navigates for /msg /query;
      * `onOpenChannelList` navigates for /list. Clears the reply and stops typing on a normal send.
      *
-     * A SERVER buffer is a raw-send surface (plans/16 §5.6): every submission is sent as a raw IRC
+     * A SERVER buffer is a raw-send surface: every submission is sent as a raw IRC
      * line to the network (one leading `/` stripped) — [parseCommand] is bypassed, and a PRIVMSG to
      * `"*"` is never sent.
      */
@@ -1494,7 +1494,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    // --- nick sheet + whois (plans/16 §5.8) ---
+    // --- nick sheet + whois ---
 
     private val _nickSheet = MutableStateFlow<NickSheetState?>(null)
     val nickSheet: StateFlow<NickSheetState?> = _nickSheet.asStateFlow()
@@ -1549,7 +1549,7 @@ class ChatViewModel @Inject constructor(
         _nickSheet.value = null
     }
 
-    // --- moderation executors (plans/16 §5.8), CHANNEL buffers only ---
+    // --- moderation executors, CHANNEL buffers only ---
 
     /** MODE <channel> +o/-o/+v/-v <nick>. */
     fun setMemberMode(nick: String, mode: Char, grant: Boolean) = viewModelScope.launch {
@@ -1628,7 +1628,7 @@ class ChatViewModel @Inject constructor(
         return io.github.trevarj.motd.ui.channelinfo.canModerate(me.prefixes, order)
     }
 
-    // --- composer prefill (mention → draft, plans/11 §A) ---
+    // --- composer prefill (mention → draft) ---
 
     /** Consume-once composer prefill queued by ChannelInfo before popping back; null when none. */
     fun consumePrefill(): String? = draftStore.consume(operationalBufferId.value)
@@ -1867,7 +1867,7 @@ class ChatViewModel @Inject constructor(
         return result.await()
     }
 
-    // --- search deep-jump (plans/11 §C) ---
+    // --- search deep-jump ---
 
     private val jumpMsgid: String? = route.jumpToMsgid
     private val jumpTime: Long = route.jumpToTime
@@ -1995,7 +1995,7 @@ class ChatViewModel @Inject constructor(
             resolveJump()
         }
         // Normal entry, on the first buffer emission: freeze the visit's divider boundary
-        // ([freezeUnreadEntrySnapshot], plans/15 #2) and publish the one-shot entry target, both
+        // ([freezeUnreadEntrySnapshot]) and publish the one-shot entry target, both
         // from ONE at-rest resolution shared with the Pager key.
         viewModelScope.launch {
             // A restored visit already positioned itself in a previous process; only a fresh one may
@@ -2322,7 +2322,7 @@ class ChatViewModel @Inject constructor(
                 // newest row, which is precisely what the viewport mark-read gate must never see.
                 val target = r.target
                 // Force a distinct emission so the screen's LaunchedEffect(jumpTarget) always
-                // re-runs, even when the re-resolved index equals the previous one (plans/15 #12).
+                // re-runs, even when the re-resolved index equals the previous one.
                 _jumpTarget.value = null
                 _jumpTarget.value = target.copy(requestToken = request.token)
             }
@@ -2540,7 +2540,7 @@ class ChatViewModel @Inject constructor(
     /**
      * Re-resolve the same target once when a live message shifted indices mid-jump. The single-shot
      * guard means the screen can always call [onJumpHandled] after it; a repeat request just clears
-     * the target so the not-loaded path takes over (plans/15 #12).
+     * the target so the not-loaded path takes over.
      */
     fun reresolveJumpOnce(token: Long) {
         val request = activeJumpRequest?.takeIf { it.token == token } ?: return

@@ -94,7 +94,7 @@ READY_NETWORK=ready-fixture
 READY_PID="$RUN/ircv3-ready.pid"
 READY_LOG="$RUN/ircv3-ready.log"
 
-# Obfuscation layer (plans/20 Phase 1 validation). REALITY server on :8443 (avoid clashing with a
+# Obfuscation layer (Phase 1 validation). REALITY server on :8443 (avoid clashing with a
 # real 443), a local SOCKS5 the app dials on 127.0.0.1:1080, and a handshake domain to impersonate.
 # www.microsoft.com does NOT work as a REALITY steal target from every host / with the uTLS Chrome
 # fingerprint; www.cloudflare.com is a reliable default. Override any of these via the environment.
@@ -577,7 +577,7 @@ start_soju_for_reconnect() {
   log "soju restarted from preserved state (pid $(cat "$RUN/soju.pid"))"
 }
 
-# ---- Obfuscation layer: VLESS + REALITY (plans/20) -----------------------------------------
+# ---- Obfuscation layer: VLESS + REALITY ----------------------------------------------------
 #
 # Proves the SOCKS5 substrate carries IRC end-to-end through REALITY against the LOCAL stack, before
 # any VPS. Topology:

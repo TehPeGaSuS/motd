@@ -1,8 +1,7 @@
 # motd device and end-to-end testing
 
 This is the canonical operator guide for motd’s Android device harness. The
-scripts in this directory are the behavioral authority; historical design notes
-under `plans/` are not required to run it.
+scripts in this directory are the behavioral authority.
 
 The harness drives only `io.github.trevarj.motd.debug` through `adb` and
 uiautomator. It refuses any package id without the `.debug` suffix because its

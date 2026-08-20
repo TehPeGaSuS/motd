@@ -24,7 +24,7 @@ import java.text.DateFormat
 import java.util.Date
 
 /**
- * TOFU cert-trust dialog (plans/12). Shows the presented leaf's host:port, colon-formatted SHA-256,
+ * TOFU cert-trust dialog. Shows the presented leaf's host:port, colon-formatted SHA-256,
  * subject, issuer, and validity window. When [CertPrompt.changed] is true it leads with a red
  * "certificate changed" warning (possible MITM / rotation). Trust pins the leaf and reconnects;
  * Cancel dismisses and leaves the network disconnected.

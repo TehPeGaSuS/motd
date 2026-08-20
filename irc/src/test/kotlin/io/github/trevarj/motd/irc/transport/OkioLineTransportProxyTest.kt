@@ -16,7 +16,7 @@ import java.net.Proxy
 import java.net.ServerSocket
 
 /**
- * Proves the SOCKS5 substrate (plans/20 Phase 1): dialing [OkioLineTransport] through a `Proxy`
+ * Proves the SOCKS5 substrate: dialing [OkioLineTransport] through a `Proxy`
  * MUST send the destination to the proxy as a DOMAIN NAME (ATYP=0x03), never a pre-resolved IP.
  * That is the leak-free / remote-DNS / `.onion`-capable behavior — Java's SOCKS impl only performs
  * remote resolution for an UNRESOLVED `InetSocketAddress`, which the transport builds via

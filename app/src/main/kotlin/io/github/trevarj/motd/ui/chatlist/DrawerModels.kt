@@ -6,7 +6,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcClientState
 
 /**
- * Pure models for the server drawer (plans/16 §3.3). Unit-tested against the same [ChatListRow]
+ * Pure models for the server drawer. Unit-tested against the same [ChatListRow]
  * fixtures as sectioning; no Compose/Android imports so the rollup math stays verifiable.
  */
 
@@ -54,7 +54,7 @@ private fun stateFor(states: Map<Long, IrcClientState>, id: Long): IrcClientStat
 /**
  * Build drawer rows in DB order (`networks` already ordered), each BOUNCER_ROOT immediately
  * followed by its children. A root aggregates its children's counts into its own row so a
- * collapsed root still surfaces child activity (plans/16 §3.2).
+ * collapsed root still surfaces child activity.
  */
 fun buildDrawerRows(
     networks: List<NetworkEntity>,
@@ -108,7 +108,7 @@ fun buildDrawerRows(
 }
 
 /**
- * The network ids a selection covers (plans/16 §3.3): null when unscoped (everything); a
+ * The network ids a selection covers: null when unscoped (everything); a
  * DIRECT/BOUNCER_CHILD id covers only itself; a BOUNCER_ROOT id covers the root plus all its
  * children. Shared by [scopeRows] and the title connectivity cue so "what the scoped list shows"
  * and "which sockets the scoped title reports on" can never disagree.
@@ -127,7 +127,7 @@ fun scopeNetworkIds(
 }
 
 /**
- * Filter the unified chat list by the selected network (plans/16 §3.3):
+ * Filter the unified chat list by the selected network:
  * null = all rows (identity); a DIRECT/BOUNCER_CHILD id filters to that network; a BOUNCER_ROOT
  * id includes the root plus all its children's rows.
  */

@@ -74,7 +74,7 @@ internal fun chatListSyncIndicators(
     (bufferId to indicator).takeIf { indicator != ChatListSyncIndicator.NONE }
 }.toMap()
 
-/** Single UI state for the chat list screen. See plans/07 + plans/16 §3.4. */
+/** Single UI state for the chat list screen. */
 data class ChatListState(
     val rows: List<ChatListRow> = emptyList(),
     /** Scoped archived rows; all global badges and drawer rollups deliberately exclude these. */
@@ -85,10 +85,10 @@ data class ChatListState(
     val networks: List<NetworkEntity> = emptyList(),
     val loading: Boolean = true,
     val onboardingComplete: Boolean = false,
-    // Round 4 (plans/13 §3.5): global friend/fool sets drive chat-list sectioning.
+    // Round 4: global friend/fool sets drive chat-list sectioning.
     val friends: Set<String> = emptySet(),
     val fools: Set<String> = emptySet(),
-    // Round 5 (plans/16 §3): drawer server selector + scoping.
+    // Round 5: drawer server selector + scoping.
     val selectedNetworkId: Long? = null,
     val drawerRows: List<DrawerRow> = emptyList(),
     val allUnread: Int = 0, // "All chats" unread rollup (non-muted)
@@ -377,7 +377,7 @@ class ChatListViewModel @Inject constructor(
         onOpen(bufferId)
     }
 
-    // -- Round 5: drawer selection + per-network / global connectivity (plans/16 §3.4) --
+    // -- Round 5: drawer selection + per-network / global connectivity --
 
     /** Scope the list to [networkId] (root includes children); null clears the scope. */
     fun selectNetwork(networkId: Long?) = setSelection(networkId)

@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * Trivial [ForegroundBufferTracker]: a single [MutableStateFlow] holding the bufferId currently
  * visible in the UI. Set by [io.github.trevarj.motd.ui.chat.ChatViewModel], read by the
- * notification-suppression logic (plans/05). Replaces WP1's stub.
+ * notification-suppression logic. Replaces WP1's stub.
  */
 @Singleton
 class ForegroundBufferTrackerImpl @Inject constructor() : ForegroundBufferTracker {

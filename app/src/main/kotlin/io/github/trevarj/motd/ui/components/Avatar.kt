@@ -77,8 +77,8 @@ val LocalRemoteAvatars = staticCompositionLocalOf { RemoteAvatarState() }
 
 /**
  * Darkness of the *applied* theme, derived from the resolved background luminance rather than
- * [isSystemInDarkTheme] -- so forced DARK/AMOLED read as dark even when the OS is light (plans/15
- * #22). Used to pick nick-color palettes and on-color contrast across the chat components.
+ * [isSystemInDarkTheme] -- so forced DARK/AMOLED read as dark even when the OS is light.
+ * Used to pick nick-color palettes and on-color contrast across the chat components.
  */
 @Composable
 @ReadOnlyComposable
@@ -119,7 +119,7 @@ fun Avatar(
     account: String? = null,
 ) {
     // Avatars keep their generated/override color even when nick coloring is disabled (an all-gray
-    // avatar column would be unusable, plans/13 confirmed decision #5); avatar() ignores the flag.
+    // avatar column would be unusable, a confirmed design decision); avatar() ignores the flag.
     val style = LocalAvatarStyle.current
     // Hide means hide: return before the sizing Box so this composable reserves no space at all,
     // and so no remote override sneaks an image back in.
@@ -201,7 +201,7 @@ private fun InitialsAvatar(name: String, bg: Color, size: Dp, isChannel: Boolean
     ) {
         Text(
             text = initials(name, isChannel),
-            // Contrast the initials against the (possibly light) nick-color background (plans/15 #23).
+            // Contrast the initials against the (possibly light) nick-color background.
             color = onColorFor(bg),
             fontWeight = FontWeight.SemiBold,
             fontSize = (size.value * 0.4f).sp,

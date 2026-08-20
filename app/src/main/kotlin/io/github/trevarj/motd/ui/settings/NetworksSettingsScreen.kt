@@ -23,7 +23,7 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
-/** Networks category: the per-network list plus the add-network entry (plans/16 §5.2). */
+/** Networks category: the per-network list plus the add-network entry. */
 @Composable
 fun NetworksSettingsScreen(
     onBack: () -> Unit = {},

@@ -10,7 +10,7 @@ const val POPULAR_CHANNEL_LIMIT = 100
 const val CHANNEL_SEARCH_LIMIT = 2000
 
 /**
- * Sort listings by user count descending, stable for ties (plans/16 §5.7).
+ * Sort listings by user count descending, stable for ties.
  * Kotlin's [sortedByDescending] is a stable sort, so equal counts keep input order.
  */
 fun sortListings(listings: List<ChannelListing>): List<ChannelListing> =
@@ -60,7 +60,7 @@ fun shouldAutoFetchPopularChannels(
         !isRoot
 
 /**
- * Resolve the LIST arguments for a fetch (plans/16 §5.7).
+ * Resolve the LIST arguments for a fetch.
  *
  * A non-blank [query] fetches with a `*query*` substring mask and no min-users floor. A blank
  * query fetches the busiest channels ([DEFAULT_MIN_USERS] floor, applied server-side only when

@@ -10,7 +10,7 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 
 /**
- * Density-scaled spacing tokens (plans/13 §2.1) provided through [LocalSpacing]. Components read
+ * Density-scaled spacing tokens provided through [LocalSpacing]. Components read
  * `LocalSpacing.current` inside the composable, so density needs no signature changes anywhere.
  * COMFORTABLE is the baseline expressive layout; the other modes preserve their distinct render
  * paradigms while sharing the same shape and touch-target system.

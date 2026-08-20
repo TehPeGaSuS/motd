@@ -31,7 +31,7 @@ internal abstract class IrcModule {
         @Singleton
         fun transportFactory(): TransportFactory =
             // wsUrl/proxy are ignored by the pure-JVM fallback; the app builds a WSS- and
-            // proxy-aware AppTransportFactory per network (plans/19 §3.3/§3.4, plans/20 Phase 1).
+            // proxy-aware AppTransportFactory per network.
             TransportFactory { host, port, tls, _, _ -> OkioLineTransport(host, port, tls) }
     }
 }

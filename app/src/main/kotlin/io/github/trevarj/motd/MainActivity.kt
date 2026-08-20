@@ -258,7 +258,7 @@ class MainActivity : ComponentActivity(), SystemBarThemeHost {
 
     /**
      * Start the persistent-socket foreground service when delivery mode is PERSISTENT_SOCKET and
-     * at least one auto-connect network exists (plans/05). Under UNIFIED_PUSH the socket stays
+     * at least one auto-connect network exists. Under UNIFIED_PUSH the socket stays
      * down and pushes drive delivery, so we skip it.
      */
     private fun maybeStartForegroundService() {

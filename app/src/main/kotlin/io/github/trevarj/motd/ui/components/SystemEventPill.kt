@@ -37,7 +37,7 @@ data class SystemEvent(val text: String)
 /**
  * Centered pill summarizing a consecutive run of system events. A single event shows its text; a
  * run collapses to a summary ("3 joined · 1 left") that expands inline on tap to list each line
- * (plans/07). Lines remain lazy until expansion, while content refreshes keep the user's current
+ *. Lines remain lazy until expansion, while content refreshes keep the user's current
  * expanded/collapsed choice.
  */
 @Composable

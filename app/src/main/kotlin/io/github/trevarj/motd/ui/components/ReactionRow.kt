@@ -167,7 +167,7 @@ private fun ReactionChipView(chip: ReactionChip, isSelf: Boolean, onClick: () ->
         androidx.compose.foundation.layout.Row(
             // Compact chip: a fixed short height keeps reactions snug under the message instead of
             // the 48dp minimumInteractiveComponentSize that ballooned the row; the tap target stays
-            // usable via the chip's own horizontal/vertical padding (plans/15 #24).
+            // usable via the chip's own horizontal/vertical padding.
             modifier = Modifier
                 .testTag("chat_reaction_chip_${chip.emoji}")
                 // Paint-only scale: layout keeps the settled size throughout the overshoot.

@@ -74,7 +74,7 @@ data class IrcClientConfig(
     /** Extra caps to request beyond the built-in tiers (rarely needed). */
     val extraCaps: Set<String> = emptySet(),
     /**
-     * Opt-in IRC-over-WebSocket transport (plans/19 §3.3). When non-null (e.g.
+     * Opt-in IRC-over-WebSocket transport. When non-null (e.g.
      * `wss://bnc.example.com:443/`) the connection is tunneled over a WebSocket to that URL to
      * blend with ordinary HTTPS; when null the default TCP/TLS line transport is used. TLS,
      * hostname verification, and cert pinning still key on the WS URL's real host/port.

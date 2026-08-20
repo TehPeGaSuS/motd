@@ -14,7 +14,7 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
  * preserves its input order.
  *
  * Note: QUERY `displayName` is the nick today (`ensureQueryBuffer`); if display renaming ever
- * lands, classification should switch to the underlying buffer name (plans/13 Risks §9).
+ * lands, classification should switch to the underlying buffer name.
  */
 data class ChatListSections(
     val pinned: List<ChatListRow>,

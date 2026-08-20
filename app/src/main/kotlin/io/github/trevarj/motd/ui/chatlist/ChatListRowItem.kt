@@ -170,7 +170,7 @@ internal fun chatListPreviewSender(
  * Pinned rows carry a small inline [Icons.Outlined.PushPin] beside the name (there is no separate
  * "Pinned" section; pinning gives the row global list priority).
  *
- * Round 4 (plans/13 §3.5, Confirmed decision #4): a friend row gets a trailing [Icons.Filled.Star]
+ * Round 4: a friend row gets a trailing [Icons.Filled.Star]
  * plus a quiet raised-surface background behind the display name, layered under the nick color.
  */
 @Composable

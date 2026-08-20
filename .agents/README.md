@@ -13,8 +13,6 @@ into a long runbook.
 - `test/e2e/` — fast isolated headless, physical-device, and exhaustive emulator
   harnesses plus the local ergo/soju bouncer stack.
 - `.github/workflows/` — current CI, smoke, exhaustive E2E, and release behavior.
-- `plans/` — historical design and implementation records. They can explain
-  intent, but must not override current code, tests, or workflows.
 
 Read [`../ARCHITECTURE.md`](../ARCHITECTURE.md) before changing data flow,
 connection ownership, or module boundaries.

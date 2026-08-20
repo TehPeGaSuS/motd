@@ -289,7 +289,7 @@ dependencies {
     implementation(libs.media3.session)
     implementation(libs.media3.datasource)
     implementation(libs.media3.ui)
-    // Explicit for the IRC-over-WebSocket transport (plans/19 §3.3); already present transitively
+    // Explicit for the IRC-over-WebSocket transport; already present transitively
     // via Coil, pinned to the same resolved version in libs.versions.toml so nothing new resolves.
     implementation(libs.okhttp)
     implementation(libs.coroutines.android)
@@ -311,7 +311,7 @@ dependencies {
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.androidx.test.junit)
     androidTestUtil(libs.androidx.test.orchestrator)
-    // Real WebSocket handshake for the WSS transport framing test (plans/19 §3.3).
+    // Real WebSocket handshake for the WSS transport framing test.
     testImplementation(libs.okhttp.mockwebserver)
 }
 

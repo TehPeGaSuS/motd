@@ -320,7 +320,7 @@ fun MotdNavGraph(
         composable<AboutRoute> {
             AboutScreen(onBack = { navController.popBackStack() })
         }
-        // Round 5 (plans/16 §5.1): app-shell / network-management destinations.
+        // Round 5: app-shell / network-management destinations.
         composable<AddNetworkRoute> {
             AddNetworkScreen(
                 onBack = { navController.popBackStack() },

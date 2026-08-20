@@ -13,7 +13,7 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 enum class NetworkRole { DIRECT, BOUNCER_ROOT, BOUNCER_CHILD }
 
 /**
- * Per-network obfuscation transport (plans/19 §3.4, plans/20 Phase 1). `NONE` is the default
+ * Per-network obfuscation transport. `NONE` is the default
  * direct connection. `SOCKS5` dials through a user-supplied SOCKS5 proxy (host/port). `TOR` is a
  * `SOCKS5` shortcut pinned at Orbot's `127.0.0.1:9050`. `EMBEDDED_REALITY` is the in-app
  * sing-box VLESS+REALITY core configured by a pasted share link; the core exposes its own private
@@ -80,10 +80,10 @@ data class NetworkEntity(
      * to rows built in tests/imports — every insert through the repository is ranked.
      */
     val ordering: Int = 0,
-    // Opt-in IRC-over-WebSocket endpoint (plans/19 §3.3). When set (e.g. wss://bnc.example.com:443/)
+    // Opt-in IRC-over-WebSocket endpoint. When set (e.g. wss://bnc.example.com:443/)
     // the connection tunnels over a WebSocket to blend with HTTPS; null uses the TCP/TLS transport.
     val wsUrl: String? = null,
-    // Opt-in obfuscation transport (plans/19 §3.4, plans/20 Phase 1). null/NONE = direct. SOCKS5/TOR
+    // Opt-in obfuscation transport. null/NONE = direct. SOCKS5/TOR
     // dial the connection through a SOCKS5 proxy at proxyHost:proxyPort with remote DNS; TOR pins
     // Orbot's 127.0.0.1:9050. EMBEDDED_REALITY is configured by an opaque VLESS+REALITY share link;
     // the embedded core owns its loopback SOCKS endpoint, so no proxy host/port is persisted for it.

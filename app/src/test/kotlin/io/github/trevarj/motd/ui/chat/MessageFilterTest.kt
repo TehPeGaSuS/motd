@@ -10,7 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import io.github.trevarj.motd.data.prefs.PresenceMode
 
-/** Pure timeline-filter behavior (plans/13 §2.4/§2.5): JPQ visibility, fools HIDE, exemptions. */
+/** Pure timeline-filter behavior: JPQ visibility, fools HIDE, exemptions. */
 class MessageFilterTest {
 
     private fun msg(

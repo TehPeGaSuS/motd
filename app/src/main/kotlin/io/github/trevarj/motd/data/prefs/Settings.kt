@@ -16,7 +16,7 @@ enum class ThemeMode {
     TOKYO_NIGHT,
 }
 
-// Round 4 (plans/13): user-customizable UI settings.
+// Round 4: user-customizable UI settings.
 enum class LayoutDensity { COMPACT, COMFORTABLE, TWO_LINE }
 enum class NickColorPalette { THEME, CLASSIC, VIVID }
 enum class FoolsMode { COLLAPSE, HIDE }
@@ -111,7 +111,7 @@ data class Settings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = true,
     val deliveryMode: DeliveryMode = DeliveryMode.PERSISTENT_SOCKET,
-    // Round 4 (plans/13)
+    // Round 4
     val layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
     val nickColorsEnabled: Boolean = true,
     val nickColorPalette: NickColorPalette = NickColorPalette.THEME,
@@ -148,7 +148,7 @@ data class Settings(
 )
 
 /** Canonical key for friends/fools/override lookups: trimmed + lowercased.
- *  Deliberate simplification of RFC 1459 casemapping (see plans/13 Risks). */
+ *  Deliberate simplification of RFC 1459 casemapping. */
 fun normalizeNick(nick: String): String = nick.trim().lowercase()
 
 /** Compare stored preference entries using one network's advertised IRC identity rules. */
@@ -209,7 +209,7 @@ interface PushPrefs {
 }
 
 /**
- * TOFU cert pins for self-signed / bare-IP TLS bouncers (plans/12). Persists the accepted leaf
+ * TOFU cert pins for self-signed / bare-IP TLS bouncers. Persists the accepted leaf
  * SHA-256 (lowercase hex) per host:port. A pinned host skips CA/hostname validation; a pin mismatch
  * later triggers a change warning. DataStore key `cert_pins` = JSON `{"host:port":"<sha256 hex>"}`.
  */

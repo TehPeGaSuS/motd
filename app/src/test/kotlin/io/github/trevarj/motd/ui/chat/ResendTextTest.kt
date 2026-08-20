@@ -7,7 +7,7 @@ import org.junit.Test
 class ResendTextTest {
 
     @Test fun `ACTION re-prefixes the me marker so it resends as an action`() {
-        // Stored display text has the me marker stripped; retry must restore it (plans/15 #10).
+        // Stored display text has the me marker stripped; retry must restore it.
         assertEquals("/me waves at everyone", resendText(MessageKind.ACTION, "waves at everyone"))
     }
 

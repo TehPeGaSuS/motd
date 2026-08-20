@@ -14,7 +14,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 
 /**
- * Direct-reply / mark-read notification actions (plans/05). The RemoteInput reply is forwarded to
+ * Direct-reply / mark-read notification actions. The RemoteInput reply is forwarded to
  * [ConnectionManager.sendMessage]; the mark-read action to [ConnectionManager.markRead].
  */
 @AndroidEntryPoint

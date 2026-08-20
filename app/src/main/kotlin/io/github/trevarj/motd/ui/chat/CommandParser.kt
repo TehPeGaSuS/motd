@@ -3,12 +3,12 @@ package io.github.trevarj.motd.ui.chat
 /**
  * Pure translation of a composer line into a [ChatCommand]. No side effects, no Android/IRC deps,
  * so it is trivially unit-testable (WP7 acceptance). The ViewModel executes the returned command
- * against [io.github.trevarj.motd.service.ConnectionManager] / the network's client (plans/07).
+ * against [io.github.trevarj.motd.service.ConnectionManager] / the network's client.
  *
  * Lines that do not start with `/` are ordinary messages. A leading `//` escapes to a literal `/`
- * message. `/me` maps to a raw `/me` PRIVMSG (the manager translates it to an ACTION, plans/05).
+ * message. `/me` maps to a raw `/me` PRIVMSG (the manager translates it to an ACTION).
  * Unknown `/cmd` becomes [ChatCommand.RawLine] with the leading slash stripped, sent verbatim via
- * `IrcMessage.parse` (plans/07).
+ * `IrcMessage.parse`.
  *
  * Commands that address a channel accept the target implicitly: run them in the channel's own
  * conversation and the ViewModel supplies the buffer's target, matching how `/topic` and `/kick`
@@ -57,19 +57,19 @@ sealed interface ChatCommand {
      */
     data class Mode(val target: String?, val modes: String?) : ChatCommand
 
-    /** `/away [message]` — away with a message; `/back` or bare `/away` clears it (plans/16 §5.9). */
+    /** `/away [message]` — away with a message; `/back` or bare `/away` clears it. */
     data class Away(val message: String?) : ChatCommand
 
-    /** `/whois nick` — open the nick sheet with WHOIS details (plans/16 §5.9). */
+    /** `/whois nick` — open the nick sheet with WHOIS details. */
     data class Whois(val nick: String) : ChatCommand
 
-    /** `/list` — open the channel browser for the current network (plans/16 §5.9). */
+    /** `/list` — open the channel browser for the current network. */
     data object ChannelList : ChatCommand
 
-    /** `/kick nick [reason]` — kick from the current channel (plans/16 §5.9). */
+    /** `/kick nick [reason]` — kick from the current channel. */
     data class Kick(val nick: String, val reason: String?) : ChatCommand
 
-    /** `/ban nick` — MODE +b nick!*@* on the current channel (plans/16 §5.9). */
+    /** `/ban nick` — MODE +b nick!*@* on the current channel. */
     data class Ban(val nick: String) : ChatCommand
 
     /** `/invite nick [channel]` — null channel invites to the current channel. */

@@ -11,8 +11,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * Covers the plans/15 #5 (buffer-scoped reactions, no IN-clause overflow) and #10 (failed-row
- * delete) DAO additions.
+ * Covers the buffer-scoped reactions (no IN-clause overflow) and failed-row delete DAO
+ * additions.
  */
 @RunWith(RobolectricTestRunner::class)
 class ReactionAndDeleteDaoTest {

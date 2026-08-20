@@ -29,7 +29,7 @@ enum class DayLabelKind { TODAY, YESTERDAY, DATE }
 
 /**
  * Localized day-separator chip built from a timestamp: resolves Today/Yesterday from string
- * resources (plans/15 #25) and otherwise a medium date. Prefer this over [DaySeparator] with a
+ * resources and otherwise a medium date. Prefer this over [DaySeparator] with a
  * pre-formatted [String] so the label follows the device locale.
  */
 @Composable
@@ -104,7 +104,7 @@ fun NewMessagesDivider(label: String, modifier: Modifier = Modifier) {
 }
 
 // Hoisted formatter: SimpleDateFormat is not thread-safe, so guard access. Rebuilt only when the
-// default locale changes (plans/15 #28 — avoid per-row allocation on recomposition).
+// default locale changes.
 private var cachedLocale: Locale? = null
 private var cachedDateFormat: SimpleDateFormat? = null
 
@@ -121,7 +121,7 @@ private fun mediumDateFormat(): SimpleDateFormat {
 /**
  * Classify [timeMs] relative to [now] into Today / Yesterday / a medium date, comparing whole
  * calendar days (not a fixed 24h delta) so the boundary is correct across DST transitions
- * (plans/15 #28). The [DayLabelKind.DATE] pair carries the pre-formatted fallback string.
+ *. The [DayLabelKind.DATE] pair carries the pre-formatted fallback string.
  */
 fun dayLabelKind(timeMs: Long, now: Long = System.currentTimeMillis()): Pair<DayLabelKind, String> {
     val msg = Calendar.getInstance().apply { timeInMillis = timeMs }

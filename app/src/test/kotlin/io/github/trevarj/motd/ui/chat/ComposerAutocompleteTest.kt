@@ -18,7 +18,7 @@ class ComposerAutocompleteTest {
         )
 
     @Test fun single_char_token_yields_no_nick_completions() {
-        // "a" is one char and not @-prefixed -> suppressed (plans/15 #30).
+        // "a" is one char and not @-prefixed -> suppressed.
         assertTrue(completions("a").isEmpty())
     }
 

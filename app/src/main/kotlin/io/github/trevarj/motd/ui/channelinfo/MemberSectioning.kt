@@ -65,7 +65,7 @@ fun prefixOrderFrom(prefixModes: List<Pair<Char, Char>>): String =
     else prefixModes.joinToString("") { it.second.toString() }
 
 /**
- * Prefix sections with fools pulled out into a trailing bucket (plans/13 §3.6). Fool members
+ * Prefix sections with fools pulled out into a trailing bucket. Fool members
  * using the network's IRC casemapping are removed from every prefix section and returned separately,
  * sorted case-insensitively. Friends are NOT moved — they stay in their prefix section (they
  * only gain a star on the row). Empty [fools] reproduces the plain [sectionMembers] result.

@@ -692,7 +692,7 @@ interface BufferDao {
     // Delete a buffer and all of its content. messages (and their messages_fts rows via Room's
     // FTS sync triggers) cascade off the buffers->messages FK ON DELETE CASCADE. members and
     // reactions have no FK to buffers, so they are cleared explicitly here in one transaction to
-    // avoid orphaned rows (plans/04 cascade note; verified in DeleteBufferDaoTest).
+    // avoid orphaned rows.
     @Query("DELETE FROM members WHERE bufferId = :id")
     suspend fun deleteMembersForBuffer(id: Long)
 
@@ -1208,7 +1208,7 @@ interface MessageDao {
      * Observe a single local row's server msgid by primary key. Emits null while the row is still
      * pending (own optimistic send not yet echoed) and the durable msgid once the echo promotes it
      * in place. Drives the deferred-reaction queue: a react tapped on a still-pending own message
-     * waits on this flow until its msgid lands, then sends the TAGMSG (plans/15 reactions).
+     * waits on this flow until its msgid lands, then sends the TAGMSG.
      */
     @Query("SELECT msgid FROM messages WHERE id = :id LIMIT 1")
     fun observeMsgid(id: Long): Flow<String?>
@@ -1223,7 +1223,7 @@ interface MessageDao {
 
     /**
      * Newest local self row for [bufferId] matching [text], to collapse an un-labeled echo into a
-     * pending/confirmed-local row (plans/03 echo heuristic). A still-pending row (pendingLabel set)
+     * pending/confirmed-local row (echo heuristic). A still-pending row (pendingLabel set)
      * is a local send awaiting THIS echo, so it matches regardless of the [lo]..[hi] window — its
      * serverTime is a device timestamp and cannot be compared to the server's echo time under clock
      * skew (would otherwise duplicate the self-send). Confirmed rows must fall inside the window so
@@ -1437,7 +1437,7 @@ interface ReactionDao {
     // Buffer-scoped observe with no per-msgid IN(...) list. Scrolling back accumulates >999 loaded
     // msgids, which would overflow SQLite's bind-variable limit in observeFor and crash; scoping by
     // bufferId keeps one stable query and the repository filters to the visible window in memory
-    // (plans/15 #5). A buffer's reaction table is small relative to its message history.
+    //. A buffer's reaction table is small relative to its message history.
     @Query("SELECT * FROM reactions WHERE bufferId = :bufferId")
     fun observeForBuffer(bufferId: Long): Flow<List<ReactionEntity>>
 

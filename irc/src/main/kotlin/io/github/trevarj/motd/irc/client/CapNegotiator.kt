@@ -1,7 +1,7 @@
 package io.github.trevarj.motd.irc.client
 
 /**
- * IRCv3 capability tiers (plans/03). Policy: request every advertised cap from all tiers plus
+ * IRCv3 capability tiers. Policy: request every advertised cap from all tiers plus
  * any config extras; the tier only governs degradation when a cap is absent, which the client
  * handles at runtime.
  */
@@ -59,7 +59,7 @@ internal object CapTiers {
  * Computes the CAP REQ set and splits it into <=400-byte REQ payloads.
  *
  * `draft/event-playback` is only requested when `draft/chathistory` is also advertised
- * (plans/03).
+ *.
  */
 internal object CapNegotiator {
     fun requestSet(advertised: Set<String>, extraCaps: Set<String>): Set<String> {

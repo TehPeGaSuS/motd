@@ -193,7 +193,7 @@ class SettingsViewModel @Inject constructor(
         pushAvailability.refreshNotificationPermission()
     }
 
-    // Round 4 (plans/13): appearance/chat/people settings.
+    // Round 4: appearance/chat/people settings.
     fun setLayoutDensity(density: LayoutDensity) = viewModelScope.launch {
         settingsRepository.setLayoutDensity(density)
     }

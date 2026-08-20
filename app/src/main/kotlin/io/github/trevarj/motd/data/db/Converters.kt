@@ -55,7 +55,7 @@ internal class Converters {
     @TypeConverter
     fun stringToDccTransferState(v: String): DccTransferState = DccTransferState.valueOf(v)
 
-    // Nullable: the obfsMode column is null on legacy/direct rows (plans/20 Phase 1).
+    // Nullable: the obfsMode column is null on legacy/direct rows.
     @TypeConverter
     fun obfsModeToString(v: ObfsMode?): String? = v?.name
 

@@ -90,7 +90,7 @@ class MemberSectioningTest {
         assertEquals(DEFAULT_PREFIX_ORDER, prefixOrderFrom(emptyList()))
     }
 
-    // -- sectionMembersSocial (Round 4, plans/13 §3.6) --
+    // -- sectionMembersSocial (Round 4) --
 
     @Test
     fun `sectionMembersSocial with empty fools reproduces plain sectioning`() {

@@ -14,7 +14,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * Room 1 -> 2 migration (plans/19): adds the nullable `wsUrl` column on `networks`. Verifies the
+ * Room 1 -> 2 migration: adds the nullable `wsUrl` column on `networks`. Verifies the
  * change is non-destructive — pre-existing rows survive and the new column reads NULL — and that a
  * subsequent write can set/read the column.
  */

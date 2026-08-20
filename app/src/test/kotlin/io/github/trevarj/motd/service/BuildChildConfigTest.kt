@@ -103,7 +103,7 @@ class BuildChildConfigTest {
         assertNull(cfg.bouncerNetId)
     }
 
-    // -- WSS transport threading (plans/19 §3.3) ------------------------------
+    // -- WSS transport threading ------------------------------
 
     @Test
     fun `direct network threads its own wsUrl into the config`() {

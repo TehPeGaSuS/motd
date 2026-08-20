@@ -36,7 +36,7 @@ interface NetworkRepository {
      */
     suspend fun reorderNetworks(orderedIds: List<Long>)
 
-    // Round 5 (plans/16): point reads for the network-management screens.
+    // Round 5: point reads for the network-management screens.
     /** Point read (drives NetworkSettings/Bouncer screens; delegates to NetworkDao.byId). */
     suspend fun networkById(id: Long): NetworkEntity?
 
@@ -141,7 +141,7 @@ interface MessageRepository {
     /**
      * Suspend until the local row [id] carries a durable server msgid, or [timeoutMs] elapses.
      * Returns the msgid, or null on timeout / missing row. Used to defer a reaction tapped on a
-     * still-pending own message until its echo lands (plans/15 reactions).
+     * still-pending own message until its echo lands.
      */
     suspend fun awaitMsgid(id: Long, timeoutMs: Long): String?
     suspend fun countNewerThan(

@@ -14,7 +14,7 @@ import java.time.Instant
 import java.time.format.DateTimeParseException
 
 /**
- * Maps an inbound [IrcMessage] to a domain [IrcEvent] (plans/02 mapping table).
+ * Maps an inbound [IrcMessage] to a domain [IrcEvent].
  *
  * Stateful only for NAMES accumulation (353 lines collected until 366). Everything else is a
  * pure function of the message plus the current self-nick / isupport passed in from the client.

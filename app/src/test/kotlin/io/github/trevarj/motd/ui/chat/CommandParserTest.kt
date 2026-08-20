@@ -94,7 +94,7 @@ class CommandParserTest {
         assertEquals(ChatCommand.None, parseCommand("/"))
     }
 
-    // --- Round 5 (plans/16 §5.9) ---
+    // --- Round 5 ---
 
     @Test fun away_with_and_without_message() {
         assertEquals(ChatCommand.Away("brb lunch"), parseCommand("/away brb lunch"))

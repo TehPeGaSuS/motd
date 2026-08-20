@@ -25,7 +25,7 @@ import javax.net.ssl.X509KeyManager
 import javax.net.ssl.X509TrustManager
 
 /**
- * One persisted STS policy per host (plans/03): pins a TLS port and a `until` expiry (epoch ms).
+ * One persisted STS policy per host: pins a TLS port and a `until` expiry (epoch ms).
  * Stored as JSON via the DataStore STS accessor.
  */
 @Serializable
@@ -73,7 +73,7 @@ class StsPolicyStore(private val prefs: DataStoreSettingsRepository) {
 /**
  * App-side [TransportFactory] wrapping [OkioLineTransport]. For TLS it always builds an
  * [SSLContext] pairing the optional Android KeyChain client-cert [KeyManager] (SASL EXTERNAL) with
- * a per-connection [PinningTrustManager] for TOFU leaf pinning (plans/12). It also rewrites
+ * a per-connection [PinningTrustManager] for TOFU leaf pinning. It also rewrites
  * (port, tls) to satisfy any live STS policy before connecting.
  *
  * Certificate and STS policy reads are resolved suspendingly before this synchronous transport
@@ -90,7 +90,7 @@ class AppTransportFactory(
      *  layer publish a TOFU prompt even though IrcClient flattens the failure into a state string. */
     private val onCertUntrusted: (CertUntrustedException) -> Unit = {},
     /**
-     * Optional SOCKS5 proxy to tunnel through (plans/19 §3.4, plans/20 Phase 1). Built per-network
+     * Optional SOCKS5 proxy to tunnel through. Built per-network
      * by [ConnectionManagerImpl] from the row's obfsMode/proxyHost/proxyPort and captured here (like
      * [clientCertAlias]) so it need not thread through IrcClient. STS/pinning/hostname logic is
      * untouched: it still keys on the REAL host:port, which the proxy resolves and reaches remotely.
@@ -120,7 +120,7 @@ class AppTransportFactory(
             return ConfigurationFailureTransport(it)
         }
 
-        // Opt-in IRC-over-WebSocket transport (plans/19 §3.3). When a wsUrl is configured the
+        // Opt-in IRC-over-WebSocket transport. When a wsUrl is configured the
         // physical connection is a WebSocket to that URL instead of a raw TCP/TLS socket; TLS,
         // pinning, and hostname verification still key on the wsUrl's REAL host/port.
         if (!wsUrl.isNullOrBlank()) return createWs(wsUrl)
@@ -223,12 +223,12 @@ internal fun wsEndpoint(wsUrl: String): Pair<String, Int> {
     return host to port
 }
 
-/** Orbot's default local SOCKS5 endpoint, used by the TOR obfs shortcut (plans/19 §3.4). */
+/** Orbot's default local SOCKS5 endpoint, used by the TOR obfs shortcut. */
 const val ORBOT_SOCKS_HOST = "127.0.0.1"
 const val ORBOT_SOCKS_PORT = 9050
 
 /**
- * Build the [Proxy] a network row's obfuscation config implies (plans/19 §3.4, plans/20 Phase 1),
+ * Build the [Proxy] a network row's obfuscation config implies,
  * or null for a direct connection. Pure so [ConnectionManagerImpl] can resolve it and the unit test
  * can assert the exact [Proxy] built.
  *

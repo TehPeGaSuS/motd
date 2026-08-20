@@ -61,7 +61,7 @@ import io.github.trevarj.motd.ui.settings.SubLabel
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
-/** Stateful entry: wires the ViewModel and drives navigation (plans/16 §5.4). */
+/** Stateful entry: wires the ViewModel and drives navigation. */
 @Composable
 fun AddNetworkScreen(
     onBack: () -> Unit = {},

@@ -57,7 +57,7 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /**
- * Channel browser (plans/16 §5.7). LIST/ELIST-backed, scoped to [networkId].
+ * Channel browser. LIST/ELIST-backed, scoped to [networkId].
  *
  * The busiest channels are auto-fetched on entry. ELIST 'U' is used when available; otherwise
  * the client retains a bounded top set from the LIST stream. Browsing is disabled for an unbound

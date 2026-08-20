@@ -29,7 +29,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withTimeoutOrNull
 
-// --- timeline message filtering (plans/13 §2.4/§2.5) ---
+// --- timeline message filtering ---
 
 /**
  * Behavioral filter spec derived from observed Settings and passed into each repository Pager.

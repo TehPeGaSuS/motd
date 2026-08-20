@@ -2,7 +2,7 @@ package io.github.trevarj.motd.irc.ext
 
 import io.github.trevarj.motd.irc.proto.IrcMessage
 
-/** Builds soju `BOUNCER` command lines (plans/03 soju.im/bouncer-networks). */
+/** Builds soju `BOUNCER` command lines (soju.im/bouncer-networks). */
 internal object BouncerCommands {
     fun listNetworks(): IrcMessage =
         IrcMessage(command = "BOUNCER", params = listOf("LISTNETWORKS"))

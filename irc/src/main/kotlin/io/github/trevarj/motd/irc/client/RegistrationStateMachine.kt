@@ -5,7 +5,7 @@ import io.github.trevarj.motd.irc.proto.Isupport
 import io.github.trevarj.motd.irc.event.IrcEvent
 
 /**
- * Drives IRC registration (plans/02 steps 1-11): optional PASS → CAP LS 302 → CAP REQ/ACK → SASL →
+ * Drives IRC registration (steps 1-11): optional PASS → CAP LS 302 → CAP REQ/ACK → SASL →
  * optional BOUNCER BIND → CAP END → 001/005 → Ready. Message-driven and side-effect free:
  * [start] returns the opening lines; [onMessage] returns [Action]s for each inbound message.
  *
@@ -51,7 +51,7 @@ internal class RegistrationStateMachine(
 
     // Advertised caps from CAP LS: name -> value ("" when valueless).
     private val advertised = LinkedHashMap<String, String>()
-    // ACKed caps, encoded as "name=value" when the LS carried a value (plans/03 sts surfacing).
+    // ACKed caps, encoded as "name=value" when the LS carried a value (sts surfacing).
     private val acked = LinkedHashSet<String>()
     private var requestedBatches = 0
     private var ackedBatches = 0
@@ -345,7 +345,7 @@ internal class RegistrationStateMachine(
         }
     }
 
-    /** Record an ACKed cap, encoding its LS value as `name=value` when present (plans/03). */
+    /** Record an ACKed cap, encoding its LS value as `name=value` when present. */
     private fun recordAcked(cap: String) {
         // ACK may prefix with '-' to drop; ignore those here (unusual during registration).
         val name = cap.removePrefix("-").removePrefix("=").removePrefix("~")

@@ -5,7 +5,7 @@ import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.irc.proto.IrcMessage
 
 /**
- * Parsed WHOIS details for the nick sheet (plans/16 §5.8). Every field is optional because a server
+ * Parsed WHOIS details for the nick sheet. Every field is optional because a server
  * may omit any numeric; the sheet renders only the lines it has.
  */
 data class WhoisInfo(
@@ -23,7 +23,7 @@ data class WhoisInfo(
     val away: Boolean? = null,
 )
 
-/** Nick-sheet state: the target nick plus its WHOIS details once they land (plans/16 §5.8). */
+/** Nick-sheet state: the target nick plus its WHOIS details once they land. */
 data class NickSheetState(
     val nick: String,
     val cached: UserEntity? = null,
@@ -57,7 +57,7 @@ fun mergeUserDetails(nick: String, cached: UserEntity?, whois: WhoisInfo?): Whoi
  * - `330` RPL_WHOISACCOUNT: params = [me, nick, account, "is logged in as"]
  *
  * Returns null when neither a `311` nor a `318` (end-of-WHOIS) is present, i.e. the response does
- * not describe a real WHOIS (plans/16 §5.8 acceptance).
+ * not describe a real WHOIS.
  */
 fun parseWhois(lines: List<IrcMessage>): WhoisInfo? {
     val has311 = lines.any { it.command == "311" }

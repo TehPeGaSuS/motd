@@ -10,8 +10,7 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
    implementation before editing. Existing changes belong to the user unless
    proven otherwise; preserve them and stage only your own work.
 2. Treat current source, Gradle configuration, tests, scripts, and GitHub
-   workflows as authoritative. `plans/` records the original design process and
-   is historical reference material, not a contract.
+   workflows as authoritative.
 3. Read [`ARCHITECTURE.md`](ARCHITECTURE.md) and the task-specific guide linked
    from [`.agents/README.md`](.agents/README.md). Prefer `rg`/`rg --files` when
    locating code.

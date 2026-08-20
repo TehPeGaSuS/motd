@@ -50,7 +50,7 @@ import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 /**
- * Shared nick bottom sheet (plans/16 §5.8), used from the chat timeline and ChannelInfo. Stateless:
+ * Shared nick bottom sheet, used from the chat timeline and ChannelInfo. Stateless:
  * the header shows WHOIS details when available; the moderation block appears only when
  * [canModerate] and the nick is not self (Confirmed #7). Kick/Ban open a confirm dialog.
  */

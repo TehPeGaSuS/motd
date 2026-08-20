@@ -348,7 +348,7 @@ internal fun SettingsNavigationRow(
 }
 
 /**
- * "host:port" plus a role suffix for soju rows (plans/16 §5.2): " · soju" for a BOUNCER_ROOT,
+ * "host:port" plus a role suffix for soju rows: " · soju" for a BOUNCER_ROOT,
  * " · via <root name>" for a BOUNCER_CHILD (root name resolved from [all]).
  */
 @Composable

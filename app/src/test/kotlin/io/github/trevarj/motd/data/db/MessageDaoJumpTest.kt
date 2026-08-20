@@ -10,7 +10,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/** DAO index math for search deep-jump (plans/11 §C, contract in plans/10). */
+/** DAO index math for search deep-jump. */
 @RunWith(RobolectricTestRunner::class)
 class MessageDaoJumpTest {
     private lateinit var db: MotdDatabase

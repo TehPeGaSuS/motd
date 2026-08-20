@@ -5,7 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Truth table for [shouldPostNotification] (plans/13 §2.6). The `(DM || mention)` gate is applied
+ * Truth table for [shouldPostNotification]. The `(DM || mention)` gate is applied
  * upstream in EventProcessor, so every case here already qualifies as a DM or mention.
  *
  * Precedence: already-read > foreground > mute > fool; friend status never bypasses a mute.

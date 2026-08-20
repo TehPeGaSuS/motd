@@ -47,12 +47,12 @@ data class ChannelInfoUiState(
     val memberCount: Int? = null,
     val rosterState: RosterLoadState = RosterLoadState.NOT_LOADED,
     val hasStaleMembers: Boolean = false,
-    // Round 4 (plans/13 §3.6): global friend/fool sets. Fools are pulled into their own section.
+    // Round 4: global friend/fool sets. Fools are pulled into their own section.
     val foolMembers: List<MemberEntity> = emptyList(),
     val friends: Set<String> = emptySet(),
     val fools: Set<String> = emptySet(),
     val identityRules: IrcIdentityRules = IrcIdentityRules(),
-    // Round 5 (plans/16 §5.8): true when the viewer holds op in this channel (moderation gate).
+    // Round 5: true when the viewer holds op in this channel (moderation gate).
     val canModerate: Boolean = false,
     // Fuzzy member search. When [searchResults] is non-null the list renders a flat ranked set
     // instead of the prefix sections; null (query blank) means sectioned mode.
@@ -332,7 +332,7 @@ class ChannelInfoViewModel @Inject constructor(
 
     /**
      * Queue a "$nick: " prefill on the current buffer's composer draft, then [onDone] (pops back
-     * to the chat). ChatScreen reads it via [ComposerDraftStore.consume] on re-entry (plans/11 §A).
+     * to the chat). ChatScreen reads it via [ComposerDraftStore.consume] on re-entry.
      */
     fun mentionMember(nick: String, onDone: () -> Unit) {
         state.value.buffer?.let { draftStore.push(it.id, "$nick: ") }
@@ -365,7 +365,7 @@ class ChannelInfoViewModel @Inject constructor(
         dismissNickSheet()
     }
 
-    // --- nick sheet + whois (plans/16 §5.8) ---
+    // --- nick sheet + whois ---
 
     private val _nickSheet = MutableStateFlow<NickSheetState?>(null)
     val nickSheet: StateFlow<NickSheetState?> = _nickSheet
@@ -411,7 +411,7 @@ class ChannelInfoViewModel @Inject constructor(
         _nickSheet.value = null
     }
 
-    // --- moderation executors (plans/16 §5.8) ---
+    // --- moderation executors ---
 
     private val _toolEvents = MutableSharedFlow<ChannelToolEvent>(extraBufferCapacity = 4)
     val toolEvents: SharedFlow<ChannelToolEvent> = _toolEvents.asSharedFlow()

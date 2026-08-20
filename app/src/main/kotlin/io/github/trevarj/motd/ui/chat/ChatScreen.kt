@@ -296,7 +296,7 @@ fun ChatScreen(
     // /msg and /query resolve-or-create a QUERY buffer via the VM, then navigate to it.
     onOpenBuffer: (Long) -> Unit = {},
     onOpenAudioOrigin: (AudioPlaybackOrigin) -> Unit = {},
-    // Round 5 (plans/16): /list opens the channel browser. Body lands in WP-V3.
+    // Round 5: /list opens the channel browser. Body lands in WP-V3.
     onOpenChannelList: (Long) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
     voiceViewModel: VoiceMessageViewModel = hiltViewModel(),
@@ -396,14 +396,14 @@ fun ChatScreen(
     // divider: settled-at-bottom mark-read would otherwise consume the arriving backlog before the
     // corrected position (and its divider) lands. Bounded on the ViewModel side.
     val viewportReadHold by viewModel.viewportReadHold.collectAsStateWithLifecycle()
-    // Read marker frozen on entry so the "New messages" divider doesn't flash away (plans/15 #2).
+    // Read marker frozen on entry so the "New messages" divider doesn't flash away.
     val unreadEntrySnapshot by viewModel.unreadEntrySnapshot.collectAsStateWithLifecycle()
     // Live read marker drives the FAB unread badge so it clears as messages are read (not on exit).
     val localReadAnchor by viewModel.localReadAnchor.collectAsStateWithLifecycle()
     val rawNewestAnchor by viewModel.rawNewestAnchor.collectAsStateWithLifecycle()
     val composerDraft by viewModel.composerDraft.collectAsStateWithLifecycle()
     val outgoingFlight by viewModel.outgoingFlight.collectAsStateWithLifecycle()
-    // Timeline behavioral settings collected separately from ChatState (plans/13 §2.5).
+    // Timeline behavioral settings collected separately from ChatState.
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val hiddenFoolsRevealed by viewModel.hiddenFoolsRevealed.collectAsStateWithLifecycle()
     val contentPreviews by viewModel.contentPreviews.collectAsStateWithLifecycle()
@@ -415,7 +415,7 @@ fun ChatScreen(
     val audioCacheStatuses by viewModel.audioCacheStatuses.collectAsStateWithLifecycle()
     val replyConfig by viewModel.replyConfig.collectAsStateWithLifecycle()
     val historyAvailability by viewModel.historyAvailability.collectAsStateWithLifecycle()
-    // Round 5: nick sheet + replay-safe UI events (plans/16 §5.6/§5.8).
+    // Round 5: nick sheet + replay-safe UI events.
     val nickSheet by viewModel.nickSheet.collectAsStateWithLifecycle()
     val uiEvents by viewModel.uiEvents.collectAsStateWithLifecycle()
     val historySyncStatus by viewModel.historySyncStatus.collectAsStateWithLifecycle()
@@ -555,7 +555,7 @@ fun ChatScreen(
         diagnostics = viewModel.diagnostics,
     )
 
-    // Nick sheet (plans/16 §5.8): actions render immediately; whois fills in when it lands.
+    // Nick sheet: actions render immediately; whois fills in when it lands.
     nickSheet?.let { sheet ->
         val norm = identityRules::normalize
         val myNick = (state.connState as? IrcClientState.Ready)?.nick
@@ -733,7 +733,7 @@ fun ChatContent(
     onJumpUnresolved: (Long) -> Unit = {},
     onReresolveJump: (Long) -> Unit = {},
     onReresolveInitial: (ChatPositionTarget) -> Unit = {},
-    // Round 5 (plans/16 §5.6/§5.8): SERVER-buffer raw-send + nick sheet plumbing.
+    // Round 5: SERVER-buffer raw-send + nick sheet plumbing.
     isServerBuffer: Boolean = false,
     onSenderClick: (String) -> Unit = {},
     uiEvent: QueuedChatUiEvent? = null,
@@ -808,8 +808,8 @@ fun ChatContent(
         traceBufferId?.let { AutoFollowTrace.nextSessionId() }
     }
     val scope = rememberCoroutineScope()
-    // Expanded fool rows (plans/13 §2.4): keyed by MessageEntity.id, expand-only for the session.
-    // Ephemeral by design (lost on config change; accepted per plans/13 Risks #6).
+    // Expanded fool rows: keyed by MessageEntity.id, expand-only for the session.
+    // Ephemeral by design (lost on config change; an accepted tradeoff).
     var expandedFools by remember { mutableStateOf(setOf<Long>()) }
     val clipboard: Clipboard = LocalClipboard.current
     val ctx = LocalContext.current
@@ -930,7 +930,7 @@ fun ChatContent(
     var conversationLayoutSheetOpen by rememberSaveable { mutableStateOf(false) }
     var presenceModeSheetOpen by rememberSaveable { mutableStateOf(false) }
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
-    // Global fool expand/collapse toggle (plans/13 §2.4): when true every collapsed fool row in the
+    // Global fool expand/collapse toggle: when true every collapsed fool row in the
     // buffer renders expanded; per-row toggles still override individually via [expandedFools] and
     // [collapsedFools]. Ephemeral per composition, like expandedFools.
     var expandAllFools by remember { mutableStateOf(false) }
@@ -1830,7 +1830,7 @@ fun ChatContent(
         ChatTitleTarget.NICK_DETAILS -> stringResource(R.string.chat_open_nick_details)
         ChatTitleTarget.NONE -> null
     }
-    // Mark read on new-message-while-at-bottom only (plans/07/15 #2): syncing while scrolled up
+    // Mark read on new-message-while-at-bottom only: syncing while scrolled up
     // reading history would clear unread on other clients and destroy the local unread UX. What
     // "at bottom" is allowed to mean is therefore load-bearing, and `atBottom` is the only thing
     // standing between a viewport parked in history and a room-wide MARKREAD: see isAtEffectiveBottom.
@@ -1874,7 +1874,7 @@ fun ChatContent(
     }
     val recentSpeakers = remember(items.itemCount) {
         // Exclude system-event senders and self so recency ranking reflects real conversation
-        // partners (plans/15 #30). Only the newest rows matter for recency, so cap the scan (the list
+        // partners. Only the newest rows matter for recency, so cap the scan (the list
         // is reverse-laid-out, so index 0.. are the newest) to stay cheap on large loaded windows.
         (0 until minOf(items.itemCount, 60))
             .mapNotNull { items.peek(it) }
@@ -2197,7 +2197,7 @@ fun ChatContent(
                         bufferId = state.buffer?.id,
                         conversationName = state.buffer?.displayName,
                         directMessage = state.buffer?.type == BufferType.QUERY,
-                        // Frozen read-marker so the "New messages" divider stays put (plans/15 #2).
+                        // Frozen read-marker so the "New messages" divider stays put.
                         readMarkerTime = unreadEntrySnapshot?.marker,
                         readMarkerLabel = unreadEntryLabel,
                         timelineSeams = timelineSeams,
@@ -2438,7 +2438,7 @@ fun ChatContent(
                     onFieldTextPositioned = { flightAnchors.composerTextOrigin = it },
                     reply = state.replyTo?.let { ComposerReply(it.sender, it.text) },
                     onCancelReply = { onSetReply(null) },
-                    // SERVER buffers send raw commands; hint that in the placeholder (plans/16 §5.6).
+                    // SERVER buffers send raw commands; hint that in the placeholder.
                     // Held blank while a flight is airborne: the ghost is born over the input box
                     // at exactly the field-text origin, and the placeholder appearing beneath the
                     // departing line read as two texts fighting for the same spot.
@@ -2562,7 +2562,7 @@ fun ChatContent(
     }
 
     sheetTarget?.let { target ->
-        // Dismiss with the M3 hide animation, clearing the target only once it settles (plans/15 #31).
+        // Dismiss with the M3 hide animation, clearing the target only once it settles.
         val hideThen: (() -> Unit) -> Unit = { after ->
             scope.launch { sheetState.hide() }.invokeOnCompletion {
                 sheetTarget = null
@@ -2603,7 +2603,7 @@ fun ChatContent(
                 }
             },
             onQuote = {
-                // Append the quote to the existing draft with the cursor at the end (plans/15 #19).
+                // Append the quote to the existing draft with the cursor at the end.
                 hideThen {
                     composerText = appendPrefill(composerText, "> ${target.text}\n")
                     onDraftChanged(composerText.text)
@@ -2730,7 +2730,7 @@ internal inline fun <T> pagingSnapshotItemOrNull(
 
 /**
  * Append [prefill] to [value], inserting a single space when the current text is non-empty and
- * doesn't already end in whitespace. Places the cursor at the end (plans/11 §A).
+ * doesn't already end in whitespace. Places the cursor at the end.
  */
 fun appendPrefill(value: TextFieldValue, prefill: String): TextFieldValue {
     val current = value.text
@@ -2786,7 +2786,7 @@ internal fun composerTextForReply(
 
 /**
  * Header subtitle: typing summary if anyone is typing, else a localized member count for channels.
- * Uses the [Context] typing overload and a plural for the count (plans/15 #25).
+ * Uses the [Context] typing overload and a plural for the count.
  */
 /** A durable explicit-jump failure is the sole source of the not-loaded snackbar. */
 internal fun shouldPresentUnresolvedEntrySnackbar(entryState: EntryPositionState): Boolean =

@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * Foreground-service keeper for the connection subsystem (plans/05). Thin [LifecycleService]:
+ * Foreground-service keeper for the connection subsystem. Thin [LifecycleService]:
  * onStartCommand → startForeground(status) + connectionManager.startAll(); explicit [ACTION_STOP] →
  * stopAll() + stopSelf(). Service removal itself never stops the manager (see the note above the
  * companion). START_STICKY so Android restarts it after a kill while PERSISTENT_SOCKET is in

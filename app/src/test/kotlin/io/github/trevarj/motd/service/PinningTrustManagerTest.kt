@@ -18,7 +18,7 @@ import org.junit.Test
 
 /**
  * [PinningTrustManager.checkServerTrusted] — the code that decides whether CA validation is
- * bypassed (plans/12 TOFU pinning). The pure decision table is covered by [CertDecisionTest]; this
+ * bypassed (TOFU pinning). The pure decision table is covered by [CertDecisionTest]; this
  * covers the glue that reads the presented leaf and either short-circuits on the pin or delegates
  * to the platform trust manager.
  *

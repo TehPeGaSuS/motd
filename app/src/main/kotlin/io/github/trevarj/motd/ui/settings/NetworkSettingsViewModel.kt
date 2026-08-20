@@ -36,9 +36,9 @@ data class NetworkSettingsUiState(
     val entity: NetworkEntity? = null,
     // User-facing display name (alias). Editable so a bouncer root need not show its raw host/IP.
     val displayName: String = "",
-    // Opt-in IRC-over-WebSocket URL (plans/19 §3.3); blank = default TCP/TLS transport.
+    // Opt-in IRC-over-WebSocket URL; blank = default TCP/TLS transport.
     val wsUrl: String = "",
-    // Opt-in obfuscation/proxy (plans/20 Phase 1). NONE = direct; SOCKS5/REALITY reveal host/port;
+    // Opt-in obfuscation/proxy. NONE = direct; SOCKS5/REALITY reveal host/port;
     // TOR pins Orbot's 127.0.0.1:9050. Port kept as a string for text-field editing.
     val obfsMode: ObfsMode = ObfsMode.NONE,
     val proxyHost: String = "",
@@ -49,7 +49,7 @@ data class NetworkSettingsUiState(
     val initialAwayMessage: String = "",
     val isZnc: Boolean = false,
     val zncLogin: ZncLoginForm = ZncLoginForm(),
-    // Round 5 (plans/16 §5.3): live status + autoConnect editing.
+    // Round 5: live status + autoConnect editing.
     val connState: IrcClientState = IrcClientState.Disconnected,
     val autoConnect: Boolean = true,
     val parentName: String? = null,   // root name for a BOUNCER_CHILD's "Managed by" row
@@ -199,7 +199,7 @@ class NetworkSettingsViewModel @Inject constructor(
     }
     fun editObfsLink(link: String) { _state.value = _state.value.copy(obfsLink = link) }
 
-    /** "Route via Tor (Orbot)" shortcut: pin SOCKS5 at 127.0.0.1:9050 (plans/19 §3.4). */
+    /** "Route via Tor (Orbot)" shortcut: pin SOCKS5 at 127.0.0.1:9050. */
     fun useTorShortcut() {
         _state.value = _state.value.copy(
             obfsMode = ObfsMode.TOR,
@@ -319,7 +319,7 @@ class NetworkSettingsViewModel @Inject constructor(
             bouncerNetId = current.bouncerNetId,
             // Blank clears the WSS override, reverting to the default TCP/TLS transport.
             wsUrl = _state.value.wsUrl.trim().ifBlank { null },
-            // Obfuscation/proxy (plans/20 Phase 1).
+            // Obfuscation/proxy.
             obfsMode = _state.value.obfsMode,
             proxyHost = _state.value.proxyHost,
             proxyPort = _state.value.proxyPort.toIntOrNull(),

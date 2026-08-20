@@ -78,7 +78,7 @@ internal fun CompactMessageRow(
     linkPreviewLoading: Boolean = false,
     linkPreviewResolved: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
-    // Normalized nicks known in the current buffer; @mentions of these are colored (plans/17).
+    // Normalized nicks known in the current buffer; @mentions of these are colored.
     knownNicks: Set<String> = emptySet(),
     identityRules: IrcIdentityRules = IrcIdentityRules(),
     onLongPress: () -> Unit = {},

@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.first
 
 /**
  * Starts the foreground service on BOOT_COMPLETED when delivery mode is PERSISTENT_SOCKET and at
- * least one network exists (plans/05). API 34+ permits FGS start from BOOT_COMPLETED for
+ * least one network exists. API 34+ permits FGS start from BOOT_COMPLETED for
  * specialUse; a [ForegroundServiceStartNotAllowedException] is swallowed (app connects on open).
  */
 @AndroidEntryPoint

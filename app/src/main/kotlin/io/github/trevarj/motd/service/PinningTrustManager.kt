@@ -26,7 +26,7 @@ class CertUntrustedException(
     "Untrusted certificate for $host:$port (sha256=$sha256, changed=$changed)",
 )
 
-/** Outcome of the pure TOFU pin decision (plans/12). */
+/** Outcome of the pure TOFU pin decision. */
 enum class CertDecision { TRUST, PROMPT, CHANGED }
 
 /**
@@ -45,7 +45,7 @@ fun certDecision(pinned: String?, presentedSha256: String, caValid: Boolean): Ce
     }
 
 /**
- * Per-connection [X509TrustManager] realizing TOFU leaf pinning (plans/12). Built by
+ * Per-connection [X509TrustManager] realizing TOFU leaf pinning. Built by
  * [AppTransportFactory] with the host/port and the pin looked up at create() time.
  *
  * checkServerTrusted:
@@ -56,7 +56,7 @@ fun certDecision(pinned: String?, presentedSha256: String, caValid: Boolean): Ce
  *    on success accept (normal CA-valid path — hostname is still enforced upstream when unpinned).
  */
 // CustomX509TrustManager: a custom trust manager is intentional and required for TOFU leaf pinning
-// (plans/12). Unpinned hosts are NOT weakened — validation is delegated to the platform default
+//. Unpinned hosts are NOT weakened — validation is delegated to the platform default
 // X509TrustManager; only an explicit user-pinned leaf fingerprint bypasses CA/path checks, which is
 // a strictly stronger guarantee. It never blindly accepts certificates.
 @SuppressLint("CustomX509TrustManager")

@@ -48,7 +48,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Final notification suppression decision (plans/13 §2.6). Pure and unit-tested.
+ * Final notification suppression decision. Pure and unit-tested.
  *
  * Precedence (highest first): foreground buffer suppresses everything; an explicit buffer mute
  * always wins over friend status; a fool sender is fully silenced. The `(DM || mention)` gate lives upstream in
@@ -64,7 +64,7 @@ fun shouldPostNotification(
 ): Boolean = !alreadyRead && !foreground && !muted && !senderIsFool
 
 /**
- * MessagingStyle notifications (plans/05). Owns the notification channels and applies the final
+ * MessagingStyle notifications. Owns the notification channels and applies the final
  * suppression rules that need Android state (muted buffer, foregrounded buffer) before posting.
  * Implements [MessageNotifier] (the EventProcessor hook) and hosts the status notification for
  * the foreground service.

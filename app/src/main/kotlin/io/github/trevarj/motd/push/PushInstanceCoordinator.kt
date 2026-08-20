@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * THE UnifiedPush registration trigger (plans/11 §B.2). v1 never called `UnifiedPush.registerApp`;
+ * THE UnifiedPush registration trigger. v1 never called `UnifiedPush.registerApp`;
  * this @Singleton watches the delivery mode and the connectable-network set and reconciles the
  * set of registered UnifiedPush instances (one per connectable network, `instance = networkId`).
  *

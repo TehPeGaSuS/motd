@@ -45,11 +45,11 @@ import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
-/** Quick-reaction row shown at the top of the action sheet (plans/07). */
+/** Quick-reaction row shown at the top of the action sheet. */
 val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢")
 
 /**
- * ~64 common emoji for the "more" grid. No external emoji-picker dependency (plans/07).
+ * ~64 common emoji for the "more" grid. No external emoji-picker dependency.
  */
 val EMOJI_GRID = listOf(
     "👍", "👎", "❤️", "🔥", "😂", "🤣", "😊", "😍",
@@ -77,7 +77,7 @@ fun MessageActionSheet(
     onCopy: () -> Unit,
     onQuote: () -> Unit,
     onShare: () -> Unit,
-    // SERVER buffers have no msgids/targets: reply + reactions are inert and hidden (plans/16 §5.6).
+    // SERVER buffers have no msgids/targets: reply + reactions are inert and hidden.
     isServerBuffer: Boolean = false,
 ) {
     var showGrid by remember { mutableStateOf(false) }
@@ -101,7 +101,7 @@ fun MessageActionSheet(
                 QUICK_REACTIONS.forEach { emoji ->
                     val enabled = reactionEnabled(emoji)
                     Box(
-                        // >=48dp touch target (plans/15 #24).
+                        // >=48dp touch target.
                         modifier = Modifier
                             .minimumInteractiveComponentSize()
                             .alpha(if (enabled) 1f else 0.38f)
@@ -116,7 +116,7 @@ fun MessageActionSheet(
                     modifier = Modifier
                         .testTag("message_more_reactions")
                         .minimumInteractiveComponentSize()
-                        // Expander a11y: label + expanded/collapsed state (plans/15 #31).
+                        // Expander a11y: label + expanded/collapsed state.
                         .semantics {
                             role = Role.Button
                             contentDescription = moreLabel

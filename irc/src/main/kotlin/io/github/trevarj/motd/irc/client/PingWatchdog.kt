@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Liveness watchdog (plans/02).
+ * Liveness watchdog.
  *
  * After [idleBeforePing] of inbound silence the client sends `PING motd-<epoch>`; if no line at
  * all arrives within a further [pingGrace], the connection is considered dead and [onDead] fires

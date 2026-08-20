@@ -40,9 +40,9 @@ class TransportConfigurationException(message: String) : IllegalStateException(m
 
 fun interface TransportFactory {
     /**
-     * Build a transport for [host]:[port]. When [wsUrl] is non-null (plans/19 §3.3) the factory may
+     * Build a transport for [host]:[port]. When [wsUrl] is non-null the factory may
      * return an IRC-over-WebSocket transport dialing that URL instead of a raw TCP/TLS socket; the
-     * pure-JVM default factory ignores it. When [proxy] is non-null (plans/19 §3.4, plans/20 Phase 1)
+     * pure-JVM default factory ignores it. When [proxy] is non-null
      * the connection is dialed through a SOCKS5 proxy with remote DNS; the pure-JVM default ignores
      * it too. TLS/pinning still key on the real [host]:[port] through the tunnel.
      */
@@ -63,7 +63,7 @@ class OkioLineTransport(
      */
     private val verifyHostname: Boolean = true,
     /**
-     * Optional SOCKS5 proxy to tunnel the connection through (plans/19 §3.4, plans/20 Phase 1).
+     * Optional SOCKS5 proxy to tunnel the connection through.
      * When non-null the raw socket is a `Socket(proxy)` and the destination is dialed *unresolved*
      * so DNS is performed remotely by the proxy — Java's SOCKS impl resolves locally otherwise,
      * which both leaks the destination and breaks `.onion`. TLS is layered on top exactly as on the

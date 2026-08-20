@@ -3,7 +3,7 @@ package io.github.trevarj.motd.irc.ext
 import io.github.trevarj.motd.irc.proto.IrcMessage
 
 /**
- * Builds read-marker request lines (plans/03). `MARKREAD` is the IRCv3 `draft/read-marker` command;
+ * Builds read-marker request lines. `MARKREAD` is the IRCv3 `draft/read-marker` command;
  * soju's older `soju.im/read` extension reuses the same `timestamp=<ISO>` param shape under the
  * `READ` command, so the builders are parameterized by command name.
  */

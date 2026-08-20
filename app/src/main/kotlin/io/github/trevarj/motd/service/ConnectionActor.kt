@@ -89,7 +89,7 @@ enum class WakeCause {
 }
 
 /**
- * Drives one physical socket (plans/05). Owns the reconnect loop with exponential backoff, the
+ * Drives one physical socket. Owns the reconnect loop with exponential backoff, the
  * per-connection EventProcessor collector, catch-up, and network-callback fast-retry/fast-fail.
  *
  * Backoff: base 2s, ×2^attempt, cap 90s, jitter 0.7–1.3. The attempt counter resets to 0 after

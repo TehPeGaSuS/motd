@@ -6,7 +6,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-// Single app database. Destructive fallback is deliberately NOT configured (see plans/04) so schema
+// Single app database. Destructive fallback is deliberately NOT configured so schema
 // drift surfaces in review instead of wiping real user data/history; schema changes ship a proper
 // Migration instead.
 @Database(
@@ -60,7 +60,7 @@ abstract class MotdDatabase : RoomDatabase() {
 
 /**
  * v1 -> v2: add the nullable `wsUrl` column on `networks` for the opt-in IRC-over-WebSocket
- * transport (plans/19 §3.3). Non-destructive additive change: TEXT, nullable, no default, so all
+ * transport. Non-destructive additive change: TEXT, nullable, no default, so all
  * existing rows keep `wsUrl = NULL` (TCP/TLS) and every message/buffer/history row is preserved.
  */
 val MIGRATION_1_2 = object : Migration(1, 2) {

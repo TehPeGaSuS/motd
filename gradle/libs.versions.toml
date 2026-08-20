@@ -24,8 +24,8 @@ okio = "3.18.1"
 okhttp = "5.4.0"
 coroutines = "1.11.0"
 serialization = "1.11.0"
-# plans/01 pins 2.4.0, but that version was never published to Maven Central
-# (JitPack-only under com.github.UnifiedPush); 2.5.0 is the first Central release.
+# 2.4.0 was never published to Maven Central (JitPack-only under
+# com.github.UnifiedPush); 2.5.0 is the first Central release.
 unifiedpush = "3.3.3"
 junit = "4.13.2"
 turbine = "1.2.1"

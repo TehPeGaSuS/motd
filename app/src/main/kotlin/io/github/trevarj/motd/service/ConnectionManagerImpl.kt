@@ -418,7 +418,7 @@ internal suspend fun attemptChannelPartWrite(
 }
 
 /**
- * Hilt @Singleton connection subsystem (plans/05). Outlives the foreground service — the service
+ * Hilt @Singleton connection subsystem. Outlives the foreground service — the service
  * is merely its keeper. Spawns one [ConnectionActor] per connectable network row (BOUNCER_ROOT
  * gets the root actor; each BOUNCER_CHILD a bound actor copying the root host/SASL with its
  * bouncerNetId; DIRECT one each), reconciles on networkDao changes, and reacts to deliveryMode.
@@ -464,7 +464,7 @@ class ConnectionManagerImpl @Inject constructor(
     // bouncer endpoint + account SASL) without a suspend DB read. Updated on every reconcile.
     @Volatile private var networksById: Map<Long, NetworkEntity> = emptyMap()
 
-    // Sticky in-memory user intent per network (plans/16 §4): true = force-connect,
+    // Sticky in-memory user intent per network: true = force-connect,
     // false = force-disconnect, absent = follow autoConnect. Survives reconcile emissions so a
     // manual disconnect/connect is not undone by the next DB write. Reset by stopAll (not persisted).
     private val userIntents = java.util.concurrent.ConcurrentHashMap<Long, Boolean>()
@@ -618,7 +618,7 @@ class ConnectionManagerImpl @Inject constructor(
      * holds a persisted endpoint (and at least one such client exists). This gates teardown on
      * push actually being armed on all push-eligible networks, so a network still awaiting its
      * endpoint keeps its socket. Non-webpush DIRECT networks are ignored here (documented
-     * limitation — plans/11 risk 6).
+     * limitation).
      */
     private suspend fun maybeStopForPush() {
         if (!shouldApplyDozePushHandoff(
@@ -982,7 +982,7 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     /** Add/remove/restart actors so the live set matches the wanted set derived from [all] rows
-     *  and the sticky user-intent map (plans/16 §4). */
+     *  and the sticky user-intent map. */
     private suspend fun reconcile(all: List<NetworkEntity>) {
         val deletedIds = networksById.keys - all.mapTo(mutableSetOf()) { it.id }
         // Keep a synchronous lookup so buildClient can resolve a child's root bouncer row.
@@ -1460,7 +1460,7 @@ class ConnectionManagerImpl @Inject constructor(
         // Obfuscation/proxy follows the transport endpoint too: a bound child dials the same
         // bouncer endpoint on its OWN socket (and, for EMBEDDED_REALITY, its own libbox core — see
         // resolveTransportProxy), so it inherits the root's proxy CONFIGURATION, never its
-        // connection (plans/20 Phase 1).
+        // connection.
         val endpoint = root ?: row
         val security = prepareTransportSecurity(
             host = config.host,
@@ -1493,7 +1493,7 @@ class ConnectionManagerImpl @Inject constructor(
         return IrcClientConnection(IrcClient(config, factory, scope), proxyResolution.release)
     }
 
-    /** On Ready: persist any STS policy, re-establish bouncer children, then run catch-up (plans/04). */
+    /** On Ready: persist any STS policy, re-establish bouncer children, then run catch-up. */
     private suspend fun onReady(
         row: NetworkEntity,
         client: IrcClient,
@@ -1643,7 +1643,7 @@ class ConnectionManagerImpl @Inject constructor(
         }
     }
 
-    // -- catch-up (plans/04) -------------------------------------------------
+    // -- catch-up -------------------------------------------------
 
     /**
      * Own reconnect catch-up for the lifetime of this exact client. Its caller already waited for
@@ -2322,7 +2322,7 @@ class ConnectionManagerImpl @Inject constructor(
             "marker=${target.anchor.serverTime}:${target.anchor.eventId}"
         }
         // SERVER buffers use "*" as their name, which is not a valid MARKREAD target; the Room
-        // read-marker advance above still runs. Skip the wire send for them (plans/16 §4).
+        // read-marker advance above still runs. Skip the wire send for them.
         if (buffer.type == BufferType.SERVER) return
         val authoritative = target.authoritative ?: return
         val currentRemote = bufferDao.observeById(canonicalBufferId)?.readMarkerTime
@@ -2341,7 +2341,7 @@ class ConnectionManagerImpl @Inject constructor(
         if (settings.settings.first().deliveryMode == DeliveryMode.UNIFIED_PUSH) maybeStopForPush()
     }
 
-    // -- TOFU cert trust (plans/12) -----------------------------------------
+    // -- TOFU cert trust -----------------------------------------
 
     /** Publish a prompt for [networkId], deduping so re-attempts don't stack duplicates. */
     private fun publishCertPrompt(networkId: Long, ex: CertUntrustedException) {
@@ -2867,13 +2867,13 @@ internal suspend fun awaitReadMarkerResponse(
 }
 
 /**
- * Pure wanted-set computation for [ConnectionManagerImpl.reconcile] (plans/16 §4), extracted for
+ * Pure wanted-set computation for [ConnectionManagerImpl.reconcile], extracted for
  * unit tests. A network is wanted when the sticky user intent (if present) or, absent an intent,
  * its `autoConnect` flag is true — and it is not an orphan BOUNCER_CHILD (a child with no parentId
  * has no root row to inherit the bouncer endpoint and credentials from, so it can never dial).
  */
 /**
- * Build the [IrcClientConfig] for one network row (plans/05 §soju bouncer-networks). For a
+ * Build the [IrcClientConfig] for one network row (§soju bouncer-networks). For a
  * BOUNCER_CHILD the physical socket is the *bouncer's*, not the upstream network's: the transport
  * endpoint (host/port/tls) and the account SASL credentials are taken from the resolved [root].
  * soju's pre-welcome BOUNCER BIND path mutates capabilities in a way that can stall on Android's
@@ -2992,7 +2992,7 @@ internal fun isConfigurationFailure(reason: String): Boolean =
         reason.startsWith("connect failed: Embedded REALITY configuration")
 
 /**
- * Network ids parked on the given `host:port` cert endpoint (plans/12, #48). When a TOFU cert is
+ * Network ids parked on the given `host:port` cert endpoint (#48). When a TOFU cert is
  * trusted, the pin is stored keyed by host:port, so every network whose latest untrusted-cert
  * failure targets that same endpoint becomes reconnectable — a soju bouncer root and all its bound
  * children share one physical host:port, so trusting once must reconnect the whole set, not only the

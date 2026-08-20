@@ -178,7 +178,7 @@ private fun Modifier.mentionHighlight(accent: Color): Modifier = drawWithContent
  *
  * Grouping: [showSender] draws the nick-colored name + avatar (own messages omit the name). Own
  * bubbles are right-aligned `primaryContainer`; others left `surfaceContainerHigh`. Corner radii
- * tighten on the grouped inner edge (plans/07).
+ * tighten on the grouped inner edge.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -205,7 +205,7 @@ fun MessageBubble(
     linkPreviewResolved: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
     // Normalized nicks known in the current buffer; @mentions of these in the body are colored with
-    // the nick's own color (plans/17). Empty = no mention coloring.
+    // the nick's own color. Empty = no mention coloring.
     knownNicks: Set<String> = emptySet(),
     identityRules: IrcIdentityRules = IrcIdentityRules(),
     onLongPress: () -> Unit = {},
@@ -220,7 +220,7 @@ fun MessageBubble(
     // settings and construct its own formatter.
     val displayedTime = formattedTime ?: formatTime(timeMs)
     // A shared no-op onClick with a null indication removes the dead ripple on plain taps; long-press
-    // is the only action entry, labeled for TalkBack (plans/15 #31).
+    // is the only action entry, labeled for TalkBack.
     // Density tokens + nick-color scheme flow through CompositionLocals; no signature churn.
     val spacing = LocalSpacing.current
     val nickColors = LocalNickColors.current
@@ -442,7 +442,7 @@ fun MessageBubble(
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
                         // Friend tint: a subtle theme-primary rounded background behind the name,
-                        // layered under the nick color (plans/13 confirmed decision #4).
+                        // layered under the nick color.
                         modifier = if (senderIsFriend) Modifier.friendNickTint() else Modifier,
                     )
                     if (senderIsFriend) {
@@ -474,7 +474,7 @@ fun MessageBubble(
                     onImageClick = onImageClick,
                     onLongPress = onLongPress,
                     // Reserve a 4:3 box until the bitmap lands so rows don't jump the reversed-list
-                    // anchor (plans/15 #34).
+                    // anchor.
                     modifier = Modifier
                         .padding(vertical = 2.dp)
                         .heightIn(max = 280.dp)
@@ -485,7 +485,7 @@ fun MessageBubble(
 
             if (text.isNotBlank()) {
                 // Linkify http(s) URLs so the body is tappable even when the preview fails
-                // (plans/15 #11); LinkAnnotation.Url uses the platform URI open handler. Known-nick
+                //; LinkAnnotation.Url uses the platform URI open handler. Known-nick
                 // @mentions are colored with the nick's own color. Body build is memoized per
                 // (text, mention inputs) so it doesn't re-run every recomposition/scroll frame.
                 val linkColor = if (isSelf || mentionHighlighted || kind == MessageKind.NOTICE) {
@@ -1033,7 +1033,7 @@ private fun Modifier.actionAccentRail(accent: Color): Modifier = drawWithContent
 }
 
 /**
- * TWO_LINE density renderer (plans/13): a compact two-line message row.
+ * TWO_LINE density renderer: a compact two-line message row.
  *  - Line 1: a small avatar, the nick-colored name (friend tint/star preserved), the own-message
  *    sent check ([MessageStatusIcon], own messages only), and the timestamp.
  *  - Line 2: the message body (linkified), plus the reply preview, inline image, link preview, and
@@ -1428,7 +1428,7 @@ internal fun SentIcon(contentColor: Color = MaterialTheme.colorScheme.onSurfaceV
     )
 }
 
-/** Small clock glyph shown next to the timestamp while a message is still sending (plans/15 #21). */
+/** Small clock glyph shown next to the timestamp while a message is still sending. */
 @Composable
 internal fun PendingIcon(contentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
     Icon(
@@ -1464,7 +1464,7 @@ internal fun FailedIcon() {
 
 /**
  * Build an [AnnotatedString] where each http(s) URL in [text] is a tappable [LinkAnnotation.Url]
- * (plans/15 #11) and each @mention of a known nick is colored with that nick's own color. URL
+ * and each @mention of a known nick is colored with that nick's own color. URL
  * boundaries come from [extractUrls], matched left-to-right in the raw text; the runs between URLs
  * get mention coloring via [appendMentionColored]. [mentionColor] returns the nick's color for a
  * known token (matched with the active IRC identity rules) or null for a plain word; when null
@@ -1627,7 +1627,7 @@ internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendMentionColor
 }
 
 /**
- * Subtle friend highlight behind the sender name (plans/13 confirmed decision #4): a low-alpha
+ * Subtle friend highlight behind the sender name: a low-alpha
  * theme-primary rounded pill layered under the nick color. Distinct enough to spot, quiet enough
  * not to fight the nick color or the bubble background.
  */
@@ -1690,7 +1690,7 @@ internal fun ReplyMiniBubble(
 }
 
 /**
- * Format [ms] as a short clock time honoring the device 12/24-hour preference (plans/15 #28). The
+ * Format [ms] as a short clock time honoring the device 12/24-hour preference. The
  * [JavaDateFormat] is hoisted per Compose context via [LocalContext] and rebuilt only when the
  * device setting/locale changes, avoiding a per-row/per-recomposition allocation.
  */

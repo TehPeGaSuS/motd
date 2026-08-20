@@ -7,7 +7,7 @@ import io.github.trevarj.motd.data.prefs.MessageSpacing
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** spacingFor token mapping (plans/13 table 2.1) + the avatar-column invariant. */
+/** spacingFor token mapping + the avatar-column invariant. */
 class SpacingTest {
 
     @Test

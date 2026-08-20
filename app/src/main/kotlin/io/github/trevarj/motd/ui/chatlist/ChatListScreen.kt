@@ -169,7 +169,7 @@ fun ChatListScreen(
     onOpenSettings: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onOpenOnboarding: () -> Unit = {},
-    // Round 5 (plans/16): drawer/network-management pass-throughs.
+    // Round 5: drawer/network-management pass-throughs.
     onOpenNetworkSettings: (Long) -> Unit = {},
     onOpenAddNetwork: () -> Unit = {},
     onOpenChannelList: (Long) -> Unit = {},
@@ -296,7 +296,7 @@ fun ChatListContent(
     onDeleteBuffers: (Collection<ChatListRow>) -> Unit = {},
     onAcceptInvitation: (Long) -> Unit = {},
     onIgnoreInvitation: (Long) -> Unit = {},
-    // Round 5 (plans/16 §3): drawer + scoping. Defaulted so previews stay terse.
+    // Round 5: drawer + scoping. Defaulted so previews stay terse.
     onSelectNetwork: (Long?) -> Unit = {},
     onConnect: (Long) -> Unit = {},
     onDisconnect: (Long) -> Unit = {},
@@ -870,7 +870,7 @@ private fun ChatList(
     // Pinning has global priority, then unpinned friends, recent chats, and collapsed fools.
     // Pin state remains an inline row marker; it does not add a visible section header.
     val sections = sectionChatList(rows, friends, fools)
-    // Fools section is collapsed by default; state is local to the screen (accepted, plans/13).
+    // Fools section is collapsed by default; state is local to the screen (accepted).
     var foolsExpanded by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     // Resolved once so every row in every section shares one placement decision per frame.

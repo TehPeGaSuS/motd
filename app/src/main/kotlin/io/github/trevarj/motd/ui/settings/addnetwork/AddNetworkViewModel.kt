@@ -26,7 +26,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/** The three phases of the add-network flow (plans/16 §5.4). */
+/** The three phases of the add-network flow. */
 enum class AddNetworkPhase { FORM, TESTING, FAILED }
 
 data class AddNetworkUiState(
@@ -64,7 +64,7 @@ data class AddNetworkUiState(
 }
 
 /**
- * Add-network flow (plans/16 §5.4): collect a DIRECT or soju BOUNCER_ROOT network via the shared
+ * Add-network flow: collect a DIRECT or soju BOUNCER_ROOT network via the shared
  * [buildNetworkEntity], run a connect test, and on Ready finish (soju roots jump to the bouncer
  * manager). On failure the user may retry, edit, or "Save anyway" (confirmed decision #4).
  */

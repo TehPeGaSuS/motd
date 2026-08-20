@@ -11,7 +11,7 @@ import javax.inject.Inject
 
 /**
  * Bridges the Hilt-provided [ConnectionManager]'s TOFU cert prompts to the global dialog host in
- * MainActivity (plans/12). Kept minimal: it just exposes the prompt flow and forwards trust/dismiss.
+ * MainActivity. Kept minimal: it just exposes the prompt flow and forwards trust/dismiss.
  */
 @HiltViewModel
 class CertPromptViewModel @Inject constructor(

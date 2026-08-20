@@ -294,9 +294,9 @@ fun MessageList(
     onRejectDccTransfer: (Long) -> Unit = {},
     onRemoveDccTransfer: (Long) -> Unit = {},
     // Normalized nicks known in the current buffer (member list). Drives @mention coloring in the
-    // message bodies (plans/17); passed straight through to each MessageBubble.
+    // message bodies; passed straight through to each MessageBubble.
     knownNicks: Set<String> = emptySet(),
-    // Behavioral settings threaded from viewModel.settings (plans/13 §2.3/§2.4). Style-only
+    // Behavioral settings threaded from viewModel.settings. Style-only
     // concerns (density, nick color) flow through CompositionLocals instead.
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
@@ -308,7 +308,7 @@ fun MessageList(
     // flips a single fool row either way so expand/re-collapse is bidirectional (bug #9).
     foolExpanded: (Long) -> Boolean = { false },
     onToggleFool: (Long) -> Unit = {},
-    // Tapping a non-self sender's name/avatar opens the nick sheet (plans/16 §5.8).
+    // Tapping a non-self sender's name/avatar opens the nick sheet.
     onSenderClick: (String) -> Unit = {},
     onAcceptInvite: (Long) -> Unit = {},
     onDismissInvite: (Long) -> Unit = {},
@@ -345,8 +345,8 @@ fun MessageList(
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
         // Stable keys stop paging invalidations (new message / echo confirm / page load) from
-        // re-anchoring the viewport by index and reusing per-row state across messages (plans/15
-        // #4). Placeholder rows fall back to the position key.
+        // re-anchoring the viewport by index and reusing per-row state across messages.
+        // Placeholder rows fall back to the position key.
         //
         // A seam is drawn INSIDE the newer row's composition, never as its own item(). An extra item
         // would change items.itemCount and shift itemKey, which would in turn break the
@@ -434,7 +434,7 @@ fun MessageList(
                 return@items
             }
 
-            // System-event collapse (plans/15 #15): render one pill on the run's *newest* item and
+            // System-event collapse: render one pill on the run's *newest* item and
             // skip the rest. In a reversed list the newest of a contiguous system run is the item
             // whose just-newer neighbor is not a system event.
             if (isSystemKind(msg.kind)) {
@@ -469,7 +469,7 @@ fun MessageList(
                 return@items
             }
 
-            // Fool COLLAPSE (plans/13 §2.4): render a tap-to-expand placeholder in place of the
+            // Fool COLLAPSE: render a tap-to-expand placeholder in place of the
             // bubble until its id is expanded. HIDE mode is filtered upstream so it never reaches
             // here; system-kind rows are handled above and never fool-treated.
             val isFool = foolsMode == FoolsMode.COLLAPSE &&
@@ -576,7 +576,7 @@ fun MessageList(
             )
         }
 
-        // Append spinner / end-of-history / error affordances (plans/15 #27). This item sits at the
+        // Append spinner / end-of-history / error affordances. This item sits at the
         // top of the reversed list, i.e. visually above the oldest message where APPEND loads more.
         item(key = "append-state", contentType = "loadstate") {
             ChatHistoryFooter(
@@ -1438,7 +1438,7 @@ private fun MessageRow(
                     hasMention = msg.hasMention,
                     senderIsFriend = senderIsFriend,
                     failed = msg.failed,
-                    // Subtle "sending…" state before the 30s failure flip (plans/15 #21).
+                    // Subtle "sending…" state before the 30s failure flip.
                     pending = msg.pendingLabel != null,
                     reply = reply,
                     onReplyClick = if (resolvedReply != null) {
@@ -1553,7 +1553,7 @@ private fun MessageRow(
 }
 
 /**
- * COLLAPSE placeholder for a fool's message (plans/13 §2.4): a dimmed one-line "nick · hidden" row
+ * COLLAPSE placeholder for a fool's message: a dimmed one-line "nick · hidden" row
  * that expands to the full bubble on tap for the rest of the session. Day-separator and read-marker
  * dividers are drawn exactly as [MessageRow] does so grouping boundaries stay intact whether or not
  * the row is expanded.
@@ -1797,7 +1797,7 @@ private fun RetryRow(onRetry: (() -> Unit)?, onDelete: () -> Unit) {
     }
 }
 
-/** One error-tinted, >=48dp-tall tappable label used by [RetryRow] (plans/15 #24). */
+/** One error-tinted, >=48dp-tall tappable label used by [RetryRow]. */
 @Composable
 private fun RetryRowAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
     androidx.compose.foundation.layout.Row(

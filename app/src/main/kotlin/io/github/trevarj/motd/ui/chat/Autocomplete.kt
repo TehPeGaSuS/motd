@@ -81,7 +81,7 @@ fun rankNickCompletions(
 
 /**
  * Replace the token [token] in [text] with [nick], choosing the insertion form: `nick: ` at line
- * start, otherwise `nick ` (plans/07). Returns the new text and the cursor offset after insertion.
+ * start, otherwise `nick `. Returns the new text and the cursor offset after insertion.
  */
 data class CompletionResult(val text: String, val cursor: Int)
 

@@ -1,7 +1,7 @@
 package io.github.trevarj.motd.ui.channelinfo
 
 /**
- * Pure moderation helpers (plans/16 §5.8). No Android/IRC deps, so op-gating and mask building are
+ * Pure moderation helpers. No Android/IRC deps, so op-gating and mask building are
  * unit-testable in isolation.
  */
 

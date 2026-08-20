@@ -3,7 +3,7 @@ package io.github.trevarj.motd.service
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** Pure TOFU pin-decision logic (plans/12): pinned/mismatch/first-use → Trust/Prompt/Changed. */
+/** Pure TOFU pin-decision logic: pinned/mismatch/first-use → Trust/Prompt/Changed. */
 class CertDecisionTest {
 
     private val fp = "a1b2c3"

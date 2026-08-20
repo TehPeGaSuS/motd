@@ -15,7 +15,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * Duplicate-connection prevention (plans/05, plans/16): adding the same server twice must not
+ * Duplicate-connection prevention: adding the same server twice must not
  * insert a second [NetworkEntity] (which would spawn a second actor/socket). Covers the
  * per-role identity key and the idempotent soju-child import.
  */

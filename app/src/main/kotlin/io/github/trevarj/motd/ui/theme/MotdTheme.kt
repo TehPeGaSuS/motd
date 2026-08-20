@@ -163,7 +163,7 @@ fun MotdTheme(
     trueBlack: Boolean = false,
     dynamicColor: Boolean = true,
     followSystem: Boolean = false,
-    // Round 4 (plans/13); all defaulted so existing call sites (incl. previews) stay unchanged.
+    // Round 4; all defaulted so existing call sites (incl. previews) stay unchanged.
     layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
     nickColorsEnabled: Boolean = true,
     nickColorPalette: NickColorPalette = NickColorPalette.THEME,
@@ -239,7 +239,7 @@ fun MotdTheme(
     // rather than synthesized, so a nick is always one of the theme's own colors.
     val nickIdentityPalette = remember(effectivePreset) { themeIdentityPalette(effectivePreset) }
     // Style-only concerns (spacing, nick colors, avatar style) flow through CompositionLocals so
-    // components never receive them as parameters (plans/13 plumbing split).
+    // components never receive them as parameters.
     val appFontFamily = rememberAppFontFamily(fontChoice, customFontFile)
     val typography = remember(uiFontScalePercent, fontChoice, appFontFamily) {
         scaledTypography(uiFontScalePercent, BaseTypography.withFontFamily(appFontFamily))

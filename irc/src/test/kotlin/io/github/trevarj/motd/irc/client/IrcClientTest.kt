@@ -1243,7 +1243,7 @@ class IrcClientTest {
         assertEquals("motd-1700000000000", raws.await().message.params.first())
     }
 
-    // -- LIST / listChannels (plans/16 §5.7) --
+    // -- LIST / listChannels --
 
     @Test
     fun `raw LIST collector subscribes before the request can be sent`() = runTest {

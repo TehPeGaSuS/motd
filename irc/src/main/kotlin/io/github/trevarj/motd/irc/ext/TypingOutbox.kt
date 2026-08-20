@@ -1,7 +1,7 @@
 package io.github.trevarj.motd.irc.ext
 
 /**
- * Throttles outbound `+typing` TAGMSGs (plans/02).
+ * Throttles outbound `+typing` TAGMSGs.
  *
  * At most one TAGMSG per (target, state) per [throttleMs]. "done" is always sent immediately
  * and clears the throttle window for that target (so a fresh "active" afterwards goes out at

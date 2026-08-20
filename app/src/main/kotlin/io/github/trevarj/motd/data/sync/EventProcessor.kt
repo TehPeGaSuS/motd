@@ -86,7 +86,7 @@ internal data class HistoryPageWrite(
 )
 
 /**
- * The sole IRC→Room writer (plans/04 mapping table). Implements [IrcEventSink]: every per-network
+ * The sole IRC→Room writer. Implements [IrcEventSink]: every per-network
  * collector, the catch-up path, the RemoteMediator, the pending-send insert, and the push path
  * funnel through [process] or [persistHistoryPage]. Never writes state from anywhere else.
  *
@@ -2652,7 +2652,7 @@ class EventProcessor @Inject constructor(
         }
     }
 
-    // -- server buffer (plans/16 §5.6) --------------------------------------
+    // -- server buffer --------------------------------------
 
     private suspend fun onStandardReply(
         networkId: Long,
@@ -3413,7 +3413,7 @@ class EventProcessor @Inject constructor(
     ) {
         if (e.isSelf) return
         // Never raise a notification for a SERVER buffer: a motd line containing the user's nick
-        // must not fire a mention (plans/16 §5.6.5).
+        // must not fire a mention.
         if (type == BufferType.SERVER) return
         if (type != BufferType.QUERY && !hasMention) return
         notifier.onCanonicalIncoming(networkId, bufferId, type, hasMention, eventId, e)
@@ -3460,7 +3460,7 @@ class EventProcessor @Inject constructor(
 
     private companion object {
         /**
-         * Informational numerics persisted to the SERVER buffer as SERVER_INFO (plans/16 §5.6.3):
+         * Informational numerics persisted to the SERVER buffer as SERVER_INFO:
          * welcome (001..004), lusers (251..255, 265, 266), motd (375, 372, 376), RPL_AWAY (301),
          * and the WHOIS set (311, 312, 317, 318, 319, 330, 338) as a fallback surface when
          * labeled-response is missing. LIST numerics (321/322/323) are deliberately excluded so a

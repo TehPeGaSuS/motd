@@ -206,7 +206,7 @@ internal fun ImageViewerContent(
                 .testTag(IMAGE_VIEWER_IMAGE_TAG),
         )
 
-        // Loading / error affordances (plans/15 #26).
+        // Loading / error affordances.
         when {
             loadFailed ->
                 Text(
@@ -246,7 +246,7 @@ internal fun ImageViewerContent(
                         )
                     }
                     // MediaStore RELATIVE_PATH is API 29+; pre-29 would need WRITE_EXTERNAL_STORAGE,
-                    // so hide Save there rather than request a legacy permission (plans/15 #26).
+                    // so hide Save there rather than request a legacy permission.
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         IconButton(
                             enabled = !saveInProgress,

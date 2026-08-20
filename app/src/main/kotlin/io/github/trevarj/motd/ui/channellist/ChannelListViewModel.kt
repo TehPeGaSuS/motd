@@ -24,7 +24,7 @@ import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 
 /**
- * Channel-browser UI state (plans/16 §5.7).
+ * Channel-browser UI state.
  *
  * [loaded] distinguishes "fetched, no results" from "not fetched yet". [isRoot] disables
  * browsing for an unbound soju BOUNCER_ROOT (LIST is meaningless on the root connection).

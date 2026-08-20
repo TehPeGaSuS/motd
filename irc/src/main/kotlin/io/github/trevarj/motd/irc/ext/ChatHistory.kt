@@ -22,7 +22,7 @@ object ChatHistorySelectors {
 }
 
 /**
- * Builds `CHATHISTORY` request lines (plans/03). Pure string construction; the client sends the
+ * Builds `CHATHISTORY` request lines. Pure string construction; the client sends the
  * result via `sendLabeled` and reassembles the response batch.
  *
  * Subcommands:

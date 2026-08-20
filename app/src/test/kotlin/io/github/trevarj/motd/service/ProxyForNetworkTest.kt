@@ -10,7 +10,7 @@ import java.net.Proxy
 
 /**
  * [proxyForNetwork] builds the exact [Proxy] a network row's obfuscation config implies
- * (plans/20 Phase 1), leaving the destination UNRESOLVED so DNS is done remotely by the proxy.
+ *, leaving the destination UNRESOLVED so DNS is done remotely by the proxy.
  */
 class ProxyForNetworkTest {
 

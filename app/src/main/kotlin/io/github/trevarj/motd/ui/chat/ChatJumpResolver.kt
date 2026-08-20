@@ -4,7 +4,7 @@ import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 
 /**
- * Resolves a search/deep-jump target to a 0-based reverse-list index (plans/11 §C).
+ * Resolves a search/deep-jump target to a 0-based reverse-list index.
  *
  * The list is reverse-laid-out (index 0 == newest), matching the paging source
  * `ORDER BY serverTime DESC, timelineOrder DESC, id DESC`. [MessageRepository.countNewerThan] returns the strict

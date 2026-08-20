@@ -17,7 +17,7 @@ import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509TrustManager
 
 /**
- * IRC-over-WebSocket transport (plans/19 §3.3). Speaks the IRCv3 `text.ircv3.net` subprotocol:
+ * IRC-over-WebSocket transport. Speaks the IRCv3 `text.ircv3.net` subprotocol:
  * each inbound WS text message is exactly one IRC line (no trailing CRLF), and each outbound line
  * is sent as one WS text message with the CRLF stripped. On the wire this is an ordinary TLS
  * handshake to the bouncer host followed by an HTTP `Upgrade: websocket`, so it blends with HTTPS

@@ -8,7 +8,7 @@ import org.junit.Test
 
 /**
  * Unit tests for the pure wanted-set computation behind [ConnectionManagerImpl.reconcile]
- * (plans/16 §4). Verifies that sticky user intent overrides `autoConnect` in both directions and
+ *. Verifies that sticky user intent overrides `autoConnect` in both directions and
  * that orphan BOUNCER_CHILD rows are excluded.
  */
 class ConnectionIntentsTest {

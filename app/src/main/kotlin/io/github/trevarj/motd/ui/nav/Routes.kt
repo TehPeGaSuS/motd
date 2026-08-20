@@ -31,7 +31,7 @@ import kotlinx.serialization.Serializable
 // Inbound ACTION_SEND: pick the chat that receives the shared payload.
 @Serializable data object SharePickerRoute
 
-// Round 4 (plans/13): manage-nicks screens (one screen, three routes).
+// Round 4: manage-nicks screens (one screen, three routes).
 @Serializable data object FriendsRoute
 @Serializable data object FoolsRoute
 @Serializable data object NickColorsRoute
@@ -48,7 +48,7 @@ data class NotificationTarget(
     val jumpToEventId: Long? = null,
 )
 
-// Round 5 (plans/16): app shell / network management.
+// Round 5: app shell / network management.
 @Serializable data object AddNetworkRoute
 @Serializable data class BouncerNetworksRoute(val rootNetworkId: Long)
 @Serializable data class ChannelListRoute(val networkId: Long)

@@ -45,7 +45,7 @@ fun AutocompletePanel(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        // >=48dp touch target for autocomplete rows (plans/15 #24).
+                        // >=48dp touch target for autocomplete rows.
                         .heightIn(min = 48.dp)
                         .clickable { onPick(candidate) }
                         .padding(horizontal = 16.dp, vertical = 10.dp),

@@ -2,7 +2,7 @@ package io.github.trevarj.motd.irc.ext
 
 /**
  * Tag-escaped `k=v;k2=v2` attribute strings used by soju's BOUNCER and WEBPUSH commands
- * (plans/03). Values use the IRCv3 tag-value escape table.
+ *. Values use the IRCv3 tag-value escape table.
  */
 internal fun renderAttrString(attrs: Map<String, String>): String =
     attrs.entries.joinToString(";") { (k, v) -> "$k=${escapeAttrValue(v)}" }
