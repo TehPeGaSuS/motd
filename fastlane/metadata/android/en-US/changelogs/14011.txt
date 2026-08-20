@@ -1,0 +1,6 @@
+- Sending a message now animates into place, and the pending clock morphs into a delivery check — or into a cross when a send fails.
+- Reactions burst with sparks when one lands on your message.
+- Sync dots in the chat list settle into a check, and the connecting banner arc resolves the same way.
+- Empty lists and the onboarding screen gained animated art.
+- Smoother pinch-to-zoom and panning in the image viewer.
+- All new motion follows your system animation speed setting, including off.
