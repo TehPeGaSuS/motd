@@ -9,11 +9,9 @@ import io.github.trevarj.motd.irc.ext.SearchResultMessage
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.TimelineEventId
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emptyFlow
 
 enum class DeliveryMode { PERSISTENT_SOCKET, UNIFIED_PUSH }
 enum class SendRejectionReason {
@@ -92,10 +90,6 @@ internal fun rosterStateAfterNames(explicitRefreshInFlight: Boolean): RosterLoad
 internal fun rosterStateAfterExplicitRefresh(completed: Boolean): RosterLoadState =
     if (completed) RosterLoadState.LOADED else RosterLoadState.FAILED
 
-private val EMPTY_ROSTER_STATES: StateFlow<Map<Long, RosterLoadState>> = MutableStateFlow(emptyMap())
-private val EMPTY_PRESENCE_STATES: StateFlow<Map<PresenceKey, PresenceState>> = MutableStateFlow(emptyMap())
-private val EMPTY_LAG_STATES: StateFlow<Map<Long, Long?>> = MutableStateFlow(emptyMap())
-private val EMPTY_SELF_AWAY_STATES: StateFlow<Map<Long, String?>> = MutableStateFlow(emptyMap())
 data class ConnectionActivitySnapshot(
     val states: Map<Long, IrcClientState> = emptyMap(),
     val progressing: Map<Long, Boolean> = emptyMap(),
@@ -103,10 +97,8 @@ data class ConnectionActivitySnapshot(
     val historyCatchUpPending: Set<Long> = emptySet(),
 )
 
-private val EMPTY_CONNECTION_ACTIVITY = MutableStateFlow(ConnectionActivitySnapshot())
-
 /**
- * A pending TOFU cert-trust decision surfaced to the UI (plans/12). Published when a TLS handshake
+ * A pending TOFU cert-trust decision surfaced to the UI. Published when a TLS handshake
  * hit an untrusted (self-signed / bare-IP / changed) leaf certificate. [changed] = true means a
  * previously-pinned cert now differs (possible MITM or rotation) and warrants a warning.
  */
@@ -126,12 +118,12 @@ interface ConnectionManager {
     /** Connection state per network row id. */
     val connectionStates: StateFlow<Map<Long, IrcClientState>>
     /** Atomically published connection state, actor liveness, and initial-reconcile readiness. */
-    val connectionActivity: StateFlow<ConnectionActivitySnapshot> get() = EMPTY_CONNECTION_ACTIVITY
-    val rosterStates: StateFlow<Map<Long, RosterLoadState>> get() = EMPTY_ROSTER_STATES
-    val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> get() = EMPTY_PRESENCE_STATES
+    val connectionActivity: StateFlow<ConnectionActivitySnapshot>
+    val rosterStates: StateFlow<Map<Long, RosterLoadState>>
+    val presenceStates: StateFlow<Map<PresenceKey, PresenceState>>
     /** Latest PING/PONG round-trip latency (ms) per network id; null = unknown/disconnected (#34). */
-    val lagStates: StateFlow<Map<Long, Long?>> get() = EMPTY_LAG_STATES
-    val channelJoinOutcomes: Flow<ChannelJoinOutcome> get() = emptyFlow()
+    val lagStates: StateFlow<Map<Long, Long?>>
+    val channelJoinOutcomes: Flow<ChannelJoinOutcome>
 
     /**
      * Our own server-confirmed away state per network id.
@@ -141,7 +133,7 @@ interface ConnectionManager {
      * away set from another bouncer client is only known as "away"). Keys are authoritative,
      * values are best effort. Never updated optimistically.
      */
-    val selfAwayStates: StateFlow<Map<Long, String?>> get() = EMPTY_SELF_AWAY_STATES
+    val selfAwayStates: StateFlow<Map<Long, String?>>
 
     /** Live client for a connected network, null otherwise. */
     fun clientFor(networkId: Long): IrcClient?
@@ -182,7 +174,7 @@ interface ConnectionManager {
      * waiting for whatever the network-wide checkpoint decides to do; a request-level permit
      * interleaves it with any pass already on the wire.
      */
-    suspend fun checkpointHistory(focusBufferId: Long? = null) = Unit
+    suspend fun checkpointHistory(focusBufferId: Long? = null)
 
     /** Accepted means every chunk is durably represented, not necessarily written to the wire. */
     suspend fun sendMessage(
@@ -192,8 +184,7 @@ interface ConnectionManager {
     ): SendAcceptance
 
     /** Retry the same durable row with a new attempt label. */
-    suspend fun retryMessage(eventId: TimelineEventId): SendAcceptance =
-        SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
+    suspend fun retryMessage(eventId: TimelineEventId): SendAcceptance
     suspend fun sendTyping(bufferId: Long, state: String)
     suspend fun sendReact(bufferId: Long, msgid: String, emoji: String)
     /**
@@ -203,45 +194,34 @@ interface ConnectionManager {
     suspend fun joinChannel(networkId: Long, channel: String, key: String? = null)
 
     /** Atomically claim a persisted invitation, connect if needed, then send exactly one JOIN. */
-    suspend fun acceptInvite(messageId: Long) = Unit
+    suspend fun acceptInvite(messageId: Long)
 
     /** Resolve a persisted invitation without joining. */
-    suspend fun dismissInvite(messageId: Long) = Unit
+    suspend fun dismissInvite(messageId: Long)
 
     /** Explicit lazy roster refresh; duplicate callers share the same in-flight request. */
-    suspend fun requestMembers(bufferId: Long, force: Boolean = false) = Unit
+    suspend fun requestMembers(bufferId: Long, force: Boolean = false)
 
     /** Part the buffer's channel; [reason] (from `/part <reason>`) becomes the PART trailing param. */
     suspend fun partChannel(bufferId: Long, reason: String? = null)
 
     /**
      * PART seam used by durable channel-close requests. Returns true only when the connection
-     * boundary confirms that the write reached its live transport. The default keeps existing
-     * test/fake implementations source-compatible; the real manager overrides it with a strict
-     * Ready/transport check.
+     * boundary confirms that the write reached its live transport.
      */
-    suspend fun partChannelForClose(bufferId: Long, reason: String? = null): Boolean = try {
-        partChannel(bufferId, reason)
-        true
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (_: Exception) {
-        false
-    }
+    suspend fun partChannelForClose(bufferId: Long, reason: String? = null): Boolean
 
     /**
      * Write a channel TOPIC command. True means the live transport accepted the write; it does
      * not mean the server authorized or echoed the change. Room is updated only by the IRC echo.
-     * The default is deliberately conservative so lightweight fakes remain disconnected unless
-     * they opt into an accepted write.
      */
-    suspend fun setChannelTopic(bufferId: Long, topic: String): Boolean = false
+    suspend fun setChannelTopic(bufferId: Long, topic: String): Boolean
 
     /**
      * Write an AWAY command. A null/blank [message] is "back". [selfAwayStates] only moves when the
      * server confirms with 305/306, so a write that never reaches the wire cannot desync the state.
      */
-    suspend fun setAway(networkId: Long, message: String? = null) = Unit
+    suspend fun setAway(networkId: Long, message: String? = null)
 
     /** True when this network's live client can run a server-side soju SEARCH right now. */
     fun serverSearchAvailable(networkId: Long): Boolean = clientFor(networkId)?.searchAvailable == true
@@ -274,7 +254,7 @@ interface ConnectionManager {
     suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long
 
     /** Find-or-create the per-network SERVER buffer (name "*", displayName = network name);
-     *  returns bufferId. UI entry for the server-messages timeline (plans/16). */
+     *  returns bufferId. UI entry for the server-messages timeline. */
     suspend fun ensureServerBuffer(networkId: Long): Long
 
     /** Advance the exact local anchor; wire MARKREAD uses an authoritative boundary at/before it. */
@@ -284,7 +264,7 @@ interface ConnectionManager {
      *  No-op unless deliveryMode == UNIFIED_PUSH. Called by MotdPushReceiver.onNewEndpoint. */
     suspend fun evaluatePushMode()
 
-    // -- TOFU cert trust (plans/12) --
+    // -- TOFU cert trust --
 
     /** Pending cert-trust prompts (deduped by networkId). Observed by the global dialog host. */
     val certPrompts: StateFlow<List<CertPrompt>>
