@@ -68,7 +68,7 @@ class ChatListSelectionUiTest {
                     state = state.value,
                     onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
                     onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
-                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
                     onAcceptInvitation = { id ->
                         state.value = state.value.copy(
                             invitations = state.value.invitations.map {
@@ -117,7 +117,7 @@ class ChatListSelectionUiTest {
                     state = ChatListState(rows = listOf(row().copy(displayName = "fool")), fools = setOf("fool"), loading = false),
                     onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
                     onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
-                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
                 )
             }
         }
@@ -139,7 +139,7 @@ class ChatListSelectionUiTest {
                     state = ChatListState(loading = false),
                     onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
                     onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
-                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
                 )
             }
         }
@@ -167,7 +167,7 @@ class ChatListSelectionUiTest {
                     state = state.value,
                     onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
                     onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
-                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
                 )
             }
         }
@@ -192,7 +192,7 @@ class ChatListSelectionUiTest {
                     onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
                     onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
                     onSetArchived = { ids, archived -> archiveCalls += ids.toList() to archived },
-                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
                 )
             }
         }
@@ -224,7 +224,7 @@ class ChatListSelectionUiTest {
                             }
                         }
                     },
-                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
                 )
             }
         }
@@ -267,7 +267,7 @@ class ChatListSelectionUiTest {
                             state.value = state.value.copy(rows = listOf(restored, active), archivedRows = emptyList())
                         }
                     },
-                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
                 )
             }
         }
@@ -302,7 +302,7 @@ class ChatListSelectionUiTest {
                     onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
                     onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
                     onSetArchived = { ids, archived -> archiveCalls += ids.toList() to archived },
-                    onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
                 )
             }
         }

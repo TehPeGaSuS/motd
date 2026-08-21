@@ -337,8 +337,8 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
-    fun joinChannel(networkId: Long, channel: String) = viewModelScope.launch {
-        connectionManager.joinChannel(networkId, channel)
+    fun joinChannel(networkId: Long, channel: String, key: String?) = viewModelScope.launch {
+        connectionManager.joinChannel(networkId, channel, key)
     }
 
     fun acceptInvitation(messageId: Long) = viewModelScope.launch {

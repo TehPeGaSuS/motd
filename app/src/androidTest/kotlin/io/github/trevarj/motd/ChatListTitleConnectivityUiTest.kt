@@ -65,7 +65,7 @@ class ChatListTitleConnectivityUiTest {
                     onOpenSearch = {},
                     onSetPinned = { _, _ -> },
                     onSetMuted = { _, _ -> },
-                    onJoinChannel = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> },
                     onMessageUser = { _, _ -> },
                 )
             }

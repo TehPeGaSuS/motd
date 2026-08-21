@@ -291,7 +291,7 @@ fun ChatListContent(
     onSetPinned: (Collection<Long>, Boolean) -> Unit,
     onSetMuted: (Collection<Long>, Boolean) -> Unit,
     onSetArchived: (Collection<Long>, Boolean) -> Unit = { _, _ -> },
-    onJoinChannel: (Long, String) -> Unit,
+    onJoinChannel: (Long, String, String?) -> Unit,
     onMessageUser: (Long, String) -> Unit,
     onDeleteBuffers: (Collection<ChatListRow>) -> Unit = {},
     onAcceptInvitation: (Long) -> Unit = {},
@@ -655,8 +655,8 @@ fun ChatListContent(
             preselectedNetworkId = state.selectedNetworkId,
             sheetState = sheetState,
             onDismiss = { showSheet = false },
-            onJoinChannel = { networkId, channel ->
-                onJoinChannel(networkId, channel)
+            onJoinChannel = { networkId, channel, key ->
+                onJoinChannel(networkId, channel, key)
                 scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
             },
             onMessageUser = { networkId, nick ->
@@ -1966,7 +1966,7 @@ private fun ChatListContentPreview() {
             ),
             onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
             onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
-            onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+            onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
         )
     }
 }
@@ -1989,7 +1989,7 @@ private fun ChatListEmptyPreview() {
             ),
             onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
             onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
-            onJoinChannel = { _, _ -> }, onMessageUser = { _, _ -> },
+            onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
         )
     }
 }

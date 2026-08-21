@@ -5,7 +5,6 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -23,32 +22,37 @@ class NewConversationSheetUiTest {
         compose.setContent {
             MotdTheme {
                 NewConversationSheetContent(
-                    networks = listOf(
-                        NetworkEntity(
-                            id = 1,
-                            name = "Libera",
-                            role = NetworkRole.DIRECT,
-                            host = "irc.libera.chat",
-                            port = 6697,
-                            nick = "me",
-                            username = "me",
-                            realname = "Me",
+                    networks =
+                        listOf(
+                            NetworkEntity(
+                                id = 1,
+                                name = "Libera",
+                                role = NetworkRole.DIRECT,
+                                host = "irc.libera.chat",
+                                port = 6697,
+                                nick = "me",
+                                username = "me",
+                                realname = "Me",
+                            ),
                         ),
-                    ),
-                    onJoinChannel = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> },
                     onMessageUser = { _, _ -> },
                 )
             }
         }
 
-        val joinBounds = compose.onNodeWithTag("new_conversation_content")
-            .getUnclippedBoundsInRoot()
+        val joinBounds =
+            compose
+                .onNodeWithTag("new_conversation_content")
+                .getUnclippedBoundsInRoot()
 
         compose.onNodeWithTag("new_conversation_message_tab").performClick()
         compose.waitForIdle()
 
-        val messageBounds = compose.onNodeWithTag("new_conversation_content")
-            .getUnclippedBoundsInRoot()
+        val messageBounds =
+            compose
+                .onNodeWithTag("new_conversation_content")
+                .getUnclippedBoundsInRoot()
         assertEquals(joinBounds.bottom - joinBounds.top, messageBounds.bottom - messageBounds.top)
         assertEquals(
             0,
@@ -57,33 +61,48 @@ class NewConversationSheetUiTest {
     }
 
     @Test
-    fun keyboardDone_joinsTheEnteredChannel() {
-        var joined: Pair<Long, String>? = null
+    fun submit_joinsTheEnteredChannelWithItsPassword() {
+        var joined: Triple<Long, String, String?>? = null
         compose.setContent {
             MotdTheme {
                 NewConversationSheetContent(
                     networks = listOf(network()),
-                    onJoinChannel = { networkId, channel -> joined = networkId to channel },
+                    onJoinChannel = { networkId, channel, key ->
+                        joined = Triple(networkId, channel, key)
+                    },
                     onMessageUser = { _, _ -> },
                 )
             }
         }
 
-        val input = compose.onNodeWithTag("new_conversation_input")
-        input.performTextInput("motd")
-        input.performImeAction()
+        compose.onNodeWithTag("new_conversation_input").performTextInput("motd")
+        assertEquals(
+            0,
+            compose.onAllNodesWithTag("new_conversation_password").fetchSemanticsNodes().size,
+        )
+        compose.onNodeWithTag("new_conversation_password_toggle").performClick()
+        compose.onNodeWithTag("new_conversation_password").performTextInput("discarded")
+        compose.onNodeWithTag("new_conversation_password_toggle").performClick()
+        assertEquals(
+            0,
+            compose.onAllNodesWithTag("new_conversation_password").fetchSemanticsNodes().size,
+        )
+        compose.onNodeWithTag("new_conversation_password_toggle").performClick()
+        compose.onNodeWithTag("new_conversation_password").performTextInput("hunter2")
+        compose.onNodeWithTag("new_conversation_submit").performClick()
 
-        compose.runOnIdle { assertEquals(1L to "#motd", joined) }
+        compose.runOnIdle { assertEquals(Triple(1L, "#motd", "hunter2"), joined) }
     }
 
-    private fun network() = NetworkEntity(
-        id = 1,
-        name = "Libera",
-        role = NetworkRole.DIRECT,
-        host = "irc.libera.chat",
-        port = 6697,
-        nick = "me",
-        username = "me",
-        realname = "Me",
-    )
+    private fun network() =
+        NetworkEntity(
+            id = 1,
+            name = "Libera",
+            role = NetworkRole.DIRECT,
+            host = "irc.libera.chat",
+            port = 6697,
+            nick = "me",
+            username = "me",
+            realname = "Me",
+        )
 }
