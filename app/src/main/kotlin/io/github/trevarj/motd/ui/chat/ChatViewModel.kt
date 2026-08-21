@@ -1491,13 +1491,16 @@ class ChatViewModel
                         val rules = identityRules.value
                         val target = rules.normalize(cmd.channels.substringBefore(','))
                         withTimeoutOrNull(30_000L) {
-                            bufferRepository.observeChatList().mapNotNull { rows ->
-                                rows.firstOrNull {
-                                    it.networkId == nid &&
-                                        it.type == BufferType.CHANNEL &&
-                                        rules.normalize(it.displayName) == target
-                                }?.bufferId
-                            }.first()
+                            bufferRepository
+                                .observeChatList()
+                                .mapNotNull { rows ->
+                                    rows
+                                        .firstOrNull {
+                                            it.networkId == nid &&
+                                                it.type == BufferType.CHANNEL &&
+                                                rules.normalize(it.displayName) == target
+                                        }?.bufferId
+                                }.first()
                         }?.let(onOpenBuffer)
                     }
                 }

@@ -40,9 +40,9 @@ import io.github.trevarj.motd.ui.settings.NetworksSettingsScreen
 import io.github.trevarj.motd.ui.settings.NickListKind
 import io.github.trevarj.motd.ui.settings.SettingsScreen
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkScreen
+import io.github.trevarj.motd.ui.settings.bouncer.BouncerNetworksScreen
 import io.github.trevarj.motd.ui.settings.labs.GestureMenuEditorScreen
 import io.github.trevarj.motd.ui.settings.labs.LabsScreen
-import io.github.trevarj.motd.ui.settings.bouncer.BouncerNetworksScreen
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.SharePickerScreen
 import io.github.trevarj.motd.ui.theme.MotdMotion
@@ -388,18 +388,19 @@ private fun ChatListPane(
  * Internal rather than private because the gesture overlay performs its own chat jumps from outside
  * the graph, and a second copy of this would be a second set of rules for the same navigation.
  */
-internal fun NavHostController.openChat(route: ChatRoute, replaceCurrentChat: Boolean) {
+internal fun NavHostController.openChat(
+    route: ChatRoute,
+    replaceCurrentChat: Boolean,
+) {
     navigate(route) {
         if (replaceCurrentChat) popUpTo<ChatRoute> { inclusive = true }
         launchSingleTop = true
     }
 }
 
-private fun AnimatedContentTransitionScope<NavBackStackEntry>.isChatTarget(): Boolean =
-    isChatRoutePattern(targetState.destination.route)
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.isChatTarget(): Boolean = isChatRoutePattern(targetState.destination.route)
 
-private fun AnimatedContentTransitionScope<NavBackStackEntry>.isChatInitial(): Boolean =
-    isChatRoutePattern(initialState.destination.route)
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.isChatInitial(): Boolean = isChatRoutePattern(initialState.destination.route)
 
 internal fun isChatRoutePattern(route: String?): Boolean {
     val chatRouteName = ChatRoute::class.qualifiedName ?: return false
