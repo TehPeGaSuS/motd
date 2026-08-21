@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -24,7 +25,6 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.res.stringResource
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -32,7 +32,9 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 /**
  * One line of system-event text (a JOIN/PART/QUIT/etc. summary), already formatted by the caller.
  */
-data class SystemEvent(val text: String)
+data class SystemEvent(
+    val text: String,
+)
 
 /**
  * Centered pill summarizing a consecutive run of system events. A single event shows its text; a
@@ -48,6 +50,7 @@ fun SystemEventPill(
     /** Changes whenever the backing collapsed chunk changes so expanded lines are refreshed. */
     contentKey: Any,
     modifier: Modifier = Modifier,
+    forceCollapsible: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(false) }
     SystemEventPill(
@@ -58,6 +61,7 @@ fun SystemEventPill(
         expanded = expanded,
         onExpandedChange = { expanded = it },
         modifier = modifier,
+        forceCollapsible = forceCollapsible,
     )
 }
 
@@ -71,47 +75,57 @@ internal fun SystemEventPill(
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    forceCollapsible: Boolean = false,
 ) {
     // Materializing every line of a large JOIN/PART burst while scrolling is expensive. Keep the
     // collapsed path to its bounded summary and build lines only if the user opens the pill.
-    val collapsible = lineCount > 1
+    val collapsible = forceCollapsible || lineCount > 1
     val showLines = expanded && collapsible
-    val lines = remember(contentKey, showLines) {
-        if (showLines) loadLines() else emptyList()
-    }
-    val expansionState = stringResource(
-        if (showLines) R.string.system_event_expanded else R.string.system_event_collapsed,
-    )
+    val lines =
+        remember(contentKey, showLines) {
+            if (showLines) loadLines() else emptyList()
+        }
+    val expansionState =
+        stringResource(
+            if (showLines) R.string.system_event_expanded else R.string.system_event_collapsed,
+        )
     // Capsule for the short collapsed pill; once expanded the percent radius would be 50% of the
     // smaller dimension and overrun the 14 dp text padding, pushing top/bottom lines outside the
     // background. Cap it to a Dp radius that stays within the padding when expanded.
     val pillShape = if (showLines) RoundedCornerShape(14.dp) else RoundedCornerShape(50)
     Row(
-        modifier = modifier.fillMaxWidth().padding(
-            vertical = LocalSpacing.current.systemPillVPad,
-            horizontal = LocalSpacing.current.messageOuterHPad,
-        ),
+        modifier =
+            modifier.fillMaxWidth().padding(
+                vertical = LocalSpacing.current.systemPillVPad,
+                horizontal = LocalSpacing.current.messageOuterHPad,
+            ),
         horizontalArrangement = Arrangement.Center,
     ) {
         Column(
-            modifier = Modifier
-                .background(
-                    MaterialTheme.colorScheme.surfaceContainerHigh,
-                    pillShape,
-                )
-                .then(
-                    if (collapsible) Modifier.semantics {
-                        role = Role.Button
-                        contentDescription = summary
-                        stateDescription = expansionState
-                    } else Modifier,
-                )
-                .then(
-                    if (collapsible) Modifier.clickable {
-                        onExpandedChange(!showLines)
-                    } else Modifier,
-                )
-                .padding(horizontal = 14.dp, vertical = 6.dp),
+            modifier =
+                Modifier
+                    .background(
+                        MaterialTheme.colorScheme.surfaceContainerHigh,
+                        pillShape,
+                    ).then(
+                        if (collapsible) {
+                            Modifier.semantics {
+                                role = Role.Button
+                                contentDescription = summary
+                                stateDescription = expansionState
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ).then(
+                        if (collapsible) {
+                            Modifier.clickable {
+                                onExpandedChange(!showLines)
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ).padding(horizontal = 14.dp, vertical = 6.dp),
             horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
         ) {
             // Keep exactly one content tree mounted. AnimatedContent briefly layered the collapsed
@@ -145,7 +159,9 @@ internal fun SystemEventPill(
 private fun SystemEventPillSinglePreview() {
     MotdTheme {
         SystemEventPill(
-            summary = "alice joined", lineCount = 1, loadLines = { listOf("alice joined") },
+            summary = "alice joined",
+            lineCount = 1,
+            loadLines = { listOf("alice joined") },
             contentKey = "alice",
         )
     }
@@ -156,7 +172,8 @@ private fun SystemEventPillSinglePreview() {
 private fun SystemEventPillCollapsedPreview() {
     MotdTheme {
         SystemEventPill(
-            summary = "3 joined · 1 left", lineCount = 4,
+            summary = "3 joined · 1 left",
+            lineCount = 4,
             loadLines = { listOf("alice joined", "bob joined", "carol joined", "dave left") },
             contentKey = "preview",
         )

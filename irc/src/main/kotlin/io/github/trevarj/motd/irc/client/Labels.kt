@@ -12,15 +12,21 @@ class IrcCommandException(
 ) : Exception("$ircCommand failed ($code): $text")
 
 /** Raised when an IRC request receives no completing response within the timeout. */
-class IrcTimeoutException(val label: String) : Exception("IRC response timed out: $label")
+class IrcTimeoutException(
+    val label: String,
+) : Exception("IRC response timed out: $label")
 
 /** Raised when a command awaiting an IRC response loses its connection. */
-class IrcDisconnectedException(val ircCommand: String, val reason: String?) :
-    Exception("$ircCommand disconnected${reason?.let { ": $it" }.orEmpty()}")
+class IrcDisconnectedException(
+    val ircCommand: String,
+    val reason: String?,
+) : Exception("$ircCommand disconnected${reason?.let { ": $it" }.orEmpty()}")
 
 /** Raised when a completed IRC response violates the protocol shape required by its command. */
-class IrcProtocolException(val ircCommand: String, detail: String) :
-    Exception("$ircCommand returned an invalid response: $detail")
+class IrcProtocolException(
+    val ircCommand: String,
+    detail: String,
+) : Exception("$ircCommand returned an invalid response: $detail")
 
 /** Conservative IRCv3 label subset: opaque ASCII, non-empty, and bounded before wire escaping. */
 internal fun requireValidChatLabel(label: String) {
@@ -60,6 +66,7 @@ internal class LabelCorrelator {
         var batchRef: String? = null
         var rootBatch: IrcMessage? = null
         val buffered = mutableListOf<IrcMessage>()
+
         // Nested batch refs opened under the root batch (so we know when we're back at root).
         val openNested = mutableSetOf<String>()
         val nestedParents = mutableMapOf<String, String>()
@@ -67,20 +74,28 @@ internal class LabelCorrelator {
 
     // label -> pending request
     private val byLabel = HashMap<String, Pending>()
+
     // batchRef -> label, so batch-tagged lines route to the right pending request
     private val refToLabel = HashMap<String, String>()
 
     fun next(): String = "motd-${counter.incrementAndGet()}"
 
     @Synchronized
-    fun register(label: String, ircCommand: String, deferred: CompletableDeferred<CorrelatedResponse>) {
+    fun register(
+        label: String,
+        ircCommand: String,
+        deferred: CompletableDeferred<CorrelatedResponse>,
+    ) {
         check(label !in byLabel) { "duplicate label: $label" }
         byLabel[label] = Pending(ircCommand, deferred)
     }
 
     /** Remove exactly this registration and every batch-ref alias it acquired. */
     @Synchronized
-    fun unregister(label: String, deferred: CompletableDeferred<CorrelatedResponse>) {
+    fun unregister(
+        label: String,
+        deferred: CompletableDeferred<CorrelatedResponse>,
+    ) {
         val pending = byLabel[label]
         if (pending == null) {
             // Labels are monotonic and never reused, so any remaining alias is stale.
@@ -101,10 +116,11 @@ internal class LabelCorrelator {
         if (msg.command == "BATCH" && msg.params.firstOrNull()?.startsWith("-") == true) {
             val ref = msg.params[0].substring(1)
             val label = refToLabel[ref] ?: return false
-            val pending = byLabel[label] ?: run {
-                refToLabel.remove(ref)
-                return false
-            }
+            val pending =
+                byLabel[label] ?: run {
+                    refToLabel.remove(ref)
+                    return false
+                }
             if (ref in pending.openNested) {
                 if (pending.nestedParents.values.any { it == ref }) {
                     failPending(label, pending, "nested batch closed before its child batch")
@@ -135,10 +151,11 @@ internal class LabelCorrelator {
         if (batchTag != null) {
             val label = refToLabel[batchTag]
             if (label != null) {
-                val pending = byLabel[label] ?: run {
-                    refToLabel.remove(batchTag)
-                    return false
-                }
+                val pending =
+                    byLabel[label] ?: run {
+                        refToLabel.remove(batchTag)
+                        return false
+                    }
                 // A BATCH command inside the root must be a valid nested opening; closes were
                 // handled above by the ref they close.
                 if (msg.command == "BATCH") {
@@ -223,20 +240,86 @@ internal class LabelCorrelator {
         refToLabel.clear()
     }
 
-    private fun removePending(label: String, pending: Pending) {
+    private fun removePending(
+        label: String,
+        pending: Pending,
+    ) {
         if (byLabel[label] === pending) byLabel.remove(label)
         refToLabel.entries.removeAll { it.value == label }
         pending.openNested.clear()
         pending.nestedParents.clear()
     }
 
-    private fun failPending(label: String, pending: Pending, detail: String) {
+    private fun failPending(
+        label: String,
+        pending: Pending,
+        detail: String,
+    ) {
         removePending(label, pending)
         pending.deferred.completeExceptionally(IrcProtocolException(pending.ircCommand, detail))
     }
 
-    private fun isErrorNumeric(command: String): Boolean =
-        command.length == 3 && command.all { it.isDigit() } && command[0] == '4'
+    private fun isErrorNumeric(command: String): Boolean = command.length == 3 && command.all { it.isDigit() } && command[0] == '4'
+}
+
+/** Correlates one serialized WHOIS response when `labeled-response` is unavailable. */
+internal class UnlabeledWhoisCorrelator {
+    private data class Pending(
+        val nick: String,
+        val deferred: CompletableDeferred<List<IrcMessage>>,
+        val messages: MutableList<IrcMessage> = mutableListOf(),
+    )
+
+    private var pending: Pending? = null
+
+    @Synchronized
+    fun register(
+        nick: String,
+        deferred: CompletableDeferred<List<IrcMessage>>,
+    ) {
+        check(pending == null) { "an unlabelled WHOIS request is already pending" }
+        pending = Pending(nick, deferred)
+    }
+
+    @Synchronized
+    fun clear(deferred: CompletableDeferred<List<IrcMessage>>) {
+        if (pending?.deferred === deferred) pending = null
+    }
+
+    @Synchronized
+    fun route(
+        msg: IrcMessage,
+        normalize: (String) -> String,
+    ): Boolean {
+        val current = pending ?: return false
+        if (msg.command.length != 3 || !msg.command.all(Char::isDigit)) return false
+        val target = msg.params.getOrNull(1) ?: return false
+        if (normalize(target) != normalize(current.nick)) return false
+
+        if (msg.command.first() == '4' || msg.command.first() == '5') {
+            pending = null
+            current.deferred.completeExceptionally(
+                IrcCommandException("WHOIS", msg.command, msg.params.lastOrNull().orEmpty()),
+            )
+            return true
+        }
+
+        current.messages += msg
+        if (msg.command == "318") {
+            pending = null
+            current.deferred.complete(current.messages.toList())
+        }
+        return true
+    }
+
+    @Synchronized
+    fun failAll(cause: Throwable) {
+        pending?.deferred?.takeUnless { it.isCompleted }?.completeExceptionally(cause)
+        pending = null
+    }
+
+    @Synchronized
+    fun failAllDisconnected(reason: String?) = failAll(IrcDisconnectedException("WHOIS", reason))
 }
 
 /**
@@ -263,7 +346,10 @@ internal class UnlabeledChatHistoryCorrelator {
     private var pending: Pending? = null
 
     @Synchronized
-    fun register(request: ChatHistoryRequest, deferred: CompletableDeferred<CorrelatedResponse>) {
+    fun register(
+        request: ChatHistoryRequest,
+        deferred: CompletableDeferred<CorrelatedResponse>,
+    ) {
         check(pending == null) { "an unlabelled CHATHISTORY request is already pending" }
         pending = Pending(request, deferred)
     }
@@ -321,6 +407,7 @@ internal class UnlabeledChatHistoryCorrelator {
                         return true
                     }
                 }
+
                 refToken.startsWith("-") -> {
                     val ref = refToken.substring(1)
                     if (ref !in current.refs) return false
@@ -343,9 +430,12 @@ internal class UnlabeledChatHistoryCorrelator {
                     }
                     return true
                 }
-                else -> if (msg.tags["batch"]?.let(current.refs::contains) == true) {
-                    failProtocol(current, "batch content contained malformed framing")
-                    return true
+
+                else -> {
+                    if (msg.tags["batch"]?.let(current.refs::contains) == true) {
+                        failProtocol(current, "batch content contained malformed framing")
+                        return true
+                    }
                 }
             }
         }
@@ -357,20 +447,34 @@ internal class UnlabeledChatHistoryCorrelator {
         return false
     }
 
-    private fun isExpectedHistoryBatch(request: ChatHistoryRequest, msg: IrcMessage): Boolean {
-        val type = msg.params.getOrNull(1)?.lowercase().orEmpty()
+    private fun isExpectedHistoryBatch(
+        request: ChatHistoryRequest,
+        msg: IrcMessage,
+    ): Boolean {
+        val type =
+            msg.params
+                .getOrNull(1)
+                ?.lowercase()
+                .orEmpty()
         if (!type.contains("chathistory")) return false
         val targets = type.contains("chathistory-targets")
         return (request.subcommand == ChatHistoryRequest.Subcommand.TARGETS) == targets
     }
 
     private fun isHistoryFailure(msg: IrcMessage): Boolean =
-        (msg.command == "FAIL" &&
-            msg.params.firstOrNull()?.equals("CHATHISTORY", ignoreCase = true) == true) ||
-            (msg.command.length == 3 && msg.command.all { it.isDigit() } && msg.command[0] == '4' &&
-                msg.params.any { it.equals("CHATHISTORY", ignoreCase = true) })
+        (
+            msg.command == "FAIL" &&
+                msg.params.firstOrNull()?.equals("CHATHISTORY", ignoreCase = true) == true
+        ) ||
+            (
+                msg.command.length == 3 && msg.command.all { it.isDigit() } && msg.command[0] == '4' &&
+                    msg.params.any { it.equals("CHATHISTORY", ignoreCase = true) }
+            )
 
-    private fun finishFailure(current: Pending, msg: IrcMessage) {
+    private fun finishFailure(
+        current: Pending,
+        msg: IrcMessage,
+    ) {
         pending = null
         val code = if (msg.command == "FAIL") msg.params.getOrNull(1) ?: "FAIL" else msg.command
         current.deferred.completeExceptionally(
@@ -382,7 +486,10 @@ internal class UnlabeledChatHistoryCorrelator {
         )
     }
 
-    private fun failProtocol(current: Pending, detail: String) {
+    private fun failProtocol(
+        current: Pending,
+        detail: String,
+    ) {
         pending = null
         current.refs.clear()
         current.nestedParents.clear()
@@ -472,6 +579,7 @@ internal class UnlabeledSearchCorrelator {
                         return true
                     }
                 }
+
                 refToken.startsWith("-") -> {
                     val ref = refToken.substring(1)
                     if (ref !in current.refs) return false
@@ -494,9 +602,12 @@ internal class UnlabeledSearchCorrelator {
                     }
                     return true
                 }
-                else -> if (msg.tags["batch"]?.let(current.refs::contains) == true) {
-                    failProtocol(current, "batch content contained malformed framing")
-                    return true
+
+                else -> {
+                    if (msg.tags["batch"]?.let(current.refs::contains) == true) {
+                        failProtocol(current, "batch content contained malformed framing")
+                        return true
+                    }
                 }
             }
         }
@@ -509,13 +620,19 @@ internal class UnlabeledSearchCorrelator {
     }
 
     private fun isSearchBatch(msg: IrcMessage): Boolean =
-        msg.params.getOrNull(1).orEmpty().equals("soju.im/search", ignoreCase = true)
+        msg.params
+            .getOrNull(1)
+            .orEmpty()
+            .equals("soju.im/search", ignoreCase = true)
 
     private fun isSearchFailure(msg: IrcMessage): Boolean =
         msg.command == "FAIL" &&
             msg.params.firstOrNull()?.equals("SEARCH", ignoreCase = true) == true
 
-    private fun finishFailure(current: Pending, msg: IrcMessage) {
+    private fun finishFailure(
+        current: Pending,
+        msg: IrcMessage,
+    ) {
         pending = null
         current.deferred.completeExceptionally(
             IrcCommandException(
@@ -526,7 +643,10 @@ internal class UnlabeledSearchCorrelator {
         )
     }
 
-    private fun failProtocol(current: Pending, detail: String) {
+    private fun failProtocol(
+        current: Pending,
+        detail: String,
+    ) {
         pending = null
         current.refs.clear()
         current.nestedParents.clear()

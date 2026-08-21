@@ -1,5 +1,8 @@
 package io.github.trevarj.motd.ui.chat
 
+import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.sync.COMMAND_RESPONSE_PAYLOAD_PREFIX
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -61,14 +64,26 @@ class SystemEventChunkTest {
         // An expanded tail initially has two rows; append supplies older rows in that same chunk.
         val beforeAppend = SystemRunContentKey(newestId = 48, oldestId = 49, count = 2)
         val afterAppend = SystemRunContentKey(newestId = 48, oldestId = 51, count = 4)
-        val expandedIds = updateExpandedSystemEvents(
-            current = emptySet(),
-            runIds = listOf(48L, 49L),
-            expanded = true,
-        )
+        val expandedIds =
+            updateExpandedSystemEvents(
+                current = emptySet(),
+                runIds = listOf(48L, 49L),
+                expanded = true,
+            )
 
         assertTrue(beforeAppend != afterAppend)
         assertTrue(systemRunExpanded(listOf(48L, 50L, 49L, 51L), expandedIds))
+    }
+
+    @Test fun `command responses group only within their own session`() {
+        val join = systemMessage(1, MessageKind.JOIN)
+        val first = systemMessage(2, MessageKind.SERVER_INFO, "${COMMAND_RESPONSE_PAYLOAD_PREFIX}first")
+        val firstError = systemMessage(3, MessageKind.ERROR, "${COMMAND_RESPONSE_PAYLOAD_PREFIX}first")
+        val second = systemMessage(4, MessageKind.SERVER_INFO, "${COMMAND_RESPONSE_PAYLOAD_PREFIX}second")
+
+        assertTrue(sameSystemRun(first, firstError))
+        assertTrue(!sameSystemRun(join, first))
+        assertTrue(!sameSystemRun(first, second))
     }
 
     @Test fun `adjacent chunks keep distinct content identities`() {
@@ -76,4 +91,20 @@ class SystemEventChunkTest {
         val atBoundary = SystemRunContentKey(newestId = 24, oldestId = 47, count = 24)
         assertTrue(beforeBoundary != atBoundary)
     }
+
+    private fun systemMessage(
+        id: Long,
+        kind: MessageKind,
+        payload: String? = null,
+    ): MessageEntity =
+        MessageEntity(
+            id = id,
+            bufferId = 1,
+            serverTime = id,
+            sender = "/motd",
+            kind = kind,
+            text = "line $id",
+            dedupKey = "dedup-$id",
+            eventPayload = payload,
+        )
 }

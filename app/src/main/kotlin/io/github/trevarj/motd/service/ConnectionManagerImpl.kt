@@ -49,6 +49,7 @@ import io.github.trevarj.motd.irc.client.preferredExtendedMonitor
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.ext.MonitorCommands
 import io.github.trevarj.motd.irc.ext.MonitorSupport
 import io.github.trevarj.motd.irc.ext.monitorSupport
@@ -1867,6 +1868,45 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     // -- send paths ---------------------------------------------------------
+
+    override suspend fun sendCommand(networkId: Long, originBufferId: Long, message: IrcMessage) {
+        val buffer = bufferDao.observeById(originBufferId) ?: return
+        if (buffer.networkId != networkId) return
+        val client = clientFor(networkId) ?: return
+        val awayMessage = if (message.command == "AWAY") {
+            message.params.firstOrNull()?.takeIf(String::isNotBlank)
+        } else {
+            null
+        }
+        if (message.command == "AWAY") {
+            if (awayMessage == null) pendingAwayMessages.remove(networkId)
+            else pendingAwayMessages[networkId] = awayMessage
+        }
+        val label = newOutgoingLabel().takeIf { client.hasCap("labeled-response") }
+        val sessionId = eventProcessor.beginCommandResponse(
+            networkId = networkId,
+            bufferId = buffer.id,
+            command = message.command,
+            label = label,
+        )
+        val tagged = if (label == null) message else message.copy(tags = message.tags + ("label" to label))
+        val sent = try {
+            client.sendIfConnected(tagged)
+        } catch (cancelled: CancellationException) {
+            eventProcessor.cancelCommandResponse(sessionId)
+            if (message.command == "AWAY") pendingAwayMessages.remove(networkId)
+            throw cancelled
+        } catch (error: Exception) {
+            diagnostics.record("connections", "command_write_failed") {
+                mapOf("network_id" to networkId, "command" to message.command, "error" to error::class.simpleName)
+            }
+            false
+        }
+        if (!sent) {
+            eventProcessor.cancelCommandResponse(sessionId)
+            if (message.command == "AWAY") pendingAwayMessages.remove(networkId)
+        }
+    }
 
     override suspend fun sendMessage(
         bufferId: Long,

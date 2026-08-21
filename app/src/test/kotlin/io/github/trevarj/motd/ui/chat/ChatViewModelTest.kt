@@ -722,7 +722,8 @@ class ChatViewModelTest {
         client.start()
         runCurrent()
         transport.sent.clear()
-        val vm = viewModel(channel, FakeConnectionManager(network.id, client = client))
+        val manager = FakeConnectionManager(network.id, client = client)
+        val vm = viewModel(channel, manager)
         vm.state.first { it.buffer != null }
 
         vm.submit("/mode +m", {}, {})
@@ -748,9 +749,24 @@ class ChatViewModelTest {
         assertEquals(listOf("#secret", "let me in"), sent[4].params)
         assertEquals(listOf("Ada Lovelace"), sent[5].params)
         assertEquals(emptyList<String>(), sent[6].params)
+        assertTrue(manager.commandOrigins.all { it.first == channel.id })
+        assertEquals(sent.map { it.command }, manager.commandOrigins.map { it.second.command })
 
         client.stop()
         runCurrent()
+    }
+
+    @Test
+    fun `whois remains sheet only instead of using command feedback path`() = runTest {
+        val manager = FakeConnectionManager(network.id)
+        val vm = viewModel(channel, manager)
+        vm.state.first { it.buffer != null }
+
+        vm.submit("/whois alice", {}, {})
+        advanceUntilIdle()
+
+        assertEquals("alice", vm.nickSheet.value?.nick)
+        assertTrue(manager.commandOrigins.isEmpty())
     }
 
     @Test
@@ -2956,6 +2972,7 @@ class ChatViewModelTest {
         val reactions = mutableListOf<SentReaction>()
         val typing = mutableListOf<Pair<Long, String>>()
         val sentLines = mutableListOf<String>()
+        val commandOrigins = mutableListOf<Pair<Long, IrcMessage>>()
         val joins = mutableListOf<Triple<Long, String, String?>>()
         val parts = mutableListOf<Pair<Long, String?>>()
         val readMarkers = mutableListOf<Pair<Long, TimelineAnchor>>()
@@ -3025,6 +3042,14 @@ class ChatViewModelTest {
         override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) {
             if (reactionError) error("reaction rejected")
             reactions += SentReaction(bufferId, msgid, emoji)
+        }
+        override suspend fun sendCommand(networkId: Long, originBufferId: Long, message: IrcMessage) {
+            commandOrigins += originBufferId to message
+            when (message.command) {
+                "JOIN" -> joinChannel(networkId, message.params.firstOrNull().orEmpty(), message.params.getOrNull(1))
+                "PART" -> partChannel(originBufferId, message.params.getOrNull(1))
+                else -> currentClient?.send(message)
+            }
         }
         override suspend fun joinChannel(networkId: Long, channel: String, key: String?) {
             joins += Triple(networkId, channel, key)

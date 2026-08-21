@@ -11,8 +11,8 @@ import io.github.trevarj.motd.irc.ext.SearchCommands
 import io.github.trevarj.motd.irc.ext.SearchRequest
 import io.github.trevarj.motd.irc.ext.SearchResultMessage
 import io.github.trevarj.motd.irc.ext.TypingOutbox
-import io.github.trevarj.motd.irc.ext.parseSearchResult
 import io.github.trevarj.motd.irc.ext.WebPushCommands
+import io.github.trevarj.motd.irc.ext.parseSearchResult
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.IrcParseException
 import io.github.trevarj.motd.irc.proto.Isupport
@@ -21,9 +21,9 @@ import io.github.trevarj.motd.irc.transport.TransportConfigurationException
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -32,6 +32,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -41,7 +42,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -83,38 +83,56 @@ data class IrcClientConfig(
 )
 
 data class ChatHistoryRequest(
-    val subcommand: Subcommand, val target: String,
+    val subcommand: Subcommand,
+    val target: String,
     /** Bounds are "timestamp=<ISO8601>" or "msgid=<id>" selectors, pre-rendered. */
-    val bound1: String? = null, val bound2: String? = null,
+    val bound1: String? = null,
+    val bound2: String? = null,
     val limit: Int,
-) { enum class Subcommand { LATEST, BEFORE, AFTER, AROUND, BETWEEN, TARGETS } }
+) {
+    enum class Subcommand { LATEST, BEFORE, AFTER, AROUND, BETWEEN, TARGETS }
+}
 
-data class BouncerNetwork(val netId: String, val attrs: Map<String, String>) // attrs: name,host,state,nickname,...
+data class BouncerNetwork(
+    val netId: String,
+    val attrs: Map<String, String>,
+) // attrs: name,host,state,nickname,...
 
 /** One RPL_LIST (322) row. */
-data class ChannelListing(val name: String, val userCount: Int, val topic: String)
+data class ChannelListing(
+    val name: String,
+    val userCount: Int,
+    val topic: String,
+)
 
 /** Collects one unlabelled LIST response. The caller must start this before writing LIST. */
 internal fun CoroutineScope.launchUnlabeledChannelListCollector(
     events: SharedFlow<IrcEvent>,
     onListLine: (IrcMessage) -> Unit,
-): Job = launch(start = CoroutineStart.UNDISPATCHED) {
-    events.collect { event ->
-        if (event !is IrcEvent.Raw) return@collect
-        when (event.message.command) {
-            "322" -> onListLine(event.message)
-            "323" -> throw CancellationException("LIST end")
+): Job =
+    launch(start = CoroutineStart.UNDISPATCHED) {
+        events.collect { event ->
+            if (event !is IrcEvent.Raw) return@collect
+            when (event.message.command) {
+                "322" -> onListLine(event.message)
+                "323" -> throw CancellationException("LIST end")
+            }
         }
     }
-}
 
 /** Memory-bounded accumulator that retains the busiest channels and preserves arrival order ties. */
-private class BoundedChannelListings(private val capacity: Int) {
-    private data class Entry(val listing: ChannelListing, val order: Long)
-
-    private val entries = PriorityQueue<Entry>(
-        compareBy<Entry> { it.listing.userCount }.thenByDescending { it.order },
+private class BoundedChannelListings(
+    private val capacity: Int,
+) {
+    private data class Entry(
+        val listing: ChannelListing,
+        val order: Long,
     )
+
+    private val entries =
+        PriorityQueue<Entry>(
+            compareBy<Entry> { it.listing.userCount }.thenByDescending { it.order },
+        )
     private var nextOrder = 0L
 
     fun add(element: ChannelListing) {
@@ -129,18 +147,25 @@ private class BoundedChannelListings(private val capacity: Int) {
         entries.add(entry)
     }
 
-    fun toList(): List<ChannelListing> = entries
-        .sortedWith(compareByDescending<Entry> { it.listing.userCount }.thenBy { it.order })
-        .map(Entry::listing)
+    fun toList(): List<ChannelListing> =
+        entries
+            .sortedWith(compareByDescending<Entry> { it.listing.userCount }.thenBy { it.order })
+            .map(Entry::listing)
 }
 
-data class WhoxResult(val rows: List<IrcEvent.WhoxRow>, val completed: Boolean)
+data class WhoxResult(
+    val rows: List<IrcEvent.WhoxRow>,
+    val completed: Boolean,
+)
 
 /**
  * An event observed through a bounded fan-out stream. Consumers must treat a non-contiguous
  * [sequence] as lost state and recover from their own authoritative source.
  */
-data class SequencedIrcEvent(val sequence: Long, val event: IrcEvent)
+data class SequencedIrcEvent(
+    val sequence: Long,
+    val event: IrcEvent,
+)
 
 /** One instance per physical socket. Restartable: start() after stop() reconnects fresh. */
 class IrcClient(
@@ -152,25 +177,31 @@ class IrcClient(
     private val _state = MutableStateFlow<IrcClientState>(IrcClientState.Disconnected)
     val state: StateFlow<IrcClientState> = _state.asStateFlow()
     private val _targetClassificationReady = MutableStateFlow(false)
+
     /** True once CHANTYPES is explicit or the registration burst confirms protocol defaults. */
     val targetClassificationReady: StateFlow<Boolean> = _targetClassificationReady.asStateFlow()
     private val _pendingFeatureCaps = MutableStateFlow<Set<String>>(emptySet())
+
     /** Runtime/deferred CAP requests that have not received ACK or NAK yet. */
     val pendingFeatureCaps: StateFlow<Set<String>> = _pendingFeatureCaps.asStateFlow()
 
-    private val _events = MutableSharedFlow<IrcEvent>(
-        replay = 0,
-        extraBufferCapacity = observerBufferCapacity,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
+    private val _events =
+        MutableSharedFlow<IrcEvent>(
+            replay = 0,
+            extraBufferCapacity = observerBufferCapacity,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+
     /** Best-effort fan-out for transient request correlation and UI-adjacent observers. */
     val broadcastEvents: SharedFlow<IrcEvent> = _events.asSharedFlow()
 
-    private val _sequencedEvents = MutableSharedFlow<SequencedIrcEvent>(
-        replay = 0,
-        extraBufferCapacity = observerBufferCapacity,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
+    private val _sequencedEvents =
+        MutableSharedFlow<SequencedIrcEvent>(
+            replay = 0,
+            extraBufferCapacity = observerBufferCapacity,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+
     /**
      * Bounded, ordered fan-out for stateful observers. It intentionally does not consume
      * [criticalEvents]; a slow observer is never allowed to stall the IRC reader.
@@ -204,25 +235,31 @@ class IrcClient(
     private val unlabeledChatHistoryLock = Mutex()
     private val unlabeledSearch = UnlabeledSearchCorrelator()
     private val unlabeledSearchLock = Mutex()
+    private val unlabeledWhois = UnlabeledWhoisCorrelator()
+    private val unlabeledWhoisLock = Mutex()
     private val unlabeledChannelListLock = Mutex()
     private var unlabeledChannelListDrain: Job? = null
     private val outboundLock = Mutex()
     private val batches = BatchAssembler()
     private val typingOutbox = TypingOutbox()
-    private val eventMapper = EventMapper(
-        selfNick = { selfNick.get() },
-        isupport = { _isupport.get() },
-        sojuReadCap = { hasCap("soju.im/read") },
-    )
+    private val eventMapper =
+        EventMapper(
+            selfNick = { selfNick.get() },
+            isupport = { _isupport.get() },
+            sojuReadCap = { hasCap("soju.im/read") },
+        )
     private val whoxRequests = ConcurrentHashMap<String, Deferred<WhoxResult>>()
     private val whoxTokens = WhoxTokenPool()
 
     @Volatile private var transport: IrcTransport? = null
+
     @Volatile private var watchdog: PingWatchdog? = null
+
     @Volatile private var lagMonitor: LagMonitor? = null
     private var runJob: Job? = null
 
     private val _lag = MutableStateFlow<Long?>(null)
+
     /**
      * Latest PING/PONG round-trip latency in ms (issue #34); null until the first probe completes
      * or while disconnected. Stable across the connection's lifetime: the active [LagMonitor] writes
@@ -254,7 +291,7 @@ class IrcClient(
         registered = false
         _targetClassificationReady.value = false
         _pendingFeatureCaps.value = emptySet()
-        _bouncerNetworks.value = emptyMap()   // drop any stale networks from a prior connection
+        _bouncerNetworks.value = emptyMap() // drop any stale networks from a prior connection
         _state.value = IrcClientState.Connecting
         runJob = scope.launch { run(criticalEvents) }
     }
@@ -270,6 +307,7 @@ class IrcClient(
         labels.failAll(CancellationException("client stopped"))
         unlabeledChatHistory.failAll(CancellationException("client stopped"))
         unlabeledSearch.failAll(CancellationException("client stopped"))
+        unlabeledWhois.failAll(CancellationException("client stopped"))
         cancelWhoxRequests("client stopped")
         batches.reset()
         val t = transport
@@ -323,10 +361,11 @@ class IrcClient(
         } catch (e: Throwable) {
             // Invalid persisted transport config cannot recover through backoff. Keep ordinary
             // socket/TLS failures retryable, but park until the user changes this setting.
-            _state.value = IrcClientState.Failed(
-                "connect failed: ${e.message}",
-                fatal = e is TransportConfigurationException,
-            )
+            _state.value =
+                IrcClientState.Failed(
+                    "connect failed: ${e.message}",
+                    fatal = e is TransportConfigurationException,
+                )
             emitDisconnected(criticalEvents, disconnectedPublished, e.message)
             if (transport === t) transport = null
             return
@@ -336,35 +375,38 @@ class IrcClient(
         val reg = RegistrationStateMachine(config)
         for (a in reg.start()) applyRegAction(a, t, criticalEvents, disconnectedPublished)
 
-        val wd = PingWatchdog(
-            scope = scope,
-            sendPing = { payload -> runCatching { sendSerialized(t, "PING $payload") } },
-            onDead = {
-                _state.value = IrcClientState.Disconnected
-                emitDisconnected(criticalEvents, disconnectedPublished, "watchdog timeout")
-                runCatching { t.close() }
-            },
-        )
+        val wd =
+            PingWatchdog(
+                scope = scope,
+                sendPing = { payload -> runCatching { sendSerialized(t, "PING $payload") } },
+                onDead = {
+                    _state.value = IrcClientState.Disconnected
+                    emitDisconnected(criticalEvents, disconnectedPublished, "watchdog timeout")
+                    runCatching { t.close() }
+                },
+            )
         watchdog = wd
         wd.start()
 
-        val lm = LagMonitor(
-            scope = scope,
-            sendPing = { payload -> runCatching { sendSerialized(t, "PING $payload") } },
-            isRegistered = { registered },
-            sink = _lag,
-        )
+        val lm =
+            LagMonitor(
+                scope = scope,
+                sendPing = { payload -> runCatching { sendSerialized(t, "PING $payload") } },
+                isRegistered = { registered },
+                sink = _lag,
+            )
         lagMonitor = lm
         lm.start()
 
         try {
             t.incoming.collect { line ->
                 wd.onInbound()
-                val msg = try {
-                    IrcMessage.parse(line)
-                } catch (_: IrcParseException) {
-                    return@collect
-                }
+                val msg =
+                    try {
+                        IrcMessage.parse(line)
+                    } catch (_: IrcParseException) {
+                        return@collect
+                    }
                 // Answer server PING immediately, before any mapping.
                 if (msg.command == "PING") {
                     runCatching { sendSerialized(t, "PONG ${msg.params.firstOrNull().orEmpty()}") }
@@ -408,10 +450,12 @@ class IrcClient(
                 labels.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
                 unlabeledChatHistory.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
                 unlabeledSearch.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
+                unlabeledWhois.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
             } else {
                 labels.failAll(CancellationException("connection closed"))
                 unlabeledChatHistory.failAll(CancellationException("connection closed"))
                 unlabeledSearch.failAll(CancellationException("connection closed"))
+                unlabeledWhois.failAll(CancellationException("connection closed"))
             }
             cancelWhoxRequests("connection closed")
             batches.reset()
@@ -432,7 +476,10 @@ class IrcClient(
         disconnectedPublished: AtomicBoolean,
     ) {
         when (a) {
-            is RegistrationStateMachine.Action.Send -> runCatching { sendSerialized(t, a.line) }
+            is RegistrationStateMachine.Action.Send -> {
+                runCatching { sendSerialized(t, a.line) }
+            }
+
             is RegistrationStateMachine.Action.SendDeferred -> {
                 // Capture this connection's activity signal; the field is replaced on restart, so
                 // a late waiter can never be released by the next connection's traffic (the
@@ -445,8 +492,15 @@ class IrcClient(
                     if (transport === t) runCatching { sendSerialized(t, a.line) }
                 }
             }
-            is RegistrationStateMachine.Action.Emit -> publish(criticalEvents, a.event)
-            is RegistrationStateMachine.Action.SetNick -> selfNick.set(a.nick)
+
+            is RegistrationStateMachine.Action.Emit -> {
+                publish(criticalEvents, a.event)
+            }
+
+            is RegistrationStateMachine.Action.SetNick -> {
+                selfNick.set(a.nick)
+            }
+
             is RegistrationStateMachine.Action.Complete -> {
                 selfNick.set(a.nick)
                 _isupport.set(a.isupport)
@@ -459,6 +513,7 @@ class IrcClient(
                 _state.value = IrcClientState.Ready(a.nick, a.caps, isupportMap)
                 publish(criticalEvents, IrcEvent.Registered(a.nick, a.caps, isupportMap))
             }
+
             is RegistrationStateMachine.Action.Fail -> {
                 _state.value = IrcClientState.Failed(a.reason, a.fatal)
                 emitDisconnected(criticalEvents, disconnectedPublished, a.reason)
@@ -478,6 +533,7 @@ class IrcClient(
         // Released soju lacks labeled-response, but its CHATHISTORY/SEARCH replies remain batched.
         if (unlabeledChatHistory.route(msg)) return
         if (unlabeledSearch.route(msg)) return
+        if (unlabeledWhois.route(msg, isupport::normalize)) return
 
         // Runtime CAP NEW/DEL.
         if (msg.command == "CAP") {
@@ -493,13 +549,20 @@ class IrcClient(
         }
 
         when (val outcome = batches.route(msg)) {
-            BatchAssembler.Outcome.Buffered -> return
-            is BatchAssembler.Outcome.Closed -> emitBatch(outcome, criticalEvents)
+            BatchAssembler.Outcome.Buffered -> {
+                return
+            }
+
+            is BatchAssembler.Outcome.Closed -> {
+                emitBatch(outcome, criticalEvents)
+            }
+
             BatchAssembler.Outcome.PassThrough -> {
-                val ev = eventMapper.map(msg, batchId = null) { reply ->
-                    // CTCP auto-reply (e.g. VERSION) — fire and forget on the client scope.
-                    scope.launch { runCatching { sendSerialized(t, reply) } }
-                }
+                val ev =
+                    eventMapper.map(msg, batchId = null) { reply ->
+                        // CTCP auto-reply (e.g. VERSION) — fire and forget on the client scope.
+                        scope.launch { runCatching { sendSerialized(t, reply) } }
+                    }
                 if (ev != null) emitEvent(ev, criticalEvents)
             }
         }
@@ -529,64 +592,91 @@ class IrcClient(
     internal fun mapBatchTree(
         tree: BatchTree,
         historical: Boolean = tree.type == "chathistory" || tree.type == "znc.in/playback",
+    ): List<IrcEvent> = mapBatchTree(tree, historical, inheritedLabel = null)
+
+    private fun mapBatchTree(
+        tree: BatchTree,
+        historical: Boolean,
+        inheritedLabel: String?,
     ): List<IrcEvent> {
+        val responseLabel = tree.opening.tags["label"] ?: inheritedLabel
+        val responseWrapper = tree.type.equals("labeled-response", ignoreCase = true)
+        val eventBatchId = tree.ref.takeUnless { responseWrapper }
+
+        fun labeled(message: IrcMessage): IrcMessage {
+            var tags = message.tags
+            if (responseWrapper && tags["batch"] == tree.ref) tags = tags - "batch"
+            if (responseLabel != null && "label" !in tags) tags = tags + ("label" to responseLabel)
+            return if (tags === message.tags) message else message.copy(tags = tags)
+        }
         if (tree.type == MULTILINE_CAP) {
-            mapMultilineBatch(tree, historical)?.let { return listOf(it) }
-            return mapMalformedMultiline(tree, historical)
+            mapMultilineBatch(tree, historical, responseLabel)?.let { return listOf(it) }
+            return mapMalformedMultiline(tree, historical, responseLabel)
         }
 
         if (tree.type == "netsplit" || tree.type == "netjoin") {
             val leaves = tree.leafMessages()
             val expected = if (tree.type == "netsplit") "QUIT" else "JOIN"
             if (tree.params.size == 2 && leaves.isNotEmpty() && leaves.all { it.first.command == expected }) {
-                val events = leaves.mapNotNull { (message, batchRef) ->
-                    eventMapper.map(message, batchId = batchRef, historical = historical)
-                }
+                val events =
+                    leaves.mapNotNull { (message, batchRef) ->
+                        eventMapper.map(labeled(message), batchId = batchRef, historical = historical)
+                    }
                 if (events.size == leaves.size) {
                     val historyReference = historyReference(tree.opening)
                     return listOf(
                         IrcEvent.NetworkBatch(
-                            kind = if (tree.type == "netsplit") {
-                                IrcEvent.NetworkBatchKind.NETSPLIT
-                            } else {
-                                IrcEvent.NetworkBatchKind.NETJOIN
-                            },
+                            kind =
+                                if (tree.type == "netsplit") {
+                                    IrcEvent.NetworkBatchKind.NETSPLIT
+                                } else {
+                                    IrcEvent.NetworkBatchKind.NETJOIN
+                                },
                             serverA = tree.params[0],
                             serverB = tree.params[1],
                             events = events,
-                            historyMetadata = HistoryEventMetadata(
-                                isContext = "draft/chathistory-context" in tree.opening.tags,
-                                msgid = historyReference?.msgid,
-                                serverTime = historyReference?.serverTime,
-                            ),
+                            historyMetadata =
+                                HistoryEventMetadata(
+                                    isContext = "draft/chathistory-context" in tree.opening.tags,
+                                    msgid = historyReference?.msgid,
+                                    serverTime = historyReference?.serverTime,
+                                ),
                         ),
                     )
                 }
             }
         }
 
-        val flattened = tree.children.flatMap { child ->
-            when (child) {
-                is BatchChild.Message -> listOfNotNull(
-                    eventMapper.map(child.message, batchId = tree.ref, historical = historical),
-                )
-                is BatchChild.Nested -> mapBatchTree(child.batch, historical)
+        val flattened =
+            tree.children.flatMap { child ->
+                when (child) {
+                    is BatchChild.Message -> {
+                        listOfNotNull(
+                            eventMapper.map(labeled(child.message), batchId = eventBatchId, historical = historical),
+                        )
+                    }
+
+                    is BatchChild.Nested -> {
+                        mapBatchTree(child.batch, historical, responseLabel)
+                    }
+                }
             }
-        }
         return if (tree.type == "chathistory") {
             val target = tree.params.firstOrNull().orEmpty()
             listOf(
                 IrcEvent.PlaybackBatch(
                     source = IrcEvent.PlaybackSource.CHATHISTORY,
                     target = target,
-                    items = flattened.mapIndexed { ordinal, event ->
-                        val targeted = if (event is IrcEvent.NetworkBatch && event.target == null) {
-                            event.copy(target = target)
-                        } else {
-                            event
-                        }
-                        IrcEvent.PlaybackItem.from(targeted, ordinal)
-                    },
+                    items =
+                        flattened.mapIndexed { ordinal, event ->
+                            val targeted =
+                                if (event is IrcEvent.NetworkBatch && event.target == null) {
+                                    event.copy(target = target)
+                                } else {
+                                    event
+                                }
+                            IrcEvent.PlaybackItem.from(targeted, ordinal)
+                        },
                 ),
             )
         } else if (tree.type == "znc.in/playback") {
@@ -595,9 +685,10 @@ class IrcClient(
                 IrcEvent.PlaybackBatch(
                     source = IrcEvent.PlaybackSource.ZNC_PLAYBACK,
                     target = target,
-                    items = flattened.mapIndexed { ordinal, event ->
-                        IrcEvent.PlaybackItem.from(event, ordinal)
-                    },
+                    items =
+                        flattened.mapIndexed { ordinal, event ->
+                            IrcEvent.PlaybackItem.from(event, ordinal)
+                        },
                 ),
             )
         } else {
@@ -605,16 +696,28 @@ class IrcClient(
         }
     }
 
-    private fun mapMultilineBatch(tree: BatchTree, historical: Boolean = false): IrcEvent.ChatMessage? {
+    private fun mapMultilineBatch(
+        tree: BatchTree,
+        historical: Boolean = false,
+        responseLabel: String? = null,
+    ): IrcEvent.ChatMessage? {
         val target = tree.params.firstOrNull() ?: return null
-        val messages = tree.children.map {
-            (it as? BatchChild.Message)?.message ?: return null
-        }
+        val messages =
+            tree.children.map {
+                (it as? BatchChild.Message)?.message ?: return null
+            }
         if (messages.isEmpty()) return null
         val command = messages.first().command
         if (command != "PRIVMSG" && command != "NOTICE") return null
         if (messages.any { it.command != command || it.params.getOrNull(0) != target }) return null
-        if (messages.any { MULTILINE_CONCAT_TAG in it.tags && it.params.getOrNull(1).orEmpty().isEmpty() }) {
+        if (messages.any {
+                MULTILINE_CONCAT_TAG in it.tags &&
+                    it.params
+                        .getOrNull(1)
+                        .orEmpty()
+                        .isEmpty()
+            }
+        ) {
             return null
         }
 
@@ -631,12 +734,13 @@ class IrcClient(
         if (!sawNonBlank) return null
 
         val first = messages.first()
-        val synthetic = IrcMessage(
-            tags = tree.opening.tags,
-            source = first.source ?: tree.opening.source,
-            command = command,
-            params = listOf(target, combined.toString()),
-        )
+        val synthetic =
+            IrcMessage(
+                tags = tree.opening.tags + listOfNotNull(responseLabel?.let { "label" to it }),
+                source = first.source ?: tree.opening.source,
+                command = command,
+                params = listOf(target, combined.toString()),
+            )
         return eventMapper.map(
             synthetic,
             batchId = tree.opening.tags["batch"] ?: tree.ref,
@@ -647,28 +751,43 @@ class IrcClient(
     private fun mapMalformedMultiline(
         tree: BatchTree,
         historical: Boolean,
-    ): List<IrcEvent> = tree.children.flatMap { child ->
-        when (child) {
-            is BatchChild.Message -> {
-                val text = child.message.params.getOrNull(1).orEmpty()
-                if ((child.message.command == "PRIVMSG" || child.message.command == "NOTICE") && text.isEmpty()) {
-                    emptyList()
-                } else {
-                    listOfNotNull(
-                        eventMapper.map(child.message, batchId = tree.ref, historical = historical),
-                    )
+        responseLabel: String?,
+    ): List<IrcEvent> =
+        tree.children.flatMap { child ->
+            when (child) {
+                is BatchChild.Message -> {
+                    val text =
+                        child.message.params
+                            .getOrNull(1)
+                            .orEmpty()
+                    if ((child.message.command == "PRIVMSG" || child.message.command == "NOTICE") && text.isEmpty()) {
+                        emptyList()
+                    } else {
+                        listOfNotNull(
+                            eventMapper.map(
+                                child.message.copy(
+                                    tags = child.message.tags + listOfNotNull(responseLabel?.let { "label" to it }),
+                                ),
+                                batchId = tree.ref,
+                                historical = historical,
+                            ),
+                        )
+                    }
+                }
+
+                is BatchChild.Nested -> {
+                    mapBatchTree(child.batch, historical, responseLabel)
                 }
             }
-            is BatchChild.Nested -> mapBatchTree(child.batch, historical)
         }
-    }
 
-    private fun BatchTree.leafMessages(): List<Pair<IrcMessage, String>> = children.flatMap { child ->
-        when (child) {
-            is BatchChild.Message -> listOf(child.message to ref)
-            is BatchChild.Nested -> child.batch.leafMessages()
+    private fun BatchTree.leafMessages(): List<Pair<IrcMessage, String>> =
+        children.flatMap { child ->
+            when (child) {
+                is BatchChild.Message -> listOf(child.message to ref)
+                is BatchChild.Nested -> child.batch.leafMessages()
+            }
         }
-    }
 
     private suspend fun handleRuntimeCap(
         msg: IrcMessage,
@@ -676,7 +795,11 @@ class IrcClient(
         criticalEvents: Channel<IrcEvent>,
     ) {
         val sub = msg.params.getOrNull(1) ?: return
-        val tokens = msg.params.last().split(' ').filter { it.isNotEmpty() }
+        val tokens =
+            msg.params
+                .last()
+                .split(' ')
+                .filter { it.isNotEmpty() }
         val caps = tokens.map { it.removePrefix("-").substringBefore('=') }.toSet()
         rememberAdvertisedCaps(msg)
         when (sub) {
@@ -689,26 +812,36 @@ class IrcClient(
                     for (b in CapNegotiator.batches(want)) runCatching { sendSerialized(t, "CAP REQ :$b") }
                 }
             }
+
             "DEL" -> {
                 ackedCaps.set(ackedCaps.get().filterNot { it.substringBefore('=') in caps }.toSet())
                 updateReadyCaps(ackedCaps.get())
                 publish(criticalEvents, IrcEvent.CapsChanged(emptySet(), caps))
             }
+
             "ACK" -> {
-                val removed = tokens.filter { it.startsWith("-") }
-                    .map { it.removePrefix("-").substringBefore('=') }
-                    .toSet()
-                val added = tokens.filterNot { it.startsWith("-") }.map { token ->
-                    val name = token.substringBefore('=')
-                    val value = token.substringAfter(
-                        '=',
-                        missingDelimiterValue = runtimeAdvertisedCaps[name].orEmpty(),
-                    )
-                    if (value.isEmpty()) name else "$name=$value"
-                }.toSet()
-                val updated = ackedCaps.get()
-                    .filterNot { it.substringBefore('=') in removed }
-                    .toSet() + added
+                val removed =
+                    tokens
+                        .filter { it.startsWith("-") }
+                        .map { it.removePrefix("-").substringBefore('=') }
+                        .toSet()
+                val added =
+                    tokens
+                        .filterNot { it.startsWith("-") }
+                        .map { token ->
+                            val name = token.substringBefore('=')
+                            val value =
+                                token.substringAfter(
+                                    '=',
+                                    missingDelimiterValue = runtimeAdvertisedCaps[name].orEmpty(),
+                                )
+                            if (value.isEmpty()) name else "$name=$value"
+                        }.toSet()
+                val updated =
+                    ackedCaps
+                        .get()
+                        .filterNot { it.substringBefore('=') in removed }
+                        .toSet() + added
                 ackedCaps.set(updated)
                 updateReadyCaps(ackedCaps.get())
                 publish(
@@ -716,7 +849,10 @@ class IrcClient(
                     IrcEvent.CapsChanged(added.map { it.substringBefore('=') }.toSet(), removed),
                 )
             }
-            "NAK" -> Unit
+
+            "NAK" -> {
+                Unit
+            }
         }
         if (sub == "ACK" || sub == "NAK" || sub == "DEL") {
             _pendingFeatureCaps.value -= caps
@@ -726,15 +862,25 @@ class IrcClient(
     private fun rememberAdvertisedCaps(msg: IrcMessage) {
         if (msg.command != "CAP") return
         val sub = msg.params.getOrNull(1) ?: return
-        val tokens = msg.params.lastOrNull()?.split(' ')?.filter(String::isNotEmpty).orEmpty()
+        val tokens =
+            msg.params
+                .lastOrNull()
+                ?.split(' ')
+                ?.filter(String::isNotEmpty)
+                .orEmpty()
         when (sub) {
-            "LS", "NEW" -> tokens.forEach { token ->
-                val normalized = token.removePrefix("-")
-                val name = normalized.substringBefore('=')
-                runtimeAdvertisedCaps[name] = normalized.substringAfter('=', missingDelimiterValue = "")
+            "LS", "NEW" -> {
+                tokens.forEach { token ->
+                    val normalized = token.removePrefix("-")
+                    val name = normalized.substringBefore('=')
+                    runtimeAdvertisedCaps[name] = normalized.substringAfter('=', missingDelimiterValue = "")
+                }
             }
-            "DEL" -> tokens.forEach { token ->
-                runtimeAdvertisedCaps.remove(token.removePrefix("-").substringBefore('='))
+
+            "DEL" -> {
+                tokens.forEach { token ->
+                    runtimeAdvertisedCaps.remove(token.removePrefix("-").substringBefore('='))
+                }
             }
         }
     }
@@ -778,10 +924,15 @@ class IrcClient(
         _sequencedEvents.emit(sequenced)
     }
 
-    private suspend fun sendSerialized(t: IrcTransport, msg: IrcMessage) =
-        sendSerialized(t, msg.serialize())
+    private suspend fun sendSerialized(
+        t: IrcTransport,
+        msg: IrcMessage,
+    ) = sendSerialized(t, msg.serialize())
 
-    private suspend fun sendSerialized(t: IrcTransport, line: String) {
+    private suspend fun sendSerialized(
+        t: IrcTransport,
+        line: String,
+    ) {
         outboundLock.withLock { t.send(line) }
     }
 
@@ -809,9 +960,7 @@ class IrcClient(
     }
 
     /** Attach a label tag, suspend until the labeled response/ack batch completes. */
-    suspend fun sendLabeled(msg: IrcMessage): List<IrcMessage> {
-        return sendLabeledResponse(msg).messages
-    }
+    suspend fun sendLabeled(msg: IrcMessage): List<IrcMessage> = sendLabeledResponse(msg).messages
 
     private suspend fun sendLabeledResponse(msg: IrcMessage): CorrelatedResponse {
         val t = transport ?: throw IrcDisconnectedException(msg.command, null)
@@ -834,6 +983,25 @@ class IrcClient(
         }
     }
 
+    /** Collect WHOIS details without leaking unlabeled numerics into the ordinary event stream. */
+    suspend fun whois(nick: String): List<IrcMessage> {
+        val message = IrcMessage(command = "WHOIS", params = listOf(nick))
+        if (hasCap("labeled-response")) return sendLabeled(message)
+        return unlabeledWhoisLock.withLock {
+            val t = transport ?: throw IrcDisconnectedException("WHOIS", null)
+            val deferred = CompletableDeferred<List<IrcMessage>>()
+            unlabeledWhois.register(nick, deferred)
+            try {
+                sendSerialized(t, message)
+                withTimeout(LABEL_TIMEOUT_MS) { deferred.await() }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                throw IrcTimeoutException("WHOIS")
+            } finally {
+                unlabeledWhois.clear(deferred)
+            }
+        }
+    }
+
     /** Send one chat message using the app's exact durable attempt label. */
     suspend fun sendMessage(
         target: String,
@@ -845,14 +1013,15 @@ class IrcClient(
         requireValidChatLabel(label)
         val t = transport ?: return false
         val labelTag = label.takeIf { hasCap("labeled-response") }
-        val plan = planChatMessage(
-            target = target,
-            text = text,
-            replyToMsgid = replyToMsgid,
-            label = labelTag,
-            multilineLimits = if (hasMultilineWireSupport() && !forceLegacy) multilineLimits else null,
-            forceLegacy = forceLegacy,
-        ) ?: return false
+        val plan =
+            planChatMessage(
+                target = target,
+                text = text,
+                replyToMsgid = replyToMsgid,
+                label = labelTag,
+                multilineLimits = if (hasMultilineWireSupport() && !forceLegacy) multilineLimits else null,
+                forceLegacy = forceLegacy,
+            ) ?: return false
         // Do NOT register a correlator deferred: the labeled echo must flow through as a normal
         // self ChatMessage event (carrying label in ctx) so the app can dedup the pending row.
         when (plan) {
@@ -862,16 +1031,22 @@ class IrcClient(
                 }
                 sendSerialized(t, plan.message)
             }
-            is MultilineSendPlan.Batch -> outboundLock.withLock {
-                t.send(plan.opening.serialize())
-                plan.components.forEach { t.send(it.serialize()) }
-                t.send(plan.closing.serialize())
+
+            is MultilineSendPlan.Batch -> {
+                outboundLock.withLock {
+                    t.send(plan.opening.serialize())
+                    plan.components.forEach { t.send(it.serialize()) }
+                    t.send(plan.closing.serialize())
+                }
             }
         }
         return true
     }
 
-    suspend fun sendTyping(target: String, state: String) {
+    suspend fun sendTyping(
+        target: String,
+        state: String,
+    ) {
         if (!hasCap("message-tags")) return
         val t = transport ?: return
         if (!typingOutbox.shouldSend(target, state)) return
@@ -879,37 +1054,59 @@ class IrcClient(
         sendSerialized(t, msg)
     }
 
-    suspend fun sendReact(target: String, msgid: String, emoji: String) {
+    suspend fun sendReact(
+        target: String,
+        msgid: String,
+        emoji: String,
+    ) {
         if (!hasCap("message-tags")) return
         val t = transport ?: return
-        val msg = IrcMessage(
-            tags = mapOf("+draft/react" to emoji, "+reply" to msgid),
-            command = "TAGMSG",
-            params = listOf(target),
-        )
+        val msg =
+            IrcMessage(
+                tags = mapOf("+draft/react" to emoji, "+reply" to msgid),
+                command = "TAGMSG",
+                params = listOf(target),
+            )
         sendSerialized(t, msg)
     }
 
     suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
         val limit = clampHistoryLimit(req.limit)
-        val msg = when (req.subcommand) {
-            ChatHistoryRequest.Subcommand.LATEST ->
-                ChatHistoryCommands.latest(req.target, req.bound1, limit)
-            ChatHistoryRequest.Subcommand.BEFORE -> ChatHistoryCommands.before(req.target, req.bound1.orEmpty(), limit)
-            ChatHistoryRequest.Subcommand.AFTER -> ChatHistoryCommands.after(req.target, req.bound1.orEmpty(), limit)
-            ChatHistoryRequest.Subcommand.AROUND -> ChatHistoryCommands.around(req.target, req.bound1.orEmpty(), limit)
-            ChatHistoryRequest.Subcommand.BETWEEN ->
-                ChatHistoryCommands.between(req.target, req.bound1.orEmpty(), req.bound2.orEmpty(), limit)
-            ChatHistoryRequest.Subcommand.TARGETS ->
-                ChatHistoryCommands.targets(req.bound1.orEmpty(), req.bound2.orEmpty(), limit)
-        }
-        val response = if (hasCap("labeled-response")) {
-            sendLabeledResponse(msg)
-        } else {
-            sendUnlabeledChatHistory(req, msg)
-        }
-        val root = response.rootBatch
-            ?: throw IrcProtocolException("CHATHISTORY", "response did not contain a complete root batch")
+        val msg =
+            when (req.subcommand) {
+                ChatHistoryRequest.Subcommand.LATEST -> {
+                    ChatHistoryCommands.latest(req.target, req.bound1, limit)
+                }
+
+                ChatHistoryRequest.Subcommand.BEFORE -> {
+                    ChatHistoryCommands.before(req.target, req.bound1.orEmpty(), limit)
+                }
+
+                ChatHistoryRequest.Subcommand.AFTER -> {
+                    ChatHistoryCommands.after(req.target, req.bound1.orEmpty(), limit)
+                }
+
+                ChatHistoryRequest.Subcommand.AROUND -> {
+                    ChatHistoryCommands.around(req.target, req.bound1.orEmpty(), limit)
+                }
+
+                ChatHistoryRequest.Subcommand.BETWEEN -> {
+                    ChatHistoryCommands.between(req.target, req.bound1.orEmpty(), req.bound2.orEmpty(), limit)
+                }
+
+                ChatHistoryRequest.Subcommand.TARGETS -> {
+                    ChatHistoryCommands.targets(req.bound1.orEmpty(), req.bound2.orEmpty(), limit)
+                }
+            }
+        val response =
+            if (hasCap("labeled-response")) {
+                sendLabeledResponse(msg)
+            } else {
+                sendUnlabeledChatHistory(req, msg)
+            }
+        val root =
+            response.rootBatch
+                ?: throw IrcProtocolException("CHATHISTORY", "response did not contain a complete root batch")
         // Two accepted shapes, matching `search`: released soju sends a bare `chathistory` root,
         // while soju master (post-70c4ded) wraps that batch in an outer `labeled-response` batch.
         // In the wrapped shape the label opens the wrapper and the history batch sits one level in,
@@ -917,19 +1114,30 @@ class IrcClient(
         // Unlike `search`, only the first batch inside the wrapper is the history batch: multiline
         // and netsplit batches nest within it rather than beside it, so they must not be matched
         // here. They are reassembled later by `mapCorrelatedHistory`, which walks the wrapper.
-        val hist = if (root.params.getOrNull(1).orEmpty().equals("labeled-response", ignoreCase = true)) {
-            response.messages.firstOrNull {
-                it.command == "BATCH" && it.params.firstOrNull()?.startsWith("+") == true
-            } ?: throw IrcProtocolException("CHATHISTORY", "labeled-response wrapper contained no batch")
-        } else {
-            root
-        }
-        val expectedType = if (req.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
-            "draft/chathistory-targets"
-        } else {
-            "chathistory"
-        }
-        if (hist.command != "BATCH" || !hist.params.getOrNull(1).orEmpty().equals(expectedType, ignoreCase = true)) {
+        val hist =
+            if (root.params
+                    .getOrNull(1)
+                    .orEmpty()
+                    .equals("labeled-response", ignoreCase = true)
+            ) {
+                response.messages.firstOrNull {
+                    it.command == "BATCH" && it.params.firstOrNull()?.startsWith("+") == true
+                } ?: throw IrcProtocolException("CHATHISTORY", "labeled-response wrapper contained no batch")
+            } else {
+                root
+            }
+        val expectedType =
+            if (req.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
+                "draft/chathistory-targets"
+            } else {
+                "chathistory"
+            }
+        if (hist.command != "BATCH" ||
+            !hist.params
+                .getOrNull(1)
+                .orEmpty()
+                .equals(expectedType, ignoreCase = true)
+        ) {
             throw IrcProtocolException(
                 "CHATHISTORY",
                 "unexpected batch type ${hist.params.getOrNull(1).orEmpty()}",
@@ -940,9 +1148,10 @@ class IrcClient(
             ChatHistoryResponse.Targets(parseTargets(response.messages), endOfHistory)
         } else {
             val mapped = mapCorrelatedHistory(root, response.messages)
-            val primaryMessages = mapped.filter { (message, _) ->
-                "draft/chathistory-context" !in message.tags
-            }
+            val primaryMessages =
+                mapped.filter { (message, _) ->
+                    "draft/chathistory-context" !in message.tags
+                }
             val oldest = primaryMessages.firstOrNull()?.first?.let(::historyReference)
             val newest = primaryMessages.lastOrNull()?.first?.let(::historyReference)
             ChatHistoryResponse.Messages(
@@ -983,18 +1192,20 @@ class IrcClient(
         // Buffering under the correlator keeps the result PRIVMSGs out of the normal event flow,
         // the same property `chathistory` relies on.
         val msg = SearchCommands.search(req)
-        val response = if (hasCap("labeled-response")) {
-            sendLabeledResponse(msg)
-        } else {
-            sendUnlabeledSearch(msg)
-        }
-        val root = response.rootBatch
-            ?: if (response.messages.isEmpty()) {
-                // Tolerated: a zero-result SEARCH may complete without ever opening a batch.
-                return emptyList()
+        val response =
+            if (hasCap("labeled-response")) {
+                sendLabeledResponse(msg)
             } else {
-                throw IrcProtocolException("SEARCH", "response did not contain a complete root batch")
+                sendUnlabeledSearch(msg)
             }
+        val root =
+            response.rootBatch
+                ?: if (response.messages.isEmpty()) {
+                    // Tolerated: a zero-result SEARCH may complete without ever opening a batch.
+                    return emptyList()
+                } else {
+                    throw IrcProtocolException("SEARCH", "response did not contain a complete root batch")
+                }
         // Two accepted shapes: released soju sends a bare `soju.im/search` root, while soju master
         // (post-70c4ded) wraps that batch in an outer `labeled-response` batch. Rejecting the
         // wrapper would turn a server upgrade into a silent protocol failure.
@@ -1008,11 +1219,15 @@ class IrcClient(
         }
         if (labeledWrapper) {
             // Every batch opened inside the wrapper must itself be the search batch.
-            val wrongInner = response.messages.firstOrNull {
-                it.command == "BATCH" &&
-                    it.params.firstOrNull()?.startsWith("+") == true &&
-                    !it.params.getOrNull(1).orEmpty().equals("soju.im/search", ignoreCase = true)
-            }
+            val wrongInner =
+                response.messages.firstOrNull {
+                    it.command == "BATCH" &&
+                        it.params.firstOrNull()?.startsWith("+") == true &&
+                        !it.params
+                            .getOrNull(1)
+                            .orEmpty()
+                            .equals("soju.im/search", ignoreCase = true)
+                }
             if (wrongInner != null) {
                 throw IrcProtocolException(
                     "SEARCH",
@@ -1058,39 +1273,50 @@ class IrcClient(
             }
         }
 
-        val rootRef = root.params.firstOrNull()?.removePrefix("+").orEmpty()
-        val closed = assembler.route(IrcMessage(command = "BATCH", params = listOf("-$rootRef")))
-            as? BatchAssembler.Outcome.Closed
-            ?: throw IrcProtocolException("CHATHISTORY", "root batch did not assemble completely")
+        val rootRef =
+            root.params
+                .firstOrNull()
+                ?.removePrefix("+")
+                .orEmpty()
+        val closed =
+            assembler.route(IrcMessage(command = "BATCH", params = listOf("-$rootRef")))
+                as? BatchAssembler.Outcome.Closed
+                ?: throw IrcProtocolException("CHATHISTORY", "root batch did not assemble completely")
         return mapCorrelatedHistoryChildren(closed.tree)
     }
 
     private fun mapCorrelatedHistoryChildren(tree: BatchTree): List<Pair<IrcMessage, IrcEvent>> =
         tree.children.flatMap { child ->
             when (child) {
-                is BatchChild.Message -> listOfNotNull(
-                    eventMapper.map(
-                        child.message,
-                        batchId = child.message.tags["batch"] ?: tree.ref,
-                        historical = true,
+                is BatchChild.Message -> {
+                    listOfNotNull(
+                        eventMapper
+                            .map(
+                                child.message,
+                                batchId = child.message.tags["batch"] ?: tree.ref,
+                                historical = true,
+                            )?.let { child.message to it },
                     )
-                        ?.let { child.message to it },
-                )
+                }
+
                 is BatchChild.Nested -> {
-                    val event = when (child.batch.type) {
-                        MULTILINE_CAP -> mapMultilineBatch(child.batch, historical = true)
-                        "netsplit", "netjoin" -> mapBatchTree(child.batch, historical = true).singleOrNull()
-                        else -> null
-                    }
+                    val event =
+                        when (child.batch.type) {
+                            MULTILINE_CAP -> mapMultilineBatch(child.batch, historical = true)
+                            "netsplit", "netjoin" -> mapBatchTree(child.batch, historical = true).singleOrNull()
+                            else -> null
+                        }
                     if (event != null) {
                         val reference = historyReference(child.batch.opening)
-                        val enriched = (event as? IrcEvent.NetworkBatch)?.copy(
-                            historyMetadata = HistoryEventMetadata(
-                                isContext = "draft/chathistory-context" in child.batch.opening.tags,
-                                msgid = reference?.msgid,
-                                serverTime = reference?.serverTime,
-                            ),
-                        ) ?: event
+                        val enriched =
+                            (event as? IrcEvent.NetworkBatch)?.copy(
+                                historyMetadata =
+                                    HistoryEventMetadata(
+                                        isContext = "draft/chathistory-context" in child.batch.opening.tags,
+                                        msgid = reference?.msgid,
+                                        serverTime = reference?.serverTime,
+                                    ),
+                            ) ?: event
                         listOf(child.batch.opening to enriched)
                     } else {
                         mapCorrelatedHistoryChildren(child.batch)
@@ -1102,21 +1328,25 @@ class IrcClient(
     private suspend fun sendUnlabeledChatHistory(
         request: ChatHistoryRequest,
         message: IrcMessage,
-    ): CorrelatedResponse = unlabeledChatHistoryLock.withLock {
-        val t = transport ?: throw IrcDisconnectedException("CHATHISTORY", null)
-        val deferred = CompletableDeferred<CorrelatedResponse>()
-        unlabeledChatHistory.register(request, deferred)
-        try {
-            sendSerialized(t, message)
-            withTimeout(LABEL_TIMEOUT_MS) { deferred.await() }
-        } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
-            throw IrcTimeoutException("CHATHISTORY")
-        } finally {
-            unlabeledChatHistory.clear(deferred)
+    ): CorrelatedResponse =
+        unlabeledChatHistoryLock.withLock {
+            val t = transport ?: throw IrcDisconnectedException("CHATHISTORY", null)
+            val deferred = CompletableDeferred<CorrelatedResponse>()
+            unlabeledChatHistory.register(request, deferred)
+            try {
+                sendSerialized(t, message)
+                withTimeout(LABEL_TIMEOUT_MS) { deferred.await() }
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                throw IrcTimeoutException("CHATHISTORY")
+            } finally {
+                unlabeledChatHistory.clear(deferred)
+            }
         }
-    }
 
-    suspend fun markRead(target: String, timestampMs: Long) {
+    suspend fun markRead(
+        target: String,
+        timestampMs: Long,
+    ) {
         val t = transport ?: return
         val command = readMarkerCommand() ?: return
         sendSerialized(t, ReadMarkerCommands.set(command, target, timestampMs))
@@ -1140,11 +1370,12 @@ class IrcClient(
      * else READ when only soju's extension is acked, else null (no-op). The IRCv3 standard wins so
      * soju broadcasts MARKREAD to this client when both are advertised.
      */
-    private fun readMarkerCommand(): String? = when {
-        hasCap("draft/read-marker") -> "MARKREAD"
-        hasCap("soju.im/read") -> "READ"
-        else -> null
-    }
+    private fun readMarkerCommand(): String? =
+        when {
+            hasCap("draft/read-marker") -> "MARKREAD"
+            hasCap("soju.im/read") -> "READ"
+            else -> null
+        }
 
     /**
      * Fetch one correlated WHOX snapshot. Equal normalized masks share one in-flight request;
@@ -1165,32 +1396,43 @@ class IrcClient(
         }
     }
 
-    private suspend fun performWhox(mask: String, normalizedMask: String): WhoxResult {
+    private suspend fun performWhox(
+        mask: String,
+        normalizedMask: String,
+    ): WhoxResult {
         val token = whoxTokens.acquire() ?: return WhoxResult(emptyList(), completed = false)
-        val t = transport ?: run {
-            whoxTokens.release(token)
-            return WhoxResult(emptyList(), completed = false)
-        }
+        val t =
+            transport ?: run {
+                whoxTokens.release(token)
+                return WhoxResult(emptyList(), completed = false)
+            }
         val rows = ArrayList<IrcEvent.WhoxRow>()
-        val collector = scope.async(start = CoroutineStart.UNDISPATCHED) {
-            broadcastEvents.first { event ->
-                when (event) {
-                    is IrcEvent.WhoxRow -> {
-                        if (event.token == token) rows += event
-                        false
+        val collector =
+            scope.async(start = CoroutineStart.UNDISPATCHED) {
+                broadcastEvents.first { event ->
+                    when (event) {
+                        is IrcEvent.WhoxRow -> {
+                            if (event.token == token) rows += event
+                            false
+                        }
+
+                        is IrcEvent.WhoxComplete -> {
+                            _isupport.get().normalize(event.mask) == normalizedMask
+                        }
+
+                        else -> {
+                            false
+                        }
                     }
-                    is IrcEvent.WhoxComplete ->
-                        _isupport.get().normalize(event.mask) == normalizedMask
-                    else -> false
                 }
             }
-        }
         return try {
             sendSerialized(t, WhoxCommands.request(mask, token))
-            val completed = withTimeoutOrNull(WHOX_TIMEOUT_MS) {
-                collector.await()
-                true
-            } == true
+            val completed =
+                withTimeoutOrNull(WHOX_TIMEOUT_MS) {
+                    collector.await()
+                    true
+                } == true
             WhoxResult(rows.toList(), completed)
         } finally {
             collector.cancel()
@@ -1226,8 +1468,7 @@ class IrcClient(
         return snapshotBouncerNetworks()
     }
 
-    private fun snapshotBouncerNetworks(): List<BouncerNetwork> =
-        _bouncerNetworks.value.map { (id, attrs) -> BouncerNetwork(id, attrs) }
+    private fun snapshotBouncerNetworks(): List<BouncerNetwork> = _bouncerNetworks.value.map { (id, attrs) -> BouncerNetwork(id, attrs) }
 
     suspend fun bouncerAddNetwork(attrs: Map<String, String>): String {
         val response = sendLabeled(BouncerCommands.addNetwork(attrs))
@@ -1251,13 +1492,18 @@ class IrcClient(
      * raw 322s until 323 or a 15s timeout. Returns only the [cap] most populated rows; the raw
      * collector stays memory-bounded even for a large unfiltered LIST.
      */
-    suspend fun listChannels(mask: String? = null, minUsers: Int? = null, cap: Int = 2000): List<ChannelListing> {
-        val params = buildList {
-            mask?.takeIf { it.isNotBlank() }?.let { add(it) }
-            // The user-count filter is only appended when the server advertises ELIST 'U'.
-            val elistU = _isupport.get()["ELIST"]?.contains('U', ignoreCase = true) == true
-            if (minUsers != null && elistU) add(">$minUsers")
-        }
+    suspend fun listChannels(
+        mask: String? = null,
+        minUsers: Int? = null,
+        cap: Int = 2000,
+    ): List<ChannelListing> {
+        val params =
+            buildList {
+                mask?.takeIf { it.isNotBlank() }?.let { add(it) }
+                // The user-count filter is only appended when the server advertises ELIST 'U'.
+                val elistU = _isupport.get()["ELIST"]?.contains('U', ignoreCase = true) == true
+                if (minUsers != null && elistU) add(">$minUsers")
+            }
         val msg = IrcMessage(command = "LIST", params = params)
 
         if (hasCap("labeled-response")) {
@@ -1273,17 +1519,19 @@ class IrcClient(
             awaitPreviousChannelListResponse()
             val t = transport ?: throw IrcDisconnectedException("LIST", null)
             val out = BoundedChannelListings(cap)
-            val collector = scope.launchUnlabeledChannelListCollector(broadcastEvents) { message ->
-                parseListMessage(message)?.let(out::add)
-            }
+            val collector =
+                scope.launchUnlabeledChannelListCollector(broadcastEvents) { message ->
+                    parseListMessage(message)?.let(out::add)
+                }
             var sent = false
             try {
                 sendSerialized(t, msg)
                 sent = true
-                val completed = withTimeoutOrNull(LIST_TIMEOUT_MS) {
-                    collector.join()
-                    true
-                } == true
+                val completed =
+                    withTimeoutOrNull(LIST_TIMEOUT_MS) {
+                        collector.join()
+                        true
+                    } == true
                 if (!completed) {
                     // Keep consuming this response through its 323 terminator. A later raw LIST
                     // must not see the tail of this response as its own result.
@@ -1303,17 +1551,17 @@ class IrcClient(
     /** Waits for a timed-out raw LIST's 323 before another uncorrelated LIST can be sent. */
     private suspend fun awaitPreviousChannelListResponse() {
         val previous = unlabeledChannelListDrain ?: return
-        val drained = withTimeoutOrNull(LIST_DRAIN_WAIT_MS) {
-            previous.join()
-            true
-        } == true
+        val drained =
+            withTimeoutOrNull(LIST_DRAIN_WAIT_MS) {
+                previous.join()
+                true
+            } == true
         if (!drained) throw IrcTimeoutException("previous channel list")
         if (unlabeledChannelListDrain === previous) unlabeledChannelListDrain = null
     }
 
     /** Parse an [IrcMessage] that is (or wraps) an RPL_LIST 322 into a [ChannelListing]. */
-    private fun parseListLine(msg: IrcMessage): ChannelListing? =
-        if (msg.command == "322") parseListMessage(msg) else null
+    private fun parseListLine(msg: IrcMessage): ChannelListing? = if (msg.command == "322") parseListMessage(msg) else null
 
     /** RPL_LIST: params = [me, channel, count, topic]. */
     private fun parseListMessage(msg: IrcMessage): ChannelListing? {
@@ -1326,7 +1574,11 @@ class IrcClient(
 
     // -- soju webpush --
 
-    suspend fun webpushRegister(endpoint: String, p256dh: ByteArray, auth: ByteArray) {
+    suspend fun webpushRegister(
+        endpoint: String,
+        p256dh: ByteArray,
+        auth: ByteArray,
+    ) {
         webpushCommand(
             action = "REGISTER",
             endpoint = endpoint,
@@ -1347,45 +1599,61 @@ class IrcClient(
      * command reply. Start collecting before writing: a local bouncer can acknowledge quickly
      * enough for send-then-collect to miss the response on this replay-free event stream.
      */
-    private suspend fun webpushCommand(action: String, endpoint: String, message: IrcMessage) {
+    private suspend fun webpushCommand(
+        action: String,
+        endpoint: String,
+        message: IrcMessage,
+    ) {
         val t = transport ?: throw IllegalStateException("IRC client is not connected")
         coroutineScope {
-            val response = async(start = CoroutineStart.UNDISPATCHED) {
-                broadcastEvents.mapNotNull { event ->
-                    when (event) {
-                        is IrcEvent.Raw -> {
-                            val raw = event.message
-                            when {
-                                raw.command == "WEBPUSH" &&
-                                    raw.params.getOrNull(0) == action &&
-                                    raw.params.getOrNull(1) == endpoint -> WebPushResponse.Success
-                                else -> null
+            val response =
+                async(start = CoroutineStart.UNDISPATCHED) {
+                    broadcastEvents
+                        .mapNotNull { event ->
+                            when (event) {
+                                is IrcEvent.Raw -> {
+                                    val raw = event.message
+                                    when {
+                                        raw.command == "WEBPUSH" &&
+                                            raw.params.getOrNull(0) == action &&
+                                            raw.params.getOrNull(1) == endpoint -> WebPushResponse.Success
+
+                                        else -> null
+                                    }
+                                }
+
+                                is IrcEvent.StandardReply -> {
+                                    if (event.severity == IrcEvent.StandardReplySeverity.FAIL &&
+                                        event.commandName == "WEBPUSH" &&
+                                        event.context.any { it == action }
+                                    ) {
+                                        WebPushResponse.Failure(event.code, event.description)
+                                    } else {
+                                        null
+                                    }
+                                }
+
+                                is IrcEvent.Disconnected -> {
+                                    WebPushResponse.Disconnected(event.reason)
+                                }
+
+                                else -> {
+                                    null
+                                }
                             }
-                        }
-                        is IrcEvent.StandardReply -> {
-                            if (event.severity == IrcEvent.StandardReplySeverity.FAIL &&
-                                event.commandName == "WEBPUSH" &&
-                                event.context.any { it == action }
-                            ) {
-                                WebPushResponse.Failure(event.code, event.description)
-                            } else {
-                                null
-                            }
-                        }
-                        is IrcEvent.Disconnected -> WebPushResponse.Disconnected(event.reason)
-                        else -> null
-                    }
-                }.first()
-            }
+                        }.first()
+                }
             try {
                 sendSerialized(t, message)
                 when (val reply = withTimeout(WEBPUSH_TIMEOUT_MS) { response.await() }) {
                     WebPushResponse.Success -> Unit
+
                     is WebPushResponse.Failure -> throw IrcCommandException(
                         ircCommand = "WEBPUSH $action",
                         code = reply.code,
                         text = reply.text,
                     )
+
                     is WebPushResponse.Disconnected -> throw IrcDisconnectedException(
                         ircCommand = "WEBPUSH $action",
                         reason = reply.reason,
@@ -1405,8 +1673,7 @@ class IrcClient(
     val multilineLimits: MultilineLimits?
         get() = multilineLimits(caps)
 
-    fun hasCap(cap: String): Boolean =
-        ackedCaps.get().any { it == cap || it.startsWith("$cap=") }
+    fun hasCap(cap: String): Boolean = ackedCaps.get().any { it == cap || it.startsWith("$cap=") }
 
     fun canSendMultilineMessage(text: String): Boolean =
         hasMultilineWireSupport() &&
@@ -1441,30 +1708,33 @@ class IrcClient(
                 // every ZNC network — which never advertises the extension at all — at
                 // NegotiatingOrOffline for the whole Ready session. That value never converged, so
                 // every waiter on it blocked forever instead of settling on "unsupported".
-                val awaitingCapDecision = _pendingFeatureCaps.value.any {
-                    it == CHATHISTORY_CAP || it.startsWith("$CHATHISTORY_CAP=")
-                }
+                val awaitingCapDecision =
+                    _pendingFeatureCaps.value.any {
+                        it == CHATHISTORY_CAP || it.startsWith("$CHATHISTORY_CAP=")
+                    }
                 return if (awaitingCapDecision) {
                     HistoryAvailability.NegotiatingOrOffline
                 } else {
                     HistoryAvailability.Unsupported
                 }
             }
-            val referenceTypes = _isupport.get()["MSGREFTYPES"]?.let { advertised ->
-                advertised.split(',', ' ').mapNotNullTo(linkedSetOf()) { type ->
-                    when {
-                        type.equals("timestamp", ignoreCase = true) -> HistoryReferenceType.TIMESTAMP
-                        type.equals("msgid", ignoreCase = true) -> HistoryReferenceType.MSGID
-                        else -> null
+            val referenceTypes =
+                _isupport.get()["MSGREFTYPES"]?.let { advertised ->
+                    advertised.split(',', ' ').mapNotNullTo(linkedSetOf()) { type ->
+                        when {
+                            type.equals("timestamp", ignoreCase = true) -> HistoryReferenceType.TIMESTAMP
+                            type.equals("msgid", ignoreCase = true) -> HistoryReferenceType.MSGID
+                            else -> null
+                        }
                     }
-                }
-            } ?: linkedSetOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID)
+                } ?: linkedSetOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID)
             val advertisedLimit = _isupport.get()["CHATHISTORY"]?.toIntOrNull()
-            val pageLimit = when {
-                advertisedLimit == 0 -> Int.MAX_VALUE
-                advertisedLimit != null && advertisedLimit > 0 -> advertisedLimit
-                else -> DEFAULT_HISTORY_PAGE_LIMIT
-            }
+            val pageLimit =
+                when {
+                    advertisedLimit == 0 -> Int.MAX_VALUE
+                    advertisedLimit != null && advertisedLimit > 0 -> advertisedLimit
+                    else -> DEFAULT_HISTORY_PAGE_LIMIT
+                }
             return HistoryAvailability.Ready(
                 referenceTypes,
                 pageLimit,
@@ -1476,57 +1746,71 @@ class IrcClient(
 
     private fun clampHistoryLimit(requested: Int): Int {
         val advertised = _isupport.get()["CHATHISTORY"]?.toIntOrNull()
-        val max = when {
-            advertised == 0 -> Int.MAX_VALUE
-            advertised != null && advertised > 0 -> advertised
-            else -> DEFAULT_HISTORY_PAGE_LIMIT
-        }
+        val max =
+            when {
+                advertised == 0 -> Int.MAX_VALUE
+                advertised != null && advertised > 0 -> advertised
+                else -> DEFAULT_HISTORY_PAGE_LIMIT
+            }
         return requested.coerceAtLeast(1).coerceAtMost(max)
     }
 
-    private fun parseTargets(response: List<IrcMessage>): List<ChatHistoryTarget> = buildList {
-        for (message in response) {
-            // Generic labeled correlation retains nested batch framing. It is the only unrelated
-            // protocol shape valid inside an otherwise completed TARGETS batch.
-            if (message.command == "BATCH") continue
-            if (message.command != "CHATHISTORY" ||
-                !message.params.firstOrNull().orEmpty().equals("TARGETS", ignoreCase = true)
-            ) {
-                throw IrcProtocolException(
-                    "CHATHISTORY TARGETS",
-                    "unexpected ${message.command} record",
-                )
+    private fun parseTargets(response: List<IrcMessage>): List<ChatHistoryTarget> =
+        buildList {
+            for (message in response) {
+                // Generic labeled correlation retains nested batch framing. It is the only unrelated
+                // protocol shape valid inside an otherwise completed TARGETS batch.
+                if (message.command == "BATCH") continue
+                if (message.command != "CHATHISTORY" ||
+                    !message.params
+                        .firstOrNull()
+                        .orEmpty()
+                        .equals("TARGETS", ignoreCase = true)
+                ) {
+                    throw IrcProtocolException(
+                        "CHATHISTORY TARGETS",
+                        "unexpected ${message.command} record",
+                    )
+                }
+                if (message.params.size != 3) {
+                    throw IrcProtocolException(
+                        "CHATHISTORY TARGETS",
+                        "record must contain subcommand, target, and timestamp",
+                    )
+                }
+                val target = message.params[1]
+                if (target.isEmpty()) {
+                    throw IrcProtocolException("CHATHISTORY TARGETS", "record target is empty")
+                }
+                val timestamp =
+                    runCatching {
+                        java.time.Instant
+                            .parse(message.params[2])
+                            .toEpochMilli()
+                    }.getOrElse {
+                        throw IrcProtocolException("CHATHISTORY TARGETS", "record timestamp is invalid")
+                    }
+                add(ChatHistoryTarget(target, timestamp))
             }
-            if (message.params.size != 3) {
-                throw IrcProtocolException(
-                    "CHATHISTORY TARGETS",
-                    "record must contain subcommand, target, and timestamp",
-                )
-            }
-            val target = message.params[1]
-            if (target.isEmpty()) {
-                throw IrcProtocolException("CHATHISTORY TARGETS", "record target is empty")
-            }
-            val timestamp = runCatching {
-                java.time.Instant.parse(message.params[2]).toEpochMilli()
-            }.getOrElse {
-                throw IrcProtocolException("CHATHISTORY TARGETS", "record timestamp is invalid")
-            }
-            add(ChatHistoryTarget(target, timestamp))
         }
-    }
 
     private fun historyReference(message: IrcMessage): ChatHistoryReference? {
         val msgid = message.tags["msgid"]?.takeIf(String::isNotEmpty)
-        val serverTime = message.tags["time"]?.let { encoded ->
-            runCatching { java.time.Instant.parse(encoded).toEpochMilli() }.getOrNull()
-        }
+        val serverTime =
+            message.tags["time"]?.let { encoded ->
+                runCatching {
+                    java.time.Instant
+                        .parse(encoded)
+                        .toEpochMilli()
+                }.getOrNull()
+            }
         if (msgid == null && serverTime == null) return null
         return ChatHistoryReference(msgid, serverTime)
     }
 
     private companion object {
         const val LABEL_TIMEOUT_MS = 30_000L
+
         // Generous enough that a slow link answering a PING is not mistaken for a dead bouncer.
         const val BOUNCER_LIST_PROBE_GRACE_MS = 5_000L
         const val LIST_TIMEOUT_MS = 15_000L
@@ -1542,8 +1826,15 @@ class IrcClient(
 
 private sealed interface WebPushResponse {
     data object Success : WebPushResponse
-    data class Failure(val code: String, val text: String) : WebPushResponse
-    data class Disconnected(val reason: String?) : WebPushResponse
+
+    data class Failure(
+        val code: String,
+        val text: String,
+    ) : WebPushResponse
+
+    data class Disconnected(
+        val reason: String?,
+    ) : WebPushResponse
 }
 
 /** Snapshot ISUPPORT into the plain map exposed on Ready/Registered. */

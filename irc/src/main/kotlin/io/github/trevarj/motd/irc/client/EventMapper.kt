@@ -35,9 +35,16 @@ class EventMapper(
     private val namesBuffers = HashMap<String, MutableList<IrcEvent.Names.Member>>()
     private val namesDisplay = HashMap<String, String>()
 
-    private data class ParsedServerTime(val value: Long, val source: ServerTimeSource)
+    private data class ParsedServerTime(
+        val value: Long,
+        val source: ServerTimeSource,
+    )
 
-    private fun ctx(msg: IrcMessage, batchId: String?, historical: Boolean): MessageContext {
+    private fun ctx(
+        msg: IrcMessage,
+        batchId: String?,
+        historical: Boolean,
+    ): MessageContext {
         val parsedTime = parseServerTime(msg.tags["time"], historical)
         return MessageContext(
             msgid = msg.tags["msgid"],
@@ -51,7 +58,10 @@ class EventMapper(
         )
     }
 
-    private fun parseServerTime(time: String?, historical: Boolean): ParsedServerTime {
+    private fun parseServerTime(
+        time: String?,
+        historical: Boolean,
+    ): ParsedServerTime {
         if (time == null) {
             return if (historical) {
                 ParsedServerTime(UNKNOWN_HISTORY_TIME, ServerTimeSource.UNKNOWN)
@@ -95,105 +105,197 @@ class EventMapper(
     ): IrcEvent? {
         val c = { ctx(msg, batchId, historical) }
         return when (msg.command) {
-            "PRIVMSG", "NOTICE" -> mapChat(msg, c(), ctcpReply)
-            "TAGMSG" -> mapTagMessage(msg, c())
-            "JOIN" -> mapJoin(msg, c())
+            "PRIVMSG", "NOTICE" -> {
+                mapChat(msg, c(), ctcpReply)
+            }
+
+            "TAGMSG" -> {
+                mapTagMessage(msg, c())
+            }
+
+            "JOIN" -> {
+                mapJoin(msg, c())
+            }
+
             "PART" -> {
                 val nick = msg.source?.nick ?: return IrcEvent.Raw(msg)
                 val channel = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
                 IrcEvent.Parted(c(), nick, channel, msg.params.getOrNull(1), isSelf(msg.source))
             }
+
             "QUIT" -> {
                 val nick = msg.source?.nick ?: return IrcEvent.Raw(msg)
                 IrcEvent.Quit(c(), nick, msg.params.getOrNull(0))
             }
+
             "KICK" -> {
                 val channel = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
                 val victim = msg.params.getOrNull(1) ?: return IrcEvent.Raw(msg)
                 val by = msg.source?.nick ?: ""
                 IrcEvent.Kicked(
-                    c(), victim, channel, by, msg.params.getOrNull(2),
+                    c(),
+                    victim,
+                    channel,
+                    by,
+                    msg.params.getOrNull(2),
                     isSelf = isupport().normalize(victim) == isupport().normalize(selfNick()),
                 )
             }
+
             "NICK" -> {
                 val from = msg.source?.nick ?: return IrcEvent.Raw(msg)
                 val to = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
                 IrcEvent.NickChanged(c(), from, to, isSelf(msg.source))
             }
+
             "TOPIC" -> {
                 val channel = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
                 IrcEvent.TopicChanged(c(), channel, msg.params.getOrNull(1).orEmpty(), msg.source?.nick)
             }
-            "331", "332" -> mapTopicSnapshot(msg)
+
+            "331", "332" -> {
+                mapTopicSnapshot(msg)
+            }
+
             "MODE" -> {
                 val target = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
                 val modes = msg.params.getOrNull(1).orEmpty()
                 IrcEvent.ModeChanged(c(), target, modes, msg.params.drop(2))
             }
+
             "RENAME" -> {
                 val oldName = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
                 val newName = msg.params.getOrNull(1) ?: return IrcEvent.Raw(msg)
                 IrcEvent.ChannelRenamed(c(), msg.source?.nick, oldName, newName, msg.params.getOrNull(2))
             }
+
             "INVITE" -> {
                 val nick = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
                 val channel = msg.params.getOrNull(1) ?: return IrcEvent.Raw(msg)
                 IrcEvent.Invited(c(), msg.source?.nick ?: "", nick, channel)
             }
+
             "AWAY" -> {
                 val nick = msg.source?.nick ?: return IrcEvent.Raw(msg)
                 IrcEvent.AwayChanged(nick, msg.params.getOrNull(0))
             }
+
             // 305 RPL_UNAWAY / 306 RPL_NOWAWAY confirm our own away state. params[0] is our nick;
             // drop it so the remaining text can be rendered verbatim.
-            "305", "306" -> IrcEvent.SelfAwayChanged(
-                isAway = msg.command == "306",
-                text = msg.params.drop(1).joinToString(" ").trim(),
-            )
+            "305", "306" -> {
+                IrcEvent.SelfAwayChanged(
+                    isAway = msg.command == "306",
+                    text =
+                        msg.params
+                            .drop(1)
+                            .joinToString(" ")
+                            .trim(),
+                    ctx = c().takeIf { it.label != null },
+                )
+            }
+
             "ACCOUNT" -> {
                 val nick = msg.source?.nick ?: return IrcEvent.Raw(msg)
                 val acct = msg.params.getOrNull(0)
                 IrcEvent.AccountChanged(nick, if (acct == null || acct == "*") null else acct)
             }
+
             "CHGHOST" -> {
                 val nick = msg.source?.nick ?: return IrcEvent.Raw(msg)
                 val user = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
                 val host = msg.params.getOrNull(1) ?: return IrcEvent.Raw(msg)
                 IrcEvent.HostChanged(nick, user, host)
             }
+
             "SETNAME" -> {
                 val nick = msg.source?.nick ?: return IrcEvent.Raw(msg)
                 IrcEvent.RealnameChanged(nick, msg.params.getOrNull(0).orEmpty())
             }
-            "FAIL", "WARN", "NOTE" -> mapStandardReply(msg, c())
-            "MARKREAD" -> mapMarkRead(msg)
+
+            "FAIL", "WARN", "NOTE" -> {
+                mapStandardReply(msg, c())
+            }
+
+            "MARKREAD" -> {
+                mapMarkRead(msg)
+            }
+
             // soju.im/read uses the READ command with the same timestamp= shape as MARKREAD. Only
             // map it on connections that negotiated soju's extension; otherwise stray READ traffic
             // (e.g. a non-soju server) must not synthesize ReadMarker events.
-            "READ" -> if (sojuReadCap()) mapMarkRead(msg) else null
-            "BOUNCER" -> mapBouncer(msg)
-            "ERROR" -> IrcEvent.ServerError("ERROR", msg.params, msg.params.lastOrNull().orEmpty())
+            "READ" -> {
+                if (sojuReadCap()) mapMarkRead(msg) else null
+            }
+
+            "BOUNCER" -> {
+                mapBouncer(msg)
+            }
+
+            "ERROR" -> {
+                IrcEvent.ServerError(
+                    "ERROR",
+                    msg.params,
+                    msg.params.lastOrNull().orEmpty(),
+                    c().takeIf { it.label != null },
+                )
+            }
+
             // NAMES accumulation.
-            "353" -> if (accumulateNames(msg)) {
-                val channel = msg.params.getOrNull(2) ?: msg.params.getOrNull(1).orEmpty()
-                IrcEvent.NamesStarted(channel)
-            } else null
-            "366" -> finishNames(msg)
-            "354" -> mapWhox(msg)
-            "315" -> IrcEvent.WhoxComplete(msg.params.getOrNull(1).orEmpty())
-            "730" -> IrcEvent.MonitorOnline(
-                monitorTargets(msg).mapNotNull(::parseIrcPrefix),
-            )
-            "731" -> IrcEvent.MonitorOffline(monitorTargets(msg))
-            "732" -> IrcEvent.MonitorList(monitorTargets(msg))
-            "733" -> IrcEvent.MonitorListEnd
-            "734" -> IrcEvent.MonitorLimitExceeded(
-                limit = msg.params.getOrNull(1)?.toIntOrNull(),
-                targets = msg.params.getOrNull(2).orEmpty().split(',').filter(String::isNotBlank),
-                text = msg.params.lastOrNull().orEmpty(),
-            )
-            else -> mapNumericOrRaw(msg)
+            "353" -> {
+                if (accumulateNames(msg)) {
+                    val channel = msg.params.getOrNull(2) ?: msg.params.getOrNull(1).orEmpty()
+                    IrcEvent.NamesStarted(channel)
+                } else {
+                    null
+                }
+            }
+
+            "366" -> {
+                finishNames(msg)
+            }
+
+            "354" -> {
+                mapWhox(msg)
+            }
+
+            "315" -> {
+                IrcEvent.WhoxComplete(msg.params.getOrNull(1).orEmpty())
+            }
+
+            "730" -> {
+                IrcEvent.MonitorOnline(
+                    monitorTargets(msg).mapNotNull(::parseIrcPrefix),
+                )
+            }
+
+            "731" -> {
+                IrcEvent.MonitorOffline(monitorTargets(msg))
+            }
+
+            "732" -> {
+                IrcEvent.MonitorList(monitorTargets(msg))
+            }
+
+            "733" -> {
+                IrcEvent.MonitorListEnd
+            }
+
+            "734" -> {
+                IrcEvent.MonitorLimitExceeded(
+                    limit = msg.params.getOrNull(1)?.toIntOrNull(),
+                    targets =
+                        msg.params
+                            .getOrNull(2)
+                            .orEmpty()
+                            .split(',')
+                            .filter(String::isNotBlank),
+                    text = msg.params.lastOrNull().orEmpty(),
+                )
+            }
+
+            else -> {
+                mapNumericOrRaw(msg)
+            }
         }
     }
 
@@ -202,7 +304,11 @@ class EventMapper(
         const val UNKNOWN_HISTORY_TIME = 0L
     }
 
-    private fun mapChat(msg: IrcMessage, ctx: MessageContext, ctcpReply: (IrcMessage) -> Unit): IrcEvent? {
+    private fun mapChat(
+        msg: IrcMessage,
+        ctx: MessageContext,
+        ctcpReply: (IrcMessage) -> Unit,
+    ): IrcEvent? {
         val source = msg.source ?: Prefix(nick = "")
         val target = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
         var text = msg.params.getOrNull(1).orEmpty()
@@ -216,10 +322,12 @@ class EventMapper(
                     text = inner.removePrefix("ACTION ")
                     kind = IrcEvent.ChatKind.ACTION
                 }
+
                 inner == "ACTION" -> {
                     text = ""
                     kind = IrcEvent.ChatKind.ACTION
                 }
+
                 inner == "VERSION" && msg.command == "PRIVMSG" -> {
                     // Answer CTCP VERSION with a NOTICE; emit nothing.
                     ctcpReply(
@@ -230,23 +338,41 @@ class EventMapper(
                     )
                     return null
                 }
+
                 inner.startsWith("DCC") && msg.command == "PRIVMSG" -> {
                     return when (val dcc = parseDccPayload(inner)) {
-                        is ParsedDcc.Send -> IrcEvent.DccSend(ctx, source, target, dcc.offer)
-                        is ParsedDcc.Resume -> IrcEvent.DccResume(ctx, source, target, dcc.request)
-                        is ParsedDcc.Accept -> IrcEvent.DccAccept(ctx, source, target, dcc.accepted)
-                        is ParsedDcc.Unsupported -> IrcEvent.UnsupportedDcc(
-                            ctx = ctx,
-                            source = source,
-                            target = target,
-                            command = dcc.command,
-                            reason = dcc.reason,
-                            rawPayload = inner,
-                        )
-                        null -> null
+                        is ParsedDcc.Send -> {
+                            IrcEvent.DccSend(ctx, source, target, dcc.offer)
+                        }
+
+                        is ParsedDcc.Resume -> {
+                            IrcEvent.DccResume(ctx, source, target, dcc.request)
+                        }
+
+                        is ParsedDcc.Accept -> {
+                            IrcEvent.DccAccept(ctx, source, target, dcc.accepted)
+                        }
+
+                        is ParsedDcc.Unsupported -> {
+                            IrcEvent.UnsupportedDcc(
+                                ctx = ctx,
+                                source = source,
+                                target = target,
+                                command = dcc.command,
+                                reason = dcc.reason,
+                                rawPayload = inner,
+                            )
+                        }
+
+                        null -> {
+                            null
+                        }
                     }
                 }
-                else -> return null // ignore other CTCP
+
+                else -> {
+                    return null
+                } // ignore other CTCP
             }
         } else {
             kind = if (msg.command == "NOTICE") IrcEvent.ChatKind.NOTICE else IrcEvent.ChatKind.PRIVMSG
@@ -263,7 +389,10 @@ class EventMapper(
         )
     }
 
-    private fun mapTagMessage(msg: IrcMessage, ctx: MessageContext): IrcEvent {
+    private fun mapTagMessage(
+        msg: IrcMessage,
+        ctx: MessageContext,
+    ): IrcEvent {
         val source = msg.source ?: Prefix(nick = "")
         val target = msg.params.getOrNull(0).orEmpty()
         val react = msg.reactionValue()
@@ -282,7 +411,10 @@ class EventMapper(
         )
     }
 
-    private fun mapJoin(msg: IrcMessage, ctx: MessageContext): IrcEvent {
+    private fun mapJoin(
+        msg: IrcMessage,
+        ctx: MessageContext,
+    ): IrcEvent {
         val nick = msg.source?.nick ?: return IrcEvent.Raw(msg)
         val channel = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
         // extended-join: JOIN <channel> <account> :<realname>
@@ -295,31 +427,42 @@ class EventMapper(
         val target = msg.params.getOrNull(0).orEmpty()
         val tsToken = msg.params.getOrNull(1) // "timestamp=<ISO>" or "timestamp=*"
         val value = tsToken?.substringAfter("timestamp=", "")
-        val ts = when {
-            value.isNullOrEmpty() || value == "*" -> null
-            else -> try {
-                Instant.parse(value).toEpochMilli()
-            } catch (_: DateTimeParseException) {
-                null
+        val ts =
+            when {
+                value.isNullOrEmpty() || value == "*" -> {
+                    null
+                }
+
+                else -> {
+                    try {
+                        Instant.parse(value).toEpochMilli()
+                    } catch (_: DateTimeParseException) {
+                        null
+                    }
+                }
             }
-        }
         return IrcEvent.ReadMarker(target, ts)
     }
 
-    private fun mapStandardReply(msg: IrcMessage, ctx: MessageContext): IrcEvent {
+    private fun mapStandardReply(
+        msg: IrcMessage,
+        ctx: MessageContext,
+    ): IrcEvent {
         val commandName = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
         val code = msg.params.getOrNull(1) ?: return IrcEvent.Raw(msg)
         val description = msg.params.lastOrNull().orEmpty()
-        val context = if (msg.params.size <= 3) {
-            emptyList()
-        } else {
-            msg.params.subList(2, msg.params.lastIndex)
-        }
-        val severity = when (msg.command) {
-            "FAIL" -> IrcEvent.StandardReplySeverity.FAIL
-            "WARN" -> IrcEvent.StandardReplySeverity.WARN
-            else -> IrcEvent.StandardReplySeverity.NOTE
-        }
+        val context =
+            if (msg.params.size <= 3) {
+                emptyList()
+            } else {
+                msg.params.subList(2, msg.params.lastIndex)
+            }
+        val severity =
+            when (msg.command) {
+                "FAIL" -> IrcEvent.StandardReplySeverity.FAIL
+                "WARN" -> IrcEvent.StandardReplySeverity.WARN
+                else -> IrcEvent.StandardReplySeverity.NOTE
+            }
         if (severity == IrcEvent.StandardReplySeverity.FAIL &&
             commandName.equals("BATCH", ignoreCase = true) &&
             code in MULTILINE_REJECTION_CODES &&
@@ -348,13 +491,19 @@ class EventMapper(
         val started = key !in namesBuffers
         namesDisplay[key] = channel
         val members = namesBuffers.getOrPut(key) { mutableListOf() }
-        val list = msg.params.lastOrNull().orEmpty().split(' ').filter { it.isNotEmpty() }
+        val list =
+            msg.params
+                .lastOrNull()
+                .orEmpty()
+                .split(' ')
+                .filter { it.isNotEmpty() }
         val prefixChars = isupport().prefixModes.map { it.second }.toSet()
         for (entry in list) {
             var i = 0
             val prefixes = StringBuilder()
             while (i < entry.length && entry[i] in prefixChars) {
-                prefixes.append(entry[i]); i++
+                prefixes.append(entry[i])
+                i++
             }
             val rest = entry.substring(i)
             val identity = parseIrcPrefix(rest) ?: continue
@@ -381,9 +530,12 @@ class EventMapper(
     private fun mapWhox(msg: IrcMessage): IrcEvent {
         // WHO <mask> %tuhnafr,<token> yields:
         // 354 <client> <token> <user> <host> <nick> <account> <flags> :<realname>
-        val token = msg.params.getOrNull(1)?.toIntOrNull()
-            ?.takeIf { it in 0..999 }
-            ?: return IrcEvent.Raw(msg)
+        val token =
+            msg.params
+                .getOrNull(1)
+                ?.toIntOrNull()
+                ?.takeIf { it in 0..999 }
+                ?: return IrcEvent.Raw(msg)
         val username = msg.params.getOrNull(2)
         val host = msg.params.getOrNull(3)
         val nick = msg.params.getOrNull(4) ?: return IrcEvent.Raw(msg)
@@ -407,13 +559,19 @@ class EventMapper(
         // Error numerics (4xx/5xx) surface as ServerError; everything else is Raw.
         val cmd = msg.command
         if (cmd.length == 3 && cmd.all { it.isDigit() } && (cmd[0] == '4' || cmd[0] == '5')) {
-            return IrcEvent.ServerError(cmd, msg.params, msg.params.lastOrNull().orEmpty())
+            val context = ctx(msg, null, false).takeIf { it.label != null }
+            return IrcEvent.ServerError(cmd, msg.params, msg.params.lastOrNull().orEmpty(), context)
         }
         return IrcEvent.Raw(msg)
     }
 
     private fun monitorTargets(msg: IrcMessage): List<String> =
-        msg.params.drop(1).firstOrNull().orEmpty().split(',').filter(String::isNotBlank)
+        msg.params
+            .drop(1)
+            .firstOrNull()
+            .orEmpty()
+            .split(',')
+            .filter(String::isNotBlank)
 
     /** Parse tag-escaped `k=v;k2=v2` attribute strings (bouncer / webpush). */
     private fun parseAttrs(raw: String): Map<String, String> = parseAttrString(raw)
@@ -441,7 +599,11 @@ private fun unescapeAttrValue(value: String): String {
     var i = 0
     while (i < value.length) {
         val ch = value[i]
-        if (ch != '\\') { sb.append(ch); i++; continue }
+        if (ch != '\\') {
+            sb.append(ch)
+            i++
+            continue
+        }
         if (i == value.length - 1) break
         when (val next = value[i + 1]) {
             ':' -> sb.append(';')

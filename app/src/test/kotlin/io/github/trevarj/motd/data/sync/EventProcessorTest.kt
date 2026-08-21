@@ -2397,6 +2397,113 @@ class EventProcessorTest {
     }
 
     @Test
+    fun labeledCommandRepliesRouteToTheirOriginatingChats() = runTest {
+        val first = db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "#one", displayName = "#one", type = BufferType.CHANNEL),
+        )
+        val second = db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "#two", displayName = "#two", type = BufferType.CHANNEL),
+        )
+        processor.beginCommandResponse(networkId, first, "MOTD", "first")
+        processor.beginCommandResponse(networkId, second, "LINKS", "second")
+
+        processor.process(
+            networkId,
+            IrcEvent.Raw(IrcMessage(tags = mapOf("label" to "second"), command = "364", params = listOf("me", "link"))),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.Raw(IrcMessage(tags = mapOf("label" to "first"), command = "372", params = listOf("me", "motd"))),
+        )
+
+        assertEquals("link", pagingList(second).single().text)
+        assertEquals("motd", pagingList(first).single().text)
+        assertTrue(pagingList(first).single().eventPayload!!.startsWith(COMMAND_RESPONSE_PAYLOAD_PREFIX))
+        assertNull(serverBuffer())
+    }
+
+    @Test
+    fun labeledCommandAckCompletesWithoutCreatingAnEmptyPill() = runTest {
+        val origin = db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "#origin", displayName = "#origin", type = BufferType.CHANNEL),
+        )
+        processor.beginCommandResponse(networkId, origin, "NICK", "nick-label")
+
+        processor.process(
+            networkId,
+            IrcEvent.Raw(IrcMessage(tags = mapOf("label" to "nick-label"), command = "ACK")),
+        )
+
+        assertTrue(pagingList(origin).isEmpty())
+        assertNull(serverBuffer())
+    }
+
+    @Test
+    fun unlabeledCommandUsesLatestOriginUntilTerminalOrTimeout() = runTest {
+        val old = db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "#old", displayName = "#old", type = BufferType.CHANNEL),
+        )
+        val latest = db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "#latest", displayName = "#latest", type = BufferType.CHANNEL),
+        )
+        processor.beginCommandResponse(networkId, old, "MOTD", null)
+        processor.beginCommandResponse(networkId, latest, "MOTD", null)
+        processor.process(networkId, IrcEvent.Raw(IrcMessage(command = "372", params = listOf("me", "latest"))))
+        processor.process(networkId, IrcEvent.Raw(IrcMessage(command = "376", params = listOf("me", "done"))))
+        processor.process(networkId, IrcEvent.Raw(IrcMessage(command = "372", params = listOf("me", "server"))))
+
+        assertTrue(pagingList(old).isEmpty())
+        assertEquals(listOf("done", "latest"), pagingList(latest).map { it.text }.sorted())
+        assertEquals("server", pagingList(serverBuffer()!!.id).single().text)
+
+        processor.beginCommandResponse(networkId, old, "MOTD", null, now = 0)
+        processor.process(networkId, IrcEvent.Raw(IrcMessage(command = "372", params = listOf("me", "expired"))))
+        assertTrue(pagingList(old).isEmpty())
+    }
+
+    @Test
+    fun commandErrorRoutesToOriginInsteadOfProtocolTarget() = runTest {
+        val origin = db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "#origin", displayName = "#origin", type = BufferType.CHANNEL),
+        )
+        db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "#other", displayName = "#other", type = BufferType.CHANNEL),
+        )
+        processor.beginCommandResponse(networkId, origin, "JOIN", "join-label")
+
+        processor.process(
+            networkId,
+            IrcEvent.ServerError(
+                "473",
+                listOf("me", "#other"),
+                "Cannot join channel (+i)",
+                ctx(label = "join-label"),
+            ),
+        )
+
+        val row = pagingList(origin).single()
+        assertEquals(MessageKind.ERROR, row.kind)
+        assertTrue(row.text.startsWith("473"))
+        assertNull(serverBuffer())
+    }
+
+    @Test
+    fun whoisIsSheetOnlyUnlessSentAsTrackedRawCommand() = runTest {
+        processor.process(networkId, IrcEvent.Raw(IrcMessage(command = "311", params = listOf("me", "alice", "u", "h"))))
+        assertNull(serverBuffer())
+
+        val origin = db.bufferDao().insert(
+            BufferEntity(networkId = networkId, name = "#origin", displayName = "#origin", type = BufferType.CHANNEL),
+        )
+        processor.beginCommandResponse(networkId, origin, "WHOIS", null)
+        processor.process(networkId, IrcEvent.Raw(IrcMessage(command = "311", params = listOf("me", "alice", "u", "h"))))
+        processor.process(networkId, IrcEvent.Raw(IrcMessage(command = "318", params = listOf("me", "alice", "done"))))
+
+        assertEquals(2, pagingList(origin).size)
+        assertNull(serverBuffer())
+    }
+
+    @Test
     fun disconnected_insertsServerInfoMarker() = runTest {
         processor.process(networkId, IrcEvent.Disconnected("connection reset"))
         val server = serverBuffer()!!

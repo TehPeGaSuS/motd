@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -17,11 +18,11 @@ import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.sync.COMMAND_RESPONSE_PAYLOAD_PREFIX
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
 import io.github.trevarj.motd.ui.chat.MessageList
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import kotlin.math.abs
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
@@ -29,20 +30,22 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import kotlin.math.abs
 
 class MessageTimelineUiTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
     fun canonicalVariantsRenderOnceInTimelineOrder() {
-        val rows = listOf(
-            message(6, 600, MessageKind.PRIVMSG, "failed", self = true, failed = true),
-            message(5, 500, MessageKind.PRIVMSG, "sending", self = true, pending = true),
-            message(4, 400, MessageKind.NOTICE, "notice"),
-            message(3, 300, MessageKind.ACTION, "waves"),
-            message(2, 200, MessageKind.JOIN, "joined"),
-            message(1, 100, MessageKind.PRIVMSG, "oldest"),
-        )
+        val rows =
+            listOf(
+                message(6, 600, MessageKind.PRIVMSG, "failed", self = true, failed = true),
+                message(5, 500, MessageKind.PRIVMSG, "sending", self = true, pending = true),
+                message(4, 400, MessageKind.NOTICE, "notice"),
+                message(3, 300, MessageKind.ACTION, "waves"),
+                message(2, 200, MessageKind.JOIN, "joined"),
+                message(1, 100, MessageKind.PRIVMSG, "oldest"),
+            )
         render(flowOf(PagingData.from(rows)), TimelineAnchor(250, 2))
 
         listOf(6L, 5L, 4L, 3L, 1L).forEach { assertMessageOnce(it) }
@@ -64,31 +67,32 @@ class MessageTimelineUiTest {
     fun typedEventsExposeStableActionsAndFallbacks() {
         var joins = 0
         var dismissals = 0
-        val rows = listOf(
-            message(4, 400, MessageKind.DCC_TRANSFER, "file offer", payload = null),
-            message(
-                3,
-                300,
-                MessageKind.NETJOIN,
-                "network healed",
-                payload = NetworkBatchPayloadV1("a.example", "b.example", listOf("alice", "bob")).encode(),
-            ),
-            message(
-                2,
-                200,
-                MessageKind.NETSPLIT,
-                "network split",
-                payload = NetworkBatchPayloadV1("a.example", "b.example", listOf("alice")).encode(),
-            ),
-            message(
-                1,
-                100,
-                MessageKind.INVITE,
-                "alice invited you",
-                payload = InvitePayloadV1("alice", "me", "#journey").encode(),
-                inviteState = InviteState.PENDING,
-            ),
-        )
+        val rows =
+            listOf(
+                message(4, 400, MessageKind.DCC_TRANSFER, "file offer", payload = null),
+                message(
+                    3,
+                    300,
+                    MessageKind.NETJOIN,
+                    "network healed",
+                    payload = NetworkBatchPayloadV1("a.example", "b.example", listOf("alice", "bob")).encode(),
+                ),
+                message(
+                    2,
+                    200,
+                    MessageKind.NETSPLIT,
+                    "network split",
+                    payload = NetworkBatchPayloadV1("a.example", "b.example", listOf("alice")).encode(),
+                ),
+                message(
+                    1,
+                    100,
+                    MessageKind.INVITE,
+                    "alice invited you",
+                    payload = InvitePayloadV1("alice", "me", "#journey").encode(),
+                    inviteState = InviteState.PENDING,
+                ),
+            )
         render(
             flowOf(PagingData.from(rows)),
             onAcceptInvite = { joins++ },
@@ -110,14 +114,35 @@ class MessageTimelineUiTest {
     }
 
     @Test
+    fun singleCommandReplyStartsCollapsedAndExpands() {
+        val reply =
+            message(
+                1,
+                100,
+                MessageKind.SERVER_INFO,
+                "Message of the day complete",
+                payload = "${COMMAND_RESPONSE_PAYLOAD_PREFIX}motd-session",
+            ).copy(sender = "/motd")
+        render(flowOf(PagingData.from(listOf(reply))))
+
+        scrollTo("chat_system_pill")
+        compose.onNodeWithText("/motd · 1 reply", useUnmergedTree = true).assertIsDisplayed()
+        compose.onAllNodesWithText("Message of the day complete", useUnmergedTree = true).assertCountEquals(0)
+        compose.onNodeWithTag("chat_system_pill", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("Message of the day complete", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
     fun pagingReplacementKeepsTheVisibleMessageAnchorStable() {
-        val systemRun = listOf(
-            message(1_002, 72_000, MessageKind.JOIN, "alice joined"),
-            message(1_001, 71_000, MessageKind.PART, "bob left"),
-        )
-        val messages = (70L downTo 1L).map { id ->
-            message(id, id * 1_000, MessageKind.PRIVMSG, "row $id")
-        }
+        val systemRun =
+            listOf(
+                message(1_002, 72_000, MessageKind.JOIN, "alice joined"),
+                message(1_001, 71_000, MessageKind.PART, "bob left"),
+            )
+        val messages =
+            (70L downTo 1L).map { id ->
+                message(id, id * 1_000, MessageKind.PRIVMSG, "row $id")
+            }
         val original = systemRun + messages
         val pages = MutableStateFlow(PagingData.from(original))
         render(pages)
@@ -127,12 +152,13 @@ class MessageTimelineUiTest {
         scrollTo(messageTag(25))
         val before = bounds(messageTag(25))
 
-        pages.value = PagingData.from(
-            listOf(message(1_003, 73_000, MessageKind.PRIVMSG, "row 71")) +
-                systemRun +
-                message(1_000, 70_500, MessageKind.QUIT, "carol quit") +
-                messages,
-        )
+        pages.value =
+            PagingData.from(
+                listOf(message(1_003, 73_000, MessageKind.PRIVMSG, "row 71")) +
+                    systemRun +
+                    message(1_000, 70_500, MessageKind.QUIT, "carol quit") +
+                    messages,
+            )
         compose.waitUntil(10_000) {
             runCatching { compose.onNodeWithTag(messageTag(25), useUnmergedTree = true).assertIsDisplayed() }.isSuccess
         }
@@ -192,8 +218,7 @@ class MessageTimelineUiTest {
         compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
     }
 
-    private fun bounds(tag: String): Rect =
-        compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+    private fun bounds(tag: String): Rect = compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
 
     private fun messageTag(id: Long) = "chat_message_m$id"
 

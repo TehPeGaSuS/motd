@@ -37,12 +37,14 @@ import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.event.ServerTimeSource
+import io.github.trevarj.motd.irc.event.messageContextOrNull
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.replyReference
 import io.github.trevarj.motd.irc.proto.unreactionValue
 import io.github.trevarj.motd.service.IrcEventSink
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -65,6 +67,9 @@ data class ReplannedOutgoingPlan(
 )
 
 internal data class PersistedHistoryPage(val roomId: RoomId, val inserted: Int)
+
+internal const val COMMAND_RESPONSE_PAYLOAD_PREFIX = "command-response:v1:"
+private const val COMMAND_RESPONSE_TIMEOUT_MS = 30_000L
 
 /**
  * One CHATHISTORY TARGETS row already resolved to a known room: the server's newest-activity
@@ -130,8 +135,21 @@ class EventProcessor @Inject constructor(
         ConcurrentHashMap<Long, ArrayDeque<ChatRoute>>()
     private val activeHistoryTargets = ConcurrentHashMap<Long, ActiveHistoryTarget>()
     private val activeProtocolPageCursorWrites = ConcurrentHashMap.newKeySet<Long>()
+    private val commandResponsesById = ConcurrentHashMap<String, CommandResponseSession>()
+    private val commandResponsesByLabel = ConcurrentHashMap<String, CommandResponseSession>()
+    private val latestUnlabeledCommand = ConcurrentHashMap<Long, CommandResponseSession>()
 
     private data class RosterKey(val networkId: Long, val bufferId: Long)
+
+    private data class CommandResponseSession(
+        val id: String,
+        val networkId: Long,
+        val bufferId: RoomId,
+        val command: String,
+        val label: String?,
+        val expiresAt: Long,
+        var nextOrdinal: Int = 0,
+    )
 
     private data class CanonicalBatchKey(
         val roomId: Long,
@@ -266,9 +284,43 @@ class EventProcessor @Inject constructor(
         }
     }
 
+    /** Register one composer command before its wire write so replies can return to its chat. */
+    fun beginCommandResponse(
+        networkId: Long,
+        bufferId: RoomId,
+        command: String,
+        label: String?,
+        now: Long = System.currentTimeMillis(),
+    ): String {
+        commandResponsesById.values.removeAll { it.expiresAt <= now }
+        commandResponsesByLabel.values.removeAll { it.expiresAt <= now }
+        latestUnlabeledCommand.entries.removeAll { it.value.expiresAt <= now }
+        val session = CommandResponseSession(
+            id = UUID.randomUUID().toString(),
+            networkId = networkId,
+            bufferId = bufferId,
+            command = command.uppercase().filter { it.isLetterOrDigit() || it == '_' }.ifEmpty { "COMMAND" },
+            label = label,
+            expiresAt = now + COMMAND_RESPONSE_TIMEOUT_MS,
+        )
+        commandResponsesById[session.id] = session
+        if (label == null) {
+            latestUnlabeledCommand.put(networkId, session)?.let(::finishCommandResponse)
+        } else {
+            commandResponsesByLabel[label] = session
+        }
+        return session.id
+    }
+
+    fun cancelCommandResponse(sessionId: String) {
+        commandResponsesById[sessionId]?.let(::finishCommandResponse)
+    }
+
     override suspend fun process(networkId: Long, event: IrcEvent) {
         sequencer.withNetwork(networkId) {
             processEvent(networkId, event, EventOrigin.LIVE)
+            completeCommandFromState(networkId, event)
+            if (event is IrcEvent.Disconnected) clearCommandResponses(networkId)
             bufferStore.drainCommittedRoomMerges()
         }
     }
@@ -2654,6 +2706,100 @@ class EventProcessor @Inject constructor(
 
     // -- server buffer --------------------------------------
 
+    private fun commandResponse(
+        networkId: Long,
+        label: String?,
+        now: Long = System.currentTimeMillis(),
+    ): CommandResponseSession? {
+        val session = if (label != null) {
+            commandResponsesByLabel[label]
+        } else {
+            latestUnlabeledCommand[networkId]
+        } ?: return null
+        if (session.networkId != networkId || session.expiresAt <= now) {
+            finishCommandResponse(session)
+            return null
+        }
+        return session
+    }
+
+    private fun finishCommandResponse(session: CommandResponseSession) {
+        commandResponsesById.remove(session.id, session)
+        session.label?.let { commandResponsesByLabel.remove(it, session) }
+        latestUnlabeledCommand.remove(session.networkId, session)
+    }
+
+    private fun clearCommandResponses(networkId: Long) {
+        commandResponsesById.values.filter { it.networkId == networkId }.forEach(::finishCommandResponse)
+    }
+
+    private fun completeCommandFromState(networkId: Long, event: IrcEvent) {
+        val session = commandResponse(networkId, event.messageContextOrNull()?.label) ?: return
+        val complete = when (session.command) {
+            "JOIN" -> event is IrcEvent.Joined && event.isSelf
+            "PART" -> event is IrcEvent.Parted && event.isSelf
+            "NICK" -> event is IrcEvent.NickChanged && event.isSelf
+            "TOPIC" -> event is IrcEvent.TopicChanged
+            "MODE" -> event is IrcEvent.ModeChanged
+            "KICK" -> event is IrcEvent.Kicked
+            "INVITE" -> event is IrcEvent.Invited
+            "SETNAME" -> event is IrcEvent.RealnameChanged
+            "PRIVMSG", "NOTICE" -> event is IrcEvent.ChatMessage && event.isSelf
+            else -> false
+        }
+        if (complete) finishCommandResponse(session)
+    }
+
+    private suspend fun insertCommandResponse(
+        session: CommandResponseSession,
+        ctx: MessageContext,
+        kind: MessageKind,
+        text: String,
+    ) {
+        val ordinal = session.nextOrdinal++
+        insertSystem(
+            bufferId = session.bufferId,
+            ctx = ctx,
+            kind = kind,
+            sender = "/${session.command.lowercase()}",
+            text = text,
+            dedupKey = "command:${session.id}:$ordinal",
+            eventPayload = "$COMMAND_RESPONSE_PAYLOAD_PREFIX${session.id}",
+            origin = EventOrigin.LIVE,
+        )
+    }
+
+    private fun commandResponseEnds(command: String, reply: String): Boolean = when (command) {
+        "WHOIS" -> reply == "318"
+        "WHO" -> reply == "315"
+        "NAMES" -> reply == "366"
+        "MOTD" -> reply == "376" || reply == "422"
+        "LIST" -> reply == "323"
+        "LINKS" -> reply == "365"
+        "STATS" -> reply == "219"
+        "HELP" -> reply == "706"
+        "INFO" -> reply == "374"
+        "ADMIN" -> reply == "259"
+        "TRACE" -> reply == "262"
+        "LUSERS" -> reply == "266"
+        "VERSION" -> reply == "351"
+        "TIME" -> reply == "391"
+        "USERHOST" -> reply == "302"
+        "ISON" -> reply == "303"
+        "INVITE" -> reply == "341"
+        else -> false
+    }
+
+    private fun rawCommandResponseText(message: io.github.trevarj.motd.irc.proto.IrcMessage): String {
+        val numeric = message.command.length == 3 && message.command.all(Char::isDigit)
+        val params = if (numeric) message.params.drop(1) else message.params
+        return if (numeric) {
+            params.joinToString(" ").trim().ifEmpty { message.command }
+        } else {
+            (listOf(message.command) + params).joinToString(" ").trim()
+        }
+    }
+
     private suspend fun onStandardReply(
         networkId: Long,
         e: IrcEvent.StandardReply,
@@ -2666,14 +2812,15 @@ class EventProcessor @Inject constructor(
                 else -> bufferStore.resolveQueryRoom(networkId, st.normalize(target), account = null)
             }
         }
-        val bufferId = routed?.id ?: ensureServerBuffer(networkId, st)
+        val protocolBufferId = routed?.id ?: ensureServerBuffer(networkId, st)
+        val response = if (origin == EventOrigin.LIVE) commandResponse(networkId, e.ctx.label) else null
         if (e.severity == IrcEvent.StandardReplySeverity.FAIL) {
             e.ctx.label?.let { label ->
-                messageDao.failIfStillPending(bufferId, label)
+                messageDao.failIfStillPending(protocolBufferId, label)
             } ?: if (e.commandName.equals("PRIVMSG", ignoreCase = true) ||
                 e.commandName.equals("NOTICE", ignoreCase = true)
             ) {
-                messageDao.failLatestPending(bufferId)
+                messageDao.failLatestPending(protocolBufferId)
             } else {
                 Unit
             }
@@ -2685,19 +2832,24 @@ class EventProcessor @Inject constructor(
         }
         val command = e.commandName.takeUnless { it == "*" }?.let { "$it " }.orEmpty()
         val text = "$command$prefix (${e.code}): ${e.description}".trim()
-        insertSystem(
-            bufferId,
-            e.ctx,
-            if (e.severity == IrcEvent.StandardReplySeverity.FAIL) MessageKind.ERROR else MessageKind.SERVER_INFO,
-            "",
-            text,
-            origin = origin,
-        )
+        val kind = if (e.severity == IrcEvent.StandardReplySeverity.FAIL) {
+            MessageKind.ERROR
+        } else {
+            MessageKind.SERVER_INFO
+        }
+        if (response != null) {
+            insertCommandResponse(response, e.ctx, kind, text)
+            if (e.severity == IrcEvent.StandardReplySeverity.FAIL) finishCommandResponse(response)
+        } else {
+            insertSystem(protocolBufferId, e.ctx, kind, "", text, origin = origin)
+        }
     }
 
-    /** ServerError → SERVER buffer, kind ERROR. The event carries no ctx, so use the wall clock. */
+    /** ServerError mutates target state, but composer feedback returns to its originating chat. */
     private suspend fun onServerError(networkId: Long, e: IrcEvent.ServerError) {
         val st = stateFor(networkId)
+        val response = commandResponse(networkId, e.ctx?.label)
+        val responseContext = e.ctx ?: serverCtx()
         if (e.code in PART_ALREADY_CLOSED_NUMERICS) {
             val channel = e.params.firstOrNull { isChannel(networkId, it, st) }
             val buffer = channel?.let { existingChannelBuffer(networkId, it, st) }
@@ -2726,7 +2878,12 @@ class EventProcessor @Inject constructor(
             if (channelBuffer != null) {
                 val bufferId = channelBuffer.id
                 val text = "${e.code} ${e.text}".trim()
-                insertSystem(bufferId, serverCtx(), MessageKind.ERROR, "", text)
+                if (response != null) {
+                    insertCommandResponse(response, responseContext, MessageKind.ERROR, text)
+                    finishCommandResponse(response)
+                } else {
+                    insertSystem(bufferId, responseContext, MessageKind.ERROR, "", text)
+                }
                 // Mark the just-sent message as failed; the server never accepted it. Retry is still
                 // available, and after rejoining it will succeed. Capture the row first — failLatestPending
                 // flips it to failed=0-excluded.
@@ -2738,9 +2895,14 @@ class EventProcessor @Inject constructor(
                 return
             }
         }
-        val bufferId = ensureServerBuffer(networkId, st)
         val text = "${e.code} ${e.text}".trim()
-        insertSystem(bufferId, serverCtx(), MessageKind.ERROR, "", text)
+        if (response != null) {
+            insertCommandResponse(response, responseContext, MessageKind.ERROR, text)
+            finishCommandResponse(response)
+        } else {
+            val bufferId = ensureServerBuffer(networkId, st)
+            insertSystem(bufferId, responseContext, MessageKind.ERROR, "", text)
+        }
     }
 
     /** Whitelisted informational numerics → SERVER buffer, kind SERVER_INFO (our nick dropped). */
@@ -2752,6 +2914,16 @@ class EventProcessor @Inject constructor(
     ) {
         if (removeReaction(networkId, e.message, origin, historyTarget)) return
         if (origin != EventOrigin.LIVE) return
+        val response = commandResponse(networkId, e.message.tags["label"])
+        if (response != null) {
+            if (e.message.command == "ACK") {
+                finishCommandResponse(response)
+                return
+            }
+            insertCommandResponse(response, serverCtx(), MessageKind.SERVER_INFO, rawCommandResponseText(e.message))
+            if (commandResponseEnds(response.command, e.message.command)) finishCommandResponse(response)
+            return
+        }
         if (e.message.command !in SERVER_INFO_NUMERICS) return
         val st = stateFor(networkId)
         val bufferId = ensureServerBuffer(networkId, st)
@@ -2806,9 +2978,15 @@ class EventProcessor @Inject constructor(
      * it before these numerics became a typed event. Live-only, like every other SERVER_INFO line.
      */
     private suspend fun onSelfAwayChanged(networkId: Long, e: IrcEvent.SelfAwayChanged) {
-        val st = stateFor(networkId)
-        val bufferId = ensureServerBuffer(networkId, st)
-        insertSystem(bufferId, serverCtx(), MessageKind.SERVER_INFO, "", e.text)
+        val response = commandResponse(networkId, e.ctx?.label)
+        if (response != null) {
+            insertCommandResponse(response, e.ctx ?: serverCtx(), MessageKind.SERVER_INFO, e.text)
+            finishCommandResponse(response)
+        } else {
+            val st = stateFor(networkId)
+            val bufferId = ensureServerBuffer(networkId, st)
+            insertSystem(bufferId, e.ctx ?: serverCtx(), MessageKind.SERVER_INFO, "", e.text)
+        }
     }
 
     /** Disconnected marker → SERVER buffer for cheap in-history reconnect visibility. */
@@ -3297,6 +3475,7 @@ class EventProcessor @Inject constructor(
         // Override for idempotent system rows (e.g. self-join) that must collapse across replays
         // regardless of serverTime. Falls back to msgid ?: sha1(serverTime|sender|text).
         dedupKey: String? = null,
+        eventPayload: String? = null,
         isSelf: Boolean = false,
         origin: EventOrigin = if (ctx.batchId == null) EventOrigin.LIVE else EventOrigin.HISTORY,
     ) {
@@ -3313,6 +3492,7 @@ class EventProcessor @Inject constructor(
             isSelf = isSelf,
             dedupKey = dedupKey ?: SemanticIdentity.keyFor(ctx.msgid, ctx.serverTime, sender, text),
             eventKey = dedupKey,
+            eventPayload = eventPayload,
             serverTimeAuthoritative = ctx.serverTimeSource == ServerTimeSource.TAG,
         )
         val batchKey = CanonicalBatchKey(bufferId, row.kind, normalizedSender, text, row.serverTime)
@@ -3461,10 +3641,10 @@ class EventProcessor @Inject constructor(
     private companion object {
         /**
          * Informational numerics persisted to the SERVER buffer as SERVER_INFO:
-         * welcome (001..004), lusers (251..255, 265, 266), motd (375, 372, 376), RPL_AWAY (301),
-         * and the WHOIS set (311, 312, 317, 318, 319, 330, 338) as a fallback surface when
-         * labeled-response is missing. LIST numerics (321/322/323) are deliberately excluded so a
-         * browse never floods the buffer. Own away confirmations (305/306) are no longer Raw: they
+         * welcome (001..004), lusers (251..255, 265, 266), motd (375, 372, 376), and RPL_AWAY
+         * (301). WHOIS is consumed by the nick-sheet request path. LIST numerics
+         * (321/322/323) are deliberately excluded so a browse never floods the buffer. Own away
+         * confirmations (305/306) are no longer Raw: they
          * map to [IrcEvent.SelfAwayChanged] and render the identical line from that branch.
          */
         val SERVER_INFO_NUMERICS: Set<String> = setOf(
@@ -3472,7 +3652,6 @@ class EventProcessor @Inject constructor(
             "251", "252", "253", "254", "255", "265", "266",
             "375", "372", "376",
             "301",
-            "311", "312", "317", "318", "319", "330", "338",
         )
 
         val JOIN_ERROR_NUMERICS: Set<String> = setOf(

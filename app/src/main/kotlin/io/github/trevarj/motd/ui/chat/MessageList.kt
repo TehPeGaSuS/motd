@@ -5,22 +5,21 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,17 +29,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.material3.Icon
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -52,71 +53,70 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameMillis
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.semantics.testTag as semanticsTestTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.AudioAttachment
-import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioCacheStatus
-import io.github.trevarj.motd.audio.AudioPlaybackState
+import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioPlaybackOrigin
 import io.github.trevarj.motd.audio.AudioPlaybackRequest
+import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.audio.CachedAudioMetadata
 import io.github.trevarj.motd.audio.displayTextForAudioMessage
 import io.github.trevarj.motd.audio.extensionlessAudioCandidates
 import io.github.trevarj.motd.audio.toAttachment
-import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.DccDirection
 import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.DccTransferProtocol
 import io.github.trevarj.motd.data.db.DccTransferState
+import io.github.trevarj.motd.data.db.InviteState
+import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
-import io.github.trevarj.motd.data.db.InviteState
+import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.repo.CachedLinkPreview
+import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.data.sync.COMMAND_RESPONSE_PAYLOAD_PREFIX
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
 import io.github.trevarj.motd.dcc.DccEndpointRisk
 import io.github.trevarj.motd.dcc.dccEndpointRisk
 import io.github.trevarj.motd.dcc.resolveDccAddress
-import io.github.trevarj.motd.data.prefs.FoolsMode
-import io.github.trevarj.motd.data.repo.CachedLinkPreview
-import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
-import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
+import io.github.trevarj.motd.ui.components.DaySeparator
 import io.github.trevarj.motd.ui.components.HistoryGapDivider
+import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.NewMessagesDivider
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
-import io.github.trevarj.motd.ui.components.SystemEventPill
 import io.github.trevarj.motd.ui.components.SwipeToReplyContainer
-import io.github.trevarj.motd.ui.components.DaySeparator
+import io.github.trevarj.motd.ui.components.SystemEventPill
 import io.github.trevarj.motd.ui.components.dayStart
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
-import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.LocalSpacing
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdSpacing
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -124,6 +124,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.semantics.testTag as semanticsTestTag
 
 /**
  * Target collapsed system-event count per pill, and the modulus of the identity hash that places
@@ -132,11 +133,17 @@ import kotlinx.coroutines.withContext
 internal const val MAX_COLLAPSED_SYSTEM_EVENTS = 24
 
 /** Refresh identity for expanded line content; changes when Paging extends a tail chunk. */
-internal data class SystemRunContentKey(val newestId: Long, val oldestId: Long, val count: Int)
+internal data class SystemRunContentKey(
+    val newestId: Long,
+    val oldestId: Long,
+    val count: Int,
+)
 
 /** An expanded run stays expanded when synchronization reshapes its bounded Paging chunk. */
-internal fun systemRunExpanded(runIds: Collection<Long>, expandedEventIds: Set<Long>): Boolean =
-    runIds.any(expandedEventIds::contains)
+internal fun systemRunExpanded(
+    runIds: Collection<Long>,
+    expandedEventIds: Set<Long>,
+): Boolean = runIds.any(expandedEventIds::contains)
 
 internal fun updateExpandedSystemEvents(
     current: Set<Long>,
@@ -158,42 +165,66 @@ internal enum class MessageContentType {
     OTHER_FAILED,
 }
 
-fun isSystemKind(kind: MessageKind): Boolean = when (kind) {
-    MessageKind.JOIN,
-    MessageKind.PART,
-    MessageKind.QUIT,
-    MessageKind.KICK,
-    MessageKind.NICK,
-    MessageKind.MODE,
-    MessageKind.TOPIC,
-    MessageKind.SERVER_INFO,
-    MessageKind.ERROR,
-    -> true
-    else -> false
+fun isSystemKind(kind: MessageKind): Boolean =
+    when (kind) {
+        MessageKind.JOIN,
+        MessageKind.PART,
+        MessageKind.QUIT,
+        MessageKind.KICK,
+        MessageKind.NICK,
+        MessageKind.MODE,
+        MessageKind.TOPIC,
+        MessageKind.SERVER_INFO,
+        MessageKind.ERROR,
+        -> true
+
+        else -> false
+    }
+
+internal fun commandResponseGroup(message: MessageEntity): String? =
+    message.eventPayload?.takeIf { it.startsWith(COMMAND_RESPONSE_PAYLOAD_PREFIX) }
+
+internal fun sameSystemRun(
+    first: MessageEntity,
+    second: MessageEntity,
+): Boolean {
+    val firstCommand = commandResponseGroup(first)
+    val secondCommand = commandResponseGroup(second)
+    return if (firstCommand != null || secondCommand != null) {
+        firstCommand != null && firstCommand == secondCommand
+    } else {
+        isSystemKind(first.kind) && isSystemKind(second.kind)
+    }
 }
 
-internal fun messageContentType(message: MessageEntity): MessageContentType = when {
-    message.kind == MessageKind.INVITE -> MessageContentType.INVITE
-    message.kind == MessageKind.DCC_TRANSFER -> MessageContentType.DCC_TRANSFER
-    message.kind == MessageKind.NETSPLIT || message.kind == MessageKind.NETJOIN -> MessageContentType.NETWORK_BATCH
-    isSystemKind(message.kind) -> MessageContentType.SYSTEM
-    message.kind == MessageKind.ACTION && message.failed -> MessageContentType.ACTION_FAILED
-    message.kind == MessageKind.ACTION -> MessageContentType.ACTION
-    message.isSelf && message.failed -> MessageContentType.SELF_FAILED
-    message.isSelf -> MessageContentType.SELF
-    message.failed -> MessageContentType.OTHER_FAILED
-    else -> MessageContentType.OTHER
-}
+internal fun messageContentType(message: MessageEntity): MessageContentType =
+    when {
+        message.kind == MessageKind.INVITE -> MessageContentType.INVITE
+        message.kind == MessageKind.DCC_TRANSFER -> MessageContentType.DCC_TRANSFER
+        message.kind == MessageKind.NETSPLIT || message.kind == MessageKind.NETJOIN -> MessageContentType.NETWORK_BATCH
+        isSystemKind(message.kind) -> MessageContentType.SYSTEM
+        message.kind == MessageKind.ACTION && message.failed -> MessageContentType.ACTION_FAILED
+        message.kind == MessageKind.ACTION -> MessageContentType.ACTION
+        message.isSelf && message.failed -> MessageContentType.SELF_FAILED
+        message.isSelf -> MessageContentType.SELF
+        message.failed -> MessageContentType.OTHER_FAILED
+        else -> MessageContentType.OTHER
+    }
 
 /** Stable per-message testTag id: server msgid when present, else the local entity id (pending). */
+
 /** Stable UIAutomator/Compose address: server identity wins once an echo has promoted the row. */
-internal fun timelineMessageTag(msgid: String?, eventId: Long): String =
-    "chat_message_${msgid ?: eventId}"
+internal fun timelineMessageTag(
+    msgid: String?,
+    eventId: Long,
+): String = "chat_message_${msgid ?: eventId}"
 
 private fun messageTag(msg: MessageEntity): String = timelineMessageTag(msg.msgid, msg.id)
 
-internal fun foolCollapseTag(msgid: String?, eventId: Long): String =
-    "chat_fool_collapse_${msgid ?: eventId}"
+internal fun foolCollapseTag(
+    msgid: String?,
+    eventId: Long,
+): String = "chat_fool_collapse_${msgid ?: eventId}"
 
 // `MessageEntity.timelineAnchor()` lives in ChatModels.kt: it had a byte-identical private copy here
 // until the seam rule needed to name a row from the screen, at which point one package-level
@@ -203,13 +234,17 @@ internal fun foolCollapseTag(msgid: String?, eventId: Long): String =
  * True when [current] should show its sender header: it opens a new same-sender ≤3-min group.
  * [olderNeighbor] is the message immediately older in time (index+1 in a reversed list).
  */
-fun showsSender(current: MessageEntity, olderNeighbor: MessageEntity?): Boolean {
+fun showsSender(
+    current: MessageEntity,
+    olderNeighbor: MessageEntity?,
+): Boolean {
     if (olderNeighbor == null) return true
-    val sameActor = if (current.senderAccount != null && olderNeighbor.senderAccount != null) {
-        current.senderAccount == olderNeighbor.senderAccount
-    } else {
-        current.normalizedActor == olderNeighbor.normalizedActor
-    }
+    val sameActor =
+        if (current.senderAccount != null && olderNeighbor.senderAccount != null) {
+            current.senderAccount == olderNeighbor.senderAccount
+        } else {
+            current.normalizedActor == olderNeighbor.normalizedActor
+        }
     if (!sameActor || olderNeighbor.isSelf != current.isSelf) return true
     // An ACTION (/me) is its own utterance: it always opens a new group on either side of the
     // boundary, so a regular message following an ACTION shows its nick again instead of reading
@@ -225,7 +260,11 @@ fun showsSender(current: MessageEntity, olderNeighbor: MessageEntity?): Boolean 
  * direction, or system-kind change, an ACTION boundary, or >[GROUP_WINDOW_MS]). Zero when there is
  * no older neighbor. Non-COMFORTABLE densities get 0 for both tokens, so this is a no-op there.
  */
-fun bubbleGap(showSender: Boolean, hasOlder: Boolean, spacing: MotdSpacing): Dp {
+fun bubbleGap(
+    showSender: Boolean,
+    hasOlder: Boolean,
+    spacing: MotdSpacing,
+): Dp {
     if (!hasOlder) return 0.dp
     return if (showSender) spacing.bubbleBreakGap else spacing.bubbleBurstGap
 }
@@ -336,12 +375,13 @@ fun MessageList(
         // timeline addressable so the real-stack acceptance test can scroll to an imported row
         // instead of confusing an off-screen row with a missing one. Scroll-driven paging: reaching
         // the older end triggers Paging APPEND via the prefetch window, no gesture plumbing needed.
-        modifier = modifier
-            .fillMaxSize()
-            // The runway: while a sent bubble is airborne the whole timeline yields upward so
-            // vacated space exists at the foot before the landing row can open its own gap.
-            .graphicsLayer { translationY = -listShift() }
-            .testTag("chat_timeline"),
+        modifier =
+            modifier
+                .fillMaxSize()
+                // The runway: while a sent bubble is airborne the whole timeline yields upward so
+                // vacated space exists at the foot before the landing row can open its own gap.
+                .graphicsLayer { translationY = -listShift() }
+                .testTag("chat_timeline"),
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
         // Stable keys stop paging invalidations (new message / echo confirm / page load) from
@@ -438,16 +478,16 @@ fun MessageList(
             // skip the rest. In a reversed list the newest of a contiguous system run is the item
             // whose just-newer neighbor is not a system event.
             if (isSystemKind(msg.kind)) {
-                if (!isSystemRunChunkHead(msg.id, newer?.let { isSystemKind(it.kind) } == true)) return@items
+                if (!isSystemRunChunkHead(msg.id, newer?.let { sameSystemRun(msg, it) } == true)) return@items
                 LiveTimelineEntry(
-                        liveEntryIds,
-                        msg,
-                        onLiveEntryConsumed,
-                        outgoingFlight,
-                        flownRowIds,
-                        flightProgress,
-                        onFlightRowPositioned,
-                    ) {
+                    liveEntryIds,
+                    msg,
+                    onLiveEntryConsumed,
+                    outgoingFlight,
+                    flownRowIds,
+                    flightProgress,
+                    onFlightRowPositioned,
+                ) {
                     SystemEventRun(
                         items = items,
                         index = index,
@@ -458,11 +498,12 @@ fun MessageList(
                         onLoadGap = onLoadGap,
                         expandedEventIds = expandedSystemEventIds,
                         onExpandedChange = { runIds, expanded ->
-                            expandedSystemEventIds = updateExpandedSystemEvents(
-                                expandedSystemEventIds,
-                                runIds,
-                                expanded,
-                            )
+                            expandedSystemEventIds =
+                                updateExpandedSystemEvents(
+                                    expandedSystemEventIds,
+                                    runIds,
+                                    expanded,
+                                )
                         },
                     )
                 }
@@ -472,18 +513,19 @@ fun MessageList(
             // Fool COLLAPSE: render a tap-to-expand placeholder in place of the
             // bubble until its id is expanded. HIDE mode is filtered upstream so it never reaches
             // here; system-kind rows are handled above and never fool-treated.
-            val isFool = foolsMode == FoolsMode.COLLAPSE &&
-                isFoolMessage(msg, fools, identityRules)
+            val isFool =
+                foolsMode == FoolsMode.COLLAPSE &&
+                    isFoolMessage(msg, fools, identityRules)
             if (isFool && !foolExpanded(msg.id)) {
                 LiveTimelineEntry(
-                        liveEntryIds,
-                        msg,
-                        onLiveEntryConsumed,
-                        outgoingFlight,
-                        flownRowIds,
-                        flightProgress,
-                        onFlightRowPositioned,
-                    ) {
+                    liveEntryIds,
+                    msg,
+                    onLiveEntryConsumed,
+                    outgoingFlight,
+                    flownRowIds,
+                    flightProgress,
+                    onFlightRowPositioned,
+                ) {
                     FoolPlaceholderRow(
                         msg = msg,
                         older = older,
@@ -501,16 +543,17 @@ fun MessageList(
             val highlighted = highlightMsgid != null && msg.msgid == highlightMsgid
             // Deep jumps are rare. Do not install an animation state object in every ordinary row;
             // only the single target needs one while the highlight is active.
-            val highlightColor = if (highlighted) {
-                val pulse = remember(msg.id, highlightMsgid) { Animatable(0f) }
-                LaunchedEffect(msg.id, highlightMsgid) {
-                    pulse.animateTo(1f, tween(durationMillis = 800))
-                    pulse.animateTo(0f, tween(durationMillis = 800))
+            val highlightColor =
+                if (highlighted) {
+                    val pulse = remember(msg.id, highlightMsgid) { Animatable(0f) }
+                    LaunchedEffect(msg.id, highlightMsgid) {
+                        pulse.animateTo(1f, tween(durationMillis = 800))
+                        pulse.animateTo(0f, tween(durationMillis = 800))
+                    }
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.14f * pulse.value)
+                } else {
+                    Color.Transparent
                 }
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.14f * pulse.value)
-            } else {
-                Color.Transparent
-            }
 
             // Column (not Box): MessageRow emits several vertical siblings — the collapse chip,
             // bubble, retry row, and read-marker/day dividers. A Box would stack them on top of one
@@ -640,25 +683,29 @@ private fun ActiveDccTransferCard(
     onReject: (Long) -> Unit,
     onRemove: (Long) -> Unit,
 ) {
-    val privateRisk = remember(transfer.address, transfer.addressKind) {
-        runCatching { dccEndpointRisk(resolveDccAddress(transfer.address, transfer.addressKind)) }
-            .getOrDefault(DccEndpointRisk.UNSPECIFIED)
-            .takeIf { it != DccEndpointRisk.PUBLIC }
-    }
-    val progress = transfer.sizeBytes?.takeIf { it > 0 }?.let { size ->
-        (transfer.bytesTransferred.toFloat() / size.toFloat()).coerceIn(0f, 1f)
-    }
+    val privateRisk =
+        remember(transfer.address, transfer.addressKind) {
+            runCatching { dccEndpointRisk(resolveDccAddress(transfer.address, transfer.addressKind)) }
+                .getOrDefault(DccEndpointRisk.UNSPECIFIED)
+                .takeIf { it != DccEndpointRisk.PUBLIC }
+        }
+    val progress =
+        transfer.sizeBytes?.takeIf { it > 0 }?.let { size ->
+            (transfer.bytesTransferred.toFloat() / size.toFloat()).coerceIn(0f, 1f)
+        }
     val direction = if (transfer.direction == DccDirection.INCOMING) "Incoming" else "Outgoing"
-    val protocol = when (transfer.protocol) {
-        DccTransferProtocol.SEND -> "Plain DCC SEND"
-        DccTransferProtocol.SSEND -> "Secure DCC SSEND · identity unverified"
-    }
+    val protocol =
+        when (transfer.protocol) {
+            DccTransferProtocol.SEND -> "Plain DCC SEND"
+            DccTransferProtocol.SSEND -> "Secure DCC SSEND · identity unverified"
+        }
     val status = dccStatusText(transfer)
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .testTag("chat_dcc_transfer_${transfer.id}"),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .testTag("chat_dcc_transfer_${transfer.id}"),
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
@@ -668,17 +715,21 @@ private fun ActiveDccTransferCard(
             )
             Text(transfer.displayFilename, style = MaterialTheme.typography.titleMedium)
             Text(
-                text = listOfNotNull(
-                    transfer.sizeBytes?.let(::formatDccBytes),
-                    protocol,
-                    status,
-                ).joinToString(" · "),
+                text =
+                    listOfNotNull(
+                        transfer.sizeBytes?.let(::formatDccBytes),
+                        protocol,
+                        status,
+                    ).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (privateRisk != null) {
                 Text(
-                    text = "Private or local endpoint: ${privateRisk.name.lowercase().replace('_', ' ')}. Allow only if you trust this peer and network.",
+                    text = "Private or local endpoint: ${privateRisk.name.lowercase().replace(
+                        '_',
+                        ' ',
+                    )}. Allow only if you trust this peer and network.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -708,18 +759,22 @@ private fun DccTransferActions(
     onRemove: (Long) -> Unit,
 ) {
     val incoming = transfer.direction == DccDirection.INCOMING
-    val canAccept = incoming && transfer.state in setOf(
-        DccTransferState.OFFERED,
-        DccTransferState.PARTIAL,
-        DccTransferState.FAILED,
-    )
-    val terminal = transfer.state in setOf(
-        DccTransferState.COMPLETED,
-        DccTransferState.REJECTED,
-        DccTransferState.EXPIRED,
-        DccTransferState.FAILED,
-        DccTransferState.REMOVED,
-    )
+    val canAccept =
+        incoming && transfer.state in
+            setOf(
+                DccTransferState.OFFERED,
+                DccTransferState.PARTIAL,
+                DccTransferState.FAILED,
+            )
+    val terminal =
+        transfer.state in
+            setOf(
+                DccTransferState.COMPLETED,
+                DccTransferState.REJECTED,
+                DccTransferState.EXPIRED,
+                DccTransferState.FAILED,
+                DccTransferState.REMOVED,
+            )
     if (!canAccept && !terminal) return
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (canAccept) {
@@ -749,17 +804,18 @@ private fun DccTransferActions(
     }
 }
 
-private fun dccStatusText(transfer: DccTransferEntity): String = when (transfer.state) {
-    DccTransferState.OFFERED -> "Waiting"
-    DccTransferState.ACCEPTING -> "Starting"
-    DccTransferState.ACTIVE -> "Transferring"
-    DccTransferState.PARTIAL -> "Partial"
-    DccTransferState.COMPLETED -> "Complete"
-    DccTransferState.FAILED -> transfer.error?.let { "Failed: $it" } ?: "Failed"
-    DccTransferState.REJECTED -> "Rejected"
-    DccTransferState.EXPIRED -> "Expired"
-    DccTransferState.REMOVED -> "Removed"
-}
+private fun dccStatusText(transfer: DccTransferEntity): String =
+    when (transfer.state) {
+        DccTransferState.OFFERED -> "Waiting"
+        DccTransferState.ACCEPTING -> "Starting"
+        DccTransferState.ACTIVE -> "Transferring"
+        DccTransferState.PARTIAL -> "Partial"
+        DccTransferState.COMPLETED -> "Complete"
+        DccTransferState.FAILED -> transfer.error?.let { "Failed: $it" } ?: "Failed"
+        DccTransferState.REJECTED -> "Rejected"
+        DccTransferState.EXPIRED -> "Expired"
+        DccTransferState.REMOVED -> "Removed"
+    }
 
 private fun formatDccBytes(bytes: Long): String {
     val units = listOf("B", "KiB", "MiB", "GiB")
@@ -780,7 +836,10 @@ private fun formatDccBytes(bytes: Long): String {
  * slot is.
  */
 @Composable
-private fun TimelineSeamDivider(seam: RowSeam?, onLoadGap: (Long) -> Unit) {
+private fun TimelineSeamDivider(
+    seam: RowSeam?,
+    onLoadGap: (Long) -> Unit,
+) {
     if (seam == null) return
     HistoryGapDivider(state = seam.state, onLoad = { onLoadGap(seam.gapId) })
 }
@@ -819,10 +878,11 @@ private fun TimelineSeamAbove(
 @Composable
 internal fun MessagePlaceholderRow(height: () -> Dp = { DEFAULT_TIMELINE_ROW_HEIGHT }) {
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(height())
-            .clearAndSetSemantics {},
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .height(height())
+                .clearAndSetSemantics {},
         contentAlignment = Alignment.CenterStart,
     ) {
         Spacer(
@@ -854,14 +914,23 @@ private fun LiveTimelineEntry(
         // A send flight owns this row's entrance: the bubble travelling from the composer *is* the
         // animation, so the row waits underneath it rather than revealing itself as well. Checked
         // before [flownRowIds], which this very row joins the moment it first reports its bounds.
-        outgoingFlight?.matches(message) == true ->
+        outgoingFlight?.matches(message) == true -> {
             FlightLandingEntry(message.id, flightProgress, onFlightRowPositioned, content)
+        }
+
         // Already delivered by a ghost. Its entrance is spent, so it renders plainly forever after
         // even though the live-entrance set still names it.
-        message.id in flownRowIds -> content()
-        message.id in liveEntryIds ->
+        message.id in flownRowIds -> {
+            content()
+        }
+
+        message.id in liveEntryIds -> {
             LiveMessageEntry(messageId = message.id, onConsumed = onConsumed, content = content)
-        else -> content()
+        }
+
+        else -> {
+            content()
+        }
     }
 }
 
@@ -885,21 +954,23 @@ private fun FlightLandingEntry(
 ) {
     val latestOnPositioned = rememberUpdatedState(onPositioned)
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clipToBounds()
-            .layout { measurable, constraints ->
-                val placeable = measurable.measure(constraints)
-                // Clamped, so the spring's overshoot stays on the bubble alone: the gap opens to
-                // exactly one row and the bubble settles back into it.
-                val revealedHeight = (placeable.height * progress().coerceIn(0f, 1f)).toInt()
-                    .coerceIn(0, placeable.height)
-                layout(placeable.width, revealedHeight) {
-                    placeable.placeRelative(0, revealedHeight - placeable.height)
-                }
-            }
-            .graphicsLayer { alpha = 0f }
-            .onGloballyPositioned { latestOnPositioned.value(messageId, it.boundsInWindow()) },
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clipToBounds()
+                .layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints)
+                    // Clamped, so the spring's overshoot stays on the bubble alone: the gap opens to
+                    // exactly one row and the bubble settles back into it.
+                    val revealedHeight =
+                        (placeable.height * progress().coerceIn(0f, 1f))
+                            .toInt()
+                            .coerceIn(0, placeable.height)
+                    layout(placeable.width, revealedHeight) {
+                        placeable.placeRelative(0, revealedHeight - placeable.height)
+                    }
+                }.graphicsLayer { alpha = 0f }
+                .onGloballyPositioned { latestOnPositioned.value(messageId, it.boundsInWindow()) },
     ) {
         content()
     }
@@ -929,27 +1000,30 @@ private fun LiveMessageEntry(
         complete = true
     }
 
-    val motion = if (complete) {
-        Modifier
-    } else {
-        Modifier
-            .layout { measurable, constraints ->
-                val placeable = measurable.measure(constraints)
-                val revealedHeight = (placeable.height * reveal.value).toInt()
-                    .coerceIn(0, placeable.height)
-                layout(placeable.width, revealedHeight) {
-                    // Bottom alignment makes the bubble grow into the conversation instead of
-                    // sliding its full height over the composer.
-                    placeable.placeRelative(0, revealedHeight - placeable.height)
-                }
-            }
-            .graphicsLayer { alpha = reveal.value }
-    }
+    val motion =
+        if (complete) {
+            Modifier
+        } else {
+            Modifier
+                .layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints)
+                    val revealedHeight =
+                        (placeable.height * reveal.value)
+                            .toInt()
+                            .coerceIn(0, placeable.height)
+                    layout(placeable.width, revealedHeight) {
+                        // Bottom alignment makes the bubble grow into the conversation instead of
+                        // sliding its full height over the composer.
+                        placeable.placeRelative(0, revealedHeight - placeable.height)
+                    }
+                }.graphicsLayer { alpha = reveal.value }
+        }
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clipToBounds()
-            .then(motion),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clipToBounds()
+                .then(motion),
     ) {
         content()
     }
@@ -969,8 +1043,9 @@ private fun NetworkBatchPill(message: MessageEntity) {
         return
     }
     val action = if (message.kind == MessageKind.NETSPLIT) "split" else "rejoined"
-    val summary = "${payload.nicks.size} ${if (payload.nicks.size == 1) "user" else "users"} $action " +
-        "(${payload.serverA} ↔ ${payload.serverB})"
+    val summary =
+        "${payload.nicks.size} ${if (payload.nicks.size == 1) "user" else "users"} $action " +
+            "(${payload.serverA} ↔ ${payload.serverB})"
     SystemEventPill(
         summary = summary,
         lineCount = payload.nicks.size,
@@ -993,8 +1068,15 @@ private fun AnimatedContentTransitionScope<*>.cardPillTransform(): ContentTransf
  * exiting frame keeps its old content while the replacement fades in.
  */
 private sealed interface InviteRender {
-    data class Pill(val summary: String, val testTag: String) : InviteRender
-    data class ActiveCard(val channel: String, val state: InviteState) : InviteRender
+    data class Pill(
+        val summary: String,
+        val testTag: String,
+    ) : InviteRender
+
+    data class ActiveCard(
+        val channel: String,
+        val state: InviteState,
+    ) : InviteRender
 }
 
 @Composable
@@ -1005,17 +1087,26 @@ private fun InvitationCard(
 ) {
     val payload = remember(message.eventPayload) { InvitePayloadV1.decode(message.eventPayload) }
     val state = message.inviteState
-    val render = when {
-        payload == null || state == null || state == InviteState.HISTORICAL -> InviteRender.Pill(
-            summary = message.text,
-            testTag = "chat_invite_compact_${message.id}",
-        )
-        state == InviteState.JOINED || state == InviteState.DISMISSED -> InviteRender.Pill(
-            summary = "${if (state == InviteState.JOINED) "Joined" else "Dismissed"} ${payload.channel}",
-            testTag = "chat_invite_resolved_${message.id}",
-        )
-        else -> InviteRender.ActiveCard(channel = payload.channel, state = state)
-    }
+    val render =
+        when {
+            payload == null || state == null || state == InviteState.HISTORICAL -> {
+                InviteRender.Pill(
+                    summary = message.text,
+                    testTag = "chat_invite_compact_${message.id}",
+                )
+            }
+
+            state == InviteState.JOINED || state == InviteState.DISMISSED -> {
+                InviteRender.Pill(
+                    summary = "${if (state == InviteState.JOINED) "Joined" else "Dismissed"} ${payload.channel}",
+                    testTag = "chat_invite_resolved_${message.id}",
+                )
+            }
+
+            else -> {
+                InviteRender.ActiveCard(channel = payload.channel, state = state)
+            }
+        }
     AnimatedContent(
         targetState = render,
         transitionSpec = { cardPillTransform() },
@@ -1025,42 +1116,48 @@ private fun InvitationCard(
         label = "invite_render",
     ) { target ->
         when (target) {
-            is InviteRender.Pill -> SystemEventPill(
-                summary = target.summary,
-                lineCount = 1,
-                loadLines = { listOf(message.text) },
-                contentKey = message.id,
-                modifier = Modifier.testTag(target.testTag),
-            )
-            is InviteRender.ActiveCard -> Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                    .testTag("chat_invite_card_${message.id}"),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Invitation to ${target.channel}", style = MaterialTheme.typography.titleMedium)
-                    Text(message.text, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
-                    if (target.state == InviteState.FAILED) {
-                        Text("Could not join. You can retry.", color = MaterialTheme.colorScheme.error)
-                    }
-                    // An exiting card keeps composing through the card->pill collapse; its
-                    // buttons must not fire against the already-resolved invite.
-                    val current = target == render
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = onJoin,
-                            enabled = current && target.state != InviteState.JOINING,
-                            modifier = Modifier.testTag("chat_invite_join_${message.id}"),
-                        ) {
-                            Text(if (target.state == InviteState.JOINING) "Joining…" else "Join")
+            is InviteRender.Pill -> {
+                SystemEventPill(
+                    summary = target.summary,
+                    lineCount = 1,
+                    loadLines = { listOf(message.text) },
+                    contentKey = message.id,
+                    modifier = Modifier.testTag(target.testTag),
+                )
+            }
+
+            is InviteRender.ActiveCard -> {
+                Card(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .testTag("chat_invite_card_${message.id}"),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Invitation to ${target.channel}", style = MaterialTheme.typography.titleMedium)
+                        Text(message.text, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
+                        if (target.state == InviteState.FAILED) {
+                            Text("Could not join. You can retry.", color = MaterialTheme.colorScheme.error)
                         }
-                        OutlinedButton(
-                            onClick = onDismiss,
-                            enabled = current,
-                            modifier = Modifier.testTag("chat_invite_dismiss_${message.id}"),
-                        ) {
-                            Text("Dismiss")
+                        // An exiting card keeps composing through the card->pill collapse; its
+                        // buttons must not fire against the already-resolved invite.
+                        val current = target == render
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = onJoin,
+                                enabled = current && target.state != InviteState.JOINING,
+                                modifier = Modifier.testTag("chat_invite_join_${message.id}"),
+                            ) {
+                                Text(if (target.state == InviteState.JOINING) "Joining…" else "Join")
+                            }
+                            OutlinedButton(
+                                onClick = onDismiss,
+                                enabled = current,
+                                modifier = Modifier.testTag("chat_invite_dismiss_${message.id}"),
+                            ) {
+                                Text("Dismiss")
+                            }
                         }
                     }
                 }
@@ -1097,7 +1194,7 @@ private fun SystemEventRun(
     var i = index + 1
     while (i < items.itemCount) {
         val m = items.peek(i) ?: break
-        if (!isSystemKind(m.kind) || isSystemRunChunkBoundary(m.id)) break
+        if (!sameSystemRun(newest, m) || isSystemRunChunkBoundary(m.id)) break
         run.add(m)
         i++
     }
@@ -1105,15 +1202,25 @@ private fun SystemEventRun(
     val runIds = run.map { it.id }
     val olderThanRun = if (index + run.size < items.itemCount) items.peek(index + run.size) else null
 
-    val summary = if (run.size == 1) newest.text else summarizeSystemRun(run)
+    val commandResponse = commandResponseGroup(newest) != null
+    val summary =
+        if (commandResponse) {
+            summarizeCommandResponse(run)
+        } else if (run.size == 1) {
+            newest.text
+        } else {
+            summarizeSystemRun(run)
+        }
 
     // Divider before the run when the run's newest crosses the marker and its older neighbor doesn't.
-    val showNewDivider = readMarkerTime != null &&
-        newest.timelineAnchor() > readMarkerTime &&
-        (olderThanRun == null || olderThanRun.timelineAnchor() <= readMarkerTime)
-    val showDay = remember(oldest.serverTime, olderThanRun?.serverTime) {
-        olderThanRun == null || dayStart(oldest.serverTime) != dayStart(olderThanRun.serverTime)
-    }
+    val showNewDivider =
+        readMarkerTime != null &&
+            newest.timelineAnchor() > readMarkerTime &&
+            (olderThanRun == null || olderThanRun.timelineAnchor() <= readMarkerTime)
+    val showDay =
+        remember(oldest.serverTime, olderThanRun?.serverTime) {
+            olderThanRun == null || dayStart(oldest.serverTime) != dayStart(olderThanRun.serverTime)
+        }
     // The whole run occupies one slot, so its seam is bracketed by the run's newest row and the row
     // just older than the ENTIRE run — the same pair the read-marker divider above is derived from.
     // Anything else would let a seam falling inside the run disappear with the collapsed rows.
@@ -1137,6 +1244,7 @@ private fun SystemEventRun(
             contentKey = SystemRunContentKey(newest.id, oldest.id, run.size),
             expanded = systemRunExpanded(runIds, expandedEventIds),
             onExpandedChange = { expanded -> onExpandedChange(runIds, expanded) },
+            forceCollapsible = commandResponse,
             modifier = Modifier.testTag("chat_system_pill"),
         )
     }
@@ -1160,15 +1268,27 @@ private fun mixEventIdentity(id: Long): Long {
  * row landed: a catch-up burst shifts every index, so already-rendered pills changed membership,
  * summary, and content key on every invalidation — the "show all" redraw flicker.
  */
-internal fun isSystemRunChunkBoundary(id: Long): Boolean =
-    (mixEventIdentity(id) ushr 1) % MAX_COLLAPSED_SYSTEM_EVENTS == 0L
+internal fun isSystemRunChunkBoundary(id: Long): Boolean = (mixEventIdentity(id) ushr 1) % MAX_COLLAPSED_SYSTEM_EVENTS == 0L
 
 /**
  * A run begins at its newest row and at each identity boundary inside it. Still O(1) per suppressed
  * row: no neighbor walk while flinging, and each event belongs to exactly one head.
  */
-internal fun isSystemRunChunkHead(id: Long, newerIsSystem: Boolean): Boolean =
-    !newerIsSystem || isSystemRunChunkBoundary(id)
+internal fun isSystemRunChunkHead(
+    id: Long,
+    newerIsSystem: Boolean,
+): Boolean = !newerIsSystem || isSystemRunChunkBoundary(id)
+
+private fun summarizeCommandResponse(run: List<MessageEntity>): String {
+    val replies = run.count { it.kind != MessageKind.ERROR }
+    val errors = run.size - replies
+    val counts =
+        listOfNotNull(
+            replies.takeIf { it > 0 }?.let { "$it ${if (it == 1) "reply" else "replies"}" },
+            errors.takeIf { it > 0 }?.let { "$it ${if (it == 1) "error" else "errors"}" },
+        ).joinToString(" · ")
+    return "${run.first().sender} · $counts"
+}
 
 /**
  * Summarize a run of system events by kind: JOIN → "joined", PART/QUIT → "left", others by kind
@@ -1177,15 +1297,16 @@ internal fun isSystemRunChunkHead(id: Long, newerIsSystem: Boolean): Boolean =
 private fun summarizeSystemRun(run: List<MessageEntity>): String {
     val counts = LinkedHashMap<String, Int>()
     for (m in run) {
-        val label = when (m.kind) {
-            MessageKind.JOIN -> "joined"
-            MessageKind.PART, MessageKind.QUIT -> "left"
-            MessageKind.KICK -> "kicked"
-            MessageKind.NICK -> "renamed"
-            MessageKind.MODE -> "mode"
-            MessageKind.TOPIC -> "topic"
-            else -> "events"
-        }
+        val label =
+            when (m.kind) {
+                MessageKind.JOIN -> "joined"
+                MessageKind.PART, MessageKind.QUIT -> "left"
+                MessageKind.KICK -> "kicked"
+                MessageKind.NICK -> "renamed"
+                MessageKind.MODE -> "mode"
+                MessageKind.TOPIC -> "topic"
+                else -> "events"
+            }
         counts[label] = (counts[label] ?: 0) + 1
     }
     return counts.entries.joinToString(" · ") { (label, n) -> "$n $label" }
@@ -1194,8 +1315,12 @@ private fun summarizeSystemRun(run: List<MessageEntity>): String {
 /** Completion-tracked link-preview state so a failed/null fetch stops the loading skeleton. */
 private sealed interface PreviewState {
     data object Idle : PreviewState
+
     data object Loading : PreviewState
-    data class Done(val preview: LinkPreview?) : PreviewState
+
+    data class Done(
+        val preview: LinkPreview?,
+    ) : PreviewState
 }
 
 @Composable
@@ -1252,14 +1377,16 @@ private fun MessageRow(
     // UNKNOWN and abstains: a seam's slot is defined by the pair, so with no lower end the placement
     // is genuinely undecidable and a guess would visibly jump when the placeholder loads. Do not
     // unify them.
-    val showNewDivider = readMarkerTime != null &&
-        msg.timelineAnchor() > readMarkerTime &&
-        (older == null || older.timelineAnchor() <= readMarkerTime)
+    val showNewDivider =
+        readMarkerTime != null &&
+            msg.timelineAnchor() > readMarkerTime &&
+            (older == null || older.timelineAnchor() <= readMarkerTime)
 
     // Day separator when this message starts a new day relative to the older neighbor.
-    val showDay = remember(msg.serverTime, older?.serverTime) {
-        older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
-    }
+    val showDay =
+        remember(msg.serverTime, older?.serverTime) {
+            older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
+        }
 
     // Telegram-style inter-bubble gap (COMFORTABLE only): a small burst gap while a same-sender
     // group continues, a larger break gap when a new group opens. Hoisted so the same value feeds
@@ -1286,28 +1413,31 @@ private fun MessageRow(
 
     // A row asks Room for its reply target only while it is composed. This avoids timeline-wide
     // loaded-window scans during fast traversal; collection is lifecycle-cancelled off-screen.
-    val resolvedReply: ReplyPreviewData? = if (msg.replyToMsgid != null) {
-        val replyFlow = remember(msg.replyToMsgid) { replyPreview(msg.replyToMsgid) }
-        val resolved by replyFlow.collectAsStateWithLifecycle()
-        resolved
-    } else {
-        null
-    }
+    val resolvedReply: ReplyPreviewData? =
+        if (msg.replyToMsgid != null) {
+            val replyFlow = remember(msg.replyToMsgid) { replyPreview(msg.replyToMsgid) }
+            val resolved by replyFlow.collectAsStateWithLifecycle()
+            resolved
+        } else {
+            null
+        }
     // A reply relationship remains visible even if its parent is not in local history yet. The
     // reactive lookup above replaces this marker as soon as echo confirmation or history inserts
     // the referenced msgid.
-    val reply = resolvedReply ?: msg.replyToMsgid?.let {
-        ReplyPreviewData(
-            sender = stringResource(R.string.chat_action_reply),
-            text = stringResource(R.string.chat_reply_target_unavailable),
-        )
-    }
+    val reply =
+        resolvedReply ?: msg.replyToMsgid?.let {
+            ReplyPreviewData(
+                sender = stringResource(R.string.chat_action_reply),
+                text = stringResource(R.string.chat_reply_target_unavailable),
+            )
+        }
 
     // URL discovery is unnecessary for the overwhelming majority of IRC lines. Completed parses
     // come from a bounded process cache first; only a genuine miss waits for the fling to settle.
-    val mayContainUrl = remember(msg.text) {
-        msg.text.contains("http://") || msg.text.contains("https://")
-    }
+    val mayContainUrl =
+        remember(msg.text) {
+            msg.text.contains("http://") || msg.text.contains("https://")
+        }
     var richUrls by remember(msg.id, msg.text) {
         mutableStateOf(if (mayContainUrl) MessageUrlCache.get(msg.text) else MessageUrls.Empty)
     }
@@ -1323,9 +1453,10 @@ private fun MessageRow(
     val imageUrl = visibleUrls?.imageUrl
     val linkUrl = visibleUrls?.linkUrl
     val immediateAudio = visibleUrls?.audio.orEmpty()
-    val headCandidates = remember(msg.id, msg.text, showLinkPreviews) {
-        if (showLinkPreviews) extensionlessAudioCandidates(msg.text) else emptyList()
-    }
+    val headCandidates =
+        remember(msg.id, msg.text, showLinkPreviews) {
+            if (showLinkPreviews) extensionlessAudioCandidates(msg.text) else emptyList()
+        }
     var headAudio by remember(msg.id, headCandidates) {
         mutableStateOf(
             headCandidates.mapNotNull { cachedAudioMetadata(it)?.metadata?.toAttachment() },
@@ -1336,26 +1467,32 @@ private fun MessageRow(
     LaunchedEffect(msg.id, headCandidates, networkId) {
         if (headCandidates.isEmpty()) return@LaunchedEffect
         snapshotFlow { latestCanStartNewRichContentWork }.first { it }
-        val resolved = headCandidates.take(8).mapNotNull { url ->
-            latestCachedAudioMetadata(url)?.metadata
-                ?: try {
-                    latestLoadAudioMetadata(url, networkId)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    null
-                }
-        }.map { it.toAttachment() }
+        val resolved =
+            headCandidates
+                .take(8)
+                .mapNotNull { url ->
+                    latestCachedAudioMetadata(url)?.metadata
+                        ?: try {
+                            latestLoadAudioMetadata(url, networkId)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            null
+                        }
+                }.map { it.toAttachment() }
         headAudio = resolved
     }
-    val audioAttachments = remember(immediateAudio, headAudio) {
-        (immediateAudio + headAudio).distinctBy { it.url }
-    }
-    val messageText = remember(msg.text, audioAttachments) {
-        displayTextForAudioMessage(msg.text, audioAttachments)
-    }
-    val standaloneVoice = audioAttachments.size == 1 && audioAttachments.single().voice &&
-        messageText.isBlank() && reply == null
+    val audioAttachments =
+        remember(immediateAudio, headAudio) {
+            (immediateAudio + headAudio).distinctBy { it.url }
+        }
+    val messageText =
+        remember(msg.text, audioAttachments) {
+            displayTextForAudioMessage(msg.text, audioAttachments)
+        }
+    val standaloneVoice =
+        audioAttachments.size == 1 && audioAttachments.single().voice &&
+            messageText.isBlank() && reply == null
 
     // A cached completion is rendered synchronously even while scrolling. A cache miss waits for
     // idle, then joins the repository's process-owned single-flight fetch. Null is a completed
@@ -1381,13 +1518,14 @@ private fun MessageRow(
             return@LaunchedEffect
         }
         previewState = PreviewState.Loading
-        val preview = try {
-            loadPreview(url, networkId)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            null
-        }
+        val preview =
+            try {
+                loadPreview(url, networkId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
         previewState = PreviewState.Done(preview)
     }
     val preview = (previewState as? PreviewState.Done)?.preview?.withImageGate(showImages)
@@ -1397,11 +1535,12 @@ private fun MessageRow(
     // Ordinary rows stay on the hot scrolling path without even resolving the accessibility
     // string; mention state is immutable for a stored row and only the sparse highlighted rows
     // need it.
-    val mentionDescription = if (msg.hasMention && !msg.isSelf) {
-        stringResource(R.string.chat_message_mentions_you)
-    } else {
-        null
-    }
+    val mentionDescription =
+        if (msg.hasMention && !msg.isSelf) {
+            stringResource(R.string.chat_message_mentions_you)
+        } else {
+            null
+        }
 
     // Gap sits on the older-neighbor side (before the bubble) so it separates this row from the
     // previous burst; day separators and read markers live on the newer side (after the bubble), so
@@ -1414,10 +1553,11 @@ private fun MessageRow(
     SwipeToReplyContainer(
         // Keep the stable automation id and mention state on one semantics node. SwipeToReply adds
         // its custom action downstream without changing this message-level accessibility state.
-        modifier = Modifier.semantics {
-            semanticsTestTag = messageTag(msg)
-            mentionDescription?.let { stateDescription = it }
-        },
+        modifier =
+            Modifier.semantics {
+                semanticsTestTag = messageTag(msg)
+                mentionDescription?.let { stateDescription = it }
+            },
         onReply = { onReply(msg) },
     ) { rowModifier ->
         Column(modifier = rowModifier.fillMaxWidth()) {
@@ -1441,11 +1581,12 @@ private fun MessageRow(
                     // Subtle "sending…" state before the 30s failure flip.
                     pending = msg.pendingLabel != null,
                     reply = reply,
-                    onReplyClick = if (resolvedReply != null) {
-                        msg.replyToMsgid?.let { parentMsgid -> { onReplyPreviewClick(parentMsgid) } }
-                    } else {
-                        null
-                    },
+                    onReplyClick =
+                        if (resolvedReply != null) {
+                            msg.replyToMsgid?.let { parentMsgid -> { onReplyPreviewClick(parentMsgid) } }
+                        } else {
+                            null
+                        },
                     imageUrl = imageUrl,
                     linkPreview = preview,
                     linkPreviewLoading = previewLoading,
@@ -1467,14 +1608,16 @@ private fun MessageRow(
                 // metadata arrives. Shrink the provisional bubble while the player grows.
                 AnimatedVisibility(
                     visible = !standaloneVoice,
-                    enter = expandVertically(
-                        animationSpec = MotdMotion.contentSize,
-                        expandFrom = Alignment.Bottom,
-                    ) + fadeIn(MotdMotion.microFadeIn),
-                    exit = shrinkVertically(
-                        animationSpec = MotdMotion.contentSize,
-                        shrinkTowards = Alignment.Bottom,
-                    ) + fadeOut(MotdMotion.microFadeOut),
+                    enter =
+                        expandVertically(
+                            animationSpec = MotdMotion.contentSize,
+                            expandFrom = Alignment.Bottom,
+                        ) + fadeIn(MotdMotion.microFadeIn),
+                    exit =
+                        shrinkVertically(
+                            animationSpec = MotdMotion.contentSize,
+                            shrinkTowards = Alignment.Bottom,
+                        ) + fadeOut(MotdMotion.microFadeOut),
                 ) {
                     messageBubble()
                 }
@@ -1491,23 +1634,8 @@ private fun MessageRow(
                 formattedTime = if (standaloneVoice) formattedTime else null,
                 pending = msg.pendingLabel != null,
                 failed = msg.failed,
-                origin = if (bufferId != null && networkId != null && conversationName != null) {
-                    AudioPlaybackOrigin(
-                        bufferId = bufferId,
-                        networkId = networkId,
-                        conversation = conversationName,
-                        sender = msg.sender,
-                        isSelf = msg.isSelf,
-                        directMessage = directMessage,
-                        eventId = msg.id,
-                        msgid = msg.msgid,
-                        serverTime = msg.serverTime,
-                    )
-                } else {
-                    null
-                },
-                onToggle = { attachment, routeNetworkId ->
-                    val origin = if (bufferId != null && networkId != null && conversationName != null) {
+                origin =
+                    if (bufferId != null && networkId != null && conversationName != null) {
                         AudioPlaybackOrigin(
                             bufferId = bufferId,
                             networkId = networkId,
@@ -1521,7 +1649,24 @@ private fun MessageRow(
                         )
                     } else {
                         null
-                    }
+                    },
+                onToggle = { attachment, routeNetworkId ->
+                    val origin =
+                        if (bufferId != null && networkId != null && conversationName != null) {
+                            AudioPlaybackOrigin(
+                                bufferId = bufferId,
+                                networkId = networkId,
+                                conversation = conversationName,
+                                sender = msg.sender,
+                                isSelf = msg.isSelf,
+                                directMessage = directMessage,
+                                eventId = msg.id,
+                                msgid = msg.msgid,
+                                serverTime = msg.serverTime,
+                            )
+                        } else {
+                            null
+                        }
                     onAudioToggle(AudioPlaybackRequest(attachment, routeNetworkId, origin))
                 },
                 onInspectCache = onAudioCacheInspect,
@@ -1539,10 +1684,12 @@ private fun MessageRow(
     if (msg.failed || msg.pendingLabel != null) {
         AnimatedVisibility(
             visible = msg.failed,
-            enter = expandVertically(animationSpec = MotdMotion.contentSize) +
-                fadeIn(MotdMotion.microFadeIn),
-            exit = shrinkVertically(animationSpec = MotdMotion.contentSize) +
-                fadeOut(MotdMotion.microFadeOut),
+            enter =
+                expandVertically(animationSpec = MotdMotion.contentSize) +
+                    fadeIn(MotdMotion.microFadeIn),
+            exit =
+                shrinkVertically(animationSpec = MotdMotion.contentSize) +
+                    fadeOut(MotdMotion.microFadeOut),
         ) {
             RetryRow(
                 onRetry = if (canRetry) ({ onRetry(msg) }) else null,
@@ -1570,12 +1717,14 @@ private fun FoolPlaceholderRow(
 ) {
     // Same divided convention as MessageRow: a null [older] is a real edge for the unread and day
     // rules (both derived from this row alone) and an unknown one for the seam (defined by the pair).
-    val showNewDivider = readMarkerTime != null &&
-        msg.timelineAnchor() > readMarkerTime &&
-        (older == null || older.timelineAnchor() <= readMarkerTime)
-    val showDay = remember(msg.serverTime, older?.serverTime) {
-        older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
-    }
+    val showNewDivider =
+        readMarkerTime != null &&
+            msg.timelineAnchor() > readMarkerTime &&
+            (older == null || older.timelineAnchor() <= readMarkerTime)
+    val showDay =
+        remember(msg.serverTime, older?.serverTime) {
+            older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
+        }
 
     // Column so the placeholder row and any dividers stack vertically rather than overlapping (a bare
     // item slot stacks its children like a Box).
@@ -1589,13 +1738,14 @@ private fun FoolPlaceholderRow(
             )
         }
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                // Collapsed fool row is still a message container; keep it selectable/tappable.
-                .testTag(messageTag(msg))
-                .clickable { onExpand() }
-                .alpha(0.7f)
-                .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    // Collapsed fool row is still a message container; keep it selectable/tappable.
+                    .testTag(messageTag(msg))
+                    .clickable { onExpand() }
+                    .alpha(0.7f)
+                    .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -1620,14 +1770,19 @@ private fun FoolPlaceholderRow(
  * bubble's own long-press/link taps intact by owning a separate tap target.
  */
 @Composable
-internal fun FoolCollapseChip(sender: String, tag: String, onCollapse: () -> Unit) {
+internal fun FoolCollapseChip(
+    sender: String,
+    tag: String,
+    onCollapse: () -> Unit,
+) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag(tag)
-            .clickable { onCollapse() }
-            .alpha(0.7f)
-            .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag(tag)
+                .clickable { onCollapse() }
+                .alpha(0.7f)
+                .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -1688,57 +1843,84 @@ fun ChatHistoryFooter(
     onRetry: () -> Unit,
 ) {
     when (state) {
-        ChatHistoryUiState.Hidden -> Unit
-        ChatHistoryUiState.Loading -> androidx.compose.foundation.layout.Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = HistoryFooterHeight)
-                .padding(vertical = 12.dp)
-                .testTag(CHAT_HISTORY_LOADING_TAG),
-            contentAlignment = androidx.compose.ui.Alignment.Center,
-        ) {
-            androidx.compose.material3.CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                strokeWidth = 2.dp,
-            )
+        ChatHistoryUiState.Hidden -> {
+            Unit
         }
-        // Armed, not fetching: a slim static line, sized exactly like the shimmer box so swapping
-        // between the two never reflows the rows above it.
-        ChatHistoryUiState.Armed -> HistoryStatusText(
-            R.string.chat_history_footer_more,
-            modifier = Modifier.heightIn(min = HistoryFooterHeight).testTag(CHAT_HISTORY_MORE_TAG),
-        )
-        ChatHistoryUiState.Retry -> HistoryRetryFooter(
-            text = stringResource(R.string.chat_history_error),
-            onRetry = onRetry,
-        )
-        // Sits directly above the oldest message in the reversed list, where the reader who wants
-        // more history is already looking, and re-arms the same APPEND the ladder stopped on.
-        ChatHistoryUiState.LoadOlder -> Box(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            TextButton(
-                onClick = onRetry,
-                modifier = Modifier.heightIn(min = 48.dp).testTag(CHAT_HISTORY_LOAD_OLDER_TAG),
+
+        ChatHistoryUiState.Loading -> {
+            androidx.compose.foundation.layout.Box(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = HistoryFooterHeight)
+                        .padding(vertical = 12.dp)
+                        .testTag(CHAT_HISTORY_LOADING_TAG),
+                contentAlignment = androidx.compose.ui.Alignment.Center,
             ) {
-                Text(stringResource(R.string.chat_history_load_older))
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                )
             }
         }
-        is ChatHistoryUiState.Unavailable -> HistoryStatusText(
-            if (state.offline) {
-                R.string.chat_history_footer_offline
-            } else {
-                R.string.chat_history_footer_negotiating
-            },
-        )
-        ChatHistoryUiState.Unsupported -> HistoryStatusText(R.string.chat_history_footer_unsupported)
-        ChatHistoryUiState.ConfirmedStart -> HistoryStatusText(R.string.chat_history_start)
+
+        // Armed, not fetching: a slim static line, sized exactly like the shimmer box so swapping
+        // between the two never reflows the rows above it.
+        ChatHistoryUiState.Armed -> {
+            HistoryStatusText(
+                R.string.chat_history_footer_more,
+                modifier = Modifier.heightIn(min = HistoryFooterHeight).testTag(CHAT_HISTORY_MORE_TAG),
+            )
+        }
+
+        ChatHistoryUiState.Retry -> {
+            HistoryRetryFooter(
+                text = stringResource(R.string.chat_history_error),
+                onRetry = onRetry,
+            )
+        }
+
+        // Sits directly above the oldest message in the reversed list, where the reader who wants
+        // more history is already looking, and re-arms the same APPEND the ladder stopped on.
+        ChatHistoryUiState.LoadOlder -> {
+            Box(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                TextButton(
+                    onClick = onRetry,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag(CHAT_HISTORY_LOAD_OLDER_TAG),
+                ) {
+                    Text(stringResource(R.string.chat_history_load_older))
+                }
+            }
+        }
+
+        is ChatHistoryUiState.Unavailable -> {
+            HistoryStatusText(
+                if (state.offline) {
+                    R.string.chat_history_footer_offline
+                } else {
+                    R.string.chat_history_footer_negotiating
+                },
+            )
+        }
+
+        ChatHistoryUiState.Unsupported -> {
+            HistoryStatusText(R.string.chat_history_footer_unsupported)
+        }
+
+        ChatHistoryUiState.ConfirmedStart -> {
+            HistoryStatusText(R.string.chat_history_start)
+        }
     }
 }
 
 @Composable
-private fun HistoryStatusText(textRes: Int, modifier: Modifier = Modifier) {
+private fun HistoryStatusText(
+    textRes: Int,
+    modifier: Modifier = Modifier,
+) {
     Box(
         modifier = modifier.fillMaxWidth().padding(vertical = 12.dp),
         contentAlignment = Alignment.Center,
@@ -1752,7 +1934,10 @@ private fun HistoryStatusText(textRes: Int, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun HistoryRetryFooter(text: String, onRetry: () -> Unit) {
+private fun HistoryRetryFooter(
+    text: String,
+    onRetry: () -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1773,11 +1958,15 @@ private fun HistoryRetryFooter(text: String, onRetry: () -> Unit) {
 
 /** Right-aligned retry (when safe) and delete affordances under a failed message bubble. */
 @Composable
-private fun RetryRow(onRetry: (() -> Unit)?, onDelete: () -> Unit) {
+private fun RetryRow(
+    onRetry: (() -> Unit)?,
+    onDelete: () -> Unit,
+) {
     androidx.compose.foundation.layout.Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
     ) {
@@ -1787,7 +1976,8 @@ private fun RetryRow(onRetry: (() -> Unit)?, onDelete: () -> Unit) {
                 label = stringResource(R.string.chat_retry),
                 onClick = onRetry,
             )
-            androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+            androidx.compose.foundation.layout
+                .Spacer(Modifier.size(8.dp))
         }
         RetryRowAction(
             icon = Icons.Filled.DeleteOutline,
@@ -1799,13 +1989,18 @@ private fun RetryRow(onRetry: (() -> Unit)?, onDelete: () -> Unit) {
 
 /** One error-tinted, >=48dp-tall tappable label used by [RetryRow]. */
 @Composable
-private fun RetryRowAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+private fun RetryRowAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
     androidx.compose.foundation.layout.Row(
-        modifier = Modifier
-            .heightIn(min = 48.dp)
-            .wrapContentHeight()
-            .clickable { onClick() }
-            .padding(horizontal = 8.dp),
+        modifier =
+            Modifier
+                .heightIn(min = 48.dp)
+                .wrapContentHeight()
+                .clickable { onClick() }
+                .padding(horizontal = 8.dp),
         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
     ) {
         androidx.compose.material3.Icon(
