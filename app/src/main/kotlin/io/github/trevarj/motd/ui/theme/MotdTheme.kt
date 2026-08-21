@@ -28,6 +28,7 @@ import androidx.core.view.WindowCompat
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.DEFAULT_CUSTOM_TIME_FORMAT
 import io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.LayoutDensity
@@ -120,6 +121,8 @@ val LocalAppFontFamily: ProvidableCompositionLocal<FontFamily?> = staticComposit
 data class TimestampConfig(
     val show: Boolean = true,
     val format: TimeFormat = TimeFormat.AUTO,
+    // SimpleDateFormat pattern, only consulted when format == CUSTOM.
+    val customPattern: String = DEFAULT_CUSTOM_TIME_FORMAT,
 )
 
 /** CompositionLocal carrying the active timestamp display config; defaults to always-shown/AUTO. */

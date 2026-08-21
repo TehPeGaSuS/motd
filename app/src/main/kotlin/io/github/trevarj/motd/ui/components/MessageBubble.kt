@@ -1855,10 +1855,12 @@ internal fun formatTime(ms: Long): String = rememberMessageTimeFormatter()(ms)
 internal fun rememberMessageTimeFormatter(): (Long) -> String {
     val context = LocalContext.current
     val locale = LocalLocale.current.platformLocale
-    val timeFormat = LocalTimestampConfig.current.format
+    val timestampConfig = LocalTimestampConfig.current
+    val timeFormat = timestampConfig.format
+    val customPattern = timestampConfig.customPattern
     val is24 = remember(context, locale) { DateFormat.is24HourFormat(context) }
     val formatter =
-        remember(is24, locale, timeFormat) {
+        remember(is24, locale, timeFormat, customPattern) {
             when (timeFormat) {
                 // getTimeFormat honors the 12/24h system setting; not thread-safe but only used on the
                 // UI thread.
@@ -1877,6 +1879,12 @@ internal fun rememberMessageTimeFormatter(): (Long) -> String {
                         locale,
                     )
                 }
+
+                // A malformed user-typed pattern falls back to AUTO rather than crashing the row.
+                TimeFormat.CUSTOM -> {
+                    runCatching { java.text.SimpleDateFormat(customPattern, locale) }
+                        .getOrElse { DateFormat.getTimeFormat(context) ?: JavaDateFormat.getTimeInstance(JavaDateFormat.SHORT) }
+                }
             }
         }
     return remember(formatter) {
@@ -1894,8 +1902,13 @@ internal fun resolveIs24Hour(
 ): Boolean =
     when (format) {
         TimeFormat.AUTO -> deviceIs24
+
         TimeFormat.H12 -> false
+
         TimeFormat.H24 -> true
+
+        // CUSTOM's pattern decides its own hour cycle; this hint isn't consulted for it.
+        TimeFormat.CUSTOM -> deviceIs24
     }
 
 @Preview

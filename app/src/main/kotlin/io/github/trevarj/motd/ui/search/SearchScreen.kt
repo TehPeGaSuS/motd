@@ -61,9 +61,11 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.repo.SearchCoverage
 import io.github.trevarj.motd.ui.chatlist.relativeChatTime
 import io.github.trevarj.motd.ui.components.EmptyState
+import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.components.resolveIs24Hour
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdMotion
@@ -427,13 +429,14 @@ private fun SearchRow(
     tag: String,
     onClick: () -> Unit,
 ) {
-    // Search results always show a time (independent of the in-chat "show timestamps" toggle);
-    // only its 12h/24h format follows the user's preference.
+    // Search results always show a time, independent of the in-chat "show timestamps" toggle.
     val context = LocalContext.current
+    val timestampConfig = LocalTimestampConfig.current
     // Reads a system setting via a Binder call; memoize per row rather than re-querying on every
     // recomposition (this composable is invoked once per visible result row).
     val is24HourDevice = remember(context) { DateFormat.is24HourFormat(context) }
-    val is24Hour = resolveIs24Hour(LocalTimestampConfig.current.format, is24HourDevice)
+    val is24Hour = resolveIs24Hour(timestampConfig.format, is24HourDevice)
+    val formatTimestamp = rememberMessageTimeFormatter()
     Row(
         modifier =
             Modifier
@@ -458,7 +461,12 @@ private fun SearchRow(
         // A server hit without a time tag carries 0; render nothing rather than the epoch.
         if (serverTime > 0) {
             Text(
-                text = relativeChatTime(serverTime, is24Hour = is24Hour),
+                text =
+                    if (timestampConfig.format == TimeFormat.CUSTOM) {
+                        formatTimestamp(serverTime)
+                    } else {
+                        relativeChatTime(serverTime, is24Hour = is24Hour)
+                    },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.align(Alignment.Top),

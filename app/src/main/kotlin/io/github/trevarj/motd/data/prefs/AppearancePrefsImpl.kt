@@ -23,6 +23,7 @@ private val CONVERSATION_FONT_SCALE = intPreferencesKey("conversation_font_scale
 private val FONT_CHOICE = stringPreferencesKey("font_choice_v1")
 private val SHOW_TIMESTAMPS = booleanPreferencesKey("show_timestamps_v1")
 private val TIME_FORMAT = stringPreferencesKey("time_format_v1")
+private val CUSTOM_TIME_FORMAT_PATTERN = stringPreferencesKey("custom_time_format_pattern_v1")
 private val MESSAGE_SPACING = stringPreferencesKey("message_spacing_v1")
 private val BUBBLE_CORNER_STYLE = stringPreferencesKey("bubble_corner_style_v1")
 private val LAUNCHER_ICON = stringPreferencesKey("launcher_icon_v1")
@@ -84,6 +85,9 @@ class AppearancePrefsImpl
                     timeFormat =
                         prefs[TIME_FORMAT]?.let { runCatching { TimeFormat.valueOf(it) }.getOrNull() }
                             ?: TimeFormat.AUTO,
+                    customTimeFormatPattern =
+                        prefs[CUSTOM_TIME_FORMAT_PATTERN]?.takeIf { it.isNotBlank() }
+                            ?: DEFAULT_CUSTOM_TIME_FORMAT,
                     messageSpacing =
                         prefs[MESSAGE_SPACING]?.let { runCatching { MessageSpacing.valueOf(it) }.getOrNull() }
                             ?: MessageSpacing.DEFAULT,
@@ -143,6 +147,10 @@ class AppearancePrefsImpl
 
         override suspend fun setTimeFormat(format: TimeFormat) {
             store.edit { it[TIME_FORMAT] = format.name }
+        }
+
+        override suspend fun setCustomTimeFormatPattern(pattern: String) {
+            store.edit { it[CUSTOM_TIME_FORMAT_PATTERN] = pattern.ifBlank { DEFAULT_CUSTOM_TIME_FORMAT } }
         }
 
         override suspend fun setMessageSpacing(spacing: MessageSpacing) {

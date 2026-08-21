@@ -245,6 +245,10 @@ internal class FakeAppearance(
 
     override suspend fun setTimeFormat(format: TimeFormat) = Unit
 
+    override suspend fun setCustomTimeFormatPattern(pattern: String) {
+        state.value = state.value.copy(customTimeFormatPattern = pattern)
+    }
+
     override suspend fun setMessageSpacing(spacing: MessageSpacing) = Unit
 
     override suspend fun setBubbleCornerStyle(style: BubbleCornerStyle) = Unit

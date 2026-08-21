@@ -128,7 +128,10 @@ enum class ChatWallpaperPreset { NONE, CHATTER, CHANNELS, TERMINAL, RELAY, SIGNA
 
 enum class FontChoice { SYSTEM, SANS, SERIF, MONOSPACE, JETBRAINS_MONO, CUSTOM }
 
-enum class TimeFormat { AUTO, H12, H24 }
+enum class TimeFormat { AUTO, H12, H24, CUSTOM }
+
+/** Default custom-timestamp pattern, [java.text.SimpleDateFormat] syntax (not strftime). */
+const val DEFAULT_CUSTOM_TIME_FORMAT = "dd/MM/yyyy - HH:mm:ss"
 
 enum class MessageSpacing { COMPACT, DEFAULT, RELAXED }
 
@@ -155,6 +158,8 @@ data class AppearanceConfig(
     val fontChoice: FontChoice = FontChoice.SYSTEM,
     val showTimestamps: Boolean = true,
     val timeFormat: TimeFormat = TimeFormat.AUTO,
+    // SimpleDateFormat pattern, only consulted when timeFormat == CUSTOM.
+    val customTimeFormatPattern: String = DEFAULT_CUSTOM_TIME_FORMAT,
     val messageSpacing: MessageSpacing = MessageSpacing.DEFAULT,
     val bubbleCornerStyle: BubbleCornerStyle = BubbleCornerStyle.ROUNDED,
     val launcherIcon: LauncherIcon = LauncherIcon.DEFAULT,
@@ -183,6 +188,8 @@ interface AppearancePrefs {
     suspend fun setShowTimestamps(enabled: Boolean)
 
     suspend fun setTimeFormat(format: TimeFormat)
+
+    suspend fun setCustomTimeFormatPattern(pattern: String)
 
     suspend fun setMessageSpacing(spacing: MessageSpacing)
 

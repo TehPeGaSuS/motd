@@ -140,6 +140,7 @@ fun AppearanceSettingsScreen(
         onImportCustomFont = viewModel::importCustomFont,
         onShowTimestamps = viewModel::setShowTimestamps,
         onTimeFormat = viewModel::setTimeFormat,
+        onCustomTimeFormatPattern = viewModel::setCustomTimeFormatPattern,
         onMessageSpacing = viewModel::setMessageSpacing,
         onBubbleCornerStyle = viewModel::setBubbleCornerStyle,
         onLauncherIcon = viewModel::setLauncherIcon,
@@ -166,6 +167,7 @@ fun AppearanceSettingsContent(
     onFontChoice: (FontChoice) -> Unit,
     onShowTimestamps: (Boolean) -> Unit,
     onTimeFormat: (TimeFormat) -> Unit,
+    onCustomTimeFormatPattern: (String) -> Unit,
     onMessageSpacing: (io.github.trevarj.motd.data.prefs.MessageSpacing) -> Unit,
     onBubbleCornerStyle: (io.github.trevarj.motd.data.prefs.BubbleCornerStyle) -> Unit,
     onLauncherIcon: (LauncherIcon) -> Unit,
@@ -300,7 +302,12 @@ fun AppearanceSettingsContent(
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SubLabel(stringResource(R.string.settings_time_format))
-            TimeFormatGroup(current = appearance.timeFormat, onSelect = onTimeFormat)
+            TimeFormatGroup(
+                current = appearance.timeFormat,
+                onSelect = onTimeFormat,
+                customPattern = appearance.customTimeFormatPattern,
+                onCustomPatternChange = onCustomTimeFormatPattern,
+            )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SubLabel(stringResource(R.string.settings_message_spacing))
             MessageSpacingGroup(current = appearance.messageSpacing, onSelect = onMessageSpacing)
@@ -799,6 +806,8 @@ private fun DensityGroup(
 private fun TimeFormatGroup(
     current: TimeFormat,
     onSelect: (TimeFormat) -> Unit,
+    customPattern: String,
+    onCustomPatternChange: (String) -> Unit,
 ) {
     // Always enabled: the chat list keeps using the format even while message timestamps are hidden.
     val options =
@@ -806,6 +815,7 @@ private fun TimeFormatGroup(
             TimeFormat.AUTO to R.string.settings_time_format_auto,
             TimeFormat.H12 to R.string.settings_time_format_h12,
             TimeFormat.H24 to R.string.settings_time_format_h24,
+            TimeFormat.CUSTOM to R.string.settings_time_format_custom,
         )
     Column(Modifier.selectableGroup()) {
         options.forEach { (format, labelRes) ->
@@ -816,6 +826,32 @@ private fun TimeFormatGroup(
                 onClick = { onSelect(format) },
                 modifier = Modifier.testTag("settings_time_format_${format.name.lowercase()}"),
             )
+        }
+        AnimatedVisibility(
+            visible = current == TimeFormat.CUSTOM,
+            enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+            exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+        ) {
+            var draft by remember(customPattern) { mutableStateOf(customPattern) }
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = {
+                        draft = it
+                        onCustomPatternChange(it)
+                    },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.settings_time_format)) },
+                    placeholder = { Text(stringResource(R.string.settings_time_format_custom_hint)) },
+                    modifier = Modifier.fillMaxWidth().testTag("settings_time_format_custom_pattern"),
+                )
+                Text(
+                    text = stringResource(R.string.settings_time_format_custom_help),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
     }
 }
@@ -993,6 +1029,7 @@ private fun AppearanceSettingsPreview() {
             onFontChoice = {},
             onShowTimestamps = {},
             onTimeFormat = {},
+            onCustomTimeFormatPattern = {},
             onMessageSpacing = {},
             onBubbleCornerStyle = {},
             onLauncherIcon = {},
@@ -1025,6 +1062,7 @@ private fun AppearanceSettingsMinTextPreview() {
             onFontChoice = {},
             onShowTimestamps = {},
             onTimeFormat = {},
+            onCustomTimeFormatPattern = {},
             onMessageSpacing = {},
             onBubbleCornerStyle = {},
             onLauncherIcon = {},
@@ -1057,6 +1095,7 @@ private fun AppearanceSettingsMaxTextPreview() {
             onFontChoice = {},
             onShowTimestamps = {},
             onTimeFormat = {},
+            onCustomTimeFormatPattern = {},
             onMessageSpacing = {},
             onBubbleCornerStyle = {},
             onLauncherIcon = {},

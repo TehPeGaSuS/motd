@@ -166,7 +166,12 @@ class MainActivity :
                 uiFontScalePercent = appearance.uiFontScalePercent,
                 fontChoice = appearance.fontChoice,
                 customFontFile = customFontFile,
-                timestampConfig = TimestampConfig(appearance.showTimestamps, appearance.timeFormat),
+                timestampConfig =
+                    TimestampConfig(
+                        appearance.showTimestamps,
+                        appearance.timeFormat,
+                        appearance.customTimeFormatPattern,
+                    ),
                 messageSpacing = appearance.messageSpacing,
                 bubbleCornerStyle = appearance.bubbleCornerStyle,
             ) {

@@ -58,6 +58,7 @@ import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.audio.parseAudioAttachments
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
+import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.Avatar
@@ -67,6 +68,7 @@ import io.github.trevarj.motd.ui.components.MutedActivityBadge
 import io.github.trevarj.motd.ui.components.NetworkChip
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.components.avatarsHidden
+import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.components.resolveIs24Hour
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
@@ -201,13 +203,14 @@ fun ChatListRowItem(
     // Resolved per-nick color (also used to tint the friend star), matching sender coloring.
     val nickColor = LocalNickColors.current.nick(row.displayName, MaterialTheme.colorScheme.onSurfaceVariant)
     val spacing = LocalSpacing.current
-    // The chat-list time always shows regardless of the in-chat "show timestamps" toggle; only its
-    // 12h/24h format follows the user's preference (AUTO falls back to the device setting).
+    // Chat-list time always shows regardless of the in-chat "show timestamps" toggle.
     val context = LocalContext.current
+    val timestampConfig = LocalTimestampConfig.current
     // Reads a system setting via a Binder call; memoize per row rather than re-querying on every
     // recomposition (this composable is invoked once per visible row).
     val is24HourDevice = remember(context) { DateFormat.is24HourFormat(context) }
-    val is24Hour = resolveIs24Hour(LocalTimestampConfig.current.format, is24HourDevice)
+    val is24Hour = resolveIs24Hour(timestampConfig.format, is24HourDevice)
+    val formatTimestamp = rememberMessageTimeFormatter()
     val queryPresence = presence.takeIf { row.type == BufferType.QUERY }
     val badges = chatListBadgeState(row)
     val isUnread = !row.muted && row.unreadCount > 0
@@ -441,7 +444,12 @@ fun ChatListRowItem(
         ) {
             row.lastMessageTime?.let { time ->
                 Text(
-                    text = relativeChatTime(time, is24Hour = is24Hour),
+                    text =
+                        if (timestampConfig.format == TimeFormat.CUSTOM) {
+                            formatTimestamp(time)
+                        } else {
+                            relativeChatTime(time, is24Hour = is24Hour)
+                        },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

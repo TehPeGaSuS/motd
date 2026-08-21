@@ -440,6 +440,7 @@ class ConfigurationBackupRepositoryImpl
                 appearancePrefs.setFontChoice(it.fontChoice)
                 appearancePrefs.setShowTimestamps(it.showTimestamps)
                 appearancePrefs.setTimeFormat(it.timeFormat)
+                appearancePrefs.setCustomTimeFormatPattern(it.customTimeFormatPattern)
                 appearancePrefs.setMessageSpacing(it.messageSpacing)
                 appearancePrefs.setBubbleCornerStyle(it.bubbleCornerStyle)
                 appearancePrefs.setLauncherIcon(it.launcherIcon)

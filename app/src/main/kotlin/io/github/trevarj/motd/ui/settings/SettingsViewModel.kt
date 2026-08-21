@@ -271,6 +271,11 @@ class SettingsViewModel
                 appearancePrefs.setTimeFormat(format)
             }
 
+        fun setCustomTimeFormatPattern(pattern: String) =
+            viewModelScope.launch {
+                appearancePrefs.setCustomTimeFormatPattern(pattern)
+            }
+
         fun setMessageSpacing(spacing: io.github.trevarj.motd.data.prefs.MessageSpacing) =
             viewModelScope.launch {
                 appearancePrefs.setMessageSpacing(spacing)

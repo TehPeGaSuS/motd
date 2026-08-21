@@ -708,6 +708,9 @@
     <string name="settings_time_format_auto">System default</string>
     <string name="settings_time_format_h12">12-hour</string>
     <string name="settings_time_format_h24">24-hour</string>
+    <string name="settings_time_format_custom">Custom</string>
+    <string name="settings_time_format_custom_hint">e.g. dd/MM/yyyy - HH:mm:ss</string>
+    <string name="settings_time_format_custom_help">SimpleDateFormat pattern — dd/MM/yyyy is day/month/year, HH:mm:ss is 24-hour time with seconds</string>
     <string name="settings_message_spacing">Message spacing</string>
     <string name="settings_message_spacing_compact">Compact</string>
     <string name="settings_message_spacing_default">Default</string>
