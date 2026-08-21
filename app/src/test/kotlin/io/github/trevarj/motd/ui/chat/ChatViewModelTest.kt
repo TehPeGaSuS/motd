@@ -714,6 +714,39 @@ class ChatViewModelTest {
         runCurrent()
     }
 
+    @Test
+    fun `join opens its first channel after the buffer appears`() = runTest {
+        val manager = FakeConnectionManager(network.id)
+        val buffers = FakeBufferRepository(channel)
+        val opened = mutableListOf<Long>()
+        val vm = viewModel(channel, manager, buffers = buffers)
+        vm.state.first { it.buffer != null }
+
+        vm.submit("/join #new,#other", opened::add)
+        runCurrent()
+        assertTrue(opened.isEmpty())
+        buffers.chatList.value = listOf(
+            ChatListRow(
+                bufferId = 42,
+                networkId = network.id,
+                networkName = network.name,
+                displayName = "#new",
+                type = BufferType.CHANNEL,
+                pinned = false,
+                muted = false,
+                lastMessageText = null,
+                lastMessageSender = null,
+                lastMessageTime = null,
+                unreadCount = 0,
+                mentionCount = 0,
+            ),
+        )
+        runCurrent()
+
+        assertEquals(listOf(Triple(network.id, "#new,#other", null)), manager.joins)
+        assertEquals(listOf(42L), opened)
+    }
+
     /** #51: the composer's new first-class commands, checked on the wire rather than at the parser. */
     @Test
     fun `new slash commands reach the wire with buffer-derived targets`() = runTest {
@@ -3102,12 +3135,13 @@ class ChatViewModelTest {
         private val routeId: Long = current.id,
     ) : BufferRepository {
         private val buffer = MutableStateFlow(current)
+        val chatList = MutableStateFlow<List<ChatListRow>>(emptyList())
         val layoutWrites = mutableListOf<Pair<Long, LayoutDensity?>>()
         var layoutWriteResult = true
         val presenceWrites = mutableListOf<Pair<Long, PresenceMode?>>()
         var presenceWriteResult = true
 
-        override fun observeChatList(): Flow<List<ChatListRow>> = flowOf(emptyList())
+        override fun observeChatList(): Flow<List<ChatListRow>> = chatList
         override fun observeBuffer(id: Long): Flow<BufferEntity?> =
             buffer.takeIf { id == routeId || id == current.id } ?: flowOf(null)
         override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = flowOf(emptyList())

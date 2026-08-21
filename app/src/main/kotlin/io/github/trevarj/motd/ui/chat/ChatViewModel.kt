@@ -1402,8 +1402,9 @@ class ChatViewModel
                 ?.let(audioPlaybackController::dismiss)
 
         /**
-         * Parse [raw] and execute the resulting [ChatCommand]. `onOpenBuffer` navigates for /msg /query;
-         * `onOpenChannelList` navigates for /list. Clears the reply and stops typing on a normal send.
+         * Parse [raw] and execute the resulting [ChatCommand]. `onOpenBuffer` navigates for /join,
+         * /msg, and /query; `onOpenChannelList` navigates for /list. Clears the reply and stops typing
+         * on a normal send.
          *
          * A SERVER buffer is a raw-send surface: every submission is sent as a raw IRC
          * line to the network (one leading `/` stripped) — [parseCommand] is bypassed, and a PRIVMSG to
@@ -1487,6 +1488,17 @@ class ChatViewModel
                 is ChatCommand.Join -> {
                     networkId?.let { nid ->
                         sendCommand(nid, IrcMessage(command = "JOIN", params = listOfNotNull(cmd.channels, cmd.keys)))
+                        val rules = identityRules.value
+                        val target = rules.normalize(cmd.channels.substringBefore(','))
+                        withTimeoutOrNull(30_000L) {
+                            bufferRepository.observeChatList().mapNotNull { rows ->
+                                rows.firstOrNull {
+                                    it.networkId == nid &&
+                                        it.type == BufferType.CHANNEL &&
+                                        rules.normalize(it.displayName) == target
+                                }?.bufferId
+                            }.first()
+                        }?.let(onOpenBuffer)
                     }
                 }
 
