@@ -394,7 +394,6 @@ internal fun NavHostController.openChat(
 ) {
     navigate(route) {
         if (replaceCurrentChat) popUpTo<ChatRoute> { inclusive = true }
-        launchSingleTop = true
     }
 }
 

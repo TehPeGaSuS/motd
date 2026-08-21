@@ -1,9 +1,24 @@
 package io.github.trevarj.motd.ui.nav
 
+import android.content.Context
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ViewModelStore
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.ComposeNavigator
+import androidx.navigation.compose.composable
+import androidx.navigation.createGraph
+import androidx.navigation.toRoute
+import androidx.test.core.app.ApplicationProvider
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class NavGraphTest {
     private val chatRouteName = requireNotNull(ChatRoute::class.qualifiedName)
 
@@ -19,5 +34,37 @@ class NavGraphTest {
         assertFalse(isChatRoutePattern(ChatListRoute::class.qualifiedName))
         assertFalse(isChatRoutePattern("${ChatRoute::class.qualifiedName}Extra/{bufferId}"))
         assertFalse(isChatRoutePattern(null))
+    }
+
+    @Test
+    fun `opening another chat pushes its route and keeps the previous chat for back`() {
+        val controller =
+            NavHostController(ApplicationProvider.getApplicationContext<Context>()).apply {
+                setLifecycleOwner(ResumedOwner())
+                setViewModelStore(ViewModelStore())
+                navigatorProvider.addNavigator(ComposeNavigator())
+                graph =
+                    createGraph(startDestination = ChatListRoute) {
+                        composable<ChatListRoute> {}
+                        composable<ChatRoute> {}
+                    }
+            }
+
+        controller.navigate(ChatRoute(5))
+        controller.openChat(ChatRoute(7), replaceCurrentChat = false)
+
+        val chatIds =
+            controller.currentBackStack.value.mapNotNull { entry ->
+                entry
+                    .takeIf { isChatRoutePattern(it.destination.route) }
+                    ?.toRoute<ChatRoute>()
+                    ?.bufferId
+            }
+        assertEquals(listOf(5L, 7L), chatIds)
+    }
+
+    private class ResumedOwner : LifecycleOwner {
+        private val registry = LifecycleRegistry(this).apply { currentState = Lifecycle.State.RESUMED }
+        override val lifecycle: Lifecycle = registry
     }
 }
