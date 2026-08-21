@@ -407,14 +407,17 @@ fun ChatListRowItem(
                     text =
                         when (preview) {
                             is ChatListMessagePreview.Text -> {
-                                preview.value
+                                io.github.trevarj.motd.ui.components
+                                    .mircFormattedText(preview.value)
                             }
 
                             is ChatListMessagePreview.Voice -> {
-                                buildString {
-                                    append(stringResource(R.string.chatlist_voice_message))
-                                    preview.durationMs?.let { append(" · ${formatAudioDuration(it)}") }
-                                }
+                                androidx.compose.ui.text.AnnotatedString(
+                                    buildString {
+                                        append(stringResource(R.string.chatlist_voice_message))
+                                        preview.durationMs?.let { append(" · ${formatAudioDuration(it)}") }
+                                    },
+                                )
                             }
                         },
                     style = MaterialTheme.typography.bodyMedium,

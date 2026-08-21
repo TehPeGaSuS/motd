@@ -1609,8 +1609,10 @@ internal fun linkifiedBody(
     codeColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
 ): AnnotatedString {
     // Most chat rows are plain text. Avoid the URL regex, nick token walk, and builder allocation
-    // when neither link annotations nor mention styling can affect the result.
-    if (!mentionsActive && !text.contains("http://") && !text.contains("https://") && !text.contains('`')) {
+    // when neither link annotations, mention styling, nor mIRC formatting can affect the result.
+    if (!mentionsActive && !text.contains("http://") && !text.contains("https://") && !text.contains('`') &&
+        text.none { it.code in 0x01..0x1F }
+    ) {
         return AnnotatedString(text)
     }
     return buildAnnotatedString {
@@ -1630,7 +1632,10 @@ internal fun linkifiedBody(
     }
 }
 
-/** Code segmentation precedes URL and mention annotation, so code contents stay inert. */
+/**
+ * mIRC formatting codes are resolved first since they can wrap around code spans/URLs/mentions;
+ * code segmentation then precedes URL and mention annotation so code contents stay inert.
+ */
 internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendRichText(
     text: String,
     plainStyle: SpanStyle,
@@ -1638,19 +1643,24 @@ internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendRichText(
     codeStyle: SpanStyle,
     mentionColor: (String) -> androidx.compose.ui.graphics.Color? = { null },
 ) {
-    for (segment in parseInlineCode(text)) {
-        when (segment) {
-            is InlineTextSegment.Code -> {
-                withStyle(codeStyle) { append(segment.text) }
-            }
+    for (run in parseMircFormatting(text)) {
+        val runPlainStyle = plainStyle.merge(run.style)
+        val runLinkStyle = run.style.merge(linkStyle)
+        val runCodeStyle = run.style.merge(codeStyle)
+        for (segment in parseInlineCode(run.text)) {
+            when (segment) {
+                is InlineTextSegment.Code -> {
+                    withStyle(runCodeStyle) { append(segment.text) }
+                }
 
-            is InlineTextSegment.Plain -> {
-                appendPlainLinksAndMentions(
-                    segment.text,
-                    plainStyle,
-                    linkStyle,
-                    mentionColor,
-                )
+                is InlineTextSegment.Plain -> {
+                    appendPlainLinksAndMentions(
+                        segment.text,
+                        runPlainStyle,
+                        runLinkStyle,
+                        mentionColor,
+                    )
+                }
             }
         }
     }

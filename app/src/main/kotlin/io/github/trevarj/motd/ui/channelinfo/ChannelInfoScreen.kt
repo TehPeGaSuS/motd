@@ -744,7 +744,12 @@ private fun ChannelHeader(
                 val topic = buffer.topic?.takeIf { it.isNotBlank() }
                 if (topic != null) {
                     Text(
-                        text = topic,
+                        text =
+                            io.github.trevarj.motd.ui.components.linkifiedBody(
+                                text = topic,
+                                linkColor = MaterialTheme.colorScheme.primary,
+                                mentionsActive = false,
+                            ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f, fill = false).testTag("channelinfo_topic"),

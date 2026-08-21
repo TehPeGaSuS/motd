@@ -2,6 +2,8 @@ package io.github.trevarj.motd.ui.components
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontSynthesis
@@ -108,6 +110,31 @@ class MessageBubbleTextTest {
                 .filter { it.item.color == Color.Red }
                 .map { body.text.substring(it.start, it.end) }
         assertEquals(listOf("@bob"), redRuns)
+    }
+
+    @Test
+    fun mirc_color_overrides_plain_body_color() {
+        val body =
+            buildAnnotatedString {
+                appendRichText(
+                    text = "\u000304red",
+                    plainStyle = SpanStyle(color = Color.Green),
+                    linkStyle = SpanStyle(color = Color.Blue),
+                    codeStyle = SpanStyle(fontFamily = FontFamily.Monospace),
+                )
+            }
+
+        assertEquals("red", body.text)
+        assertTrue(body.spanStyles.any { it.item.color == Color.Red })
+    }
+
+    @Test
+    fun mirc_preview_leaves_urls_and_backticks_inert() {
+        val body = mircFormattedText("\u000304visit https://example.com and `code`")
+
+        assertEquals("visit https://example.com and `code`", body.text)
+        assertTrue(body.spanStyles.any { it.item.color == Color.Red })
+        assertTrue(!body.hasLinkAnnotations(0, body.length))
     }
 
     @Test

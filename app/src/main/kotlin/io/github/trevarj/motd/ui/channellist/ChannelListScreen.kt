@@ -318,7 +318,11 @@ private fun ChannelList(
                 supportingContent = {
                     if (listing.topic.isNotBlank()) {
                         Text(
-                            listing.topic,
+                            io.github.trevarj.motd.ui.components.linkifiedBody(
+                                text = listing.topic,
+                                linkColor = MaterialTheme.colorScheme.primary,
+                                mentionsActive = false,
+                            ),
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.bodySmall,
