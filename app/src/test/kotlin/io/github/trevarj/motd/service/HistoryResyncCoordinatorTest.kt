@@ -2404,15 +2404,13 @@ class HistoryResyncCoordinatorTest {
         assertEquals(2_000L, catchUpRetryDelayMs(0))
         assertEquals(4_000L, catchUpRetryDelayMs(1))
         assertEquals(30_000L, catchUpRetryDelayMs(20))
-        assertEquals(
-            false,
-            shouldRetryIncompleteCatchUp(
-                HistoryResyncState.Incomplete(
-                    inserted = 1,
-                    reason = "latest already local",
-                ),
-            ),
+        val settledPartial = HistoryResyncState.Incomplete(
+            inserted = 1,
+            reason = "latest already local",
         )
+        assertFalse(shouldRetryIncompleteCatchUp(settledPartial))
+        assertTrue(terminalCatchUpCanVouchForConnection(settledPartial))
+        assertFalse(terminalCatchUpCanVouchForConnection(settledPartial.copy(retryRecommended = true)))
     }
 
     private fun String.timestampBoundMillis(): Long =

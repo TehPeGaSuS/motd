@@ -1748,9 +1748,12 @@ class ConnectionManagerImpl @Inject constructor(
                             delay(retryMs)
                             continue
                         }
-                        // A server can omit end-of-history metadata even after its advertised
-                        // latest message is local. Do not loop merely to prove older completeness.
+                        // Non-retryable partial results are this server's best proof. Remember it,
+                        // or the same healthy socket re-enumerates history on every foreground.
                         historyResyncCoordinator.settleNetworkPass(networkId, result, client)
+                        if (terminalCatchUpCanVouchForConnection(result)) {
+                            completedCatchUps[networkId] = CompletedCatchUp(client)
+                        }
                         return
                     }
                     diagnostics.record("history", "catch_up_failed") {
@@ -2904,6 +2907,11 @@ internal const val CATCH_UP_MAX_ATTEMPTS = 5
 
 internal fun shouldRetryIncompleteCatchUp(result: HistoryResyncState.Failed): Boolean =
     result is HistoryResyncState.Incomplete && result.retryRecommended
+
+internal fun terminalCatchUpCanVouchForConnection(result: HistoryResyncState.Failed): Boolean =
+    result is HistoryResyncState.Capped ||
+        (result is HistoryResyncState.Incomplete &&
+            !result.awaitsTargetClassification && !result.retryRecommended)
 
 /** Wire requests needed to converge local markers with a read-marker-capable server. */
 internal fun readMarkerSyncRequests(markers: List<BufferReadMarker>): List<ReadMarkerSyncRequest> =
