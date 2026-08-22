@@ -134,11 +134,11 @@ internal fun httpsUploadUri(value: String?): java.net.URI? = runCatching {
  * is actually connected to.
  */
 sealed interface SojuFileHostEndpoint {
-    /** Advertised, well formed, and served by the network's own host. */
+    /** Advertised, well formed, and served within the network host's DNS namespace. */
     data class Usable(val url: String) : SojuFileHostEndpoint
 
     /**
-     * Advertised and well formed, but served by [advertisedHost] rather than [networkHost].
+     * Advertised and well formed, but served outside [networkHost]'s DNS namespace.
      *
      * An upload authenticates with the network's SASL credential, so following this endpoint would
      * forward that credential to a third-party host the server merely named — with no pin and no
@@ -167,15 +167,19 @@ fun sojuFileHostEndpoint(isupport: Map<String, String>, networkHost: String): So
  * Resolve an advertised file-host endpoint against [networkHost], the host of the IRC endpoint the
  * upload's credential belongs to.
  *
- * The host must match, case-insensitively. **Ports must not**: soju serves IRC and the file host
- * from one process on two ports (`listen ircs://:6697` beside `listen https://:6696`), so a
- * port-sensitive comparison would reject every real soju deployment.
+ * The host must match or be its subdomain, case-insensitively. This permits a network owner to
+ * isolate uploads at e.g. `files.irc.example` without trusting sibling or unrelated domains.
+ * **Ports must not** match: soju commonly serves IRC and uploads on separate ports.
  */
 fun validateSojuFileHostEndpoint(value: String?, networkHost: String): SojuFileHostEndpoint {
     val uri = httpsUploadUri(value) ?: return SojuFileHostEndpoint.Unavailable
-    val expected = networkHost.trim()
+    val advertised = uri.host.trimEnd('.')
+    val expected = networkHost.trim().trimEnd('.')
     // Fails closed on an unknown network host: an endpoint we cannot bind is never usable.
-    return if (expected.isNotEmpty() && uri.host.equals(expected, ignoreCase = true)) {
+    return if (
+        expected.isNotEmpty() &&
+        (advertised.equals(expected, ignoreCase = true) || advertised.endsWith(".$expected", ignoreCase = true))
+    ) {
         SojuFileHostEndpoint.Usable(uri.toString())
     } else {
         SojuFileHostEndpoint.OffHost(advertisedHost = uri.host, networkHost = expected)

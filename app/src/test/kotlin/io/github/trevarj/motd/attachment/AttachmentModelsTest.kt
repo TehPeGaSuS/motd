@@ -55,15 +55,25 @@ class AttachmentModelsTest {
             SojuFileHostEndpoint.Usable("https://irc.example:6696/uploads"),
             validateSojuFileHostEndpoint("https://irc.example:6696/uploads", "irc.example"),
         )
+        // A dedicated upload host remains inside the connected host owner's DNS namespace.
+        assertEquals(
+            SojuFileHostEndpoint.Usable("https://files.irc.starlightnet.work/uploads"),
+            validateSojuFileHostEndpoint("https://files.irc.starlightnet.work/uploads", "starlightnet.work"),
+        )
         // A server naming a third-party host is refused, and the advertised host is reported.
         assertEquals(
             SojuFileHostEndpoint.OffHost("evil.example", "irc.example"),
             validateSojuFileHostEndpoint("https://evil.example/uploads", "irc.example"),
         )
-        // A sibling subdomain is still another host.
+        // A sibling domain is outside the connected host's namespace.
         assertEquals(
-            SojuFileHostEndpoint.OffHost("files.irc.example", "irc.example"),
-            validateSojuFileHostEndpoint("https://files.irc.example/uploads", "irc.example"),
+            SojuFileHostEndpoint.OffHost("files.other.example", "irc.example"),
+            validateSojuFileHostEndpoint("https://files.other.example/uploads", "irc.example"),
+        )
+        // A suffix without a label boundary must not impersonate a subdomain.
+        assertEquals(
+            SojuFileHostEndpoint.OffHost("evilirc.example", "irc.example"),
+            validateSojuFileHostEndpoint("https://evilirc.example/uploads", "irc.example"),
         )
         // Fails closed when the network host is unknown rather than accepting anything.
         assertEquals(
