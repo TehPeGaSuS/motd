@@ -112,21 +112,27 @@ class AttachmentModelsTest {
     }
 
     @Test fun sojuFileHostUsesDefaultUploadCeiling() {
-        val config = normalizedConfig(PasteBackendConfig(
-            backend = AttachmentBackend.SOJU_FILEHOST,
-            sizeLimitBytes = MAX_CUSTOM_LIMIT_BYTES,
-        ))
+        val config =
+            normalizedConfig(
+                PasteBackendConfig(
+                    backend = AttachmentBackend.SOJU_FILEHOST,
+                    sizeLimitBytes = MAX_CUSTOM_LIMIT_BYTES,
+                ),
+            )
         assertEquals(DEFAULT_PUBLIC_LIMIT_BYTES, config.sizeLimitBytes)
         assertTrue(AttachmentBackend.SOJU_FILEHOST.acceptsBinary)
     }
 
     @Test fun customLimitAllows512MiB() {
-        val config = normalizedConfig(PasteBackendConfig(
-            backend = AttachmentBackend.CUSTOM_0X0,
-            endpoint = "https://paste.example",
-            customEndpoint = "https://paste.example",
-            sizeLimitBytes = MAX_CUSTOM_LIMIT_BYTES,
-        ))
+        val config =
+            normalizedConfig(
+                PasteBackendConfig(
+                    backend = AttachmentBackend.CUSTOM_0X0,
+                    endpoint = "https://paste.example",
+                    customEndpoint = "https://paste.example",
+                    sizeLimitBytes = MAX_CUSTOM_LIMIT_BYTES,
+                ),
+            )
         assertEquals(MAX_CUSTOM_LIMIT_BYTES, config.sizeLimitBytes)
     }
 
@@ -135,10 +141,13 @@ class AttachmentModelsTest {
         assertEquals("https://x0.at", AttachmentBackend.X0_AT.endpoint)
         assertTrue(AttachmentBackend.X0_AT.acceptsBinary)
         assertEquals(MAX_X0AT_LIMIT_BYTES, backendMaxBytes(AttachmentBackend.X0_AT))
-        val capped = normalizedConfig(PasteBackendConfig(
-            backend = AttachmentBackend.X0_AT,
-            sizeLimitBytes = MAX_X0AT_LIMIT_BYTES,
-        ))
+        val capped =
+            normalizedConfig(
+                PasteBackendConfig(
+                    backend = AttachmentBackend.X0_AT,
+                    sizeLimitBytes = MAX_X0AT_LIMIT_BYTES,
+                ),
+            )
         assertEquals(MAX_X0AT_LIMIT_BYTES, capped.sizeLimitBytes)
         assertEquals("https://x0.at", capped.endpoint)
     }
@@ -184,11 +193,12 @@ class AttachmentModelsTest {
 
     @Test fun x0atUploadSendsNoSecretOrExpiryFields() {
         // x0.at ignores secret/expires; only the file field is sent.
-        val config = PasteBackendConfig(
-            backend = AttachmentBackend.X0_AT,
-            secretUrl = true,
-            expiry = "7d",
-        )
+        val config =
+            PasteBackendConfig(
+                backend = AttachmentBackend.X0_AT,
+                secretUrl = true,
+                expiry = "7d",
+            )
         assertEquals(emptyList<Pair<String, String>>(), multipart0x0Fields(normalizedConfig(config)))
     }
 
@@ -227,11 +237,14 @@ class AttachmentModelsTest {
     }
 
     @Test fun compatibleBackendsStillSendSecretAndExpiry() {
-        val config = normalizedConfig(PasteBackendConfig(
-            backend = AttachmentBackend.ZERO_X_ZERO,
-            secretUrl = true,
-            expiry = "7d",
-        ))
+        val config =
+            normalizedConfig(
+                PasteBackendConfig(
+                    backend = AttachmentBackend.ZERO_X_ZERO,
+                    secretUrl = true,
+                    expiry = "7d",
+                ),
+            )
         assertEquals(listOf("secret" to "", "expires" to "7d"), multipart0x0Fields(config))
     }
 }
