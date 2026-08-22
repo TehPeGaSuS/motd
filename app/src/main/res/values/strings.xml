@@ -86,6 +86,15 @@
     <string name="onboarding_auth_sasl_password">Password</string>
     <string name="onboarding_auth_server_password">Server password (optional)</string>
     <string name="onboarding_auth_server_password_desc">Sent with IRC PASS before registration. For CLoak, use username/network:password and leave SASL set to None.</string>
+    <string name="onboarding_auth_nickserv_desc">Optional fallback for networks without SASL. SASL is preferred when available.</string>
+    <string name="onboarding_auth_nickserv_password">NickServ password (optional)</string>
+    <string name="onboarding_auth_nickserv_invalid">Enter a password without whitespace and valid recovery commands.</string>
+    <string name="onboarding_auth_nickserv_syntax">IDENTIFY syntax</string>
+    <string name="onboarding_auth_nickserv_nick_password">Nickname, then password</string>
+    <string name="onboarding_auth_nickserv_password_nick">Password, then nickname</string>
+    <string name="onboarding_auth_nickserv_recovery">Recover preferred nickname automatically</string>
+    <string name="onboarding_auth_nickserv_sequence">Recovery commands</string>
+    <string name="onboarding_auth_nickserv_sequence_desc">Comma-separated command names, such as REGAIN or GHOST,REGAIN.</string>
     <string name="onboarding_auth_choose_cert">Choose certificate</string>
     <string name="onboarding_auth_cert_selected">Certificate: %1$s</string>
     <!-- soju bouncer auth: always SASL PLAIN, no picker (WP-S2) -->

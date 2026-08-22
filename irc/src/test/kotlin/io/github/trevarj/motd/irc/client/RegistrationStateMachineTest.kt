@@ -84,6 +84,153 @@ class RegistrationStateMachineTest {
     }
 
     @Test
+    fun `NickServ identify supports both argument orders after welcome`() {
+        val base = IrcClientConfig(
+            host = "irc.example",
+            port = 6697,
+            tls = true,
+            nick = "motd",
+            username = "motd",
+            realname = "motd",
+            nickServPassword = "nick-secret",
+        )
+
+        val nickPassword = RegistrationStateMachine(base)
+        nickPassword.start()
+        nickPassword.onMessage(cap("LS", ""))
+        val nickPasswordWelcome = nickPassword.onMessage(
+            IrcMessage(command = "001", params = listOf("motd", "Welcome")),
+        )
+        assertEquals(
+            listOf("PRIVMSG NickServ :IDENTIFY motd nick-secret"),
+            nickPasswordWelcome.sentLines(),
+        )
+        assertTrue(
+            nickPasswordWelcome.indexOfFirst { it is RegistrationStateMachine.Action.Send } <
+                nickPasswordWelcome.indexOfFirst { it is RegistrationStateMachine.Action.Complete },
+        )
+
+        val passwordNick = RegistrationStateMachine(
+            base.copy(nickServIdentifySyntax = NickServIdentifySyntax.PASSWORD_NICK),
+        )
+        passwordNick.start()
+        passwordNick.onMessage(cap("LS", ""))
+        assertEquals(
+            listOf("PRIVMSG NickServ :IDENTIFY nick-secret motd"),
+            passwordNick.onMessage(
+                IrcMessage(command = "001", params = listOf("motd", "Welcome")),
+            ).sentLines(),
+        )
+    }
+
+    @Test
+    fun `alternate nick runs configured recovery then requests preferred nick`() {
+        val machine = RegistrationStateMachine(
+            IrcClientConfig(
+                host = "irc.example",
+                port = 6697,
+                tls = true,
+                nick = "motd",
+                username = "motd",
+                realname = "motd",
+                nickServPassword = "nick-secret",
+                nickServRecoveryCommands = listOf("GHOST", "REGAIN"),
+            ),
+        )
+
+        machine.start()
+        assertEquals(
+            listOf("NICK motd_"),
+            machine.onMessage(IrcMessage(command = "433", params = listOf("*", "motd"))).sentLines(),
+        )
+        machine.onMessage(cap("LS", ""))
+
+        assertEquals(
+            listOf(
+                "PRIVMSG NickServ :IDENTIFY motd nick-secret",
+                "PRIVMSG NickServ :GHOST motd nick-secret",
+                "PRIVMSG NickServ :REGAIN motd nick-secret",
+                "NICK motd",
+            ),
+            machine.onMessage(
+                IrcMessage(command = "001", params = listOf("motd_", "Welcome")),
+            ).sentLines(),
+        )
+    }
+
+    @Test
+    fun `invalid persisted NickServ values fail before registration`() {
+        listOf(
+            IrcClientConfig(
+                "irc.example", 6697, true, "motd", "motd", "motd",
+                nickServPassword = "two words",
+            ),
+            IrcClientConfig(
+                "irc.example", 6697, true, "motd", "motd", "motd",
+                nickServPassword = "secret",
+                nickServRecoveryCommands = listOf("QUIT now"),
+            ),
+            IrcClientConfig(
+                "irc.example", 6697, true, "motd", "motd", "motd",
+                nickServPassword = "x".repeat(500),
+            ),
+        ).forEach { config ->
+            val fail = RegistrationStateMachine(config).start().single()
+                as RegistrationStateMachine.Action.Fail
+            assertEquals("invalid NickServ configuration", fail.reason)
+            assertTrue(fail.fatal)
+        }
+    }
+
+    @Test
+    fun `disabled or missing NickServ recovery sends no recovery commands`() {
+        val disabled = RegistrationStateMachine(
+            IrcClientConfig(
+                "irc.example", 6697, true, "motd", "motd", "motd",
+                nickServPassword = "secret",
+            ),
+        )
+        disabled.start()
+        disabled.onMessage(IrcMessage(command = "433", params = listOf("*", "motd")))
+        disabled.onMessage(cap("LS", ""))
+        assertEquals(
+            listOf("PRIVMSG NickServ :IDENTIFY motd secret"),
+            disabled.onMessage(
+                IrcMessage(command = "001", params = listOf("motd_", "Welcome")),
+            ).sentLines(),
+        )
+
+        val missing = RegistrationStateMachine(
+            IrcClientConfig(
+                "irc.example", 6697, true, "motd", "motd", "motd",
+                nickServRecoveryCommands = listOf("REGAIN"),
+            ),
+        )
+        missing.start()
+        missing.onMessage(IrcMessage(command = "433", params = listOf("*", "motd")))
+        missing.onMessage(cap("LS", ""))
+        assertTrue(
+            missing.onMessage(
+                IrcMessage(command = "001", params = listOf("motd_", "Welcome")),
+            ).sentLines().isEmpty(),
+        )
+    }
+
+    @Test
+    fun `SASL configuration ignores NickServ fallback`() {
+        val machine = RegistrationStateMachine(
+            IrcClientConfig(
+                "irc.example", 6697, true, "motd", "motd", "motd",
+                sasl = SaslMechanism.PLAIN,
+                nickServPassword = "two words",
+                nickServRecoveryCommands = listOf("QUIT now"),
+            ),
+        )
+
+        assertTrue(machine.start().none { it is RegistrationStateMachine.Action.Fail })
+    }
+
+    @Test
     fun `bouncer bind negotiates replay safety before fallback ready`() {
         val machine = RegistrationStateMachine(
             IrcClientConfig(

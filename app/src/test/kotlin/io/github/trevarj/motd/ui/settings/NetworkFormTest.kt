@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.settings
 
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
+import io.github.trevarj.motd.irc.client.NickServIdentifySyntax
 import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
@@ -32,6 +33,73 @@ class NetworkFormTest {
         assertTrue(AuthForm(serverPassword = "trev/libera:secret").isValid)
         assertEquals(false, AuthForm(serverPassword = "secret\nQUIT").isValid)
         assertEquals(false, AuthForm(serverPassword = "x".repeat(505)).isValid)
+    }
+
+    @Test
+    fun `NickServ fallback round trips independently of IRC PASS`() {
+        val auth = AuthForm(
+            mode = AuthMode.NONE,
+            serverPassword = "server-secret",
+            nickServPassword = "nick-secret",
+            nickServIdentifySyntax = NickServIdentifySyntax.PASSWORD_NICK,
+            nickServRecoveryEnabled = true,
+            nickServRecoverySequence = "GHOST, REGAIN",
+        )
+
+        val entity = buildNetworkEntity(
+            server = ServerForm(host = "irc.example.org", nick = "me"),
+            auth = auth,
+            role = NetworkRole.DIRECT,
+        )
+
+        assertEquals(SaslMechanism.NONE.name, entity.saslMechanism)
+        assertEquals("nick-secret", entity.nickServPassword)
+        assertEquals("PASSWORD_NICK", entity.nickServIdentifySyntax)
+        assertTrue(entity.nickServRecoveryEnabled)
+        assertEquals("GHOST,REGAIN", entity.nickServRecoverySequence)
+        assertEquals(auth.copy(nickServRecoverySequence = "GHOST,REGAIN"), entity.toAuthForm())
+    }
+
+    @Test
+    fun `NickServ validation rejects unsafe passwords and recovery commands`() {
+        assertTrue(AuthForm(nickServPassword = "secret").isValid)
+        assertTrue(AuthForm(nickServRecoveryEnabled = true).isValid)
+        assertEquals(false, AuthForm(nickServPassword = "two words").isValid)
+        assertEquals(false, AuthForm(nickServPassword = "x".repeat(401)).isValid)
+        assertEquals(
+            false,
+            AuthForm(
+                nickServPassword = "secret",
+                nickServRecoveryEnabled = true,
+                nickServRecoverySequence = "GHOST,QUIT now",
+            ).isValid,
+        )
+        assertEquals(
+            false,
+            AuthForm(
+                nickServPassword = "secret",
+                nickServRecoveryEnabled = true,
+                nickServRecoverySequence = "",
+            ).isValid,
+        )
+    }
+
+    @Test
+    fun `SASL authentication drops inactive NickServ password`() {
+        val entity = buildNetworkEntity(
+            server = ServerForm(host = "irc.example.org", nick = "me"),
+            auth = AuthForm(
+                mode = AuthMode.PLAIN,
+                saslUser = "me",
+                saslPassword = "sasl-secret",
+                nickServPassword = "inactive-secret",
+                nickServRecoveryEnabled = true,
+            ),
+            role = NetworkRole.DIRECT,
+        )
+
+        assertNull(entity.nickServPassword)
+        assertEquals(false, entity.nickServRecoveryEnabled)
     }
 
     @Test

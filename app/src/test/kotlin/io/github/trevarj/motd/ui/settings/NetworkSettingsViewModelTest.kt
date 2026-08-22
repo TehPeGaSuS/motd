@@ -5,6 +5,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.irc.client.IrcClient
+import io.github.trevarj.motd.irc.client.NickServIdentifySyntax
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ConnectionManager
@@ -304,6 +305,38 @@ class NetworkSettingsViewModelTest {
         assertNull(vm.state.value.pendingBouncerIdentityChange)
         assertEquals(listOf("update:1"), repo.operations)
         assertTrue(done)
+    }
+
+    @Test
+    fun nickServEdit_isDetectedAndSavedForDirectNetwork() = runTest {
+        val direct = root(saslMechanism = "NONE", saslUser = null).copy(
+            role = NetworkRole.DIRECT,
+            parentId = null,
+            saslPassword = null,
+            nickServPassword = "old-secret",
+        )
+        val repo = FakeNetworkRepository(listOf(direct))
+        val vm = loadedVm(repo)
+
+        assertEquals("old-secret", vm.state.value.auth.nickServPassword)
+        vm.editAuth(
+            vm.state.value.auth.copy(
+                nickServPassword = "new-secret",
+                nickServIdentifySyntax = NickServIdentifySyntax.PASSWORD_NICK,
+                nickServRecoveryEnabled = true,
+                nickServRecoverySequence = "GHOST,REGAIN",
+            ),
+        )
+
+        assertTrue(vm.state.value.hasUnsavedChanges)
+        vm.save {}
+        runCurrent()
+
+        val saved = repo.networks.getValue(1)
+        assertEquals("new-secret", saved.nickServPassword)
+        assertEquals("PASSWORD_NICK", saved.nickServIdentifySyntax)
+        assertTrue(saved.nickServRecoveryEnabled)
+        assertEquals("GHOST,REGAIN", saved.nickServRecoverySequence)
     }
 
     @Test

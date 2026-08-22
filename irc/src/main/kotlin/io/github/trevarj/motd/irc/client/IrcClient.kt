@@ -55,6 +55,15 @@ import java.util.concurrent.atomic.AtomicReference
 
 enum class SaslMechanism { NONE, PLAIN, EXTERNAL }
 
+enum class NickServIdentifySyntax { NICK_PASSWORD, PASSWORD_NICK }
+
+/** One automatic preferred-nick recovery across every socket owned by a connection actor. */
+class NickRecoveryGuard {
+    private val claimed = AtomicBoolean(false)
+
+    internal fun claim(): Boolean = claimed.compareAndSet(false, true)
+}
+
 data class IrcClientConfig(
     val host: String,
     val port: Int,
@@ -69,6 +78,11 @@ data class IrcClientConfig(
     val serverPassword: String? = null,
     /** Optional per-network away message to apply during or immediately after registration. */
     val initialAwayMessage: String? = null,
+    /** Optional NickServ fallback, used only when SASL is disabled. */
+    val nickServPassword: String? = null,
+    val nickServIdentifySyntax: NickServIdentifySyntax = NickServIdentifySyntax.NICK_PASSWORD,
+    /** Empty disables automatic recovery; otherwise commands run in order before renicking. */
+    val nickServRecoveryCommands: List<String> = emptyList(),
     /** soju: bind this connection to a bouncer network before CAP END. */
     val bouncerNetId: String? = null,
     /** Extra caps to request beyond the built-in tiers (rarely needed). */
@@ -173,6 +187,7 @@ class IrcClient(
     private val factory: TransportFactory,
     private val scope: CoroutineScope,
     private val observerBufferCapacity: Int = OBSERVER_EVENT_CAPACITY,
+    private val nickRecoveryGuard: NickRecoveryGuard = NickRecoveryGuard(),
 ) {
     private val _state = MutableStateFlow<IrcClientState>(IrcClientState.Disconnected)
     val state: StateFlow<IrcClientState> = _state.asStateFlow()
@@ -372,7 +387,7 @@ class IrcClient(
         }
 
         _state.value = IrcClientState.Registering
-        val reg = RegistrationStateMachine(config)
+        val reg = RegistrationStateMachine(config, nickRecoveryGuard::claim)
         for (a in reg.start()) applyRegAction(a, t, criticalEvents, disconnectedPublished)
 
         val wd =
@@ -563,9 +578,31 @@ class IrcClient(
                         // CTCP auto-reply (e.g. VERSION) — fire and forget on the client scope.
                         scope.launch { runCatching { sendSerialized(t, reply) } }
                     }
-                if (ev != null) emitEvent(ev, criticalEvents)
+                if (ev != null) {
+                    applySelfNickChange(ev, t)
+                    emitEvent(ev, criticalEvents)
+                }
             }
         }
+    }
+
+    /** Confirm self identity before mapping later traffic, then make at most one recovery attempt. */
+    private suspend fun applySelfNickChange(
+        ev: IrcEvent,
+        t: IrcTransport,
+    ) {
+        if (ev !is IrcEvent.NickChanged || !ev.isSelf) return
+        selfNick.set(ev.to)
+        (_state.value as? IrcClientState.Ready)?.let { ready ->
+            _state.value = ready.copy(nick = ev.to)
+        }
+        if (_isupport.get().normalize(ev.to) == _isupport.get().normalize(config.nick)) return
+        if (config.sasl != SaslMechanism.NONE || config.nickServPassword.isNullOrEmpty() ||
+            config.nickServRecoveryCommands.isEmpty() || !nickRecoveryGuard.claim()
+        ) {
+            return
+        }
+        for (line in nickServRecoveryLines(config)) sendSerialized(t, line)
     }
 
     /** Emit an event, accumulating bouncer-network snapshots as a side effect. */

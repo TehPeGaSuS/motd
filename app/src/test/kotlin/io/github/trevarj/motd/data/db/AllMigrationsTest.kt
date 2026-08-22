@@ -123,6 +123,52 @@ class AllMigrationsTest {
         }
     }
 
+    @Test
+    fun migrateVersion28To29_preservesNetworkAndDisablesNickServ() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.deleteDatabase(DB_NAME)
+        legacyHelper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(DB_NAME)
+                .callback(object : SupportSQLiteOpenHelper.Callback(28) {
+                    override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion(db, 28)
+                    override fun onUpgrade(
+                        db: SupportSQLiteDatabase,
+                        oldVersion: Int,
+                        newVersion: Int,
+                    ) = Unit
+                })
+                .build(),
+        )
+        legacyHelper!!.writableDatabase.execSQL(
+            """INSERT INTO networks
+                (id, name, role, host, port, tls, nick, username, realname, saslMechanism,
+                 autoConnect, ordering, restoreAutoConnect)
+                VALUES (1, 'libera', 'DIRECT', 'irc.libera.chat', 6697, 1, 'me', 'me', 'Me',
+                        'NONE', 1, 0, 0)""",
+        )
+        legacyHelper!!.close()
+        legacyHelper = null
+
+        val migrated = Room.databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
+            .addMigrations(MIGRATION_28_29)
+            .build()
+        try {
+            migrated.openHelper.writableDatabase.query(
+                """SELECT nickServPassword, nickServIdentifySyntax, nickServRecoveryEnabled,
+                          nickServRecoverySequence FROM networks WHERE id = 1""",
+            ).use { cursor ->
+                check(cursor.moveToFirst())
+                assertNull(cursor.getString(0))
+                assertNull(cursor.getString(1))
+                assertEquals(0, cursor.getInt(2))
+                assertNull(cursor.getString(3))
+            }
+        } finally {
+            migrated.close()
+        }
+    }
+
     /**
      * The registered array is what `DbModule` hands Room on a real device, so a hop missing from it
      * is a crash-on-upgrade. Room only proves the hops it is asked to walk; this pins the array to a
@@ -152,8 +198,10 @@ class AllMigrationsTest {
         javaClass.classLoader?.getResource("${MotdDatabase::class.java.canonicalName}/$version.json")
 
     /** Creates the real v1 tables, indices, FTS triggers, and Room identity from the tracked JSON. */
-    private fun createExportedVersion1(db: SupportSQLiteDatabase) {
-        val resource = "${MotdDatabase::class.java.canonicalName}/1.json"
+    private fun createExportedVersion1(db: SupportSQLiteDatabase) = createExportedVersion(db, 1)
+
+    private fun createExportedVersion(db: SupportSQLiteDatabase, version: Int) {
+        val resource = "${MotdDatabase::class.java.canonicalName}/$version.json"
         val schema = checkNotNull(javaClass.classLoader?.getResourceAsStream(resource)) {
             "missing checked-in Room schema resource $resource"
         }.bufferedReader().use { Json.parseToJsonElement(it.readText()).jsonObject }
@@ -181,10 +229,10 @@ class AllMigrationsTest {
         const val DB_NAME = "all-migrations-test.db"
 
         /**
-         * Mirrors `version = 28` on `@Database`. Room's annotation is CLASS-retained, so the
+         * Mirrors `version = 29` on `@Database`. Room's annotation is CLASS-retained, so the
          * declared version cannot be read reflectively; the exported schema JSON is the runtime
          * witness for it instead.
          */
-        const val DECLARED_VERSION = 28
+        const val DECLARED_VERSION = 29
     }
 }

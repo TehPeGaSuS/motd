@@ -14,6 +14,7 @@ import io.github.trevarj.motd.irc.event.IrcEvent
  */
 internal class RegistrationStateMachine(
     private val config: IrcClientConfig,
+    private val claimNickRecovery: () -> Boolean = { true },
 ) {
     sealed interface Action {
         data class Send(val line: String) : Action
@@ -64,6 +65,14 @@ internal class RegistrationStateMachine(
 
     /** Opening lines: optional PASS, then CAP LS 302, NICK, USER. */
     fun start(): List<Action> {
+        if (config.sasl == SaslMechanism.NONE && !config.nickServPassword.isNullOrEmpty()) {
+            runCatching {
+                nickServIdentifyLine(config)
+                nickServRecoveryLines(config)
+            }.onFailure {
+                return fail("invalid NickServ configuration", fatal = true)
+            }
+        }
         val actions = mutableListOf<Action>(Action.SetNick(nick))
         config.serverPassword?.takeIf { it.isNotEmpty() }?.let { password ->
             val passLine = runCatching {
@@ -216,14 +225,19 @@ internal class RegistrationStateMachine(
         // 001 <nick> :Welcome — server's canonical nick wins.
         nick = msg.params.firstOrNull() ?: nick
         phase = Phase.DONE
-        val actions = mutableListOf<Action>(
-            Action.SetNick(nick),
-            Action.Complete(
-                nick,
-                acked.toSet(),
-                isupport,
-                deferredCaps = postWelcomeCapReqs.toSet(),
-            ),
+        val actions = mutableListOf<Action>(Action.SetNick(nick))
+        if (config.sasl == SaslMechanism.NONE && !config.nickServPassword.isNullOrEmpty()) {
+            actions += Action.Send(nickServIdentifyLine(config))
+            val preferredUnavailable = isupport.normalize(nick) != isupport.normalize(config.nick)
+            if (preferredUnavailable && config.nickServRecoveryCommands.isNotEmpty() && claimNickRecovery()) {
+                actions += nickServRecoveryLines(config).map(Action::Send)
+            }
+        }
+        actions += Action.Complete(
+            nick,
+            acked.toSet(),
+            isupport,
+            deferredCaps = postWelcomeCapReqs.toSet(),
         )
         val fallbackAwayLine = initialAwayLine()
         if (fallbackAwayLine != null && (!preAwayAttempted || preAwayRejected)) {
@@ -369,3 +383,35 @@ internal class RegistrationStateMachine(
         const val FALLBACK_FEATURE_CAP_DELAY_MS = 1_000L
     }
 }
+
+private val NICKSERV_COMMAND = Regex("[A-Za-z][A-Za-z0-9-]*")
+
+internal fun nickServIdentifyLine(config: IrcClientConfig): String {
+    val password = config.validNickServPassword()
+    val body = when (config.nickServIdentifySyntax) {
+        NickServIdentifySyntax.NICK_PASSWORD -> "IDENTIFY ${config.nick} $password"
+        NickServIdentifySyntax.PASSWORD_NICK -> "IDENTIFY $password ${config.nick}"
+    }
+    return nickServMessage(body)
+}
+
+/** Recovery service commands followed by the explicit preferred-nick request. */
+internal fun nickServRecoveryLines(config: IrcClientConfig): List<String> {
+    if (config.nickServRecoveryCommands.isEmpty()) return emptyList()
+    val password = config.validNickServPassword()
+    return config.nickServRecoveryCommands.map { command ->
+        require(NICKSERV_COMMAND.matches(command)) { "invalid NickServ recovery command" }
+        nickServMessage("${command.uppercase()} ${config.nick} $password")
+    } + IrcMessage(command = "NICK", params = listOf(config.nick)).serialize()
+}
+
+private fun IrcClientConfig.validNickServPassword(): String {
+    val password = requireNotNull(nickServPassword) { "missing NickServ password" }
+    require(password.isNotEmpty() && password.none(Char::isWhitespace)) {
+        "invalid NickServ password"
+    }
+    return password
+}
+
+private fun nickServMessage(body: String): String =
+    IrcMessage(command = "PRIVMSG", params = listOf("NickServ", body)).serialize()

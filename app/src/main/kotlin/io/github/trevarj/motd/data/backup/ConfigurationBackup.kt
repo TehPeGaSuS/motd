@@ -558,6 +558,11 @@ private data class PortableNetwork(
     val hadSaslPassword: Boolean = false,
     val serverPassword: String? = null,
     val hadServerPassword: Boolean = false,
+    val nickServPassword: String? = null,
+    val hadNickServPassword: Boolean = false,
+    val nickServIdentifySyntax: String? = null,
+    val nickServRecoveryEnabled: Boolean = false,
+    val nickServRecoverySequence: String? = null,
     val initialAwayMessage: String? = null,
     val hadClientCertificate: Boolean = false,
     val autoConnect: Boolean,
@@ -609,6 +614,11 @@ private fun NetworkEntity.toPortable(
     hadSaslPassword = !saslPassword.isNullOrBlank(),
     serverPassword = serverPassword.takeIf { includeSecrets },
     hadServerPassword = !serverPassword.isNullOrBlank(),
+    nickServPassword = nickServPassword.takeIf { includeSecrets },
+    hadNickServPassword = !nickServPassword.isNullOrBlank(),
+    nickServIdentifySyntax = nickServIdentifySyntax,
+    nickServRecoveryEnabled = nickServRecoveryEnabled,
+    nickServRecoverySequence = nickServRecoverySequence,
     initialAwayMessage = initialAwayMessage,
     hadClientCertificate = !clientCertAlias.isNullOrBlank(),
     autoConnect = restoreAutoConnect.takeIf { pendingCredentialRequirements != null } ?: autoConnect,
@@ -629,10 +639,13 @@ private fun PortableNetwork.toEntity(
 ): NetworkEntity {
     val retainedSasl = if (!includeSecrets && saslPassword == null) local?.saslPassword else saslPassword
     val retainedServerPassword = if (!includeSecrets && serverPassword == null) local?.serverPassword else serverPassword
+    val retainedNickServPassword =
+        if (!includeSecrets && nickServPassword == null) local?.nickServPassword else nickServPassword
     val retainedObfsLink = if (!includeSecrets && obfsLink == null) local?.obfsLink else obfsLink
     val requirements = missingRequirements(
         localSaslPassword = retainedSasl,
         localServerPassword = retainedServerPassword,
+        localNickServPassword = retainedNickServPassword,
         localObfsLink = retainedObfsLink,
     )
     return NetworkEntity(
@@ -651,6 +664,10 @@ private fun PortableNetwork.toEntity(
         saslUser = saslUser,
         saslPassword = retainedSasl,
         serverPassword = retainedServerPassword,
+        nickServPassword = retainedNickServPassword,
+        nickServIdentifySyntax = nickServIdentifySyntax,
+        nickServRecoveryEnabled = nickServRecoveryEnabled,
+        nickServRecoverySequence = nickServRecoverySequence,
         initialAwayMessage = initialAwayMessage,
         clientCertAlias = null,
         autoConnect = autoConnect && requirements.isEmpty(),
@@ -668,22 +685,28 @@ private fun PortableNetwork.toEntity(
 private fun PortableNetwork.retainsAnyLocalSecret(local: NetworkEntity): Boolean =
     (hadSaslPassword && saslPassword == null && !local.saslPassword.isNullOrBlank()) ||
         (hadServerPassword && serverPassword == null && !local.serverPassword.isNullOrBlank()) ||
+        (hadNickServPassword && nickServPassword == null && !local.nickServPassword.isNullOrBlank()) ||
         (hadObfsLink && obfsLink == null && !local.obfsLink.isNullOrBlank())
 
 private fun PortableNetwork.missingCredentials(local: NetworkEntity?): Boolean =
     missingRequirements(
         localSaslPassword = local?.saslPassword,
         localServerPassword = local?.serverPassword,
+        localNickServPassword = local?.nickServPassword,
         localObfsLink = local?.obfsLink,
     ).isNotEmpty()
 
 private fun PortableNetwork.missingRequirements(
     localSaslPassword: String?,
     localServerPassword: String?,
+    localNickServPassword: String?,
     localObfsLink: String?,
 ): List<String> = buildList {
     if (hadSaslPassword && saslPassword.isNullOrBlank() && localSaslPassword.isNullOrBlank()) add("saslPassword")
     if (hadServerPassword && serverPassword.isNullOrBlank() && localServerPassword.isNullOrBlank()) add("serverPassword")
+    if (hadNickServPassword && nickServPassword.isNullOrBlank() && localNickServPassword.isNullOrBlank()) {
+        add("nickServPassword")
+    }
     if (hadObfsLink && obfsLink.isNullOrBlank() && localObfsLink.isNullOrBlank()) add("obfsLink")
     if (hadClientCertificate) add("clientCertificate")
 }

@@ -71,6 +71,13 @@ data class NetworkEntity(
     val saslUser: String? = null, val saslPassword: String? = null,
     /** Optional IRC PASS value. Kept separate because servers may require PASS with or without SASL. */
     val serverPassword: String? = null,
+    /** Optional NickServ fallback for direct connections without SASL. */
+    val nickServPassword: String? = null,
+    /** Null is the default nickname-password syntax. */
+    val nickServIdentifySyntax: String? = null,
+    @ColumnInfo(defaultValue = "0") val nickServRecoveryEnabled: Boolean = false,
+    /** Null is the default one-command `REGAIN` sequence. */
+    val nickServRecoverySequence: String? = null,
     val initialAwayMessage: String? = null,
     val clientCertAlias: String? = null,
     val autoConnect: Boolean = true,
@@ -97,7 +104,7 @@ data class NetworkEntity(
     /** Desired auto-connect value restored once [pendingCredentialRequirements] has been repaired. */
     val restoreAutoConnect: Boolean = false,
 ) {
-    // Redact secrets (saslPassword, serverPassword, obfsLink) from logs; proxyHost/port are
+    // Redact secrets (saslPassword, serverPassword, nickServPassword, obfsLink) from logs; proxyHost/port are
     // non-sensitive so keep them out
     // too for brevity — the endpoint host:port is enough to identify the row.
     override fun toString() = "NetworkEntity(id=$id, name=$name, role=$role, host=$host:$port)"

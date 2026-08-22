@@ -34,7 +34,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 28,
+    version = 29,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -816,6 +816,18 @@ val MIGRATION_27_28 = object : Migration(27, 28) {
     }
 }
 
+/** v28 -> v29 adds optional NickServ fallback settings; existing networks remain disabled. */
+val MIGRATION_28_29 = object : Migration(28, 29) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE networks ADD COLUMN nickServPassword TEXT")
+        db.execSQL("ALTER TABLE networks ADD COLUMN nickServIdentifySyntax TEXT")
+        db.execSQL(
+            "ALTER TABLE networks ADD COLUMN nickServRecoveryEnabled INTEGER NOT NULL DEFAULT 0",
+        )
+        db.execSQL("ALTER TABLE networks ADD COLUMN nickServRecoverySequence TEXT")
+    }
+}
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -855,6 +867,7 @@ val ALL_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_25_26,
     MIGRATION_26_27,
     MIGRATION_27_28,
+    MIGRATION_28_29,
 )
 
 private fun legacyReactionNormalizedSender(column: String): String =

@@ -48,6 +48,7 @@ import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
+import io.github.trevarj.motd.irc.client.NickServIdentifySyntax
 import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
@@ -545,9 +546,100 @@ private fun AuthSection(auth: AuthForm, onAuthChange: (AuthForm) -> Unit) {
                     }
                 }
 
-                AuthMode.NONE -> Unit
+                AuthMode.NONE -> Column(
+                    modifier = Modifier.padding(top = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.onboarding_auth_nickserv_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    PasswordField(
+                        value = auth.nickServPassword,
+                        onValueChange = { onAuthChange(auth.copy(nickServPassword = it)) },
+                        label = stringResource(R.string.onboarding_auth_nickserv_password),
+                        supportingText = if (auth.nickServValid) null else
+                            stringResource(R.string.onboarding_auth_nickserv_invalid),
+                        isError = !auth.nickServValid,
+                    )
+                    if (auth.nickServPassword.isNotBlank()) {
+                        Text(
+                            stringResource(R.string.onboarding_auth_nickserv_syntax),
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Column(Modifier.selectableGroup()) {
+                            NickServSyntaxOption(
+                                NickServIdentifySyntax.NICK_PASSWORD,
+                                auth,
+                                stringResource(R.string.onboarding_auth_nickserv_nick_password),
+                                onAuthChange,
+                            )
+                            NickServSyntaxOption(
+                                NickServIdentifySyntax.PASSWORD_NICK,
+                                auth,
+                                stringResource(R.string.onboarding_auth_nickserv_password_nick),
+                                onAuthChange,
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                stringResource(R.string.onboarding_auth_nickserv_recovery),
+                                modifier = Modifier.weight(1f),
+                            )
+                            Switch(
+                                checked = auth.nickServRecoveryEnabled,
+                                onCheckedChange = {
+                                    onAuthChange(auth.copy(nickServRecoveryEnabled = it))
+                                },
+                            )
+                        }
+                        if (auth.nickServRecoveryEnabled) {
+                            OutlinedTextField(
+                                value = auth.nickServRecoverySequence,
+                                onValueChange = {
+                                    onAuthChange(auth.copy(nickServRecoverySequence = it))
+                                },
+                                label = { Text(stringResource(R.string.onboarding_auth_nickserv_sequence)) },
+                                supportingText = {
+                                    Text(stringResource(R.string.onboarding_auth_nickserv_sequence_desc))
+                                },
+                                isError = !auth.nickServValid,
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Characters,
+                                    autoCorrectEnabled = false,
+                                    imeAction = ImeAction.Done,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun NickServSyntaxOption(
+    syntax: NickServIdentifySyntax,
+    auth: AuthForm,
+    label: String,
+    onAuthChange: (AuthForm) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(
+            selected = syntax == auth.nickServIdentifySyntax,
+            onClick = { onAuthChange(auth.copy(nickServIdentifySyntax = syntax)) },
+        )
+        Text(label, modifier = Modifier.padding(start = 8.dp))
     }
 }
 
@@ -623,6 +715,17 @@ fun buildNetworkEntity(
         saslUser = auth.saslUser.trim().ifBlank { null },
         saslPassword = auth.saslPassword.ifBlank { null },
         serverPassword = auth.serverPassword.ifEmpty { null },
+        nickServPassword = auth.nickServPassword.takeIf {
+            !isSoju && auth.mode == AuthMode.NONE && it.isNotBlank()
+        },
+        nickServIdentifySyntax = auth.nickServIdentifySyntax.name.takeUnless {
+            it == NickServIdentifySyntax.NICK_PASSWORD.name
+        },
+        nickServRecoveryEnabled = !isSoju && auth.mode == AuthMode.NONE &&
+            auth.nickServPassword.isNotBlank() && auth.nickServRecoveryEnabled,
+        nickServRecoverySequence = auth.nickServRecoveryCommands
+            .joinToString(",")
+            .takeUnless { it == "REGAIN" },
         clientCertAlias = if (isSoju) null else auth.certAlias,
         wsUrl = wsUrl?.trim()?.ifBlank { null },
         // NONE stores null so a direct row stays clean; other modes store the mode + trimmed proxy.
@@ -652,4 +755,10 @@ fun NetworkEntity.toAuthForm(): AuthForm = AuthForm(
     saslPassword = saslPassword.orEmpty(),
     certAlias = clientCertAlias,
     serverPassword = serverPassword.orEmpty(),
+    nickServPassword = nickServPassword.orEmpty(),
+    nickServIdentifySyntax = nickServIdentifySyntax?.let {
+        runCatching { NickServIdentifySyntax.valueOf(it) }.getOrNull()
+    } ?: NickServIdentifySyntax.NICK_PASSWORD,
+    nickServRecoveryEnabled = nickServRecoveryEnabled,
+    nickServRecoverySequence = nickServRecoverySequence ?: "REGAIN",
 )

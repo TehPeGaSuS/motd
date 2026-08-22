@@ -51,6 +51,7 @@ class ConfigurationBackupRepositoryTest {
 
         assertFalse(raw.contains("sasl-secret"))
         assertFalse(raw.contains("server-secret"))
+        assertFalse(raw.contains("nickserv-secret"))
         assertFalse(raw.contains("vless://secret"))
 
         val targetDb = inMemoryDb()
@@ -64,9 +65,13 @@ class ConfigurationBackupRepositoryTest {
         val imported = targetDb.networkDao().allNow().single()
         assertNull(imported.saslPassword)
         assertNull(imported.serverPassword)
+        assertNull(imported.nickServPassword)
+        assertEquals("PASSWORD_NICK", imported.nickServIdentifySyntax)
+        assertTrue(imported.nickServRecoveryEnabled)
+        assertEquals("GHOST,REGAIN", imported.nickServRecoverySequence)
         assertNull(imported.obfsLink)
         assertEquals(
-            "saslPassword,serverPassword,obfsLink,clientCertificate",
+            "saslPassword,serverPassword,nickServPassword,obfsLink,clientCertificate",
             imported.pendingCredentialRequirements,
         )
         assertFalse(imported.autoConnect)
@@ -87,6 +92,7 @@ class ConfigurationBackupRepositoryTest {
 
         assertFalse(raw.contains("sasl-secret"))
         assertFalse(raw.contains("server-secret"))
+        assertFalse(raw.contains("nickserv-secret"))
         assertFalse(raw.contains("vless://secret"))
 
         val targetDb = inMemoryDb()
@@ -104,6 +110,10 @@ class ConfigurationBackupRepositoryTest {
         val imported = targetDb.networkDao().allNow().single()
         assertEquals("sasl-secret", imported.saslPassword)
         assertEquals("server-secret", imported.serverPassword)
+        assertEquals("nickserv-secret", imported.nickServPassword)
+        assertEquals("PASSWORD_NICK", imported.nickServIdentifySyntax)
+        assertTrue(imported.nickServRecoveryEnabled)
+        assertEquals("GHOST,REGAIN", imported.nickServRecoverySequence)
         assertEquals("vless://secret", imported.obfsLink)
         assertNull(imported.pendingCredentialRequirements)
         assertEquals(true, imported.autoConnect)
@@ -235,6 +245,10 @@ class ConfigurationBackupRepositoryTest {
         saslUser = "me",
         saslPassword = "sasl-secret",
         serverPassword = "server-secret",
+        nickServPassword = "nickserv-secret",
+        nickServIdentifySyntax = "PASSWORD_NICK",
+        nickServRecoveryEnabled = true,
+        nickServRecoverySequence = "GHOST,REGAIN",
         clientCertAlias = clientCertAlias,
         autoConnect = true,
         obfsMode = ObfsMode.EMBEDDED_REALITY,

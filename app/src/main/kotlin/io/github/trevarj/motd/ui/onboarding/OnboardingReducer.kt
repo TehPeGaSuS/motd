@@ -5,6 +5,7 @@ import io.github.trevarj.motd.bouncer.SojuLoginForm
 import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.HistorySyncDepth
+import io.github.trevarj.motd.irc.client.NickServIdentifySyntax
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.settings.addnetwork.applyNetworkPreset
@@ -82,13 +83,31 @@ data class AuthForm(
     val saslPassword: String = "",
     val certAlias: String? = null,
     val serverPassword: String = "",
+    val nickServPassword: String = "",
+    val nickServIdentifySyntax: NickServIdentifySyntax = NickServIdentifySyntax.NICK_PASSWORD,
+    val nickServRecoveryEnabled: Boolean = false,
+    val nickServRecoverySequence: String = "REGAIN",
 ) {
     val serverPasswordValid: Boolean
         get() = serverPassword.none { it == '\r' || it == '\n' } &&
             serverPassword.toByteArray(Charsets.UTF_8).size <= MAX_SERVER_PASSWORD_BYTES
 
+    val nickServRecoveryCommands: List<String>
+        get() = nickServRecoverySequence.split(',').map(String::trim)
+
+    val nickServValid: Boolean
+        get() {
+            if (mode != AuthMode.NONE) return true
+            if (nickServPassword.isBlank()) return true
+            if (nickServPassword.any(Char::isWhitespace) ||
+                nickServPassword.toByteArray(Charsets.UTF_8).size > MAX_NICKSERV_PASSWORD_BYTES
+            ) return false
+            return !nickServRecoveryEnabled ||
+                nickServRecoveryCommands.all { it.matches(NICKSERV_COMMAND) }
+        }
+
     val isValid: Boolean
-        get() = serverPasswordValid && when (mode) {
+        get() = serverPasswordValid && nickServValid && when (mode) {
             AuthMode.NONE -> true
             AuthMode.PLAIN -> saslUser.isNotBlank() && saslPassword.isNotBlank()
             AuthMode.EXTERNAL -> certAlias != null
@@ -97,6 +116,10 @@ data class AuthForm(
 
 /** Leaves room for `PASS :`, CRLF, and the IRC 512-byte non-tag message limit. */
 private const val MAX_SERVER_PASSWORD_BYTES = 504
+
+/** Leaves room for `PRIVMSG NickServ :IDENTIFY <nick> ` and IRC framing. */
+private const val MAX_NICKSERV_PASSWORD_BYTES = 400
+private val NICKSERV_COMMAND = Regex("[A-Za-z][A-Za-z0-9-]*")
 
 /** A bouncer network row on the CONNECT page (soju import list / add form results). */
 data class BouncerNetworkRow(

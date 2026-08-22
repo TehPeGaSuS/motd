@@ -3,6 +3,7 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
+import io.github.trevarj.motd.irc.client.NickServIdentifySyntax
 import io.github.trevarj.motd.irc.client.SaslMechanism
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -96,6 +97,40 @@ class BuildChildConfigTest {
     }
 
     @Test
+    fun `direct non-SASL network threads NickServ fallback into client config`() {
+        val direct = child().copy(
+            role = NetworkRole.DIRECT,
+            parentId = null,
+            bouncerNetId = null,
+            nickServPassword = "nick-secret",
+            nickServIdentifySyntax = NickServIdentifySyntax.PASSWORD_NICK.name,
+            nickServRecoveryEnabled = true,
+            nickServRecoverySequence = "GHOST, REGAIN",
+        )
+
+        val cfg = buildChildConfig(direct, root = null)
+
+        assertEquals("nick-secret", cfg.nickServPassword)
+        assertEquals(NickServIdentifySyntax.PASSWORD_NICK, cfg.nickServIdentifySyntax)
+        assertEquals(listOf("GHOST", "REGAIN"), cfg.nickServRecoveryCommands)
+    }
+
+    @Test
+    fun `bouncer child never inherits NickServ fallback`() {
+        val cfg = buildChildConfig(
+            child().copy(
+                nickServPassword = "upstream-secret",
+                nickServRecoveryEnabled = true,
+                nickServRecoverySequence = "REGAIN",
+            ),
+            root().copy(nickServPassword = "root-secret", nickServRecoveryEnabled = true),
+        )
+
+        assertNull(cfg.nickServPassword)
+        assertEquals(emptyList<String>(), cfg.nickServRecoveryCommands)
+    }
+
+    @Test
     fun `orphan child with unresolved root falls back to its own fields`() {
         // Defensive: reconcile excludes orphan children, but buildChildConfig must not crash.
         val cfg = buildChildConfig(child(), root = null)
@@ -171,6 +206,18 @@ class BuildChildConfigTest {
             assertNotEquals(baseline, networkFingerprint(child, changedRoot))
         }
         assertEquals(baseline, networkFingerprint(child, root))
+    }
+
+    @Test
+    fun `fingerprint changes with NickServ fallback settings`() {
+        val base = child().copy(role = NetworkRole.DIRECT, parentId = null)
+        val baseline = networkFingerprint(base)
+        listOf(
+            base.copy(nickServPassword = "secret"),
+            base.copy(nickServIdentifySyntax = NickServIdentifySyntax.PASSWORD_NICK.name),
+            base.copy(nickServRecoveryEnabled = true),
+            base.copy(nickServRecoverySequence = "GHOST,REGAIN"),
+        ).forEach { changed -> assertNotEquals(baseline, networkFingerprint(changed)) }
     }
 
     @Test

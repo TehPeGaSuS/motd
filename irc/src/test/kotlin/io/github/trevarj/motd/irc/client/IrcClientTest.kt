@@ -208,6 +208,92 @@ class IrcClientTest {
         }
 
     @Test
+    fun `live self nick change updates Ready and runs one recovery sequence`() =
+        runTest {
+            val ft = FakeTransport()
+            val client =
+                IrcClient(
+                    config().copy(
+                        nickServPassword = "nick-secret",
+                        nickServRecoveryCommands = listOf("REGAIN"),
+                    ),
+                    ft.factory(),
+                    clientScope(),
+                )
+            client.start()
+            runCurrent()
+            ft.feed(":srv CAP * LS :$fullLs")
+            runCurrent()
+            ft.feed(":srv CAP motd ACK :$fullLs")
+            runCurrent()
+            ft.feed(":srv 001 motd :Welcome")
+            runCurrent()
+
+            ft.feed(":motd!u@h NICK motd-away")
+            runCurrent()
+
+            assertEquals("motd-away", (client.state.value as IrcClientState.Ready).nick)
+            assertEquals(
+                listOf(
+                    "PRIVMSG NickServ :REGAIN motd nick-secret",
+                    "NICK motd",
+                ),
+                ft.sent.takeLast(2),
+            )
+
+            ft.feed(":motd-away!u@h NICK motd")
+            runCurrent()
+            assertEquals("motd", (client.state.value as IrcClientState.Ready).nick)
+
+            val recoveryWrites = ft.sent.count { it.contains("REGAIN") }
+            ft.feed(":motd!u@h NICK motd-away-again")
+            runCurrent()
+            assertEquals("motd-away-again", (client.state.value as IrcClientState.Ready).nick)
+            assertEquals(recoveryWrites, ft.sent.count { it.contains("REGAIN") })
+        }
+
+    @Test
+    fun `shared recovery guard suppresses recovery on automatic reconnect`() =
+        runTest {
+            val guard = NickRecoveryGuard()
+            val cfg =
+                config().copy(
+                    nickServPassword = "nick-secret",
+                    nickServRecoveryCommands = listOf("REGAIN"),
+                )
+            val firstTransport = FakeTransport()
+            val first = IrcClient(cfg, firstTransport.factory(), clientScope(), nickRecoveryGuard = guard)
+            first.start()
+            runCurrent()
+            firstTransport.feed(":srv CAP * LS :$fullLs")
+            runCurrent()
+            firstTransport.feed(":srv CAP motd ACK :$fullLs")
+            runCurrent()
+            firstTransport.feed(":srv 001 motd :Welcome")
+            firstTransport.feed(":motd!u@h NICK motd-away")
+            runCurrent()
+            assertTrue(firstTransport.sent.any { it.contains("REGAIN") })
+            first.stop()
+
+            val secondTransport = FakeTransport()
+            val second = IrcClient(cfg, secondTransport.factory(), clientScope(), nickRecoveryGuard = guard)
+            second.start()
+            runCurrent()
+            secondTransport.feed(":srv 433 * motd :Nickname is already in use")
+            secondTransport.feed(":srv CAP * LS :$fullLs")
+            runCurrent()
+            secondTransport.feed(":srv CAP motd_ ACK :$fullLs")
+            runCurrent()
+            secondTransport.feed(":srv 001 motd_ :Welcome")
+            runCurrent()
+
+            assertTrue(second.state.value is IrcClientState.Ready)
+            assertEquals("motd_", (second.state.value as IrcClientState.Ready).nick)
+            assertEquals(1, secondTransport.sent.count { it == "NICK motd" })
+            assertTrue(secondTransport.sent.none { it.contains("REGAIN") })
+        }
+
+    @Test
     fun `SASL 904 is fatal Failed`() =
         runTest {
             val ft = FakeTransport()

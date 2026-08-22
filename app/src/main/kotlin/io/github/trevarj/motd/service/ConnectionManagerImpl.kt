@@ -41,6 +41,8 @@ import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcClientConfig
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.NO_IMPLICIT_NAMES_ALIASES
+import io.github.trevarj.motd.irc.client.NickRecoveryGuard
+import io.github.trevarj.motd.irc.client.NickServIdentifySyntax
 import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.irc.client.canSendClientTag
 import io.github.trevarj.motd.irc.client.canSendReactionTags
@@ -1014,10 +1016,11 @@ class ConnectionManagerImpl @Inject constructor(
 
     private fun createActor(row: NetworkEntity, generation: Long): ConnectionLifecycleActor {
         val fp = fingerprint(row)
+        val nickRecoveryGuard = NickRecoveryGuard()
         return ConnectionActor(
             networkId = row.id,
             scope = scope,
-            connectionFactory = { buildConnection(row) },
+            connectionFactory = { buildConnection(row, nickRecoveryGuard) },
             onState = { id, state ->
                 diagnostics.record("connections", "state_changed") {
                     buildMap {
@@ -1445,7 +1448,10 @@ class ConnectionManagerImpl @Inject constructor(
         }
     }
 
-    private suspend fun buildConnection(row: NetworkEntity): IrcClientConnection {
+    private suspend fun buildConnection(
+        row: NetworkEntity,
+        nickRecoveryGuard: NickRecoveryGuard,
+    ): IrcClientConnection {
         // A BOUNCER_CHILD is a *bound connection to the bouncer*, not a direct socket to the
         // upstream network. Its own host/port/tls/SASL may carry the upstream server's details
         // (soju's BOUNCER NETWORK attrs report the upstream host), so connecting on them would
@@ -1491,7 +1497,10 @@ class ConnectionManagerImpl @Inject constructor(
                 }
             },
         )
-        return IrcClientConnection(IrcClient(config, factory, scope), proxyResolution.release)
+        return IrcClientConnection(
+            IrcClient(config, factory, scope, nickRecoveryGuard = nickRecoveryGuard),
+            proxyResolution.release,
+        )
     }
 
     /** On Ready: persist any STS policy, re-establish bouncer children, then run catch-up. */
@@ -2931,6 +2940,10 @@ internal fun buildChildConfig(row: NetworkEntity, root: NetworkEntity?): IrcClie
     } else {
         endpoint.saslUser
     }
+    val sasl = runCatching {
+        SaslMechanism.valueOf(endpoint.saslMechanism)
+    }.getOrDefault(SaslMechanism.NONE)
+    val useNickServ = row.role == NetworkRole.DIRECT && sasl == SaslMechanism.NONE
     return IrcClientConfig(
         host = endpoint.host,
         port = endpoint.port,
@@ -2939,11 +2952,20 @@ internal fun buildChildConfig(row: NetworkEntity, root: NetworkEntity?): IrcClie
         nick = row.nick,
         username = row.username,
         realname = row.realname,
-        sasl = runCatching { SaslMechanism.valueOf(endpoint.saslMechanism) }.getOrDefault(SaslMechanism.NONE),
+        sasl = sasl,
         saslUser = saslUser,
         saslPassword = endpoint.saslPassword,
         serverPassword = endpoint.serverPassword,
         initialAwayMessage = row.initialAwayMessage,
+        nickServPassword = row.nickServPassword.takeIf { useNickServ },
+        nickServIdentifySyntax = row.nickServIdentifySyntax?.let {
+            runCatching { NickServIdentifySyntax.valueOf(it) }.getOrNull()
+        } ?: NickServIdentifySyntax.NICK_PASSWORD,
+        nickServRecoveryCommands = if (useNickServ && row.nickServRecoveryEnabled) {
+            (row.nickServRecoverySequence ?: "REGAIN").split(',').map(String::trim)
+        } else {
+            emptyList()
+        },
         bouncerNetId = null,
         // WSS transport follows the physical endpoint: the bouncer's wsUrl for a bound child.
         wsUrl = endpoint.wsUrl,
@@ -3019,7 +3041,8 @@ internal fun networkFingerprint(row: NetworkEntity, root: NetworkEntity? = null)
     val endpoint = if (row.role == NetworkRole.BOUNCER_CHILD) root ?: row else row
     return "${endpoint.host}:${endpoint.port}:${endpoint.tls}:${row.nick}:${row.username}:${row.realname}:" +
         "${endpoint.saslMechanism}:${endpoint.saslUser}:${endpoint.saslPassword}:${endpoint.serverPassword}:" +
-        "${row.initialAwayMessage}:" +
+        "${row.nickServPassword}:${row.nickServIdentifySyntax}:${row.nickServRecoveryEnabled}:" +
+        "${row.nickServRecoverySequence}:${row.initialAwayMessage}:" +
         "${row.bouncerNetId}:" +
         "${endpoint.clientCertAlias}:${endpoint.wsUrl}:${endpoint.obfsMode}:${endpoint.proxyHost}:${endpoint.proxyPort}:${endpoint.obfsLink}"
 }
