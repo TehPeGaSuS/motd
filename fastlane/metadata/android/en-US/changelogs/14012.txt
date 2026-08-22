@@ -1,0 +1,3 @@
+- Added optional NickServ identification for direct networks, with configurable one-shot GHOST/REGAIN nick recovery.
+- JOIN commands now support channel keys and open joined channels immediately.
+- Command replies now appear inline and can expand for details.
