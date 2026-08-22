@@ -674,22 +674,21 @@ class ConnectionManagerImpl @Inject constructor(
             // prevent.
             startForegroundKeeper()
         }
-        foregroundHistoryCheckpoint()
+        historyCheckpoint()
     }
 
     /**
-     * The reconnect-then-verify pair every foreground entry runs, shared so the two entry points
-     * cannot drift apart.
+     * The reconnect-then-verify pair every foreground or device-wake checkpoint runs.
      *
-     * The order is the point: [verifyHistoryOnForeground] paints AwaitingConnection on every open
+     * The order is the point: [verifyHistoryAtCheckpoint] paints AwaitingConnection on every open
      * buffer of a network that is not Ready, and that optimistic badge is only honest while
      * something is actually driving the connection. [reconnectStale] is what wakes an actor parked
-     * in exponential backoff; without it in front, a warm entry could leave every buffer of a
+     * in exponential backoff; without it in front, a checkpoint could leave every buffer of a
      * backing-off network waiting on nothing but that backoff's own expiry.
      */
-    private suspend fun foregroundHistoryCheckpoint() {
+    private suspend fun historyCheckpoint() {
         reconnectStale()
-        verifyHistoryOnForeground()
+        verifyHistoryAtCheckpoint()
     }
 
     /** [startForegroundKeeper] precondition for a visibly-foreground process. */
@@ -707,7 +706,7 @@ class ConnectionManagerImpl @Inject constructor(
     // conversation the user just opened must not wait behind discovery.
     override suspend fun checkpointHistory(focusBufferId: Long?) {
         focusBufferId?.let(::reconcileFocusedBuffer)
-        foregroundHistoryCheckpoint()
+        historyCheckpoint()
     }
 
     /**
@@ -741,7 +740,7 @@ class ConnectionManagerImpl @Inject constructor(
      * time-based throttle was defending against is not silent at all: a server buffer that fills
      * while the process is frozen stalls the socket, the ping watchdog kills it, and the
      * reconnect's new client fails [shouldRunForegroundVerification]'s identity check, so its A1
-     * pass runs. [foregroundHistoryCheckpoint] runs `reconnectStale()` (and with it the registry's
+     * pass runs. [historyCheckpoint] runs `reconnectStale()` (and with it the registry's
      * liveness probe) in front of this, which is what turns a silently-dead socket into that
      * reconnect.
      *
@@ -749,7 +748,7 @@ class ConnectionManagerImpl @Inject constructor(
      * shows queued feedback immediately; the reconnect this method follows adopts those entries
      * when it finally runs a real pass.
      */
-    internal suspend fun verifyHistoryOnForeground() {
+    internal suspend fun verifyHistoryAtCheckpoint() {
         val snapshot = registry.snapshot.value
         if (!snapshot.started) return
         for ((networkId, state) in snapshot.states) {
@@ -828,13 +827,25 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     /**
-     * Doze entry is the UnifiedPush hand-off boundary. Doze exit intentionally leaves a completed
-     * hand-off suspended until motd foregrounds; reconnecting sockets behind another foreground
-     * app would defeat the battery-saving mode without improving delivery.
+     * Doze entry hands healthy UnifiedPush networks to push. When the device wakes, reconnect them
+     * in the background and run the normal history checkpoint; they stay open until the next Doze
+     * entry, subject to Android freezing this non-foreground process.
      */
     internal fun onDeviceIdleModeChanged(idle: Boolean) {
+        val wasIdle = deviceIdle
         deviceIdle = idle
-        if (idle && !appForeground) scope.launch { maybeStopForPush() }
+        if (idle && !appForeground) {
+            scope.launch { maybeStopForPush() }
+        } else if (wasIdle && !idle && !appForeground) {
+            scope.launch {
+                val mode = settings.settings.first().deliveryMode
+                if (shouldResumeSocketsAfterDozeExit(appForeground, wasIdle, deviceIdle, mode)) {
+                    pushSuspendedIds.clear()
+                    startAll()
+                    historyCheckpoint()
+                }
+            }
+        }
     }
 
     private suspend fun beginEmbeddedRealityBackgroundRetention(all: List<NetworkEntity>) {
@@ -2503,6 +2514,13 @@ internal fun shouldApplyDozePushHandoff(
     deviceIdle: Boolean,
     deliveryMode: DeliveryMode,
 ): Boolean = !appForeground && deviceIdle && deliveryMode == DeliveryMode.UNIFIED_PUSH
+
+internal fun shouldResumeSocketsAfterDozeExit(
+    appForeground: Boolean,
+    wasDeviceIdle: Boolean,
+    deviceIdle: Boolean,
+    deliveryMode: DeliveryMode,
+): Boolean = !appForeground && wasDeviceIdle && !deviceIdle && deliveryMode == DeliveryMode.UNIFIED_PUSH
 
 /**
  * Diagnostic fields for a Ready connection (`connections`/`state_changed`). The `caps` value is

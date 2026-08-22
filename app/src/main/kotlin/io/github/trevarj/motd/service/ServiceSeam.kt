@@ -171,8 +171,8 @@ interface ConnectionManager {
 
     /**
      * Re-drive the wanted set and revive any actor that died/parked in the background (Doze/network
-     * drop leaves it terminally Failed with a completed job). Canonical app-foreground reconnect,
-     * invoked from ProcessLifecycleOwner's onStart. Ready actors receive one watchdog-style
+     * drop leaves it terminally Failed with a completed job). Used by app-foreground and device-wake
+     * checkpoints. Ready actors receive one watchdog-style
      * liveness probe and are only restarted when the probe times out; healthy/connecting/retrying/
      * cert-parked actors otherwise remain untouched. Requests are conflated, so repeated lifecycle
      * callbacks cannot storm reconnects.

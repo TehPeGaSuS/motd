@@ -700,6 +700,15 @@ class ConnectionActorTest {
     }
 
     @Test
+    fun unifiedPushResumesSocketsOnlyOnABackgroundDozeExit() {
+        assertTrue(shouldResumeSocketsAfterDozeExit(false, true, false, DeliveryMode.UNIFIED_PUSH))
+        assertTrue(!shouldResumeSocketsAfterDozeExit(true, true, false, DeliveryMode.UNIFIED_PUSH))
+        assertTrue(!shouldResumeSocketsAfterDozeExit(false, false, false, DeliveryMode.UNIFIED_PUSH))
+        assertTrue(!shouldResumeSocketsAfterDozeExit(false, true, true, DeliveryMode.UNIFIED_PUSH))
+        assertTrue(!shouldResumeSocketsAfterDozeExit(false, true, false, DeliveryMode.PERSISTENT_SOCKET))
+    }
+
+    @Test
     fun persistentSocketArmsTheKeeperOnEveryForegroundWithAWantedNetwork() {
         // The gap this closes: PERSISTENT_SOCKET only ever armed the service from
         // MainActivity.onCreate, so a warm re-entry (notification tap via onNewIntent, or a return
