@@ -2436,7 +2436,12 @@ fun ChatContent(
                     enabled = composerEnabled,
                     onFieldPositioned = { flightAnchors.composerField = it },
                     onFieldTextPositioned = { flightAnchors.composerTextOrigin = it },
-                    reply = state.replyTo?.let { ComposerReply(it.sender, it.text) },
+                    // Keep the reply content mounted while its banner exits, but start that exit on
+                    // the send tap rather than after persistence clears the durable draft.
+                    reply = outgoingFlight?.let { flight ->
+                        flight.replyText?.let { ComposerReply(flight.replySender.orEmpty(), it) }
+                    } ?: state.replyTo?.let { ComposerReply(it.sender, it.text) },
+                    replyVisible = outgoingFlight?.replyText == null,
                     onCancelReply = { onSetReply(null) },
                     // SERVER buffers send raw commands; hint that in the placeholder.
                     // Held blank while a flight is airborne: the ghost is born over the input box

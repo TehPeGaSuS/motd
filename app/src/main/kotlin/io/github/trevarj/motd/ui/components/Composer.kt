@@ -306,6 +306,7 @@ fun Composer(
     enabled: Boolean,
     modifier: Modifier = Modifier,
     reply: ComposerReply? = null,
+    replyVisible: Boolean = reply != null,
     onCancelReply: () -> Unit = {},
     placeholder: String = stringResource(R.string.chat_composer_placeholder),
     showEmojiButton: Boolean = true,
@@ -496,7 +497,7 @@ fun Composer(
                 HorizontalDivider(thickness = Dp.Hairline, color = MaterialTheme.colorScheme.outlineVariant)
 
                 AnimatedVisibility(
-                    visible = reply != null,
+                    visible = replyVisible && reply != null,
                     enter = expandVertically(animationSpec = MotdMotion.contentSize) + fadeIn(MotdMotion.fadeIn),
                     exit = shrinkVertically(animationSpec = MotdMotion.contentSize) + fadeOut(MotdMotion.microFadeOut),
                 ) {

@@ -19,6 +19,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
+import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -166,6 +167,33 @@ class ComposerUiTest {
         compose.runOnIdle {
             assertEquals("alice", picked)
         }
+    }
+
+    @Test
+    fun replyBanner_keepsItsContentWhileSendExitRuns() {
+        val replyVisible = mutableStateOf(true)
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = TextFieldValue("reply"),
+                    onValueChange = {},
+                    onSend = {},
+                    enabled = true,
+                    reply = ComposerReply("alice", "original"),
+                    replyVisible = replyVisible.value,
+                )
+            }
+        }
+        compose.onNodeWithText("original").assertIsDisplayed()
+
+        compose.runOnUiThread { replyVisible.value = false }
+        compose.mainClock.advanceTimeByFrame()
+
+        // Send starts the exit immediately, while the old quote remains mounted for the fade.
+        compose.onNodeWithText("original").assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.onNodeWithText("original").assertDoesNotExist()
     }
 
     @Test
