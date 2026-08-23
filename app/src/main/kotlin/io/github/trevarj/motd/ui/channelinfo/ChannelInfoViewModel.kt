@@ -3,6 +3,10 @@ package io.github.trevarj.motd.ui.channelinfo
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.attachment.sojuFileHostAdvertised
+import io.github.trevarj.motd.avatar.AvatarController
+import io.github.trevarj.motd.avatar.ConversationAvatarOutcome
+import io.github.trevarj.motd.avatar.NoopAvatarController
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
@@ -62,6 +66,7 @@ data class ChannelInfoUiState(
     // while disconnected. Surfaced subtly in Channel Info rather than the chat header.
     val lagMs: Long? = null,
     val connected: Boolean = false,
+    val sojuFileHostAvailable: Boolean = false,
     /**
      * ISUPPORT-derived mode vocabulary for this network, null until the connection is Ready. It
      * says which modes the server *advertises*, never which modes are currently set: nothing in
@@ -126,6 +131,7 @@ class ChannelInfoViewModel @Inject constructor(
     private val userDao: UserDao,
     private val networkIdentityDao: NetworkIdentityDao,
     private val networkIgnoreRepository: NetworkIgnoreRepository = NoopNetworkIgnoreRepository,
+    private val avatarController: AvatarController = NoopAvatarController,
 ) : ViewModel() {
 
     private val bufferIdFlow = MutableStateFlow<Long?>(null)
@@ -255,6 +261,7 @@ class ChannelInfoViewModel @Inject constructor(
                 searchResults = searchResults,
                 lagMs = runtime.lagMs,
                 connected = runtime.connected,
+                sojuFileHostAvailable = runtime.isupport?.let(::sojuFileHostAdvertised) == true,
                 modeCatalog = modeCatalog,
             )
         }.stateIn(
@@ -282,6 +289,24 @@ class ChannelInfoViewModel @Inject constructor(
         state.value.buffer
             ?.let { bufferRepository.setMuted(it.id, muted) }
             ?.let { _muteBacklogSuppressions.emit(it) }
+    }
+
+    private val _avatarEvents = MutableSharedFlow<ConversationAvatarOutcome>(extraBufferCapacity = 1)
+    val avatarEvents: SharedFlow<ConversationAvatarOutcome> = _avatarEvents.asSharedFlow()
+
+    fun importAvatar(uri: android.net.Uri) = avatarAction { avatarController.importConversationAvatar(it, uri) }
+
+    fun setAvatarUrl(url: String) = avatarAction { avatarController.setConversationAvatar(it, url) }
+
+    fun resetAvatar() = avatarAction(avatarController::resetConversationAvatar)
+
+    fun shareAvatar() = avatarAction(avatarController::shareConversationAvatar)
+
+    fun clearSharedAvatar() = avatarAction(avatarController::clearSharedConversationAvatar)
+
+    private fun avatarAction(action: suspend (Long) -> ConversationAvatarOutcome) = viewModelScope.launch {
+        val roomId = state.value.buffer?.id ?: return@launch
+        _avatarEvents.emit(action(roomId))
     }
 
     /** Put back the mute backlog floor an unmute advanced past (snackbar undo). */

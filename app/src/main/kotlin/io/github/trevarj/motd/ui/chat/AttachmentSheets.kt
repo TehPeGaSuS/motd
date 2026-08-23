@@ -135,6 +135,7 @@ fun AttachmentSheets(
     // Inbound share hand-off: skip source selection and confirm this file directly.
     sharedFile: PendingShare.File? = null,
     directFileTransferAvailable: Boolean = false,
+    imageOnly: Boolean = false,
     onDismiss: () -> Unit,
     onInsertUrl: (String) -> Unit,
     onReplaceDraft: (String) -> Unit,
@@ -215,7 +216,8 @@ fun AttachmentSheets(
         AttachmentFlow.Idle -> Unit
         AttachmentFlow.Sources -> SourceSheet(
             currentDraft = currentDraft,
-            recent = recent,
+            recent = if (imageOnly) recent.filter { it.mimeType?.startsWith("image/") == true } else recent,
+            imageOnly = imageOnly,
             onDismiss = ::closeSourceSheet,
             onPhoto = {
                 closeSourceSheet()
@@ -223,7 +225,7 @@ fun AttachmentSheets(
             },
             onFile = {
                 closeSourceSheet()
-                filePicker.launch(arrayOf("*/*"))
+                filePicker.launch(arrayOf(if (imageOnly) "image/*" else "*/*"))
             },
             directFileTransferAvailable = directFileTransferAvailable,
             onDirectFile = {
@@ -337,6 +339,7 @@ fun AttachmentSheets(
 private fun SourceSheet(
     currentDraft: String,
     recent: List<UploadRecord>,
+    imageOnly: Boolean,
     onDismiss: () -> Unit,
     onPhoto: () -> Unit,
     onFile: () -> Unit,
@@ -356,9 +359,16 @@ private fun SourceSheet(
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SourceCard(Icons.Outlined.Image, stringResource(R.string.upload_photo), stringResource(R.string.upload_photo_desc), true, onPhoto, Modifier.weight(1f))
-                SourceCard(Icons.Outlined.AttachFile, stringResource(R.string.upload_file), stringResource(R.string.upload_file_desc), true, onFile, Modifier.weight(1f))
+                SourceCard(
+                    Icons.Outlined.AttachFile,
+                    stringResource(if (imageOnly) R.string.avatar_image_file else R.string.upload_file),
+                    stringResource(if (imageOnly) R.string.avatar_image_file_desc else R.string.upload_file_desc),
+                    true,
+                    onFile,
+                    Modifier.weight(1f),
+                )
             }
-            if (directFileTransferAvailable) {
+            if (directFileTransferAvailable && !imageOnly) {
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     SourceCard(
@@ -372,10 +382,12 @@ private fun SourceSheet(
                     Spacer(Modifier.weight(1f))
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                SourceCard(Icons.Outlined.Description, stringResource(R.string.upload_draft), stringResource(R.string.upload_draft_desc), currentDraft.isNotBlank(), onCurrentDraft, Modifier.weight(1f))
-                SourceCard(Icons.Outlined.Edit, stringResource(R.string.upload_text), stringResource(R.string.upload_text_desc), true, onNewText, Modifier.weight(1f))
+            if (!imageOnly) {
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SourceCard(Icons.Outlined.Description, stringResource(R.string.upload_draft), stringResource(R.string.upload_draft_desc), currentDraft.isNotBlank(), onCurrentDraft, Modifier.weight(1f))
+                    SourceCard(Icons.Outlined.Edit, stringResource(R.string.upload_text), stringResource(R.string.upload_text_desc), true, onNewText, Modifier.weight(1f))
+                }
             }
             if (recent.isNotEmpty()) {
                 Spacer(Modifier.height(24.dp))

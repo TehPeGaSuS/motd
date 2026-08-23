@@ -256,6 +256,7 @@ fun ChatListRowItem(
                 name = row.displayName,
                 isChannel = row.type == BufferType.CHANNEL,
                 networkId = row.networkId,
+                conversationModel = row.avatarOverrideModel,
                 presence = queryPresence,
                 size = spacing.chatListAvatar,
             )
@@ -465,6 +466,7 @@ private fun PresenceAvatar(
     name: String,
     isChannel: Boolean,
     networkId: Long,
+    conversationModel: String?,
     presence: PresenceState?,
     size: Dp,
 ) {
@@ -473,6 +475,7 @@ private fun PresenceAvatar(
             name = name,
             isChannel = isChannel,
             networkId = networkId,
+            conversationModel = conversationModel,
             size = size,
             modifier = Modifier.align(Alignment.Center),
         )

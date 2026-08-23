@@ -757,10 +757,55 @@ class BufferStoreCanonicalTest {
     }
 
     @Test
-    fun mergeTransfersLoserLayoutOverrideOnlyWhenWinnerInherits() = runTest {
-        val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
-        val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
-        db.bufferDao().update(loser.copy(layoutDensityOverride = LayoutDensity.COMPACT))
+    fun mergeTransfersAvatarOnlyWhenCanonicalWinnerHasNone() =
+        runTest {
+            val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
+            val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
+            db.bufferDao().setAvatarOverride(loser.id, "https://example.com/loser.png")
+
+            val transferred = store.mergeRooms(winner.id, loser.id)
+            assertEquals("https://example.com/loser.png", transferred.avatarOverrideModel)
+
+            val third = store.getOrCreate(networkId, "third", "Third", BufferType.QUERY)
+            db.bufferDao().setAvatarOverride(third.id, "https://example.com/third.png")
+            val conflicted = store.mergeRooms(transferred.id, third.id)
+            assertEquals("https://example.com/loser.png", conflicted.avatarOverrideModel)
+        }
+
+    @Test
+    fun avatarWriteThroughRedirectAndDismissedQueryRetention() =
+        runTest {
+            val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
+            val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
+            store.mergeRooms(winner.id, loser.id)
+
+            assertEquals(1, db.bufferDao().setAvatarOverride(loser.id, "file:///owned/avatar.image"))
+            assertEquals("file:///owned/avatar.image", db.bufferDao().rawById(winner.id)?.avatarOverrideModel)
+            assertEquals(null, db.bufferDao().rawById(loser.id)?.avatarOverrideModel)
+
+            db.bufferDao().deleteBuffer(winner.id)
+            assertTrue(db.bufferDao().rawById(winner.id)!!.dismissed)
+            assertEquals("file:///owned/avatar.image", db.bufferDao().rawById(winner.id)?.avatarOverrideModel)
+        }
+
+    @Test
+    fun serverRoomsRejectAvatarOverridesAndDeletedChannelsDropTheirReference() =
+        runTest {
+            val server = store.getOrCreate(networkId, "server", "server", BufferType.SERVER)
+            assertEquals(0, db.bufferDao().setAvatarOverride(server.id, "https://example.com/no.png"))
+
+            val channel = store.getOrCreate(networkId, "#room", "#room", BufferType.CHANNEL)
+            db.bufferDao().setAvatarOverride(channel.id, "file:///owned/channel.image")
+            db.bufferDao().deleteBuffer(channel.id)
+            assertEquals(null, db.bufferDao().rawById(channel.id))
+        }
+
+    @Test
+    fun mergeTransfersLoserLayoutOverrideOnlyWhenWinnerInherits() =
+        runTest {
+            val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
+            val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
+            db.bufferDao().update(loser.copy(layoutDensityOverride = LayoutDensity.COMPACT))
 
         val merged = store.mergeRooms(winner.id, loser.id)
 

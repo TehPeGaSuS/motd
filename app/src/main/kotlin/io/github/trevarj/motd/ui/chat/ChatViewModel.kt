@@ -15,6 +15,9 @@ import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.audio.CachedAudioMetadata
 import io.github.trevarj.motd.audio.DirectMediaPolicy
+import io.github.trevarj.motd.avatar.AvatarController
+import io.github.trevarj.motd.avatar.ConversationAvatarOutcome
+import io.github.trevarj.motd.avatar.NoopAvatarController
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ComposerDraftEntity
@@ -81,9 +84,12 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -249,6 +255,7 @@ class ChatViewModel
         // (tests) free of a live history transport, exactly as networkIgnoreRepository does below.
         private val gapFiller: HistoryGapFiller = NoopHistoryGapFiller,
         private val networkIgnoreRepository: NetworkIgnoreRepository = NoopNetworkIgnoreRepository,
+        private val avatarController: AvatarController = NoopAvatarController,
         // The app's own decision journal, handed to the screen so the timeline's Paging generations can
         // be journalled alongside the history-fetch decisions that cause them. Public because the
         // consumer is the composable, not this class; Noop default for hand-built call sites, as
@@ -1771,6 +1778,20 @@ class ChatViewModel
             nickDetailsJob = null
             _nickSheet.value = null
         }
+
+        private val _avatarEvents = MutableSharedFlow<ConversationAvatarOutcome>(extraBufferCapacity = 1)
+        val avatarEvents: SharedFlow<ConversationAvatarOutcome> = _avatarEvents.asSharedFlow()
+
+        fun importAvatar(uri: android.net.Uri) = avatarAction { avatarController.importConversationAvatar(it, uri) }
+
+        fun setAvatarUrl(url: String) = avatarAction { avatarController.setConversationAvatar(it, url) }
+
+        fun resetAvatar() = avatarAction(avatarController::resetConversationAvatar)
+
+        private fun avatarAction(action: suspend (Long) -> ConversationAvatarOutcome) =
+            viewModelScope.launch {
+                _avatarEvents.emit(action(operationalBufferId.value))
+            }
 
         // --- moderation executors, CHANNEL buffers only ---
 

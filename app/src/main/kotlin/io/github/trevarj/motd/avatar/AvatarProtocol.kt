@@ -52,10 +52,26 @@ sealed interface AvatarMetadataEvent {
 fun subscribeAvatarMessage() = IrcMessage(command = "METADATA", params = listOf("*", "SUB", AVATAR_KEY))
 fun unsubscribeAvatarMessage() = IrcMessage(command = "METADATA", params = listOf("*", "UNSUB", AVATAR_KEY))
 fun syncAvatarMessage(target: String) = IrcMessage(command = "METADATA", params = listOf(target, "SYNC"))
-fun publishAvatarMessage(url: String?) = IrcMessage(
+
+fun publishAvatarMessage(url: String?) = metadataAvatarMessage("*", url)
+
+fun channelAvatarMessage(
+    target: String,
+    url: String?,
+) = metadataAvatarMessage(target, url)
+
+private fun metadataAvatarMessage(
+    target: String,
+    url: String?,
+) = IrcMessage(
     command = "METADATA",
-    params = if (url == null) listOf("*", "SET", AVATAR_KEY) else listOf("*", "SET", AVATAR_KEY, url),
+    params = if (url == null) listOf(target, "SET", AVATAR_KEY) else listOf(target, "SET", AVATAR_KEY, url),
 )
+
+fun avatarMetadataRejected(response: List<IrcMessage>): Boolean =
+    response.any { message ->
+        message.command == "FAIL" || message.command == "ERROR" || message.command.toIntOrNull() in 764..772
+    }
 
 fun parseAvatarMetadata(message: IrcMessage): AvatarMetadataEvent? {
     return when (message.command) {

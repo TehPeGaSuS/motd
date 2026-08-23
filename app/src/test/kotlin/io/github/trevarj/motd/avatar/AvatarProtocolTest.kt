@@ -16,6 +16,11 @@ class AvatarProtocolTest {
             publishAvatarMessage("https://example.com/a/{size}.png").serialize(),
         )
         assertEquals("METADATA * SET avatar", publishAvatarMessage(null).serialize())
+        assertEquals(
+            "METADATA #chat SET avatar https://example.com/channel.png",
+            channelAvatarMessage("#chat", "https://example.com/channel.png").serialize(),
+        )
+        assertEquals("METADATA #chat SET avatar", channelAvatarMessage("#chat", null).serialize())
     }
 
     @Test fun parses_notification_snapshot_removal_and_delayed_sync() {
@@ -78,6 +83,12 @@ class AvatarProtocolTest {
         assertTrue(supportsAvatarMutation(capable))
         assertTrue(supportsAvatarPublishing(capable, "https://example.com/avatar.png"))
         assertFalse(supportsAvatarPublishing(capable, "https://example.com/${"x".repeat(128)}"))
+    }
+
+    @Test fun detects_labeled_metadata_rejections() {
+        assertTrue(avatarMetadataRejected(listOf(IrcMessage(command = "769", params = listOf("me")))))
+        assertTrue(avatarMetadataRejected(listOf(IrcMessage(command = "FAIL", params = listOf("METADATA")))))
+        assertFalse(avatarMetadataRejected(listOf(IrcMessage(command = "761", params = listOf("me")))))
     }
 
     @Test fun absent_limits_allow_and_zero_or_malformed_limits_deny() {

@@ -150,9 +150,11 @@ class AllMigrationsTest {
         legacyHelper!!.close()
         legacyHelper = null
 
-        val migrated = Room.databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-            .addMigrations(MIGRATION_28_29)
-            .build()
+        val migrated =
+            Room
+                .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
+                .addMigrations(MIGRATION_28_29, MIGRATION_29_30)
+                .build()
         try {
             migrated.openHelper.writableDatabase.query(
                 """SELECT nickServPassword, nickServIdentifySyntax, nickServRecoveryEnabled,
@@ -163,6 +165,80 @@ class AllMigrationsTest {
                 assertNull(cursor.getString(1))
                 assertEquals(0, cursor.getInt(2))
                 assertNull(cursor.getString(3))
+            }
+        } finally {
+            migrated.close()
+        }
+    }
+
+    @Test
+    fun migrateVersion29To30_preservesBuffersAndMessagesAndAddsWritableAvatarOverride() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.deleteDatabase(DB_NAME)
+        legacyHelper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(29) {
+                            override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion(db, 29)
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
+        legacyHelper!!.writableDatabase.apply {
+            execSQL(
+                """INSERT INTO networks
+                    (id, name, role, host, port, tls, nick, username, realname, saslMechanism,
+                     autoConnect, ordering, restoreAutoConnect, nickServRecoveryEnabled)
+                    VALUES (1, 'libera', 'DIRECT', 'irc.libera.chat', 6697, 1, 'me', 'me', 'Me',
+                            'NONE', 1, 0, 0, 0)""",
+            )
+            execSQL(
+                """INSERT INTO buffers
+                    (id, networkId, name, displayName, type, joined, membershipCycle, pinned, muted,
+                     archived, ordering, historyComplete, dismissed)
+                    VALUES (1, 1, '#motd', '#motd', 'CHANNEL', 1, 0, 0, 0, 0, 0, 0, 0)""",
+            )
+            execSQL(
+                """INSERT INTO messages
+                    (id, bufferId, serverTime, sender, normalizedActor, kind, text, isSelf,
+                     hasMention, failed, dedupKey, serverTimeAuthoritative, timelineOrder,
+                     timelineOrderConfirmed, timeProvenance, notificationHandled,
+                     notificationClaimed, soundHandled)
+                    VALUES (1, 1, 1000, 'alice', 'alice', 'PRIVMSG', 'hello', 0, 0, 0, 'm1',
+                            1, 1, 0, 'SERVER_TAG', 0, 0, 0)""",
+            )
+        }
+        legacyHelper!!.close()
+        legacyHelper = null
+
+        val migrated =
+            Room
+                .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
+                .addMigrations(MIGRATION_29_30)
+                .build()
+        try {
+            val sqlite = migrated.openHelper.writableDatabase
+            sqlite.query("SELECT avatarOverrideModel FROM buffers WHERE id = 1").use { cursor ->
+                check(cursor.moveToFirst())
+                assertNull(cursor.getString(0))
+            }
+            sqlite.query("SELECT COUNT(*) FROM messages WHERE bufferId = 1").use { cursor ->
+                check(cursor.moveToFirst())
+                assertEquals(1, cursor.getInt(0))
+            }
+            sqlite.execSQL("UPDATE buffers SET avatarOverrideModel = 'https://example.com/a.png' WHERE id = 1")
+            sqlite.execSQL("UPDATE buffers SET avatarOverrideModel = 'file:///owned/a.image' WHERE id = 1")
+            sqlite.query("SELECT avatarOverrideModel FROM buffers WHERE id = 1").use { cursor ->
+                check(cursor.moveToFirst())
+                assertEquals("file:///owned/a.image", cursor.getString(0))
             }
         } finally {
             migrated.close()
@@ -229,10 +305,10 @@ class AllMigrationsTest {
         const val DB_NAME = "all-migrations-test.db"
 
         /**
-         * Mirrors `version = 29` on `@Database`. Room's annotation is CLASS-retained, so the
+         * Mirrors `version = 30` on `@Database`. Room's annotation is CLASS-retained, so the
          * declared version cannot be read reflectively; the exported schema JSON is the runtime
          * witness for it instead.
          */
-        const val DECLARED_VERSION = 29
+        const val DECLARED_VERSION = 30
     }
 }

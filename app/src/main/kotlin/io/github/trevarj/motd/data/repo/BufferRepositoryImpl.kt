@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.data.repo
 
+import io.github.trevarj.motd.avatar.LocalAvatarStore
+import io.github.trevarj.motd.avatar.validateAvatarUrl
 import io.github.trevarj.motd.data.db.BufferDao
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.ChatListRow
@@ -29,6 +31,7 @@ class BufferRepositoryImpl @Inject constructor(
     private val messageDao: MessageDao,
     private val settings: SettingsRepository,
     private val visibilityReader: MessageVisibilityReader,
+    private val localAvatarStore: LocalAvatarStore,
 ) : BufferRepository {
     override fun observeChatList(): Flow<List<ChatListRow>> = combine(
         bufferDao.observeChatList(),
@@ -85,6 +88,18 @@ class BufferRepositoryImpl @Inject constructor(
     override suspend fun setPresenceModeOverride(id: Long, mode: PresenceMode?): Boolean =
         bufferDao.setPresenceModeOverride(id, mode) == 1
 
-    // QUERY rows become hidden cursor shells; other types are physically removed with their graph.
-    override suspend fun deleteBuffer(id: Long) = bufferDao.deleteBuffer(bufferDao.canonicalId(id) ?: id)
+    override suspend fun setAvatarOverride(id: Long, model: String?): Boolean {
+        if (model != null && validateAvatarUrl(model) == null && !localAvatarStore.owns(model)) return false
+        return bufferDao.setAvatarOverride(id, model) == 1
+    }
+
+    // QUERY rows become hidden cursor shells and retain their avatar; deleted CHANNEL files do not.
+    override suspend fun deleteBuffer(id: Long) {
+        val canonicalId = bufferDao.canonicalId(id) ?: id
+        val room = bufferDao.rawById(canonicalId)
+        bufferDao.deleteBuffer(canonicalId)
+        if (room?.type == io.github.trevarj.motd.data.db.BufferType.CHANNEL) {
+            localAvatarStore.delete(room.avatarOverrideModel)
+        }
+    }
 }

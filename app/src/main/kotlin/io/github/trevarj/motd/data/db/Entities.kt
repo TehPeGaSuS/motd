@@ -197,6 +197,8 @@ data class RoomEntity(
     val layoutDensityOverride: LayoutDensity? = null,
     /** Null inherits the global presence-event preference for this durable conversation. */
     val presenceModeOverride: PresenceMode? = null,
+    /** User-selected HTTPS URL or app-owned file URI. SERVER rooms always leave this null. */
+    val avatarOverrideModel: String? = null,
     /**
      * Newest activity CHATHISTORY TARGETS advertised for this room, or null when discovery has
      * never mentioned it. Written forward-only, by [io.github.trevarj.motd.data.sync.EventProcessor]

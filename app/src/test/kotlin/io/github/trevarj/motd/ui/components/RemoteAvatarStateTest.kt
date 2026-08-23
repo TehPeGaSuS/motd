@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.components
 
 import io.github.trevarj.motd.avatar.AvatarRecord
+import io.github.trevarj.motd.avatar.conversationAvatarModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -25,5 +26,29 @@ class RemoteAvatarStateTest {
     @Test fun disabled_state_returns_no_model_so_coil_cannot_request() {
         val state = RemoteAvatarState(enabled = false, records = listOf(alice))
         assertNull(state.url(7, "Alice", "alice", 40))
+    }
+
+    @Test fun conversation_override_precedes_shared_and_supports_local_files_and_placeholders() {
+        assertEquals(
+            "https://local.example/64.png",
+            conversationAvatarModel(
+                "https://local.example/{size}.png",
+                "https://shared.example/a.png",
+                64,
+            ),
+        )
+        assertEquals(
+            "file:///data/user/0/motd/files/conversation-avatars/a.image",
+            conversationAvatarModel(
+                "file:///data/user/0/motd/files/conversation-avatars/a.image",
+                "https://shared.example/a.png",
+                64,
+            ),
+        )
+        assertEquals(
+            "https://shared.example/a.png",
+            conversationAvatarModel(null, "https://shared.example/a.png", 64),
+        )
+        assertNull(conversationAvatarModel(null, null, 64))
     }
 }

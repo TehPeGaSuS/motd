@@ -191,6 +191,7 @@ interface BufferDao {
             b.pinned AS pinned,
             b.muted AS muted,
             b.archived AS archived,
+            b.avatarOverrideModel AS avatarOverrideModel,
             lm.text AS lastMessageText,
             lm.sender AS lastMessageSender,
             lm.serverTime AS lastMessageTime,
@@ -484,6 +485,21 @@ interface BufferDao {
            )""",
     )
     suspend fun setPresenceModeOverride(requestedId: RoomId, mode: PresenceMode?): Int
+
+    /** Write through durable redirects; SERVER rows reject conversation avatar overrides. */
+    @Query(
+        """UPDATE buffers SET avatarOverrideModel = :model
+           WHERE id = (
+               SELECT COALESCE(redirectToRoomId, id) FROM buffers WHERE id = :requestedId
+           ) AND type IN ('CHANNEL', 'QUERY')""",
+    )
+    suspend fun setAvatarOverride(
+        requestedId: RoomId,
+        model: String?,
+    ): Int
+
+    @Query("SELECT avatarOverrideModel FROM buffers WHERE avatarOverrideModel LIKE 'file://%'")
+    suspend fun localAvatarModels(): List<String>
 
     @Query(
         """UPDATE buffers SET
@@ -802,6 +818,7 @@ data class ChatListRow(
     val caseMapping: String? = null,
     val chanTypes: String? = null,
     val archived: Boolean = false,
+    val avatarOverrideModel: String? = null,
     val unreadCountIncomplete: Boolean = false,
     val mentionCountIncomplete: Boolean = false,
     /**

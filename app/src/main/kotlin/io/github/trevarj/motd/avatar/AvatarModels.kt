@@ -49,6 +49,16 @@ fun validateAvatarUrl(raw: String): String? {
 fun expandAvatarUrl(url: String, sizePx: Int): String? =
     validateAvatarUrl(url)?.replace("{size}", sizePx.coerceIn(16, 512).toString())
 
+/** Resolve explicit local/HTTPS models before shared metadata; file models never use placeholders. */
+fun conversationAvatarModel(
+    override: String?,
+    shared: String?,
+    sizePx: Int,
+): String? =
+    override?.takeIf { it.startsWith("file://") }
+        ?: override?.let { expandAvatarUrl(it, sizePx) }
+        ?: shared?.let { expandAvatarUrl(it, sizePx) }
+
 fun avatarIdentity(nick: String, account: String?): String =
     account?.takeUnless { it == "*" }?.let { "account:${it.lowercase()}" }
         ?: "nick:${canonicalAvatarNick(nick)}"

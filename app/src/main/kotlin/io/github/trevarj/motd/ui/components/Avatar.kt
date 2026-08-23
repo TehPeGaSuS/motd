@@ -29,6 +29,7 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.avatar.AvatarRecord
 import io.github.trevarj.motd.avatar.avatarIdentity
 import io.github.trevarj.motd.avatar.canonicalAvatarNick
+import io.github.trevarj.motd.avatar.conversationAvatarModel
 import io.github.trevarj.motd.avatar.expandAvatarUrl
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
@@ -117,6 +118,7 @@ fun Avatar(
     isChannel: Boolean = false,
     networkId: Long? = null,
     account: String? = null,
+    conversationModel: String? = null,
 ) {
     // Avatars keep their generated/override color even when nick coloring is disabled (an all-gray
     // avatar column would be unusable, a confirmed design decision); avatar() ignores the flag.
@@ -136,7 +138,11 @@ fun Avatar(
             }
             AvatarStyle.NONE -> {}
         }
-        LocalRemoteAvatars.current.url(networkId, name, account, size.value.toInt())?.let { url ->
+        conversationAvatarModel(
+            conversationModel,
+            LocalRemoteAvatars.current.url(networkId, name, account, size.value.toInt()),
+            size.value.toInt(),
+        )?.let { url ->
             // The deterministic local avatar stays underneath, so failed/cancelled loads fall
             // back without erasing valid metadata or flashing an empty avatar.
             AsyncImage(

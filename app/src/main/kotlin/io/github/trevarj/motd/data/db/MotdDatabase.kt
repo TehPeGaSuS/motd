@@ -34,7 +34,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 29,
+    version = 30,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -828,6 +828,13 @@ val MIGRATION_28_29 = object : Migration(28, 29) {
     }
 }
 
+/** v29 -> v30 adds local per-conversation avatars; existing rooms inherit generated/shared avatars. */
+val MIGRATION_29_30 = object : Migration(29, 30) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE buffers ADD COLUMN avatarOverrideModel TEXT")
+    }
+}
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -868,6 +875,7 @@ val ALL_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_26_27,
     MIGRATION_27_28,
     MIGRATION_28_29,
+    MIGRATION_29_30,
 )
 
 private fun legacyReactionNormalizedSender(column: String): String =

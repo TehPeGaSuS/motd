@@ -106,6 +106,10 @@ interface BufferRepository {
     suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean
     /** Persists a nullable per-conversation presence override; false means the room disappeared. */
     suspend fun setPresenceModeOverride(id: Long, mode: PresenceMode?): Boolean
+
+    /** Persists a validated conversation avatar model through durable room redirects. */
+    suspend fun setAvatarOverride(id: Long, model: String?): Boolean = false
+
     /** Remove local content. QUERY identity/cursor state remains as a hidden reconnect tombstone;
      *  the parting of a joined CHANNEL is handled upstream by the caller (ChatListViewModel). */
     suspend fun deleteBuffer(id: Long)

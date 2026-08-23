@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -82,6 +83,9 @@ fun NickActionSheet(
     resolvedHost: String? = null,
     hostLoading: Boolean = false,
     onNickSelected: (String?) -> Unit = {},
+    conversationModel: String? = null,
+    canEditConversationAvatar: Boolean = false,
+    onEditConversationAvatar: () -> Unit = {},
 ) {
     var kickTarget by remember { mutableStateOf(false) }
     var banTarget by remember { mutableStateOf(false) }
@@ -94,12 +98,34 @@ fun NickActionSheet(
             ListItem(
                 headlineContent = { Text(nick) },
                 supportingContent = { WhoisSummary(whois, presence) },
-                leadingContent = if (avatarsHidden()) {
-                    null
-                } else {
-                    { Avatar(name = nick, size = 40.dp, networkId = networkId) }
-                },
+                leadingContent =
+                    if (avatarsHidden()) {
+                        null
+                    } else {
+                        {
+                            Avatar(
+                                name = nick,
+                                size = 40.dp,
+                                networkId = networkId,
+                                conversationModel = conversationModel,
+                                modifier =
+                                    if (canEditConversationAvatar) {
+                                        Modifier.testTag("nick_sheet_avatar").clickable(onClick = onEditConversationAvatar)
+                                    } else {
+                                        Modifier
+                                    },
+                            )
+                        }
+                    },
             )
+            if (canEditConversationAvatar) {
+                NickAction(
+                    Icons.Outlined.Edit,
+                    stringResource(R.string.avatar_editor_action),
+                    onEditConversationAvatar,
+                    tag = "nick_sheet_edit_avatar",
+                )
+            }
             HorizontalDivider()
 
             // Purpose-built nick-sheet labels shared by chat timeline and ChannelInfo.
@@ -123,12 +149,12 @@ fun NickActionSheet(
 
             if (canModerate && !isSelf) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                NickAction(Icons.Filled.Shield, stringResource(R.string.nick_sheet_give_op)) { onOp(true) }
-                NickAction(Icons.Filled.Shield, stringResource(R.string.nick_sheet_take_op)) { onOp(false) }
-                NickAction(Icons.Filled.RecordVoiceOver, stringResource(R.string.nick_sheet_give_voice)) { onVoice(true) }
-                NickAction(Icons.Filled.RecordVoiceOver, stringResource(R.string.nick_sheet_take_voice)) { onVoice(false) }
-                NickAction(Icons.Filled.Gavel, stringResource(R.string.nick_sheet_kick)) { kickTarget = true }
-                NickAction(Icons.Filled.Block, stringResource(R.string.nick_sheet_ban)) { banTarget = true }
+                NickAction(Icons.Filled.Shield, stringResource(R.string.nick_sheet_give_op), onClick = { onOp(true) })
+                NickAction(Icons.Filled.Shield, stringResource(R.string.nick_sheet_take_op), onClick = { onOp(false) })
+                NickAction(Icons.Filled.RecordVoiceOver, stringResource(R.string.nick_sheet_give_voice), onClick = { onVoice(true) })
+                NickAction(Icons.Filled.RecordVoiceOver, stringResource(R.string.nick_sheet_take_voice), onClick = { onVoice(false) })
+                NickAction(Icons.Filled.Gavel, stringResource(R.string.nick_sheet_kick), onClick = { kickTarget = true })
+                NickAction(Icons.Filled.Block, stringResource(R.string.nick_sheet_ban), onClick = { banTarget = true })
             }
         }
     }
@@ -249,12 +275,17 @@ private fun WhoisSummary(whois: WhoisInfo?, presence: PresenceState?) {
 }
 
 @Composable
-private fun NickAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+private fun NickAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    tag: String? = null,
+) {
     Row(modifier = Modifier.fillMaxWidth()) {
         ListItem(
             headlineContent = { Text(label) },
             leadingContent = { Icon(icon, contentDescription = null) },
-            modifier = Modifier.clickable(onClick = onClick),
+            modifier = Modifier.then(tag?.let(Modifier::testTag) ?: Modifier).clickable(onClick = onClick),
         )
     }
 }

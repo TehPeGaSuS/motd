@@ -9,6 +9,8 @@ import coil.decode.ImageDecoderDecoder
 import coil.decode.VideoFrameDecoder
 import dagger.hilt.android.HiltAndroidApp
 import io.github.trevarj.motd.appearance.LauncherIconController
+import io.github.trevarj.motd.avatar.LocalAvatarStore
+import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.di.AppVisibilityImpl
@@ -19,10 +21,12 @@ import io.github.trevarj.motd.service.AutoAwayCoordinator
 import io.github.trevarj.motd.ui.ComposeFoundationWorkarounds
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 
 @HiltAndroidApp
 class MotdApplication : Application(), ImageLoaderFactory {
@@ -44,6 +48,10 @@ class MotdApplication : Application(), ImageLoaderFactory {
 
     @Inject lateinit var launcherIconController: LauncherIconController
 
+    @Inject lateinit var database: MotdDatabase
+
+    @Inject lateinit var localAvatarStore: LocalAvatarStore
+
     @ApplicationScope
     @Inject
     lateinit var applicationScope: CoroutineScope
@@ -58,6 +66,9 @@ class MotdApplication : Application(), ImageLoaderFactory {
         pushInstanceCoordinator.start()
         pushLifecycleCoordinator.start()
         autoAwayCoordinator.start()
+        applicationScope.launch(Dispatchers.IO) {
+            localAvatarStore.prune(database.bufferDao().localAvatarModels())
+        }
         appearancePrefs.config
             .map { it.launcherIcon }
             .distinctUntilChanged()

@@ -51,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.semantics.contentDescription
@@ -65,19 +66,22 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.avatar.ConversationAvatarOutcome
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
+import io.github.trevarj.motd.service.RosterLoadState
+import io.github.trevarj.motd.ui.chat.AttachmentSheets
 import io.github.trevarj.motd.ui.chat.LagTone
 import io.github.trevarj.motd.ui.chat.NickActionSheet
 import io.github.trevarj.motd.ui.chat.lagTone
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.AvatarEditorSheet
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import io.github.trevarj.motd.service.RosterLoadState
 
 /** Stateful entry: wires the ViewModel and drives navigation/leave. */
 @Composable
@@ -89,6 +93,7 @@ fun ChannelInfoScreen(
 ) {
     LaunchedEffect(bufferId) { viewModel.init(bufferId) }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val resources = LocalResources.current
     val nickSheet by viewModel.nickSheet.collectAsStateWithLifecycle()
     val topicMutation by viewModel.topicMutation.collectAsStateWithLifecycle()
     val leaveMutation by viewModel.leaveMutation.collectAsStateWithLifecycle()
@@ -107,6 +112,8 @@ fun ChannelInfoScreen(
     )
     val resolvedHost by viewModel.resolvedHost.collectAsStateWithLifecycle()
     val resolvingHost by viewModel.resolvingHost.collectAsStateWithLifecycle()
+    var avatarEditorOpen by rememberSaveable { mutableStateOf(false) }
+    var avatarUploadOpen by rememberSaveable { mutableStateOf(false) }
 
     // Operator feedback. The ViewModel reports what happened; the wording lives here, resolved in
     // composition so it follows configuration changes. The sequence number makes two identical
@@ -131,6 +138,21 @@ fun ChannelInfoScreen(
     }
     LaunchedEffect(toolFeedback?.first) {
         snackbarHostState.showSnackbar(toolMessage ?: return@LaunchedEffect)
+    }
+    LaunchedEffect(viewModel, resources) {
+        viewModel.avatarEvents.collect { outcome ->
+            val message =
+                when (outcome) {
+                    ConversationAvatarOutcome.LocalOnly -> R.string.avatar_result_local_only
+                    ConversationAvatarOutcome.Shared -> R.string.avatar_result_shared
+                    ConversationAvatarOutcome.RequestSent -> R.string.avatar_result_request_sent
+                    ConversationAvatarOutcome.LocalReset -> R.string.avatar_result_reset
+                    ConversationAvatarOutcome.SharedCleared -> R.string.avatar_result_shared_cleared
+                    ConversationAvatarOutcome.Invalid -> R.string.avatar_result_invalid
+                    ConversationAvatarOutcome.Failed -> R.string.avatar_result_failed
+                }
+            snackbarHostState.showSnackbar(resources.getString(message))
+        }
     }
 
     ChannelInfoContent(
@@ -158,6 +180,54 @@ fun ChannelInfoScreen(
         onNickSelected = viewModel::resolveHostFor,
         onRetryMembers = viewModel::retryMembers,
         onQueryChange = viewModel::setQuery,
+        onEditAvatar = { avatarEditorOpen = true },
+    )
+
+    AvatarEditorSheet(
+        open = avatarEditorOpen,
+        currentModel = state.buffer?.avatarOverrideModel,
+        isChannel = true,
+        onDismiss = { avatarEditorOpen = false },
+        onImport = {
+            viewModel.importAvatar(it)
+            avatarEditorOpen = false
+        },
+        onUpload = {
+            avatarEditorOpen = false
+            avatarUploadOpen = true
+        },
+        onUrl = {
+            viewModel.setAvatarUrl(it)
+            avatarEditorOpen = false
+        },
+        onReset = {
+            viewModel.resetAvatar()
+            avatarEditorOpen = false
+        },
+        onShare = {
+            viewModel.shareAvatar()
+            avatarEditorOpen = false
+        },
+        onClearShared = {
+            viewModel.clearSharedAvatar()
+            avatarEditorOpen = false
+        },
+    )
+    AttachmentSheets(
+        open = avatarUploadOpen,
+        currentDraft = "",
+        networkId = state.buffer?.networkId,
+        sojuFileHostAvailable = state.sojuFileHostAvailable,
+        imageOnly = true,
+        onDismiss = { avatarUploadOpen = false },
+        onInsertUrl = {
+            viewModel.setAvatarUrl(it)
+            avatarUploadOpen = false
+        },
+        onReplaceDraft = {
+            viewModel.setAvatarUrl(it)
+            avatarUploadOpen = false
+        },
     )
 
     // Nick sheet: shared with the chat timeline. Moderation shown only when op.
@@ -219,6 +289,7 @@ fun ChannelInfoContent(
     onNickSelected: (String?) -> Unit = {},
     onRetryMembers: () -> Unit = {},
     onQueryChange: (String) -> Unit = {},
+    onEditAvatar: () -> Unit = {},
 ) {
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var showTopicEdit by remember { mutableStateOf(false) }
@@ -254,6 +325,7 @@ fun ChannelInfoContent(
                     lagMs = state.lagMs,
                     connected = state.connected,
                     onRetryMembers = onRetryMembers,
+                    onEditAvatar = onEditAvatar,
                     onEditTopic = {
                         onBeginTopicEdit()
                         showTopicEdit = true
@@ -269,6 +341,7 @@ fun ChannelInfoContent(
                         onBeginLeave()
                         showLeaveConfirm = true
                     },
+                    onEditAvatar = onEditAvatar,
                 )
             }
             // Non-ops get no section at all rather than a wall of disabled controls; the gate
@@ -587,6 +660,7 @@ private fun ChannelHeader(
     hasStaleMembers: Boolean,
     lagMs: Long?,
     connected: Boolean,
+    onEditAvatar: () -> Unit = {},
     onEditTopic: () -> Unit = {},
     onRetryMembers: () -> Unit = {},
 ) {
@@ -602,6 +676,8 @@ private fun ChannelHeader(
                 size = 88.dp,
                 isChannel = buffer?.type == BufferType.CHANNEL,
                 networkId = buffer?.networkId,
+                conversationModel = buffer?.avatarOverrideModel,
+                modifier = Modifier.clickable(onClick = onEditAvatar).testTag("channelinfo_avatar"),
             )
         }
         Text(
@@ -674,9 +750,17 @@ private fun ActionsRow(
     onSetPinned: (Boolean) -> Unit,
     onSetMuted: (Boolean) -> Unit,
     onLeave: () -> Unit,
+    onEditAvatar: () -> Unit = {},
 ) {
     val pinned = buffer?.pinned == true
     val muted = buffer?.muted == true
+    if (avatarsHidden()) {
+        ListItem(
+            headlineContent = { Text(stringResource(R.string.avatar_editor_action)) },
+            leadingContent = { Icon(Icons.Outlined.Edit, contentDescription = null) },
+            modifier = Modifier.testTag("channelinfo_avatar_action").clickable(onClick = onEditAvatar),
+        )
+    }
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,

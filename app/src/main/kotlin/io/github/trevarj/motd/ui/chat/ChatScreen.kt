@@ -95,7 +95,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -119,6 +118,8 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -135,7 +136,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -168,6 +168,7 @@ import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.audio.CachedAudioMetadata
 import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.formatAudioDuration
+import io.github.trevarj.motd.avatar.ConversationAvatarOutcome
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -184,10 +185,11 @@ import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
-import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AutocompletePanel
+import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.AvatarEditorSheet
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
@@ -313,6 +315,8 @@ fun ChatScreen(
         }
     }
     var mentionRequest by remember { mutableStateOf<Pair<Long, String>?>(null) }
+    var avatarEditorOpen by rememberSaveable { mutableStateOf(false) }
+    var avatarUploadOpen by rememberSaveable { mutableStateOf(false) }
     // A prefill aimed at this conversation while it is already open (gesture orb). It arrives as
     // text rather than as an entry to drain, and rides the same append path as a nick-sheet mention.
     LaunchedEffect(viewModel) {
@@ -553,6 +557,7 @@ fun ChatScreen(
         onConversationLayoutSelected = viewModel::setConversationLayoutOverride,
         onPresenceModeSelected = viewModel::setPresenceModeOverride,
         diagnostics = viewModel.diagnostics,
+        avatarEvents = viewModel.avatarEvents,
     )
 
     // Nick sheet: actions render immediately; whois fills in when it lands.
@@ -560,6 +565,9 @@ fun ChatScreen(
         val norm = identityRules::normalize
         val myNick = (state.connState as? IrcClientState.Ready)?.nick
         val isSelf = myNick != null && norm(sheet.nick) == norm(myNick)
+        val canEditAvatar =
+            state.buffer?.type == BufferType.QUERY &&
+                norm(sheet.nick) == norm(state.buffer?.displayName.orEmpty())
         NickActionSheet(
             nick = sheet.nick,
             networkId = state.buffer?.networkId,
@@ -594,8 +602,56 @@ fun ChatScreen(
             // The sheet already runs a WHOIS on open, so its host is the address to offer here.
             resolvedHost = sheet.details?.host,
             hostLoading = sheet.whois == null,
+            conversationModel = state.buffer?.avatarOverrideModel,
+            canEditConversationAvatar = canEditAvatar,
+            onEditConversationAvatar = {
+                viewModel.dismissNickSheet()
+                avatarEditorOpen = true
+            },
         )
     }
+
+    AvatarEditorSheet(
+        open = avatarEditorOpen,
+        currentModel = state.buffer?.avatarOverrideModel,
+        isChannel = false,
+        onDismiss = { avatarEditorOpen = false },
+        onImport = {
+            viewModel.importAvatar(it)
+            avatarEditorOpen = false
+        },
+        onUpload = {
+            avatarEditorOpen = false
+            avatarUploadOpen = true
+        },
+        onUrl = {
+            viewModel.setAvatarUrl(it)
+            avatarEditorOpen = false
+        },
+        onReset = {
+            viewModel.resetAvatar()
+            avatarEditorOpen = false
+        },
+    )
+    AttachmentSheets(
+        open = avatarUploadOpen,
+        currentDraft = "",
+        networkId = state.buffer?.networkId,
+        sojuFileHostAvailable =
+            (state.connState as? IrcClientState.Ready)
+                ?.isupport
+                ?.let(::sojuFileHostAdvertised) == true,
+        imageOnly = true,
+        onDismiss = { avatarUploadOpen = false },
+        onInsertUrl = {
+            viewModel.setAvatarUrl(it)
+            avatarUploadOpen = false
+        },
+        onReplaceDraft = {
+            viewModel.setAvatarUrl(it)
+            avatarUploadOpen = false
+        },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -752,6 +808,7 @@ fun ChatContent(
     // Opt-in journal for the timeline's own Paging generations. Noop by default so previews and
     // hand-built call sites need nothing; the required E2E gate arms the real one for the journey.
     diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
+    avatarEvents: Flow<ConversationAvatarOutcome> = emptyFlow(),
 ) {
     val listState = rememberLazyListState()
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
@@ -813,6 +870,7 @@ fun ChatContent(
     var expandedFools by remember { mutableStateOf(setOf<Long>()) }
     val clipboard: Clipboard = LocalClipboard.current
     val ctx = LocalContext.current
+    val resources = LocalResources.current
     val snackbarHostState = remember { SnackbarHostState() }
     var pendingDccAccept by remember { mutableStateOf<PendingDccAccept?>(null) }
     val dccDestinationPicker = rememberLauncherForActivityResult(
@@ -828,6 +886,21 @@ fun ChatContent(
         val notice = voiceState.notice ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(notice)
         onVoiceNoticeDismissed()
+    }
+    LaunchedEffect(avatarEvents, resources) {
+        avatarEvents.collect { outcome ->
+            val message =
+                when (outcome) {
+                    ConversationAvatarOutcome.LocalOnly -> R.string.avatar_result_local_only
+                    ConversationAvatarOutcome.Shared -> R.string.avatar_result_shared
+                    ConversationAvatarOutcome.RequestSent -> R.string.avatar_result_request_sent
+                    ConversationAvatarOutcome.LocalReset -> R.string.avatar_result_reset
+                    ConversationAvatarOutcome.SharedCleared -> R.string.avatar_result_shared_cleared
+                    ConversationAvatarOutcome.Invalid -> R.string.avatar_result_invalid
+                    ConversationAvatarOutcome.Failed -> R.string.avatar_result_failed
+                }
+            snackbarHostState.showSnackbar(resources.getString(message))
+        }
     }
     // The ViewModel owns the durable value; this local state only retains cursor/selection details.
     var composerText by remember(traceBufferId) {
@@ -1914,6 +1987,7 @@ fun ChatContent(
                                 size = MotdSizes.headerAvatar,
                                 isChannel = buffer?.type == BufferType.CHANNEL,
                                 networkId = buffer?.networkId,
+                                conversationModel = buffer?.avatarOverrideModel,
                             )
                         }
                         // The 10dp gap only separates the title from the avatar beside it.

@@ -7,6 +7,7 @@ import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.avatar.LocalAvatarStore
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.db.BufferType
@@ -485,6 +486,7 @@ class ChatViewModelTest {
                 messageDao = db.messageDao(),
                 settings = FakeSettingsRepository(),
                 visibilityReader = MessageVisibilityReader(db),
+                localAvatarStore = LocalAvatarStore(ApplicationProvider.getApplicationContext()),
             ),
         )
 
