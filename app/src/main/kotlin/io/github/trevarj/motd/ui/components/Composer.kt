@@ -387,6 +387,7 @@ fun Composer(
 ) {
     var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
     var expanded by remember { mutableStateOf(false) }
+    var visualLineCount by remember { mutableIntStateOf(1) }
     var colorSheetVisible by remember { mutableStateOf(false) }
     var colorSelection by remember { mutableStateOf(TextRange.Zero) }
     var selectedForeground by remember { mutableStateOf<Int?>(null) }
@@ -567,6 +568,10 @@ fun Composer(
         if (emojiPickerSession === collapsing) emojiPickerSession = null
     }
 
+    LaunchedEffect(visualLineCount) {
+        if (visualLineCount <= 1) expanded = false
+    }
+
     // Dismiss transient surfaces before leaving chat.
     BackHandler(
         enabled = colorSheetVisible || expanded || emojiPickerSession?.phase == EmojiPickerPhase.OPEN,
@@ -648,23 +653,6 @@ fun Composer(
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {
                         Row(verticalAlignment = Alignment.Bottom) {
-                            if (ircFormattingEnabled) {
-                                IconButton(
-                                    onClick = { expanded = !expanded },
-                                    modifier =
-                                        Modifier
-                                            .size(48.dp)
-                                            .testTag("chat_composer_format_expand")
-                                            .semantics { selected = expanded },
-                                ) {
-                                    Icon(
-                                        if (expanded) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-                                        contentDescription = if (expanded) "Collapse rich editor" else "Expand rich editor",
-                                        tint =
-                                            if (expanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
                             if (showEmojiButton) {
                                 IconButton(
                                     onClick = {
@@ -726,6 +714,7 @@ fun Composer(
                                     expanded = expanded,
                                     expandedHeight = expandedHeight,
                                     onColor = ::openColorSheet,
+                                    onVisualLineCountChange = { visualLineCount = it },
                                 )
 
                                 // A physical tap on the text field while the picker is open should
@@ -766,58 +755,79 @@ fun Composer(
                     }
 
                     val canSend = enabled && plainIrcText(value.text).isNotBlank()
-                    // Send and voice are both fixed 48.dp round buttons, so cross-fading the swap
-                    // changes only pixels inside that circle and never shifts the input row.
-                    Crossfade(
-                        targetState = canSend || !voiceEnabled,
-                        animationSpec = MotdMotion.microFadeIn,
-                        label = "composer_action",
-                    ) { showSend ->
-                        if (showSend) {
-                            FilledIconButton(
-                                onClick = {
-                                    dismissEmojiPicker()
-                                    expanded = false
-                                    onSend()
-                                },
-                                enabled = canSend,
-                                modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
-                                shape = CircleShape,
-                                colors =
-                                    IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                                        disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
-                                    ),
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        if (ircFormattingEnabled && visualLineCount > 1) {
+                            IconButton(
+                                onClick = { expanded = !expanded },
+                                modifier =
+                                    Modifier
+                                        .size(40.dp)
+                                        .testTag("chat_composer_format_expand")
+                                        .semantics { selected = expanded },
                             ) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        Icons.AutoMirrored.Filled.Send,
-                                        stringResource(R.string.chat_composer_send),
-                                        modifier = Modifier.size(24.dp),
-                                    )
-                                }
+                                Icon(
+                                    if (expanded) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                                    contentDescription = if (expanded) "Collapse rich editor" else "Expand rich editor",
+                                    tint =
+                                        if (expanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
-                        } else {
-                            VoiceRecordButton(
-                                enabled = enabled,
-                                recording = voiceRecording,
-                                onHoldStart = {
-                                    dismissEmojiPicker()
-                                    onVoiceHoldStart()
-                                },
-                                onAccessibilityStart = {
-                                    dismissEmojiPicker()
-                                    onVoiceAccessibilityStart()
-                                },
-                                onHoldStop = onVoiceHoldStop,
-                                onHoldCancel = onVoiceHoldCancel,
-                                onLock = onVoiceLock,
-                            )
+                        }
+                        // Send and voice remain fixed 48.dp round buttons.
+                        Crossfade(
+                            targetState = canSend || !voiceEnabled,
+                            animationSpec = MotdMotion.microFadeIn,
+                            label = "composer_action",
+                        ) { showSend ->
+                            if (showSend) {
+                                FilledIconButton(
+                                    onClick = {
+                                        dismissEmojiPicker()
+                                        expanded = false
+                                        onSend()
+                                    },
+                                    enabled = canSend,
+                                    modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
+                                    shape = CircleShape,
+                                    colors =
+                                        IconButtonDefaults.filledIconButtonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                                            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
+                                        ),
+                                ) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.Send,
+                                            stringResource(R.string.chat_composer_send),
+                                            modifier = Modifier.size(24.dp),
+                                        )
+                                    }
+                                }
+                            } else {
+                                VoiceRecordButton(
+                                    enabled = enabled,
+                                    recording = voiceRecording,
+                                    onHoldStart = {
+                                        dismissEmojiPicker()
+                                        onVoiceHoldStart()
+                                    },
+                                    onAccessibilityStart = {
+                                        dismissEmojiPicker()
+                                        onVoiceAccessibilityStart()
+                                    },
+                                    onHoldStop = onVoiceHoldStop,
+                                    onHoldCancel = onVoiceHoldCancel,
+                                    onLock = onVoiceLock,
+                                )
+                            }
                         }
                     }
                 }
@@ -1336,6 +1346,7 @@ private fun ComposerTextField(
     expanded: Boolean = false,
     expandedHeight: Dp = 148.dp,
     onColor: () -> Unit = {},
+    onVisualLineCountChange: (Int) -> Unit = {},
 ) {
     val state = rememberTextFieldState(value.text, value.selection)
     val latestValue by rememberUpdatedState(value)
@@ -1445,6 +1456,7 @@ private fun ComposerTextField(
                 imeAction = ImeAction.Default,
             ),
         lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = if (expanded) Int.MAX_VALUE else 6),
+        onTextLayout = { getResult -> onVisualLineCountChange(getResult()?.lineCount ?: 1) },
         outputTransformation = outputTransformation,
         decorator = { inner ->
             Box(

@@ -1,6 +1,9 @@
 package io.github.trevarj.motd
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
@@ -18,6 +21,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
@@ -206,8 +210,32 @@ class ComposerUiTest {
     }
 
     @Test
+    fun expandActionAppearsOnlyForMultipleVisualLines() {
+        val draft = mutableStateOf(TextFieldValue("one visual line"))
+        compose.setContent {
+            MotdTheme {
+                Box(Modifier.width(180.dp)) {
+                    Composer(
+                        value = draft.value,
+                        onValueChange = { draft.value = it },
+                        onSend = {},
+                        enabled = true,
+                        showEmojiButton = false,
+                        ircFormattingEnabled = true,
+                    )
+                }
+            }
+        }
+        compose.onAllNodesWithTag("chat_composer_format_expand").assertCountEquals(0)
+
+        compose.runOnIdle { draft.value = TextFieldValue("text long enough to wrap onto another visual line") }
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_composer_format_expand").assertIsDisplayed()
+    }
+
+    @Test
     fun richComposer_expandsAndFormatsSelectionWhilePlainComposerStaysPlain() {
-        val draft = mutableStateOf(TextFieldValue("hello", TextRange(0, 5)))
+        val draft = mutableStateOf(TextFieldValue("hello\nthere", TextRange(0, 11)))
         compose.setContent {
             MotdTheme {
                 Composer(
@@ -224,11 +252,11 @@ class ComposerUiTest {
         compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
         compose.onNodeWithTag("chat_format_bold").performClick()
         compose.runOnIdle {
-            assertEquals("${IRC_BOLD}hello$IRC_BOLD", draft.value.text)
+            assertEquals("${IRC_BOLD}hello\nthere$IRC_BOLD", draft.value.text)
         }
         compose.onNodeWithTag("chat_composer_format_expand").performClick()
         compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
-        compose.runOnIdle { assertEquals("hello", parseIrcFormatting(draft.value.text).visibleText) }
+        compose.runOnIdle { assertEquals("hello\nthere", parseIrcFormatting(draft.value.text).visibleText) }
 
         compose.setContent {
             MotdTheme { Composer(TextFieldValue("plain"), {}, {}, true) }
@@ -238,7 +266,7 @@ class ComposerUiTest {
 
     @Test
     fun colorSheet_appliesForegroundAndBackgroundAndFormattingOnlyCannotSend() {
-        val draft = mutableStateOf(TextFieldValue("hello", TextRange(0, 5)))
+        val draft = mutableStateOf(TextFieldValue("hello\nthere", TextRange(0, 11)))
         compose.setContent {
             MotdTheme {
                 Composer(
