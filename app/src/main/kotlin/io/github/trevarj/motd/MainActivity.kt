@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -169,6 +170,9 @@ class MainActivity : ComponentActivity(), SystemBarThemeHost {
                     Surface(
                         modifier = Modifier
                             .fillMaxSize()
+                            // Edge-to-edge windows receive IME insets instead of being resized.
+                            // Consume them once here so every destination stays above the keyboard.
+                            .imePadding()
                             .semantics { testTagsAsResourceId = true },
                         color = MaterialTheme.colorScheme.background,
                     ) {
