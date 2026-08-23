@@ -141,7 +141,7 @@ android {
     defaultConfig {
         applicationId = "io.github.trevarj.motd"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         // Release CI and F-Droid supply these explicitly; the checked-in Gradle properties provide
         // a deterministic fallback for source builds outside either service.
         versionName = configuredVersionName
@@ -217,8 +217,8 @@ android {
         disable += "GradleDependency"
         // The AGP version is catalog-pinned; the upgrade nag is intentional noise.
         disable += "AndroidGradlePluginVersion"
-        // SDK levels are deliberately pinned. CI runners ship a newer SDK than the
-        // pinned platform, so lint flags targetSdk 35 as "old"; that nag is intentional noise.
+        // compileSdk 37 / targetSdk 36 is an intentional split: compile against the pinned SDK
+        // while targeting the latest stable Android behavior. The resulting nag is noise.
         disable += "OldTargetApi"
         // The Doze battery-exemption request is a justified core use: an always-on IRC/bouncer
         // connection is the app's primary function. Distributed outside the Play Store.
