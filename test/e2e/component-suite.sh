@@ -5,7 +5,7 @@ set -euo pipefail
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$E2E_DIR/../.." && pwd)"
 # Exact count catches silently skipped instrumentation; update only with intentional test changes.
-EXPECTED_CASES=115
+EXPECTED_CASES=116
 REAL_STACK_ANNOTATION=io.github.trevarj.motd.FastHeadlessE2e
 
 cd "$REPO"

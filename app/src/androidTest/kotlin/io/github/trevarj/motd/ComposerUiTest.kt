@@ -258,6 +258,26 @@ class ComposerUiTest {
     }
 
     @Test
+    fun colorActionOpensAtCollapsedCursorOnBlankLine() {
+        val draft = mutableStateOf(TextFieldValue("first\n", TextRange(6)))
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_format_color").performClick()
+        compose.onNodeWithTag("chat_composer_color_sheet").assertIsDisplayed()
+    }
+
+    @Test
     fun richComposer_expandsAndFormatsSelectionWhilePlainComposerStaysPlain() {
         val draft = mutableStateOf(TextFieldValue("hello\nthere", TextRange(0, 11)))
         compose.setContent {
