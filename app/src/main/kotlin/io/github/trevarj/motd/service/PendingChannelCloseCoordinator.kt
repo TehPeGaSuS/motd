@@ -7,10 +7,6 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.irc.event.IrcClientState
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -19,6 +15,10 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /** Process-wide entry point for durable CHANNEL leave/delete requests. */
 interface ChannelCloseCoordinator {
@@ -99,10 +99,11 @@ class PendingChannelCloseCoordinator private constructor(
     private suspend fun attempt(bufferId: Long) {
         val guard = attempts.getOrPut(bufferId) { Mutex() }
         guard.withLock {
-            val buffer = db.bufferDao().observeById(bufferId) ?: run {
-                clearRetry(bufferId)
-                return
-            }
+            val buffer =
+                db.bufferDao().observeById(bufferId) ?: run {
+                    clearRetry(bufferId)
+                    return
+                }
             if (buffer.type != BufferType.CHANNEL || buffer.pendingCloseAt == null) {
                 clearRetry(bufferId)
                 return
@@ -110,21 +111,25 @@ class PendingChannelCloseCoordinator private constructor(
             val network = db.networkDao().byId(buffer.networkId) ?: return
             if (!isReadyFor(network, connections.connectionStates.value)) return
 
-            val outcome = try {
-                closeChannel(buffer, network)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                CloseOutcome.RETRY
-            }
+            val outcome =
+                try {
+                    closeChannel(buffer, network)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    CloseOutcome.RETRY
+                }
             when (outcome) {
                 CloseOutcome.COMPLETED -> {
                     db.bufferDao().deleteBuffer(buffer.id)
                     clearRetry(buffer.id)
                 }
+
                 CloseOutcome.AWAITING_CONFIRMATION,
                 CloseOutcome.RETRY,
-                -> scheduleRetry(buffer.id)
+                -> {
+                    scheduleRetry(buffer.id)
+                }
             }
         }
     }
@@ -149,9 +154,7 @@ class PendingChannelCloseCoordinator private constructor(
     private fun isReadyFor(
         network: NetworkEntity,
         states: Map<Long, IrcClientState>,
-    ): Boolean {
-        return states[network.id] is IrcClientState.Ready
-    }
+    ): Boolean = states[network.id] is IrcClientState.Ready
 
     private fun scheduleRetry(bufferId: Long) {
         retryJobs.compute(bufferId) { _, active ->
@@ -186,13 +189,14 @@ class PendingChannelCloseCoordinator private constructor(
             clock: AppClock,
             scope: CoroutineScope,
             retryWait: suspend (attempt: Int) -> Unit,
-        ): PendingChannelCloseCoordinator = PendingChannelCloseCoordinator(
-            db = db,
-            connections = connections,
-            clock = clock,
-            scope = scope,
-            retryWait = retryWait,
-        )
+        ): PendingChannelCloseCoordinator =
+            PendingChannelCloseCoordinator(
+                db = db,
+                connections = connections,
+                clock = clock,
+                scope = scope,
+                retryWait = retryWait,
+            )
     }
 }
 

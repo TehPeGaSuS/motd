@@ -9,8 +9,6 @@ import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.DeliveryMode
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -23,6 +21,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import javax.inject.Inject
+import javax.inject.Singleton
 
 // Single Preferences DataStore named "settings" shared by SettingsRepository, PushPrefs, and the
 // internal STS-policy accessor. Property delegate scopes one instance per process.
@@ -36,6 +36,7 @@ internal object PrefKeys {
     val PUSH_KEYS = stringPreferencesKey("push_keys")
     val STS_POLICIES = stringPreferencesKey("sts_policies")
     val CERT_PINS = stringPreferencesKey("cert_pins")
+
     // Round 4
     val LAYOUT_DENSITY = stringPreferencesKey("layout_density")
     val NICK_COLORS_ENABLED = stringPreferencesKey("nick_colors_enabled")
@@ -44,6 +45,7 @@ internal object PrefKeys {
     val FRIEND_NICKS = stringPreferencesKey("friend_nicks")
     val FOOL_NICKS = stringPreferencesKey("fool_nicks")
     val FOOLS_MODE = stringPreferencesKey("fools_mode")
+
     /** Superseded by [PRESENCE_MODE]; still read so an existing hide/show choice is honored. */
     val SHOW_JOIN_PART_QUIT = stringPreferencesKey("show_join_part_quit")
     val PRESENCE_MODE = stringPreferencesKey("presence_mode")
@@ -72,8 +74,7 @@ internal fun decodeNickSet(raw: String?): Set<String> {
 }
 
 /** Encode a set of nicks as a JSON array (insertion order). */
-internal fun encodeNickSet(nicks: Set<String>): String =
-    buildJsonArray { for (n in nicks) add(JsonPrimitive(n)) }.toString()
+internal fun encodeNickSet(nicks: Set<String>): String = buildJsonArray { for (n in nicks) add(JsonPrimitive(n)) }.toString()
 
 /** Decode a JSON object {"nick": hue} into a map; hues coerced into 0..359, garbage -> empty. */
 internal fun decodeHueOverrides(raw: String?): Map<String, Int> {
@@ -85,329 +86,387 @@ internal fun decodeHueOverrides(raw: String?): Map<String, Int> {
 }
 
 /** Encode a nick->hue map as a JSON object (hues coerced into 0..359). */
-internal fun encodeHueOverrides(map: Map<String, Int>): String =
-    buildJsonObject { for ((k, v) in map) put(k, v.coerceIn(0, 359)) }.toString()
+internal fun encodeHueOverrides(map: Map<String, Int>): String = buildJsonObject { for ((k, v) in map) put(k, v.coerceIn(0, 359)) }.toString()
 
 // Implements SettingsRepository, PushPrefs, and exposes STS-policy JSON storage (internal, for
 // WP5) all over the one DataStore. Constructor-injectable so WP10 can rebind the interfaces.
 @Singleton
-class DataStoreSettingsRepository @Inject constructor(
-    @ApplicationContext private val context: Context,
-) : SettingsRepository, PushPrefs, CertTrustStore {
-    private val store get() = context.settingsDataStore
-    private val json = Json { ignoreUnknownKeys = true }
+class DataStoreSettingsRepository
+    @Inject
+    constructor(
+        @ApplicationContext private val context: Context,
+    ) : SettingsRepository,
+        PushPrefs,
+        CertTrustStore {
+        private val store get() = context.settingsDataStore
+        private val json = Json { ignoreUnknownKeys = true }
 
-    // -- SettingsRepository --
+        // -- SettingsRepository --
 
-    override val settings: Flow<Settings> = store.data.map { prefs ->
-        Settings(
-            themeMode = prefs[PrefKeys.THEME_MODE]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
-                ?: ThemeMode.SYSTEM,
-            dynamicColor = prefs[PrefKeys.DYNAMIC_COLOR]?.toBooleanStrictOrNull() ?: true,
-            deliveryMode = prefs[PrefKeys.DELIVERY_MODE]?.let { runCatching { DeliveryMode.valueOf(it) }.getOrNull() }
-                ?: DeliveryMode.PERSISTENT_SOCKET,
-            // Round 4: invalid enum strings fall back to defaults.
-            layoutDensity = prefs[PrefKeys.LAYOUT_DENSITY]?.let { runCatching { LayoutDensity.valueOf(it) }.getOrNull() }
-                ?: LayoutDensity.COMFORTABLE,
-            nickColorsEnabled = prefs[PrefKeys.NICK_COLORS_ENABLED]?.toBooleanStrictOrNull() ?: true,
-            nickColorPalette = nickColorPaletteFromPreference(prefs[PrefKeys.NICK_COLOR_PALETTE]),
-            nickColorOverrides = decodeHueOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]),
-            friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]),
-            fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]),
-            foolsMode = prefs[PrefKeys.FOOLS_MODE]?.let { runCatching { FoolsMode.valueOf(it) }.getOrNull() }
-                ?: FoolsMode.COLLAPSE,
-            presenceMode = presenceModeFromPreference(
-                prefs[PrefKeys.PRESENCE_MODE],
-                prefs[PrefKeys.SHOW_JOIN_PART_QUIT],
-            ),
-            avatarStyle = avatarStyleFromPreference(prefs[PrefKeys.AVATAR_STYLE]),
-            chatWallpaper = prefs[PrefKeys.CHAT_WALLPAPER]?.let { runCatching { ChatWallpaper.valueOf(it) }.getOrNull() }
-                ?: ChatWallpaper.NONE,
-            showComposerEmoji = prefs[PrefKeys.SHOW_COMPOSER_EMOJI]?.toBooleanStrictOrNull() ?: true,
-            chatSoundsEnabled = prefs[PrefKeys.CHAT_SOUNDS_ENABLED]?.toBooleanStrictOrNull() ?: true,
-            historySyncDepth = prefs[PrefKeys.HISTORY_SYNC_DEPTH]
-                ?.let { runCatching { HistorySyncDepth.valueOf(it) }.getOrNull() }
-                ?: HistorySyncDepth.MONTH,
-            autoAwayEnabled = prefs[PrefKeys.AUTO_AWAY_ENABLED]?.toBooleanStrictOrNull() ?: false,
-            autoAwayMinutes = autoAwayMinutesFromPreference(prefs[PrefKeys.AUTO_AWAY_MINUTES]?.toIntOrNull()),
-            autoAwayMessage = prefs[PrefKeys.AUTO_AWAY_MESSAGE].orEmpty(),
-        )
-    }
-
-    override suspend fun setThemeMode(m: ThemeMode) {
-        store.edit { it[PrefKeys.THEME_MODE] = m.name }
-    }
-
-    override suspend fun setDynamicColor(enabled: Boolean) {
-        store.edit { it[PrefKeys.DYNAMIC_COLOR] = enabled.toString() }
-    }
-
-    override suspend fun setDeliveryMode(m: DeliveryMode) {
-        store.edit { it[PrefKeys.DELIVERY_MODE] = m.name }
-    }
-
-    // -- Round 4: appearance/behavior settings --
-
-    override suspend fun setLayoutDensity(d: LayoutDensity) {
-        store.edit { it[PrefKeys.LAYOUT_DENSITY] = d.name }
-    }
-
-    override suspend fun setNickColorsEnabled(enabled: Boolean) {
-        store.edit { it[PrefKeys.NICK_COLORS_ENABLED] = enabled.toString() }
-    }
-
-    override suspend fun setNickColorPalette(p: NickColorPalette) {
-        store.edit { it[PrefKeys.NICK_COLOR_PALETTE] = p.name }
-    }
-
-    override suspend fun setNickColorOverride(nick: String, hue: Int?) {
-        val key = normalizeNick(nick)
-        store.edit { prefs ->
-            val current = decodeHueOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]).toMutableMap()
-            if (hue == null) current.remove(key) else current[key] = hue.coerceIn(0, 359)
-            if (current.isEmpty()) prefs.remove(PrefKeys.NICK_COLOR_OVERRIDES)
-            else prefs[PrefKeys.NICK_COLOR_OVERRIDES] = encodeHueOverrides(current)
-        }
-    }
-
-    override suspend fun setFriend(nick: String, isFriend: Boolean) {
-        val key = normalizeNick(nick)
-        // One transaction keeps friends/fools disjoint: adding a friend drops it from fools.
-        store.edit { prefs ->
-            val friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]).toMutableSet()
-            val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]).toMutableSet()
-            if (isFriend) {
-                friends.add(key)
-                fools.remove(key)
-            } else {
-                friends.remove(key)
-            }
-            writeNickSet(prefs, PrefKeys.FRIEND_NICKS, friends)
-            writeNickSet(prefs, PrefKeys.FOOL_NICKS, fools)
-        }
-    }
-
-    override suspend fun setFool(nick: String, isFool: Boolean) {
-        val key = normalizeNick(nick)
-        store.edit { prefs ->
-            val friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]).toMutableSet()
-            val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]).toMutableSet()
-            if (isFool) {
-                fools.add(key)
-                friends.remove(key)
-            } else {
-                fools.remove(key)
-            }
-            writeNickSet(prefs, PrefKeys.FRIEND_NICKS, friends)
-            writeNickSet(prefs, PrefKeys.FOOL_NICKS, fools)
-        }
-    }
-
-    override suspend fun setFriend(
-        nick: String,
-        isFriend: Boolean,
-        identityRules: IrcIdentityRules,
-    ) = setSocialIdentity(nick, isFriend, identityRules, friend = true)
-
-    override suspend fun setFool(
-        nick: String,
-        isFool: Boolean,
-        identityRules: IrcIdentityRules,
-    ) = setSocialIdentity(nick, isFool, identityRules, friend = false)
-
-    private suspend fun setSocialIdentity(
-        nick: String,
-        enabled: Boolean,
-        identityRules: IrcIdentityRules,
-        friend: Boolean,
-    ) {
-        val key = normalizeNick(nick)
-        val actor = identityRules.normalize(nick.trim())
-        store.edit { prefs ->
-            val friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]).toMutableSet()
-            val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]).toMutableSet()
-            val target = if (friend) friends else fools
-            target.removeAll { identityRules.normalize(it.trim()) == actor }
-            if (enabled) {
-                val other = if (friend) fools else friends
-                other.removeAll { identityRules.normalize(it.trim()) == actor }
-                target.add(key)
-            }
-            writeNickSet(prefs, PrefKeys.FRIEND_NICKS, friends)
-            writeNickSet(prefs, PrefKeys.FOOL_NICKS, fools)
-        }
-    }
-
-    override suspend fun setFoolsMode(m: FoolsMode) {
-        store.edit { it[PrefKeys.FOOLS_MODE] = m.name }
-    }
-
-    /** Drops the superseded boolean so a later downgrade-then-upgrade cannot resurrect it. */
-    override suspend fun setPresenceMode(m: PresenceMode) {
-        store.edit {
-            it[PrefKeys.PRESENCE_MODE] = m.name
-            it.remove(PrefKeys.SHOW_JOIN_PART_QUIT)
-        }
-    }
-
-    override suspend fun setAvatarStyle(style: AvatarStyle) {
-        store.edit { it[PrefKeys.AVATAR_STYLE] = style.name }
-    }
-
-    override suspend fun setChatWallpaper(w: ChatWallpaper) {
-        store.edit { it[PrefKeys.CHAT_WALLPAPER] = w.name }
-    }
-
-    override suspend fun setShowComposerEmoji(show: Boolean) {
-        store.edit { it[PrefKeys.SHOW_COMPOSER_EMOJI] = show.toString() }
-    }
-
-    override suspend fun setChatSoundsEnabled(enabled: Boolean) {
-        store.edit { it[PrefKeys.CHAT_SOUNDS_ENABLED] = enabled.toString() }
-    }
-
-    override suspend fun setHistorySyncDepth(d: HistorySyncDepth) {
-        store.edit { it[PrefKeys.HISTORY_SYNC_DEPTH] = d.name }
-    }
-
-    override suspend fun setAutoAwayEnabled(enabled: Boolean) {
-        store.edit { it[PrefKeys.AUTO_AWAY_ENABLED] = enabled.toString() }
-    }
-
-    /** Coerced on write as well as on read: an off-list delay must never reach the coordinator. */
-    override suspend fun setAutoAwayMinutes(minutes: Int) {
-        val choice = autoAwayMinutesFromPreference(minutes)
-        store.edit { it[PrefKeys.AUTO_AWAY_MINUTES] = choice.toString() }
-    }
-
-    /** Blank clears the key so the localized default applies again. */
-    override suspend fun setAutoAwayMessage(message: String) {
-        val trimmed = message.trim()
-        store.edit {
-            if (trimmed.isEmpty()) it.remove(PrefKeys.AUTO_AWAY_MESSAGE)
-            else it[PrefKeys.AUTO_AWAY_MESSAGE] = trimmed
-        }
-    }
-
-    // Empty set removes its key (mirrors setEndpointFor); non-empty writes the JSON array.
-    private fun writeNickSet(prefs: androidx.datastore.preferences.core.MutablePreferences, key: Preferences.Key<String>, nicks: Set<String>) {
-        if (nicks.isEmpty()) prefs.remove(key) else prefs[key] = encodeNickSet(nicks)
-    }
-
-    // -- PushPrefs (values base64url; keys stored as JSON) --
-
-    // Per-network endpoints persisted as a JSON object {"<networkId>": "<url>"} under one key,
-    // using the same manual-JSON approach as push_keys.
-    override suspend fun endpoints(): Map<Long, String> =
-        decodeEndpoints(store.data.first()[PrefKeys.PUSH_ENDPOINTS])
-
-    override suspend fun endpointFor(networkId: Long): String? =
-        endpoints()[networkId]
-
-    override suspend fun setEndpointFor(networkId: Long, endpoint: String?) {
-        store.edit { prefs ->
-            val current = decodeEndpoints(prefs[PrefKeys.PUSH_ENDPOINTS]).toMutableMap()
-            if (endpoint == null) current.remove(networkId) else current[networkId] = endpoint
-            if (current.isEmpty()) prefs.remove(PrefKeys.PUSH_ENDPOINTS)
-            else prefs[PrefKeys.PUSH_ENDPOINTS] = encodeEndpoints(current)
-        }
-    }
-
-    override suspend fun clearEndpoints() {
-        store.edit { it.remove(PrefKeys.PUSH_ENDPOINTS) }
-    }
-
-    private fun decodeEndpoints(raw: String?): Map<Long, String> {
-        if (raw == null) return emptyMap()
-        return runCatching {
-            val obj = json.parseToJsonElement(raw) as kotlinx.serialization.json.JsonObject
-            obj.entries.mapNotNull { (k, v) ->
-                val id = k.toLongOrNull() ?: return@mapNotNull null
-                id to v.jsonPrimitive.content
-            }.toMap()
-        }.getOrDefault(emptyMap())
-    }
-
-    private fun encodeEndpoints(map: Map<Long, String>): String =
-        buildJsonObject {
-            for ((id, url) in map) put(id.toString(), url)
-        }.toString()
-
-    // PushKeys is a frozen contract data class (no @Serializable), so (de)serialize it manually
-    // as a plain JSON object.
-    override suspend fun keys(): PushKeys? =
-        store.data.first()[PrefKeys.PUSH_KEYS]?.let { raw ->
-            runCatching {
-                val obj = json.parseToJsonElement(raw)
-                    .let { it as kotlinx.serialization.json.JsonObject }
-                PushKeys(
-                    privateKey = obj.getValue("privateKey").jsonPrimitive.content,
-                    publicUncompressed = obj.getValue("publicUncompressed").jsonPrimitive.content,
-                    auth = obj.getValue("auth").jsonPrimitive.content,
+        override val settings: Flow<Settings> =
+            store.data.map { prefs ->
+                Settings(
+                    themeMode =
+                        prefs[PrefKeys.THEME_MODE]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
+                            ?: ThemeMode.SYSTEM,
+                    dynamicColor = prefs[PrefKeys.DYNAMIC_COLOR]?.toBooleanStrictOrNull() ?: true,
+                    deliveryMode =
+                        prefs[PrefKeys.DELIVERY_MODE]?.let { runCatching { DeliveryMode.valueOf(it) }.getOrNull() }
+                            ?: DeliveryMode.PERSISTENT_SOCKET,
+                    // Round 4: invalid enum strings fall back to defaults.
+                    layoutDensity =
+                        prefs[PrefKeys.LAYOUT_DENSITY]?.let { runCatching { LayoutDensity.valueOf(it) }.getOrNull() }
+                            ?: LayoutDensity.COMFORTABLE,
+                    nickColorsEnabled = prefs[PrefKeys.NICK_COLORS_ENABLED]?.toBooleanStrictOrNull() ?: true,
+                    nickColorPalette = nickColorPaletteFromPreference(prefs[PrefKeys.NICK_COLOR_PALETTE]),
+                    nickColorOverrides = decodeHueOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]),
+                    friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]),
+                    fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]),
+                    foolsMode =
+                        prefs[PrefKeys.FOOLS_MODE]?.let { runCatching { FoolsMode.valueOf(it) }.getOrNull() }
+                            ?: FoolsMode.COLLAPSE,
+                    presenceMode =
+                        presenceModeFromPreference(
+                            prefs[PrefKeys.PRESENCE_MODE],
+                            prefs[PrefKeys.SHOW_JOIN_PART_QUIT],
+                        ),
+                    avatarStyle = avatarStyleFromPreference(prefs[PrefKeys.AVATAR_STYLE]),
+                    chatWallpaper =
+                        prefs[PrefKeys.CHAT_WALLPAPER]?.let { runCatching { ChatWallpaper.valueOf(it) }.getOrNull() }
+                            ?: ChatWallpaper.NONE,
+                    showComposerEmoji = prefs[PrefKeys.SHOW_COMPOSER_EMOJI]?.toBooleanStrictOrNull() ?: true,
+                    chatSoundsEnabled = prefs[PrefKeys.CHAT_SOUNDS_ENABLED]?.toBooleanStrictOrNull() ?: true,
+                    historySyncDepth =
+                        prefs[PrefKeys.HISTORY_SYNC_DEPTH]
+                            ?.let { runCatching { HistorySyncDepth.valueOf(it) }.getOrNull() }
+                            ?: HistorySyncDepth.MONTH,
+                    autoAwayEnabled = prefs[PrefKeys.AUTO_AWAY_ENABLED]?.toBooleanStrictOrNull() ?: false,
+                    autoAwayMinutes = autoAwayMinutesFromPreference(prefs[PrefKeys.AUTO_AWAY_MINUTES]?.toIntOrNull()),
+                    autoAwayMessage = prefs[PrefKeys.AUTO_AWAY_MESSAGE].orEmpty(),
                 )
-            }.getOrNull()
+            }
+
+        override suspend fun setThemeMode(m: ThemeMode) {
+            store.edit { it[PrefKeys.THEME_MODE] = m.name }
         }
 
-    override suspend fun setKeys(keys: PushKeys) {
-        val encoded = buildJsonObject {
-            put("privateKey", keys.privateKey)
-            put("publicUncompressed", keys.publicUncompressed)
-            put("auth", keys.auth)
-        }.toString()
-        store.edit { it[PrefKeys.PUSH_KEYS] = encoded }
-    }
+        override suspend fun setDynamicColor(enabled: Boolean) {
+            store.edit { it[PrefKeys.DYNAMIC_COLOR] = enabled.toString() }
+        }
 
-    // -- CertTrustStore (TOFU cert pins; JSON {"host:port":"<sha256 hex>"} under one key) --
+        override suspend fun setDeliveryMode(m: DeliveryMode) {
+            store.edit { it[PrefKeys.DELIVERY_MODE] = m.name }
+        }
 
-    override suspend fun pinnedFor(host: String, port: Int): String? =
-        decodeCertPins(store.data.first()[PrefKeys.CERT_PINS])[pinKey(host, port)]
+        // -- Round 4: appearance/behavior settings --
 
-    override suspend fun isPinned(host: String, port: Int, sha256: String): Boolean =
-        pinnedFor(host, port)?.equals(sha256, ignoreCase = true) == true
+        override suspend fun setLayoutDensity(d: LayoutDensity) {
+            store.edit { it[PrefKeys.LAYOUT_DENSITY] = d.name }
+        }
 
-    override suspend fun pin(host: String, port: Int, sha256: String) {
-        store.edit { prefs ->
-            val current = decodeCertPins(prefs[PrefKeys.CERT_PINS]).toMutableMap()
-            current[pinKey(host, port)] = sha256.lowercase()
-            prefs[PrefKeys.CERT_PINS] = encodeCertPins(current)
+        override suspend fun setNickColorsEnabled(enabled: Boolean) {
+            store.edit { it[PrefKeys.NICK_COLORS_ENABLED] = enabled.toString() }
+        }
+
+        override suspend fun setNickColorPalette(p: NickColorPalette) {
+            store.edit { it[PrefKeys.NICK_COLOR_PALETTE] = p.name }
+        }
+
+        override suspend fun setNickColorOverride(
+            nick: String,
+            hue: Int?,
+        ) {
+            val key = normalizeNick(nick)
+            store.edit { prefs ->
+                val current = decodeHueOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]).toMutableMap()
+                if (hue == null) current.remove(key) else current[key] = hue.coerceIn(0, 359)
+                if (current.isEmpty()) {
+                    prefs.remove(PrefKeys.NICK_COLOR_OVERRIDES)
+                } else {
+                    prefs[PrefKeys.NICK_COLOR_OVERRIDES] = encodeHueOverrides(current)
+                }
+            }
+        }
+
+        override suspend fun setFriend(
+            nick: String,
+            isFriend: Boolean,
+        ) {
+            val key = normalizeNick(nick)
+            // One transaction keeps friends/fools disjoint: adding a friend drops it from fools.
+            store.edit { prefs ->
+                val friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]).toMutableSet()
+                val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]).toMutableSet()
+                if (isFriend) {
+                    friends.add(key)
+                    fools.remove(key)
+                } else {
+                    friends.remove(key)
+                }
+                writeNickSet(prefs, PrefKeys.FRIEND_NICKS, friends)
+                writeNickSet(prefs, PrefKeys.FOOL_NICKS, fools)
+            }
+        }
+
+        override suspend fun setFool(
+            nick: String,
+            isFool: Boolean,
+        ) {
+            val key = normalizeNick(nick)
+            store.edit { prefs ->
+                val friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]).toMutableSet()
+                val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]).toMutableSet()
+                if (isFool) {
+                    fools.add(key)
+                    friends.remove(key)
+                } else {
+                    fools.remove(key)
+                }
+                writeNickSet(prefs, PrefKeys.FRIEND_NICKS, friends)
+                writeNickSet(prefs, PrefKeys.FOOL_NICKS, fools)
+            }
+        }
+
+        override suspend fun setFriend(
+            nick: String,
+            isFriend: Boolean,
+            identityRules: IrcIdentityRules,
+        ) = setSocialIdentity(nick, isFriend, identityRules, friend = true)
+
+        override suspend fun setFool(
+            nick: String,
+            isFool: Boolean,
+            identityRules: IrcIdentityRules,
+        ) = setSocialIdentity(nick, isFool, identityRules, friend = false)
+
+        private suspend fun setSocialIdentity(
+            nick: String,
+            enabled: Boolean,
+            identityRules: IrcIdentityRules,
+            friend: Boolean,
+        ) {
+            val key = normalizeNick(nick)
+            val actor = identityRules.normalize(nick.trim())
+            store.edit { prefs ->
+                val friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]).toMutableSet()
+                val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]).toMutableSet()
+                val target = if (friend) friends else fools
+                target.removeAll { identityRules.normalize(it.trim()) == actor }
+                if (enabled) {
+                    val other = if (friend) fools else friends
+                    other.removeAll { identityRules.normalize(it.trim()) == actor }
+                    target.add(key)
+                }
+                writeNickSet(prefs, PrefKeys.FRIEND_NICKS, friends)
+                writeNickSet(prefs, PrefKeys.FOOL_NICKS, fools)
+            }
+        }
+
+        override suspend fun setFoolsMode(m: FoolsMode) {
+            store.edit { it[PrefKeys.FOOLS_MODE] = m.name }
+        }
+
+        /** Drops the superseded boolean so a later downgrade-then-upgrade cannot resurrect it. */
+        override suspend fun setPresenceMode(m: PresenceMode) {
+            store.edit {
+                it[PrefKeys.PRESENCE_MODE] = m.name
+                it.remove(PrefKeys.SHOW_JOIN_PART_QUIT)
+            }
+        }
+
+        override suspend fun setAvatarStyle(style: AvatarStyle) {
+            store.edit { it[PrefKeys.AVATAR_STYLE] = style.name }
+        }
+
+        override suspend fun setChatWallpaper(w: ChatWallpaper) {
+            store.edit { it[PrefKeys.CHAT_WALLPAPER] = w.name }
+        }
+
+        override suspend fun setShowComposerEmoji(show: Boolean) {
+            store.edit { it[PrefKeys.SHOW_COMPOSER_EMOJI] = show.toString() }
+        }
+
+        override suspend fun setChatSoundsEnabled(enabled: Boolean) {
+            store.edit { it[PrefKeys.CHAT_SOUNDS_ENABLED] = enabled.toString() }
+        }
+
+        override suspend fun setHistorySyncDepth(d: HistorySyncDepth) {
+            store.edit { it[PrefKeys.HISTORY_SYNC_DEPTH] = d.name }
+        }
+
+        override suspend fun setAutoAwayEnabled(enabled: Boolean) {
+            store.edit { it[PrefKeys.AUTO_AWAY_ENABLED] = enabled.toString() }
+        }
+
+        /** Coerced on write as well as on read: an off-list delay must never reach the coordinator. */
+        override suspend fun setAutoAwayMinutes(minutes: Int) {
+            val choice = autoAwayMinutesFromPreference(minutes)
+            store.edit { it[PrefKeys.AUTO_AWAY_MINUTES] = choice.toString() }
+        }
+
+        /** Blank clears the key so the localized default applies again. */
+        override suspend fun setAutoAwayMessage(message: String) {
+            val trimmed = message.trim()
+            store.edit {
+                if (trimmed.isEmpty()) {
+                    it.remove(PrefKeys.AUTO_AWAY_MESSAGE)
+                } else {
+                    it[PrefKeys.AUTO_AWAY_MESSAGE] = trimmed
+                }
+            }
+        }
+
+        // Empty set removes its key (mirrors setEndpointFor); non-empty writes the JSON array.
+        private fun writeNickSet(
+            prefs: androidx.datastore.preferences.core.MutablePreferences,
+            key: Preferences.Key<String>,
+            nicks: Set<String>,
+        ) {
+            if (nicks.isEmpty()) prefs.remove(key) else prefs[key] = encodeNickSet(nicks)
+        }
+
+        // -- PushPrefs (values base64url; keys stored as JSON) --
+
+        // Per-network endpoints persisted as a JSON object {"<networkId>": "<url>"} under one key,
+        // using the same manual-JSON approach as push_keys.
+        override suspend fun endpoints(): Map<Long, String> = decodeEndpoints(store.data.first()[PrefKeys.PUSH_ENDPOINTS])
+
+        override suspend fun endpointFor(networkId: Long): String? = endpoints()[networkId]
+
+        override suspend fun setEndpointFor(
+            networkId: Long,
+            endpoint: String?,
+        ) {
+            store.edit { prefs ->
+                val current = decodeEndpoints(prefs[PrefKeys.PUSH_ENDPOINTS]).toMutableMap()
+                if (endpoint == null) current.remove(networkId) else current[networkId] = endpoint
+                if (current.isEmpty()) {
+                    prefs.remove(PrefKeys.PUSH_ENDPOINTS)
+                } else {
+                    prefs[PrefKeys.PUSH_ENDPOINTS] = encodeEndpoints(current)
+                }
+            }
+        }
+
+        override suspend fun clearEndpoints() {
+            store.edit { it.remove(PrefKeys.PUSH_ENDPOINTS) }
+        }
+
+        private fun decodeEndpoints(raw: String?): Map<Long, String> {
+            if (raw == null) return emptyMap()
+            return runCatching {
+                val obj = json.parseToJsonElement(raw) as kotlinx.serialization.json.JsonObject
+                obj.entries
+                    .mapNotNull { (k, v) ->
+                        val id = k.toLongOrNull() ?: return@mapNotNull null
+                        id to v.jsonPrimitive.content
+                    }.toMap()
+            }.getOrDefault(emptyMap())
+        }
+
+        private fun encodeEndpoints(map: Map<Long, String>): String =
+            buildJsonObject {
+                for ((id, url) in map) put(id.toString(), url)
+            }.toString()
+
+        // PushKeys is a frozen contract data class (no @Serializable), so (de)serialize it manually
+        // as a plain JSON object.
+        override suspend fun keys(): PushKeys? =
+            store.data.first()[PrefKeys.PUSH_KEYS]?.let { raw ->
+                runCatching {
+                    val obj =
+                        json
+                            .parseToJsonElement(raw)
+                            .let { it as kotlinx.serialization.json.JsonObject }
+                    PushKeys(
+                        privateKey = obj.getValue("privateKey").jsonPrimitive.content,
+                        publicUncompressed = obj.getValue("publicUncompressed").jsonPrimitive.content,
+                        auth = obj.getValue("auth").jsonPrimitive.content,
+                    )
+                }.getOrNull()
+            }
+
+        override suspend fun setKeys(keys: PushKeys) {
+            val encoded =
+                buildJsonObject {
+                    put("privateKey", keys.privateKey)
+                    put("publicUncompressed", keys.publicUncompressed)
+                    put("auth", keys.auth)
+                }.toString()
+            store.edit { it[PrefKeys.PUSH_KEYS] = encoded }
+        }
+
+        // -- CertTrustStore (TOFU cert pins; JSON {"host:port":"<sha256 hex>"} under one key) --
+
+        override suspend fun pinnedFor(
+            host: String,
+            port: Int,
+        ): String? = decodeCertPins(store.data.first()[PrefKeys.CERT_PINS])[pinKey(host, port)]
+
+        override suspend fun isPinned(
+            host: String,
+            port: Int,
+            sha256: String,
+        ): Boolean = pinnedFor(host, port)?.equals(sha256, ignoreCase = true) == true
+
+        override suspend fun pin(
+            host: String,
+            port: Int,
+            sha256: String,
+        ) {
+            store.edit { prefs ->
+                val current = decodeCertPins(prefs[PrefKeys.CERT_PINS]).toMutableMap()
+                current[pinKey(host, port)] = sha256.lowercase()
+                prefs[PrefKeys.CERT_PINS] = encodeCertPins(current)
+            }
+        }
+
+        override suspend fun unpin(
+            host: String,
+            port: Int,
+        ) {
+            store.edit { prefs ->
+                val current = decodeCertPins(prefs[PrefKeys.CERT_PINS]).toMutableMap()
+                current.remove(pinKey(host, port))
+                if (current.isEmpty()) {
+                    prefs.remove(PrefKeys.CERT_PINS)
+                } else {
+                    prefs[PrefKeys.CERT_PINS] = encodeCertPins(current)
+                }
+            }
+        }
+
+        // host:port composite key; host lowercased so pins are case-insensitive on the hostname.
+        private fun pinKey(
+            host: String,
+            port: Int,
+        ): String = "${host.lowercase()}:$port"
+
+        private fun decodeCertPins(raw: String?): Map<String, String> {
+            if (raw == null) return emptyMap()
+            return runCatching {
+                val obj = json.parseToJsonElement(raw) as kotlinx.serialization.json.JsonObject
+                obj.entries.associate { (k, v) -> k to v.jsonPrimitive.content }
+            }.getOrDefault(emptyMap())
+        }
+
+        private fun encodeCertPins(map: Map<String, String>): String =
+            buildJsonObject {
+                for ((k, v) in map) put(k, v)
+            }.toString()
+
+        // -- STS policy storage (internal accessor for WP5) --
+
+        /** Raw STS-policy JSON blob (opaque to this layer); WP5 owns the schema. */
+        internal suspend fun stsPolicies(): String? = store.data.first()[PrefKeys.STS_POLICIES]
+
+        internal suspend fun setStsPolicies(jsonBlob: String?) {
+            store.edit {
+                if (jsonBlob == null) {
+                    it.remove(PrefKeys.STS_POLICIES)
+                } else {
+                    it[PrefKeys.STS_POLICIES] = jsonBlob
+                }
+            }
         }
     }
-
-    override suspend fun unpin(host: String, port: Int) {
-        store.edit { prefs ->
-            val current = decodeCertPins(prefs[PrefKeys.CERT_PINS]).toMutableMap()
-            current.remove(pinKey(host, port))
-            if (current.isEmpty()) prefs.remove(PrefKeys.CERT_PINS)
-            else prefs[PrefKeys.CERT_PINS] = encodeCertPins(current)
-        }
-    }
-
-    // host:port composite key; host lowercased so pins are case-insensitive on the hostname.
-    private fun pinKey(host: String, port: Int): String = "${host.lowercase()}:$port"
-
-    private fun decodeCertPins(raw: String?): Map<String, String> {
-        if (raw == null) return emptyMap()
-        return runCatching {
-            val obj = json.parseToJsonElement(raw) as kotlinx.serialization.json.JsonObject
-            obj.entries.associate { (k, v) -> k to v.jsonPrimitive.content }
-        }.getOrDefault(emptyMap())
-    }
-
-    private fun encodeCertPins(map: Map<String, String>): String =
-        buildJsonObject {
-            for ((k, v) in map) put(k, v)
-        }.toString()
-
-    // -- STS policy storage (internal accessor for WP5) --
-
-    /** Raw STS-policy JSON blob (opaque to this layer); WP5 owns the schema. */
-    internal suspend fun stsPolicies(): String? =
-        store.data.first()[PrefKeys.STS_POLICIES]
-
-    internal suspend fun setStsPolicies(jsonBlob: String?) {
-        store.edit {
-            if (jsonBlob == null) it.remove(PrefKeys.STS_POLICIES)
-            else it[PrefKeys.STS_POLICIES] = jsonBlob
-        }
-    }
-}

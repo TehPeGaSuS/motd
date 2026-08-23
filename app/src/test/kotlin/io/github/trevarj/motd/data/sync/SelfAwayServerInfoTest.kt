@@ -29,83 +29,103 @@ class SelfAwayServerInfoTest {
     private var networkId: Long = 0
 
     @Before
-    fun setUp() = runTest {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        db = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
-            .allowMainThreadQueries().build()
-        processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
-        networkId = db.networkDao().insert(
-            NetworkEntity(
-                name = "libera", role = NetworkRole.DIRECT,
-                host = "irc.libera.chat", port = 6697,
-                nick = "me", username = "me", realname = "Me",
-            ),
-        )
-        processor.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
-    }
+    fun setUp() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            db =
+                Room
+                    .inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
+                    .allowMainThreadQueries()
+                    .build()
+            processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
+            networkId =
+                db.networkDao().insert(
+                    NetworkEntity(
+                        name = "libera",
+                        role = NetworkRole.DIRECT,
+                        host = "irc.libera.chat",
+                        port = 6697,
+                        nick = "me",
+                        username = "me",
+                        realname = "Me",
+                    ),
+                )
+            processor.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+        }
 
-    @After fun tearDown() { db.close() }
+    @After fun tearDown() {
+        db.close()
+    }
 
     private suspend fun serverBuffer() = db.bufferDao().byName(networkId, "*")
 
-    private suspend fun serverRows() = db.messageDao().pagingSource(serverBuffer()!!.id).load(
-        androidx.paging.PagingSource.LoadParams.Refresh(null, 100, false),
-    ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data }
+    private suspend fun serverRows() =
+        db
+            .messageDao()
+            .pagingSource(serverBuffer()!!.id)
+            .load(
+                androidx.paging.PagingSource.LoadParams
+                    .Refresh(null, 100, false),
+            ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data }
 
     @Test
-    fun liveSelfAway_insertsSameServerInfoLineAsBefore() = runTest {
-        processor.process(
-            networkId,
-            IrcEvent.SelfAwayChanged(isAway = true, text = "You have been marked as being away"),
-        )
-        processor.process(
-            networkId,
-            IrcEvent.SelfAwayChanged(isAway = false, text = "You are no longer marked as being away"),
-        )
-        val rows = serverRows()
-        assertEquals(2, rows.size)
-        rows.forEach { assertEquals(MessageKind.SERVER_INFO, it.kind) }
-        assertEquals(
-            setOf(
-                "You have been marked as being away",
-                "You are no longer marked as being away",
-            ),
-            rows.map { it.text }.toSet(),
-        )
-    }
+    fun liveSelfAway_insertsSameServerInfoLineAsBefore() =
+        runTest {
+            processor.process(
+                networkId,
+                IrcEvent.SelfAwayChanged(isAway = true, text = "You have been marked as being away"),
+            )
+            processor.process(
+                networkId,
+                IrcEvent.SelfAwayChanged(isAway = false, text = "You are no longer marked as being away"),
+            )
+            val rows = serverRows()
+            assertEquals(2, rows.size)
+            rows.forEach { assertEquals(MessageKind.SERVER_INFO, it.kind) }
+            assertEquals(
+                setOf(
+                    "You have been marked as being away",
+                    "You are no longer marked as being away",
+                ),
+                rows.map { it.text }.toSet(),
+            )
+        }
 
     @Test
-    fun historySelfAway_insertsNothing() = runTest {
-        processor.process(
-            networkId,
-            IrcEvent.HistoryBatch(
-                target = "#chan",
-                events = listOf(IrcEvent.SelfAwayChanged(isAway = true, text = "You have been marked as being away")),
-            ),
-        )
-        assertNull(serverBuffer())
-    }
+    fun historySelfAway_insertsNothing() =
+        runTest {
+            processor.process(
+                networkId,
+                IrcEvent.HistoryBatch(
+                    target = "#chan",
+                    events = listOf(IrcEvent.SelfAwayChanged(isAway = true, text = "You have been marked as being away")),
+                ),
+            )
+            assertNull(serverBuffer())
+        }
 
     @Test
-    fun pushSelfAway_insertsNothing() = runTest {
-        processor.processPush(
-            networkId,
-            IrcEvent.SelfAwayChanged(isAway = true, text = "You have been marked as being away"),
-        )
-        assertNull(serverBuffer())
-    }
+    fun pushSelfAway_insertsNothing() =
+        runTest {
+            processor.processPush(
+                networkId,
+                IrcEvent.SelfAwayChanged(isAway = true, text = "You have been marked as being away"),
+            )
+            assertNull(serverBuffer())
+        }
 
     @Test
-    fun awayNumericsAreNoLongerRawServerInfo() = runTest {
-        // The Raw path must not double-render them now that the typed branch owns the line.
-        processor.process(
-            networkId,
-            IrcEvent.Raw(IrcMessage(command = "306", params = listOf("me", "You have been marked as being away"))),
-        )
-        processor.process(
-            networkId,
-            IrcEvent.Raw(IrcMessage(command = "305", params = listOf("me", "You are no longer marked as being away"))),
-        )
-        assertNull(serverBuffer())
-    }
+    fun awayNumericsAreNoLongerRawServerInfo() =
+        runTest {
+            // The Raw path must not double-render them now that the typed branch owns the line.
+            processor.process(
+                networkId,
+                IrcEvent.Raw(IrcMessage(command = "306", params = listOf("me", "You have been marked as being away"))),
+            )
+            processor.process(
+                networkId,
+                IrcEvent.Raw(IrcMessage(command = "305", params = listOf("me", "You are no longer marked as being away"))),
+            )
+            assertNull(serverBuffer())
+        }
 }

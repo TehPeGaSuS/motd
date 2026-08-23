@@ -14,7 +14,6 @@ import org.junit.Test
  * [ConnectionIntentsTest] / [TrustReconnectTest] / [ChildReconnectTest].
  */
 class ActorRebuildTest {
-
     private val ready = IrcClientState.Ready(nick = "motd", caps = emptySet(), isupport = emptyMap())
     private val fatal = IrcClientState.Failed("sasl fail", fatal = true)
 

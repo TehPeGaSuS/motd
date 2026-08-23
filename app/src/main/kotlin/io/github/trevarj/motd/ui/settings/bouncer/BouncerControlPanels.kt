@@ -47,7 +47,14 @@ fun ChannelsPanel(
     connected: Boolean,
     callbacks: BouncerControlCallbacks,
 ) {
-    var network by remember(state.rows) { mutableStateOf(state.rows.firstOrNull()?.name.orEmpty()) }
+    var network by remember(state.rows) {
+        mutableStateOf(
+            state.rows
+                .firstOrNull()
+                ?.name
+                .orEmpty(),
+        )
+    }
     var channel by remember { mutableStateOf("") }
     var detached by remember { mutableStateOf<Boolean?>(null) }
     var relayDetached by remember { mutableStateOf("") }
@@ -79,8 +86,9 @@ fun ChannelsPanel(
                 ActionWrap {
                     OutlinedButton(
                         onClick = { callbacks.onChannelStatus(network.trim()) },
-                        enabled = connected && network.isNotBlank() &&
-                            state.capabilities.supports("channel status") && !state.commandBusy,
+                        enabled =
+                            connected && network.isNotBlank() &&
+                                state.capabilities.supports("channel status") && !state.commandBusy,
                     ) { Text(stringResource(R.string.action_refresh)) }
                 }
                 if (state.channels.isEmpty()) {
@@ -97,8 +105,11 @@ fun ChannelsPanel(
                             ) {
                                 Text(row.name, fontWeight = FontWeight.Medium)
                                 Text(
-                                    if (row.detached) "${row.status} · ${stringResource(R.string.bouncer_channel_detached)}"
-                                    else row.status,
+                                    if (row.detached) {
+                                        "${row.status} · ${stringResource(R.string.bouncer_channel_detached)}"
+                                    } else {
+                                        row.status
+                                    },
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
@@ -154,18 +165,21 @@ fun ChannelsPanel(
                 ActionWrap {
                     Button(
                         onClick = { callbacks.onCreateChannel(channel.trim(), network.trim(), fields()) },
-                        enabled = canMutate && channel.isNotBlank() && network.isNotBlank() &&
-                            state.capabilities.supports("channel create"),
+                        enabled =
+                            canMutate && channel.isNotBlank() && network.isNotBlank() &&
+                                state.capabilities.supports("channel create"),
                     ) { Text(stringResource(R.string.bouncer_add)) }
                     OutlinedButton(
                         onClick = { callbacks.onUpdateChannel(channel.trim(), network.trim(), fields()) },
-                        enabled = canMutate && channel.isNotBlank() && network.isNotBlank() &&
-                            state.capabilities.supports("channel update"),
+                        enabled =
+                            canMutate && channel.isNotBlank() && network.isNotBlank() &&
+                                state.capabilities.supports("channel update"),
                     ) { Text(stringResource(R.string.action_save)) }
                     TextButton(
                         onClick = { confirmDelete = true },
-                        enabled = canMutate && channel.isNotBlank() && network.isNotBlank() &&
-                            state.capabilities.supports("channel delete"),
+                        enabled =
+                            canMutate && channel.isNotBlank() && network.isNotBlank() &&
+                                state.capabilities.supports("channel delete"),
                     ) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) }
                 }
             }
@@ -197,7 +211,14 @@ fun AccountPanel(
 ) {
     var nick by remember { mutableStateOf("") }
     var realName by remember { mutableStateOf("") }
-    var network by remember(state.rows) { mutableStateOf(state.rows.firstOrNull()?.name.orEmpty()) }
+    var network by remember(state.rows) {
+        mutableStateOf(
+            state.rows
+                .firstOrNull()
+                ?.name
+                .orEmpty(),
+        )
+    }
     var keyType by remember { mutableStateOf("ed25519") }
     var showSasl by remember { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -235,8 +256,9 @@ fun AccountPanel(
                             realName.trim().takeIf(String::isNotBlank),
                         )
                     },
-                    enabled = enabled && (nick.isNotBlank() || realName.isNotBlank()) &&
-                        state.capabilities.supports("user update"),
+                    enabled =
+                        enabled && (nick.isNotBlank() || realName.isNotBlank()) &&
+                            state.capabilities.supports("user update"),
                 ) { Text(stringResource(R.string.action_save)) }
             }
         }
@@ -301,7 +323,10 @@ fun AccountPanel(
             message = stringResource(R.string.bouncer_sasl_reset_message, network),
             destructive = true,
             onDismiss = { confirmReset = false },
-            onConfirm = { confirmReset = false; callbacks.onResetSasl(network.trim()) },
+            onConfirm = {
+                confirmReset = false
+                callbacks.onResetSasl(network.trim())
+            },
         )
     }
     if (confirmCert) {
@@ -390,38 +415,67 @@ fun AdminPanel(
         }
     }
     when (dialog) {
-        AdminDialog.CREATE_USER -> UserCreateDialog(
-            onDismiss = { dialog = null },
-            onSubmit = { username, password, admin, userEnabled ->
-                dialog = null
-                callbacks.onCreateUser(username, password, admin, userEnabled)
-            },
-        )
-        AdminDialog.UPDATE_USER -> UserUpdateDialog(
-            currentUsername = state.root?.username.orEmpty(),
-            administrator = true,
-            onDismiss = { dialog = null },
-            onSubmit = { username, fields -> dialog = null; callbacks.onUpdateUser(username, fields) },
-        )
-        AdminDialog.DELETE_USER -> TypedUserDeleteDialog(
-            onDismiss = { dialog = null },
-            onSubmit = { username -> dialog = null; callbacks.onRequestUserDeletion(username) },
-        )
-        AdminDialog.RUN_AS_USER -> TextCommandDialog(
-            title = stringResource(R.string.bouncer_user_run_title),
-            firstLabel = stringResource(R.string.onboarding_field_username),
-            secondLabel = stringResource(R.string.bouncer_console_command),
-            onDismiss = { dialog = null },
-            onSubmit = { username, command -> dialog = null; callbacks.onRunAsUser(username, command) },
-        )
-        AdminDialog.SERVER_NOTICE -> TextCommandDialog(
-            title = stringResource(R.string.bouncer_server_notice_title),
-            firstLabel = stringResource(R.string.bouncer_server_notice_message),
-            warning = stringResource(R.string.bouncer_server_notice_warning),
-            onDismiss = { dialog = null },
-            onSubmit = { message, _ -> dialog = null; callbacks.onServerNotice(message) },
-        )
-        null -> Unit
+        AdminDialog.CREATE_USER -> {
+            UserCreateDialog(
+                onDismiss = { dialog = null },
+                onSubmit = { username, password, admin, userEnabled ->
+                    dialog = null
+                    callbacks.onCreateUser(username, password, admin, userEnabled)
+                },
+            )
+        }
+
+        AdminDialog.UPDATE_USER -> {
+            UserUpdateDialog(
+                currentUsername = state.root?.username.orEmpty(),
+                administrator = true,
+                onDismiss = { dialog = null },
+                onSubmit = { username, fields ->
+                    dialog = null
+                    callbacks.onUpdateUser(username, fields)
+                },
+            )
+        }
+
+        AdminDialog.DELETE_USER -> {
+            TypedUserDeleteDialog(
+                onDismiss = { dialog = null },
+                onSubmit = { username ->
+                    dialog = null
+                    callbacks.onRequestUserDeletion(username)
+                },
+            )
+        }
+
+        AdminDialog.RUN_AS_USER -> {
+            TextCommandDialog(
+                title = stringResource(R.string.bouncer_user_run_title),
+                firstLabel = stringResource(R.string.onboarding_field_username),
+                secondLabel = stringResource(R.string.bouncer_console_command),
+                onDismiss = { dialog = null },
+                onSubmit = { username, command ->
+                    dialog = null
+                    callbacks.onRunAsUser(username, command)
+                },
+            )
+        }
+
+        AdminDialog.SERVER_NOTICE -> {
+            TextCommandDialog(
+                title = stringResource(R.string.bouncer_server_notice_title),
+                firstLabel = stringResource(R.string.bouncer_server_notice_message),
+                warning = stringResource(R.string.bouncer_server_notice_warning),
+                onDismiss = { dialog = null },
+                onSubmit = { message, _ ->
+                    dialog = null
+                    callbacks.onServerNotice(message)
+                },
+            )
+        }
+
+        null -> {
+            Unit
+        }
     }
     if (debugEnableWarning) {
         ConfirmDialog(
@@ -429,7 +483,10 @@ fun AdminPanel(
             message = stringResource(R.string.bouncer_debug_enable_warning),
             destructive = true,
             onDismiss = { debugEnableWarning = false },
-            onConfirm = { debugEnableWarning = false; callbacks.onServerDebug(true) },
+            onConfirm = {
+                debugEnableWarning = false
+                callbacks.onServerDebug(true)
+            },
         )
     }
 }
@@ -441,9 +498,10 @@ fun ConsolePanel(
     callbacks: BouncerControlCallbacks,
 ) {
     var command by remember { mutableStateOf("") }
-    val suggestions = remember(state.capabilities.commandPaths, command) {
-        bouncerCommandSuggestions(state.capabilities.commandPaths, command)
-    }
+    val suggestions =
+        remember(state.capabilities.commandPaths, command) {
+            bouncerCommandSuggestions(state.capabilities.commandPaths, command)
+        }
     Column(Modifier.fillMaxSize().testTag("bouncer_console_panel")) {
         LazyColumn(
             modifier = Modifier.fillMaxWidth().weight(1f),
@@ -455,8 +513,12 @@ fun ConsolePanel(
             }
             items(state.transcript, key = { "${it.serverTime}:${it.sender}:${it.text}" }) { entry ->
                 Surface(
-                    color = if (entry.isSelf) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surfaceContainerLow,
+                    color =
+                        if (entry.isSelf) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerLow
+                        },
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -492,25 +554,32 @@ fun ConsolePanel(
             label = { Text(stringResource(R.string.bouncer_console_command)) },
             supportingText = {
                 Text(
-                    if (state.capabilities.verified) stringResource(R.string.bouncer_console_help)
-                    else stringResource(R.string.bouncer_console_unverified),
+                    if (state.capabilities.verified) {
+                        stringResource(R.string.bouncer_console_help)
+                    } else {
+                        stringResource(R.string.bouncer_console_unverified)
+                    },
                 )
             },
             trailingIcon = {
                 IconButton(
-                    onClick = { callbacks.onSubmitConsole(command); command = "" },
+                    onClick = {
+                        callbacks.onSubmitConsole(command)
+                        command = ""
+                    },
                     enabled = connected && command.isNotBlank() && !state.commandBusy,
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.action_send))
                 }
             },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = {
-                if (connected && command.isNotBlank() && !state.commandBusy) {
-                    callbacks.onSubmitConsole(command)
-                    command = ""
-                }
-            }),
+            keyboardActions =
+                KeyboardActions(onSend = {
+                    if (connected && command.isNotBlank() && !state.commandBusy) {
+                        callbacks.onSubmitConsole(command)
+                        command = ""
+                    }
+                }),
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(12.dp).testTag("bouncer_console_input"),
         )
@@ -518,7 +587,10 @@ fun ConsolePanel(
 }
 
 @Composable
-private fun PanelCard(title: String, content: @Composable () -> Unit) {
+private fun PanelCard(
+    title: String,
+    content: @Composable () -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             title,
@@ -539,7 +611,11 @@ private fun PanelCard(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun FilterField(value: String, onValueChange: (String) -> Unit, label: String) {
+private fun FilterField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,

@@ -12,9 +12,11 @@ import io.github.trevarj.motd.irc.client.ChatHistoryReference
  * timestamp-only wire is every full page) and is deliberately not expressible here.
  */
 sealed interface Pageability {
-
     /** Page again, issuing the request from [boundary], attributed to [focusedGapId] if any. */
-    data class Page(val boundary: ChatHistoryReference, val focusedGapId: Long?) : Pageability
+    data class Page(
+        val boundary: ChatHistoryReference,
+        val focusedGapId: Long?,
+    ) : Pageability
 
     /**
      * There is no local boundary to page from, so pull the newest page instead. Reached on a fresh
@@ -27,14 +29,19 @@ sealed interface Pageability {
      * diagnostic field; the strings are matched by field tooling, so treat them as a wire contract
      * and do not reword them.
      */
-    data class End(val reason: String) : Pageability
+    data class End(
+        val reason: String,
+    ) : Pageability
 }
 
 /**
  * What the page that just completed actually achieved: the boundary it was requested from and the
  * durable rows the persist added. Null when asking before a fetch rather than after one.
  */
-data class PageProgress(val previous: ChatHistoryReference?, val insertedCount: Int)
+data class PageProgress(
+    val previous: ChatHistoryReference?,
+    val insertedCount: Int,
+)
 
 /**
  * The anti-livelock stop: nothing landed and the next request would be byte-identical.
@@ -112,11 +119,12 @@ fun olderPageability(
     //
     // With no open gap the floor is absent and this degenerates to "page below the oldest thing I
     // know", which is the ladder it has always been.
-    val boundary = focusedGap?.let { ChatHistoryReference(it.newerMsgid, it.newerServerTime) }
-        ?: olderOf(
-            olderOf(cursorOldest?.takeIf { it.msgid != null || it.serverTime != null }, oldestLocalRow),
-            gapFloor,
-        )
+    val boundary =
+        focusedGap?.let { ChatHistoryReference(it.newerMsgid, it.newerServerTime) }
+            ?: olderOf(
+                olderOf(cursorOldest?.takeIf { it.msgid != null || it.serverTime != null }, oldestLocalRow),
+                gapFloor,
+            )
 
     if (progress != null && progress.insertedCount == 0 && !boundary.advancedFrom(progress.previous)) {
         // Anti-livelock guard: nothing landed AND the next request would be identical, so reporting
@@ -142,9 +150,10 @@ fun olderPageability(
  * BEFORE selector, which is strictly-older-than on timestamp, so equal-timestamp precision buys
  * nothing here; the exact edge identity still travels with the gap for the fill that owns it.
  */
-fun openGapFloor(gaps: List<HistoryGapEntity>): ChatHistoryReference? = gaps
-    .minByOrNull { it.olderServerTime }
-    ?.let { ChatHistoryReference(it.olderMsgid, it.olderServerTime) }
+fun openGapFloor(gaps: List<HistoryGapEntity>): ChatHistoryReference? =
+    gaps
+        .minByOrNull { it.olderServerTime }
+        ?.let { ChatHistoryReference(it.olderMsgid, it.olderServerTime) }
 
 /**
  * The older of two boundaries.
@@ -153,7 +162,10 @@ fun openGapFloor(gaps: List<HistoryGapEntity>): ChatHistoryReference? = gaps
  * event whose position only the server knows — so it yields rather than guessing. Every gap edge and
  * every retained row carries a server time; only a stored protocol cursor can lack one.
  */
-internal fun olderOf(a: ChatHistoryReference?, b: ChatHistoryReference?): ChatHistoryReference? {
+internal fun olderOf(
+    a: ChatHistoryReference?,
+    b: ChatHistoryReference?,
+): ChatHistoryReference? {
     if (a == null) return b
     if (b == null) return a
     val aTime = a.serverTime ?: return b

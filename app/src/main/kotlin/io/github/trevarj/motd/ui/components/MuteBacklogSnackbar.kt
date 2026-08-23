@@ -31,11 +31,12 @@ fun <T> MuteBacklogUndoEffect(
     val currentOnUndo by rememberUpdatedState(onUndo)
     LaunchedEffect(suppressions, hostState) {
         suppressions.collect { suppression ->
-            val result = hostState.showSnackbar(
-                message = message,
-                actionLabel = undoLabel,
-                duration = SnackbarDuration.Long,
-            )
+            val result =
+                hostState.showSnackbar(
+                    message = message,
+                    actionLabel = undoLabel,
+                    duration = SnackbarDuration.Long,
+                )
             if (result == SnackbarResult.ActionPerformed) currentOnUndo(suppression)
         }
     }

@@ -13,14 +13,15 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class OnboardingPrefsTest {
     @Test
-    fun completionDefaultsFalseAndPersists() = runTest {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val prefs: OnboardingPrefs = OnboardingPrefsImpl(context)
+    fun completionDefaultsFalseAndPersists() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val prefs: OnboardingPrefs = OnboardingPrefsImpl(context)
 
-        assertFalse(prefs.completed.first())
+            assertFalse(prefs.completed.first())
 
-        prefs.markCompleted()
+            prefs.markCompleted()
 
-        assertTrue(OnboardingPrefsImpl(context).completed.first())
-    }
+            assertTrue(OnboardingPrefsImpl(context).completed.first())
+        }
 }

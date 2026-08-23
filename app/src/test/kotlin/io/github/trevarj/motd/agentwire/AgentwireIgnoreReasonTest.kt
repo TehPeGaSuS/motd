@@ -8,12 +8,12 @@ import io.github.trevarj.motd.irc.client.EventMapper
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.Isupport
-import java.util.UUID
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.util.UUID
 
 private const val SYNC_ID = "11111111-1111-4111-8111-111111111111"
 
@@ -25,11 +25,12 @@ private const val SYNC_ID = "11111111-1111-4111-8111-111111111111"
 class AgentwireIgnoreReasonTest {
     @Test
     fun `playback and replay batches are declined as playback`() {
-        val batch = IrcEvent.PlaybackBatch(
-            source = IrcEvent.PlaybackSource.CHATHISTORY,
-            target = "#codex",
-            items = emptyList<IrcEvent.PlaybackItem>(),
-        )
+        val batch =
+            IrcEvent.PlaybackBatch(
+                source = IrcEvent.PlaybackSource.CHATHISTORY,
+                target = "#codex",
+                items = emptyList<IrcEvent.PlaybackItem>(),
+            )
         assertEquals(IgnoreReason.PLAYBACK, why(state(), batch))
     }
 
@@ -86,14 +87,15 @@ class AgentwireIgnoreReasonTest {
 
     @Test
     fun `an action envelope is not an event`() {
-        val action = AgentwireEnvelope(
-            kind = "sync.request",
-            type = "action",
-            id = UUID.randomUUID().toString(),
-            at = 1,
-            instance = "peer",
-            device = "device",
-        )
+        val action =
+            AgentwireEnvelope(
+                kind = "sync.request",
+                type = "action",
+                id = UUID.randomUUID().toString(),
+                at = 1,
+                instance = "peer",
+                device = "device",
+            )
         assertEquals(IgnoreReason.NOT_EVENT, why(state(), inbound("agent", action)))
     }
 
@@ -120,31 +122,37 @@ class AgentwireIgnoreReasonTest {
     @Test
     fun `the sync accept filter names its own drops`() {
         val pinned = state().copy(botAccount = "agent", epoch = "epoch-1")
-        val result = AgentwireEventIngestor().ingest(
-            state = pinned,
-            event = inbound("agent", event("turn.started", epoch = "epoch-1")),
-            syncId = SYNC_ID,
-            accept = { false },
-        )
+        val result =
+            AgentwireEventIngestor().ingest(
+                state = pinned,
+                event = inbound("agent", event("turn.started", epoch = "epoch-1")),
+                syncId = SYNC_ID,
+                accept = { false },
+            )
         assertEquals(IgnoreReason.FILTERED, (result as AgentwireEventIngestor.Result.Ignored).why)
     }
 
-    private fun why(state: AgentwireUiState, event: IrcEvent): IgnoreReason {
+    private fun why(
+        state: AgentwireUiState,
+        event: IrcEvent,
+    ): IgnoreReason {
         val result = AgentwireEventIngestor().ingest(state, event, SYNC_ID)
         return (result as AgentwireEventIngestor.Result.Ignored).why
     }
 
-    private fun state() = AgentwireUiState(
-        channel = "#codex",
-        controllerAccount = "controller",
-        backendAccount = "agent",
-    )
+    private fun state() =
+        AgentwireUiState(
+            channel = "#codex",
+            controllerAccount = "controller",
+            backendAccount = "agent",
+        )
 
-    private fun hello(reply: String) = event(
-        kind = "agent.hello",
-        reply = reply,
-        data = buildJsonObject { put("epoch", "epoch-1") },
-    )
+    private fun hello(reply: String) =
+        event(
+            kind = "agent.hello",
+            reply = reply,
+            data = buildJsonObject { put("epoch", "epoch-1") },
+        )
 
     private fun event(
         kind: String,
@@ -162,18 +170,27 @@ class AgentwireIgnoreReasonTest {
         data = data,
     )
 
-    private fun inbound(account: String, envelope: AgentwireEnvelope, target: String = "#codex"): IrcEvent =
-        inboundRaw(account, encodeAgentwireEnvelope(envelope), target)
+    private fun inbound(
+        account: String,
+        envelope: AgentwireEnvelope,
+        target: String = "#codex",
+    ): IrcEvent = inboundRaw(account, encodeAgentwireEnvelope(envelope), target)
 
-    private fun inboundRaw(account: String, raw: String, target: String = "#codex"): IrcEvent = map(
-        IrcMessage(
-            tags = mapOf("account" to account, AGENTWIRE_TAG to raw),
-            source = io.github.trevarj.motd.irc.proto.Prefix(account, "u", "h"),
-            command = "TAGMSG",
-            params = listOf(target),
-        ).serialize(),
-    )
+    private fun inboundRaw(
+        account: String,
+        raw: String,
+        target: String = "#codex",
+    ): IrcEvent =
+        map(
+            IrcMessage(
+                tags = mapOf("account" to account, AGENTWIRE_TAG to raw),
+                source =
+                    io.github.trevarj.motd.irc.proto
+                        .Prefix(account, "u", "h"),
+                command = "TAGMSG",
+                params = listOf(target),
+            ).serialize(),
+        )
 
-    private fun map(line: String): IrcEvent =
-        checkNotNull(EventMapper({ "me" }, { Isupport() }).map(IrcMessage.parse(line)))
+    private fun map(line: String): IrcEvent = checkNotNull(EventMapper({ "me" }, { Isupport() }).map(IrcMessage.parse(line)))
 }

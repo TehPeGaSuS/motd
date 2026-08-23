@@ -104,10 +104,11 @@ internal fun RadialMenu(
     val bandColor = MaterialTheme.colorScheme.surfaceContainerHighest
     val wellColor = MaterialTheme.colorScheme.surfaceContainerLow
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .testTag(GESTURE_MENU_SCRIM_TAG)
-            .background(Color.Black.copy(alpha = SCRIM_ALPHA)),
+        modifier =
+            modifier
+                .fillMaxSize()
+                .testTag(GESTURE_MENU_SCRIM_TAG)
+                .background(Color.Black.copy(alpha = SCRIM_ALPHA)),
     ) {
         Canvas(Modifier.fillMaxSize()) {
             state.rings.forEachIndexed { index, ring ->
@@ -133,7 +134,10 @@ internal fun RadialMenu(
  * anchor, and the width that centring depends on is only known after measuring.
  */
 @Composable
-private fun RadialSliceLabels(ring: RadialRing, metrics: RadialMetrics) {
+private fun RadialSliceLabels(
+    ring: RadialRing,
+    metrics: RadialMetrics,
+) {
     val comfortable = ring.arc.isComfortable()
     Layout(
         content = {
@@ -163,26 +167,33 @@ private fun RadialSliceLabels(ring: RadialRing, metrics: RadialMetrics) {
 }
 
 @Composable
-private fun RadialSliceLabel(entry: RadialEntry, focused: Boolean, showLabel: Boolean) {
-    val container = if (focused) {
-        MaterialTheme.colorScheme.inverseSurface
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHighest
-    }
-    val content = if (focused) {
-        MaterialTheme.colorScheme.inverseOnSurface
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
+private fun RadialSliceLabel(
+    entry: RadialEntry,
+    focused: Boolean,
+    showLabel: Boolean,
+) {
+    val container =
+        if (focused) {
+            MaterialTheme.colorScheme.inverseSurface
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        }
+    val content =
+        if (focused) {
+            MaterialTheme.colorScheme.inverseOnSurface
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp),
-        modifier = Modifier
-            .testTag(gestureMenuSliceTag(entry.id))
-            .widthIn(max = 112.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(container)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+        modifier =
+            Modifier
+                .testTag(gestureMenuSliceTag(entry.id))
+                .widthIn(max = 112.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(container)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
         Icon(
             imageVector = entry.icon.vector,

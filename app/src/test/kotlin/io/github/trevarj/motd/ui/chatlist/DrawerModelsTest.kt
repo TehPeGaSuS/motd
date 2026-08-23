@@ -12,15 +12,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DrawerModelsTest {
-
     private fun net(
         id: Long,
         name: String = "net$id",
         role: NetworkRole = NetworkRole.DIRECT,
         parentId: Long? = null,
     ) = NetworkEntity(
-        id = id, name = name, role = role, parentId = parentId,
-        host = "h", port = 6697, nick = "me", username = "me", realname = "Me",
+        id = id,
+        name = name,
+        role = role,
+        parentId = parentId,
+        host = "h",
+        port = 6697,
+        nick = "me",
+        username = "me",
+        realname = "Me",
     )
 
     private fun row(
@@ -31,10 +37,18 @@ class DrawerModelsTest {
         mentions: Int = 0,
         type: BufferType = BufferType.CHANNEL,
     ) = ChatListRow(
-        bufferId = id, networkId = networkId, networkName = "net",
-        displayName = "#c$id", type = type, pinned = false, muted = muted,
-        lastMessageText = null, lastMessageSender = null, lastMessageTime = null,
-        unreadCount = unread, mentionCount = mentions,
+        bufferId = id,
+        networkId = networkId,
+        networkName = "net",
+        displayName = "#c$id",
+        type = type,
+        pinned = false,
+        muted = muted,
+        lastMessageText = null,
+        lastMessageSender = null,
+        lastMessageTime = null,
+        unreadCount = unread,
+        mentionCount = mentions,
     )
 
     @Test
@@ -54,10 +68,11 @@ class DrawerModelsTest {
 
     @Test
     fun `muted rows are excluded from unread and mention rollups`() {
-        val rows = listOf(
-            row(1, networkId = 1, muted = false, unread = 3, mentions = 1),
-            row(2, networkId = 1, muted = true, unread = 5, mentions = 2),
-        )
+        val rows =
+            listOf(
+                row(1, networkId = 1, muted = false, unread = 3, mentions = 1),
+                row(2, networkId = 1, muted = true, unread = 5, mentions = 2),
+            )
         val drawer = buildDrawerRows(listOf(net(1)), rows, emptyMap())
         assertEquals(3, drawer[0].unread)
         assertEquals(1, drawer[0].mentions)
@@ -65,16 +80,18 @@ class DrawerModelsTest {
 
     @Test
     fun `bouncer root aggregates children counts and children follow indented`() {
-        val networks = listOf(
-            net(1, "soju", NetworkRole.BOUNCER_ROOT),
-            net(2, "OFTC", NetworkRole.BOUNCER_CHILD, parentId = 1),
-            net(3, "Rizon", NetworkRole.BOUNCER_CHILD, parentId = 1),
-        )
-        val rows = listOf(
-            row(10, networkId = 1, unread = 1, mentions = 0), // root's own buffer
-            row(20, networkId = 2, unread = 4, mentions = 1),
-            row(30, networkId = 3, unread = 2, mentions = 3),
-        )
+        val networks =
+            listOf(
+                net(1, "soju", NetworkRole.BOUNCER_ROOT),
+                net(2, "OFTC", NetworkRole.BOUNCER_CHILD, parentId = 1),
+                net(3, "Rizon", NetworkRole.BOUNCER_CHILD, parentId = 1),
+            )
+        val rows =
+            listOf(
+                row(10, networkId = 1, unread = 1, mentions = 0), // root's own buffer
+                row(20, networkId = 2, unread = 4, mentions = 1),
+                row(30, networkId = 3, unread = 2, mentions = 3),
+            )
         val drawer = buildDrawerRows(networks, rows, emptyMap())
 
         // Order: root, then its children in DB order.
@@ -114,27 +131,30 @@ class DrawerModelsTest {
 
     @Test
     fun `root id includes its children rows`() {
-        val networks = listOf(
-            net(1, "soju", NetworkRole.BOUNCER_ROOT),
-            net(2, "OFTC", NetworkRole.BOUNCER_CHILD, parentId = 1),
-        )
-        val rows = listOf(
-            row(1, networkId = 1),
-            row(2, networkId = 2),
-            row(3, networkId = 9), // unrelated network
-        )
+        val networks =
+            listOf(
+                net(1, "soju", NetworkRole.BOUNCER_ROOT),
+                net(2, "OFTC", NetworkRole.BOUNCER_CHILD, parentId = 1),
+            )
+        val rows =
+            listOf(
+                row(1, networkId = 1),
+                row(2, networkId = 2),
+                row(3, networkId = 9), // unrelated network
+            )
         val out = scopeRows(rows, 1, networks)
         assertEquals(listOf(1L, 2L), out.map { it.bufferId })
     }
 
     @Test
     fun `mark all and scoped count exclude muted server and read rows`() {
-        val rows = listOf(
-            row(1, networkId = 1, unread = 2),
-            row(2, networkId = 1, muted = true, unread = 4),
-            row(3, networkId = 1, unread = 0),
-            row(4, networkId = 1, unread = 7, type = BufferType.SERVER),
-        )
+        val rows =
+            listOf(
+                row(1, networkId = 1, unread = 2),
+                row(2, networkId = 1, muted = true, unread = 4),
+                row(3, networkId = 1, unread = 0),
+                row(4, networkId = 1, unread = 7, type = BufferType.SERVER),
+            )
 
         assertEquals(listOf(1L), unreadBufferIds(rows))
         assertEquals(2, ChatListState(rows = rows).scopedUnreadCount)

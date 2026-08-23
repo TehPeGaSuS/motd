@@ -32,7 +32,10 @@ private data class Rollup(
     val mentionsIncomplete: Boolean = false,
 )
 
-private fun rollupFor(rows: List<ChatListRow>, networkId: Long): Rollup {
+private fun rollupFor(
+    rows: List<ChatListRow>,
+    networkId: Long,
+): Rollup {
     var unread = 0
     var mentions = 0
     var unreadIncomplete = false
@@ -48,8 +51,10 @@ private fun rollupFor(rows: List<ChatListRow>, networkId: Long): Rollup {
     return Rollup(unread, mentions, unreadIncomplete, mentionsIncomplete)
 }
 
-private fun stateFor(states: Map<Long, IrcClientState>, id: Long): IrcClientState =
-    states[id] ?: IrcClientState.Disconnected
+private fun stateFor(
+    states: Map<Long, IrcClientState>,
+    id: Long,
+): IrcClientState = states[id] ?: IrcClientState.Disconnected
 
 /**
  * Build drawer rows in DB order (`networks` already ordered), each BOUNCER_ROOT immediately
@@ -61,11 +66,16 @@ fun buildDrawerRows(
     rows: List<ChatListRow>,
     states: Map<Long, IrcClientState>,
 ): List<DrawerRow> {
-    val childrenByParent = networks
-        .filter { it.role == NetworkRole.BOUNCER_CHILD && it.parentId != null }
-        .groupBy { it.parentId!! }
+    val childrenByParent =
+        networks
+            .filter { it.role == NetworkRole.BOUNCER_CHILD && it.parentId != null }
+            .groupBy { it.parentId!! }
 
-    fun rowFor(net: NetworkEntity, depth: Int, extra: Rollup = Rollup(0, 0)): DrawerRow {
+    fun rowFor(
+        net: NetworkEntity,
+        depth: Int,
+        extra: Rollup = Rollup(0, 0),
+    ): DrawerRow {
         val state = stateFor(states, net.id)
         val own = rollupFor(rows, net.id)
         return DrawerRow(
@@ -85,23 +95,31 @@ fun buildDrawerRows(
     val out = ArrayList<DrawerRow>()
     for (net in networks) {
         when (net.role) {
-            NetworkRole.BOUNCER_CHILD -> Unit // emitted under its parent below
+            NetworkRole.BOUNCER_CHILD -> {
+                Unit
+            }
+
+            // emitted under its parent below
             NetworkRole.BOUNCER_ROOT -> {
                 val kids = childrenByParent[net.id].orEmpty()
                 // Aggregate children's counts into the root's own row.
-                val childTotals = kids.fold(Rollup(0, 0)) { acc, kid ->
-                    val r = rollupFor(rows, kid.id)
-                    Rollup(
-                        acc.unread + r.unread,
-                        acc.mentions + r.mentions,
-                        acc.unreadIncomplete || r.unreadIncomplete,
-                        acc.mentionsIncomplete || r.mentionsIncomplete,
-                    )
-                }
+                val childTotals =
+                    kids.fold(Rollup(0, 0)) { acc, kid ->
+                        val r = rollupFor(rows, kid.id)
+                        Rollup(
+                            acc.unread + r.unread,
+                            acc.mentions + r.mentions,
+                            acc.unreadIncomplete || r.unreadIncomplete,
+                            acc.mentionsIncomplete || r.mentionsIncomplete,
+                        )
+                    }
                 out.add(rowFor(net, depth = 0, extra = childTotals))
                 for (kid in kids) out.add(rowFor(kid, depth = 1))
             }
-            NetworkRole.DIRECT -> out.add(rowFor(net, depth = 0))
+
+            NetworkRole.DIRECT -> {
+                out.add(rowFor(net, depth = 0))
+            }
         }
     }
     return out
@@ -120,9 +138,13 @@ fun scopeNetworkIds(
     if (selectedNetworkId == null) return null
     val selected = networks.firstOrNull { it.id == selectedNetworkId }
     return when (selected?.role) {
-        NetworkRole.BOUNCER_ROOT ->
+        NetworkRole.BOUNCER_ROOT -> {
             networks.filter { it.parentId == selectedNetworkId }.map { it.id }.toSet() + selectedNetworkId
-        else -> setOf(selectedNetworkId)
+        }
+
+        else -> {
+            setOf(selectedNetworkId)
+        }
     }
 }
 

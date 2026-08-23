@@ -37,15 +37,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -124,8 +124,9 @@ internal fun ChannelListContent(
                     // Fade only, both specs explicit: the RowScope defaults would add a
                     // horizontal expansion that sweeps the fixed top-bar chrome sideways.
                     AnimatedVisibility(
-                        visible = state.availability == ChannelBrowserAvailability.READY &&
-                            !state.loading,
+                        visible =
+                            state.availability == ChannelBrowserAvailability.READY &&
+                                !state.loading,
                         enter = fadeIn(MotdMotion.microFadeIn),
                         exit = fadeOut(MotdMotion.microFadeOut),
                     ) {
@@ -144,13 +145,18 @@ internal fun ChannelListContent(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             when {
-                state.availability != ChannelBrowserAvailability.READY -> NotReadyState(state)
+                state.availability != ChannelBrowserAvailability.READY -> {
+                    NotReadyState(state)
+                }
 
                 else -> {
                     // Search field: substring-mask fetch on the IME search action.
                     OutlinedTextField(
                         value = text,
-                        onValueChange = { text = it; onQueryChange(it.text) },
+                        onValueChange = {
+                            text = it
+                            onQueryChange(it.text)
+                        },
                         singleLine = true,
                         placeholder = { Text(stringResource(R.string.channel_list_search_hint)) },
                         trailingIcon = {
@@ -165,22 +171,26 @@ internal fun ChannelListContent(
                             }
                         },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(
-                            onSearch = { onSearch(text.text) },
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                            .testTag("channel_list_search_field"),
+                        keyboardActions =
+                            KeyboardActions(
+                                onSearch = { onSearch(text.text) },
+                            ),
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .testTag("channel_list_search_field"),
                     )
                     // Ease the bar's height in and out so the results below never jump
                     // by the indicator height twice per fetch.
                     AnimatedVisibility(
                         visible = state.loading,
-                        enter = fadeIn(MotdMotion.microFadeIn) +
-                            expandVertically(animationSpec = MotdMotion.contentSize),
-                        exit = fadeOut(MotdMotion.microFadeOut) +
-                            shrinkVertically(animationSpec = MotdMotion.contentSize),
+                        enter =
+                            fadeIn(MotdMotion.microFadeIn) +
+                                expandVertically(animationSpec = MotdMotion.contentSize),
+                        exit =
+                            fadeOut(MotdMotion.microFadeOut) +
+                                shrinkVertically(animationSpec = MotdMotion.contentSize),
                     ) {
                         LinearProgressIndicator(Modifier.fillMaxWidth())
                     }
@@ -202,7 +212,7 @@ private fun ResultsBody(
     onJoin: (String) -> Unit,
 ) {
     when {
-        state.error != null && state.listings.isEmpty() && !state.loading ->
+        state.error != null && state.listings.isEmpty() && !state.loading -> {
             EmptyState(
                 icon = Icons.Outlined.Forum,
                 title = stringResource(R.string.channel_list_error_title),
@@ -210,8 +220,11 @@ private fun ResultsBody(
                 actionLabel = stringResource(R.string.channel_list_retry),
                 onAction = onSearch,
             )
+        }
 
-        state.loading && state.listings.isEmpty() -> ChannelListLoading()
+        state.loading && state.listings.isEmpty() -> {
+            ChannelListLoading()
+        }
 
         // No fetch yet: waiting for the entry auto-fetch to begin.
         !state.loaded && !state.loading -> {
@@ -222,43 +235,46 @@ private fun ResultsBody(
             )
         }
 
-        state.loaded && state.listings.isEmpty() && !state.loading ->
+        state.loaded && state.listings.isEmpty() && !state.loading -> {
             EmptyState(
                 icon = Icons.Outlined.Forum,
                 title = stringResource(R.string.channel_list_empty),
                 message = stringResource(R.string.channel_list_empty_message),
             )
+        }
 
-        else -> Column(Modifier.fillMaxSize()) {
-            Text(
-                if (state.query.isBlank()) {
-                    stringResource(R.string.channel_list_popular)
-                } else {
-                    pluralStringResource(
-                        R.plurals.channel_list_results,
-                        state.listings.size,
-                        state.listings.size,
-                    )
-                },
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            state.joinError?.let { error ->
+        else -> {
+            Column(Modifier.fillMaxSize()) {
                 Text(
-                    error,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
+                    if (state.query.isBlank()) {
+                        stringResource(R.string.channel_list_popular)
+                    } else {
+                        pluralStringResource(
+                            R.plurals.channel_list_results,
+                            state.listings.size,
+                            state.listings.size,
+                        )
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
+                state.joinError?.let { error ->
+                    Text(
+                        error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+                ChannelList(
+                    listings = state.listings,
+                    pendingChannels = state.pendingChannels,
+                    joinedChannels = state.joinedChannels,
+                    identityRules = state.identityRules,
+                    onJoin = onJoin,
+                )
             }
-            ChannelList(
-                listings = state.listings,
-                pendingChannels = state.pendingChannels,
-                joinedChannels = state.joinedChannels,
-                identityRules = state.identityRules,
-                onJoin = onJoin,
-            )
         }
     }
 }
@@ -290,12 +306,13 @@ private fun ChannelList(
     LazyColumn(Modifier.fillMaxSize()) {
         // Keyed by channel name for stable recomposition over large lists (cap 2000).
         items(listings, key = { it.name }) { listing ->
-            val joinStatus = channelJoinStatus(
-                listing.name,
-                pendingChannels,
-                joinedChannels,
-                identityRules,
-            )
+            val joinStatus =
+                channelJoinStatus(
+                    listing.name,
+                    pendingChannels,
+                    joinedChannels,
+                    identityRules,
+                )
             ListItem(
                 headlineContent = { Text(listing.name) },
                 supportingContent = {
@@ -322,9 +339,10 @@ private fun ChannelList(
                         TextButton(
                             onClick = { onJoin(listing.name) },
                             enabled = joinStatus == ChannelJoinStatus.JOIN,
-                            modifier = Modifier.testTag(
-                                "channel_list_join_${listing.name.removePrefix("#").lowercase()}",
-                            ),
+                            modifier =
+                                Modifier.testTag(
+                                    "channel_list_join_${listing.name.removePrefix("#").lowercase()}",
+                                ),
                         ) {
                             Text(
                                 stringResource(
@@ -346,19 +364,32 @@ private fun ChannelList(
 
 @Composable
 private fun NotReadyState(state: ChannelListUiState) {
-    val (title, message) = when (state.availability) {
-        ChannelBrowserAvailability.INITIALIZING ->
-            R.string.channel_list_checking to R.string.channel_list_checking_message
-        ChannelBrowserAvailability.ROOT_UNAVAILABLE ->
-            R.string.channel_list_title to R.string.channel_list_root_cant_browse
-        ChannelBrowserAvailability.CONNECTING ->
-            R.string.channel_list_connecting to R.string.channel_list_connecting_message
-        ChannelBrowserAvailability.FAILED ->
-            R.string.channel_list_unavailable to R.string.channel_list_offline_message
-        ChannelBrowserAvailability.OFFLINE ->
-            R.string.channel_list_offline to R.string.channel_list_offline_message
-        ChannelBrowserAvailability.READY -> return
-    }
+    val (title, message) =
+        when (state.availability) {
+            ChannelBrowserAvailability.INITIALIZING -> {
+                R.string.channel_list_checking to R.string.channel_list_checking_message
+            }
+
+            ChannelBrowserAvailability.ROOT_UNAVAILABLE -> {
+                R.string.channel_list_title to R.string.channel_list_root_cant_browse
+            }
+
+            ChannelBrowserAvailability.CONNECTING -> {
+                R.string.channel_list_connecting to R.string.channel_list_connecting_message
+            }
+
+            ChannelBrowserAvailability.FAILED -> {
+                R.string.channel_list_unavailable to R.string.channel_list_offline_message
+            }
+
+            ChannelBrowserAvailability.OFFLINE -> {
+                R.string.channel_list_offline to R.string.channel_list_offline_message
+            }
+
+            ChannelBrowserAvailability.READY -> {
+                return
+            }
+        }
     EmptyState(
         icon = Icons.Outlined.Forum,
         title = stringResource(title),
@@ -368,11 +399,12 @@ private fun NotReadyState(state: ChannelListUiState) {
 
 // --- previews (fake state, no ViewModel) ---
 
-private val PREVIEW_LISTINGS = listOf(
-    ChannelListing("#linux", 1423, "All things Linux and free software"),
-    ChannelListing("#kotlin", 892, "Kotlin programming language"),
-    ChannelListing("#archlinux", 640, ""),
-)
+private val PREVIEW_LISTINGS =
+    listOf(
+        ChannelListing("#linux", 1423, "All things Linux and free software"),
+        ChannelListing("#kotlin", 892, "Kotlin programming language"),
+        ChannelListing("#archlinux", 640, ""),
+    )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Preview
@@ -380,12 +412,13 @@ private val PREVIEW_LISTINGS = listOf(
 private fun ChannelListLoadedPreview() {
     MotdTheme {
         ChannelListContent(
-            state = ChannelListUiState(
-                connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
-                initialized = true,
-                listings = PREVIEW_LISTINGS,
-                loaded = true,
-            ),
+            state =
+                ChannelListUiState(
+                    connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
+                    initialized = true,
+                    listings = PREVIEW_LISTINGS,
+                    loaded = true,
+                ),
             onBack = {},
             onQueryChange = {},
             onSearch = {},
@@ -400,10 +433,11 @@ private fun ChannelListLoadedPreview() {
 private fun ChannelListNotReadyPreview() {
     MotdTheme {
         ChannelListContent(
-            state = ChannelListUiState(
-                connState = IrcClientState.Disconnected,
-                initialized = true,
-            ),
+            state =
+                ChannelListUiState(
+                    connState = IrcClientState.Disconnected,
+                    initialized = true,
+                ),
             onBack = {},
             onQueryChange = {},
             onSearch = {},

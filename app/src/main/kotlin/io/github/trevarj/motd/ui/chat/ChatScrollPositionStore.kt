@@ -19,50 +19,60 @@ import javax.inject.Singleton
  * exists purely to decide where a reopen lands.
  */
 @Singleton
-class ChatScrollPositionStore @Inject constructor() {
-    private val positions = java.util.concurrent.ConcurrentHashMap<Long, ChatScrollPosition>()
-    private val displayed = java.util.concurrent.ConcurrentHashMap<Long, TimelineAnchor>()
-    private val bottomParks = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
+class ChatScrollPositionStore
+    @Inject
+    constructor() {
+        private val positions = java.util.concurrent.ConcurrentHashMap<Long, ChatScrollPosition>()
+        private val displayed = java.util.concurrent.ConcurrentHashMap<Long, TimelineAnchor>()
+        private val bottomParks =
+            java.util.concurrent.ConcurrentHashMap
+                .newKeySet<Long>()
 
-    fun get(bufferId: Long): ChatScrollPosition? = positions[bufferId]
+        fun get(bufferId: Long): ChatScrollPosition? = positions[bufferId]
 
-    fun put(bufferId: Long, position: ChatScrollPosition) {
-        positions[bufferId] = position
-        bottomParks.remove(bufferId)
+        fun put(
+            bufferId: Long,
+            position: ChatScrollPosition,
+        ) {
+            positions[bufferId] = position
+            bottomParks.remove(bufferId)
+        }
+
+        /** Forgets the saved viewport ONLY. What the reader has already seen does not become untrue. */
+        fun remove(bufferId: Long) {
+            positions.remove(bufferId)
+            bottomParks.remove(bufferId)
+        }
+
+        /**
+         * Records that the reader left this room at the live bottom.
+         *
+         * Absence of a saved viewport cannot carry this on its own, because it is also what a room
+         * nobody has opened yet looks like, and those two want opposite entries for a room with NO
+         * unread: a first open falls back to the read marker, while a follower belongs back at the
+         * newest row. The park says which one it is, and nothing more — it is a statement about where
+         * the reader stopped, not about what arrived afterwards, so it does not survive contact with an
+         * unread divider. Entry consults it only when the room is caught up; see `ChatViewModel`.
+         */
+        fun markParkedAtBottom(bufferId: Long) {
+            positions.remove(bufferId)
+            bottomParks += bufferId
+        }
+
+        fun isParkedAtBottom(bufferId: Long): Boolean = bufferId in bottomParks
+
+        /** Deepest (oldest) row this process has put on screen for the room, or null if none has. */
+        fun furthestDisplayed(bufferId: Long): TimelineAnchor? = displayed[bufferId]
+
+        /**
+         * Records a row the timeline displayed. Monotonic toward history: a reader scrolling back
+         * forward never retracts the depth they already reached, so the watermark keeps meaning
+         * "everything at or below this has been on screen".
+         */
+        fun recordFurthestDisplayed(
+            bufferId: Long,
+            anchor: TimelineAnchor,
+        ) {
+            displayed.merge(bufferId, anchor) { seen, incoming -> minOf(seen, incoming) }
+        }
     }
-
-    /** Forgets the saved viewport ONLY. What the reader has already seen does not become untrue. */
-    fun remove(bufferId: Long) {
-        positions.remove(bufferId)
-        bottomParks.remove(bufferId)
-    }
-
-    /**
-     * Records that the reader left this room at the live bottom.
-     *
-     * Absence of a saved viewport cannot carry this on its own, because it is also what a room
-     * nobody has opened yet looks like, and those two want opposite entries for a room with NO
-     * unread: a first open falls back to the read marker, while a follower belongs back at the
-     * newest row. The park says which one it is, and nothing more — it is a statement about where
-     * the reader stopped, not about what arrived afterwards, so it does not survive contact with an
-     * unread divider. Entry consults it only when the room is caught up; see `ChatViewModel`.
-     */
-    fun markParkedAtBottom(bufferId: Long) {
-        positions.remove(bufferId)
-        bottomParks += bufferId
-    }
-
-    fun isParkedAtBottom(bufferId: Long): Boolean = bufferId in bottomParks
-
-    /** Deepest (oldest) row this process has put on screen for the room, or null if none has. */
-    fun furthestDisplayed(bufferId: Long): TimelineAnchor? = displayed[bufferId]
-
-    /**
-     * Records a row the timeline displayed. Monotonic toward history: a reader scrolling back
-     * forward never retracts the depth they already reached, so the watermark keeps meaning
-     * "everything at or below this has been on screen".
-     */
-    fun recordFurthestDisplayed(bufferId: Long, anchor: TimelineAnchor) {
-        displayed.merge(bufferId, anchor) { seen, incoming -> minOf(seen, incoming) }
-    }
-}

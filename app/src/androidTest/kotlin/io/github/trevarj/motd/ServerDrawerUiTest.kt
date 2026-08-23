@@ -24,11 +24,12 @@ class ServerDrawerUiTest {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 ServerDrawerContent(
-                    drawerRows = listOf(
-                        drawerRow(1, IrcClientState.Ready("alice", emptySet(), emptyMap())),
-                        drawerRow(2, IrcClientState.Connecting),
-                        drawerRow(3, IrcClientState.Disconnected),
-                    ),
+                    drawerRows =
+                        listOf(
+                            drawerRow(1, IrcClientState.Ready("alice", emptySet(), emptyMap())),
+                            drawerRow(2, IrcClientState.Connecting),
+                            drawerRow(3, IrcClientState.Disconnected),
+                        ),
                     selectedNetworkId = null,
                     allUnread = 0,
                     allMentions = 0,
@@ -48,19 +49,24 @@ class ServerDrawerUiTest {
         }
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val expectedStates = mapOf(
-            1L to context.getString(R.string.drawer_state_connected),
-            2L to context.getString(R.string.drawer_state_disconnected),
-            3L to context.getString(R.string.drawer_state_disconnected),
-        )
+        val expectedStates =
+            mapOf(
+                1L to context.getString(R.string.drawer_state_connected),
+                2L to context.getString(R.string.drawer_state_disconnected),
+                3L to context.getString(R.string.drawer_state_disconnected),
+            )
         for ((networkId, state) in expectedStates) {
-            compose.onNodeWithTag("drawer_network_icon_$networkId", useUnmergedTree = true)
+            compose
+                .onNodeWithTag("drawer_network_icon_$networkId", useUnmergedTree = true)
                 .assertIsDisplayed()
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, state))
         }
     }
 
-    private fun drawerRow(networkId: Long, state: IrcClientState) = DrawerRow(
+    private fun drawerRow(
+        networkId: Long,
+        state: IrcClientState,
+    ) = DrawerRow(
         networkId = networkId,
         name = "Network $networkId",
         role = NetworkRole.DIRECT,

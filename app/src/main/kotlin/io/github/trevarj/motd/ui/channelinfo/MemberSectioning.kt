@@ -37,21 +37,22 @@ fun sectionMembers(
     val rank: (Char) -> Int = { c -> order.indexOf(c).let { if (it < 0) Int.MAX_VALUE else it } }
 
     // Highest prefix = the one with the smallest rank among the member's held prefixes.
-    fun highest(m: MemberEntity): Char? =
-        m.prefixes.minByOrNull(rank).takeIf { it != null && rank(it) != Int.MAX_VALUE }
+    fun highest(m: MemberEntity): Char? = m.prefixes.minByOrNull(rank).takeIf { it != null && rank(it) != Int.MAX_VALUE }
 
     val grouped = members.groupBy { highest(it) }
 
     // Section order: known prefixes by [order], then the null (regular) bucket last.
-    val prefixSections = order
-        .mapNotNull { glyph ->
-            grouped[glyph]?.let { list ->
-                MemberSection(glyph, list.sortedWith(comparator))
+    val prefixSections =
+        order
+            .mapNotNull { glyph ->
+                grouped[glyph]?.let { list ->
+                    MemberSection(glyph, list.sortedWith(comparator))
+                }
             }
+    val regular =
+        grouped[null]?.let { list ->
+            MemberSection(null, list.sortedWith(comparator))
         }
-    val regular = grouped[null]?.let { list ->
-        MemberSection(null, list.sortedWith(comparator))
-    }
 
     return prefixSections + listOfNotNull(regular)
 }
@@ -61,8 +62,11 @@ fun sectionMembers(
  * (mode->prefix pairs, already in privilege order). Empty input yields the default order.
  */
 fun prefixOrderFrom(prefixModes: List<Pair<Char, Char>>): String =
-    if (prefixModes.isEmpty()) DEFAULT_PREFIX_ORDER
-    else prefixModes.joinToString("") { it.second.toString() }
+    if (prefixModes.isEmpty()) {
+        DEFAULT_PREFIX_ORDER
+    } else {
+        prefixModes.joinToString("") { it.second.toString() }
+    }
 
 /**
  * Prefix sections with fools pulled out into a trailing bucket. Fool members
@@ -85,17 +89,17 @@ fun sectionMembersSocial(
     identityRules: IrcIdentityRules = IrcIdentityRules(),
     comparator: Comparator<MemberEntity> = identityRules.memberComparator(),
 ): SocialSections {
-    val (foolMembers, rest) = members.partition {
-        identityRules.matchesConfiguredNick(it.nick, fools)
-    }
+    val (foolMembers, rest) =
+        members.partition {
+            identityRules.matchesConfiguredNick(it.nick, fools)
+        }
     return SocialSections(
         sections = sectionMembers(rest, prefixOrder, identityRules, comparator),
         fools = foolMembers.sortedWith(identityRules.memberComparator()),
     )
 }
 
-private fun IrcIdentityRules.memberComparator(): Comparator<MemberEntity> =
-    compareBy<MemberEntity> { normalize(it.nick) }.thenBy { it.nick }
+private fun IrcIdentityRules.memberComparator(): Comparator<MemberEntity> = compareBy<MemberEntity> { normalize(it.nick) }.thenBy { it.nick }
 
 /**
  * Orders members by last-spoke time descending, with never-spoke members (null) sorting last

@@ -26,21 +26,37 @@ class Migration4To5Test {
     @Test fun `migration adds nullable reality link and preserves proxy settings`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context).name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(4) {
-                    override fun onCreate(db: SupportSQLiteDatabase) = db.execSQL(CREATE_NETWORKS_V4)
-                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
-                }).build(),
-        )
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(4) {
+                            override fun onCreate(db: SupportSQLiteDatabase) = db.execSQL(CREATE_NETWORKS_V4)
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                old: Int,
+                                new: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL(INSERT_NETWORK_V4)
         MIGRATION_4_5.migrate(db)
         db.query("SELECT proxyHost, proxyPort, obfsLink FROM networks WHERE id = 1").use { c ->
-            assertTrue(c.moveToFirst()); assertEquals("127.0.0.1", c.getString(0)); assertEquals(1080, c.getInt(1)); assertNull(c.getString(2))
+            assertTrue(c.moveToFirst())
+            assertEquals("127.0.0.1", c.getString(0))
+            assertEquals(1080, c.getInt(1))
+            assertNull(c.getString(2))
         }
         db.execSQL("UPDATE networks SET obfsLink = 'vless://uuid@example.test:443?security=reality' WHERE id = 1")
-        db.query("SELECT obfsLink FROM networks WHERE id = 1").use { c -> assertTrue(c.moveToFirst()); assertEquals("vless://uuid@example.test:443?security=reality", c.getString(0)) }
+        db.query("SELECT obfsLink FROM networks WHERE id = 1").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("vless://uuid@example.test:443?security=reality", c.getString(0))
+        }
     }
 
     private companion object {

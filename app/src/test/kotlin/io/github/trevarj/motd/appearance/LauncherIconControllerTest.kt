@@ -34,7 +34,11 @@ class LauncherIconControllerTest {
         assertFalse(disable.contains(enable))
         assertEquals(LauncherIcon.entries.size - 1, disable.size)
         assertEquals(disable.size, disable.toSet().size) // no duplicates
-        val expectedDisabled = LauncherIcon.entries.filter { it != LauncherIcon.NORD }.map(::launcherAliasFqcn).toSet()
+        val expectedDisabled =
+            LauncherIcon.entries
+                .filter { it != LauncherIcon.NORD }
+                .map(::launcherAliasFqcn)
+                .toSet()
         assertEquals(expectedDisabled, disable.toSet())
     }
 
@@ -54,7 +58,10 @@ class LauncherIconControllerApplyTest {
 
     private fun componentFor(icon: LauncherIcon) = ComponentName(context.packageName, launcherAliasFqcn(icon))
 
-    private fun isEnabled(icon: LauncherIcon, manifestDefaultEnabled: Boolean): Boolean =
+    private fun isEnabled(
+        icon: LauncherIcon,
+        manifestDefaultEnabled: Boolean,
+    ): Boolean =
         when (packageManager.getComponentEnabledSetting(componentFor(icon))) {
             PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true
             PackageManager.COMPONENT_ENABLED_STATE_DISABLED -> false

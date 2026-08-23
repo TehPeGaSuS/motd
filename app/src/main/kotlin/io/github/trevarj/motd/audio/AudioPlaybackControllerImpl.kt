@@ -16,11 +16,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.di.IoDispatcher
-import java.io.File
-import java.net.HttpURLConnection
-import java.util.LinkedHashMap
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -37,470 +32,528 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.net.HttpURLConnection
+import java.util.LinkedHashMap
+import javax.inject.Inject
+import javax.inject.Singleton
 
 @Singleton
-class AudioPlaybackControllerImpl @Inject constructor(
-    @ApplicationContext private val context: Context,
-    private val routeProvider: NetworkMediaRouteProvider,
-    private val crypto: VoiceCrypto,
-    private val cacheStore: AudioCacheStore,
-    private val mediaCache: AudioMediaCache,
-    private val waveformRepository: AudioWaveformRepository,
-    private val waveformAnalyzer: AudioWaveformAnalyzer,
-    private val db: MotdDatabase,
-    @ApplicationScope private val applicationScope: CoroutineScope,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
-) : AudioPlaybackController {
-    private val _state = MutableStateFlow(AudioPlaybackState())
-    override val state: StateFlow<AudioPlaybackState> = _state.asStateFlow()
-    override val waveforms: StateFlow<Map<String, AudioWaveform>> = waveformRepository.waveforms
-    private val _cacheStatuses = MutableStateFlow<Map<String, AudioCacheStatus>>(emptyMap())
-    override val cacheStatuses: StateFlow<Map<String, AudioCacheStatus>> = _cacheStatuses.asStateFlow()
-    private var controller: MediaController? = null
-    private val controllerReady = CompletableDeferred<MediaController>()
-    private var decryptedTemp: File? = null
-    private var playJob: Job? = null
-    private var activeRequest: AudioPlaybackRequest? = null
-    private var generation = 0L
+class AudioPlaybackControllerImpl
+    @Inject
+    constructor(
+        @ApplicationContext private val context: Context,
+        private val routeProvider: NetworkMediaRouteProvider,
+        private val crypto: VoiceCrypto,
+        private val cacheStore: AudioCacheStore,
+        private val mediaCache: AudioMediaCache,
+        private val waveformRepository: AudioWaveformRepository,
+        private val waveformAnalyzer: AudioWaveformAnalyzer,
+        private val db: MotdDatabase,
+        @ApplicationScope private val applicationScope: CoroutineScope,
+        @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    ) : AudioPlaybackController {
+        private val _state = MutableStateFlow(AudioPlaybackState())
+        override val state: StateFlow<AudioPlaybackState> = _state.asStateFlow()
+        override val waveforms: StateFlow<Map<String, AudioWaveform>> = waveformRepository.waveforms
+        private val _cacheStatuses = MutableStateFlow<Map<String, AudioCacheStatus>>(emptyMap())
+        override val cacheStatuses: StateFlow<Map<String, AudioCacheStatus>> = _cacheStatuses.asStateFlow()
+        private var controller: MediaController? = null
+        private val controllerReady = CompletableDeferred<MediaController>()
+        private var decryptedTemp: File? = null
+        private var playJob: Job? = null
+        private var activeRequest: AudioPlaybackRequest? = null
+        private var generation = 0L
 
-    init {
-        val token = SessionToken(context, ComponentName(context, AudioPlaybackService::class.java))
-        val future = MediaController.Builder(context, token).buildAsync()
-        future.addListener(
-            {
-                runCatching { future.get() }
-                    .onSuccess { mediaController ->
-                        controller = mediaController.also { connected ->
-                            connected.addListener(object : Player.Listener {
-                                override fun onPlaybackStateChanged(playbackState: Int) = updateState(connected)
-                                override fun onIsPlayingChanged(isPlaying: Boolean) = updateState(connected)
-                                override fun onPlayerError(error: PlaybackException) {
-                                    if (connected.currentMediaItem?.mediaId != _state.value.activeId) return
-                                    _state.value = _state.value.copy(
+        init {
+            val token = SessionToken(context, ComponentName(context, AudioPlaybackService::class.java))
+            val future = MediaController.Builder(context, token).buildAsync()
+            future.addListener(
+                {
+                    runCatching { future.get() }
+                        .onSuccess { mediaController ->
+                            controller =
+                                mediaController.also { connected ->
+                                    connected.addListener(
+                                        object : Player.Listener {
+                                            override fun onPlaybackStateChanged(playbackState: Int) = updateState(connected)
+
+                                            override fun onIsPlayingChanged(isPlaying: Boolean) = updateState(connected)
+
+                                            override fun onPlayerError(error: PlaybackException) {
+                                                if (connected.currentMediaItem?.mediaId != _state.value.activeId) return
+                                                _state.value =
+                                                    _state.value.copy(
+                                                        loading = false,
+                                                        loadingFraction = null,
+                                                        playing = false,
+                                                        error = error.message ?: "Playback failed",
+                                                    )
+                                            }
+                                        },
+                                    )
+                                    updateState(connected)
+                                }
+                            controllerReady.complete(mediaController)
+                        }.onFailure { error ->
+                            controllerReady.completeExceptionally(error)
+                            _state.value =
+                                _state.value.copy(
+                                    loading = false,
+                                    error = error.message ?: "Audio service unavailable",
+                                )
+                        }
+                },
+                ContextCompat.getMainExecutor(context),
+            )
+            applicationScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                while (true) {
+                    withContext(Dispatchers.Main.immediate) {
+                        if (_state.value.activeId != null) controller?.let(::updateState)
+                    }
+                    updateDownloadProgress()
+                    delay(POSITION_POLL_MS)
+                }
+            }
+        }
+
+        override fun play(
+            request: AudioPlaybackRequest,
+            speed: Float,
+        ) {
+            val session = ++generation
+            playJob?.cancel()
+            activeRequest = request
+            cleanupPlaintext()
+            val attachment = request.attachment
+            inspectCache(attachment)
+            _state.value =
+                AudioPlaybackState(
+                    activeId = attachment.playbackId,
+                    title = attachment.title,
+                    url = attachment.displayUrl,
+                    loading = true,
+                    speed = speed,
+                    attachment = attachment,
+                    origin = request.origin,
+                    waveform = attachment.waveform ?: waveformRepository.waveforms.value[attachment.playbackId],
+                )
+            playJob =
+                applicationScope.launch {
+                    if (attachment.waveform == null) {
+                        waveformRepository.load(attachment.playbackId)?.let { waveform ->
+                            if (session == generation) _state.value = _state.value.copy(waveform = waveform)
+                        }
+                    }
+                    val networkName =
+                        request.origin?.networkId?.let { networkId ->
+                            withContext(ioDispatcher) { db.networkDao().byId(networkId)?.name }
+                        }
+                    if (session == generation) _state.value = _state.value.copy(networkName = networkName)
+                    val playbackUri =
+                        try {
+                            materializePlaybackUri(request, session)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            if (session == generation) {
+                                cleanupPlaintext()
+                                _state.value =
+                                    _state.value.copy(
                                         loading = false,
                                         loadingFraction = null,
                                         playing = false,
                                         error = error.message ?: "Playback failed",
                                     )
-                                }
-                            })
-                            updateState(connected)
+                            }
+                            return@launch
                         }
-                        controllerReady.complete(mediaController)
+                    if (session != generation) return@launch
+                    withContext(Dispatchers.Main.immediate) {
+                        val mediaController = controller ?: controllerReady.await()
+                        val item =
+                            MediaItem
+                                .Builder()
+                                .setMediaId(attachment.playbackId)
+                                .setUri(playbackUri)
+                                .setMediaMetadata(mediaMetadata(request, networkName))
+                                .build()
+                        mediaController.setMediaItem(item)
+                        mediaController.prepare()
+                        mediaController.playbackParameters = PlaybackParameters(speed)
+                        mediaController.play()
+                        updateState(mediaController)
                     }
-                    .onFailure { error ->
-                        controllerReady.completeExceptionally(error)
-                        _state.value = _state.value.copy(
-                            loading = false,
-                            error = error.message ?: "Audio service unavailable",
-                        )
-                    }
-            },
-            ContextCompat.getMainExecutor(context),
-        )
-        applicationScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            while (true) {
-                withContext(Dispatchers.Main.immediate) {
-                    if (_state.value.activeId != null) controller?.let(::updateState)
                 }
-                updateDownloadProgress()
-                delay(POSITION_POLL_MS)
+        }
+
+        override fun toggle(request: AudioPlaybackRequest) {
+            val current = state.value
+            if (current.activeId != request.attachment.playbackId) {
+                play(request)
+                return
+            }
+            when {
+                current.loading -> cancelLoading()
+                current.error != null -> retryActive()
+                else -> toggleActive()
             }
         }
-    }
 
-    override fun play(request: AudioPlaybackRequest, speed: Float) {
-        val session = ++generation
-        playJob?.cancel()
-        activeRequest = request
-        cleanupPlaintext()
-        val attachment = request.attachment
-        inspectCache(attachment)
-        _state.value = AudioPlaybackState(
-            activeId = attachment.playbackId,
-            title = attachment.title,
-            url = attachment.displayUrl,
-            loading = true,
-            speed = speed,
-            attachment = attachment,
-            origin = request.origin,
-            waveform = attachment.waveform ?: waveformRepository.waveforms.value[attachment.playbackId],
-        )
-        playJob = applicationScope.launch {
-            if (attachment.waveform == null) {
-                waveformRepository.load(attachment.playbackId)?.let { waveform ->
-                    if (session == generation) _state.value = _state.value.copy(waveform = waveform)
+        override fun inspectCache(attachment: AudioAttachment) {
+            val playbackId = attachment.playbackId
+            if (_cacheStatuses.value[playbackId] == AudioCacheStatus.CACHED) return
+            applicationScope.launch(ioDispatcher) {
+                val status =
+                    if (attachment.encrypted) {
+                        val cachedBytes =
+                            cacheStore
+                                .ciphertextFile(attachment.url.substringBefore('#'))
+                                .takeIf { it.isFile }
+                                ?.length()
+                                ?: 0L
+                        if (cachedBytes > 0L) {
+                            AudioCacheStatus.CACHED
+                        } else {
+                            AudioCacheStatus.NOT_CACHED
+                        }
+                    } else if (attachment.url.startsWith("http", ignoreCase = true)) {
+                        mediaCache.status(attachment.url)
+                    } else {
+                        AudioCacheStatus.CACHED
+                    }
+                putCacheStatus(playbackId, status)
+            }
+        }
+
+        override fun pause() {
+            applicationScope.launch(Dispatchers.Main.immediate) {
+                controller?.pause()
+                controller?.let(::updateState)
+            }
+        }
+
+        override fun dismiss(itemId: String) {
+            if (state.value.activeId != itemId) return
+            val requestToAnalyze = activeRequest
+            generation++
+            playJob?.cancel()
+            playJob = null
+            activeRequest = null
+            applicationScope.launch(Dispatchers.Main.immediate) {
+                controller?.run {
+                    stop()
+                    clearMediaItems()
                 }
+                cleanupPlaintext()
+                _state.value = AudioPlaybackState()
             }
-            val networkName = request.origin?.networkId?.let { networkId ->
-                withContext(ioDispatcher) { db.networkDao().byId(networkId)?.name }
-            }
-            if (session == generation) _state.value = _state.value.copy(networkName = networkName)
-            val playbackUri = try {
-                materializePlaybackUri(request, session)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                if (session == generation) {
-                    cleanupPlaintext()
-                    _state.value = _state.value.copy(
+            requestToAnalyze?.let(::analyzeCachedAudio)
+            requestToAnalyze?.attachment?.let(::inspectCache)
+        }
+
+        override fun cancelLoading() {
+            val current = state.value
+            if (!current.loading || current.activeId == null) return
+            generation++
+            playJob?.cancel()
+            playJob = null
+            applicationScope.launch(Dispatchers.Main.immediate) {
+                controller?.run {
+                    stop()
+                    clearMediaItems()
+                }
+                cleanupPlaintext()
+                _state.value =
+                    current.copy(
                         loading = false,
                         loadingFraction = null,
                         playing = false,
-                        error = error.message ?: "Playback failed",
+                        positionMs = 0,
+                        bufferedMs = 0,
+                        error = null,
                     )
-                }
-                return@launch
             }
-            if (session != generation) return@launch
-            withContext(Dispatchers.Main.immediate) {
-                val mediaController = controller ?: controllerReady.await()
-                val item = MediaItem.Builder()
-                    .setMediaId(attachment.playbackId)
-                    .setUri(playbackUri)
-                    .setMediaMetadata(mediaMetadata(request, networkName))
-                    .build()
-                mediaController.setMediaItem(item)
-                mediaController.prepare()
-                mediaController.playbackParameters = PlaybackParameters(speed)
-                mediaController.play()
+        }
+
+        override fun retryActive() {
+            val request = activeRequest ?: return
+            play(request, state.value.speed)
+        }
+
+        override fun toggleActive() {
+            val current = state.value
+            if (current.loading) {
+                cancelLoading()
+                return
+            }
+            if (current.error != null || controller?.currentMediaItem == null) {
+                retryActive()
+                return
+            }
+            applicationScope.launch(Dispatchers.Main.immediate) {
+                val mediaController = controller ?: return@launch
+                if (mediaController.isPlaying) mediaController.pause() else mediaController.play()
                 updateState(mediaController)
             }
         }
-    }
 
-    override fun toggle(request: AudioPlaybackRequest) {
-        val current = state.value
-        if (current.activeId != request.attachment.playbackId) {
-            play(request)
-            return
-        }
-        when {
-            current.loading -> cancelLoading()
-            current.error != null -> retryActive()
-            else -> toggleActive()
-        }
-    }
-
-    override fun inspectCache(attachment: AudioAttachment) {
-        val playbackId = attachment.playbackId
-        if (_cacheStatuses.value[playbackId] == AudioCacheStatus.CACHED) return
-        applicationScope.launch(ioDispatcher) {
-            val status = if (attachment.encrypted) {
-                val cachedBytes = cacheStore.ciphertextFile(attachment.url.substringBefore('#'))
-                    .takeIf { it.isFile }
-                    ?.length()
-                    ?: 0L
-                if (cachedBytes > 0L) {
-                    AudioCacheStatus.CACHED
-                } else {
-                    AudioCacheStatus.NOT_CACHED
-                }
-            } else if (attachment.url.startsWith("http", ignoreCase = true)) {
-                mediaCache.status(attachment.url)
-            } else {
-                AudioCacheStatus.CACHED
+        override fun seekTo(
+            itemId: String,
+            positionMs: Long,
+        ) {
+            applicationScope.launch(Dispatchers.Main.immediate) {
+                val mediaController = controller ?: return@launch
+                if (state.value.activeId != itemId || state.value.loading) return@launch
+                val duration = state.value.durationMs
+                mediaController.seekTo(
+                    positionMs.coerceAtLeast(0).let { value ->
+                        if (duration == null) value else value.coerceAtMost(duration)
+                    },
+                )
+                updateState(mediaController)
             }
-            putCacheStatus(playbackId, status)
         }
-    }
 
-    override fun pause() {
-        applicationScope.launch(Dispatchers.Main.immediate) {
-            controller?.pause()
-            controller?.let(::updateState)
-        }
-    }
-
-    override fun dismiss(itemId: String) {
-        if (state.value.activeId != itemId) return
-        val requestToAnalyze = activeRequest
-        generation++
-        playJob?.cancel()
-        playJob = null
-        activeRequest = null
-        applicationScope.launch(Dispatchers.Main.immediate) {
-            controller?.run {
-                stop()
-                clearMediaItems()
+        override fun setSpeed(
+            itemId: String,
+            speed: Float,
+        ) {
+            applicationScope.launch(Dispatchers.Main.immediate) {
+                val mediaController = controller ?: return@launch
+                if (state.value.activeId != itemId) return@launch
+                mediaController.playbackParameters = PlaybackParameters(speed)
+                updateState(mediaController)
             }
-            cleanupPlaintext()
-            _state.value = AudioPlaybackState()
         }
-        requestToAnalyze?.let(::analyzeCachedAudio)
-        requestToAnalyze?.attachment?.let(::inspectCache)
-    }
 
-    override fun cancelLoading() {
-        val current = state.value
-        if (!current.loading || current.activeId == null) return
-        generation++
-        playJob?.cancel()
-        playJob = null
-        applicationScope.launch(Dispatchers.Main.immediate) {
-            controller?.run {
-                stop()
-                clearMediaItems()
-            }
-            cleanupPlaintext()
-            _state.value = current.copy(
-                loading = false,
-                loadingFraction = null,
-                playing = false,
-                positionMs = 0,
-                bufferedMs = 0,
-                error = null,
-            )
-        }
-    }
-
-    override fun retryActive() {
-        val request = activeRequest ?: return
-        play(request, state.value.speed)
-    }
-
-    override fun toggleActive() {
-        val current = state.value
-        if (current.loading) {
-            cancelLoading()
-            return
-        }
-        if (current.error != null || controller?.currentMediaItem == null) {
-            retryActive()
-            return
-        }
-        applicationScope.launch(Dispatchers.Main.immediate) {
-            val mediaController = controller ?: return@launch
-            if (mediaController.isPlaying) mediaController.pause() else mediaController.play()
-            updateState(mediaController)
-        }
-    }
-
-    override fun seekTo(itemId: String, positionMs: Long) {
-        applicationScope.launch(Dispatchers.Main.immediate) {
-            val mediaController = controller ?: return@launch
-            if (state.value.activeId != itemId || state.value.loading) return@launch
-            val duration = state.value.durationMs
-            mediaController.seekTo(positionMs.coerceAtLeast(0).let { value ->
-                if (duration == null) value else value.coerceAtMost(duration)
-            })
-            updateState(mediaController)
-        }
-    }
-
-    override fun setSpeed(itemId: String, speed: Float) {
-        applicationScope.launch(Dispatchers.Main.immediate) {
-            val mediaController = controller ?: return@launch
-            if (state.value.activeId != itemId) return@launch
-            mediaController.playbackParameters = PlaybackParameters(speed)
-            updateState(mediaController)
-        }
-    }
-
-    private suspend fun materializePlaybackUri(
-        request: AudioPlaybackRequest,
-        session: Long,
-    ): android.net.Uri {
-        val attachment = request.attachment
-        if (!attachment.encrypted) return attachment.url.substringBefore('#').toUri()
-        val fragment = attachment.url.substringAfter('#', "")
-        if (fragment.isBlank()) throw IllegalArgumentException("Encrypted voice link has no key.")
-        val cipherText = downloadEncrypted(
-            url = attachment.url.substringBefore('#'),
-            networkId = request.networkId,
-            onProgress = { fraction ->
-                if (session == generation) {
-                    _state.value = _state.value.copy(loading = true, loadingFraction = fraction)
-                }
-            },
-        )
-        putCacheStatus(attachment.playbackId, AudioCacheStatus.CACHED)
-        currentCoroutineContext().ensureActive()
-        val plain = withContext(ioDispatcher) { crypto.decrypt(cipherText, fragment) }
-        if (session != generation) {
-            plain.delete()
-            throw CancellationException("Playback was replaced.")
-        }
-        decryptedTemp = plain
-        cacheStore.trim()
-        return plain.toUri()
-    }
-
-    private suspend fun downloadEncrypted(
-        url: String,
-        networkId: Long?,
-        onProgress: (Float?) -> Unit,
-    ): File = withContext(ioDispatcher) {
-        cacheStore.ciphertextFile(url).takeIf { it.isFile && it.length() > 0 }?.let {
-            onProgress(1f)
-            return@withContext it
-        }
-        val route = networkId?.let { routeProvider.routeForNetwork(it) }
-        if (route?.proxyError != null) throw IllegalStateException(route.proxyError)
-        route.useOrNull { mediaRoute ->
-            val connection = (mediaRoute?.open(url)
-                ?: java.net.URL(url).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                useCaches = false
-                connectTimeout = CONNECT_TIMEOUT_MS
-                readTimeout = READ_TIMEOUT_MS
-                setRequestProperty("Accept", "application/octet-stream, */*")
-                setRequestProperty("User-Agent", USER_AGENT)
-            }
-            val partial = cacheStore.tempFile("voice-ciphertext-", ".part")
-            try {
-                val code = connection.responseCode
-                if (code !in 200..299) throw IllegalStateException("Download failed (HTTP $code).")
-                val total = connection.contentLengthLong.takeIf { it > 0 }
-                connection.inputStream.use { input ->
-                    partial.outputStream().use { output ->
-                        val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
-                        var received = 0L
-                        while (true) {
-                            currentCoroutineContext().ensureActive()
-                            val count = input.read(buffer)
-                            if (count < 0) break
-                            output.write(buffer, 0, count)
-                            received += count
-                            onProgress(total?.let { (received.toFloat() / it).coerceIn(0f, 1f) })
+        private suspend fun materializePlaybackUri(
+            request: AudioPlaybackRequest,
+            session: Long,
+        ): android.net.Uri {
+            val attachment = request.attachment
+            if (!attachment.encrypted) return attachment.url.substringBefore('#').toUri()
+            val fragment = attachment.url.substringAfter('#', "")
+            if (fragment.isBlank()) throw IllegalArgumentException("Encrypted voice link has no key.")
+            val cipherText =
+                downloadEncrypted(
+                    url = attachment.url.substringBefore('#'),
+                    networkId = request.networkId,
+                    onProgress = { fraction ->
+                        if (session == generation) {
+                            _state.value = _state.value.copy(loading = true, loadingFraction = fraction)
                         }
+                    },
+                )
+            putCacheStatus(attachment.playbackId, AudioCacheStatus.CACHED)
+            currentCoroutineContext().ensureActive()
+            val plain = withContext(ioDispatcher) { crypto.decrypt(cipherText, fragment) }
+            if (session != generation) {
+                plain.delete()
+                throw CancellationException("Playback was replaced.")
+            }
+            decryptedTemp = plain
+            cacheStore.trim()
+            return plain.toUri()
+        }
+
+        private suspend fun downloadEncrypted(
+            url: String,
+            networkId: Long?,
+            onProgress: (Float?) -> Unit,
+        ): File =
+            withContext(ioDispatcher) {
+                cacheStore.ciphertextFile(url).takeIf { it.isFile && it.length() > 0 }?.let {
+                    onProgress(1f)
+                    return@withContext it
+                }
+                val route = networkId?.let { routeProvider.routeForNetwork(it) }
+                if (route?.proxyError != null) throw IllegalStateException(route.proxyError)
+                route.useOrNull { mediaRoute ->
+                    val connection =
+                        (
+                            mediaRoute?.open(url)
+                                ?: java.net.URL(url).openConnection() as HttpURLConnection
+                        ).apply {
+                            requestMethod = "GET"
+                            useCaches = false
+                            connectTimeout = CONNECT_TIMEOUT_MS
+                            readTimeout = READ_TIMEOUT_MS
+                            setRequestProperty("Accept", "application/octet-stream, */*")
+                            setRequestProperty("User-Agent", USER_AGENT)
+                        }
+                    val partial = cacheStore.tempFile("voice-ciphertext-", ".part")
+                    try {
+                        val code = connection.responseCode
+                        if (code !in 200..299) throw IllegalStateException("Download failed (HTTP $code).")
+                        val total = connection.contentLengthLong.takeIf { it > 0 }
+                        connection.inputStream.use { input ->
+                            partial.outputStream().use { output ->
+                                val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+                                var received = 0L
+                                while (true) {
+                                    currentCoroutineContext().ensureActive()
+                                    val count = input.read(buffer)
+                                    if (count < 0) break
+                                    output.write(buffer, 0, count)
+                                    received += count
+                                    onProgress(total?.let { (received.toFloat() / it).coerceIn(0f, 1f) })
+                                }
+                            }
+                        }
+                        val destination = cacheStore.ciphertextFile(url)
+                        if (!partial.renameTo(destination)) {
+                            partial.copyTo(destination, overwrite = true)
+                            partial.delete()
+                        }
+                        destination
+                    } finally {
+                        partial.delete()
+                        connection.disconnect()
                     }
                 }
-                val destination = cacheStore.ciphertextFile(url)
-                if (!partial.renameTo(destination)) {
-                    partial.copyTo(destination, overwrite = true)
-                    partial.delete()
+            }
+
+        private fun mediaMetadata(
+            request: AudioPlaybackRequest,
+            networkName: String?,
+        ): MediaMetadata {
+            val origin = request.origin
+            val extras =
+                Bundle().apply {
+                    origin?.let {
+                        putLong(EXTRA_BUFFER_ID, it.bufferId)
+                        putLong(EXTRA_EVENT_ID, it.eventId)
+                        putString(EXTRA_MSGID, it.msgid)
+                        putLong(EXTRA_SERVER_TIME, it.serverTime)
+                    }
                 }
-                destination
-            } finally {
-                partial.delete()
-                connection.disconnect()
+            return MediaMetadata
+                .Builder()
+                .setTitle(request.attachment.title)
+                .setArtist(origin?.contextLabel(networkName))
+                .setExtras(extras)
+                .build()
+        }
+
+        private fun updateState(mediaController: MediaController) {
+            val current = _state.value
+            if (current.activeId == null) return
+            val mediaId = mediaController.currentMediaItem?.mediaId ?: return
+            // A newly requested encrypted item can spend time downloading while the controller still
+            // references the previous item. Ignore those stale callbacks so they cannot clear the new
+            // request's download state or progress.
+            if (mediaId != current.activeId) return
+            if (mediaController.playbackState == Player.STATE_ENDED) {
+                dismiss(mediaId)
+                return
+            }
+            val duration = mediaController.duration.takeIf { it >= 0 }
+            val loading = mediaController.playbackState == Player.STATE_BUFFERING
+            _state.value =
+                current.copy(
+                    activeId = mediaId,
+                    loading = loading,
+                    // Byte progress is sampled from the cache separately. Preserve it across the
+                    // frequent MediaController position updates while buffering.
+                    loadingFraction = current.loadingFraction.takeIf { loading },
+                    playing = mediaController.isPlaying,
+                    positionMs = mediaController.currentPosition.coerceAtLeast(0L),
+                    durationMs = duration ?: current.attachment?.durationMs,
+                    bufferedMs = mediaController.bufferedPosition.coerceAtLeast(0L),
+                    speed = mediaController.playbackParameters.speed,
+                    error = null,
+                )
+        }
+
+        private suspend fun updateDownloadProgress() {
+            val snapshot = _state.value
+            val attachment = snapshot.attachment ?: return
+            if (!snapshot.loading || attachment.encrypted ||
+                !attachment.url.startsWith("http", ignoreCase = true)
+            ) {
+                return
+            }
+
+            val fraction = mediaCache.downloadFraction(attachment.url) ?: return
+            _state.update { current ->
+                if (current.activeId == snapshot.activeId && current.loading) {
+                    current.copy(loadingFraction = fraction)
+                } else {
+                    current
+                }
             }
         }
-    }
 
-    private fun mediaMetadata(request: AudioPlaybackRequest, networkName: String?): MediaMetadata {
-        val origin = request.origin
-        val extras = Bundle().apply {
-            origin?.let {
-                putLong(EXTRA_BUFFER_ID, it.bufferId)
-                putLong(EXTRA_EVENT_ID, it.eventId)
-                putString(EXTRA_MSGID, it.msgid)
-                putLong(EXTRA_SERVER_TIME, it.serverTime)
+        private fun cleanupPlaintext() {
+            decryptedTemp?.delete()
+            decryptedTemp = null
+        }
+
+        private fun analyzeCachedAudio(request: AudioPlaybackRequest) {
+            val attachment = request.attachment
+            if (attachment.encrypted || attachment.waveform != null ||
+                !attachment.url.startsWith("http", ignoreCase = true)
+            ) {
+                return
+            }
+            applicationScope.launch(ioDispatcher) {
+                val local = cacheStore.tempFile("audio-analysis-", ".media")
+                try {
+                    if (!mediaCache.copyIfComplete(attachment.url.substringBefore('#'), local)) return@launch
+                    val waveform = waveformAnalyzer.analyze(local) ?: return@launch
+                    waveformRepository.put(attachment.playbackId, waveform)
+                } finally {
+                    local.delete()
+                }
             }
         }
-        return MediaMetadata.Builder()
-            .setTitle(request.attachment.title)
-            .setArtist(origin?.contextLabel(networkName))
-            .setExtras(extras)
-            .build()
-    }
 
-    private fun updateState(mediaController: MediaController) {
-        val current = _state.value
-        if (current.activeId == null) return
-        val mediaId = mediaController.currentMediaItem?.mediaId ?: return
-        // A newly requested encrypted item can spend time downloading while the controller still
-        // references the previous item. Ignore those stale callbacks so they cannot clear the new
-        // request's download state or progress.
-        if (mediaId != current.activeId) return
-        if (mediaController.playbackState == Player.STATE_ENDED) {
-            dismiss(mediaId)
-            return
+        private fun putCacheStatus(
+            playbackId: String,
+            status: AudioCacheStatus,
+        ) {
+            _cacheStatuses.value =
+                LinkedHashMap(_cacheStatuses.value).apply {
+                    remove(playbackId)
+                    put(playbackId, status)
+                    while (size > MAX_CACHE_STATUS_ENTRIES) {
+                        remove(keys.first())
+                    }
+                }
         }
-        val duration = mediaController.duration.takeIf { it >= 0 }
-        val loading = mediaController.playbackState == Player.STATE_BUFFERING
-        _state.value = current.copy(
-            activeId = mediaId,
-            loading = loading,
-            // Byte progress is sampled from the cache separately. Preserve it across the
-            // frequent MediaController position updates while buffering.
-            loadingFraction = current.loadingFraction.takeIf { loading },
-            playing = mediaController.isPlaying,
-            positionMs = mediaController.currentPosition.coerceAtLeast(0L),
-            durationMs = duration ?: current.attachment?.durationMs,
-            bufferedMs = mediaController.bufferedPosition.coerceAtLeast(0L),
-            speed = mediaController.playbackParameters.speed,
-            error = null,
-        )
-    }
 
-    private suspend fun updateDownloadProgress() {
-        val snapshot = _state.value
-        val attachment = snapshot.attachment ?: return
-        if (!snapshot.loading || attachment.encrypted ||
-            !attachment.url.startsWith("http", ignoreCase = true)
-        ) return
-
-        val fraction = mediaCache.downloadFraction(attachment.url) ?: return
-        _state.update { current ->
-            if (current.activeId == snapshot.activeId && current.loading) {
-                current.copy(loadingFraction = fraction)
-            } else {
-                current
-            }
-        }
-    }
-
-    private fun cleanupPlaintext() {
-        decryptedTemp?.delete()
-        decryptedTemp = null
-    }
-
-    private fun analyzeCachedAudio(request: AudioPlaybackRequest) {
-        val attachment = request.attachment
-        if (attachment.encrypted || attachment.waveform != null ||
-            !attachment.url.startsWith("http", ignoreCase = true)
-        ) return
-        applicationScope.launch(ioDispatcher) {
-            val local = cacheStore.tempFile("audio-analysis-", ".media")
+        private inline fun <T> NetworkMediaRoute?.useOrNull(block: (NetworkMediaRoute?) -> T): T =
             try {
-                if (!mediaCache.copyIfComplete(attachment.url.substringBefore('#'), local)) return@launch
-                val waveform = waveformAnalyzer.analyze(local) ?: return@launch
-                waveformRepository.put(attachment.playbackId, waveform)
+                block(this)
             } finally {
-                local.delete()
+                this?.close()
             }
+
+        private companion object {
+            const val POSITION_POLL_MS = 250L
+            const val CONNECT_TIMEOUT_MS = 15_000
+            const val READ_TIMEOUT_MS = 60_000
+            const val DOWNLOAD_BUFFER_BYTES = 32 * 1024
+            const val MAX_CACHE_STATUS_ENTRIES = 256
+            const val USER_AGENT = "motd-Android (https://github.com/trevarj/motd)"
+            const val EXTRA_BUFFER_ID = "motd.audio.buffer_id"
+            const val EXTRA_EVENT_ID = "motd.audio.event_id"
+            const val EXTRA_MSGID = "motd.audio.msgid"
+            const val EXTRA_SERVER_TIME = "motd.audio.server_time"
         }
     }
 
-    private fun putCacheStatus(playbackId: String, status: AudioCacheStatus) {
-        _cacheStatuses.value = LinkedHashMap(_cacheStatuses.value).apply {
-            remove(playbackId)
-            put(playbackId, status)
-            while (size > MAX_CACHE_STATUS_ENTRIES) {
-                remove(keys.first())
-            }
-        }
-    }
-
-    private inline fun <T> NetworkMediaRoute?.useOrNull(block: (NetworkMediaRoute?) -> T): T =
-        try {
-            block(this)
-        } finally {
-            this?.close()
-        }
-
-    private companion object {
-        const val POSITION_POLL_MS = 250L
-        const val CONNECT_TIMEOUT_MS = 15_000
-        const val READ_TIMEOUT_MS = 60_000
-        const val DOWNLOAD_BUFFER_BYTES = 32 * 1024
-        const val MAX_CACHE_STATUS_ENTRIES = 256
-        const val USER_AGENT = "motd-Android (https://github.com/trevarj/motd)"
-        const val EXTRA_BUFFER_ID = "motd.audio.buffer_id"
-        const val EXTRA_EVENT_ID = "motd.audio.event_id"
-        const val EXTRA_MSGID = "motd.audio.msgid"
-        const val EXTRA_SERVER_TIME = "motd.audio.server_time"
-    }
-}
-
-fun AudioPlaybackOrigin.contextLabel(networkName: String? = null, includeNetwork: Boolean = false): String {
+fun AudioPlaybackOrigin.contextLabel(
+    networkName: String? = null,
+    includeNetwork: Boolean = false,
+): String {
     val actor = if (isSelf) "You" else sender
-    val conversationLabel = when {
-        directMessage && !isSelf -> "Direct message"
-        else -> conversation
-    }
+    val conversationLabel =
+        when {
+            directMessage && !isSelf -> "Direct message"
+            else -> conversation
+        }
     return buildString {
         append(actor)
         append(" · ")

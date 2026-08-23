@@ -33,10 +33,15 @@ sealed interface ChatListSyncChrome {
     data object Hidden : ChatListSyncChrome
 
     /** At least one network pass is live; counts are summed across every network. */
-    data class Syncing(val done: Int, val total: Int) : ChatListSyncChrome
+    data class Syncing(
+        val done: Int,
+        val total: Int,
+    ) : ChatListSyncChrome
 
     /** Buffers are queued but no pass can run: nothing is connected yet. */
-    data class Waiting(val queued: Int) : ChatListSyncChrome
+    data class Waiting(
+        val queued: Int,
+    ) : ChatListSyncChrome
 }
 
 /**
@@ -50,14 +55,21 @@ sealed interface ChatListSyncChrome {
 internal fun syncChromeSnapshot(
     passProgress: Map<Long, SyncPassProgress>,
     statuses: Map<Long, HistorySyncStatus>,
-): ChatListSyncChrome = when {
-    passProgress.isNotEmpty() -> ChatListSyncChrome.Syncing(
-        done = passProgress.values.sumOf(SyncPassProgress::settled),
-        total = passProgress.values.sumOf(SyncPassProgress::total),
-    )
-    else -> statuses.count { it.value == HistorySyncStatus.AwaitingConnection }
-        .let { queued -> if (queued > 0) ChatListSyncChrome.Waiting(queued) else ChatListSyncChrome.Hidden }
-}
+): ChatListSyncChrome =
+    when {
+        passProgress.isNotEmpty() -> {
+            ChatListSyncChrome.Syncing(
+                done = passProgress.values.sumOf(SyncPassProgress::settled),
+                total = passProgress.values.sumOf(SyncPassProgress::total),
+            )
+        }
+
+        else -> {
+            statuses
+                .count { it.value == HistorySyncStatus.AwaitingConnection }
+                .let { queued -> if (queued > 0) ChatListSyncChrome.Waiting(queued) else ChatListSyncChrome.Hidden }
+        }
+    }
 
 /**
  * Anti-flash debouncer for [ChatListSyncChrome], in the `FooterStatePresenter` idiom: pure, driven
@@ -74,7 +86,10 @@ internal class SyncChromePresenter {
     private var activeSinceMs: Long? = null
     private var shownSinceMs: Long? = null
 
-    fun resolve(snapshot: ChatListSyncChrome, nowMs: Long): ChatListSyncChrome {
+    fun resolve(
+        snapshot: ChatListSyncChrome,
+        nowMs: Long,
+    ): ChatListSyncChrome {
         candidate = snapshot
         if (snapshot == ChatListSyncChrome.Hidden) {
             activeSinceMs = null
@@ -102,13 +117,20 @@ internal class SyncChromePresenter {
      * Wall-clock instant at which [resolve] could answer differently for the last snapshot, or null
      * when the presented state already agrees with it and no timer is pending.
      */
-    fun nextDeadlineMs(nowMs: Long): Long? = when {
-        candidate != ChatListSyncChrome.Hidden && presented == ChatListSyncChrome.Hidden ->
-            activeSinceMs?.plus(SYNC_CHROME_APPEARANCE_DELAY_MS)
-        candidate == ChatListSyncChrome.Hidden && presented != ChatListSyncChrome.Hidden ->
-            shownSinceMs?.plus(SYNC_CHROME_MIN_VISIBLE_MS)
-        else -> null
-    }?.takeIf { it > nowMs }
+    fun nextDeadlineMs(nowMs: Long): Long? =
+        when {
+            candidate != ChatListSyncChrome.Hidden && presented == ChatListSyncChrome.Hidden -> {
+                activeSinceMs?.plus(SYNC_CHROME_APPEARANCE_DELAY_MS)
+            }
+
+            candidate == ChatListSyncChrome.Hidden && presented != ChatListSyncChrome.Hidden -> {
+                shownSinceMs?.plus(SYNC_CHROME_MIN_VISIBLE_MS)
+            }
+
+            else -> {
+                null
+            }
+        }?.takeIf { it > nowMs }
 }
 
 /**
@@ -118,15 +140,16 @@ internal class SyncChromePresenter {
  * windows scoped to the subscription rather than to the ViewModel's lifetime.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-internal fun Flow<ChatListSyncChrome>.presentSyncChrome(nowMs: () -> Long): Flow<ChatListSyncChrome> = flow {
-    val presenter = SyncChromePresenter()
-    emitAll(
-        transformLatest { snapshot ->
-            while (true) {
-                emit(presenter.resolve(snapshot, nowMs()))
-                val deadline = presenter.nextDeadlineMs(nowMs()) ?: break
-                delay((deadline - nowMs()).coerceAtLeast(0L))
-            }
-        }.distinctUntilChanged(),
-    )
-}
+internal fun Flow<ChatListSyncChrome>.presentSyncChrome(nowMs: () -> Long): Flow<ChatListSyncChrome> =
+    flow {
+        val presenter = SyncChromePresenter()
+        emitAll(
+            transformLatest { snapshot ->
+                while (true) {
+                    emit(presenter.resolve(snapshot, nowMs()))
+                    val deadline = presenter.nextDeadlineMs(nowMs()) ?: break
+                    delay((deadline - nowMs()).coerceAtLeast(0L))
+                }
+            }.distinctUntilChanged(),
+        )
+    }

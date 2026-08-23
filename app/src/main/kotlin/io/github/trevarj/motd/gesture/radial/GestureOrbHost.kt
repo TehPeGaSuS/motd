@@ -49,9 +49,9 @@ import io.github.trevarj.motd.ui.nav.isChatRoutePattern
 import io.github.trevarj.motd.ui.nav.openChat
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.themeIdentityPalette
-import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /** How long the tab stays fully opaque after it was last touched. */
 private const val ORB_IDLE_FADE_DELAY_MILLIS = 4_000L
@@ -141,30 +141,34 @@ internal fun GestureOrbSurface(
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val screenSize = with(density) { Size(maxWidth.toPx(), maxHeight.toPx()) }
-        val orbSize = with(density) {
-            Size(RadialDimens.OrbWidth.toPx(), RadialDimens.OrbHeight.toPx())
-        }
+        val orbSize =
+            with(density) {
+                Size(RadialDimens.OrbWidth.toPx(), RadialDimens.OrbHeight.toPx())
+            }
         val restPlacement = dragPlacement ?: placement
         val visualTopLeft = orbTopLeft(restPlacement, screenSize, orbSize)
         OrbTab(
             edge = restPlacement.edge,
             alpha = if (menuVisible) 0f else orbAlpha,
-            modifier = Modifier.offset {
-                IntOffset(visualTopLeft.x.roundToInt(), visualTopLeft.y.roundToInt())
-            },
+            modifier =
+                Modifier.offset {
+                    IntOffset(visualTopLeft.x.roundToInt(), visualTopLeft.y.roundToInt())
+                },
         )
 
-        val touchTopLeft = orbCenter(placement, screenSize, orbSize).let { center ->
-            with(density) {
-                Offset(
-                    center.x - RadialDimens.OrbTouchWidth.toPx() / 2f,
-                    center.y - RadialDimens.OrbTouchHeight.toPx() / 2f,
-                )
+        val touchTopLeft =
+            orbCenter(placement, screenSize, orbSize).let { center ->
+                with(density) {
+                    Offset(
+                        center.x - RadialDimens.OrbTouchWidth.toPx() / 2f,
+                        center.y - RadialDimens.OrbTouchHeight.toPx() / 2f,
+                    )
+                }
             }
-        }
-        val touchModifier = Modifier.offset {
-            IntOffset(touchTopLeft.x.roundToInt(), touchTopLeft.y.roundToInt())
-        }
+        val touchModifier =
+            Modifier.offset {
+                IntOffset(touchTopLeft.x.roundToInt(), touchTopLeft.y.roundToInt())
+            }
         if (accessible) {
             AccessibleGestureOrb(
                 contentDescription = stringResource(R.string.gesture_orb_open),
@@ -200,8 +204,11 @@ internal fun GestureOrbSurface(
                             haptics.performHapticFeedback(HapticFeedbackType.Confirm)
                             release.entry.action?.let(onExecute)
                         }
+
                         // A hold released with nothing selected, or one that never resolved at all.
-                        else -> haptics.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                        else -> {
+                            haptics.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                        }
                     }
                 },
                 onDragMove = { position ->
@@ -274,12 +281,22 @@ private fun rememberTouchExplorationEnabled(): Boolean {
 
 private fun HapticFeedback.perform(update: RadialUpdate) {
     when (update.effect) {
-        RadialEffect.FOCUS_CHANGED ->
+        RadialEffect.FOCUS_CHANGED -> {
             // Only entering a slice ticks; leaving one for empty space is not an event worth feeling.
             if (update.state.focusedEntry != null) performHapticFeedback(HapticFeedbackType.SegmentTick)
-        RadialEffect.DESCENDED -> performHapticFeedback(HapticFeedbackType.Confirm)
-        RadialEffect.POPPED -> performHapticFeedback(HapticFeedbackType.SegmentTick)
-        RadialEffect.NONE -> Unit
+        }
+
+        RadialEffect.DESCENDED -> {
+            performHapticFeedback(HapticFeedbackType.Confirm)
+        }
+
+        RadialEffect.POPPED -> {
+            performHapticFeedback(HapticFeedbackType.SegmentTick)
+        }
+
+        RadialEffect.NONE -> {
+            Unit
+        }
     }
 }
 
@@ -290,14 +307,24 @@ private fun NavHostController.perform(request: GestureNavRequest) {
         // ComposerDraftStore.prefillPushes, not re-entry). Any other chat must replace the open
         // one: a launchSingleTop re-navigation to an on-top ChatRoute never updates its
         // arguments, so a non-replacing jump from inside a chat would be silently swallowed.
-        is GestureNavRequest.OpenChat ->
+        is GestureNavRequest.OpenChat -> {
             if (shouldPerformChatJump(currentChatBufferId(), request.bufferId)) {
                 openChat(ChatRoute(request.bufferId), replaceCurrentChat = true)
             }
-        GestureNavRequest.OpenSearch -> navigate(SearchRoute())
-        is GestureNavRequest.OpenChannelInfo -> navigate(ChannelInfoRoute(request.bufferId))
-        GestureNavRequest.OpenChatList -> navigate(ChatListRoute) {
-            popUpTo<ChatListRoute> { inclusive = true }
+        }
+
+        GestureNavRequest.OpenSearch -> {
+            navigate(SearchRoute())
+        }
+
+        is GestureNavRequest.OpenChannelInfo -> {
+            navigate(ChannelInfoRoute(request.bufferId))
+        }
+
+        GestureNavRequest.OpenChatList -> {
+            navigate(ChatListRoute) {
+                popUpTo<ChatListRoute> { inclusive = true }
+            }
         }
     }
 }
@@ -310,5 +337,7 @@ private fun NavHostController.currentChatBufferId(): Long? {
 }
 
 /** False only when the requested chat is the one already on top — then navigating is pure churn. */
-internal fun shouldPerformChatJump(currentChatBufferId: Long?, targetBufferId: Long): Boolean =
-    currentChatBufferId != targetBufferId
+internal fun shouldPerformChatJump(
+    currentChatBufferId: Long?,
+    targetBufferId: Long,
+): Boolean = currentChatBufferId != targetBufferId

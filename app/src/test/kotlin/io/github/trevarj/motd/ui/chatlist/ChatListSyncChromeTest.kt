@@ -15,39 +15,42 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatListSyncChromeTest {
-
     // --- snapshot derivation -------------------------------------------------------------------
 
     @Test
     fun a_live_pass_sums_progress_across_every_network() {
-        val snapshot = syncChromeSnapshot(
-            passProgress = mapOf(1L to SyncPassProgress(total = 12, settled = 5), 2L to SyncPassProgress(30, 7)),
-            statuses = mapOf(9L to HistorySyncStatus.Syncing),
-        )
+        val snapshot =
+            syncChromeSnapshot(
+                passProgress = mapOf(1L to SyncPassProgress(total = 12, settled = 5), 2L to SyncPassProgress(30, 7)),
+                statuses = mapOf(9L to HistorySyncStatus.Syncing),
+            )
 
         assertEquals(ChatListSyncChrome.Syncing(done = 12, total = 42), snapshot)
     }
 
     @Test
     fun a_live_pass_wins_over_buffers_still_waiting_on_another_network() {
-        val snapshot = syncChromeSnapshot(
-            passProgress = mapOf(1L to SyncPassProgress(total = 4, settled = 1)),
-            statuses = mapOf(
-                7L to HistorySyncStatus.AwaitingConnection,
-                8L to HistorySyncStatus.AwaitingConnection,
-            ),
-        )
+        val snapshot =
+            syncChromeSnapshot(
+                passProgress = mapOf(1L to SyncPassProgress(total = 4, settled = 1)),
+                statuses =
+                    mapOf(
+                        7L to HistorySyncStatus.AwaitingConnection,
+                        8L to HistorySyncStatus.AwaitingConnection,
+                    ),
+            )
 
         assertEquals(ChatListSyncChrome.Syncing(done = 1, total = 4), snapshot)
     }
 
     @Test
     fun waiting_counts_only_awaiting_connection_entries_and_settles_to_hidden() {
-        val statuses = mapOf(
-            1L to HistorySyncStatus.AwaitingConnection,
-            2L to HistorySyncStatus.AwaitingConnection,
-            3L to HistorySyncStatus.Failed("timed out"),
-        )
+        val statuses =
+            mapOf(
+                1L to HistorySyncStatus.AwaitingConnection,
+                2L to HistorySyncStatus.AwaitingConnection,
+                3L to HistorySyncStatus.Failed("timed out"),
+            )
 
         assertEquals(ChatListSyncChrome.Waiting(queued = 2), syncChromeSnapshot(emptyMap(), statuses))
         assertEquals(
@@ -132,55 +135,57 @@ class ChatListSyncChromeTest {
     // --- driver --------------------------------------------------------------------------------
 
     @Test
-    fun the_driver_resolves_its_own_deadlines_without_further_engine_emissions() = runTest {
-        val snapshots = MutableStateFlow<ChatListSyncChrome>(ChatListSyncChrome.Hidden)
-        val seen = mutableListOf<ChatListSyncChrome>()
-        backgroundScope.launch {
-            snapshots.presentSyncChrome { testScheduler.currentTime }.toList(seen)
+    fun the_driver_resolves_its_own_deadlines_without_further_engine_emissions() =
+        runTest {
+            val snapshots = MutableStateFlow<ChatListSyncChrome>(ChatListSyncChrome.Hidden)
+            val seen = mutableListOf<ChatListSyncChrome>()
+            backgroundScope.launch {
+                snapshots.presentSyncChrome { testScheduler.currentTime }.toList(seen)
+            }
+            runCurrent()
+            assertEquals(listOf(ChatListSyncChrome.Hidden), seen)
+
+            val syncing = ChatListSyncChrome.Syncing(done = 0, total = 4)
+            snapshots.value = syncing
+            runCurrent()
+            assertEquals(listOf(ChatListSyncChrome.Hidden), seen)
+
+            // No new engine emission here: the appearance timer is the driver's own.
+            advanceTimeBy(SYNC_CHROME_APPEARANCE_DELAY_MS + 1)
+            assertEquals(listOf(ChatListSyncChrome.Hidden, syncing), seen)
+
+            snapshots.value = ChatListSyncChrome.Hidden
+            runCurrent()
+            assertEquals(listOf(ChatListSyncChrome.Hidden, syncing), seen)
+
+            advanceTimeBy(SYNC_CHROME_MIN_VISIBLE_MS + 1)
+            assertEquals(listOf(ChatListSyncChrome.Hidden, syncing, ChatListSyncChrome.Hidden), seen)
         }
-        runCurrent()
-        assertEquals(listOf(ChatListSyncChrome.Hidden), seen)
-
-        val syncing = ChatListSyncChrome.Syncing(done = 0, total = 4)
-        snapshots.value = syncing
-        runCurrent()
-        assertEquals(listOf(ChatListSyncChrome.Hidden), seen)
-
-        // No new engine emission here: the appearance timer is the driver's own.
-        advanceTimeBy(SYNC_CHROME_APPEARANCE_DELAY_MS + 1)
-        assertEquals(listOf(ChatListSyncChrome.Hidden, syncing), seen)
-
-        snapshots.value = ChatListSyncChrome.Hidden
-        runCurrent()
-        assertEquals(listOf(ChatListSyncChrome.Hidden, syncing), seen)
-
-        advanceTimeBy(SYNC_CHROME_MIN_VISIBLE_MS + 1)
-        assertEquals(listOf(ChatListSyncChrome.Hidden, syncing, ChatListSyncChrome.Hidden), seen)
-    }
 
     @Test
-    fun the_driver_keeps_publishing_progress_while_the_chrome_is_up() = runTest {
-        val snapshots = MutableStateFlow<ChatListSyncChrome>(ChatListSyncChrome.Waiting(queued = 3))
-        val seen = mutableListOf<ChatListSyncChrome>()
-        backgroundScope.launch {
-            snapshots.presentSyncChrome { testScheduler.currentTime }.toList(seen)
+    fun the_driver_keeps_publishing_progress_while_the_chrome_is_up() =
+        runTest {
+            val snapshots = MutableStateFlow<ChatListSyncChrome>(ChatListSyncChrome.Waiting(queued = 3))
+            val seen = mutableListOf<ChatListSyncChrome>()
+            backgroundScope.launch {
+                snapshots.presentSyncChrome { testScheduler.currentTime }.toList(seen)
+            }
+            advanceTimeBy(SYNC_CHROME_APPEARANCE_DELAY_MS + 1)
+            assertEquals(listOf(ChatListSyncChrome.Hidden, ChatListSyncChrome.Waiting(queued = 3)), seen)
+
+            snapshots.value = ChatListSyncChrome.Syncing(done = 1, total = 3)
+            runCurrent()
+            snapshots.value = ChatListSyncChrome.Syncing(done = 2, total = 3)
+            runCurrent()
+
+            assertEquals(
+                listOf(
+                    ChatListSyncChrome.Hidden,
+                    ChatListSyncChrome.Waiting(queued = 3),
+                    ChatListSyncChrome.Syncing(done = 1, total = 3),
+                    ChatListSyncChrome.Syncing(done = 2, total = 3),
+                ),
+                seen,
+            )
         }
-        advanceTimeBy(SYNC_CHROME_APPEARANCE_DELAY_MS + 1)
-        assertEquals(listOf(ChatListSyncChrome.Hidden, ChatListSyncChrome.Waiting(queued = 3)), seen)
-
-        snapshots.value = ChatListSyncChrome.Syncing(done = 1, total = 3)
-        runCurrent()
-        snapshots.value = ChatListSyncChrome.Syncing(done = 2, total = 3)
-        runCurrent()
-
-        assertEquals(
-            listOf(
-                ChatListSyncChrome.Hidden,
-                ChatListSyncChrome.Waiting(queued = 3),
-                ChatListSyncChrome.Syncing(done = 1, total = 3),
-                ChatListSyncChrome.Syncing(done = 2, total = 3),
-            ),
-            seen,
-        )
-    }
 }

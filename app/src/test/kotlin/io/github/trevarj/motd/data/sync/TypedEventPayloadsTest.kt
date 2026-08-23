@@ -26,16 +26,17 @@ class TypedEventPayloadsTest {
     }
 
     @Test fun `dcc payloads round trip endpoint metadata`() {
-        val file = DccFileOfferPayloadV1(
-            protocol = "SSEND",
-            filename = "photo:set.jpg",
-            address = "2001:db8::1",
-            addressKind = "IPV6_LITERAL",
-            port = 0,
-            sizeBytes = 42,
-            token = "reverse:token",
-            offerKey = "offer:key",
-        )
+        val file =
+            DccFileOfferPayloadV1(
+                protocol = "SSEND",
+                filename = "photo:set.jpg",
+                address = "2001:db8::1",
+                addressKind = "IPV6_LITERAL",
+                port = 0,
+                sizeBytes = 42,
+                token = "reverse:token",
+                offerKey = "offer:key",
+            )
         val unsupported = UnsupportedDccPayloadV1("VOICE", "UNKNOWN_COMMAND", "DCC VOICE chat 1 2")
 
         assertEquals(file, DccFileOfferPayloadV1.decode(file.encode()))

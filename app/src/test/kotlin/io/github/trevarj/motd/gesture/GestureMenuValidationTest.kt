@@ -8,13 +8,15 @@ import org.junit.Test
 
 /** What the editor is allowed to save: a ring a thumb can hit, no more than three rings deep. */
 class GestureMenuValidationTest {
+    private fun leaf(
+        id: String,
+        label: String = id,
+    ) = GestureNode.Leaf(id = id, label = label, action = GestureAction.MarkAllRead)
 
-    private fun leaf(id: String, label: String = id) =
-        GestureNode.Leaf(id = id, label = label, action = GestureAction.MarkAllRead)
-
-    private fun root(vararg children: GestureNode) = GestureMenuConfig(
-        root = GestureNode.Submenu(id = "root", label = "Menu", children = children.toList()),
-    )
+    private fun root(vararg children: GestureNode) =
+        GestureMenuConfig(
+            root = GestureNode.Submenu(id = "root", label = "Menu", children = children.toList()),
+        )
 
     @Test fun theShippedDefaultIsValidAndFillsTheRing() {
         assertEquals(emptyList<GestureMenuViolation>(), validateGestureMenu(GestureMenuConfig()))
@@ -35,10 +37,11 @@ class GestureMenuValidationTest {
 
     /** A provider is one slice in its parent; its own ring is the clamped limit, so it cannot overflow. */
     @Test fun providerLimitsAreClampedRatherThanReported() {
-        val greedy = root(
-            GestureNode.Provider(id = "p", label = "Pinned", kind = GestureProviderKind.PINNED_CHATS, limit = 99),
-            GestureNode.Provider(id = "q", label = "Unread", kind = GestureProviderKind.UNREAD_CHATS, limit = 0),
-        )
+        val greedy =
+            root(
+                GestureNode.Provider(id = "p", label = "Pinned", kind = GestureProviderKind.PINNED_CHATS, limit = 99),
+                GestureNode.Provider(id = "q", label = "Unread", kind = GestureProviderKind.UNREAD_CHATS, limit = 0),
+            )
 
         assertEquals(emptyList<GestureMenuViolation>(), validateGestureMenu(greedy))
         assertEquals(MAX_RING_SLICES, (greedy.findNode("p") as GestureNode.Provider).clampedLimit)
@@ -46,41 +49,47 @@ class GestureMenuValidationTest {
     }
 
     @Test fun ringsMayNestTwiceButNotThreeTimes() {
-        val deep = root(
-            GestureNode.Submenu(
-                id = "ring2",
-                label = "Ring 2",
-                children = listOf(
-                    GestureNode.Submenu(id = "ring3", label = "Ring 3", children = listOf(leaf("deep"))),
+        val deep =
+            root(
+                GestureNode.Submenu(
+                    id = "ring2",
+                    label = "Ring 2",
+                    children =
+                        listOf(
+                            GestureNode.Submenu(id = "ring3", label = "Ring 3", children = listOf(leaf("deep"))),
+                        ),
                 ),
-            ),
-        )
+            )
         assertEquals(emptyList<GestureMenuViolation>(), validateGestureMenu(deep))
 
-        val tooDeep = deep.addChild(
-            "ring3",
-            GestureNode.Submenu(id = "ring4", label = "Ring 4", children = listOf(leaf("deeper"))),
-        )
+        val tooDeep =
+            deep.addChild(
+                "ring3",
+                GestureNode.Submenu(id = "ring4", label = "Ring 4", children = listOf(leaf("deeper"))),
+            )
         assertEquals(listOf(GestureMenuViolation.TooDeep("ring4", MAX_GESTURE_RINGS + 1)), validateGestureMenu(tooDeep))
     }
 
     /** Descending into a provider opens a ring too, so providers count against the depth limit. */
     @Test fun aProviderCountsAsARing() {
-        val tooDeep = root(
-            GestureNode.Submenu(
-                id = "ring2",
-                label = "Ring 2",
-                children = listOf(
-                    GestureNode.Submenu(
-                        id = "ring3",
-                        label = "Ring 3",
-                        children = listOf(
-                            GestureNode.Provider(id = "p", label = "Pinned", kind = GestureProviderKind.PINNED_CHATS),
+        val tooDeep =
+            root(
+                GestureNode.Submenu(
+                    id = "ring2",
+                    label = "Ring 2",
+                    children =
+                        listOf(
+                            GestureNode.Submenu(
+                                id = "ring3",
+                                label = "Ring 3",
+                                children =
+                                    listOf(
+                                        GestureNode.Provider(id = "p", label = "Pinned", kind = GestureProviderKind.PINNED_CHATS),
+                                    ),
+                            ),
                         ),
-                    ),
                 ),
-            ),
-        )
+            )
 
         assertEquals(listOf(GestureMenuViolation.TooDeep("p", MAX_GESTURE_RINGS + 1)), validateGestureMenu(tooDeep))
     }
@@ -96,9 +105,10 @@ class GestureMenuValidationTest {
 
     /** An unknown node's label belongs to whichever build wrote it, so it is exempt. */
     @Test fun unknownNodesAreExemptFromTheLabelRule() {
-        val withUnknown = root(
-            GestureNode.Unknown(JsonObject(mapOf("type" to JsonPrimitive("hologram"), "id" to JsonPrimitive("future")))),
-        )
+        val withUnknown =
+            root(
+                GestureNode.Unknown(JsonObject(mapOf("type" to JsonPrimitive("hologram"), "id" to JsonPrimitive("future")))),
+            )
 
         assertEquals(emptyList<GestureMenuViolation>(), validateGestureMenu(withUnknown))
     }
@@ -110,10 +120,11 @@ class GestureMenuValidationTest {
     }
 
     @Test fun violationsAccumulateInPreorder() {
-        val messy = root(
-            leaf("a", label = ""),
-            GestureNode.Submenu(id = "s", label = "", children = listOf(leaf("b", label = ""))),
-        )
+        val messy =
+            root(
+                leaf("a", label = ""),
+                GestureNode.Submenu(id = "s", label = "", children = listOf(leaf("b", label = ""))),
+            )
 
         assertEquals(
             listOf(

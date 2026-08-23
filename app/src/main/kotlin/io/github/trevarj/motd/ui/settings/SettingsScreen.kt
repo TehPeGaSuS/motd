@@ -13,11 +13,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Chat
@@ -95,18 +95,20 @@ fun SettingsScreen(
                 slideInHorizontally(
                     animationSpec = MotdMotion.navigationDrawerSpatial,
                     initialOffsetX = { it },
-                ) togetherWith slideOutHorizontally(
-                    animationSpec = MotdMotion.navigationDrawerSpatial,
-                    targetOffsetX = { -it },
-                )
+                ) togetherWith
+                    slideOutHorizontally(
+                        animationSpec = MotdMotion.navigationDrawerSpatial,
+                        targetOffsetX = { -it },
+                    )
             } else {
                 slideInHorizontally(
                     animationSpec = MotdMotion.navigationDrawerSpatial,
                     initialOffsetX = { -it },
-                ) togetherWith slideOutHorizontally(
-                    animationSpec = MotdMotion.navigationDrawerSpatial,
-                    targetOffsetX = { it },
-                )
+                ) togetherWith
+                    slideOutHorizontally(
+                        animationSpec = MotdMotion.navigationDrawerSpatial,
+                        targetOffsetX = { it },
+                    )
             }
         },
         label = "settings_local_page",
@@ -282,9 +284,13 @@ internal fun SettingsScaffold(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
             Column(
-                modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp).verticalScroll(rememberScrollState())
-                    .testTag("settings_scroll")
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 720.dp)
+                        .verticalScroll(rememberScrollState())
+                        .testTag("settings_scroll")
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 content()
@@ -342,7 +348,9 @@ internal fun SettingsNavigationRow(
                 Icon(Icons.Outlined.ChevronRight, contentDescription = null)
             }
         },
-        colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+        colors =
+            androidx.compose.material3.ListItemDefaults
+                .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         modifier = modifier.fillMaxWidth().clickable(onClick = onClick).semantics { role = Role.Button },
     )
 }
@@ -359,15 +367,21 @@ internal fun networkSupporting(
 ): String {
     val base = "${network.host}:${network.port}"
     return when (network.role) {
-        NetworkRole.BOUNCER_ROOT -> stringResource(R.string.settings_network_soju_suffix, base)
+        NetworkRole.BOUNCER_ROOT -> {
+            stringResource(R.string.settings_network_soju_suffix, base)
+        }
+
         NetworkRole.BOUNCER_CHILD -> {
             val rootName = all.firstOrNull { it.id == network.parentId }?.name
             if (rootName != null) stringResource(R.string.settings_network_via_suffix, base, rootName) else base
         }
-        NetworkRole.DIRECT -> if (network.id in zncNetworkIds) {
-            stringResource(R.string.settings_network_znc_suffix, base)
-        } else {
-            base
+
+        NetworkRole.DIRECT -> {
+            if (network.id in zncNetworkIds) {
+                stringResource(R.string.settings_network_znc_suffix, base)
+            } else {
+                base
+            }
         }
     }
 }
@@ -392,18 +406,23 @@ internal fun RadioRow(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = selected, onClick = null, enabled = enabled)
         Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
             Text(
                 label,
-                color = if (enabled) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                color =
+                    if (enabled) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    },
             )
             subtitle?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -423,8 +442,11 @@ internal fun SwitchRow(
     enabled: Boolean = true,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, role = Role.Switch) { onCheckedChange(!checked) }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(enabled = enabled, role = Role.Switch) { onCheckedChange(!checked) }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -468,9 +490,15 @@ internal fun SubLabel(text: String) {
 private fun SettingsContentPreview() {
     io.github.trevarj.motd.ui.theme.MotdTheme {
         SettingsContent(
-            onBack = {}, onOpenAppearance = {}, onOpenChat = {},
-            onOpenDelivery = {}, onOpenNetworks = {}, onOpenUploads = {},
-            onOpenBackupRestore = {}, onOpenLabs = {}, onOpenAbout = {},
+            onBack = {},
+            onOpenAppearance = {},
+            onOpenChat = {},
+            onOpenDelivery = {},
+            onOpenNetworks = {},
+            onOpenUploads = {},
+            onOpenBackupRestore = {},
+            onOpenLabs = {},
+            onOpenAbout = {},
         )
     }
 }

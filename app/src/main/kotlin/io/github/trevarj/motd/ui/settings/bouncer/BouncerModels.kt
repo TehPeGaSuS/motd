@@ -6,10 +6,10 @@ import io.github.trevarj.motd.irc.client.BouncerNetwork
 /** One row: a network known to the bouncer, merged with its local mirror (if imported). */
 data class BouncerNetRow(
     val netId: String,
-    val name: String,             // attrs["name"] ?: attrs["host"] ?: netId
-    val host: String?,            // attrs["host"]
-    val bouncerState: String?,    // attrs["state"]: "connected"/"connecting"/"disconnected"
-    val childNetworkId: Long?,    // local BOUNCER_CHILD row id; null = not imported
+    val name: String, // attrs["name"] ?: attrs["host"] ?: netId
+    val host: String?, // attrs["host"]
+    val bouncerState: String?, // attrs["state"]: "connected"/"connecting"/"disconnected"
+    val childNetworkId: Long?, // local BOUNCER_CHILD row id; null = not imported
 )
 
 /**

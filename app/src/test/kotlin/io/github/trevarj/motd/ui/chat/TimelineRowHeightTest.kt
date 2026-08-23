@@ -16,20 +16,20 @@ import org.junit.Test
  * churn on sub-step noise.
  */
 class TimelineRowHeightTest {
-
     private val bounds = TimelineRowHeightBounds(minPx = 60, maxPx = 480, stepPx = 24)
 
     @Test
     fun onlyRealMessageRowsAreSampled() {
         // Row keys are entity ids (Long). Paging's placeholder key and the append footer are not.
-        val samples = timelineRowHeightSamplesPx(
-            listOf(
-                11L to 120,
-                "append-state" to 90,
-                PlaceholderKeyStandIn(3) to 48,
-                12L to 140,
-            ),
-        )
+        val samples =
+            timelineRowHeightSamplesPx(
+                listOf(
+                    11L to 120,
+                    "append-state" to 90,
+                    PlaceholderKeyStandIn(3) to 48,
+                    12L to 140,
+                ),
+            )
 
         assertEquals(listOf(120, 140), samples)
     }
@@ -38,9 +38,10 @@ class TimelineRowHeightTest {
     fun suppressedZeroHeightRowsDoNotDragTheEstimateDown() {
         // A suppressed member of a collapsed system run is a real row with a real key that composes
         // nothing. Counting it would push every skeleton below every row that is actually drawn.
-        val samples = timelineRowHeightSamplesPx(
-            listOf(1L to 0, 2L to 0, 3L to 0, 4L to 132, 5L to 140),
-        )
+        val samples =
+            timelineRowHeightSamplesPx(
+                listOf(1L to 0, 2L to 0, 3L to 0, 4L to 132, 5L to 140),
+            )
 
         assertEquals(listOf(132, 140), samples)
     }
@@ -66,11 +67,12 @@ class TimelineRowHeightTest {
 
     @Test
     fun theFirstSampleReplacesTheFallbackOutright() {
-        val next = nextTimelineRowHeightPx(
-            currentPx = UNSAMPLED_ROW_HEIGHT_PX,
-            sampledPx = 148,
-            bounds = bounds,
-        )
+        val next =
+            nextTimelineRowHeightPx(
+                currentPx = UNSAMPLED_ROW_HEIGHT_PX,
+                sampledPx = 148,
+                bounds = bounds,
+            )
 
         // 148 snaps to the nearest 24px lattice point.
         assertEquals(144, next)
@@ -126,14 +128,16 @@ class TimelineRowHeightTest {
         // the timeline indefinitely, so a stable viewport must reach a fixed point.
         var current = UNSAMPLED_ROW_HEIGHT_PX
         val viewport = listOf(1L to 130, 2L to 0, 3L to 138, 4L to 700, 5L to 126)
-        val settled = (0 until 8).map {
-            current = nextTimelineRowHeightPx(
-                currentPx = current,
-                sampledPx = medianTimelineRowHeightPx(timelineRowHeightSamplesPx(viewport)),
-                bounds = bounds,
-            )
-            current
-        }
+        val settled =
+            (0 until 8).map {
+                current =
+                    nextTimelineRowHeightPx(
+                        currentPx = current,
+                        sampledPx = medianTimelineRowHeightPx(timelineRowHeightSamplesPx(viewport)),
+                        bounds = bounds,
+                    )
+                current
+            }
 
         assertEquals(1, settled.distinct().size)
     }
@@ -148,5 +152,7 @@ class TimelineRowHeightTest {
     }
 
     /** Paging's placeholder key is internal to the library; its only relevant property is not-Long. */
-    private data class PlaceholderKeyStandIn(val index: Int)
+    private data class PlaceholderKeyStandIn(
+        val index: Int,
+    )
 }

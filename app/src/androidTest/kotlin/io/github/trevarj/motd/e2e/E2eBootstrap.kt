@@ -27,30 +27,45 @@ data class FixtureArgs(
     companion object {
         fun read(): FixtureArgs {
             val args = InstrumentationRegistry.getArguments()
-            fun required(name: String): String = args.getString(name)?.trim().orEmpty().also {
-                require(it.isNotEmpty()) { "missing required instrumentation argument: $name" }
-            }
-            val port = required("sojuPort").toIntOrNull()
-                ?.takeIf { it in 1..65535 }
-                ?: error("invalid sojuPort")
-            val ergoPort = required("ergoPort").toIntOrNull()
-                ?.takeIf { it in 1..65535 }
-                ?: error("invalid ergoPort")
+
+            fun required(name: String): String =
+                args.getString(name)?.trim().orEmpty().also {
+                    require(it.isNotEmpty()) { "missing required instrumentation argument: $name" }
+                }
+            val port =
+                required("sojuPort")
+                    .toIntOrNull()
+                    ?.takeIf { it in 1..65535 }
+                    ?: error("invalid sojuPort")
+            val ergoPort =
+                required("ergoPort")
+                    .toIntOrNull()
+                    ?.takeIf { it in 1..65535 }
+                    ?: error("invalid ergoPort")
             val fingerprint = required("sojuTlsSha256").lowercase()
             require(fingerprint.matches(Regex("[0-9a-f]{64}"))) { "invalid sojuTlsSha256" }
             return FixtureArgs(
-                host = required("sojuHost"), port = port, user = required("sojuUser"),
-                password = required("sojuPassword"), nick = required("nick"),
-                channel = required("channel"), ergoPort = ergoPort,
-                ergoUser = required("ergoUser"), ergoPassword = required("ergoPassword"),
-                secondNick = required("secondNick"), fingerprint = fingerprint,
+                host = required("sojuHost"),
+                port = port,
+                user = required("sojuUser"),
+                password = required("sojuPassword"),
+                nick = required("nick"),
+                channel = required("channel"),
+                ergoPort = ergoPort,
+                ergoUser = required("ergoUser"),
+                ergoPassword = required("ergoPassword"),
+                secondNick = required("secondNick"),
+                fingerprint = fingerprint,
                 runId = required("e2eRunId"),
             )
         }
     }
 }
 
-data class BootstrappedNetwork(val rootId: Long, val childId: Long)
+data class BootstrappedNetwork(
+    val rootId: Long,
+    val childId: Long,
+)
 
 class E2eBootstrap private constructor(
     val args: FixtureArgs,
@@ -73,36 +88,38 @@ class E2eBootstrap private constructor(
      */
     suspend fun connectedSojuNetwork(): BootstrappedNetwork {
         seams.certTrust().pin(args.host, args.port, args.fingerprint)
-        val rootId = seams.networks().addNetwork(
-            NetworkEntity(
-                name = "required-e2e-root",
-                role = NetworkRole.BOUNCER_ROOT,
-                host = args.host,
-                port = args.port,
-                nick = args.nick,
-                username = args.user,
-                realname = "motd required E2E",
-                saslMechanism = "PLAIN",
-                saslUser = args.user,
-                saslPassword = args.password,
-            ),
-        )
-        val childId = seams.networks().addNetwork(
-            NetworkEntity(
-                name = "libera",
-                role = NetworkRole.BOUNCER_CHILD,
-                parentId = rootId,
-                bouncerNetId = "libera",
-                host = args.host,
-                port = args.port,
-                nick = args.nick,
-                username = args.user,
-                realname = "motd required E2E",
-                saslMechanism = "PLAIN",
-                saslUser = args.user,
-                saslPassword = args.password,
-            ),
-        )
+        val rootId =
+            seams.networks().addNetwork(
+                NetworkEntity(
+                    name = "required-e2e-root",
+                    role = NetworkRole.BOUNCER_ROOT,
+                    host = args.host,
+                    port = args.port,
+                    nick = args.nick,
+                    username = args.user,
+                    realname = "motd required E2E",
+                    saslMechanism = "PLAIN",
+                    saslUser = args.user,
+                    saslPassword = args.password,
+                ),
+            )
+        val childId =
+            seams.networks().addNetwork(
+                NetworkEntity(
+                    name = "libera",
+                    role = NetworkRole.BOUNCER_CHILD,
+                    parentId = rootId,
+                    bouncerNetId = "libera",
+                    host = args.host,
+                    port = args.port,
+                    nick = args.nick,
+                    username = args.user,
+                    realname = "motd required E2E",
+                    saslMechanism = "PLAIN",
+                    saslUser = args.user,
+                    saslPassword = args.password,
+                ),
+            )
         withTimeout(10_000) {
             seams.networks().observeNetworks().first { rows ->
                 rows.count { it.role == NetworkRole.BOUNCER_ROOT } == 1 &&

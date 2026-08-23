@@ -11,16 +11,29 @@ internal data class BatchTree(
 )
 
 internal sealed interface BatchChild {
-    data class Message(val message: IrcMessage) : BatchChild
-    data class Nested(val batch: BatchTree) : BatchChild
+    data class Message(
+        val message: IrcMessage,
+    ) : BatchChild
+
+    data class Nested(
+        val batch: BatchTree,
+    ) : BatchChild
 }
 
 /** Assembles an immutable, ordered IRCv3 batch tree without flattening nested semantics. */
 internal class BatchAssembler {
     private sealed interface MutableChild {
-        data class Message(val message: IrcMessage) : MutableChild
-        data class Pending(val ref: String) : MutableChild
-        data class Nested(val batch: BatchTree) : MutableChild
+        data class Message(
+            val message: IrcMessage,
+        ) : MutableChild
+
+        data class Pending(
+            val ref: String,
+        ) : MutableChild
+
+        data class Nested(
+            val batch: BatchTree,
+        ) : MutableChild
     }
 
     private class OpenBatch(
@@ -37,7 +50,11 @@ internal class BatchAssembler {
 
     sealed interface Outcome {
         data object Buffered : Outcome
-        data class Closed(val tree: BatchTree) : Outcome
+
+        data class Closed(
+            val tree: BatchTree,
+        ) : Outcome
+
         data object PassThrough : Outcome
     }
 
@@ -78,19 +95,21 @@ internal class BatchAssembler {
         return Outcome.PassThrough
     }
 
-    private fun OpenBatch.freeze(): BatchTree = BatchTree(
-        ref = ref,
-        type = type,
-        params = params.toList(),
-        opening = opening,
-        children = children.mapNotNull { child ->
-            when (child) {
-                is MutableChild.Message -> BatchChild.Message(child.message)
-                is MutableChild.Nested -> BatchChild.Nested(child.batch)
-                is MutableChild.Pending -> null
-            }
-        },
-    )
+    private fun OpenBatch.freeze(): BatchTree =
+        BatchTree(
+            ref = ref,
+            type = type,
+            params = params.toList(),
+            opening = opening,
+            children =
+                children.mapNotNull { child ->
+                    when (child) {
+                        is MutableChild.Message -> BatchChild.Message(child.message)
+                        is MutableChild.Nested -> BatchChild.Nested(child.batch)
+                        is MutableChild.Pending -> null
+                    }
+                },
+        )
 
     private fun discardOpenDescendants(batch: OpenBatch) {
         batch.children.filterIsInstance<MutableChild.Pending>().forEach { pending ->

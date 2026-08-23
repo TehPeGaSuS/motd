@@ -10,7 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ConnectionBannerTest {
-
     @Test
     fun connectingStatusIsTransientAndUsesGraceWindow() {
         val status = bannerStatus(mapOf(1L to IrcClientState.Connecting)) { "Libera" }
@@ -40,12 +39,14 @@ class ConnectionBannerTest {
 
     @Test
     fun dismissedStatusStaysHiddenUntilConnectionStatusChanges() {
-        val accountRequired = bannerStatus(
-            mapOf(1L to IrcClientState.Failed("ACCOUNT_REQUIRED", fatal = true)),
-        ) { "Libera" }
-        val reconnecting = bannerStatus(
-            mapOf(1L to IrcClientState.Connecting),
-        ) { "Libera" }
+        val accountRequired =
+            bannerStatus(
+                mapOf(1L to IrcClientState.Failed("ACCOUNT_REQUIRED", fatal = true)),
+            ) { "Libera" }
+        val reconnecting =
+            bannerStatus(
+                mapOf(1L to IrcClientState.Connecting),
+            ) { "Libera" }
 
         assertNull(
             visibleBannerStatus(

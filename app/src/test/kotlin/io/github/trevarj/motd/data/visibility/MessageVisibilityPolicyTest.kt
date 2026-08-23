@@ -3,12 +3,12 @@ package io.github.trevarj.motd.data.visibility
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import io.github.trevarj.motd.data.prefs.PresenceMode
 
 class MessageVisibilityPolicyTest {
     @Test
@@ -60,13 +60,14 @@ class MessageVisibilityPolicyTest {
     @Test
     fun `temporarily revealed hidden fool is timeline-only`() {
         val fool = message(sender = "alice")
-        val policy = MessageVisibilityPolicy(
-            MessageVisibilitySpec(
-                fools = setOf("alice"),
-                foolsMode = FoolsMode.HIDE,
-                revealHiddenFools = true,
-            ),
-        )
+        val policy =
+            MessageVisibilityPolicy(
+                MessageVisibilitySpec(
+                    fools = setOf("alice"),
+                    foolsMode = FoolsMode.HIDE,
+                    revealHiddenFools = true,
+                ),
+            )
 
         assertTrue(policy.timeline(fool))
         assertFalse(policy.search(fool))
@@ -99,8 +100,9 @@ class MessageVisibilityPolicyTest {
         val policy = MessageVisibilityPolicy(MessageVisibilitySpec())
         val offer = message(kind = MessageKind.DCC_TRANSFER).copy(eventPayload = "payload-v1")
         val record = message(kind = MessageKind.DCC_TRANSFER)
-        val ownOffer = message(kind = MessageKind.DCC_TRANSFER, isSelf = true)
-            .copy(eventPayload = "payload-v1")
+        val ownOffer =
+            message(kind = MessageKind.DCC_TRANSFER, isSelf = true)
+                .copy(eventPayload = "payload-v1")
 
         assertTrue(policy.visibleUnread(offer))
         assertFalse("a payload-less transfer record is not an attention cue", policy.visibleUnread(record))
@@ -122,22 +124,25 @@ class MessageVisibilityPolicyTest {
 
     @Test
     fun `account identity keeps fool status across nick changes`() {
-        val policy = MessageVisibilityPolicy(
-            MessageVisibilitySpec(fools = setOf("stable-account")),
-        )
+        val policy =
+            MessageVisibilityPolicy(
+                MessageVisibilitySpec(fools = setOf("stable-account")),
+            )
         val before = message(sender = "old-nick").copy(senderAccount = "stable-account")
-        val after = message(sender = "new-nick").copy(
-            senderAccount = "stable-account",
-            normalizedActor = "new-nick",
-        )
+        val after =
+            message(sender = "new-nick").copy(
+                senderAccount = "stable-account",
+                normalizedActor = "new-nick",
+            )
 
         assertTrue(policy.isFool(before))
         assertTrue(policy.isFool(after))
     }
 
-    private fun policy(mode: FoolsMode) = MessageVisibilityPolicy(
-        MessageVisibilitySpec(fools = setOf("alice"), foolsMode = mode),
-    )
+    private fun policy(mode: FoolsMode) =
+        MessageVisibilityPolicy(
+            MessageVisibilitySpec(fools = setOf("alice"), foolsMode = mode),
+        )
 
     private fun message(
         sender: String = "bob",

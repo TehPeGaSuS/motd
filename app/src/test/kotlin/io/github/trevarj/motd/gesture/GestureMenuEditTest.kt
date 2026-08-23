@@ -10,24 +10,30 @@ import org.junit.Test
 
 /** Pure tree algebra: every edit is a value in, a value out, and a refused edit changes nothing. */
 class GestureMenuEditTest {
+    private fun leaf(
+        id: String,
+        label: String = id,
+    ) = GestureNode.Leaf(id = id, label = label, action = GestureAction.MarkAllRead)
 
-    private fun leaf(id: String, label: String = id) =
-        GestureNode.Leaf(id = id, label = label, action = GestureAction.MarkAllRead)
+    private val config =
+        GestureMenuConfig(
+            root =
+                GestureNode.Submenu(
+                    id = "root",
+                    label = "Menu",
+                    children =
+                        listOf(
+                            leaf("a"),
+                            GestureNode.Submenu(id = "tools", label = "Tools", children = listOf(leaf("b"), leaf("c"))),
+                            GestureNode.Provider(id = "pinned", label = "Pinned", kind = GestureProviderKind.PINNED_CHATS),
+                        ),
+                ),
+        )
 
-    private val config = GestureMenuConfig(
-        root = GestureNode.Submenu(
-            id = "root",
-            label = "Menu",
-            children = listOf(
-                leaf("a"),
-                GestureNode.Submenu(id = "tools", label = "Tools", children = listOf(leaf("b"), leaf("c"))),
-                GestureNode.Provider(id = "pinned", label = "Pinned", kind = GestureProviderKind.PINNED_CHATS),
-            ),
-        ),
-    )
-
-    private fun childIds(config: GestureMenuConfig, parentId: String): List<String> =
-        (config.findNode(parentId) as GestureNode.Submenu).children.map { it.id }
+    private fun childIds(
+        config: GestureMenuConfig,
+        parentId: String,
+    ): List<String> = (config.findNode(parentId) as GestureNode.Submenu).children.map { it.id }
 
     @Test fun findAndParentWalkTheWholeTree() {
         assertEquals("b", config.findNode("b")?.id)
@@ -128,9 +134,10 @@ class GestureMenuEditTest {
 
     /** Unknown nodes are ordinary tree citizens for structural edits, and stay opaque. */
     @Test fun unknownNodesMoveAndDeleteLikeAnythingElse() {
-        val unknown = GestureNode.Unknown(
-            JsonObject(mapOf("type" to JsonPrimitive("hologram"), "id" to JsonPrimitive("future"))),
-        )
+        val unknown =
+            GestureNode.Unknown(
+                JsonObject(mapOf("type" to JsonPrimitive("hologram"), "id" to JsonPrimitive("future"))),
+            )
         val withUnknown = config.addChild("root", unknown, index = 0)
 
         assertEquals(listOf("future", "a", "tools", "pinned"), childIds(withUnknown, "root"))

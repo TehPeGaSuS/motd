@@ -13,8 +13,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -23,36 +23,36 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.AndroidEntryPoint
-import io.github.trevarj.motd.data.db.MotdDatabase
-import io.github.trevarj.motd.data.fonts.CustomFontStore
-import io.github.trevarj.motd.di.NotificationPermissionStatus
-import io.github.trevarj.motd.diagnostics.DiagnosticLogger
-import io.github.trevarj.motd.gesture.radial.GestureOrbHost
-import io.github.trevarj.motd.data.prefs.Settings
-import io.github.trevarj.motd.data.prefs.SettingsRepository
-import io.github.trevarj.motd.data.prefs.AppearanceConfig
-import io.github.trevarj.motd.data.prefs.AppearancePrefs
-import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
-import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.avatar.AvatarConfig
 import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.avatar.AvatarRecord
 import io.github.trevarj.motd.avatar.AvatarStore
-import io.github.trevarj.motd.service.ConnectionManagerImpl
+import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.fonts.CustomFontStore
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
+import io.github.trevarj.motd.data.prefs.AppearancePrefs
+import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
+import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.di.NotificationPermissionStatus
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.gesture.radial.GestureOrbHost
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.ConnectionManagerImpl
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.IrcForegroundService
 import io.github.trevarj.motd.service.MotdNotifications
 import io.github.trevarj.motd.service.startForegroundSafely
+import io.github.trevarj.motd.ui.chat.PreloadChatWallpaperTile
 import io.github.trevarj.motd.ui.components.CertPromptViewModel
 import io.github.trevarj.motd.ui.components.CertTrustDialog
 import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
-import io.github.trevarj.motd.ui.chat.PreloadChatWallpaperTile
 import io.github.trevarj.motd.ui.nav.MotdNavGraph
 import io.github.trevarj.motd.ui.nav.NotificationTarget
 import io.github.trevarj.motd.ui.share.PendingShare
@@ -61,26 +61,37 @@ import io.github.trevarj.motd.ui.share.parseSharedContent
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SystemBarThemeHost
 import io.github.trevarj.motd.ui.theme.TimestampConfig
-import javax.inject.Inject
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity(), SystemBarThemeHost {
-
+class MainActivity :
+    ComponentActivity(),
+    SystemBarThemeHost {
     @Inject lateinit var settingsRepository: SettingsRepository
+
     @Inject lateinit var appearancePrefs: AppearancePrefs
+
     @Inject lateinit var avatarPrefs: AvatarPrefs
+
     @Inject lateinit var avatarStore: AvatarStore
+
     @Inject lateinit var contentPreviewPrefs: ContentPreviewPrefs
+
     @Inject lateinit var customFontStore: CustomFontStore
+
     @Inject lateinit var db: MotdDatabase
+
     @Inject lateinit var connectionManager: ConnectionManager
+
     @Inject lateinit var notificationPermission: NotificationPermissionStatus
+
     @Inject lateinit var pendingShareStore: PendingShareStore
+
     @Inject lateinit var diagnostics: DiagnosticLogger
 
     // POST_NOTIFICATIONS is a delivery concern: report its result immediately to Settings state.
@@ -138,9 +149,10 @@ class MainActivity : ComponentActivity(), SystemBarThemeHost {
             // backup restore that cleared it), or when CustomFontStore's revision bumps (a
             // same-name re-import changes no persisted state, so the name alone would miss it).
             val fontRevision by customFontStore.revision.collectAsStateWithLifecycle()
-            val customFontFile = remember(appearance.customFontName, fontRevision) {
-                customFontStore.installedFile()
-            }
+            val customFontFile =
+                remember(appearance.customFontName, fontRevision) {
+                    customFontStore.installedFile()
+                }
             MotdTheme(
                 themePreset = appearance.theme,
                 trueBlack = appearance.trueBlack,
@@ -159,21 +171,23 @@ class MainActivity : ComponentActivity(), SystemBarThemeHost {
                 bubbleCornerStyle = appearance.bubbleCornerStyle,
             ) {
                 CompositionLocalProvider(
-                    LocalRemoteAvatars provides RemoteAvatarState(
-                        enabled = uiState.avatarConfig.showSharedAvatars && uiState.contentPreviews.showImages,
-                        records = uiState.avatarRecords,
-                    ),
+                    LocalRemoteAvatars provides
+                        RemoteAvatarState(
+                            enabled = uiState.avatarConfig.showSharedAvatars && uiState.contentPreviews.showImages,
+                            records = uiState.avatarRecords,
+                        ),
                 ) {
                     // Root Surface paints the themed background under every screen (incl.
                     // non-Scaffold ones like onboarding) so the window follows the color scheme.
                     // Expose test tags once here for the uiautomator E2E harness.
                     Surface(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            // Edge-to-edge windows receive IME insets instead of being resized.
-                            // Consume them once here so every destination stays above the keyboard.
-                            .imePadding()
-                            .semantics { testTagsAsResourceId = true },
+                        modifier =
+                            Modifier
+                                .fillMaxSize()
+                                // Edge-to-edge windows receive IME insets instead of being resized.
+                                // Consume them once here so every destination stays above the keyboard.
+                                .imePadding()
+                                .semantics { testTagsAsResourceId = true },
                         color = MaterialTheme.colorScheme.background,
                     ) {
                         PreloadChatWallpaperTile(appearance.wallpaper)
@@ -294,15 +308,19 @@ class MainActivity : ComponentActivity(), SystemBarThemeHost {
 internal fun parseNotificationTarget(intent: Intent?): NotificationTarget? {
     if (intent?.action != MotdNotifications.ACTION_OPEN_BUFFER &&
         intent?.action != MotdNotifications.ACTION_ACCEPT_INVITE
-    ) return null
+    ) {
+        return null
+    }
     val bufferId = intent.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1L)
     if (bufferId < 0) return null
     return NotificationTarget(
         bufferId = bufferId,
         jumpToMsgid = intent.getStringExtra(MotdNotifications.EXTRA_JUMP_MSGID),
         jumpToTime = intent.getLongExtra(MotdNotifications.EXTRA_JUMP_TIME, 0L),
-        jumpToEventId = intent.getLongExtra(MotdNotifications.EXTRA_EVENT_ID, -1L)
-            .takeIf { it >= 0L },
+        jumpToEventId =
+            intent
+                .getLongExtra(MotdNotifications.EXTRA_EVENT_ID, -1L)
+                .takeIf { it >= 0L },
     )
 }
 

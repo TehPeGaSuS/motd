@@ -13,7 +13,10 @@ import kotlin.math.abs
  */
 
 /** One top-level drawer entry plus its bouncer children: the unit that moves as a whole. */
-data class DrawerGroup(val root: DrawerRow, val children: List<DrawerRow> = emptyList()) {
+data class DrawerGroup(
+    val root: DrawerRow,
+    val children: List<DrawerRow> = emptyList(),
+) {
     val rows: List<DrawerRow> get() = listOf(root) + children
 }
 
@@ -39,13 +42,18 @@ fun flattenDrawerGroups(groups: List<DrawerGroup>): List<DrawerRow> = groups.fla
 fun drawerOrderIds(rows: List<DrawerRow>): List<Long> = rows.map(DrawerRow::networkId)
 
 /** True when [networkId] has a sibling [delta] positions away, i.e. the move is not a no-op. */
-fun canMoveDrawerRow(rows: List<DrawerRow>, networkId: Long, delta: Int): Boolean {
+fun canMoveDrawerRow(
+    rows: List<DrawerRow>,
+    networkId: Long,
+    delta: Int,
+): Boolean {
     if (delta == 0) return false
     val groups = drawerGroups(rows)
     val groupIndex = groups.indexOfFirst { it.root.networkId == networkId }
     if (groupIndex >= 0) return groupIndex + delta in groups.indices
-    val owner = groups.firstOrNull { group -> group.children.any { it.networkId == networkId } }
-        ?: return false
+    val owner =
+        groups.firstOrNull { group -> group.children.any { it.networkId == networkId } }
+            ?: return false
     val childIndex = owner.children.indexOfFirst { it.networkId == networkId }
     return childIndex + delta in owner.children.indices
 }
@@ -56,7 +64,11 @@ fun canMoveDrawerRow(rows: List<DrawerRow>, networkId: Long, delta: Int): Boolea
  * order alone instead of clamping to the boundary, so a repeated "move up" at the top does nothing
  * rather than silently swallowing the intent somewhere else.
  */
-fun moveDrawerRow(rows: List<DrawerRow>, networkId: Long, delta: Int): List<DrawerRow> {
+fun moveDrawerRow(
+    rows: List<DrawerRow>,
+    networkId: Long,
+    delta: Int,
+): List<DrawerRow> {
     if (delta == 0) return rows
     val groups = drawerGroups(rows)
     val groupIndex = groups.indexOfFirst { it.root.networkId == networkId }
@@ -85,20 +97,29 @@ fun moveDrawerRow(rows: List<DrawerRow>, networkId: Long, delta: Int): List<Draw
  * tree: a network that appeared after [orderIds] was captured sorts last among its own siblings
  * instead of being stranded away from its root.
  */
-fun applyDrawerOrder(rows: List<DrawerRow>, orderIds: List<Long>?): List<DrawerRow> {
+fun applyDrawerOrder(
+    rows: List<DrawerRow>,
+    orderIds: List<Long>?,
+): List<DrawerRow> {
     if (orderIds.isNullOrEmpty()) return rows
     val rank = orderIds.withIndex().associate { (index, id) -> id to index }
+
     fun rankOf(row: DrawerRow) = rank[row.networkId] ?: Int.MAX_VALUE
-    val groups = drawerGroups(rows)
-        .map { group -> group.copy(children = group.children.sortedBy(::rankOf)) }
-        .sortedBy { rankOf(it.root) }
+    val groups =
+        drawerGroups(rows)
+            .map { group -> group.copy(children = group.children.sortedBy(::rankOf)) }
+            .sortedBy { rankOf(it.root) }
     return flattenDrawerGroups(groups)
 }
 
 /** Ids that translate together while [networkId] is dragged: a bouncer root carries its children. */
-fun drawerDragUnit(rows: List<DrawerRow>, networkId: Long): Set<Long> {
-    val group = drawerGroups(rows).firstOrNull { it.root.networkId == networkId }
-        ?: return setOf(networkId)
+fun drawerDragUnit(
+    rows: List<DrawerRow>,
+    networkId: Long,
+): Set<Long> {
+    val group =
+        drawerGroups(rows).firstOrNull { it.root.networkId == networkId }
+            ?: return setOf(networkId)
     return group.rows.mapTo(LinkedHashSet(), DrawerRow::networkId)
 }
 
@@ -121,8 +142,9 @@ fun drawerMoveShift(
         val neighbour = groups.getOrNull(groupIndex + delta) ?: return null
         return neighbour.rows.sumOf { heights[it.networkId] ?: 0 }
     }
-    val owner = groups.firstOrNull { group -> group.children.any { it.networkId == networkId } }
-        ?: return null
+    val owner =
+        groups.firstOrNull { group -> group.children.any { it.networkId == networkId } }
+            ?: return null
     val childIndex = owner.children.indexOfFirst { it.networkId == networkId }
     val neighbour = owner.children.getOrNull(childIndex + delta) ?: return null
     return heights[neighbour.networkId] ?: 0
@@ -133,7 +155,10 @@ fun drawerMoveShift(
  * neighbours the dragged unit has swapped past, so its on-screen translation is
  * `dragTotal - passedExtent`.
  */
-data class DrawerDragPlacement(val rows: List<DrawerRow>, val passedExtent: Int)
+data class DrawerDragPlacement(
+    val rows: List<DrawerRow>,
+    val passedExtent: Int,
+)
 
 /**
  * Where a drag that has travelled [dragTotal] pixels from [startRows] puts [networkId]: walk
@@ -172,8 +197,12 @@ fun drawerDragPlacement(
  * and its invalidation — and an overlay that no longer changes anything must still settle, or the
  * drawer stays pinned to a stale arrangement forever.
  */
-fun drawerOrderSettled(storedRows: List<DrawerRow>, pending: List<Long>?): Boolean =
-    applyDrawerOrder(storedRows, pending) == storedRows
+fun drawerOrderSettled(
+    storedRows: List<DrawerRow>,
+    pending: List<Long>?,
+): Boolean = applyDrawerOrder(storedRows, pending) == storedRows
 
-private fun <T> List<T>.moved(from: Int, to: Int): List<T> =
-    toMutableList().apply { add(to, removeAt(from)) }
+private fun <T> List<T>.moved(
+    from: Int,
+    to: Int,
+): List<T> = toMutableList().apply { add(to, removeAt(from)) }

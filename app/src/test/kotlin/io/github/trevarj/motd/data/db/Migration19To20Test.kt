@@ -24,33 +24,42 @@ class Migration19To20Test {
     @Test fun `migration adds durable dcc transfer table`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(19) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL(
-                            """CREATE TABLE networks (
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(19) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL(
+                                    """CREATE TABLE networks (
                                 id INTEGER PRIMARY KEY NOT NULL,
                                 name TEXT NOT NULL
                             )""",
-                        )
-                        db.execSQL(
-                            """CREATE TABLE buffers (
+                                )
+                                db.execSQL(
+                                    """CREATE TABLE buffers (
                                 id INTEGER PRIMARY KEY NOT NULL,
                                 networkId INTEGER NOT NULL
                             )""",
-                        )
-                        db.execSQL(
-                            """CREATE TABLE messages (
+                                )
+                                db.execSQL(
+                                    """CREATE TABLE messages (
                                 id INTEGER PRIMARY KEY NOT NULL,
                                 bufferId INTEGER NOT NULL
                             )""",
-                        )
-                    }
-                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
-                }).build(),
-        )
+                                )
+                            }
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL("PRAGMA foreign_keys=ON")
         db.execSQL("INSERT INTO networks(id, name) VALUES (1, 'libera')")
@@ -78,5 +87,7 @@ class Migration19To20Test {
         }
     }
 
-    private companion object { const val DB_NAME = "migration-19-20-test.db" }
+    private companion object {
+        const val DB_NAME = "migration-19-20-test.db"
+    }
 }

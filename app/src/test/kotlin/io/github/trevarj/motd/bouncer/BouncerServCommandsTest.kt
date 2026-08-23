@@ -15,11 +15,13 @@ class BouncerServCommandsTest {
     }
 
     @Test fun root_channel_mutations_use_channel_slash_network_not_network_flag() {
-        val create = BouncerServCommands.channelCreate(
-            "#motd",
-            "libera",
-            ChannelCommandFields(detached = true, relayDetached = "highlight", detachAfter = "1h"),
-        ).wire
+        val create =
+            BouncerServCommands
+                .channelCreate(
+                    "#motd",
+                    "libera",
+                    ChannelCommandFields(detached = true, relayDetached = "highlight", detachAfter = "1h"),
+                ).wire
         assertEquals(
             "channel create #motd/libera -detached true -relay-detached highlight -detach-after 1h",
             create,
@@ -32,10 +34,11 @@ class BouncerServCommandsTest {
     @Test fun network_update_emits_only_changed_fields() {
         assertEquals(
             "network update libera -nick newNick -enabled false",
-            BouncerServCommands.networkUpdate(
-                "libera",
-                NetworkCommandFields(nick = "newNick", enabled = false),
-            ).wire,
+            BouncerServCommands
+                .networkUpdate(
+                    "libera",
+                    NetworkCommandFields(nick = "newNick", enabled = false),
+                ).wire,
         )
     }
 
@@ -58,21 +61,23 @@ class BouncerServCommandsTest {
         )
         assertEquals(
             "user update -password <redacted> -nick newNick",
-            BouncerServCommands.userUpdate(
-                username = null,
-                currentUsername = "alice",
-                administrator = false,
-                changed = UserCommandFields(nick = "newNick", password = "secret"),
-            ).display,
+            BouncerServCommands
+                .userUpdate(
+                    username = null,
+                    currentUsername = "alice",
+                    administrator = false,
+                    changed = UserCommandFields(nick = "newNick", password = "secret"),
+                ).display,
         )
         assertEquals(
             "user update bob -admin true -enabled false",
-            BouncerServCommands.userUpdate(
-                username = "bob",
-                currentUsername = "alice",
-                administrator = true,
-                changed = UserCommandFields(administrator = true, enabled = false),
-            ).wire,
+            BouncerServCommands
+                .userUpdate(
+                    username = "bob",
+                    currentUsername = "alice",
+                    administrator = true,
+                    changed = UserCommandFields(administrator = true, enabled = false),
+                ).wire,
         )
         assertThrows(IllegalArgumentException::class.java) {
             BouncerServCommands.userUpdate(
@@ -90,17 +95,18 @@ class BouncerServCommandsTest {
     }
 
     @Test fun redacts_every_secret_family_and_unknown_arguments() {
-        val samples = mapOf(
-            "network create -addr irc.example -pass hunter2 -connect-command 'PRIVMSG NickServ :IDENTIFY p'" to
-                listOf("hunter2", "IDENTIFY"),
-            "sasl set-plain -network libera alice hunter2" to listOf("hunter2"),
-            "user create -username bob -password hunter2" to listOf("hunter2"),
-            "user update bob -password hunter2" to listOf("hunter2"),
-            "user delete bob b4f2aa" to listOf("b4f2aa"),
-            "network quote libera 'PRIVMSG NickServ :IDENTIFY hunter2'" to listOf("hunter2", "IDENTIFY"),
-            "server notice private announcement" to listOf("private", "announcement"),
-            "future command secret argument" to listOf("secret", "argument"),
-        )
+        val samples =
+            mapOf(
+                "network create -addr irc.example -pass hunter2 -connect-command 'PRIVMSG NickServ :IDENTIFY p'" to
+                    listOf("hunter2", "IDENTIFY"),
+                "sasl set-plain -network libera alice hunter2" to listOf("hunter2"),
+                "user create -username bob -password hunter2" to listOf("hunter2"),
+                "user update bob -password hunter2" to listOf("hunter2"),
+                "user delete bob b4f2aa" to listOf("b4f2aa"),
+                "network quote libera 'PRIVMSG NickServ :IDENTIFY hunter2'" to listOf("hunter2", "IDENTIFY"),
+                "server notice private announcement" to listOf("private", "announcement"),
+                "future command secret argument" to listOf("secret", "argument"),
+            )
         for ((wire, secrets) in samples) {
             val safe = redactBouncerServCommand(wire)
             assertTrue(safe.contains("<redacted>"))

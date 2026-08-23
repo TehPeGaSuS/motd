@@ -27,17 +27,26 @@ class Migration2To3Test {
     @Test fun `migration collapses duplicate msgids, preserves nulls, and enforces uniqueness`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        val h = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(2) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL(CREATE_MESSAGES_V2)
-                        db.execSQL(CREATE_DEDUP_INDEX_V2)
-                    }
-                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
-                }).build(),
-        )
+        val h =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(2) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL(CREATE_MESSAGES_V2)
+                                db.execSQL(CREATE_DEDUP_INDEX_V2)
+                            }
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                old: Int,
+                                new: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         helper = h
         val db = h.writableDatabase
         db.execSQL(insertMsg(1, "srv-1", "srv-1", 1000, "hi"))
@@ -47,20 +56,29 @@ class Migration2To3Test {
         MIGRATION_2_3.migrate(db)
 
         db.query("SELECT COUNT(*) FROM messages").use { c ->
-            assertTrue(c.moveToFirst()); assertEquals(2, c.getInt(0))
+            assertTrue(c.moveToFirst())
+            assertEquals(2, c.getInt(0))
         }
         db.query("SELECT id FROM messages WHERE msgid = 'srv-1'").use { c ->
-            assertTrue(c.moveToFirst()); assertEquals(1L, c.getLong(0))
+            assertTrue(c.moveToFirst())
+            assertEquals(1L, c.getLong(0))
         }
         db.query("SELECT COUNT(*) FROM messages WHERE msgid IS NULL").use { c ->
-            assertTrue(c.moveToFirst()); assertEquals(1, c.getInt(0))
+            assertTrue(c.moveToFirst())
+            assertEquals(1, c.getInt(0))
         }
         assertThrows(SQLiteConstraintException::class.java) {
             db.execSQL(insertMsg(9, "srv-1", "another", 5000, "hi"))
         }
     }
 
-    private fun insertMsg(id: Long, msgid: String?, dedupKey: String, serverTime: Long, text: String): String {
+    private fun insertMsg(
+        id: Long,
+        msgid: String?,
+        dedupKey: String,
+        serverTime: Long,
+        text: String,
+    ): String {
         val msgidSql = if (msgid == null) "NULL" else "'$msgid'"
         return "INSERT INTO messages (id, bufferId, msgid, serverTime, sender, kind, text, isSelf, hasMention, failed, dedupKey) VALUES ($id, 1, $msgidSql, $serverTime, 'me', 'PRIVMSG', '$text', 1, 0, 0, '$dedupKey')"
     }

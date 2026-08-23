@@ -16,7 +16,9 @@ class FakeTransport : IrcTransport {
     val sent = mutableListOf<String>()
 
     @Volatile var connected = false
+
     @Volatile var closed = false
+
     @Volatile var sendFailure: Throwable? = null
 
     override suspend fun connect() {

@@ -398,8 +398,7 @@ class AvatarCoordinator
             }
         }
 
-        override fun publishingAvailable(networkId: Long): Boolean =
-            connections.get().clientFor(networkId)?.let { supportsAvatarPublishing(it.caps) } == true
+        override fun publishingAvailable(networkId: Long): Boolean = connections.get().clientFor(networkId)?.let { supportsAvatarPublishing(it.caps) } == true
 
         private companion object {
             const val MAX_SYNC_DELAY_SECONDS = 60L * 60L

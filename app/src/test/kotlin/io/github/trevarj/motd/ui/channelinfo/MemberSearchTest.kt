@@ -7,8 +7,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class MemberSearchTest {
-
     private val ascii = IrcIdentityRules(caseMapping = IrcCaseMapping.Ascii)
+
     private fun member(nick: String) = MemberEntity(bufferId = 1, nick = nick, prefixes = "")
 
     private fun names(

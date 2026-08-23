@@ -6,7 +6,11 @@ import io.github.trevarj.motd.irc.event.IrcEvent
 
 /** Low-latency foreground chat sonification, kept separate from Android notifications. */
 interface ChatSoundPlayer {
-    suspend fun onIncoming(bufferId: Long, type: BufferType, message: IrcEvent.ChatMessage)
+    suspend fun onIncoming(
+        bufferId: Long,
+        type: BufferType,
+        message: IrcEvent.ChatMessage,
+    )
 
     /** Canonical identity-aware hook. Legacy/test implementations retain the event-only seam. */
     suspend fun onCanonicalIncoming(

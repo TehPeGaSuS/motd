@@ -65,31 +65,36 @@ internal fun chatRow(
     pinned: Boolean = false,
     muted: Boolean = false,
     unreadCount: Int = 0,
-): ChatListRow = ChatListRow(
-    bufferId = bufferId,
-    networkId = networkId,
-    networkName = "libera",
-    displayName = displayName,
-    type = type,
-    pinned = pinned,
-    muted = muted,
-    lastMessageText = null,
-    lastMessageSender = null,
-    lastMessageTime = null,
-    unreadCount = unreadCount,
-    mentionCount = 0,
-)
+): ChatListRow =
+    ChatListRow(
+        bufferId = bufferId,
+        networkId = networkId,
+        networkName = "libera",
+        displayName = displayName,
+        type = type,
+        pinned = pinned,
+        muted = muted,
+        lastMessageText = null,
+        lastMessageSender = null,
+        lastMessageTime = null,
+        unreadCount = unreadCount,
+        mentionCount = 0,
+    )
 
-internal fun testNetwork(id: Long, name: String = "net$id"): NetworkEntity = NetworkEntity(
-    id = id,
-    name = name,
-    role = NetworkRole.DIRECT,
-    host = "irc.example.org",
-    port = 6697,
-    nick = "me",
-    username = "me",
-    realname = "me",
-)
+internal fun testNetwork(
+    id: Long,
+    name: String = "net$id",
+): NetworkEntity =
+    NetworkEntity(
+        id = id,
+        name = name,
+        role = NetworkRole.DIRECT,
+        host = "irc.example.org",
+        port = 6697,
+        nick = "me",
+        username = "me",
+        realname = "me",
+    )
 
 internal class FakeConnections : NoopConnectionManager() {
     val away = MutableStateFlow<Map<Long, String?>>(emptyMap())
@@ -108,7 +113,10 @@ internal class FakeConnections : NoopConnectionManager() {
     override val selfAwayStates: StateFlow<Map<Long, String?>> = away
     override val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> = presence
 
-    override suspend fun setAway(networkId: Long, message: String?) {
+    override suspend fun setAway(
+        networkId: Long,
+        message: String?,
+    ) {
         awayWrites += networkId to message
     }
 
@@ -120,21 +128,30 @@ internal class FakeConnections : NoopConnectionManager() {
         disconnected += networkId
     }
 
-
-    override suspend fun joinChannel(networkId: Long, channel: String, key: String?) {
+    override suspend fun joinChannel(
+        networkId: Long,
+        channel: String,
+        key: String?,
+    ) {
         joins += Triple(networkId, channel, key)
     }
 
-    override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long {
+    override suspend fun ensureQueryBuffer(
+        networkId: Long,
+        nick: String,
+    ): Long {
         queries += networkId to nick
         return queryBufferId ?: error("no live client")
     }
 
     override suspend fun ensureServerBuffer(networkId: Long): Long = 0
-    override suspend fun markRead(bufferId: Long, anchor: TimelineAnchor) {
+
+    override suspend fun markRead(
+        bufferId: Long,
+        anchor: TimelineAnchor,
+    ) {
         marked += bufferId to anchor
     }
-
 }
 
 internal class FakeBuffers : BufferRepository {
@@ -148,64 +165,110 @@ internal class FakeBuffers : BufferRepository {
     val missing = mutableSetOf<Long>()
 
     override fun observeChatList(): Flow<List<ChatListRow>> = chats
+
     override fun observeQueryConversations(): Flow<List<MonitorQueryRow>> = queryConversations
-    override suspend fun canonicalBufferId(id: Long): Long? =
-        if (id in missing) null else redirects[id] ?: id
+
+    override suspend fun canonicalBufferId(id: Long): Long? = if (id in missing) null else redirects[id] ?: id
 
     override fun observeBuffer(id: Long): Flow<BufferEntity?> = MutableStateFlow(null)
+
     override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = MutableStateFlow(emptyList())
-    override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
-    override suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? = null
-    override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean = false
-    override suspend fun setPresenceModeOverride(id: Long, mode: PresenceMode?): Boolean = false
+
+    override suspend fun setPinned(
+        id: Long,
+        pinned: Boolean,
+    ) = Unit
+
+    override suspend fun setMuted(
+        id: Long,
+        muted: Boolean,
+    ): MuteBacklogSuppression? = null
+
+    override suspend fun setLayoutDensityOverride(
+        id: Long,
+        layout: LayoutDensity?,
+    ): Boolean = false
+
+    override suspend fun setPresenceModeOverride(
+        id: Long,
+        mode: PresenceMode?,
+    ): Boolean = false
+
     override suspend fun deleteBuffer(id: Long) = Unit
 }
 
-internal class FakeNetworks(networks: List<NetworkEntity> = emptyList()) : NetworkRepository {
+internal class FakeNetworks(
+    networks: List<NetworkEntity> = emptyList(),
+) : NetworkRepository {
     val rows = MutableStateFlow(networks)
+
     override fun observeNetworks(): Flow<List<NetworkEntity>> = rows
+
     override suspend fun addNetwork(n: NetworkEntity): Long = 0
+
     override suspend fun updateNetwork(n: NetworkEntity) = Unit
+
     override suspend fun deleteNetwork(id: Long) = Unit
+
     override suspend fun reorderNetworks(orderedIds: List<Long>) = Unit
+
     override suspend fun networkById(id: Long): NetworkEntity? = rows.value.firstOrNull { it.id == id }
+
     override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = emptyList()
 }
 
-internal class FakeAppearance(initial: AppearanceConfig = AppearanceConfig()) : AppearancePrefs {
+internal class FakeAppearance(
+    initial: AppearanceConfig = AppearanceConfig(),
+) : AppearancePrefs {
     val state = MutableStateFlow(initial)
     override val config: Flow<AppearanceConfig> = state
+
     override suspend fun setTheme(theme: ColorThemePreset) {
         state.value = state.value.copy(theme = theme)
     }
 
     override suspend fun setTrueBlack(enabled: Boolean) = Unit
+
     override suspend fun setFollowSystem(enabled: Boolean) {
         state.value = state.value.copy(followSystem = enabled)
     }
 
     override suspend fun setWallpaper(selection: WallpaperSelection) = Unit
+
     override suspend fun setUiFontScale(percent: Int) = Unit
+
     override suspend fun setConversationFontScale(percent: Int) = Unit
+
     override suspend fun setFontChoice(choice: FontChoice) = Unit
+
     override suspend fun setShowTimestamps(enabled: Boolean) = Unit
+
     override suspend fun setTimeFormat(format: TimeFormat) = Unit
+
     override suspend fun setMessageSpacing(spacing: MessageSpacing) = Unit
+
     override suspend fun setBubbleCornerStyle(style: BubbleCornerStyle) = Unit
+
     override suspend fun setLauncherIcon(icon: LauncherIcon) = Unit
+
     override suspend fun setCustomFontName(name: String) = Unit
 }
 
-internal class FakeForegroundBuffer(initial: Long? = null) : ForegroundBufferTracker {
+internal class FakeForegroundBuffer(
+    initial: Long? = null,
+) : ForegroundBufferTracker {
     private val state = MutableStateFlow(initial)
     override val foregroundBufferId: StateFlow<Long?> = state
+
     override fun set(bufferId: Long?) {
         state.value = bufferId
     }
 }
 
 /** Every requested buffer gets a boundary unless it was listed in [withoutBoundary]. */
-internal class FakeReadMarkers(private val withoutBoundary: Set<Long> = emptySet()) : ReadMarkerSnapshotter {
+internal class FakeReadMarkers(
+    private val withoutBoundary: Set<Long> = emptySet(),
+) : ReadMarkerSnapshotter {
     override suspend fun latestIncoming(bufferIds: Collection<Long>): List<BufferReadMarker> =
         bufferIds.map { id ->
             val complete = id !in withoutBoundary
@@ -228,11 +291,13 @@ internal class FakeGesturePrefs(
     val orbState = MutableStateFlow(orb)
 
     override val enabled: Flow<Boolean> = enabledState
+
     override suspend fun setEnabled(enabled: Boolean) {
         enabledState.value = enabled
     }
 
     override val menu: Flow<GestureMenuConfig> = menuState
+
     override suspend fun setMenu(config: GestureMenuConfig) {
         menuState.value = config
     }
@@ -242,31 +307,62 @@ internal class FakeGesturePrefs(
     }
 
     override val orb: Flow<OrbPlacement> = orbState
+
     override suspend fun setOrb(placement: OrbPlacement) {
         orbState.value = placement
     }
 }
 
-internal class FakeSettings(initial: Settings = Settings()) : SettingsRepository {
+internal class FakeSettings(
+    initial: Settings = Settings(),
+) : SettingsRepository {
     val state = MutableStateFlow(initial)
     override val settings: StateFlow<Settings> = state
+
     override suspend fun setThemeMode(m: ThemeMode) = Unit
+
     override suspend fun setDynamicColor(enabled: Boolean) = Unit
+
     override suspend fun setDeliveryMode(m: DeliveryMode) = Unit
+
     override suspend fun setLayoutDensity(d: LayoutDensity) = Unit
+
     override suspend fun setNickColorsEnabled(enabled: Boolean) = Unit
+
     override suspend fun setNickColorPalette(p: NickColorPalette) = Unit
-    override suspend fun setNickColorOverride(nick: String, hue: Int?) = Unit
-    override suspend fun setFriend(nick: String, isFriend: Boolean) = Unit
-    override suspend fun setFool(nick: String, isFool: Boolean) = Unit
+
+    override suspend fun setNickColorOverride(
+        nick: String,
+        hue: Int?,
+    ) = Unit
+
+    override suspend fun setFriend(
+        nick: String,
+        isFriend: Boolean,
+    ) = Unit
+
+    override suspend fun setFool(
+        nick: String,
+        isFool: Boolean,
+    ) = Unit
+
     override suspend fun setFoolsMode(m: FoolsMode) = Unit
+
     override suspend fun setPresenceMode(m: PresenceMode) = Unit
+
     override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
+
     override suspend fun setChatWallpaper(w: ChatWallpaper) = Unit
+
     override suspend fun setShowComposerEmoji(show: Boolean) = Unit
+
     override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
+
     override suspend fun setHistorySyncDepth(d: HistorySyncDepth) = Unit
+
     override suspend fun setAutoAwayEnabled(enabled: Boolean) = Unit
+
     override suspend fun setAutoAwayMinutes(minutes: Int) = Unit
+
     override suspend fun setAutoAwayMessage(message: String) = Unit
 }

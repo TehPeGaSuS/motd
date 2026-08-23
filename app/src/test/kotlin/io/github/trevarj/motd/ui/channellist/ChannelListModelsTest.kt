@@ -8,7 +8,6 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ChannelListModelsTest {
-
     @Test
     fun `join state uses normalized authoritative joined names and independent pending names`() {
         val rules = IrcIdentityRules()
@@ -68,12 +67,13 @@ class ChannelListModelsTest {
     @Test
     fun `ready join rejection clears only its matching pending channel`() {
         val rules = IrcIdentityRules()
-        val remaining = pendingChannelNamesAfterJoinRejection(
-            pendingChannelNames = setOf("#one", "#two"),
-            channel = "#ONE",
-            identityRules = rules,
-            isReady = true,
-        )
+        val remaining =
+            pendingChannelNamesAfterJoinRejection(
+                pendingChannelNames = setOf("#one", "#two"),
+                channel = "#ONE",
+                identityRules = rules,
+                isReady = true,
+            )
 
         assertEquals(setOf("#two"), remaining)
     }
@@ -140,22 +140,24 @@ class ChannelListModelsTest {
 
     @Test
     fun `sortListings orders by userCount descending`() {
-        val input = listOf(
-            ChannelListing("#a", 10, ""),
-            ChannelListing("#b", 500, ""),
-            ChannelListing("#c", 42, ""),
-        )
+        val input =
+            listOf(
+                ChannelListing("#a", 10, ""),
+                ChannelListing("#b", 500, ""),
+                ChannelListing("#c", 42, ""),
+            )
         val sorted = sortListings(input)
         assertEquals(listOf("#b", "#c", "#a"), sorted.map { it.name })
     }
 
     @Test
     fun `sortListings is stable for ties`() {
-        val input = listOf(
-            ChannelListing("#first", 100, ""),
-            ChannelListing("#second", 100, ""),
-            ChannelListing("#third", 100, ""),
-        )
+        val input =
+            listOf(
+                ChannelListing("#first", 100, ""),
+                ChannelListing("#second", 100, ""),
+                ChannelListing("#third", 100, ""),
+            )
         // Equal counts keep input order (Kotlin's sort is stable).
         assertEquals(listOf("#first", "#second", "#third"), sortListings(input).map { it.name })
     }

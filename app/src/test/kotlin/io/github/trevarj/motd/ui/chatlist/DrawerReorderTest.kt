@@ -11,20 +11,46 @@ import org.junit.Test
 
 /** Move rules for the drawer's manual network order (DrawerReorder.kt). */
 class DrawerReorderTest {
-
-    private fun direct(id: Long, name: String = "net$id") = DrawerRow(
-        networkId = id, name = name, role = NetworkRole.DIRECT, depth = 0,
-        state = IrcClientState.Disconnected, nick = null, unread = 0, mentions = 0,
+    private fun direct(
+        id: Long,
+        name: String = "net$id",
+    ) = DrawerRow(
+        networkId = id,
+        name = name,
+        role = NetworkRole.DIRECT,
+        depth = 0,
+        state = IrcClientState.Disconnected,
+        nick = null,
+        unread = 0,
+        mentions = 0,
     )
 
-    private fun root(id: Long, name: String = "soju$id") = DrawerRow(
-        networkId = id, name = name, role = NetworkRole.BOUNCER_ROOT, depth = 0,
-        state = IrcClientState.Disconnected, nick = null, unread = 0, mentions = 0,
+    private fun root(
+        id: Long,
+        name: String = "soju$id",
+    ) = DrawerRow(
+        networkId = id,
+        name = name,
+        role = NetworkRole.BOUNCER_ROOT,
+        depth = 0,
+        state = IrcClientState.Disconnected,
+        nick = null,
+        unread = 0,
+        mentions = 0,
     )
 
-    private fun child(id: Long, name: String = "child$id") = DrawerRow(
-        networkId = id, name = name, role = NetworkRole.BOUNCER_CHILD, depth = 1,
-        state = IrcClientState.Disconnected, nick = null, unread = 0, mentions = 0,
+    private fun child(
+        id: Long,
+        name: String = "child$id",
+    ) = DrawerRow(
+        networkId = id,
+        name = name,
+        role = NetworkRole.BOUNCER_CHILD,
+        depth = 1,
+        state = IrcClientState.Disconnected,
+        nick = null,
+        unread = 0,
+        mentions = 0,
     )
 
     /** libera, soju(oftc, ergo), hackint. */

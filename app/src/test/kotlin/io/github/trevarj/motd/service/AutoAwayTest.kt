@@ -6,7 +6,6 @@ import org.junit.Test
 
 /** Decision matrix for the pure auto-away helpers. */
 class AutoAwayTest {
-
     @Test
     fun away_targets_skip_networks_that_are_already_away() {
         assertEquals(

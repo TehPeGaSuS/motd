@@ -10,8 +10,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -32,8 +32,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -52,7 +52,9 @@ internal fun shouldShowLinkPreview(
 internal sealed interface LinkPreviewRenderState {
     data object Loading : LinkPreviewRenderState
 
-    data class Available(val preview: LinkPreview) : LinkPreviewRenderState
+    data class Available(
+        val preview: LinkPreview,
+    ) : LinkPreviewRenderState
 
     data object Unavailable : LinkPreviewRenderState
 }
@@ -66,18 +68,20 @@ internal enum class LinkPreviewTransitionKey {
 internal fun resolveLinkPreviewRenderState(
     preview: LinkPreview?,
     loading: Boolean,
-): LinkPreviewRenderState = when {
-    loading -> LinkPreviewRenderState.Loading
-    preview != null -> LinkPreviewRenderState.Available(preview)
-    else -> LinkPreviewRenderState.Unavailable
-}
+): LinkPreviewRenderState =
+    when {
+        loading -> LinkPreviewRenderState.Loading
+        preview != null -> LinkPreviewRenderState.Available(preview)
+        else -> LinkPreviewRenderState.Unavailable
+    }
 
 internal val LinkPreviewRenderState.transitionKey: LinkPreviewTransitionKey
-    get() = when (this) {
-        LinkPreviewRenderState.Loading -> LinkPreviewTransitionKey.LOADING
-        is LinkPreviewRenderState.Available -> LinkPreviewTransitionKey.AVAILABLE
-        LinkPreviewRenderState.Unavailable -> LinkPreviewTransitionKey.UNAVAILABLE
-    }
+    get() =
+        when (this) {
+            LinkPreviewRenderState.Loading -> LinkPreviewTransitionKey.LOADING
+            is LinkPreviewRenderState.Available -> LinkPreviewTransitionKey.AVAILABLE
+            LinkPreviewRenderState.Unavailable -> LinkPreviewTransitionKey.UNAVAILABLE
+        }
 
 /**
  * OG-tag link preview card. Each state retains a shared 72 dp minimum footprint; completed
@@ -116,15 +120,19 @@ fun LinkPreviewCard(
 }
 
 @Composable
-private fun LinkPreviewContent(preview: LinkPreview, onClick: () -> Unit) {
+private fun LinkPreviewContent(
+    preview: LinkPreview,
+    onClick: () -> Unit,
+) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .clickable { onClick() }
-            .padding(8.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .clickable { onClick() }
+                .padding(8.dp),
     ) {
         LinkPreviewLeading(preview)
         Column(modifier = Modifier.padding(vertical = 2.dp)) {
@@ -151,17 +159,19 @@ private fun LinkPreviewContent(preview: LinkPreview, onClick: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = if (preview.kind == LinkPreviewKind.TEXT) FontFamily.Monospace else FontFamily.Default,
-                    maxLines = when (preview.kind) {
-                        LinkPreviewKind.TEXT -> 4
-                        LinkPreviewKind.WIKIPEDIA -> 3
-                        LinkPreviewKind.WEB, LinkPreviewKind.VIDEO, LinkPreviewKind.FILE -> 2
-                    },
+                    maxLines =
+                        when (preview.kind) {
+                            LinkPreviewKind.TEXT -> 4
+                            LinkPreviewKind.WIKIPEDIA -> 3
+                            LinkPreviewKind.WEB, LinkPreviewKind.VIDEO, LinkPreviewKind.FILE -> 2
+                        },
                     overflow = TextOverflow.Ellipsis,
-                    modifier = when (preview.kind) {
-                        LinkPreviewKind.TEXT -> Modifier.testTag("link_preview_text_body")
-                        LinkPreviewKind.WIKIPEDIA -> Modifier.testTag("link_preview_wikipedia_body")
-                        LinkPreviewKind.WEB, LinkPreviewKind.VIDEO, LinkPreviewKind.FILE -> Modifier
-                    },
+                    modifier =
+                        when (preview.kind) {
+                            LinkPreviewKind.TEXT -> Modifier.testTag("link_preview_text_body")
+                            LinkPreviewKind.WIKIPEDIA -> Modifier.testTag("link_preview_wikipedia_body")
+                            LinkPreviewKind.WEB, LinkPreviewKind.VIDEO, LinkPreviewKind.FILE -> Modifier
+                        },
                 )
             }
         }
@@ -180,13 +190,15 @@ private fun LinkPreviewLeading(preview: LinkPreview) {
             )
             Spacer(Modifier.width(10.dp))
         }
+
         preview.imageUrl != null -> {
             Box(
                 contentAlignment = androidx.compose.ui.Alignment.Center,
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .testTag(if (preview.kind == LinkPreviewKind.VIDEO) "link_preview_video_thumbnail" else "link_preview_thumbnail"),
+                modifier =
+                    Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .testTag(if (preview.kind == LinkPreviewKind.VIDEO) "link_preview_video_thumbnail" else "link_preview_thumbnail"),
             ) {
                 AsyncImage(
                     model = preview.imageUrl,
@@ -205,6 +217,7 @@ private fun LinkPreviewLeading(preview: LinkPreview) {
             }
             Spacer(Modifier.width(10.dp))
         }
+
         preview.kind == LinkPreviewKind.VIDEO -> {
             Icon(
                 imageVector = Icons.Filled.PlayCircle,
@@ -224,12 +237,13 @@ private fun LinkPreviewSkeleton() {
     // work; the card is replaced as soon as the preview resolves.
     val block = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.18f)
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .padding(8.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .padding(8.dp),
     ) {
         androidx.compose.foundation.layout.Box(
             modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(block),
@@ -248,13 +262,14 @@ private fun LinkPreviewSkeleton() {
 @Composable
 private fun LinkPreviewUnavailable(onClick: () -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .clickable { onClick() }
-            .padding(8.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .clickable { onClick() }
+                .padding(8.dp),
     ) {
         Icon(
             imageVector = Icons.Outlined.Link,
@@ -266,13 +281,17 @@ private fun LinkPreviewUnavailable(onClick: () -> Unit) {
 }
 
 @Composable
-private fun SkeletonBar(width: androidx.compose.ui.unit.Dp, color: Color) {
+private fun SkeletonBar(
+    width: androidx.compose.ui.unit.Dp,
+    color: Color,
+) {
     androidx.compose.foundation.layout.Box(
-        modifier = Modifier
-            .width(width)
-            .height(10.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(color),
+        modifier =
+            Modifier
+                .width(width)
+                .height(10.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(color),
     )
 }
 
@@ -283,13 +302,14 @@ private val LINK_PREVIEW_MIN_HEIGHT = 72.dp
 private fun LinkPreviewCardPreview() {
     MotdTheme {
         LinkPreviewCard(
-            preview = LinkPreview(
-                url = "https://example.com/article",
-                title = "A great article about Kotlin coroutines",
-                description = "Everything you need to know about structured concurrency.",
-                imageUrl = null,
-                siteName = "example.com",
-            ),
+            preview =
+                LinkPreview(
+                    url = "https://example.com/article",
+                    title = "A great article about Kotlin coroutines",
+                    description = "Everything you need to know about structured concurrency.",
+                    imageUrl = null,
+                    siteName = "example.com",
+                ),
             loading = false,
             onClick = {},
         )

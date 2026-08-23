@@ -5,88 +5,113 @@ import kotlinx.serialization.Serializable
 
 /** App-owned color presets kept separate from the frozen settings contract. */
 enum class ColorThemePreset {
-    SYSTEM, LIGHT, DARK, AMOLED,
-    AYU_DARK, AYU_LIGHT, AYU_MIRAGE,
-    CATPPUCCIN_LATTE, CATPPUCCIN_MOCHA,
+    SYSTEM,
+    LIGHT,
+    DARK,
+    AMOLED,
+    AYU_DARK,
+    AYU_LIGHT,
+    AYU_MIRAGE,
+    CATPPUCCIN_LATTE,
+    CATPPUCCIN_MOCHA,
     DRACULA,
-    EVERFOREST_DARK, EVERFOREST_LIGHT,
-    GRUVBOX_DARK, GRUVBOX_LIGHT,
-    KANAGAWA_DRAGON, KANAGAWA_LOTUS, KANAGAWA_WAVE,
-    MODUS_OPERANDI, MODUS_VIVENDI,
-    MODUS_OPERANDI_TINTED, MODUS_VIVENDI_TINTED,
-    MODUS_OPERANDI_DEUTERANOPIA, MODUS_VIVENDI_DEUTERANOPIA,
-    MODUS_OPERANDI_TRITANOPIA, MODUS_VIVENDI_TRITANOPIA,
+    EVERFOREST_DARK,
+    EVERFOREST_LIGHT,
+    GRUVBOX_DARK,
+    GRUVBOX_LIGHT,
+    KANAGAWA_DRAGON,
+    KANAGAWA_LOTUS,
+    KANAGAWA_WAVE,
+    MODUS_OPERANDI,
+    MODUS_VIVENDI,
+    MODUS_OPERANDI_TINTED,
+    MODUS_VIVENDI_TINTED,
+    MODUS_OPERANDI_DEUTERANOPIA,
+    MODUS_VIVENDI_DEUTERANOPIA,
+    MODUS_OPERANDI_TRITANOPIA,
+    MODUS_VIVENDI_TRITANOPIA,
     MONOKAI,
-    NORD, NORD_LIGHT,
+    NORD,
+    NORD_LIGHT,
     ONE_DARK,
-    ROSE_PINE, ROSE_PINE_DAWN, ROSE_PINE_MOON,
-    SOLARIZED_DARK, SOLARIZED_LIGHT,
+    ROSE_PINE,
+    ROSE_PINE_DAWN,
+    ROSE_PINE_MOON,
+    SOLARIZED_DARK,
+    SOLARIZED_LIGHT,
     TOKYO_NIGHT,
     ZENBURN,
 }
 
 val ColorThemePreset.isFixedPalette: Boolean
-    get() = this !in setOf(
-        ColorThemePreset.SYSTEM,
-        ColorThemePreset.LIGHT,
-        ColorThemePreset.DARK,
-        ColorThemePreset.AMOLED,
-    )
+    get() =
+        this !in
+            setOf(
+                ColorThemePreset.SYSTEM,
+                ColorThemePreset.LIGHT,
+                ColorThemePreset.DARK,
+                ColorThemePreset.AMOLED,
+            )
 
 val ColorThemePreset.isDark: Boolean
-    get() = when (this) {
-        ColorThemePreset.SYSTEM -> false // resolved from the OS by MotdTheme
-        ColorThemePreset.LIGHT,
-        ColorThemePreset.AYU_LIGHT,
-        ColorThemePreset.CATPPUCCIN_LATTE,
-        ColorThemePreset.EVERFOREST_LIGHT,
-        ColorThemePreset.GRUVBOX_LIGHT,
-        ColorThemePreset.KANAGAWA_LOTUS,
-        ColorThemePreset.MODUS_OPERANDI,
-        ColorThemePreset.MODUS_OPERANDI_TINTED,
-        ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA,
-        ColorThemePreset.MODUS_OPERANDI_TRITANOPIA,
-        ColorThemePreset.NORD_LIGHT,
-        ColorThemePreset.ROSE_PINE_DAWN,
-        ColorThemePreset.SOLARIZED_LIGHT,
-        -> false
-        else -> true
-    }
+    get() =
+        when (this) {
+            ColorThemePreset.SYSTEM -> false
+
+            // resolved from the OS by MotdTheme
+            ColorThemePreset.LIGHT,
+            ColorThemePreset.AYU_LIGHT,
+            ColorThemePreset.CATPPUCCIN_LATTE,
+            ColorThemePreset.EVERFOREST_LIGHT,
+            ColorThemePreset.GRUVBOX_LIGHT,
+            ColorThemePreset.KANAGAWA_LOTUS,
+            ColorThemePreset.MODUS_OPERANDI,
+            ColorThemePreset.MODUS_OPERANDI_TINTED,
+            ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA,
+            ColorThemePreset.MODUS_OPERANDI_TRITANOPIA,
+            ColorThemePreset.NORD_LIGHT,
+            ColorThemePreset.ROSE_PINE_DAWN,
+            ColorThemePreset.SOLARIZED_LIGHT,
+            -> false
+
+            else -> true
+        }
 
 /**
  * Opposite-mode sibling for optional system-mode switching. Dark-only and alternate-dark palettes
  * keep their fixed mode.
  */
 val ColorThemePreset.systemPartner: ColorThemePreset?
-    get() = when (this) {
-        ColorThemePreset.LIGHT -> ColorThemePreset.DARK
-        ColorThemePreset.DARK -> ColorThemePreset.LIGHT
-        ColorThemePreset.AYU_LIGHT -> ColorThemePreset.AYU_DARK
-        ColorThemePreset.AYU_DARK -> ColorThemePreset.AYU_LIGHT
-        ColorThemePreset.CATPPUCCIN_LATTE -> ColorThemePreset.CATPPUCCIN_MOCHA
-        ColorThemePreset.CATPPUCCIN_MOCHA -> ColorThemePreset.CATPPUCCIN_LATTE
-        ColorThemePreset.EVERFOREST_LIGHT -> ColorThemePreset.EVERFOREST_DARK
-        ColorThemePreset.EVERFOREST_DARK -> ColorThemePreset.EVERFOREST_LIGHT
-        ColorThemePreset.GRUVBOX_LIGHT -> ColorThemePreset.GRUVBOX_DARK
-        ColorThemePreset.GRUVBOX_DARK -> ColorThemePreset.GRUVBOX_LIGHT
-        ColorThemePreset.KANAGAWA_LOTUS -> ColorThemePreset.KANAGAWA_WAVE
-        ColorThemePreset.KANAGAWA_WAVE -> ColorThemePreset.KANAGAWA_LOTUS
-        ColorThemePreset.MODUS_OPERANDI -> ColorThemePreset.MODUS_VIVENDI
-        ColorThemePreset.MODUS_VIVENDI -> ColorThemePreset.MODUS_OPERANDI
-        ColorThemePreset.MODUS_OPERANDI_TINTED -> ColorThemePreset.MODUS_VIVENDI_TINTED
-        ColorThemePreset.MODUS_VIVENDI_TINTED -> ColorThemePreset.MODUS_OPERANDI_TINTED
-        ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA -> ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA
-        ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA -> ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA
-        ColorThemePreset.MODUS_OPERANDI_TRITANOPIA -> ColorThemePreset.MODUS_VIVENDI_TRITANOPIA
-        ColorThemePreset.MODUS_VIVENDI_TRITANOPIA -> ColorThemePreset.MODUS_OPERANDI_TRITANOPIA
-        ColorThemePreset.NORD_LIGHT -> ColorThemePreset.NORD
-        ColorThemePreset.NORD -> ColorThemePreset.NORD_LIGHT
-        ColorThemePreset.ROSE_PINE_DAWN -> ColorThemePreset.ROSE_PINE
-        ColorThemePreset.ROSE_PINE -> ColorThemePreset.ROSE_PINE_DAWN
-        ColorThemePreset.SOLARIZED_LIGHT -> ColorThemePreset.SOLARIZED_DARK
-        ColorThemePreset.SOLARIZED_DARK -> ColorThemePreset.SOLARIZED_LIGHT
-        else -> null
-    }
+    get() =
+        when (this) {
+            ColorThemePreset.LIGHT -> ColorThemePreset.DARK
+            ColorThemePreset.DARK -> ColorThemePreset.LIGHT
+            ColorThemePreset.AYU_LIGHT -> ColorThemePreset.AYU_DARK
+            ColorThemePreset.AYU_DARK -> ColorThemePreset.AYU_LIGHT
+            ColorThemePreset.CATPPUCCIN_LATTE -> ColorThemePreset.CATPPUCCIN_MOCHA
+            ColorThemePreset.CATPPUCCIN_MOCHA -> ColorThemePreset.CATPPUCCIN_LATTE
+            ColorThemePreset.EVERFOREST_LIGHT -> ColorThemePreset.EVERFOREST_DARK
+            ColorThemePreset.EVERFOREST_DARK -> ColorThemePreset.EVERFOREST_LIGHT
+            ColorThemePreset.GRUVBOX_LIGHT -> ColorThemePreset.GRUVBOX_DARK
+            ColorThemePreset.GRUVBOX_DARK -> ColorThemePreset.GRUVBOX_LIGHT
+            ColorThemePreset.KANAGAWA_LOTUS -> ColorThemePreset.KANAGAWA_WAVE
+            ColorThemePreset.KANAGAWA_WAVE -> ColorThemePreset.KANAGAWA_LOTUS
+            ColorThemePreset.MODUS_OPERANDI -> ColorThemePreset.MODUS_VIVENDI
+            ColorThemePreset.MODUS_VIVENDI -> ColorThemePreset.MODUS_OPERANDI
+            ColorThemePreset.MODUS_OPERANDI_TINTED -> ColorThemePreset.MODUS_VIVENDI_TINTED
+            ColorThemePreset.MODUS_VIVENDI_TINTED -> ColorThemePreset.MODUS_OPERANDI_TINTED
+            ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA -> ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA
+            ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA -> ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA
+            ColorThemePreset.MODUS_OPERANDI_TRITANOPIA -> ColorThemePreset.MODUS_VIVENDI_TRITANOPIA
+            ColorThemePreset.MODUS_VIVENDI_TRITANOPIA -> ColorThemePreset.MODUS_OPERANDI_TRITANOPIA
+            ColorThemePreset.NORD_LIGHT -> ColorThemePreset.NORD
+            ColorThemePreset.NORD -> ColorThemePreset.NORD_LIGHT
+            ColorThemePreset.ROSE_PINE_DAWN -> ColorThemePreset.ROSE_PINE
+            ColorThemePreset.ROSE_PINE -> ColorThemePreset.ROSE_PINE_DAWN
+            ColorThemePreset.SOLARIZED_LIGHT -> ColorThemePreset.SOLARIZED_DARK
+            ColorThemePreset.SOLARIZED_DARK -> ColorThemePreset.SOLARIZED_LIGHT
+            else -> null
+        }
 
 /** Resolve a paired family against the OS only when the user opted into system-mode following. */
 fun resolveAutoPalette(
@@ -102,9 +127,13 @@ fun resolveAutoPalette(
 enum class ChatWallpaperPreset { NONE, CHATTER, CHANNELS, TERMINAL, RELAY, SIGNALS, PIXELS }
 
 enum class FontChoice { SYSTEM, SANS, SERIF, MONOSPACE, JETBRAINS_MONO, CUSTOM }
+
 enum class TimeFormat { AUTO, H12, H24 }
+
 enum class MessageSpacing { COMPACT, DEFAULT, RELAXED }
+
 enum class BubbleCornerStyle { ROUNDED, SUBTLE, SQUARE }
+
 enum class LauncherIcon { DEFAULT, MONO, TERMINAL, GRUVBOX, CATPPUCCIN, NORD, LIGHT }
 
 @Serializable
@@ -136,18 +165,31 @@ data class AppearanceConfig(
 
 interface AppearancePrefs {
     val config: Flow<AppearanceConfig>
+
     suspend fun setTheme(theme: ColorThemePreset)
+
     suspend fun setTrueBlack(enabled: Boolean)
+
     suspend fun setFollowSystem(enabled: Boolean)
+
     suspend fun setWallpaper(selection: WallpaperSelection)
+
     suspend fun setUiFontScale(percent: Int)
+
     suspend fun setConversationFontScale(percent: Int)
+
     suspend fun setFontChoice(choice: FontChoice)
+
     suspend fun setShowTimestamps(enabled: Boolean)
+
     suspend fun setTimeFormat(format: TimeFormat)
+
     suspend fun setMessageSpacing(spacing: MessageSpacing)
+
     suspend fun setBubbleCornerStyle(style: BubbleCornerStyle)
+
     suspend fun setLauncherIcon(icon: LauncherIcon)
+
     suspend fun setCustomFontName(name: String)
 }
 

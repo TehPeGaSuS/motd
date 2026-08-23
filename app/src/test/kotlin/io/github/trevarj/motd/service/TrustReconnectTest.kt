@@ -14,7 +14,6 @@ import org.junit.Test
  * `connect(id)`. Same pure-function testing style as [ConnectionIntentsTest] / [BuildChildConfigTest].
  */
 class TrustReconnectTest {
-
     private fun failure(
         host: String = "104.168.59.26",
         port: Int = 443,
@@ -34,21 +33,23 @@ class TrustReconnectTest {
     @Test
     fun `root and its children on one endpoint are all reconnected`() {
         // Root (id 1) and two bound children (2, 3) all failed on the bouncer's 104.168.59.26:443.
-        val certFailures = mapOf(
-            1L to failure(),
-            2L to failure(),
-            3L to failure(),
-        )
+        val certFailures =
+            mapOf(
+                1L to failure(),
+                2L to failure(),
+                3L to failure(),
+            )
         assertEquals(setOf(1L, 2L, 3L), networksSharingCertEndpoint("104.168.59.26", 443, certFailures))
     }
 
     @Test
     fun `only networks on the same host and port are included`() {
-        val certFailures = mapOf(
-            1L to failure(host = "104.168.59.26", port = 443),  // matches
-            2L to failure(host = "104.168.59.26", port = 6697), // same host, different port
-            3L to failure(host = "irc.other.net", port = 443),  // different host
-        )
+        val certFailures =
+            mapOf(
+                1L to failure(host = "104.168.59.26", port = 443), // matches
+                2L to failure(host = "104.168.59.26", port = 6697), // same host, different port
+                3L to failure(host = "irc.other.net", port = 443), // different host
+            )
         assertEquals(setOf(1L), networksSharingCertEndpoint("104.168.59.26", 443, certFailures))
     }
 

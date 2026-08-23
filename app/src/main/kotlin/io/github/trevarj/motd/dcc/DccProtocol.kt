@@ -19,10 +19,11 @@ data class DccOutgoingOffer(
 )
 
 fun dccSendCtcp(offer: DccOutgoingOffer): String {
-    val command = when (offer.protocol) {
-        DccTransferProtocol.SEND -> "SEND"
-        DccTransferProtocol.SSEND -> "SSEND"
-    }
+    val command =
+        when (offer.protocol) {
+            DccTransferProtocol.SEND -> "SEND"
+            DccTransferProtocol.SSEND -> "SSEND"
+        }
     val size = offer.sizeBytes?.let { " $it" }.orEmpty()
     val token = offer.token?.let { " $it" }.orEmpty()
     return "$CTCP_DELIMITER" +
@@ -30,12 +31,22 @@ fun dccSendCtcp(offer: DccOutgoingOffer): String {
         "$CTCP_DELIMITER"
 }
 
-fun dccResumeCtcp(filename: String, port: Int, positionBytes: Long, token: String?): String =
+fun dccResumeCtcp(
+    filename: String,
+    port: Int,
+    positionBytes: Long,
+    token: String?,
+): String =
     "$CTCP_DELIMITER" +
         "DCC RESUME ${quoteDccToken(filename)} $port $positionBytes${token?.let { " $it" }.orEmpty()}" +
         "$CTCP_DELIMITER"
 
-fun dccAcceptCtcp(filename: String, port: Int, positionBytes: Long, token: String?): String =
+fun dccAcceptCtcp(
+    filename: String,
+    port: Int,
+    positionBytes: Long,
+    token: String?,
+): String =
     "$CTCP_DELIMITER" +
         "DCC ACCEPT ${quoteDccToken(filename)} $port $positionBytes${token?.let { " $it" }.orEmpty()}" +
         "$CTCP_DELIMITER"
@@ -44,35 +55,58 @@ fun quoteDccToken(value: String): String {
     require(value.isNotBlank()) { "DCC token must not be blank" }
     require(value.length <= 255) { "DCC token too long" }
     require(value.none(Char::isISOControl)) { "DCC token contains control characters" }
-    val escaped = buildString(value.length) {
-        value.forEach { ch ->
-            when (ch) {
-                '\\', '"' -> append('\\').append(ch)
-                else -> append(ch)
+    val escaped =
+        buildString(value.length) {
+            value.forEach { ch ->
+                when (ch) {
+                    '\\', '"' -> append('\\').append(ch)
+                    else -> append(ch)
+                }
             }
         }
-    }
     return if (escaped.any(Char::isWhitespace)) "\"$escaped\"" else escaped
 }
 
-fun resolveDccAddress(address: String, kind: DccAddressKind): InetAddress = when (kind) {
-    DccAddressKind.IPV4_INTEGER -> {
-        val numeric = address.toLong()
-        val bytes = ByteBuffer.allocate(Int.SIZE_BYTES).putInt(numeric.toInt()).array()
-        InetAddress.getByAddress(bytes)
-    }
-    DccAddressKind.IPV4_DOTTED -> InetAddress.getByName(address)
-    DccAddressKind.IPV6_LITERAL -> InetAddress.getByName(address.removeSurrounding("[", "]"))
-}
+fun resolveDccAddress(
+    address: String,
+    kind: DccAddressKind,
+): InetAddress =
+    when (kind) {
+        DccAddressKind.IPV4_INTEGER -> {
+            val numeric = address.toLong()
+            val bytes = ByteBuffer.allocate(Int.SIZE_BYTES).putInt(numeric.toInt()).array()
+            InetAddress.getByAddress(bytes)
+        }
 
-fun advertiseDccAddress(address: InetAddress): Pair<String, DccAddressKind> = when (address) {
-    is Inet4Address -> {
-        val numeric = ByteBuffer.wrap(address.address).int.toUInt().toLong()
-        numeric.toString() to DccAddressKind.IPV4_INTEGER
+        DccAddressKind.IPV4_DOTTED -> {
+            InetAddress.getByName(address)
+        }
+
+        DccAddressKind.IPV6_LITERAL -> {
+            InetAddress.getByName(address.removeSurrounding("[", "]"))
+        }
     }
-    is Inet6Address -> address.hostAddress.orEmpty() to DccAddressKind.IPV6_LITERAL
-    else -> address.hostAddress.orEmpty() to DccAddressKind.IPV4_DOTTED
-}
+
+fun advertiseDccAddress(address: InetAddress): Pair<String, DccAddressKind> =
+    when (address) {
+        is Inet4Address -> {
+            val numeric =
+                ByteBuffer
+                    .wrap(address.address)
+                    .int
+                    .toUInt()
+                    .toLong()
+            numeric.toString() to DccAddressKind.IPV4_INTEGER
+        }
+
+        is Inet6Address -> {
+            address.hostAddress.orEmpty() to DccAddressKind.IPV6_LITERAL
+        }
+
+        else -> {
+            address.hostAddress.orEmpty() to DccAddressKind.IPV4_DOTTED
+        }
+    }
 
 enum class DccEndpointRisk {
     PUBLIC,
@@ -83,15 +117,16 @@ enum class DccEndpointRisk {
     UNSPECIFIED,
 }
 
-fun dccEndpointRisk(address: InetAddress): DccEndpointRisk = when {
-    address.isAnyLocalAddress -> DccEndpointRisk.UNSPECIFIED
-    address.isLoopbackAddress -> DccEndpointRisk.LOOPBACK
-    address.isMulticastAddress -> DccEndpointRisk.MULTICAST
-    address.isLinkLocalAddress -> DccEndpointRisk.LINK_LOCAL
-    address is Inet6Address && ((address.address.first().toInt() and 0xfe) == 0xfc) -> DccEndpointRisk.PRIVATE
-    address.isSiteLocalAddress -> DccEndpointRisk.PRIVATE
-    else -> DccEndpointRisk.PUBLIC
-}
+fun dccEndpointRisk(address: InetAddress): DccEndpointRisk =
+    when {
+        address.isAnyLocalAddress -> DccEndpointRisk.UNSPECIFIED
+        address.isLoopbackAddress -> DccEndpointRisk.LOOPBACK
+        address.isMulticastAddress -> DccEndpointRisk.MULTICAST
+        address.isLinkLocalAddress -> DccEndpointRisk.LINK_LOCAL
+        address is Inet6Address && ((address.address.first().toInt() and 0xfe) == 0xfc) -> DccEndpointRisk.PRIVATE
+        address.isSiteLocalAddress -> DccEndpointRisk.PRIVATE
+        else -> DccEndpointRisk.PUBLIC
+    }
 
 fun sanitizeDccDisplayFilename(filename: String): String {
     val leaf = filename.replace('\\', '/').substringAfterLast('/').trim()

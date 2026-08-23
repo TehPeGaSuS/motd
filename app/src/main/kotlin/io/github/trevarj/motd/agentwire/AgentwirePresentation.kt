@@ -18,17 +18,23 @@ internal sealed interface AgentwireDisplayRow {
     val key: String
 
     /** Any non-tool timeline item, rendered as a full card. */
-    data class Card(val item: AgentwireTimelineItem) : AgentwireDisplayRow {
+    data class Card(
+        val item: AgentwireTimelineItem,
+    ) : AgentwireDisplayRow {
         override val key: String get() = "card:${item.timelineKey()}"
     }
 
     /** A single tool (including the currently running one), rendered as one compact row. */
-    data class Tool(val item: AgentwireTimelineItem) : AgentwireDisplayRow {
+    data class Tool(
+        val item: AgentwireTimelineItem,
+    ) : AgentwireDisplayRow {
         override val key: String get() = "tool:${item.timelineKey()}"
     }
 
     /** At least [MIN_TOOL_RUN] consecutive settled tools folded behind one summary header. */
-    data class ToolRun(val tools: List<AgentwireTimelineItem>) : AgentwireDisplayRow {
+    data class ToolRun(
+        val tools: List<AgentwireTimelineItem>,
+    ) : AgentwireDisplayRow {
         // Keyed on the first tool so the key survives the run growing at its tail (the live case).
         override val key: String get() = "run:${tools.first().timelineKey()}"
         val failedCount: Int get() = tools.count { it.success == false }
@@ -43,6 +49,7 @@ internal sealed interface AgentwireDisplayRow {
 internal fun agentwireDisplayRows(timeline: List<AgentwireTimelineItem>): List<AgentwireDisplayRow> {
     val rows = ArrayList<AgentwireDisplayRow>(timeline.size)
     val pending = ArrayList<AgentwireTimelineItem>()
+
     fun flush() {
         when {
             pending.size >= MIN_TOOL_RUN -> rows.add(AgentwireDisplayRow.ToolRun(pending.toList()))
@@ -52,13 +59,20 @@ internal fun agentwireDisplayRows(timeline: List<AgentwireTimelineItem>): List<A
     }
     timeline.forEach { item ->
         when {
-            item.kind == "request.opened" -> Unit
-            item.kind.startsWith("tool.") && !item.running -> pending.add(item)
+            item.kind == "request.opened" -> {
+                Unit
+            }
+
+            item.kind.startsWith("tool.") && !item.running -> {
+                pending.add(item)
+            }
+
             item.kind.startsWith("tool.") -> {
                 // A running tool always stays its own visible row at the tail of the fold.
                 flush()
                 rows.add(AgentwireDisplayRow.Tool(item))
             }
+
             else -> {
                 flush()
                 rows.add(AgentwireDisplayRow.Card(item))
@@ -74,15 +88,19 @@ internal fun agentwireDisplayRows(timeline: List<AgentwireTimelineItem>): List<A
  * `assistant.delta` (body grows, row count does not) count as growth; sync/error/queue header
  * items are deliberately excluded so they never yank the viewport.
  */
-internal data class AgentwireTimelineStamp(val rowCount: Int, val contentLength: Long)
+internal data class AgentwireTimelineStamp(
+    val rowCount: Int,
+    val contentLength: Long,
+)
 
 internal fun agentwireTimelineStamp(
     timeline: List<AgentwireTimelineItem>,
     requestCount: Int,
-): AgentwireTimelineStamp = AgentwireTimelineStamp(
-    rowCount = timeline.size + requestCount,
-    contentLength = timeline.sumOf { (it.body?.length ?: 0).toLong() },
-)
+): AgentwireTimelineStamp =
+    AgentwireTimelineStamp(
+        rowCount = timeline.size + requestCount,
+        contentLength = timeline.sumOf { (it.body?.length ?: 0).toLong() },
+    )
 
 /**
  * Tracks the user's decision to follow live arrivals independently from the list's transient
@@ -90,7 +108,9 @@ internal fun agentwireTimelineStamp(
  * list. Programmatic scrolls never clear the intent; a user scroll that settles at the bottom
  * re-arms it.
  */
-internal class AgentwireAutoFollow(initialStamp: AgentwireTimelineStamp) {
+internal class AgentwireAutoFollow(
+    initialStamp: AgentwireTimelineStamp,
+) {
     var following: Boolean = true
         private set
 
@@ -101,7 +121,10 @@ internal class AgentwireAutoFollow(initialStamp: AgentwireTimelineStamp) {
         get() = stamp.rowCount
 
     /** Consume a session rebind's first snapshot without treating it as a live arrival. */
-    fun reset(stamp: AgentwireTimelineStamp, atBottom: Boolean) {
+    fun reset(
+        stamp: AgentwireTimelineStamp,
+        atBottom: Boolean,
+    ) {
         this.stamp = stamp
         following = atBottom
     }
@@ -111,15 +134,20 @@ internal class AgentwireAutoFollow(initialStamp: AgentwireTimelineStamp) {
         following = true
     }
 
-    fun onScrollStateChanged(scrolling: Boolean, programmatic: Boolean, atBottom: Boolean) {
+    fun onScrollStateChanged(
+        scrolling: Boolean,
+        programmatic: Boolean,
+        atBottom: Boolean,
+    ) {
         if (programmatic) return
         following = if (scrolling) false else atBottom
     }
 
     /** Record the new stamp and return whether the caller should scroll to the bottom. */
     fun onTimelineChanged(new: AgentwireTimelineStamp): Boolean {
-        val grew = new.rowCount > stamp.rowCount ||
-            (new.rowCount == stamp.rowCount && new.contentLength > stamp.contentLength)
+        val grew =
+            new.rowCount > stamp.rowCount ||
+                (new.rowCount == stamp.rowCount && new.contentLength > stamp.contentLength)
         // An empty-to-populated transition is initial load, not a live arrival.
         val follow = following && stamp.rowCount > 0 && grew
         stamp = new
@@ -171,11 +199,15 @@ internal fun truncateMiddle(
  * Fixed clock-time stamp, not a relative one: this screen has no ticking recomposition source, so
  * "5m ago" would silently go stale.
  */
-internal fun agentwireTimestamp(atMs: Long, nowMs: Long = System.currentTimeMillis()): String {
+internal fun agentwireTimestamp(
+    atMs: Long,
+    nowMs: Long = System.currentTimeMillis(),
+): String {
     val at = Calendar.getInstance().apply { timeInMillis = atMs }
     val now = Calendar.getInstance().apply { timeInMillis = nowMs }
-    val sameDay = at.get(Calendar.YEAR) == now.get(Calendar.YEAR) &&
-        at.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR)
+    val sameDay =
+        at.get(Calendar.YEAR) == now.get(Calendar.YEAR) &&
+            at.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR)
     val hour = at.get(Calendar.HOUR_OF_DAY)
     val minute = at.get(Calendar.MINUTE)
     val time = "%02d:%02d".format(hour, minute)

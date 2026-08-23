@@ -8,12 +8,13 @@ import org.junit.Test
 
 class BouncerControlModelsTest {
     @Test fun console_suggestions_are_prefix_ranked_and_bounded() {
-        val paths = setOf(
-            "network create",
-            "network delete",
-            "network status",
-            "server status",
-        )
+        val paths =
+            setOf(
+                "network create",
+                "network delete",
+                "network status",
+                "server status",
+            )
         assertEquals(
             listOf("network create", "network delete", "network status"),
             bouncerCommandSuggestions(paths, "  net"),

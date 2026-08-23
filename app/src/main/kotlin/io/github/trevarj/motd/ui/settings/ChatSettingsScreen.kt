@@ -8,10 +8,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -22,33 +26,29 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.VoiceConfig
 import io.github.trevarj.motd.audio.VoiceRecordingQuality
+import io.github.trevarj.motd.avatar.AvatarConfig
 import io.github.trevarj.motd.data.prefs.AUTO_AWAY_MINUTE_CHOICES
+import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.prefs.ReplyConfig
+import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.service.autoAwayText
 import io.github.trevarj.motd.ui.chat.presenceModeDescription
 import io.github.trevarj.motd.ui.chat.presenceModeLabel
-import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
-import io.github.trevarj.motd.data.prefs.ReplyConfig
-import io.github.trevarj.motd.data.prefs.Settings
-import io.github.trevarj.motd.avatar.AvatarConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AttachFile
-import androidx.compose.material.icons.outlined.Block
-import androidx.compose.material.icons.outlined.PersonOutline
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 /** Chat category: join/part/quit visibility, friends/fools management, and fools' message handling. */
@@ -66,10 +66,11 @@ fun ChatSettingsScreen(
     val audioCacheClearFailed = stringResource(R.string.settings_audio_cache_clear_failed)
     LaunchedEffect(viewModel, context, audioCacheCleared, audioCacheClearFailed) {
         viewModel.audioCacheClearEvents.collect { event ->
-            val message = when (event) {
-                AudioCacheClearEvent.CLEARED -> audioCacheCleared
-                AudioCacheClearEvent.FAILED -> audioCacheClearFailed
-            }
+            val message =
+                when (event) {
+                    AudioCacheClearEvent.CLEARED -> audioCacheCleared
+                    AudioCacheClearEvent.FAILED -> audioCacheClearFailed
+                }
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         }
     }
@@ -191,9 +192,10 @@ fun ChatSettingsContent(
             ListItem(
                 headlineContent = { Text(stringResource(R.string.settings_auto_away_message_title)) },
                 supportingContent = { Text(autoAwayText(settings.autoAwayMessage, defaultAwayMessage)) },
-                modifier = Modifier
-                    .clickable(enabled = settings.autoAwayEnabled) { awayMessageDialogOpen = true }
-                    .testTag("settings_auto_away_message"),
+                modifier =
+                    Modifier
+                        .clickable(enabled = settings.autoAwayEnabled) { awayMessageDialogOpen = true }
+                        .testTag("settings_auto_away_message"),
             )
         }
         SettingsGroup(title = stringResource(R.string.settings_composer_section)) {
@@ -238,8 +240,10 @@ fun ChatSettingsContent(
                         "${voiceQualityLabel(voice.quality)} · ${voiceQualityDescription(voice.quality)}",
                     )
                 },
-                modifier = Modifier.clickable { qualitySheetOpen = true }
-                    .testTag("settings_voice_quality"),
+                modifier =
+                    Modifier
+                        .clickable { qualitySheetOpen = true }
+                        .testTag("settings_voice_quality"),
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
@@ -261,8 +265,10 @@ fun ChatSettingsContent(
             ListItem(
                 headlineContent = { Text(stringResource(R.string.settings_clear_audio_cache)) },
                 supportingContent = { Text(stringResource(R.string.settings_clear_audio_cache_desc)) },
-                modifier = Modifier.clickable(onClick = onClearAudioCache)
-                    .testTag("settings_clear_audio_cache"),
+                modifier =
+                    Modifier
+                        .clickable(onClick = onClearAudioCache)
+                        .testTag("settings_clear_audio_cache"),
             )
         }
         SettingsGroup(title = stringResource(R.string.settings_people)) {
@@ -334,21 +340,27 @@ private fun VoiceQualitySheet(
     }
 }
 
-private fun voiceQualityLabel(quality: VoiceRecordingQuality): String = when (quality) {
-    VoiceRecordingQuality.DATA_SAVER -> "Data saver"
-    VoiceRecordingQuality.BALANCED -> "Balanced"
-    VoiceRecordingQuality.HIGH -> "High"
-}
+private fun voiceQualityLabel(quality: VoiceRecordingQuality): String =
+    when (quality) {
+        VoiceRecordingQuality.DATA_SAVER -> "Data saver"
+        VoiceRecordingQuality.BALANCED -> "Balanced"
+        VoiceRecordingQuality.HIGH -> "High"
+    }
 
-private fun voiceQualityDescription(quality: VoiceRecordingQuality): String = when (quality) {
-    VoiceRecordingQuality.DATA_SAVER -> "Opus 24 kbps · AAC 32 kbps"
-    VoiceRecordingQuality.BALANCED -> "Opus 48 kbps · AAC 64 kbps"
-    VoiceRecordingQuality.HIGH -> "Opus 64 kbps · AAC 96 kbps"
-}
+private fun voiceQualityDescription(quality: VoiceRecordingQuality): String =
+    when (quality) {
+        VoiceRecordingQuality.DATA_SAVER -> "Opus 24 kbps · AAC 32 kbps"
+        VoiceRecordingQuality.BALANCED -> "Opus 48 kbps · AAC 64 kbps"
+        VoiceRecordingQuality.HIGH -> "Opus 64 kbps · AAC 96 kbps"
+    }
 
 /** Background delay before auto-away fires. Disabled (but visible) while the feature is off. */
 @Composable
-private fun AutoAwayDelayGroup(current: Int, enabled: Boolean, onSelect: (Int) -> Unit) {
+private fun AutoAwayDelayGroup(
+    current: Int,
+    enabled: Boolean,
+    onSelect: (Int) -> Unit,
+) {
     Column(Modifier.selectableGroup()) {
         AUTO_AWAY_MINUTE_CHOICES.forEach { minutes ->
             RadioRow(
@@ -401,7 +413,10 @@ private fun AutoAwayMessageDialog(
 
 /** Global presence-event choice. A conversation can override it from its own overflow menu. */
 @Composable
-private fun PresenceModeGroup(current: PresenceMode, onSelect: (PresenceMode) -> Unit) {
+private fun PresenceModeGroup(
+    current: PresenceMode,
+    onSelect: (PresenceMode) -> Unit,
+) {
     Column(Modifier.selectableGroup()) {
         PresenceMode.entries.forEach { mode ->
             RadioRow(
@@ -417,7 +432,10 @@ private fun PresenceModeGroup(current: PresenceMode, onSelect: (PresenceMode) ->
 }
 
 @Composable
-private fun FoolsModeGroup(current: FoolsMode, onSelect: (FoolsMode) -> Unit) {
+private fun FoolsModeGroup(
+    current: FoolsMode,
+    onSelect: (FoolsMode) -> Unit,
+) {
     Column(Modifier.selectableGroup()) {
         RadioRow(
             label = stringResource(R.string.settings_fools_collapse),
@@ -448,16 +466,26 @@ private fun ChatSettingsPreview() {
             contentPreviews = ContentPreviewConfig(),
             voice = VoiceConfig(),
             avatars = AvatarConfig(),
-            onBack = {}, onOpenFriends = {}, onOpenFools = {}, onOpenDirectConnections = {},
+            onBack = {},
+            onOpenFriends = {},
+            onOpenFools = {},
+            onOpenDirectConnections = {},
             onPresenceMode = {},
-            onAutoAwayEnabled = {}, onAutoAwayMinutes = {}, onAutoAwayMessage = {},
-            onFoolsMode = {}, onShowComposerEmoji = {},
+            onAutoAwayEnabled = {},
+            onAutoAwayMinutes = {},
+            onAutoAwayMessage = {},
+            onFoolsMode = {},
+            onShowComposerEmoji = {},
             onChatSoundsEnabled = {},
             onVisibleReplyPrefix = {},
-            onShowImages = {}, onShowLinkPreviews = {}, onDirectMediaOnProxiedNetworks = {},
+            onShowImages = {},
+            onShowLinkPreviews = {},
+            onDirectMediaOnProxiedNetworks = {},
             onShowSharedAvatars = {},
-            onVoiceEncryptionDefault = {}, onClearAudioCache = {},
-            onVoiceQuality = {}, onVoiceNoiseReduction = {},
+            onVoiceEncryptionDefault = {},
+            onClearAudioCache = {},
+            onVoiceQuality = {},
+            onVoiceNoiseReduction = {},
         )
     }
 }

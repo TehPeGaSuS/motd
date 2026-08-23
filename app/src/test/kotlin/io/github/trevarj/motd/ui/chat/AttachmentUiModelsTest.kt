@@ -1,8 +1,8 @@
 package io.github.trevarj.motd.ui.chat
 
 import android.net.Uri
-import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentBackend
+import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -23,12 +23,16 @@ class AttachmentUiModelsTest {
 
     @Test fun sojuFileHostIsOnlyOfferedWhenAdvertised() {
         val source = AttachmentSource.Text("hello")
-        assertFalse(uploadDestinations(source, PasteBackendConfig()).any {
-            it.config.backend == AttachmentBackend.SOJU_FILEHOST
-        })
-        assertTrue(uploadDestinations(source, PasteBackendConfig(), sojuFileHostAvailable = true).any {
-            it.config.backend == AttachmentBackend.SOJU_FILEHOST
-        })
+        assertFalse(
+            uploadDestinations(source, PasteBackendConfig()).any {
+                it.config.backend == AttachmentBackend.SOJU_FILEHOST
+            },
+        )
+        assertTrue(
+            uploadDestinations(source, PasteBackendConfig(), sojuFileHostAvailable = true).any {
+                it.config.backend == AttachmentBackend.SOJU_FILEHOST
+            },
+        )
     }
 
     @Test fun filesNeverOfferTermbin() {
@@ -37,18 +41,21 @@ class AttachmentUiModelsTest {
     }
 
     @Test fun configuredCustomEndpointIsAvailable() {
-        val options = uploadDestinations(
-            AttachmentSource.Text("hello"),
-            PasteBackendConfig(
-                backend = AttachmentBackend.CUSTOM_0X0,
-                endpoint = "https://paste.example",
-                customEndpoint = "https://paste.example",
-            ),
+        val options =
+            uploadDestinations(
+                AttachmentSource.Text("hello"),
+                PasteBackendConfig(
+                    backend = AttachmentBackend.CUSTOM_0X0,
+                    endpoint = "https://paste.example",
+                    customEndpoint = "https://paste.example",
+                ),
+            )
+        assertTrue(
+            options.any {
+                it.config.backend == AttachmentBackend.CUSTOM_0X0 &&
+                    it.config.endpoint == "https://paste.example"
+            },
         )
-        assertTrue(options.any {
-            it.config.backend == AttachmentBackend.CUSTOM_0X0 &&
-                it.config.endpoint == "https://paste.example"
-        })
         assertTrue(options.any { it.config.backend == AttachmentBackend.CRAFTERBIN })
     }
 

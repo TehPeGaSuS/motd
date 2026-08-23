@@ -41,11 +41,12 @@ class OutgoingMessagePlanTest {
 
     @Test
     fun `logical multiline planning preserves blank lines in one durable row`() {
-        val chunks = prepareOutgoingMessageChunks(
-            "alpha\r\n\r\nbeta",
-            isBouncerServ = false,
-            preferLogicalMultiline = true,
-        )
+        val chunks =
+            prepareOutgoingMessageChunks(
+                "alpha\r\n\r\nbeta",
+                isBouncerServ = false,
+                preferLogicalMultiline = true,
+            )
 
         assertEquals(
             listOf(OutgoingMessageChunk("alpha\n\nbeta", "alpha\n\nbeta", MessageKind.PRIVMSG)),
@@ -73,10 +74,11 @@ class OutgoingMessagePlanTest {
 
     @Test
     fun `bouncer service transcript redacts secrets while wire text stays intact`() {
-        val chunks = prepareOutgoingMessageChunks(
-            "network create -addr irc.example -pass hunter2",
-            isBouncerServ = true,
-        )
+        val chunks =
+            prepareOutgoingMessageChunks(
+                "network create -addr irc.example -pass hunter2",
+                isBouncerServ = true,
+            )
 
         assertEquals("network create -addr irc.example -pass hunter2", chunks.single().wireText)
         assertFalse(chunks.single().displayText.contains("hunter2"))
@@ -84,192 +86,214 @@ class OutgoingMessagePlanTest {
     }
 
     @Test
-    fun `missing transport fails every already durable event without writes`() = runTest {
-        val writes = mutableListOf<Int>()
-        val failed = mutableListOf<Long>()
+    fun `missing transport fails every already durable event without writes`() =
+        runTest {
+            val writes = mutableListOf<Int>()
+            val failed = mutableListOf<Long>()
 
-        val result = transmitDurableOutgoingPlan(
-            eventIds = listOf(10L, 11L, 12L),
-            write = { index -> writes += index; ImmediateWireAcceptance.DISCONNECTED },
-            onWritten = {},
-            failRemaining = { ids -> failed.addAll(ids) },
-        )
+            val result =
+                transmitDurableOutgoingPlan(
+                    eventIds = listOf(10L, 11L, 12L),
+                    write = { index ->
+                        writes += index
+                        ImmediateWireAcceptance.DISCONNECTED
+                    },
+                    onWritten = {},
+                    failRemaining = { ids -> failed.addAll(ids) },
+                )
 
-        assertEquals(ImmediateWireAcceptance.DISCONNECTED, result)
-        assertEquals(listOf(0), writes)
-        assertEquals(listOf(10L, 11L, 12L), failed)
-    }
-
-    @Test
-    fun `mid plan failure leaves written prefix and fails current plus tail`() = runTest {
-        val written = mutableListOf<Int>()
-        val failed = mutableListOf<Long>()
-
-        val result = transmitDurableOutgoingPlan(
-            eventIds = listOf(20L, 21L, 22L),
-            write = { index ->
-                if (index < 1) ImmediateWireAcceptance.ACCEPTED else ImmediateWireAcceptance.FAILED
-            },
-            onWritten = { index -> written.add(index) },
-            failRemaining = { ids -> failed.addAll(ids) },
-        )
-
-        assertEquals(ImmediateWireAcceptance.FAILED, result)
-        assertEquals(listOf(0), written)
-        assertEquals(listOf(21L, 22L), failed)
-    }
+            assertEquals(ImmediateWireAcceptance.DISCONNECTED, result)
+            assertEquals(listOf(0), writes)
+            assertEquals(listOf(10L, 11L, 12L), failed)
+        }
 
     @Test
-    fun `every durable id exists before the first write`() = runTest {
-        val eventIds = listOf(25L, 26L, 27L)
-        val durableRows = eventIds.toMutableSet()
-        var checked = false
+    fun `mid plan failure leaves written prefix and fails current plus tail`() =
+        runTest {
+            val written = mutableListOf<Int>()
+            val failed = mutableListOf<Long>()
 
-        val result = transmitDurableOutgoingPlan(
-            eventIds = eventIds,
-            write = {
-                assertTrue(eventIds.all(durableRows::contains))
-                checked = true
-                ImmediateWireAcceptance.ACCEPTED
-            },
-            onWritten = {},
-            failRemaining = {},
-        )
+            val result =
+                transmitDurableOutgoingPlan(
+                    eventIds = listOf(20L, 21L, 22L),
+                    write = { index ->
+                        if (index < 1) ImmediateWireAcceptance.ACCEPTED else ImmediateWireAcceptance.FAILED
+                    },
+                    onWritten = { index -> written.add(index) },
+                    failRemaining = { ids -> failed.addAll(ids) },
+                )
 
-        assertTrue(checked)
-        assertEquals(ImmediateWireAcceptance.ACCEPTED, result)
-    }
-
-    @Test
-    fun `cancellation during post-write transition fails current and unattempted tail`() = runTest {
-        val written = mutableListOf<Int>()
-        val failed = mutableListOf<Long>()
-
-        val result = transmitDurableOutgoingPlan(
-            eventIds = listOf(30L, 31L, 32L),
-            write = { ImmediateWireAcceptance.ACCEPTED },
-            onWritten = { index ->
-                if (index == 1) throw CancellationException("cancel after write")
-                written += index
-            },
-            failRemaining = { failed += it },
-        )
-
-        assertEquals(ImmediateWireAcceptance.FAILED, result)
-        assertEquals(listOf(0), written)
-        assertEquals(listOf(31L, 32L), failed)
-    }
+            assertEquals(ImmediateWireAcceptance.FAILED, result)
+            assertEquals(listOf(0), written)
+            assertEquals(listOf(21L, 22L), failed)
+        }
 
     @Test
-    fun `cancellation before a write fails the complete unattempted plan`() = runTest {
-        val failed = mutableListOf<Long>()
+    fun `every durable id exists before the first write`() =
+        runTest {
+            val eventIds = listOf(25L, 26L, 27L)
+            val durableRows = eventIds.toMutableSet()
+            var checked = false
 
-        val result = transmitDurableOutgoingPlan(
-            eventIds = listOf(35L, 36L),
-            write = { throw CancellationException("cancel before write") },
-            onWritten = { error("write was not accepted") },
-            failRemaining = { failed += it },
-        )
-
-        assertEquals(ImmediateWireAcceptance.FAILED, result)
-        assertEquals(listOf(35L, 36L), failed)
-    }
-
-    @Test
-    fun `caller cancellation after commit still returns acceptance and ignores sound cancellation`() = runTest {
-        val lifecycle = DurableSendLifecycle()
-        val transitionEntered = CompletableDeferred<Unit>()
-        val releaseTransition = CompletableDeferred<Unit>()
-        val accepted = CompletableDeferred<SendAcceptance.Accepted>()
-        val job = launch {
-            val result = lifecycle.sending {
-                completeDurableAcceptance(
-                    eventIds = listOf(40L, 41L),
-                    transition = {
-                        transitionEntered.complete(Unit)
-                        releaseTransition.await()
+            val result =
+                transmitDurableOutgoingPlan(
+                    eventIds = eventIds,
+                    write = {
+                        assertTrue(eventIds.all(durableRows::contains))
+                        checked = true
                         ImmediateWireAcceptance.ACCEPTED
                     },
-                    secondaryEffect = { throw CancellationException("sound cancelled") },
+                    onWritten = {},
+                    failRemaining = {},
                 )
-            }
-            accepted.complete(result)
+
+            assertTrue(checked)
+            assertEquals(ImmediateWireAcceptance.ACCEPTED, result)
         }
-        transitionEntered.await()
-
-        job.cancel()
-        releaseTransition.complete(Unit)
-        job.join()
-
-        assertEquals(
-            SendAcceptance.Accepted(listOf(40L, 41L), ImmediateWireAcceptance.ACCEPTED),
-            accepted.await(),
-        )
-    }
 
     @Test
-    fun `lifecycle stop drains active sends runs recovery and gates the next send`() = runTest {
-        val lifecycle = DurableSendLifecycle()
-        val firstEntered = CompletableDeferred<Unit>()
-        val releaseFirst = CompletableDeferred<Unit>()
-        val order = mutableListOf<String>()
-        val first = launch {
-            lifecycle.sending {
-                order += "first-start"
-                firstEntered.complete(Unit)
-                releaseFirst.await()
-                order += "first-end"
-            }
+    fun `cancellation during post-write transition fails current and unattempted tail`() =
+        runTest {
+            val written = mutableListOf<Int>()
+            val failed = mutableListOf<Long>()
+
+            val result =
+                transmitDurableOutgoingPlan(
+                    eventIds = listOf(30L, 31L, 32L),
+                    write = { ImmediateWireAcceptance.ACCEPTED },
+                    onWritten = { index ->
+                        if (index == 1) throw CancellationException("cancel after write")
+                        written += index
+                    },
+                    failRemaining = { failed += it },
+                )
+
+            assertEquals(ImmediateWireAcceptance.FAILED, result)
+            assertEquals(listOf(0), written)
+            assertEquals(listOf(31L, 32L), failed)
         }
-        firstEntered.await()
-        val stop = launch {
-            lifecycle.quiesce(
-                onBlocked = { order += "timeouts-cancelled" },
-                block = { order += "pending-recovered" },
+
+    @Test
+    fun `cancellation before a write fails the complete unattempted plan`() =
+        runTest {
+            val failed = mutableListOf<Long>()
+
+            val result =
+                transmitDurableOutgoingPlan(
+                    eventIds = listOf(35L, 36L),
+                    write = { throw CancellationException("cancel before write") },
+                    onWritten = { error("write was not accepted") },
+                    failRemaining = { failed += it },
+                )
+
+            assertEquals(ImmediateWireAcceptance.FAILED, result)
+            assertEquals(listOf(35L, 36L), failed)
+        }
+
+    @Test
+    fun `caller cancellation after commit still returns acceptance and ignores sound cancellation`() =
+        runTest {
+            val lifecycle = DurableSendLifecycle()
+            val transitionEntered = CompletableDeferred<Unit>()
+            val releaseTransition = CompletableDeferred<Unit>()
+            val accepted = CompletableDeferred<SendAcceptance.Accepted>()
+            val job =
+                launch {
+                    val result =
+                        lifecycle.sending {
+                            completeDurableAcceptance(
+                                eventIds = listOf(40L, 41L),
+                                transition = {
+                                    transitionEntered.complete(Unit)
+                                    releaseTransition.await()
+                                    ImmediateWireAcceptance.ACCEPTED
+                                },
+                                secondaryEffect = { throw CancellationException("sound cancelled") },
+                            )
+                        }
+                    accepted.complete(result)
+                }
+            transitionEntered.await()
+
+            job.cancel()
+            releaseTransition.complete(Unit)
+            job.join()
+
+            assertEquals(
+                SendAcceptance.Accepted(listOf(40L, 41L), ImmediateWireAcceptance.ACCEPTED),
+                accepted.await(),
             )
         }
-        runCurrent()
-        val next = launch { lifecycle.sending { order += "next-send" } }
-        runCurrent()
-        assertEquals(listOf("first-start", "timeouts-cancelled"), order)
 
-        releaseFirst.complete(Unit)
-        first.join()
-        stop.join()
-        next.join()
+    @Test
+    fun `lifecycle stop drains active sends runs recovery and gates the next send`() =
+        runTest {
+            val lifecycle = DurableSendLifecycle()
+            val firstEntered = CompletableDeferred<Unit>()
+            val releaseFirst = CompletableDeferred<Unit>()
+            val order = mutableListOf<String>()
+            val first =
+                launch {
+                    lifecycle.sending {
+                        order += "first-start"
+                        firstEntered.complete(Unit)
+                        releaseFirst.await()
+                        order += "first-end"
+                    }
+                }
+            firstEntered.await()
+            val stop =
+                launch {
+                    lifecycle.quiesce(
+                        onBlocked = { order += "timeouts-cancelled" },
+                        block = { order += "pending-recovered" },
+                    )
+                }
+            runCurrent()
+            val next = launch { lifecycle.sending { order += "next-send" } }
+            runCurrent()
+            assertEquals(listOf("first-start", "timeouts-cancelled"), order)
 
-        assertEquals(
-            listOf("first-start", "timeouts-cancelled", "first-end", "pending-recovered", "next-send"),
-            order,
-        )
-        lifecycle.quiesce { order += "pending-recovered-again" }
-        assertEquals("pending-recovered-again", order.last())
-    }
+            releaseFirst.complete(Unit)
+            first.join()
+            stop.join()
+            next.join()
+
+            assertEquals(
+                listOf("first-start", "timeouts-cancelled", "first-end", "pending-recovered", "next-send"),
+                order,
+            )
+            lifecycle.quiesce { order += "pending-recovered-again" }
+            assertEquals("pending-recovered-again", order.last())
+        }
 
     @Test
     fun `generic retry rejects bouncer service and redacted durable rows`() {
-        val room = BufferEntity(
-            networkId = 1,
-            name = "#room",
-            displayName = "#room",
-            type = BufferType.CHANNEL,
-        )
-        val bouncer = BufferEntity(
-            networkId = 1,
-            name = "bouncerserv",
-            displayName = "BouncerServ",
-            type = BufferType.QUERY,
-        )
-        val failed = MessageEntity(
-            bufferId = 1,
-            serverTime = 1,
-            sender = "me",
-            kind = MessageKind.PRIVMSG,
-            text = "safe retry",
-            isSelf = true,
-            failed = true,
-            dedupKey = "retry",
-        )
+        val room =
+            BufferEntity(
+                networkId = 1,
+                name = "#room",
+                displayName = "#room",
+                type = BufferType.CHANNEL,
+            )
+        val bouncer =
+            BufferEntity(
+                networkId = 1,
+                name = "bouncerserv",
+                displayName = "BouncerServ",
+                type = BufferType.QUERY,
+            )
+        val failed =
+            MessageEntity(
+                bufferId = 1,
+                serverTime = 1,
+                sender = "me",
+                kind = MessageKind.PRIVMSG,
+                text = "safe retry",
+                isSelf = true,
+                failed = true,
+                dedupKey = "retry",
+            )
 
         assertTrue(isGenericRetryEligible(room, failed))
         assertFalse(isGenericRetryEligible(bouncer, failed))
@@ -281,6 +305,7 @@ class OutgoingMessagePlanTest {
             when {
                 text[index].isHighSurrogate() &&
                     (index + 1 >= text.length || !text[index + 1].isLowSurrogate()) -> return true
+
                 text[index].isLowSurrogate() &&
                     (index == 0 || !text[index - 1].isHighSurrogate()) -> return true
             }

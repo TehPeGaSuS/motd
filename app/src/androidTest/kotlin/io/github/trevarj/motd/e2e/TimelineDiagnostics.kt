@@ -20,9 +20,9 @@ import io.github.trevarj.motd.data.history.GapEdgeAnchor
 import io.github.trevarj.motd.data.history.ResolvedGap
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
-import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 /** Newest-first rows read straight from `messages`, enough to see who owns the newest positions. */
 private const val RAW_ROW_LIMIT = 24
@@ -122,7 +122,11 @@ internal class TimelineDiagnostics(
      * index; `-1` means the whole presented list holds no item with that key, which is exactly the
      * "loaded but unreachable by key" versus "not in the list at all" distinction the failure needs.
      */
-    private fun pagingSnapshot(containerTag: String, targetTag: String, targetKey: Long): JSONObject {
+    private fun pagingSnapshot(
+        containerTag: String,
+        targetTag: String,
+        targetKey: Long,
+    ): JSONObject {
         val out = JSONObject()
         val containers = compose.onAllNodesWithTag(containerTag, useUnmergedTree = true).fetchSemanticsNodes()
         out.put("containerTag", containerTag)
@@ -169,11 +173,13 @@ internal class TimelineDiagnostics(
         // looks like from outside.
         out.put("newestResolvedIndex", newestResolvedIndex)
 
-        val rowMatcher = SemanticsMatcher("timeline row tag") { node ->
-            node.config.getOrElse(SemanticsProperties.TestTag) { "" }.startsWith(TIMELINE_ROW_TAG_PREFIX)
-        }
+        val rowMatcher =
+            SemanticsMatcher("timeline row tag") { node ->
+                node.config.getOrElse(SemanticsProperties.TestTag) { "" }.startsWith(TIMELINE_ROW_TAG_PREFIX)
+            }
         val composed = JSONArray()
-        compose.onAllNodes(rowMatcher and hasAnyAncestor(hasTestTag(containerTag)), useUnmergedTree = true)
+        compose
+            .onAllNodes(rowMatcher and hasAnyAncestor(hasTestTag(containerTag)), useUnmergedTree = true)
             .fetchSemanticsNodes()
             .sortedBy { it.boundsInRoot.top }
             .take(COMPOSED_ROW_LIMIT)
@@ -188,9 +194,10 @@ internal class TimelineDiagnostics(
             }
         out.put("composedRows", composed)
         out.put("composedRowCount", composed.length())
-        val footerTagged = listOf(HISTORY_LOADING_TAG, HISTORY_MORE_TAG).any { tag ->
-            compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
-        }
+        val footerTagged =
+            listOf(HISTORY_LOADING_TAG, HISTORY_MORE_TAG).any { tag ->
+                compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            }
         out.put("historyFooterComposed", footerTagged)
         out.put("unreadDividerComposed", compose.onAllNodesWithTag(UNREAD_DIVIDER_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
         return out
@@ -228,108 +235,128 @@ internal class TimelineDiagnostics(
         return out
     }
 
-    private fun bufferRow(db: SQLiteDatabase): JSONObject = JSONObject().apply {
-        db.rawQuery(
-            "SELECT id, networkId, type, joined, redirectToRoomId, readMarkerTime, localReadAnchorTime, " +
-                "localReadAnchorEventId, oldestFetchedTime, historyComplete FROM buffers WHERE id = ?",
-            arrayOf(bufferId.toString()),
-        ).use { cursor ->
-            val found = cursor.moveToFirst()
-            put("found", found)
-            if (!found) return@use
-            put("id", cursor.long("id"))
-            put("networkId", cursor.long("networkId"))
-            put("type", cursor.string("type"))
-            put("joined", cursor.long("joined") != 0L)
-            putNullable("redirectToRoomId", cursor.longOrNull("redirectToRoomId"))
-            putNullable("readMarkerTime", cursor.longOrNull("readMarkerTime"))
-            putNullable("localReadAnchorTime", cursor.longOrNull("localReadAnchorTime"))
-            putNullable("localReadAnchorEventId", cursor.longOrNull("localReadAnchorEventId"))
-            putNullable("oldestFetchedTime", cursor.longOrNull("oldestFetchedTime"))
-            put("historyComplete", cursor.long("historyComplete") != 0L)
+    private fun bufferRow(db: SQLiteDatabase): JSONObject =
+        JSONObject().apply {
+            db
+                .rawQuery(
+                    "SELECT id, networkId, type, joined, redirectToRoomId, readMarkerTime, localReadAnchorTime, " +
+                        "localReadAnchorEventId, oldestFetchedTime, historyComplete FROM buffers WHERE id = ?",
+                    arrayOf(bufferId.toString()),
+                ).use { cursor ->
+                    val found = cursor.moveToFirst()
+                    put("found", found)
+                    if (!found) return@use
+                    put("id", cursor.long("id"))
+                    put("networkId", cursor.long("networkId"))
+                    put("type", cursor.string("type"))
+                    put("joined", cursor.long("joined") != 0L)
+                    putNullable("redirectToRoomId", cursor.longOrNull("redirectToRoomId"))
+                    putNullable("readMarkerTime", cursor.longOrNull("readMarkerTime"))
+                    putNullable("localReadAnchorTime", cursor.longOrNull("localReadAnchorTime"))
+                    putNullable("localReadAnchorEventId", cursor.longOrNull("localReadAnchorEventId"))
+                    putNullable("oldestFetchedTime", cursor.longOrNull("oldestFetchedTime"))
+                    put("historyComplete", cursor.long("historyComplete") != 0L)
+                }
         }
-    }
 
     /**
      * The target row as Room holds it now, plus the two ways its identity could have moved since
      * the probe captured it: a different row now owning the probed msgid, and an event redirect
      * pointing the probed id at a winner. Either one explains a key the timeline can never resolve.
      */
-    private fun targetRow(db: SQLiteDatabase, roomId: Long, targetKey: Long): JSONObject = JSONObject().apply {
-        put("byEventId", messageRow(db, "SELECT $MESSAGE_COLUMNS FROM messages WHERE id = ?", arrayOf(targetKey.toString())))
-        put(
-            "byMsgid",
-            probedMsgid?.let {
-                messageRow(
-                    db,
-                    "SELECT $MESSAGE_COLUMNS FROM messages WHERE bufferId = ? AND msgid = ? LIMIT 1",
-                    arrayOf(roomId.toString(), it),
-                )
-            } ?: JSONObject().put("found", false),
-        )
-        putNullable(
-            "redirectedTo",
-            db.longOrNull("SELECT canonicalEventId FROM event_redirects WHERE losingEventId = ?", targetKey),
-        )
-        put(
-            "redirectedFrom",
-            db.longOrNull("SELECT COUNT(*) FROM event_redirects WHERE canonicalEventId = ?", targetKey) ?: -1,
-        )
-    }
+    private fun targetRow(
+        db: SQLiteDatabase,
+        roomId: Long,
+        targetKey: Long,
+    ): JSONObject =
+        JSONObject().apply {
+            put("byEventId", messageRow(db, "SELECT $MESSAGE_COLUMNS FROM messages WHERE id = ?", arrayOf(targetKey.toString())))
+            put(
+                "byMsgid",
+                probedMsgid?.let {
+                    messageRow(
+                        db,
+                        "SELECT $MESSAGE_COLUMNS FROM messages WHERE bufferId = ? AND msgid = ? LIMIT 1",
+                        arrayOf(roomId.toString(), it),
+                    )
+                } ?: JSONObject().put("found", false),
+            )
+            putNullable(
+                "redirectedTo",
+                db.longOrNull("SELECT canonicalEventId FROM event_redirects WHERE losingEventId = ?", targetKey),
+            )
+            put(
+                "redirectedFrom",
+                db.longOrNull("SELECT COUNT(*) FROM event_redirects WHERE canonicalEventId = ?", targetKey) ?: -1,
+            )
+        }
 
     /**
      * The newest rows in the room, ordered exactly as the paging query orders them and with no
      * window bound applied, so a row Room retains but the window excludes still shows up here.
      * Doubles as the key-probe source for [pagingSnapshot].
      */
-    private fun newestRows(db: SQLiteDatabase, roomId: Long): JSONArray {
+    private fun newestRows(
+        db: SQLiteDatabase,
+        roomId: Long,
+    ): JSONArray {
         val rows = JSONArray()
         val keys = mutableListOf<Pair<Long, String?>>()
-        db.rawQuery(
-            "SELECT $MESSAGE_COLUMNS FROM messages WHERE bufferId = ? " +
-                "ORDER BY serverTime DESC, timelineOrder DESC, id DESC LIMIT $RAW_ROW_LIMIT",
-            arrayOf(roomId.toString()),
-        ).use { cursor ->
-            var rank = 0
-            while (cursor.moveToNext()) {
-                rows.put(cursor.messageJson().put("rank", rank))
-                keys += cursor.long("id") to cursor.stringOrNull("msgid")
-                rank++
+        db
+            .rawQuery(
+                "SELECT $MESSAGE_COLUMNS FROM messages WHERE bufferId = ? " +
+                    "ORDER BY serverTime DESC, timelineOrder DESC, id DESC LIMIT $RAW_ROW_LIMIT",
+                arrayOf(roomId.toString()),
+            ).use { cursor ->
+                var rank = 0
+                while (cursor.moveToNext()) {
+                    rows.put(cursor.messageJson().put("rank", rank))
+                    keys += cursor.long("id") to cursor.stringOrNull("msgid")
+                    rank++
+                }
             }
-        }
         newestRowKeys = keys
         return rows
     }
 
-    private fun readGaps(db: SQLiteDatabase, roomId: Long): List<HistoryGapEntity> = buildList {
-        runCatching {
-            db.rawQuery(
-                "SELECT id, roomId, olderMsgid, olderServerTime, newerMsgid, newerServerTime, recoverable, " +
-                    "olderEventId, olderTimelineOrder, newerEventId, newerTimelineOrder FROM history_gaps WHERE roomId = ?",
-                arrayOf(roomId.toString()),
-            ).use { cursor ->
-                while (cursor.moveToNext()) {
-                    add(
-                        HistoryGapEntity(
-                            id = cursor.long("id"),
-                            roomId = cursor.long("roomId"),
-                            olderMsgid = cursor.stringOrNull("olderMsgid"),
-                            olderServerTime = cursor.long("olderServerTime"),
-                            newerMsgid = cursor.stringOrNull("newerMsgid"),
-                            newerServerTime = cursor.long("newerServerTime"),
-                            recoverable = cursor.long("recoverable") != 0L,
-                            olderEventId = cursor.longOrNull("olderEventId"),
-                            olderTimelineOrder = cursor.longOrNull("olderTimelineOrder"),
-                            newerEventId = cursor.longOrNull("newerEventId"),
-                            newerTimelineOrder = cursor.longOrNull("newerTimelineOrder"),
-                        ),
-                    )
-                }
+    private fun readGaps(
+        db: SQLiteDatabase,
+        roomId: Long,
+    ): List<HistoryGapEntity> =
+        buildList {
+            runCatching {
+                db
+                    .rawQuery(
+                        "SELECT id, roomId, olderMsgid, olderServerTime, newerMsgid, newerServerTime, recoverable, " +
+                            "olderEventId, olderTimelineOrder, newerEventId, newerTimelineOrder FROM history_gaps WHERE roomId = ?",
+                        arrayOf(roomId.toString()),
+                    ).use { cursor ->
+                        while (cursor.moveToNext()) {
+                            add(
+                                HistoryGapEntity(
+                                    id = cursor.long("id"),
+                                    roomId = cursor.long("roomId"),
+                                    olderMsgid = cursor.stringOrNull("olderMsgid"),
+                                    olderServerTime = cursor.long("olderServerTime"),
+                                    newerMsgid = cursor.stringOrNull("newerMsgid"),
+                                    newerServerTime = cursor.long("newerServerTime"),
+                                    recoverable = cursor.long("recoverable") != 0L,
+                                    olderEventId = cursor.longOrNull("olderEventId"),
+                                    olderTimelineOrder = cursor.longOrNull("olderTimelineOrder"),
+                                    newerEventId = cursor.longOrNull("newerEventId"),
+                                    newerTimelineOrder = cursor.longOrNull("newerTimelineOrder"),
+                                ),
+                            )
+                        }
+                    }
             }
         }
-    }
 
-    private fun gapRows(db: SQLiteDatabase, roomId: Long, gaps: List<HistoryGapEntity>): JSONArray {
+    private fun gapRows(
+        db: SQLiteDatabase,
+        roomId: Long,
+        gaps: List<HistoryGapEntity>,
+    ): JSONArray {
         val out = JSONArray()
         resolve(db, roomId, gaps).forEach { resolved ->
             out.put(
@@ -403,7 +430,11 @@ internal class TimelineDiagnostics(
 
     // ------------------------------------------------------------------------------- plumbing
 
-    private fun resolve(db: SQLiteDatabase, roomId: Long, gaps: List<HistoryGapEntity>): List<ResolvedGap> =
+    private fun resolve(
+        db: SQLiteDatabase,
+        roomId: Long,
+        gaps: List<HistoryGapEntity>,
+    ): List<ResolvedGap> =
         gaps.map { gap ->
             ResolvedGap(
                 gap = gap,
@@ -427,51 +458,65 @@ internal class TimelineDiagnostics(
         return GapEdgeAnchor.TimeOnly(serverTime)
     }
 
-    private fun anchorByMsgid(db: SQLiteDatabase, roomId: Long, msgid: String): TimelineAnchor? =
-        db.rawQuery(
-            "SELECT serverTime, id, timelineOrder FROM messages WHERE bufferId = ? AND msgid = ? LIMIT 1",
-            arrayOf(roomId.toString(), msgid),
-        ).use { it.anchorOrNull() }
+    private fun anchorByMsgid(
+        db: SQLiteDatabase,
+        roomId: Long,
+        msgid: String,
+    ): TimelineAnchor? =
+        db
+            .rawQuery(
+                "SELECT serverTime, id, timelineOrder FROM messages WHERE bufferId = ? AND msgid = ? LIMIT 1",
+                arrayOf(roomId.toString(), msgid),
+            ).use { it.anchorOrNull() }
 
-    private fun anchorByCanonicalId(db: SQLiteDatabase, eventId: Long, roomId: Long): TimelineAnchor? =
-        db.rawQuery(
-            "SELECT serverTime, id, timelineOrder FROM messages WHERE bufferId = ? AND id = COALESCE(" +
-                "(SELECT canonicalEventId FROM event_redirects WHERE losingEventId = ?), ?) LIMIT 1",
-            arrayOf(roomId.toString(), eventId.toString(), eventId.toString()),
-        ).use { it.anchorOrNull() }
+    private fun anchorByCanonicalId(
+        db: SQLiteDatabase,
+        eventId: Long,
+        roomId: Long,
+    ): TimelineAnchor? =
+        db
+            .rawQuery(
+                "SELECT serverTime, id, timelineOrder FROM messages WHERE bufferId = ? AND id = COALESCE(" +
+                    "(SELECT canonicalEventId FROM event_redirects WHERE losingEventId = ?), ?) LIMIT 1",
+                arrayOf(roomId.toString(), eventId.toString(), eventId.toString()),
+            ).use { it.anchorOrNull() }
 
-    private fun Cursor.anchorOrNull(): TimelineAnchor? =
-        if (moveToFirst()) TimelineAnchor(long("serverTime"), long("id"), long("timelineOrder")) else null
+    private fun Cursor.anchorOrNull(): TimelineAnchor? = if (moveToFirst()) TimelineAnchor(long("serverTime"), long("id"), long("timelineOrder")) else null
 
-    private fun messageRow(db: SQLiteDatabase, sql: String, args: Array<String>): JSONObject =
+    private fun messageRow(
+        db: SQLiteDatabase,
+        sql: String,
+        args: Array<String>,
+    ): JSONObject =
         db.rawQuery(sql, args).use { cursor ->
             if (cursor.moveToFirst()) cursor.messageJson().put("found", true) else JSONObject().put("found", false)
         }
 
     /** Structural columns only: no body, no sender, no room name. */
-    private fun Cursor.messageJson(): JSONObject = JSONObject().apply {
-        put("eventId", long("id"))
-        put("bufferId", long("bufferId"))
-        putNullable("msgid", stringOrNull("msgid"))
-        put("serverTime", long("serverTime"))
-        put("timelineOrder", long("timelineOrder"))
-        put("kind", string("kind"))
-        put("isSelf", long("isSelf") != 0L)
-        put("pending", stringOrNull("pendingLabel") != null)
-        put("failed", long("failed") != 0L)
-        put("serverTimeAuthoritative", long("serverTimeAuthoritative") != 0L)
-        put("timelineOrderConfirmed", long("timelineOrderConfirmed") != 0L)
-    }
+    private fun Cursor.messageJson(): JSONObject =
+        JSONObject().apply {
+            put("eventId", long("id"))
+            put("bufferId", long("bufferId"))
+            putNullable("msgid", stringOrNull("msgid"))
+            put("serverTime", long("serverTime"))
+            put("timelineOrder", long("timelineOrder"))
+            put("kind", string("kind"))
+            put("isSelf", long("isSelf") != 0L)
+            put("pending", stringOrNull("pendingLabel") != null)
+            put("failed", long("failed") != 0L)
+            put("serverTimeAuthoritative", long("serverTimeAuthoritative") != 0L)
+            put("timelineOrderConfirmed", long("timelineOrderConfirmed") != 0L)
+        }
 
-    private fun TimelineAnchor.json(): JSONObject = JSONObject().apply {
-        put("serverTime", serverTime)
-        put("eventId", eventId)
-        put("timelineOrder", timelineOrder)
-    }
+    private fun TimelineAnchor.json(): JSONObject =
+        JSONObject().apply {
+            put("serverTime", serverTime)
+            put("eventId", eventId)
+            put("timelineOrder", timelineOrder)
+        }
 
     /** A failing section becomes an error object; the rest of the snapshot still gets written. */
-    private fun guarded(block: () -> Any): Any =
-        runCatching(block).getOrElse { JSONObject().put("error", it::class.java.name) }
+    private fun guarded(block: () -> Any): Any = runCatching(block).getOrElse { JSONObject().put("error", it::class.java.name) }
 
     private fun openReadOnly(file: File): SQLiteDatabase? {
         if (!file.exists()) return null
@@ -497,7 +542,10 @@ internal class TimelineDiagnostics(
             runCatching { this?.close() }
         }
 
-    private fun SQLiteDatabase.longOrNull(sql: String, vararg args: Any): Long? =
+    private fun SQLiteDatabase.longOrNull(
+        sql: String,
+        vararg args: Any,
+    ): Long? =
         runCatching {
             rawQuery(sql, args.map { it.toString() }.toTypedArray()).use { cursor ->
                 if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
@@ -506,15 +554,20 @@ internal class TimelineDiagnostics(
 
     private fun Cursor.long(column: String): Long = getLong(getColumnIndexOrThrow(column))
 
-    private fun Cursor.longOrNull(column: String): Long? = getColumnIndexOrThrow(column)
-        .let { if (isNull(it)) null else getLong(it) }
+    private fun Cursor.longOrNull(column: String): Long? =
+        getColumnIndexOrThrow(column)
+            .let { if (isNull(it)) null else getLong(it) }
 
     private fun Cursor.string(column: String): String = getString(getColumnIndexOrThrow(column)).orEmpty()
 
-    private fun Cursor.stringOrNull(column: String): String? = getColumnIndexOrThrow(column)
-        .let { if (isNull(it)) null else getString(it) }
+    private fun Cursor.stringOrNull(column: String): String? =
+        getColumnIndexOrThrow(column)
+            .let { if (isNull(it)) null else getString(it) }
 
-    private fun JSONObject.putNullable(key: String, value: Any?): JSONObject = put(key, value ?: JSONObject.NULL)
+    private fun JSONObject.putNullable(
+        key: String,
+        value: Any?,
+    ): JSONObject = put(key, value ?: JSONObject.NULL)
 
     /**
      * Re-reads the query's own bind arguments instead of rebuilding them, so the executed statement
@@ -525,12 +578,40 @@ internal class TimelineDiagnostics(
         val captured = arrayOfNulls<String>(argCount)
         bindTo(
             object : SupportSQLiteProgram {
-                override fun bindNull(index: Int) { captured[index - 1] = null }
-                override fun bindLong(index: Int, value: Long) { captured[index - 1] = value.toString() }
-                override fun bindDouble(index: Int, value: Double) { captured[index - 1] = value.toString() }
-                override fun bindString(index: Int, value: String) { captured[index - 1] = value }
-                override fun bindBlob(index: Int, value: ByteArray) { captured[index - 1] = "" }
+                override fun bindNull(index: Int) {
+                    captured[index - 1] = null
+                }
+
+                override fun bindLong(
+                    index: Int,
+                    value: Long,
+                ) {
+                    captured[index - 1] = value.toString()
+                }
+
+                override fun bindDouble(
+                    index: Int,
+                    value: Double,
+                ) {
+                    captured[index - 1] = value.toString()
+                }
+
+                override fun bindString(
+                    index: Int,
+                    value: String,
+                ) {
+                    captured[index - 1] = value
+                }
+
+                override fun bindBlob(
+                    index: Int,
+                    value: ByteArray,
+                ) {
+                    captured[index - 1] = ""
+                }
+
                 override fun clearBindings() = Unit
+
                 override fun close() = Unit
             },
         )
@@ -565,10 +646,17 @@ internal class TimelineDiagnostics(
  * all of them costs three small files and survives any one path being unavailable on the runner.
  */
 internal object E2eArtifactSink {
-    fun write(path: String, content: String): Int {
+    fun write(
+        path: String,
+        content: String,
+    ): Int {
         var delivered = 0
         runCatching {
-            PlatformTestStorageRegistry.getInstance().openOutputFile(path, false).bufferedWriter().use { it.write(content) }
+            PlatformTestStorageRegistry
+                .getInstance()
+                .openOutputFile(path, false)
+                .bufferedWriter()
+                .use { it.write(content) }
             delivered++
         }
         runCatching {
@@ -577,7 +665,11 @@ internal object E2eArtifactSink {
         }
         runCatching {
             @Suppress("DEPRECATION")
-            val media = InstrumentationRegistry.getInstrumentation().targetContext.externalMediaDirs.firstOrNull()
+            val media =
+                InstrumentationRegistry
+                    .getInstrumentation()
+                    .targetContext.externalMediaDirs
+                    .firstOrNull()
             if (media != null) {
                 writeFile(File(File(media, "additionalTestOutputDir"), path), content)
                 delivered++
@@ -586,7 +678,10 @@ internal object E2eArtifactSink {
         return delivered
     }
 
-    private fun writeFile(file: File, content: String) {
+    private fun writeFile(
+        file: File,
+        content: String,
+    ) {
         file.parentFile?.mkdirs()
         file.writeText(content)
     }

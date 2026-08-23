@@ -18,12 +18,26 @@ import kotlinx.serialization.json.intOrNull
  */
 enum class AgentwireGate { LOADING, ORDINARY, INVALID_TOPIC, BLOCKED, ACTIVE }
 
-private val SESSION_OWNED_KINDS = setOf(
-    "session.snapshot", "session.status", "user.prompt", "turn.started", "turn.completed",
-    "turn.failed", "assistant.delta", "assistant.completed", "plan.updated", "tool.started",
-    "tool.updated", "tool.completed", "usage.updated", "request.opened", "request.resolved",
-    "approval.review.started", "approval.review.completed",
-)
+private val SESSION_OWNED_KINDS =
+    setOf(
+        "session.snapshot",
+        "session.status",
+        "user.prompt",
+        "turn.started",
+        "turn.completed",
+        "turn.failed",
+        "assistant.delta",
+        "assistant.completed",
+        "plan.updated",
+        "tool.started",
+        "tool.updated",
+        "tool.completed",
+        "usage.updated",
+        "request.opened",
+        "request.resolved",
+        "approval.review.started",
+        "approval.review.completed",
+    )
 
 data class AgentwireListItem(
     val id: String,
@@ -149,7 +163,10 @@ class AgentwireReducer {
         revisions.clear()
     }
 
-    fun reduce(state: AgentwireUiState, envelope: AgentwireEnvelope): AgentwireUiState {
+    fun reduce(
+        state: AgentwireUiState,
+        envelope: AgentwireEnvelope,
+    ): AgentwireUiState {
         if (envelope.history == true) {
             if (
                 envelope.sid == null ||
@@ -160,17 +177,19 @@ class AgentwireReducer {
                 return state
             }
             if (!seen.remember("${envelope.sid}:${envelope.id}")) return state
-            val anchored = state.copy(
-                historyBeforeAt = state.historyBeforeAt?.let { minOf(it, envelope.at) } ?: envelope.at,
-            )
+            val anchored =
+                state.copy(
+                    historyBeforeAt = state.historyBeforeAt?.let { minOf(it, envelope.at) } ?: envelope.at,
+                )
             return reduceHistorical(anchored, envelope)
         }
         if (envelope.kind in SESSION_OWNED_KINDS && envelope.sid != null && envelope.sid != state.activeSid) {
             return state
         }
         if (!seen.remember(envelope.id)) return state
-        val entityKey = listOfNotNull(envelope.kind.substringBeforeLast('.'), envelope.sid, envelope.iid, envelope.rid)
-            .joinToString(":")
+        val entityKey =
+            listOfNotNull(envelope.kind.substringBeforeLast('.'), envelope.sid, envelope.iid, envelope.rid)
+                .joinToString(":")
         envelope.rev?.let { rev ->
             val prior = revisions[entityKey]
             if (prior != null && rev <= prior) return state
@@ -178,14 +197,17 @@ class AgentwireReducer {
         }
         val data = envelope.data ?: JsonObject(emptyMap())
         return when (envelope.kind) {
-            "agent.hello" -> state.copy(
-                epoch = envelope.epoch ?: data.string("epoch"),
-                backend = data.string("backend") ?: state.backend,
-                actions = data.stringList("actions").toSet(),
-                supportedSettings = data.stringList("settings").toSet(),
-                modelOptions = modelOptions(data),
-                error = null,
-            )
+            "agent.hello" -> {
+                state.copy(
+                    epoch = envelope.epoch ?: data.string("epoch"),
+                    backend = data.string("backend") ?: state.backend,
+                    actions = data.stringList("actions").toSet(),
+                    supportedSettings = data.stringList("settings").toSet(),
+                    modelOptions = modelOptions(data),
+                    error = null,
+                )
+            }
+
             "channel.snapshot" -> {
                 val nextSid = data.obj("binding")?.string("sid")
                 val changed = nextSid != state.activeSid
@@ -208,12 +230,18 @@ class AgentwireReducer {
                     olderHistoryAvailable = false,
                 )
             }
+
             "binding.changed" -> {
                 val detached = data.containsKey("sid") && data["sid"] is JsonNull
                 resetSessionTracking(envelope.id)
                 state.copy(
-                    activeSid = if (detached) null else envelope.sid ?: data.string("sid")
-                        ?: data.obj("session")?.string("sid"),
+                    activeSid =
+                        if (detached) {
+                            null
+                        } else {
+                            envelope.sid ?: data.string("sid")
+                                ?: data.obj("session")?.string("sid")
+                        },
                     cwd = if (detached) null else data.string("cwd") ?: data.obj("session")?.string("cwd"),
                     busy = false,
                     currentTid = null,
@@ -229,23 +257,31 @@ class AgentwireReducer {
                     olderHistoryAvailable = false,
                 )
             }
-            "session.snapshot" -> state.copy(
-                cwd = data.string("cwd") ?: state.cwd,
-                busy = data.bool("busy") ?: state.busy,
-                currentTid = envelope.tid ?: data.string("tid") ?: state.currentTid,
-                settings = data.objectStrings("settings").ifEmpty { state.settings },
-                timeline = if (data.containsKey("recentOutputs")) {
-                    restoredSessionTimeline(envelope, data)
-                } else {
-                    state.timeline
-                },
-            )
-            "session.status" -> state.copy(
-                cwd = data.string("cwd") ?: state.cwd,
-                busy = data.bool("busy") ?: state.busy,
-                currentTid = envelope.tid ?: data.string("tid") ?: state.currentTid,
-                settings = data.objectStrings("settings").ifEmpty { state.settings },
-            )
+
+            "session.snapshot" -> {
+                state.copy(
+                    cwd = data.string("cwd") ?: state.cwd,
+                    busy = data.bool("busy") ?: state.busy,
+                    currentTid = envelope.tid ?: data.string("tid") ?: state.currentTid,
+                    settings = data.objectStrings("settings").ifEmpty { state.settings },
+                    timeline =
+                        if (data.containsKey("recentOutputs")) {
+                            restoredSessionTimeline(envelope, data)
+                        } else {
+                            state.timeline
+                        },
+                )
+            }
+
+            "session.status" -> {
+                state.copy(
+                    cwd = data.string("cwd") ?: state.cwd,
+                    busy = data.bool("busy") ?: state.busy,
+                    currentTid = envelope.tid ?: data.string("tid") ?: state.currentTid,
+                    settings = data.objectStrings("settings").ifEmpty { state.settings },
+                )
+            }
+
             "workspace.page" -> {
                 val parent = data.string("parent").orEmpty()
                 val page = workspaceItems(data)
@@ -253,75 +289,99 @@ class AgentwireReducer {
                     workspaceChildren = state.workspaceChildren + (parent to page),
                 )
             }
+
             "session.page" -> {
                 val page = pageItems(data, "sid")
                 val cwd = data.string("cwd")
                 val live = data.string("scope") == "live" || cwd == null
                 val continuing = data.string("cursor") != null
                 state.copy(
-                    liveSessions = if (live) {
-                        mergePage(state.liveSessions, page, continuing)
-                    } else {
-                        state.liveSessions
-                    },
-                    workspaceSessions = if (!live) {
-                        val directory = requireNotNull(cwd)
-                        state.workspaceSessions + (directory to mergePage(
-                            state.workspaceSessions[directory].orEmpty(),
-                            page,
-                            continuing,
-                        ))
-                    } else {
-                        state.workspaceSessions
-                    },
-                    loadedSessionDirectories = cwd?.let { state.loadedSessionDirectories + it }
-                        ?: state.loadedSessionDirectories,
+                    liveSessions =
+                        if (live) {
+                            mergePage(state.liveSessions, page, continuing)
+                        } else {
+                            state.liveSessions
+                        },
+                    workspaceSessions =
+                        if (!live) {
+                            val directory = requireNotNull(cwd)
+                            state.workspaceSessions + (
+                                directory to
+                                    mergePage(
+                                        state.workspaceSessions[directory].orEmpty(),
+                                        page,
+                                        continuing,
+                                    )
+                            )
+                        } else {
+                            state.workspaceSessions
+                        },
+                    loadedSessionDirectories =
+                        cwd?.let { state.loadedSessionDirectories + it }
+                            ?: state.loadedSessionDirectories,
                 )
             }
-            "history.begin" -> if (matchesHistoryRequest(state, envelope)) {
-                state.copy(
-                    historyLoading = true,
-                    historyPage = data.string("page"),
-                    historyStaged = emptyList(),
-                )
-            } else {
-                state
+
+            "history.begin" -> {
+                if (matchesHistoryRequest(state, envelope)) {
+                    state.copy(
+                        historyLoading = true,
+                        historyPage = data.string("page"),
+                        historyStaged = emptyList(),
+                    )
+                } else {
+                    state
+                }
             }
-            "history.end" -> if (matchesHistoryRequest(state, envelope)) {
-                val count = data.int("count") ?: 0
-                state.copy(
-                    timeline = mergeHistoryPage(state.historyStaged, state.timeline),
-                    historyLoading = false,
-                    historyPage = data.string("page") ?: state.historyPage,
-                    historyRequestId = null,
-                    historyCursor = data.string("next"),
-                    historyStaged = emptyList(),
-                    olderHistoryAvailable = if (data.containsKey("next")) {
-                        data.string("next") != null
-                    } else {
-                        count > 0
-                    },
-                )
-            } else {
-                state
+
+            "history.end" -> {
+                if (matchesHistoryRequest(state, envelope)) {
+                    val count = data.int("count") ?: 0
+                    state.copy(
+                        timeline = mergeHistoryPage(state.historyStaged, state.timeline),
+                        historyLoading = false,
+                        historyPage = data.string("page") ?: state.historyPage,
+                        historyRequestId = null,
+                        historyCursor = data.string("next"),
+                        historyStaged = emptyList(),
+                        olderHistoryAvailable =
+                            if (data.containsKey("next")) {
+                                data.string("next") != null
+                            } else {
+                                count > 0
+                            },
+                    )
+                } else {
+                    state
+                }
             }
+
             "action.accepted", "action.succeeded", "action.failed", "action.uncertain" -> {
                 val status = envelope.kind.substringAfter("action.")
                 state.copy(
                     actionStatus = envelope.reply?.let { state.actionStatus + (it to status) } ?: state.actionStatus,
-                    error = when (envelope.kind) {
-                        "action.failed" -> data.string("message") ?: "Action failed"
-                        "action.uncertain" -> data.string("message") ?: "Action outcome is unknown"
-                        else -> state.error
-                    },
+                    error =
+                        when (envelope.kind) {
+                            "action.failed" -> data.string("message") ?: "Action failed"
+                            "action.uncertain" -> data.string("message") ?: "Action outcome is unknown"
+                            else -> state.error
+                        },
                 )
             }
-            "queue.snapshot" -> state.copy(queue = data.array("items")?.mapNotNull(::queueItem).orEmpty())
+
+            "queue.snapshot" -> {
+                state.copy(queue = data.array("items")?.mapNotNull(::queueItem).orEmpty())
+            }
+
             "queue.item.added", "queue.item.updated", "queue.item.moved" -> {
                 val item = queueItem(data) ?: return state
                 state.copy(queue = (state.queue.filterNot { it.iid == item.iid } + item).sortedBy { it.position })
             }
-            "queue.item.removed" -> state.copy(queue = state.queue.filterNot { it.iid == envelope.iid || it.iid == data.string("iid") })
+
+            "queue.item.removed" -> {
+                state.copy(queue = state.queue.filterNot { it.iid == envelope.iid || it.iid == data.string("iid") })
+            }
+
             "request.opened" -> {
                 val request = request(envelope, data) ?: return state
                 state.copy(
@@ -329,31 +389,54 @@ class AgentwireReducer {
                     timeline = state.timeline.upsert(envelope.timelineItem()),
                 )
             }
-            "request.resolved" -> state.copy(
-                requests = state.requests.filterNot { it.rid == envelope.rid || it.rid == data.string("rid") },
-                timeline = state.timeline.upsert(envelope.timelineItem()),
-            )
-            "turn.started" -> state.copy(
-                busy = true, currentTid = envelope.tid,
-                timeline = state.timeline.upsert(envelope.timelineItem(running = true)),
-            )
-            "turn.completed", "turn.failed" -> state.copy(
-                busy = false, currentTid = null,
-                timeline = state.timeline
-                    .stopPlan(envelope.tid)
-                    .upsert(envelope.timelineItem(success = envelope.kind == "turn.completed")),
-            )
-            "assistant.delta" -> state.copy(timeline = state.timeline.appendDelta(envelope))
+
+            "request.resolved" -> {
+                state.copy(
+                    requests = state.requests.filterNot { it.rid == envelope.rid || it.rid == data.string("rid") },
+                    timeline = state.timeline.upsert(envelope.timelineItem()),
+                )
+            }
+
+            "turn.started" -> {
+                state.copy(
+                    busy = true,
+                    currentTid = envelope.tid,
+                    timeline = state.timeline.upsert(envelope.timelineItem(running = true)),
+                )
+            }
+
+            "turn.completed", "turn.failed" -> {
+                state.copy(
+                    busy = false,
+                    currentTid = null,
+                    timeline =
+                        state.timeline
+                            .stopPlan(envelope.tid)
+                            .upsert(envelope.timelineItem(success = envelope.kind == "turn.completed")),
+                )
+            }
+
+            "assistant.delta" -> {
+                state.copy(timeline = state.timeline.appendDelta(envelope))
+            }
+
             "user.prompt", "assistant.completed", "plan.updated", "tool.started", "tool.updated", "tool.completed",
-            "usage.updated", "approval.review.started", "approval.review.completed" -> state.copy(
-                timeline = state.timeline.upsert(
-                    envelope.timelineItem(
-                        running = envelope.timelineRunning(),
-                        success = if (envelope.kind == "tool.completed") data.bool("success") else null,
-                    ),
-                ),
-            )
-            else -> state
+            "usage.updated", "approval.review.started", "approval.review.completed",
+            -> {
+                state.copy(
+                    timeline =
+                        state.timeline.upsert(
+                            envelope.timelineItem(
+                                running = envelope.timelineRunning(),
+                                success = if (envelope.kind == "tool.completed") data.bool("success") else null,
+                            ),
+                        ),
+                )
+            }
+
+            else -> {
+                state
+            }
         }
     }
 
@@ -361,34 +444,56 @@ class AgentwireReducer {
     private fun reduceHistorical(
         state: AgentwireUiState,
         envelope: AgentwireEnvelope,
-    ): AgentwireUiState = when (envelope.kind) {
-        "request.opened", "request.resolved" -> state.copy(
-            historyStaged = state.historyStaged.upsert(envelope.timelineItem()),
-        )
-        "turn.started" -> state.copy(
-            historyStaged = state.historyStaged.upsert(envelope.timelineItem(running = true)),
-        )
-        "turn.completed", "turn.failed" -> state.copy(
-            historyStaged = state.historyStaged
-                .stopPlan(envelope.tid)
-                .upsert(envelope.timelineItem(success = envelope.kind == "turn.completed")),
-        )
-        "assistant.delta" -> state.copy(historyStaged = state.historyStaged.appendDelta(envelope))
-        "user.prompt", "assistant.completed", "plan.updated", "tool.started", "tool.updated", "tool.completed",
-        "usage.updated", "approval.review.started", "approval.review.completed" -> state.copy(
-            historyStaged = state.historyStaged.upsert(
-                envelope.timelineItem(
-                    running = envelope.timelineRunning(),
-                    success = if (envelope.kind == "tool.completed") {
-                        envelope.data?.bool("success")
-                    } else {
-                        null
-                    },
-                ),
-            ),
-        )
-        else -> state
-    }
+    ): AgentwireUiState =
+        when (envelope.kind) {
+            "request.opened", "request.resolved" -> {
+                state.copy(
+                    historyStaged = state.historyStaged.upsert(envelope.timelineItem()),
+                )
+            }
+
+            "turn.started" -> {
+                state.copy(
+                    historyStaged = state.historyStaged.upsert(envelope.timelineItem(running = true)),
+                )
+            }
+
+            "turn.completed", "turn.failed" -> {
+                state.copy(
+                    historyStaged =
+                        state.historyStaged
+                            .stopPlan(envelope.tid)
+                            .upsert(envelope.timelineItem(success = envelope.kind == "turn.completed")),
+                )
+            }
+
+            "assistant.delta" -> {
+                state.copy(historyStaged = state.historyStaged.appendDelta(envelope))
+            }
+
+            "user.prompt", "assistant.completed", "plan.updated", "tool.started", "tool.updated", "tool.completed",
+            "usage.updated", "approval.review.started", "approval.review.completed",
+            -> {
+                state.copy(
+                    historyStaged =
+                        state.historyStaged.upsert(
+                            envelope.timelineItem(
+                                running = envelope.timelineRunning(),
+                                success =
+                                    if (envelope.kind == "tool.completed") {
+                                        envelope.data?.bool("success")
+                                    } else {
+                                        null
+                                    },
+                            ),
+                        ),
+                )
+            }
+
+            else -> {
+                state
+            }
+        }
 
     private fun resetSessionTracking(envelopeId: String) {
         seen.clear()
@@ -396,7 +501,10 @@ class AgentwireReducer {
         revisions.clear()
     }
 
-    private fun pageItems(data: JsonObject, identity: String): List<AgentwireListItem> {
+    private fun pageItems(
+        data: JsonObject,
+        identity: String,
+    ): List<AgentwireListItem> {
         val values = data.array("items") ?: data.array(if (identity == "sid") "sessions" else "workspaces") ?: return emptyList()
         return values.mapNotNull { element ->
             val item = element as? JsonObject ?: return@mapNotNull null
@@ -405,11 +513,12 @@ class AgentwireReducer {
         }
     }
 
-    private fun workspaceItems(data: JsonObject): List<AgentwireListItem> = data.array("items").orEmpty().mapNotNull { element ->
-        val item = element as? JsonObject ?: return@mapNotNull null
-        val path = item.string("path") ?: return@mapNotNull null
-        AgentwireListItem(path, item.string("name") ?: path, path, item)
-    }
+    private fun workspaceItems(data: JsonObject): List<AgentwireListItem> =
+        data.array("items").orEmpty().mapNotNull { element ->
+            val item = element as? JsonObject ?: return@mapNotNull null
+            val path = item.string("path") ?: return@mapNotNull null
+            AgentwireListItem(path, item.string("name") ?: path, path, item)
+        }
 
     private fun modelOptions(data: JsonObject): List<AgentwireModelOption> =
         data.obj("settingOptions")?.array("model").orEmpty().mapNotNull { element ->
@@ -427,20 +536,22 @@ class AgentwireReducer {
 private fun matchesHistoryRequest(
     state: AgentwireUiState,
     envelope: AgentwireEnvelope,
-): Boolean = envelope.sid != null &&
-    envelope.sid == state.activeSid &&
-    envelope.sid == state.historySid &&
-    envelope.reply == state.historyRequestId
+): Boolean =
+    envelope.sid != null &&
+        envelope.sid == state.activeSid &&
+        envelope.sid == state.historySid &&
+        envelope.reply == state.historyRequestId
 
 private fun mergePage(
     current: List<AgentwireListItem>,
     page: List<AgentwireListItem>,
     continuing: Boolean,
-): List<AgentwireListItem> = if (continuing) {
-    current.filterNot { old -> page.any { it.id == old.id } } + page
-} else {
-    page
-}
+): List<AgentwireListItem> =
+    if (continuing) {
+        current.filterNot { old -> page.any { it.id == old.id } } + page
+    } else {
+        page
+    }
 
 private fun queueItem(element: JsonElement): AgentwireQueueItem? {
     val data = element as? JsonObject ?: return null
@@ -453,77 +564,105 @@ private fun queueItem(element: JsonElement): AgentwireQueueItem? {
     )
 }
 
-private fun request(envelope: AgentwireEnvelope, data: JsonObject): AgentwireRequest? {
+private fun request(
+    envelope: AgentwireEnvelope,
+    data: JsonObject,
+): AgentwireRequest? {
     val rid = envelope.rid ?: data.string("rid") ?: return null
-    val questions = data.array("questions").orEmpty().mapNotNull { element ->
-        val question = element as? JsonObject ?: return@mapNotNull null
-        AgentwireQuestion(
-            id = question.string("id") ?: return@mapNotNull null,
-            header = question.string("header"),
-            prompt = question.string("prompt").orEmpty(),
-            options = question.stringList("options"),
-            multiple = question.bool("multiple") ?: false,
-            custom = question.bool("custom") ?: false,
-        )
-    }
+    val questions =
+        data.array("questions").orEmpty().mapNotNull { element ->
+            val question = element as? JsonObject ?: return@mapNotNull null
+            AgentwireQuestion(
+                id = question.string("id") ?: return@mapNotNull null,
+                header = question.string("header"),
+                prompt = question.string("prompt").orEmpty(),
+                options = question.stringList("options"),
+                multiple = question.bool("multiple") ?: false,
+                custom = question.bool("custom") ?: false,
+            )
+        }
     return AgentwireRequest(
-        rid, data.string("type") ?: "approval", data.string("summary"),
-        data.bool("redacted") ?: false, data.bool("inactive") ?: false,
-        data.bool("canSkip") ?: false, questions, envelope.sid ?: data.string("sid"),
+        rid,
+        data.string("type") ?: "approval",
+        data.string("summary"),
+        data.bool("redacted") ?: false,
+        data.bool("inactive") ?: false,
+        data.bool("canSkip") ?: false,
+        questions,
+        envelope.sid ?: data.string("sid"),
     )
 }
 
-private fun AgentwireEnvelope.timelineItem(running: Boolean = false, success: Boolean? = null): AgentwireTimelineItem {
+private fun AgentwireEnvelope.timelineItem(
+    running: Boolean = false,
+    success: Boolean? = null,
+): AgentwireTimelineItem {
     val payload = data ?: JsonObject(emptyMap())
-    val title = when {
-        kind == "user.prompt" -> "You"
-        kind.startsWith("assistant.") -> "Assistant"
-        kind.startsWith("turn.") -> kind.substringAfter('.').replaceFirstChar(Char::uppercase)
-        kind.startsWith("tool.") -> payload.string("label") ?: payload.string("kind") ?: "Tool"
-        kind == "plan.updated" -> "Plan"
-        kind == "usage.updated" -> "Usage"
-        kind.startsWith("request.") -> payload.string("type")?.replaceFirstChar(Char::uppercase) ?: "Request"
-        else -> kind
-    }
-    val body = when {
-        kind.startsWith("tool.") -> toolPreview(payload)
-        kind == "plan.updated" -> planPreview(payload)
-        payload.bool("omitted") == true -> "Content omitted because it may contain a secret"
-        else -> payload.string("content") ?: payload.string("summary") ?: payload.string("message")
-    }
+    val title =
+        when {
+            kind == "user.prompt" -> "You"
+            kind.startsWith("assistant.") -> "Assistant"
+            kind.startsWith("turn.") -> kind.substringAfter('.').replaceFirstChar(Char::uppercase)
+            kind.startsWith("tool.") -> payload.string("label") ?: payload.string("kind") ?: "Tool"
+            kind == "plan.updated" -> "Plan"
+            kind == "usage.updated" -> "Usage"
+            kind.startsWith("request.") -> payload.string("type")?.replaceFirstChar(Char::uppercase) ?: "Request"
+            else -> kind
+        }
+    val body =
+        when {
+            kind.startsWith("tool.") -> toolPreview(payload)
+            kind == "plan.updated" -> planPreview(payload)
+            payload.bool("omitted") == true -> "Content omitted because it may contain a secret"
+            else -> payload.string("content") ?: payload.string("summary") ?: payload.string("message")
+        }
     return AgentwireTimelineItem(
-        id, kind, at, sid, tid, title, body, running, success, history == true, payload, iid,
+        id,
+        kind,
+        at,
+        sid,
+        tid,
+        title,
+        body,
+        running,
+        success,
+        history == true,
+        payload,
+        iid,
     )
 }
 
-private fun AgentwireEnvelope.timelineRunning(): Boolean = when (kind) {
-    "plan.updated" -> data?.bool("running") ?: false
-    else -> kind.endsWith("started") || kind.endsWith("updated")
-}
+private fun AgentwireEnvelope.timelineRunning(): Boolean =
+    when (kind) {
+        "plan.updated" -> data?.bool("running") ?: false
+        else -> kind.endsWith("started") || kind.endsWith("updated")
+    }
 
 private fun planPreview(data: JsonObject): String? {
     val summary = data.string("summary")
     val completed = data.int("completedSteps")
     val total = data.int("totalSteps")
-    val progress = if (completed != null && total != null && total > 0) {
-        "$completed of $total steps complete"
-    } else {
-        null
-    }
+    val progress =
+        if (completed != null && total != null && total > 0) {
+            "$completed of $total steps complete"
+        } else {
+            null
+        }
     return listOfNotNull(summary, progress).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
 }
 
 private fun toolPreview(data: JsonObject): String? {
-    val sections = buildList {
-        data.string("input")?.let { add("Command\n$it") }
-        data.string("output")?.let { add("Output\n$it") }
-        data.string("diff")?.let { add("Diff\n$it") }
-        val status = data.string("status")
-        val exitCode = data.int("exitCode")
-        if (status != null || exitCode != null) {
-            add(listOfNotNull(status?.let { "Status: $it" }, exitCode?.let { "exit $it" }).joinToString(" · "))
+    val sections =
+        buildList {
+            data.string("input")?.let { add("Command\n$it") }
+            data.string("output")?.let { add("Output\n$it") }
+            data.string("diff")?.let { add("Diff\n$it") }
+            val status = data.string("status")
+            val exitCode = data.int("exitCode")
+            if (status != null || exitCode != null) {
+                add(listOfNotNull(status?.let { "Status: $it" }, exitCode?.let { "exit $it" }).joinToString(" · "))
+            }
         }
-    }
     return sections.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
 }
 
@@ -534,13 +673,17 @@ private fun restoredSessionTimeline(
     val outputs = data.array("recentOutputs").orEmpty().mapNotNull { it as? JsonObject }
     val activity = data.array("recentActivity").orEmpty().mapNotNull { it as? JsonObject }
     if (outputs.isEmpty() && activity.isEmpty()) {
-        val status = when (data.string("status")) {
-            "waiting" -> "Waiting for your input."
-            // Every backend reaches this branch, so the copy must not name one.
-            "running" -> "The agent is currently working."
-            "ready" -> "Session is ready for a prompt."
-            else -> "Session attached."
-        }
+        val status =
+            when (data.string("status")) {
+                "waiting" -> "Waiting for your input."
+
+                // Every backend reaches this branch, so the copy must not name one.
+                "running" -> "The agent is currently working."
+
+                "ready" -> "Session is ready for a prompt."
+
+                else -> "Session attached."
+            }
         return listOf(
             AgentwireTimelineItem(
                 id = "restored:${envelope.sid}:${envelope.id}:status",
@@ -555,49 +698,55 @@ private fun restoredSessionTimeline(
             ),
         )
     }
-    val restoredOutputs = outputs.mapIndexed { index, output ->
-        AgentwireTimelineItem(
-            id = "restored:${envelope.sid}:${output.string("iid") ?: index}",
-            kind = "assistant.completed",
-            at = envelope.at + index,
-            sid = envelope.sid,
-            tid = output.string("tid"),
-            title = "Assistant",
-            body = output.string("content"),
-            historical = true,
-            data = output,
-            backendItemId = output.string("iid"),
-        )
-    }
-    val restoredActivity = activity.mapIndexed { index, item ->
-        val kind = item.string("kind") ?: "tool.started"
-        val itemData = item.obj("data") ?: JsonObject(emptyMap())
-        AgentwireTimelineItem(
-            id = "restored:${envelope.sid}:${item.string("iid") ?: index}",
-            kind = kind,
-            at = envelope.at + outputs.size + index,
-            sid = envelope.sid,
-            tid = item.string("tid"),
-            title = itemData.string("label") ?: itemData.string("kind") ?: "Tool",
-            body = toolPreview(itemData),
-            running = kind != "tool.completed",
-            success = itemData.bool("success"),
-            historical = true,
-            data = itemData,
-            backendItemId = item.string("iid"),
-        )
-    }
+    val restoredOutputs =
+        outputs.mapIndexed { index, output ->
+            AgentwireTimelineItem(
+                id = "restored:${envelope.sid}:${output.string("iid") ?: index}",
+                kind = "assistant.completed",
+                at = envelope.at + index,
+                sid = envelope.sid,
+                tid = output.string("tid"),
+                title = "Assistant",
+                body = output.string("content"),
+                historical = true,
+                data = output,
+                backendItemId = output.string("iid"),
+            )
+        }
+    val restoredActivity =
+        activity.mapIndexed { index, item ->
+            val kind = item.string("kind") ?: "tool.started"
+            val itemData = item.obj("data") ?: JsonObject(emptyMap())
+            AgentwireTimelineItem(
+                id = "restored:${envelope.sid}:${item.string("iid") ?: index}",
+                kind = kind,
+                at = envelope.at + outputs.size + index,
+                sid = envelope.sid,
+                tid = item.string("tid"),
+                title = itemData.string("label") ?: itemData.string("kind") ?: "Tool",
+                body = toolPreview(itemData),
+                running = kind != "tool.completed",
+                success = itemData.bool("success"),
+                historical = true,
+                data = itemData,
+                backendItemId = item.string("iid"),
+            )
+        }
     return restoredOutputs + restoredActivity
 }
 
 private fun List<AgentwireTimelineItem>.upsert(item: AgentwireTimelineItem): List<AgentwireTimelineItem> {
     val stableId = item.stableTimelineId()
     if (stableId == null) return (this + item).sortedBy(AgentwireTimelineItem::at)
-    val existing = indexOfFirst { old ->
-        old.stableTimelineId() == stableId
+    val existing =
+        indexOfFirst { old ->
+            old.stableTimelineId() == stableId
+        }
+    return if (existing < 0) {
+        (this + item).sortedBy(AgentwireTimelineItem::at)
+    } else {
+        toMutableList().also { it[existing] = item }
     }
-    return if (existing < 0) (this + item).sortedBy(AgentwireTimelineItem::at)
-    else toMutableList().also { it[existing] = item }
 }
 
 /**
@@ -610,14 +759,28 @@ internal fun AgentwireTimelineItem.stableTimelineId(): String? {
     if (kind == "user.prompt") return "prompt:$sid:${backendItemId ?: id}"
     return tid?.let { turnId ->
         when {
-            kind.startsWith("assistant.") -> backendItemId?.let { "assistant:$sid:$turnId:$it" }
-            kind.startsWith("tool.") -> (backendItemId ?: data.string("id"))?.let {
-                "tool:$sid:$turnId:$it"
+            kind.startsWith("assistant.") -> {
+                backendItemId?.let { "assistant:$sid:$turnId:$it" }
             }
-            kind == "plan.updated" -> backendItemId?.let { "plan:$sid:$turnId:$it" }
-                ?: "plan:$sid:$turnId"
-            kind.startsWith("turn.") -> "turn:$sid:$turnId"
-            else -> null
+
+            kind.startsWith("tool.") -> {
+                (backendItemId ?: data.string("id"))?.let {
+                    "tool:$sid:$turnId:$it"
+                }
+            }
+
+            kind == "plan.updated" -> {
+                backendItemId?.let { "plan:$sid:$turnId:$it" }
+                    ?: "plan:$sid:$turnId"
+            }
+
+            kind.startsWith("turn.") -> {
+                "turn:$sid:$turnId"
+            }
+
+            else -> {
+                null
+            }
         }
     }
 }
@@ -625,9 +788,10 @@ internal fun AgentwireTimelineItem.stableTimelineId(): String? {
 private fun mergeHistoryPage(
     history: List<AgentwireTimelineItem>,
     current: List<AgentwireTimelineItem>,
-): List<AgentwireTimelineItem> = (history + current).fold(emptyList()) { result, item ->
-    result.upsert(item)
-}
+): List<AgentwireTimelineItem> =
+    (history + current).fold(emptyList()) { result, item ->
+        result.upsert(item)
+    }
 
 private fun List<AgentwireTimelineItem>.stopPlan(turnId: String?): List<AgentwireTimelineItem> =
     map { item ->
@@ -644,11 +808,12 @@ private fun List<AgentwireTimelineItem>.appendDelta(envelope: AgentwireEnvelope)
     // own item, not to whichever assistant card happens to be last. Matching on the turn alone
     // concatenates a later block onto an earlier one. Only a backend that sends no `iid` at all
     // falls back to the turn, because then the turn is the finest identity on offer.
-    val existing = if (envelope.iid != null) {
-        indexOfLast { it.backendItemId == envelope.iid && it.kind.startsWith("assistant.") }
-    } else {
-        indexOfLast { it.tid == envelope.tid && it.kind.startsWith("assistant.") }
-    }
+    val existing =
+        if (envelope.iid != null) {
+            indexOfLast { it.backendItemId == envelope.iid && it.kind.startsWith("assistant.") }
+        } else {
+            indexOfLast { it.tid == envelope.tid && it.kind.startsWith("assistant.") }
+        }
     if (existing < 0) return upsert(envelope.timelineItem(running = true))
     return toMutableList().also { items ->
         val prior = items[existing]
@@ -657,11 +822,20 @@ private fun List<AgentwireTimelineItem>.appendDelta(envelope: AgentwireEnvelope)
 }
 
 internal fun JsonObject.string(key: String): String? = (get(key) as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+
 internal fun JsonObject.bool(key: String): Boolean? = (get(key) as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull
+
 internal fun JsonObject.int(key: String): Int? = (get(key) as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull
+
 internal fun JsonObject.obj(key: String): JsonObject? = get(key) as? JsonObject
+
 internal fun JsonObject.array(key: String): JsonArray? = get(key) as? JsonArray
+
 internal fun JsonObject.stringList(key: String): List<String> = array(key).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
-internal fun JsonObject.objectStrings(key: String): Map<String, String> = obj(key).orEmpty().mapNotNull { (name, value) ->
-    (value as? JsonPrimitive)?.contentOrNull?.let { name to it }
-}.toMap()
+
+internal fun JsonObject.objectStrings(key: String): Map<String, String> =
+    obj(key)
+        .orEmpty()
+        .mapNotNull { (name, value) ->
+            (value as? JsonPrimitive)?.contentOrNull?.let { name to it }
+        }.toMap()

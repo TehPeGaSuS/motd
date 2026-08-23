@@ -26,7 +26,6 @@ import org.robolectric.Shadows.shadowOf
 /** The failure notice raised for a rejected notification reply, and its retry/retire lifecycle. */
 @RunWith(RobolectricTestRunner::class)
 class ReplyFailureNotificationTest {
-
     private lateinit var db: MotdDatabase
     private lateinit var repo: DataStoreSettingsRepository
     private lateinit var notifications: MotdNotifications
@@ -38,27 +37,39 @@ class ReplyFailureNotificationTest {
         get() = shadowOf(context.getSystemService(NotificationManager::class.java))
 
     @Before
-    fun setUp() = runTest {
-        db = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
-            .allowMainThreadQueries()
-            .build()
-        val networkId = db.networkDao().insert(
-            NetworkEntity(
-                name = "libera", role = NetworkRole.DIRECT, host = "irc.libera.chat",
-                port = 6697, nick = "me", username = "me", realname = "Me",
-            ),
-        )
-        bufferId = db.bufferDao().insert(
-            BufferEntity(
-                networkId = networkId, name = "#motd", displayName = "#motd",
-                type = BufferType.CHANNEL,
-            ),
-        )
-        shadowOf(context as android.app.Application)
-            .grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
-        repo = DataStoreSettingsRepository(context)
-        notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
-    }
+    fun setUp() =
+        runTest {
+            db =
+                Room
+                    .inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
+                    .allowMainThreadQueries()
+                    .build()
+            val networkId =
+                db.networkDao().insert(
+                    NetworkEntity(
+                        name = "libera",
+                        role = NetworkRole.DIRECT,
+                        host = "irc.libera.chat",
+                        port = 6697,
+                        nick = "me",
+                        username = "me",
+                        realname = "Me",
+                    ),
+                )
+            bufferId =
+                db.bufferDao().insert(
+                    BufferEntity(
+                        networkId = networkId,
+                        name = "#motd",
+                        displayName = "#motd",
+                        type = BufferType.CHANNEL,
+                    ),
+                )
+            shadowOf(context as android.app.Application)
+                .grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+            repo = DataStoreSettingsRepository(context)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+        }
 
     @After
     fun tearDown() {
@@ -67,30 +78,39 @@ class ReplyFailureNotificationTest {
     }
 
     @Test
-    fun rejectedReplyIsSurfacedWithItsTextAndReason() = runTest {
-        notifications.onReplyFailed(bufferId, "lost text", SendRejectionReason.NOT_IN_CHANNEL)
+    fun rejectedReplyIsSurfacedWithItsTextAndReason() =
+        runTest {
+            notifications.onReplyFailed(bufferId, "lost text", SendRejectionReason.NOT_IN_CHANNEL)
 
-        val posted = shadowManager.activeNotifications.single()
-        assertEquals(MotdNotifications.sendFailureNotificationId(bufferId), posted.id)
-        assertEquals(MotdNotifications.CHANNEL_SEND_FAILURES, posted.notification.channelId)
-        val title = posted.notification.extras.getCharSequence(NotificationCompat.EXTRA_TITLE)?.toString()
-        assertEquals("Not sent to #motd", title)
-        val body = posted.notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT)?.toString().orEmpty()
-        assertTrue(body, body.contains("lost text"))
-        assertTrue(body, body.contains(sendRejectionText(SendRejectionReason.NOT_IN_CHANNEL)))
-        // A retry action is the only way back; the send never produced a timeline row.
-        assertEquals(listOf("Retry"), posted.notification.actions.map { it.title.toString() })
-    }
+            val posted = shadowManager.activeNotifications.single()
+            assertEquals(MotdNotifications.sendFailureNotificationId(bufferId), posted.id)
+            assertEquals(MotdNotifications.CHANNEL_SEND_FAILURES, posted.notification.channelId)
+            val title =
+                posted.notification.extras
+                    .getCharSequence(NotificationCompat.EXTRA_TITLE)
+                    ?.toString()
+            assertEquals("Not sent to #motd", title)
+            val body =
+                posted.notification.extras
+                    .getCharSequence(NotificationCompat.EXTRA_TEXT)
+                    ?.toString()
+                    .orEmpty()
+            assertTrue(body, body.contains("lost text"))
+            assertTrue(body, body.contains(sendRejectionText(SendRejectionReason.NOT_IN_CHANNEL)))
+            // A retry action is the only way back; the send never produced a timeline row.
+            assertEquals(listOf("Retry"), posted.notification.actions.map { it.title.toString() })
+        }
 
     @Test
-    fun failureNoticeIsRetiredWhenTheRetryLands() = runTest {
-        notifications.onReplyFailed(bufferId, "lost text", SendRejectionReason.PERSISTENCE_FAILED)
-        assertEquals(1, shadowManager.activeNotifications.size)
+    fun failureNoticeIsRetiredWhenTheRetryLands() =
+        runTest {
+            notifications.onReplyFailed(bufferId, "lost text", SendRejectionReason.PERSISTENCE_FAILED)
+            assertEquals(1, shadowManager.activeNotifications.size)
 
-        notifications.onReplyFailureResolved(bufferId)
+            notifications.onReplyFailureResolved(bufferId)
 
-        assertEquals(0, shadowManager.activeNotifications.size)
-    }
+            assertEquals(0, shadowManager.activeNotifications.size)
+        }
 
     @Test
     fun failureNoticeIdCannotAliasTheStatusOrOtherNotificationRanges() {
@@ -103,13 +123,21 @@ class ReplyFailureNotificationTest {
     }
 
     @Test
-    fun aRejectionForAnUnknownBufferStillSurfacesTheText() = runTest {
-        notifications.onReplyFailed(4_242, "orphan text", SendRejectionReason.BUFFER_NOT_FOUND)
+    fun aRejectionForAnUnknownBufferStillSurfacesTheText() =
+        runTest {
+            notifications.onReplyFailed(4_242, "orphan text", SendRejectionReason.BUFFER_NOT_FOUND)
 
-        val posted = shadowManager.activeNotifications.single()
-        val title = posted.notification.extras.getCharSequence(NotificationCompat.EXTRA_TITLE)?.toString()
-        assertEquals("Message not sent", title)
-        val body = posted.notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT)?.toString().orEmpty()
-        assertTrue(body, body.contains("orphan text"))
-    }
+            val posted = shadowManager.activeNotifications.single()
+            val title =
+                posted.notification.extras
+                    .getCharSequence(NotificationCompat.EXTRA_TITLE)
+                    ?.toString()
+            assertEquals("Message not sent", title)
+            val body =
+                posted.notification.extras
+                    .getCharSequence(NotificationCompat.EXTRA_TEXT)
+                    ?.toString()
+                    .orEmpty()
+            assertTrue(body, body.contains("orphan text"))
+        }
 }

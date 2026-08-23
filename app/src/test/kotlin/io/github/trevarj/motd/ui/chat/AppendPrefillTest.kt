@@ -5,7 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class AppendPrefillTest {
-
     @Test fun empty_current_no_separator() {
         val out = appendPrefill(TextFieldValue(""), "alice: ")
         assertEquals("alice: ", out.text)

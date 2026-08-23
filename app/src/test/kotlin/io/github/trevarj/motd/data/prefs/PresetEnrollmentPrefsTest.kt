@@ -12,30 +12,32 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class PresetEnrollmentPrefsTest {
     @Test
-    fun claim_is_atomic_and_survives_a_new_repository_instance() = runTest {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val networkId = System.nanoTime()
-        val first: PresetEnrollmentPrefs = PresetEnrollmentPrefsImpl(context)
+    fun claim_is_atomic_and_survives_a_new_repository_instance() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val networkId = System.nanoTime()
+            val first: PresetEnrollmentPrefs = PresetEnrollmentPrefsImpl(context)
 
-        assertFalse(first.claimLiberaMotdJoin(networkId))
-        first.markLiberaEligible(networkId)
-        assertTrue(first.claimLiberaMotdJoin(networkId))
+            assertFalse(first.claimLiberaMotdJoin(networkId))
+            first.markLiberaEligible(networkId)
+            assertTrue(first.claimLiberaMotdJoin(networkId))
 
-        val afterProcessDeath: PresetEnrollmentPrefs = PresetEnrollmentPrefsImpl(context)
-        assertFalse(afterProcessDeath.claimLiberaMotdJoin(networkId))
-        afterProcessDeath.markLiberaEligible(networkId)
-        assertFalse(afterProcessDeath.claimLiberaMotdJoin(networkId))
-    }
+            val afterProcessDeath: PresetEnrollmentPrefs = PresetEnrollmentPrefsImpl(context)
+            assertFalse(afterProcessDeath.claimLiberaMotdJoin(networkId))
+            afterProcessDeath.markLiberaEligible(networkId)
+            assertFalse(afterProcessDeath.claimLiberaMotdJoin(networkId))
+        }
 
     @Test
-    fun revoking_an_unclaimed_row_prevents_the_join() = runTest {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val networkId = System.nanoTime()
-        val prefs: PresetEnrollmentPrefs = PresetEnrollmentPrefsImpl(context)
+    fun revoking_an_unclaimed_row_prevents_the_join() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val networkId = System.nanoTime()
+            val prefs: PresetEnrollmentPrefs = PresetEnrollmentPrefsImpl(context)
 
-        prefs.markLiberaEligible(networkId)
-        prefs.revokeLiberaEligibility(networkId)
+            prefs.markLiberaEligible(networkId)
+            prefs.revokeLiberaEligibility(networkId)
 
-        assertFalse(prefs.claimLiberaMotdJoin(networkId))
-    }
+            assertFalse(prefs.claimLiberaMotdJoin(networkId))
+        }
 }

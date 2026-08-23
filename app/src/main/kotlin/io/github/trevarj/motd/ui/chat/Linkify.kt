@@ -1,9 +1,9 @@
 package io.github.trevarj.motd.ui.chat
 
-import java.util.LinkedHashMap
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.isImmediateAudioUrl
 import io.github.trevarj.motd.audio.parseAudioAttachments
+import java.util.LinkedHashMap
 
 /** URL detection shared by the composer/bubble. Deliberately conservative (http/https only). */
 private val URL_REGEX = Regex("""https?://[^\s<>]+""")
@@ -29,16 +29,19 @@ data class MessageUrls(
  */
 internal object MessageUrlCache {
     private const val MAX_ENTRIES = 512
-    private val entries = object : LinkedHashMap<String, MessageUrls>(MAX_ENTRIES, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MessageUrls>?): Boolean =
-            size > MAX_ENTRIES
-    }
+    private val entries =
+        object : LinkedHashMap<String, MessageUrls>(MAX_ENTRIES, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MessageUrls>?): Boolean = size > MAX_ENTRIES
+        }
 
     @Synchronized
     fun get(text: String): MessageUrls? = entries[text]
 
     @Synchronized
-    fun put(text: String, urls: MessageUrls) {
+    fun put(
+        text: String,
+        urls: MessageUrls,
+    ) {
         entries[text] = urls
     }
 
@@ -50,7 +53,8 @@ internal object MessageUrlCache {
 
 /** All http(s) URLs in [text], in order of appearance. */
 fun extractUrls(text: String): List<String> =
-    parseInlineCode(text).asSequence()
+    parseInlineCode(text)
+        .asSequence()
         .filterIsInstance<InlineTextSegment.Plain>()
         .flatMap { segment -> URL_REGEX.findAll(segment.text).map { trimUrl(it.value) } }
         .toList()
@@ -64,13 +68,14 @@ internal fun trimUrl(raw: String): String {
     var url = raw
     while (url.isNotEmpty()) {
         val last = url.last()
-        val strip = when (last) {
-            '.', ',', '!', '?' -> true
-            ')' -> url.count { it == '(' } < url.count { it == ')' }
-            ']' -> url.count { it == '[' } < url.count { it == ']' }
-            '}' -> url.count { it == '{' } < url.count { it == '}' }
-            else -> false
-        }
+        val strip =
+            when (last) {
+                '.', ',', '!', '?' -> true
+                ')' -> url.count { it == '(' } < url.count { it == ')' }
+                ']' -> url.count { it == '[' } < url.count { it == ']' }
+                '}' -> url.count { it == '{' } < url.count { it == '}' }
+                else -> false
+            }
         if (!strip) break
         url = url.dropLast(1)
     }
@@ -78,15 +83,17 @@ internal fun trimUrl(raw: String): String {
 }
 
 /** True when [url]'s path ends in a known image extension. */
-fun isImageUrl(url: String): Boolean {
-    return urlExtension(url) in IMAGE_EXT
-}
+fun isImageUrl(url: String): Boolean = urlExtension(url) in IMAGE_EXT
 
 /** True when [url]'s path ends in a directly playable video extension. */
 fun isVideoUrl(url: String): Boolean = urlExtension(url) in VIDEO_EXT
 
 private fun urlExtension(url: String): String =
-    url.substringBefore('?').substringBefore('#').substringAfterLast('.', "").lowercase()
+    url
+        .substringBefore('?')
+        .substringBefore('#')
+        .substringAfterLast('.', "")
+        .lowercase()
 
 /** First inline image or direct video URL in [text], or null. */
 fun firstImageUrl(text: String): String? = messageUrls(text).imageUrl

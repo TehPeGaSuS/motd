@@ -30,8 +30,11 @@ object MotdLottieMotion {
      * a row composed fresh already at [target] has not transitioned into it and must render the
      * settled end frame instead of replaying the morph under the user.
      */
-    internal fun <T> playOnceOnTransition(previous: T?, current: T, target: T): Boolean =
-        previous != null && previous != target && current == target
+    internal fun <T> playOnceOnTransition(
+        previous: T?,
+        current: T,
+        target: T,
+    ): Boolean = previous != null && previous != target && current == target
 }
 
 /**
@@ -51,8 +54,10 @@ internal val LocalLottieMotionEnabled = staticCompositionLocalOf { true }
  * positionally, and handing it a trailing lambda instead silently widens `T` to `Any` -- the lambda
  * object itself becomes the stored color and Lottie's cast to Integer crashes on first draw.
  */
-internal fun lottieStrokeColor(argb: Int, keyPath: KeyPath): LottieDynamicProperty<Int> =
-    LottieDynamicProperty(LottieProperty.STROKE_COLOR, keyPath, argb)
+internal fun lottieStrokeColor(
+    argb: Int,
+    keyPath: KeyPath,
+): LottieDynamicProperty<Int> = LottieDynamicProperty(LottieProperty.STROKE_COLOR, keyPath, argb)
 
 /**
  * A fill recolor pinned to an ARGB [Int], the sibling of [lottieStrokeColor] for filled shapes.
@@ -61,8 +66,10 @@ internal fun lottieStrokeColor(argb: Int, keyPath: KeyPath): LottieDynamicProper
  * stroke contents, so a filled asset recolored through the stroke helper silently keeps the
  * placeholder color baked into its JSON. The same positional-value rule applies: never a lambda.
  */
-internal fun lottieFillColor(argb: Int, keyPath: KeyPath): LottieDynamicProperty<Int> =
-    LottieDynamicProperty(LottieProperty.COLOR, keyPath, argb)
+internal fun lottieFillColor(
+    argb: Int,
+    keyPath: KeyPath,
+): LottieDynamicProperty<Int> = LottieDynamicProperty(LottieProperty.COLOR, keyPath, argb)
 
 /**
  * Resolves the platform animator duration scale for the whole tree. Provided by [MotdTheme].
@@ -76,12 +83,13 @@ internal fun resolveLottieMotionEnabled(): Boolean {
     val scope = rememberCoroutineScope()
     val element = scope.coroutineContext[MotionDurationScale]
     val resolver = LocalContext.current.contentResolver
-    val fallbackScale = remember(resolver, element) {
-        if (element != null) {
-            null
-        } else {
-            Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+    val fallbackScale =
+        remember(resolver, element) {
+            if (element != null) {
+                null
+            } else {
+                Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+            }
         }
-    }
     return MotdLottieMotion.motionEnabled(element?.scaleFactor ?: fallbackScale ?: 1f)
 }

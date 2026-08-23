@@ -66,20 +66,24 @@ internal class SendFlightAnchors {
      */
     var hostOrigin by mutableStateOf(Offset.Zero)
     var composerField by mutableStateOf<Rect?>(null)
+
     /**
      * The composer field's inner text origin (window coords): where the first glyph of the draft
      * is drawn. The morph presentation aligns its own text here on the tap frame so the typed
      * line visually never moves when the field clears.
      */
     var composerTextOrigin by mutableStateOf<Offset?>(null)
+
     /** The landing row, keyed by event id so a report can be traced back to the row that made it. */
     var landingRow by mutableStateOf<Pair<Long, Rect>?>(null)
+
     /**
      * The ghost's measured height, written from the overlay's layout pass. Sizes the runway the
      * timeline opens under the flight; 0 until the overlay has laid out (the same frame's draw
      * already sees the real value, so at worst the runway's first frame targets only the gap).
      */
     var ghostHeight by mutableStateOf(0f)
+
     /**
      * The composer field's height on the tap frame, pinned alongside the motion reset. A
      * multi-line draft collapses the field to one line when it clears, which grows the timeline
@@ -94,7 +98,10 @@ internal class SendFlightAnchors {
         return max(0f, launchFieldHeight - current)
     }
 
-    fun reportLandingRow(eventId: Long, bounds: Rect) {
+    fun reportLandingRow(
+        eventId: Long,
+        bounds: Rect,
+    ) {
         landingRow = eventId to bounds
     }
 
@@ -220,6 +227,7 @@ internal fun sendFlightGhostTop(
  * subtree including the bubble's own click semantics). Its text duplicates a real row's, and a
  * second match would make every `onNodeWithText` assertion in chat ambiguous.
  */
+
 /**
  * How much of the morph stand-in has been replaced by the real bubble replica, from the flight
  * fraction. Smoothstepped over the flight's BACK half: the stand-in is where the transformation
@@ -264,38 +272,40 @@ internal fun BoxScope.SendFlightOverlay(
     val morph = !spacing.compact && !spacing.twoLine && flight.replyText == null
 
     Box(
-        modifier = Modifier
-            .align(Alignment.TopStart)
-            .fillMaxWidth()
-            // Layout-phase write: sizes the runway the timeline opens under this flight.
-            .onSizeChanged { anchors.ghostHeight = it.height.toFloat() }
-            .graphicsLayer {
-                // Re-read the landing every frame rather than snapshotting it: the row's rect
-                // moves while the keyboard and the list settle, and a stale target lands crooked.
-                val landing = anchors.landingRow?.second?.let(anchors::local)
-                translationY = sendFlightGhostTop(
-                    startTop = start.top,
-                    ghostHeight = size.height,
-                    listShift = listShift(),
-                    landingTop = landing?.top,
-                    landingBottom = landing?.bottom,
-                    flightFraction = motion.progress.value,
-                    liftFraction = motion.lift.value,
-                    footDrop = anchors.composerShrink(),
-                )
-            }
-            .clearAndSetSemantics {},
+        modifier =
+            Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                // Layout-phase write: sizes the runway the timeline opens under this flight.
+                .onSizeChanged { anchors.ghostHeight = it.height.toFloat() }
+                .graphicsLayer {
+                    // Re-read the landing every frame rather than snapshotting it: the row's rect
+                    // moves while the keyboard and the list settle, and a stale target lands crooked.
+                    val landing = anchors.landingRow?.second?.let(anchors::local)
+                    translationY =
+                        sendFlightGhostTop(
+                            startTop = start.top,
+                            ghostHeight = size.height,
+                            listShift = listShift(),
+                            landingTop = landing?.top,
+                            landingBottom = landing?.bottom,
+                            flightFraction = motion.progress.value,
+                            liftFraction = motion.lift.value,
+                            footDrop = anchors.composerShrink(),
+                        )
+                }.clearAndSetSemantics {},
     ) {
         // The real row's replica. Under the morph it dissolves in mid-flight over the stand-in;
         // under the plain flight it materializes over the composer on the lift's first stretch.
         // It is always the layer that lands, so the handoff to the real row stays a swap
         // between identical pixels in both presentations.
         Box(
-            modifier = if (morph) {
-                Modifier.graphicsLayer { alpha = sendFlightMorphSwap(motion.progress.value) }
-            } else {
-                Modifier.graphicsLayer { alpha = sendFlightEntryFade(motion.lift.value) }
-            },
+            modifier =
+                if (morph) {
+                    Modifier.graphicsLayer { alpha = sendFlightMorphSwap(motion.progress.value) }
+                } else {
+                    Modifier.graphicsLayer { alpha = sendFlightEntryFade(motion.lift.value) }
+                },
         ) {
             MessageBubble(
                 sender = selfNick,
@@ -355,58 +365,60 @@ private fun MorphingGhost(
     LaunchedEffect(flight.token) {
         morph.animateTo(1f, MotdMotion.sendMorphGrow)
     }
-    val roles = messageBubbleRoleColors(
-        MaterialTheme.colorScheme,
-        isSelf = true,
-        mentionHighlighted = false,
-        kind = MessageKind.PRIVMSG,
-    )
+    val roles =
+        messageBubbleRoleColors(
+            MaterialTheme.colorScheme,
+            isSelf = true,
+            mentionHighlighted = false,
+            kind = MessageKind.PRIVMSG,
+        )
     val fieldInk = MaterialTheme.colorScheme.onSurface
     val topCorner = if (showSender) spacing.bubbleCorner else spacing.bubbleGroupedCorner
-    val shape = RoundedCornerShape(
-        topStart = spacing.bubbleCorner,
-        topEnd = topCorner,
-        bottomEnd = spacing.bubbleGroupedCorner,
-        bottomStart = spacing.bubbleCorner,
-    )
+    val shape =
+        RoundedCornerShape(
+            topStart = spacing.bubbleCorner,
+            topEnd = topCorner,
+            bottomEnd = spacing.bubbleGroupedCorner,
+            bottomStart = spacing.bubbleCorner,
+        )
     // Field-text origin minus the stand-in text's own untranslated origin, pinned on the first
     // laid-out frame (the slide layer is still at identity then, so the measurement is clean).
     var textDelta by remember(flight.token) { mutableStateOf<Offset?>(null) }
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = spacing.messageOuterHPad, vertical = spacing.bubbleRowVPad)
-            .graphicsLayer { alpha = 1f - sendFlightMorphSwap(motion.progress.value) },
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = spacing.messageOuterHPad, vertical = spacing.bubbleRowVPad)
+                .graphicsLayer { alpha = 1f - sendFlightMorphSwap(motion.progress.value) },
         horizontalArrangement = Arrangement.End,
     ) {
         Box(
-            modifier = Modifier
-                .chatBubbleWidth()
-                .graphicsLayer {
-                    // Slide from the field's text origin to the bubble's natural alignment.
-                    val delta = textDelta
-                    if (delta != null) {
-                        val remaining = 1f - min(1f, morph.value)
-                        translationX = delta.x * remaining
-                        translationY = delta.y * remaining
-                    }
-                }
-                .drawBehind {
-                    // The bubble surface inflating around the line; drawn, not composed, so a
-                    // frame costs one layer invalidation. Alpha leads the scale (fully opaque by
-                    // ~60% of the morph) so the eye reads a surface GROWING to its final size,
-                    // not a finished bubble fading in.
-                    val m = min(1f, morph.value)
-                    scale(0.85f + 0.15f * m) {
-                        drawOutline(
-                            outline = shape.createOutline(size, layoutDirection, this@drawBehind),
-                            color = roles.container,
-                            alpha = min(1f, m * 1.6f),
-                        )
-                    }
-                }
-                .padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
+            modifier =
+                Modifier
+                    .chatBubbleWidth()
+                    .graphicsLayer {
+                        // Slide from the field's text origin to the bubble's natural alignment.
+                        val delta = textDelta
+                        if (delta != null) {
+                            val remaining = 1f - min(1f, morph.value)
+                            translationX = delta.x * remaining
+                            translationY = delta.y * remaining
+                        }
+                    }.drawBehind {
+                        // The bubble surface inflating around the line; drawn, not composed, so a
+                        // frame costs one layer invalidation. Alpha leads the scale (fully opaque by
+                        // ~60% of the morph) so the eye reads a surface GROWING to its final size,
+                        // not a finished bubble fading in.
+                        val m = min(1f, morph.value)
+                        scale(0.85f + 0.15f * m) {
+                            drawOutline(
+                                outline = shape.createOutline(size, layoutDirection, this@drawBehind),
+                                color = roles.container,
+                                alpha = min(1f, m * 1.6f),
+                            )
+                        }
+                    }.padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
         ) {
             // Two identical layouts crossfading ink: text cannot recolor in the draw phase, and
             // the pair keeps the glyphs themselves perfectly still while the color transfers.
@@ -414,15 +426,15 @@ private fun MorphingGhost(
                 text = flight.text,
                 style = MaterialTheme.typography.bodyLarge,
                 color = fieldInk,
-                modifier = Modifier
-                    .onGloballyPositioned {
-                        if (textDelta == null) {
-                            anchors.composerTextOrigin?.let { origin ->
-                                textDelta = origin - it.positionInWindow()
+                modifier =
+                    Modifier
+                        .onGloballyPositioned {
+                            if (textDelta == null) {
+                                anchors.composerTextOrigin?.let { origin ->
+                                    textDelta = origin - it.positionInWindow()
+                                }
                             }
-                        }
-                    }
-                    .graphicsLayer { alpha = 1f - min(1f, morph.value) },
+                        }.graphicsLayer { alpha = 1f - min(1f, morph.value) },
             )
             Text(
                 text = flight.text,

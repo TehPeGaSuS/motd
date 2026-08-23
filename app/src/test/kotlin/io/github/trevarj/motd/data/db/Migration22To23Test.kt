@@ -26,14 +26,17 @@ class Migration22To23Test {
     fun `migration lifts legacy recoverable poison without touching sibling tables`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(22) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL("CREATE TABLE buffers (id INTEGER PRIMARY KEY NOT NULL, name TEXT NOT NULL)")
-                        db.execSQL(
-                            """CREATE TABLE history_gaps (
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(22) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL("CREATE TABLE buffers (id INTEGER PRIMARY KEY NOT NULL, name TEXT NOT NULL)")
+                                db.execSQL(
+                                    """CREATE TABLE history_gaps (
                                 id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                                 roomId INTEGER NOT NULL,
                                 olderMsgid TEXT,
@@ -46,16 +49,17 @@ class Migration22To23Test {
                                 newerEventId INTEGER,
                                 newerTimelineOrder INTEGER
                             )""",
-                        )
-                    }
+                                )
+                            }
 
-                    override fun onUpgrade(
-                        db: SupportSQLiteDatabase,
-                        oldVersion: Int,
-                        newVersion: Int,
-                    ) = Unit
-                }).build(),
-        )
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL("INSERT INTO buffers(id, name) VALUES (7, '#kept')")
         // Legacy poison: a timestamp-only saturated page wrongly stamped unrecoverable.
@@ -83,15 +87,16 @@ class Migration22To23Test {
             assertEquals(1, cursor.getInt(1))
         }
         // Non-recoverable columns are untouched: only the flag was repaired.
-        db.query(
-            "SELECT olderMsgid, olderServerTime, newerMsgid, newerServerTime FROM history_gaps WHERE id = 1",
-        ).use { cursor ->
-            assertTrue(cursor.moveToFirst())
-            assertTrue(cursor.isNull(0))
-            assertEquals(1000, cursor.getLong(1))
-            assertEquals("newer-a", cursor.getString(2))
-            assertEquals(2000, cursor.getLong(3))
-        }
+        db
+            .query(
+                "SELECT olderMsgid, olderServerTime, newerMsgid, newerServerTime FROM history_gaps WHERE id = 1",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.isNull(0))
+                assertEquals(1000, cursor.getLong(1))
+                assertEquals("newer-a", cursor.getString(2))
+                assertEquals(2000, cursor.getLong(3))
+            }
         // Sibling tables are left exactly as seeded.
         db.query("SELECT name FROM buffers WHERE id = 7").use { cursor ->
             assertTrue(cursor.moveToFirst())

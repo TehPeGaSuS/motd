@@ -12,14 +12,13 @@ import io.github.trevarj.motd.appearance.LauncherIconController
 import io.github.trevarj.motd.avatar.LocalAvatarStore
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
-import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.di.AppVisibilityImpl
+import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.push.PushInstanceCoordinator
 import io.github.trevarj.motd.push.PushLifecycleCoordinator
 import io.github.trevarj.motd.service.AutoAwayCoordinator
 import io.github.trevarj.motd.ui.ComposeFoundationWorkarounds
-import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -27,9 +26,12 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @HiltAndroidApp
-class MotdApplication : Application(), ImageLoaderFactory {
+class MotdApplication :
+    Application(),
+    ImageLoaderFactory {
     // THE UnifiedPush registration trigger: reconciles registered instances against the
     // delivery mode and connectable-network set for the process lifetime.
     @Inject lateinit var pushInstanceCoordinator: PushInstanceCoordinator
@@ -76,16 +78,17 @@ class MotdApplication : Application(), ImageLoaderFactory {
             .launchIn(applicationScope)
     }
 
-    override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
-        .components {
-            // Coil's GIF and video modules provide their decoders but do not register them by
-            // themselves. Keep the platform decoder where available for animated formats.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                add(ImageDecoderDecoder.Factory())
-            } else {
-                add(GifDecoder.Factory())
-            }
-            add(VideoFrameDecoder.Factory())
-        }
-        .build()
+    override fun newImageLoader(): ImageLoader =
+        ImageLoader
+            .Builder(this)
+            .components {
+                // Coil's GIF and video modules provide their decoders but do not register them by
+                // themselves. Keep the platform decoder where available for animated formats.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    add(ImageDecoderDecoder.Factory())
+                } else {
+                    add(GifDecoder.Factory())
+                }
+                add(VideoFrameDecoder.Factory())
+            }.build()
 }

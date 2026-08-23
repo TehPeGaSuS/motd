@@ -11,15 +11,17 @@ import org.junit.Test
 class ConnectionIdentityFallbackTest {
     @Test
     fun `persisted strict rules are used while no client exists`() {
-        val rules = identityRulesFallback(
-            live = null,
-            liveReady = false,
-            persisted = NetworkIdentityEntity(
-                networkId = 1,
-                caseMapping = "rfc1459-strict",
-                chanTypes = "+",
-            ),
-        )
+        val rules =
+            identityRulesFallback(
+                live = null,
+                liveReady = false,
+                persisted =
+                    NetworkIdentityEntity(
+                        networkId = 1,
+                        caseMapping = "rfc1459-strict",
+                        chanTypes = "+",
+                    ),
+            )
 
         assertEquals("nick~", rules.normalize("NICK~"))
         assertFalse(rules.normalize("nick~") == rules.normalize("nick^"))

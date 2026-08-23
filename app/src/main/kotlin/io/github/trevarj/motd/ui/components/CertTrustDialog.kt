@@ -40,11 +40,12 @@ fun CertTrustDialog(
         onDismissRequest = onCancel,
         title = {
             Text(
-                text = if (prompt.changed) {
-                    stringResource(R.string.cert_trust_changed_title)
-                } else {
-                    stringResource(R.string.cert_trust_title)
-                },
+                text =
+                    if (prompt.changed) {
+                        stringResource(R.string.cert_trust_changed_title)
+                    } else {
+                        stringResource(R.string.cert_trust_title)
+                    },
                 color = if (prompt.changed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
             )
         },
@@ -115,28 +116,27 @@ private fun CertField(
 }
 
 /** Group the lowercase-hex fingerprint into colon-separated byte pairs (AB:CD:...). */
-private fun formatFingerprint(sha256: String): String =
-    sha256.uppercase().chunked(2).joinToString(":")
+private fun formatFingerprint(sha256: String): String = sha256.uppercase().chunked(2).joinToString(":")
 
-private fun formatDate(epochMs: Long): String =
-    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(epochMs))
+private fun formatDate(epochMs: Long): String = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(epochMs))
 
 @Preview
 @Composable
 private fun CertTrustDialogPreview() {
     MotdTheme {
         CertTrustDialog(
-            prompt = CertPrompt(
-                networkId = 1,
-                host = "192.168.1.10",
-                port = 6697,
-                sha256 = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
-                subject = "CN=bouncer.local",
-                issuer = "CN=bouncer.local",
-                notBefore = 0L,
-                notAfter = 4102444800000L,
-                changed = false,
-            ),
+            prompt =
+                CertPrompt(
+                    networkId = 1,
+                    host = "192.168.1.10",
+                    port = 6697,
+                    sha256 = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+                    subject = "CN=bouncer.local",
+                    issuer = "CN=bouncer.local",
+                    notBefore = 0L,
+                    notAfter = 4102444800000L,
+                    changed = false,
+                ),
             onTrust = {},
             onCancel = {},
         )

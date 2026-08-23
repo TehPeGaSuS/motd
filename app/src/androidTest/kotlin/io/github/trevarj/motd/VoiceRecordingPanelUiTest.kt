@@ -27,9 +27,10 @@ class VoiceRecordingPanelUiTest {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 VoiceComposerPanel(
-                    state = VoiceMessageUiState(
-                        recording = VoiceRecordingUi(elapsedMs = 1_000, locked = locked.value),
-                    ),
+                    state =
+                        VoiceMessageUiState(
+                            recording = VoiceRecordingUi(elapsedMs = 1_000, locked = locked.value),
+                        ),
                     playbackState = AudioPlaybackState(),
                     onDelete = {},
                     onCancelRecording = {},
@@ -71,7 +72,8 @@ class VoiceRecordingPanelUiTest {
             }
         }
 
-        compose.onNodeWithTag("voice_recording_panel")
+        compose
+            .onNodeWithTag("voice_recording_panel")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
             .assert(
                 SemanticsMatcher.expectValue(
@@ -87,7 +89,9 @@ class VoiceRecordingPanelUiTest {
         }
     }
 
-    private fun panelHeight() = compose.onNodeWithTag("voice_recording_panel")
-        .getUnclippedBoundsInRoot()
-        .let { it.bottom - it.top }
+    private fun panelHeight() =
+        compose
+            .onNodeWithTag("voice_recording_panel")
+            .getUnclippedBoundsInRoot()
+            .let { it.bottom - it.top }
 }

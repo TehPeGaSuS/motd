@@ -18,10 +18,10 @@ import org.robolectric.RobolectricTestRunner
  */
 @RunWith(RobolectricTestRunner::class)
 class WarmNotificationEntryTest {
-
-    private fun openBufferIntent(bufferId: Long) = Intent(MotdNotifications.ACTION_OPEN_BUFFER)
-        .putExtra(MotdNotifications.EXTRA_BUFFER_ID, bufferId)
-        .putExtra(MotdNotifications.EXTRA_JUMP_MSGID, "m1")
+    private fun openBufferIntent(bufferId: Long) =
+        Intent(MotdNotifications.ACTION_OPEN_BUFFER)
+            .putExtra(MotdNotifications.EXTRA_BUFFER_ID, bufferId)
+            .putExtra(MotdNotifications.EXTRA_JUMP_MSGID, "m1")
 
     @Test
     fun `a tapped notification routes the jump and checkpoints history for the tapped buffer`() {
@@ -59,13 +59,14 @@ class WarmNotificationEntryTest {
     fun `a share, a relaunch, and a targetless notification are not entries`() {
         var target: NotificationTarget? = null
         val checkpoints = mutableListOf<Long>()
-        val notEntries = listOf(
-            Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "hi"),
-            Intent(Intent.ACTION_MAIN),
-            // A notification intent with nothing to open: there is no chat to bring up to date.
-            Intent(MotdNotifications.ACTION_OPEN_BUFFER),
-            null,
-        )
+        val notEntries =
+            listOf(
+                Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "hi"),
+                Intent(Intent.ACTION_MAIN),
+                // A notification intent with nothing to open: there is no chat to bring up to date.
+                Intent(MotdNotifications.ACTION_OPEN_BUFFER),
+                null,
+            )
 
         notEntries.forEach { intent ->
             warmNotificationEntry(

@@ -14,12 +14,12 @@ import kotlinx.coroutines.CancellationException
  */
 
 /** Rows a read sweep or an unread jump may land on, in chat-list order. */
-internal fun unreadChatRows(rows: List<ChatListRow>): List<ChatListRow> = rows
-    .filter { !it.muted && it.type != BufferType.SERVER && it.unreadCount > 0 }
+internal fun unreadChatRows(rows: List<ChatListRow>): List<ChatListRow> =
+    rows
+        .filter { !it.muted && it.type != BufferType.SERVER && it.unreadCount > 0 }
 
 /** Pure selection seam: muted/SERVER/zero-unread rows never participate in mark-all. */
-internal fun unreadBufferIds(rows: List<ChatListRow>): List<Long> =
-    unreadChatRows(rows).map(ChatListRow::bufferId).distinct()
+internal fun unreadBufferIds(rows: List<ChatListRow>): List<Long> = unreadChatRows(rows).map(ChatListRow::bufferId).distinct()
 
 /**
  * Advance the read anchor of every buffer in [bufferIds] through the single mark-read entry point,

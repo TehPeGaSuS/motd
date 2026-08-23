@@ -96,15 +96,16 @@ internal class AdaptiveFanOut(
     }
 
     private suspend fun acquire() {
-        val ticket = synchronized(monitor) {
-            // Queue behind existing waiters even when a slot is free: overtaking them is exactly the
-            // ordering loss this class exists to prevent.
-            if (held < width && waiters.isEmpty()) {
-                held++
-                return
+        val ticket =
+            synchronized(monitor) {
+                // Queue behind existing waiters even when a slot is free: overtaking them is exactly the
+                // ordering loss this class exists to prevent.
+                if (held < width && waiters.isEmpty()) {
+                    held++
+                    return
+                }
+                CompletableDeferred<Unit>().also { waiters.addLast(it) }
             }
-            CompletableDeferred<Unit>().also { waiters.addLast(it) }
-        }
         try {
             ticket.await()
         } catch (cancelled: CancellationException) {

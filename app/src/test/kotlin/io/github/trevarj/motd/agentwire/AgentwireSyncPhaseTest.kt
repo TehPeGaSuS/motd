@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -31,8 +32,6 @@ import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.testing.NoopConnectionManager
-import java.io.OutputStream
-import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -58,7 +57,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import io.github.trevarj.motd.data.prefs.PresenceMode
+import java.io.OutputStream
+import java.util.UUID
 
 private const val NETWORK_ID = 7L
 private const val BUFFER_ID = 11L
@@ -82,41 +82,42 @@ class AgentwireSyncPhaseTest {
     fun tearDown() = Dispatchers.resetMain()
 
     @Test
-    fun `unanswered handshake ends as a named timeout and retry re-arms the budget`() = runTest(dispatcher) {
-        val transport = RecordingTransport()
-        val client = readyClient(transport)
-        val viewModel = viewModel(client)
-        advanceTimeBy(10)
-        runCurrent()
-        assertTrue(viewModel.state.value.sync is AgentwireSyncState.Syncing)
-        assertTrue(syncRequests(transport).isNotEmpty())
+    fun `unanswered handshake ends as a named timeout and retry re-arms the budget`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val viewModel = viewModel(client)
+            advanceTimeBy(10)
+            runCurrent()
+            assertTrue(viewModel.state.value.sync is AgentwireSyncState.Syncing)
+            assertTrue(syncRequests(transport).isNotEmpty())
 
-        advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS - 1_000)
-        runCurrent()
-        assertTrue(
-            "the spinner must still be running one second before the budget",
-            viewModel.state.value.sync is AgentwireSyncState.Syncing,
-        )
+            advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS - 1_000)
+            runCurrent()
+            assertTrue(
+                "the spinner must still be running one second before the budget",
+                viewModel.state.value.sync is AgentwireSyncState.Syncing,
+            )
 
-        advanceTimeBy(2_000)
-        runCurrent()
-        val failed = viewModel.state.value.sync as AgentwireSyncState.Failed
-        val timeout = failed.failure as AgentwireSyncFailure.Timeout
-        assertEquals(syncRequests(transport).size, timeout.attempts)
+            advanceTimeBy(2_000)
+            runCurrent()
+            val failed = viewModel.state.value.sync as AgentwireSyncState.Failed
+            val timeout = failed.failure as AgentwireSyncFailure.Timeout
+            assertEquals(syncRequests(transport).size, timeout.attempts)
 
-        // The loop is terminal: waiting longer must not produce more requests.
-        val issued = syncRequests(transport).size
-        advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
-        runCurrent()
-        assertEquals(issued, syncRequests(transport).size)
+            // The loop is terminal: waiting longer must not produce more requests.
+            val issued = syncRequests(transport).size
+            advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
+            runCurrent()
+            assertEquals(issued, syncRequests(transport).size)
 
-        viewModel.retrySync()
-        runCurrent()
-        assertTrue(viewModel.state.value.sync is AgentwireSyncState.Syncing)
-        advanceTimeBy(1_000)
-        runCurrent()
-        assertTrue("retry must re-arm and send again", syncRequests(transport).size > issued)
-    }
+            viewModel.retrySync()
+            runCurrent()
+            assertTrue(viewModel.state.value.sync is AgentwireSyncState.Syncing)
+            advanceTimeBy(1_000)
+            runCurrent()
+            assertTrue("retry must re-arm and send again", syncRequests(transport).size > issued)
+        }
 
     @Test
     fun `action failed replying to the live sync id becomes a rejection and stops retrying`() =
@@ -169,45 +170,47 @@ class AgentwireSyncPhaseTest {
         }
 
     @Test
-    fun `untrusted events during a handshake are counted and named in the timeout`() = runTest(dispatcher) {
-        val transport = RecordingTransport()
-        val client = readyClient(transport)
-        val diagnostics = RecordingDiagnostics()
-        val viewModel = viewModel(
-            FakeConnections(client),
-            FakeBufferRepository(buffer(joined = true)),
-            diagnostics,
-        )
-        advanceTimeBy(10)
-        runCurrent()
-        val syncId = syncRequests(transport).last()
+    fun `untrusted events during a handshake are counted and named in the timeout`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val diagnostics = RecordingDiagnostics()
+            val viewModel =
+                viewModel(
+                    FakeConnections(client),
+                    FakeBufferRepository(buffer(joined = true)),
+                    diagnostics,
+                )
+            advanceTimeBy(10)
+            runCurrent()
+            val syncId = syncRequests(transport).last()
 
-        repeat(2) { transport.feed(tagMessage("impostor", hello(syncId))) }
-        runCurrent()
-        assertEquals(
-            "Ignoring agent events from account impostor. The channel topic trusts only agent=agent.",
-            viewModel.state.value.error,
-        )
+            repeat(2) { transport.feed(tagMessage("impostor", hello(syncId))) }
+            runCurrent()
+            assertEquals(
+                "Ignoring agent events from account impostor. The channel topic trusts only agent=agent.",
+                viewModel.state.value.error,
+            )
 
-        advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
-        runCurrent()
-        val failed = viewModel.state.value.sync as AgentwireSyncState.Failed
-        val timeout = failed.failure as AgentwireSyncFailure.Timeout
-        assertEquals(2, timeout.counters.counts[IgnoreReason.UNTRUSTED_ACCOUNT])
+            advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
+            runCurrent()
+            val failed = viewModel.state.value.sync as AgentwireSyncState.Failed
+            val timeout = failed.failure as AgentwireSyncFailure.Timeout
+            assertEquals(2, timeout.counters.counts[IgnoreReason.UNTRUSTED_ACCOUNT])
 
-        val untrusted = diagnostics.records.single { it.event == "untrusted_events" }
-        assertEquals(AGENTWIRE_DIAGNOSTIC_COMPONENT, untrusted.component)
-        assertEquals(diagnostics.fingerprint("impostor"), untrusted.fields["account_fp"])
-        val syncFailed = diagnostics.records.last { it.event == "sync_failed" }
-        assertEquals("timeout", syncFailed.fields["end_reason"])
-        assertEquals(2, syncFailed.fields["ignored_untrusted_account"])
-        assertTrue(
-            "an account name must never reach the journal raw",
-            diagnostics.records.none { record ->
-                record.fields.values.any { it?.toString()?.contains("impostor") == true }
-            },
-        )
-    }
+            val untrusted = diagnostics.records.single { it.event == "untrusted_events" }
+            assertEquals(AGENTWIRE_DIAGNOSTIC_COMPONENT, untrusted.component)
+            assertEquals(diagnostics.fingerprint("impostor"), untrusted.fields["account_fp"])
+            val syncFailed = diagnostics.records.last { it.event == "sync_failed" }
+            assertEquals("timeout", syncFailed.fields["end_reason"])
+            assertEquals(2, syncFailed.fields["ignored_untrusted_account"])
+            assertTrue(
+                "an account name must never reach the journal raw",
+                diagnostics.records.none { record ->
+                    record.fields.values.any { it?.toString()?.contains("impostor") == true }
+                },
+            )
+        }
 
     @Test
     fun `a marked topic missing agent names the defect instead of rendering ordinary chat`() =
@@ -216,9 +219,10 @@ class AgentwireSyncPhaseTest {
             val client = readyClient(transport)
             val diagnostics = RecordingDiagnostics()
             // Exactly the shape of a topic written before `agent=` became required.
-            val buffers = FakeBufferRepository(
-                buffer(joined = true, topic = "agentwire:v1;account=controller;backend=claude | Claude"),
-            )
+            val buffers =
+                FakeBufferRepository(
+                    buffer(joined = true, topic = "agentwire:v1;account=controller;backend=claude | Claude"),
+                )
             val viewModel = viewModel(FakeConnections(client), buffers, diagnostics)
             advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
             runCurrent()
@@ -239,62 +243,65 @@ class AgentwireSyncPhaseTest {
         }
 
     @Test
-    fun `an unmarked channel stays ordinary and reports no defect`() = runTest(dispatcher) {
-        val transport = RecordingTransport()
-        val client = readyClient(transport)
-        val diagnostics = RecordingDiagnostics()
-        val buffers = FakeBufferRepository(buffer(joined = true, topic = "Welcome to the channel"))
-        val viewModel = viewModel(FakeConnections(client), buffers, diagnostics)
-        advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
-        runCurrent()
+    fun `an unmarked channel stays ordinary and reports no defect`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val diagnostics = RecordingDiagnostics()
+            val buffers = FakeBufferRepository(buffer(joined = true, topic = "Welcome to the channel"))
+            val viewModel = viewModel(FakeConnections(client), buffers, diagnostics)
+            advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
+            runCurrent()
 
-        assertEquals(AgentwireGate.ORDINARY, viewModel.state.value.gate)
-        assertEquals(null, viewModel.state.value.topicDefect)
-        assertEquals(emptyList<String>(), syncRequests(transport))
-        // An ordinary channel is not a failure and must never be reported as one.
-        val gate = diagnostics.records.last { it.event == "gate" }
-        assertEquals(null, gate.fields["topic_defect"])
-        assertEquals(null, gate.fields["lab_disabled"])
-    }
+            assertEquals(AgentwireGate.ORDINARY, viewModel.state.value.gate)
+            assertEquals(null, viewModel.state.value.topicDefect)
+            assertEquals(emptyList<String>(), syncRequests(transport))
+            // An ordinary channel is not a failure and must never be reported as one.
+            val gate = diagnostics.records.last { it.event == "gate" }
+            assertEquals(null, gate.fields["topic_defect"])
+            assertEquals(null, gate.fields["lab_disabled"])
+        }
 
     @Test
-    fun `a usable marker with the lab disabled records why nothing activated`() = runTest(dispatcher) {
-        val transport = RecordingTransport()
-        val client = readyClient(transport)
-        val diagnostics = RecordingDiagnostics()
-        val viewModel = viewModel(
-            FakeConnections(client),
-            FakeBufferRepository(buffer(joined = true)),
-            diagnostics,
-            lab = false,
-        )
-        advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
-        runCurrent()
+    fun `a usable marker with the lab disabled records why nothing activated`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val diagnostics = RecordingDiagnostics()
+            val viewModel =
+                viewModel(
+                    FakeConnections(client),
+                    FakeBufferRepository(buffer(joined = true)),
+                    diagnostics,
+                    lab = false,
+                )
+            advanceTimeBy(AGENTWIRE_SYNC_BUDGET_MS)
+            runCurrent()
 
-        // The lab being off is a choice, so the channel still renders as ordinary chat; the
-        // journal is what makes "I set everything up and nothing happened" answerable.
-        assertEquals(AgentwireGate.ORDINARY, viewModel.state.value.gate)
-        assertEquals(emptyList<String>(), syncRequests(transport))
-        val gate = diagnostics.records.last { it.event == "gate" }
-        assertEquals(true, gate.fields["lab_disabled"])
-    }
+            // The lab being off is a choice, so the channel still renders as ordinary chat; the
+            // journal is what makes "I set everything up and nothing happened" answerable.
+            assertEquals(AgentwireGate.ORDINARY, viewModel.state.value.gate)
+            assertEquals(emptyList<String>(), syncRequests(transport))
+            val gate = diagnostics.records.last { it.event == "gate" }
+            assertEquals(true, gate.fields["lab_disabled"])
+        }
 
     private fun TestScope.viewModel(
         connections: FakeConnections,
         buffers: FakeBufferRepository,
         diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
         lab: Boolean = true,
-    ): AgentwireViewModel = AgentwireViewModel(
-        savedStateHandle = SavedStateHandle(mapOf("bufferId" to BUFFER_ID)),
-        prefs = FakeAgentwirePrefs(lab),
-        buffers = buffers,
-        connections = connections,
-        diagnostics = diagnostics,
-        clock = AppClock { testScheduler.currentTime },
-    )
+    ): AgentwireViewModel =
+        AgentwireViewModel(
+            savedStateHandle = SavedStateHandle(mapOf("bufferId" to BUFFER_ID)),
+            prefs = FakeAgentwirePrefs(lab),
+            buffers = buffers,
+            connections = connections,
+            diagnostics = diagnostics,
+            clock = AppClock { testScheduler.currentTime },
+        )
 
-    private fun TestScope.viewModel(client: IrcClient): AgentwireViewModel =
-        viewModel(FakeConnections(client), FakeBufferRepository(buffer(joined = true)))
+    private fun TestScope.viewModel(client: IrcClient): AgentwireViewModel = viewModel(FakeConnections(client), FakeBufferRepository(buffer(joined = true)))
 
     private fun buffer(
         joined: Boolean,
@@ -310,11 +317,12 @@ class AgentwireSyncPhaseTest {
     )
 
     private suspend fun TestScope.readyClient(transport: RecordingTransport): IrcClient {
-        val client = IrcClient(
-            IrcClientConfig("irc.example", 6697, true, "me", "me", "Me"),
-            TransportFactory { _, _, _, _, _ -> transport },
-            CoroutineScope(SupervisorJob() + coroutineContext),
-        )
+        val client =
+            IrcClient(
+                IrcClientConfig("irc.example", 6697, true, "me", "me", "Me"),
+                TransportFactory { _, _, _, _, _ -> transport },
+                CoroutineScope(SupervisorJob() + coroutineContext),
+            )
         client.start()
         runCurrent()
         val caps = AGENTWIRE_REQUIRED_CAPS.joinToString(" ")
@@ -330,32 +338,41 @@ class AgentwireSyncPhaseTest {
     }
 
     /** Ids of the `sync.request` envelopes this device actually wrote to the wire. */
-    private fun syncRequests(transport: RecordingTransport): List<String> = transport.sent.mapNotNull { line ->
-        val tag = runCatching { IrcMessage.parse(line) }.getOrNull()?.tags?.get(AGENTWIRE_TAG) ?: return@mapNotNull null
-        val envelope = (decodeAgentwireValue(tag).getOrNull() as? AgentwireValue.Envelope)?.value
-        envelope?.takeIf { it.kind == "sync.request" }?.id
-    }
+    private fun syncRequests(transport: RecordingTransport): List<String> =
+        transport.sent.mapNotNull { line ->
+            val tag = runCatching { IrcMessage.parse(line) }.getOrNull()?.tags?.get(AGENTWIRE_TAG) ?: return@mapNotNull null
+            val envelope = (decodeAgentwireValue(tag).getOrNull() as? AgentwireValue.Envelope)?.value
+            envelope?.takeIf { it.kind == "sync.request" }?.id
+        }
 
     /** Serialized so tag values are escaped: envelope JSON contains spaces and semicolons. */
-    private fun tagMessage(account: String, envelope: AgentwireEnvelope): String = IrcMessage(
-        tags = mapOf("account" to account, AGENTWIRE_TAG to encodeAgentwireEnvelope(envelope)),
-        source = Prefix(account, "u", "h"),
-        command = "TAGMSG",
-        params = listOf(CHANNEL),
-    ).serialize()
+    private fun tagMessage(
+        account: String,
+        envelope: AgentwireEnvelope,
+    ): String =
+        IrcMessage(
+            tags = mapOf("account" to account, AGENTWIRE_TAG to encodeAgentwireEnvelope(envelope)),
+            source = Prefix(account, "u", "h"),
+            command = "TAGMSG",
+            params = listOf(CHANNEL),
+        ).serialize()
 
-    private fun hello(reply: String) = AgentwireEnvelope(
-        kind = "agent.hello",
-        type = "event",
-        id = UUID.randomUUID().toString(),
-        at = 1,
-        instance = "bridge",
-        epoch = "epoch-1",
-        reply = reply,
-        data = buildJsonObject { put("epoch", "epoch-1") },
-    )
+    private fun hello(reply: String) =
+        AgentwireEnvelope(
+            kind = "agent.hello",
+            type = "event",
+            id = UUID.randomUUID().toString(),
+            at = 1,
+            instance = "bridge",
+            epoch = "epoch-1",
+            reply = reply,
+            data = buildJsonObject { put("epoch", "epoch-1") },
+        )
 
-    private fun actionFailed(reply: String, message: String) = AgentwireEnvelope(
+    private fun actionFailed(
+        reply: String,
+        message: String,
+    ) = AgentwireEnvelope(
         kind = "action.failed",
         type = "event",
         id = UUID.randomUUID().toString(),
@@ -370,57 +387,112 @@ class AgentwireSyncPhaseTest {
         val sent = mutableListOf<String>()
 
         override suspend fun connect() = Unit
+
         override val incoming = inbound.consumeAsFlow()
+
         override suspend fun send(line: String) {
             sent += line
         }
+
         override suspend fun close() = inbound.close().let { }
+
         suspend fun feed(line: String) = inbound.send(line)
     }
 
     private class RecordingDiagnostics : DiagnosticLogger {
-        data class Record(val component: String, val event: String, val fields: Map<String, Any?>)
+        data class Record(
+            val component: String,
+            val event: String,
+            val fields: Map<String, Any?>,
+        )
 
         val records = mutableListOf<Record>()
         override val enabled = MutableStateFlow(true)
+
         override fun setEnabled(enabled: Boolean) = Unit
-        override fun record(component: String, event: String, fields: () -> Map<String, Any?>) {
+
+        override fun record(
+            component: String,
+            event: String,
+            fields: () -> Map<String, Any?>,
+        ) {
             records += Record(component, event, fields())
         }
+
         // Deliberately not value-embedding, so the "no raw identity" assertion is meaningful.
         override fun fingerprint(value: String?): String? = value?.let { "fp-${it.hashCode()}" }
+
         override suspend fun exportTo(output: OutputStream) = Unit
     }
 
-    private class FakeAgentwirePrefs(lab: Boolean = true) :
-        AgentwirePrefs(ApplicationProvider.getApplicationContext<Context>()) {
+    private class FakeAgentwirePrefs(
+        lab: Boolean = true,
+    ) : AgentwirePrefs(ApplicationProvider.getApplicationContext<Context>()) {
         override val enabled: Flow<Boolean> = flowOf(lab)
+
         override suspend fun setEnabled(enabled: Boolean) = Unit
+
         override suspend fun deviceId(): String = "device-under-test"
     }
 
-    private class FakeBufferRepository(buffer: BufferEntity) : BufferRepository {
+    private class FakeBufferRepository(
+        buffer: BufferEntity,
+    ) : BufferRepository {
         val buffers = MutableStateFlow<BufferEntity?>(buffer)
+
         override fun observeChatList(): Flow<List<ChatListRow>> = flowOf(emptyList())
+
         override fun observeBuffer(id: Long): Flow<BufferEntity?> = buffers
+
         override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = flowOf(emptyList())
-        override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
-        override suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? = null
-        override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean = true
-        override suspend fun setPresenceModeOverride(id: Long, mode: PresenceMode?): Boolean = true
+
+        override suspend fun setPinned(
+            id: Long,
+            pinned: Boolean,
+        ) = Unit
+
+        override suspend fun setMuted(
+            id: Long,
+            muted: Boolean,
+        ): MuteBacklogSuppression? = null
+
+        override suspend fun setLayoutDensityOverride(
+            id: Long,
+            layout: LayoutDensity?,
+        ): Boolean = true
+
+        override suspend fun setPresenceModeOverride(
+            id: Long,
+            mode: PresenceMode?,
+        ): Boolean = true
+
         override suspend fun deleteBuffer(id: Long) = Unit
     }
 
-    private class FakeConnections(private val client: IrcClient?) : NoopConnectionManager() {
+    private class FakeConnections(
+        private val client: IrcClient?,
+    ) : NoopConnectionManager() {
         val joins = mutableListOf<Pair<Long, String>>()
-        override val connectionStates = MutableStateFlow(
-            mapOf<Long, IrcClientState>(NETWORK_ID to IrcClientState.Ready("me", AGENTWIRE_REQUIRED_CAPS, emptyMap())),
-        )
+        override val connectionStates =
+            MutableStateFlow(
+                mapOf<Long, IrcClientState>(NETWORK_ID to IrcClientState.Ready("me", AGENTWIRE_REQUIRED_CAPS, emptyMap())),
+            )
+
         override fun clientFor(networkId: Long): IrcClient? = client.takeIf { networkId == NETWORK_ID }
-        override suspend fun joinChannel(networkId: Long, channel: String, key: String?) {
+
+        override suspend fun joinChannel(
+            networkId: Long,
+            channel: String,
+            key: String?,
+        ) {
             joins += networkId to channel
         }
-        override suspend fun ensureQueryBuffer(networkId: Long, nick: String) = 0L
+
+        override suspend fun ensureQueryBuffer(
+            networkId: Long,
+            nick: String,
+        ) = 0L
+
         override suspend fun ensureServerBuffer(networkId: Long) = 0L
     }
 }

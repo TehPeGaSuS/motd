@@ -1,8 +1,8 @@
 package io.github.trevarj.motd.ui.chat
 
 import io.github.trevarj.motd.data.db.UserEntity
-import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.service.PresenceState
 
 /**
  * Parsed WHOIS details for the nick sheet. Every field is optional because a server
@@ -34,7 +34,11 @@ data class NickSheetState(
 }
 
 /** WHOIS is the fresher overlay; cached WHOX/NAMES data fills fields it did not return. */
-fun mergeUserDetails(nick: String, cached: UserEntity?, whois: WhoisInfo?): WhoisInfo? {
+fun mergeUserDetails(
+    nick: String,
+    cached: UserEntity?,
+    whois: WhoisInfo?,
+): WhoisInfo? {
     if (cached == null) return whois
     val cachedHost = cached.hostmask?.substringAfter('@', missingDelimiterValue = "")?.ifBlank { null }
     return (whois ?: WhoisInfo(nick)).copy(
@@ -65,28 +69,55 @@ fun parseWhois(lines: List<IrcMessage>): WhoisInfo? {
     if (!has311 && !has318) return null
 
     // Nick comes from the 311/318 second param; fall back to any WHOIS numeric's nick param.
-    val nick = lines.firstNotNullOfOrNull { it.params.getOrNull(1)?.takeIf { n -> n.isNotEmpty() } }
-        ?: return null
+    val nick =
+        lines.firstNotNullOfOrNull { it.params.getOrNull(1)?.takeIf { n -> n.isNotEmpty() } }
+            ?: return null
 
     var info = WhoisInfo(nick = nick)
     for (msg in lines) {
         val p = msg.params
         when (msg.command) {
-            "311" -> info = info.copy(
-                username = p.getOrNull(2),
-                host = p.getOrNull(3),
-                realname = p.getOrNull(5),
-            )
-            "312" -> info = info.copy(server = p.getOrNull(2), serverInfo = p.getOrNull(3))
-            "301" -> info = info.copy(awayMessage = p.getOrNull(2), away = true)
-            "317" -> info = info.copy(
-                idleSecs = p.getOrNull(2)?.toLongOrNull(),
-                signonEpochSecs = p.getOrNull(3)?.toLongOrNull(),
-            )
-            "319" -> info = info.copy(
-                channels = p.getOrNull(2)?.trim()?.split(' ')?.filter { it.isNotEmpty() }.orEmpty(),
-            )
-            "330" -> info = info.copy(account = p.getOrNull(2))
+            "311" -> {
+                info =
+                    info.copy(
+                        username = p.getOrNull(2),
+                        host = p.getOrNull(3),
+                        realname = p.getOrNull(5),
+                    )
+            }
+
+            "312" -> {
+                info = info.copy(server = p.getOrNull(2), serverInfo = p.getOrNull(3))
+            }
+
+            "301" -> {
+                info = info.copy(awayMessage = p.getOrNull(2), away = true)
+            }
+
+            "317" -> {
+                info =
+                    info.copy(
+                        idleSecs = p.getOrNull(2)?.toLongOrNull(),
+                        signonEpochSecs = p.getOrNull(3)?.toLongOrNull(),
+                    )
+            }
+
+            "319" -> {
+                info =
+                    info.copy(
+                        channels =
+                            p
+                                .getOrNull(2)
+                                ?.trim()
+                                ?.split(' ')
+                                ?.filter { it.isNotEmpty() }
+                                .orEmpty(),
+                    )
+            }
+
+            "330" -> {
+                info = info.copy(account = p.getOrNull(2))
+            }
         }
     }
     return info

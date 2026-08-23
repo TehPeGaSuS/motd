@@ -6,8 +6,6 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
-import java.net.InetAddress
-import java.net.URL
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -24,6 +22,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.net.InetAddress
+import java.net.URL
 
 /**
  * Finding-2 regressions: preview destinations are validated on every hop — HTTPS only, no
@@ -54,20 +54,21 @@ class LinkPreviewSsrfTest {
 
     @Test
     fun restricted_address_literals_are_blocked_with_and_without_dns() {
-        val blocked = listOf(
-            "https://127.0.0.1/",
-            "https://0.0.0.0/",
-            "https://10.1.2.3/",
-            "https://172.16.0.1/",
-            "https://192.168.1.1/",
-            "https://169.254.9.9/",
-            "https://224.0.0.1/",
-            "https://[::1]/",
-            "https://[fe80::1]/",
-            "https://[fc00::1]/",
-            "https://[fd12:3456::1]/",
-            "https://[::ffff:127.0.0.1]/",
-        )
+        val blocked =
+            listOf(
+                "https://127.0.0.1/",
+                "https://0.0.0.0/",
+                "https://10.1.2.3/",
+                "https://172.16.0.1/",
+                "https://192.168.1.1/",
+                "https://169.254.9.9/",
+                "https://224.0.0.1/",
+                "https://[::1]/",
+                "https://[fe80::1]/",
+                "https://[fc00::1]/",
+                "https://[fd12:3456::1]/",
+                "https://[::ffff:127.0.0.1]/",
+            )
         for (url in blocked) {
             assertFalse(url, LinkPreviewRepositoryImpl.isAllowedDestination(URL(url), resolveDns = true))
             // Even when a proxy resolves hostnames remotely, literal addresses are still refused.
@@ -94,95 +95,110 @@ class LinkPreviewSsrfTest {
     }
 
     @Test
-    fun production_policy_refuses_cleartext_and_loopback_before_connecting() = runTest {
-        // Default (production) policy: the MockWebServer is cleartext loopback, so no request may
-        // ever reach it, in either scheme form.
-        val repository = LinkPreviewRepositoryImpl(
-            prefs, directResolver, LinkPreviewFetchPolicy(), this, StandardTestDispatcher(testScheduler),
-        )
-        server.enqueue(htmlResponse("Leak"))
+    fun production_policy_refuses_cleartext_and_loopback_before_connecting() =
+        runTest {
+            // Default (production) policy: the MockWebServer is cleartext loopback, so no request may
+            // ever reach it, in either scheme form.
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    directResolver,
+                    LinkPreviewFetchPolicy(),
+                    this,
+                    StandardTestDispatcher(testScheduler),
+                )
+            server.enqueue(htmlResponse("Leak"))
 
-        assertNull(repository.preview(server.url("/x").toString(), NETWORK_ID))
-        assertNull(repository.preview("https://127.0.0.1:${server.port}/x", NETWORK_ID))
-        assertEquals(0, server.requestCount)
-    }
-
-    @Test
-    fun redirects_are_followed_manually_to_the_final_destination() = runTest {
-        val repository = LinkPreviewRepositoryImpl(
-            prefs,
-            directResolver,
-            LinkPreviewFetchPolicy(enforceDestinationPolicy = false),
-            this,
-            StandardTestDispatcher(testScheduler),
-        )
-        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/final"))
-        server.enqueue(htmlResponse("Landed"))
-
-        val preview = repository.preview(server.url("/start").toString(), NETWORK_ID)
-
-        assertEquals(2, server.requestCount)
-        assertEquals("Landed", preview?.title)
-        // The preview reports the post-redirect URL, so provenance reflects the real destination.
-        assertTrue(preview!!.url.endsWith("/final"))
-    }
-
-    @Test
-    fun redirect_chains_are_capped() = runTest {
-        val repository = LinkPreviewRepositoryImpl(
-            prefs,
-            directResolver,
-            LinkPreviewFetchPolicy(enforceDestinationPolicy = false, maxRedirects = 2),
-            this,
-            StandardTestDispatcher(testScheduler),
-        )
-        repeat(5) { hop ->
-            server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/hop$hop"))
+            assertNull(repository.preview(server.url("/x").toString(), NETWORK_ID))
+            assertNull(repository.preview("https://127.0.0.1:${server.port}/x", NETWORK_ID))
+            assertEquals(0, server.requestCount)
         }
 
-        assertNull(repository.preview(server.url("/start").toString(), NETWORK_ID))
-        // The original request plus at most maxRedirects follow-ups.
-        assertEquals(3, server.requestCount)
-    }
+    @Test
+    fun redirects_are_followed_manually_to_the_final_destination() =
+        runTest {
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    directResolver,
+                    LinkPreviewFetchPolicy(enforceDestinationPolicy = false),
+                    this,
+                    StandardTestDispatcher(testScheduler),
+                )
+            server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/final"))
+            server.enqueue(htmlResponse("Landed"))
+
+            val preview = repository.preview(server.url("/start").toString(), NETWORK_ID)
+
+            assertEquals(2, server.requestCount)
+            assertEquals("Landed", preview?.title)
+            // The preview reports the post-redirect URL, so provenance reflects the real destination.
+            assertTrue(preview!!.url.endsWith("/final"))
+        }
 
     @Test
-    fun a_redirect_without_a_location_is_a_negative_result() = runTest {
-        val repository = LinkPreviewRepositoryImpl(
-            prefs,
-            directResolver,
-            LinkPreviewFetchPolicy(enforceDestinationPolicy = false),
-            this,
-            StandardTestDispatcher(testScheduler),
-        )
-        server.enqueue(MockResponse().setResponseCode(301))
+    fun redirect_chains_are_capped() =
+        runTest {
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    directResolver,
+                    LinkPreviewFetchPolicy(enforceDestinationPolicy = false, maxRedirects = 2),
+                    this,
+                    StandardTestDispatcher(testScheduler),
+                )
+            repeat(5) { hop ->
+                server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/hop$hop"))
+            }
 
-        assertNull(repository.preview(server.url("/start").toString(), NETWORK_ID))
-        assertEquals(1, server.requestCount)
-        assertNotNull(repository.cachedPreview(server.url("/start").toString(), NETWORK_ID))
-    }
+            assertNull(repository.preview(server.url("/start").toString(), NETWORK_ID))
+            // The original request plus at most maxRedirects follow-ups.
+            assertEquals(3, server.requestCount)
+        }
 
-    private fun htmlResponse(title: String): MockResponse = MockResponse()
-        .setHeader("Content-Type", "text/html")
-        .setBody("<meta property=\"og:title\" content=\"$title\">")
+    @Test
+    fun a_redirect_without_a_location_is_a_negative_result() =
+        runTest {
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    directResolver,
+                    LinkPreviewFetchPolicy(enforceDestinationPolicy = false),
+                    this,
+                    StandardTestDispatcher(testScheduler),
+                )
+            server.enqueue(MockResponse().setResponseCode(301))
 
-    private val directResolver = MediaRouteResolver { networkId ->
-        NetworkMediaRoute(
-            networkId = networkId,
-            endpoint = NetworkEntity(
-                id = networkId,
-                name = "test",
-                role = NetworkRole.DIRECT,
-                host = "irc.example.test",
-                port = 6697,
-                nick = "nick",
-                username = "user",
-                realname = "real",
-            ),
-            proxy = null,
-            proxyError = null,
-            authorizationHeader = null,
-        )
-    }
+            assertNull(repository.preview(server.url("/start").toString(), NETWORK_ID))
+            assertEquals(1, server.requestCount)
+            assertNotNull(repository.cachedPreview(server.url("/start").toString(), NETWORK_ID))
+        }
+
+    private fun htmlResponse(title: String): MockResponse =
+        MockResponse()
+            .setHeader("Content-Type", "text/html")
+            .setBody("<meta property=\"og:title\" content=\"$title\">")
+
+    private val directResolver =
+        MediaRouteResolver { networkId ->
+            NetworkMediaRoute(
+                networkId = networkId,
+                endpoint =
+                    NetworkEntity(
+                        id = networkId,
+                        name = "test",
+                        role = NetworkRole.DIRECT,
+                        host = "irc.example.test",
+                        port = 6697,
+                        nick = "nick",
+                        username = "user",
+                        realname = "real",
+                    ),
+                proxy = null,
+                proxyError = null,
+                authorizationHeader = null,
+            )
+        }
 
     private class FakeContentPreviewPrefs : ContentPreviewPrefs {
         private val state = MutableStateFlow(ContentPreviewConfig())

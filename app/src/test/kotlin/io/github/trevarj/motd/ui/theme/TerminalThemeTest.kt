@@ -10,10 +10,13 @@ import org.junit.Test
 /** Verifies that every ThemeMode resolves to a ColorScheme and that the isTerminalTheme flag is set
  *  correctly. Pure logic tests -- no Android/Compose runtime needed. */
 class TerminalThemeTest {
-
-    private val baseModes = setOf(
-        ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.AMOLED,
-    )
+    private val baseModes =
+        setOf(
+            ThemeMode.SYSTEM,
+            ThemeMode.LIGHT,
+            ThemeMode.DARK,
+            ThemeMode.AMOLED,
+        )
     private val terminalModes = ThemeMode.entries.toSet() - baseModes
 
     @Test
@@ -33,14 +36,18 @@ class TerminalThemeTest {
     @Test
     fun terminalModes_includeExpectedSchemes() {
         // Ensure the full set from the spec is present.
-        val expected = setOf(
-            ThemeMode.GRUVBOX_DARK, ThemeMode.GRUVBOX_LIGHT,
-            ThemeMode.SOLARIZED_DARK, ThemeMode.SOLARIZED_LIGHT,
-            ThemeMode.DRACULA,
-            ThemeMode.NORD,
-            ThemeMode.CATPPUCCIN_LATTE, ThemeMode.CATPPUCCIN_MOCHA,
-            ThemeMode.TOKYO_NIGHT,
-        )
+        val expected =
+            setOf(
+                ThemeMode.GRUVBOX_DARK,
+                ThemeMode.GRUVBOX_LIGHT,
+                ThemeMode.SOLARIZED_DARK,
+                ThemeMode.SOLARIZED_LIGHT,
+                ThemeMode.DRACULA,
+                ThemeMode.NORD,
+                ThemeMode.CATPPUCCIN_LATTE,
+                ThemeMode.CATPPUCCIN_MOCHA,
+                ThemeMode.TOKYO_NIGHT,
+            )
         assertEquals(expected, terminalModes)
     }
 

@@ -32,14 +32,18 @@ class HistorySyncProbe(
     private val history: HistoryResyncController,
     private val milestones: E2eMilestoneRecorder,
 ) {
-    suspend fun awaitCycle(bufferId: Long, timeoutMs: Long = 45_000) {
+    suspend fun awaitCycle(
+        bufferId: Long,
+        timeoutMs: Long = 45_000,
+    ) {
         try {
             withTimeout(timeoutMs) {
                 var active = false
                 history.syncStatus(bufferId).first { status ->
-                    val isActive = status == HistorySyncStatus.Queued ||
-                        status == HistorySyncStatus.AwaitingConnection ||
-                        status == HistorySyncStatus.Syncing
+                    val isActive =
+                        status == HistorySyncStatus.Queued ||
+                            status == HistorySyncStatus.AwaitingConnection ||
+                            status == HistorySyncStatus.Syncing
                     if (isActive) active = true
                     active && !isActive
                 }
@@ -52,8 +56,15 @@ class HistorySyncProbe(
     }
 }
 
-class ConnectionProbe(private val connections: ConnectionManager, private val milestones: E2eMilestoneRecorder) {
-    suspend fun awaitReady(id: Long, requiredCaps: Set<String>, timeoutMs: Long = 30_000): IrcClientState.Ready =
+class ConnectionProbe(
+    private val connections: ConnectionManager,
+    private val milestones: E2eMilestoneRecorder,
+) {
+    suspend fun awaitReady(
+        id: Long,
+        requiredCaps: Set<String>,
+        timeoutMs: Long = 30_000,
+    ): IrcClientState.Ready =
         withTimeout(timeoutMs) {
             connections.connectionStates.first { states ->
                 when (val state = states[id]) {
@@ -61,12 +72,17 @@ class ConnectionProbe(private val connections: ConnectionManager, private val mi
                         milestones.record("connection_ready", "network=$id caps=${state.caps.sorted().joinToString(",")}")
                         requiredCaps.all { cap -> state.caps.any { it == cap || it.startsWith("$cap=") } }
                     }
+
                     is IrcClientState.Failed -> {
                         milestones.record("connection_failed", "network=$id fatal=${state.fatal}")
                         if (state.fatal) error("fatal connection state")
                         false
                     }
-                    null -> false
+
+                    null -> {
+                        false
+                    }
+
                     else -> {
                         milestones.record("connection_state", "network=$id state=${state::class.simpleName}")
                         false
@@ -76,7 +92,10 @@ class ConnectionProbe(private val connections: ConnectionManager, private val mi
             connections.connectionStates.value[id] as IrcClientState.Ready
         }
 
-    suspend fun awaitDisconnected(id: Long, timeoutMs: Long = 15_000) {
+    suspend fun awaitDisconnected(
+        id: Long,
+        timeoutMs: Long = 15_000,
+    ) {
         withTimeout(timeoutMs) {
             connections.connectionStates.first { states ->
                 when (states[id]) {
@@ -89,14 +108,24 @@ class ConnectionProbe(private val connections: ConnectionManager, private val mi
     }
 }
 
-class BufferProbe(private val buffers: BufferRepository, private val milestones: E2eMilestoneRecorder) {
-    suspend fun awaitJoinedChannel(networkId: Long, channel: String, timeoutMs: Long = 20_000): Long =
+class BufferProbe(
+    private val buffers: BufferRepository,
+    private val milestones: E2eMilestoneRecorder,
+) {
+    suspend fun awaitJoinedChannel(
+        networkId: Long,
+        channel: String,
+        timeoutMs: Long = 20_000,
+    ): Long =
         try {
             withTimeout(timeoutMs) {
-                buffers.observeChatList().first { rows ->
-                    rows.any { row -> row.networkId == networkId && row.type == BufferType.CHANNEL && row.displayName.equals(channel, true) }
-                }.first { it.networkId == networkId && it.type == BufferType.CHANNEL && it.displayName.equals(channel, true) }
-                    .bufferId.also { milestones.record("buffer_joined", "network=$networkId buffer=$it") }
+                buffers
+                    .observeChatList()
+                    .first { rows ->
+                        rows.any { row -> row.networkId == networkId && row.type == BufferType.CHANNEL && row.displayName.equals(channel, true) }
+                    }.first { it.networkId == networkId && it.type == BufferType.CHANNEL && it.displayName.equals(channel, true) }
+                    .bufferId
+                    .also { milestones.record("buffer_joined", "network=$networkId buffer=$it") }
             }
         } catch (timeout: TimeoutCancellationException) {
             milestones.record("buffer_timeout", "network=$networkId")
@@ -109,8 +138,11 @@ class MessageLifecycleProbe(
     private val search: SearchRepository,
     private val milestones: E2eMilestoneRecorder,
 ) {
-    suspend fun awaitCanonical(token: String, bufferId: Long, timeoutMs: Long = 20_000): MessageEntity =
-        awaitCanonicalMatch(token, bufferId, timeoutMs, requireSelf = true) { it.text == token }
+    suspend fun awaitCanonical(
+        token: String,
+        bufferId: Long,
+        timeoutMs: Long = 20_000,
+    ): MessageEntity = awaitCanonicalMatch(token, bufferId, timeoutMs, requireSelf = true) { it.text == token }
 
     suspend fun awaitCanonicalFromAnySender(
         token: String,
@@ -123,9 +155,10 @@ class MessageLifecycleProbe(
         expectedSubstring: String,
         bufferId: Long,
         timeoutMs: Long = 20_000,
-    ): MessageEntity = awaitCanonicalMatch(query, bufferId, timeoutMs, requireSelf = true) {
-        it.text.contains(expectedSubstring)
-    }
+    ): MessageEntity =
+        awaitCanonicalMatch(query, bufferId, timeoutMs, requireSelf = true) {
+            it.text.contains(expectedSubstring)
+        }
 
     private suspend fun awaitCanonicalMatch(
         query: String,
@@ -136,15 +169,19 @@ class MessageLifecycleProbe(
     ): MessageEntity =
         try {
             withTimeout(timeoutMs) {
-                search.search(query, bufferId).map { it.hits }.first { hits ->
-                    hits.count { hit ->
+                search
+                    .search(query, bufferId)
+                    .map { it.hits }
+                    .first { hits ->
+                        hits.count { hit ->
+                            (!requireSelf || hit.message.isSelf) && matches(hit.message) && hit.message.msgid != null &&
+                                hit.message.pendingLabel == null && !hit.message.failed
+                        } == 1
+                    }.single { hit ->
                         (!requireSelf || hit.message.isSelf) && matches(hit.message) && hit.message.msgid != null &&
                             hit.message.pendingLabel == null && !hit.message.failed
-                    } == 1
-                }.single { hit ->
-                    (!requireSelf || hit.message.isSelf) && matches(hit.message) && hit.message.msgid != null &&
-                        hit.message.pendingLabel == null && !hit.message.failed
-                }.message.also { milestones.record("canonical_message", "buffer=$bufferId event=${it.id}") }
+                    }.message
+                    .also { milestones.record("canonical_message", "buffer=$bufferId event=${it.id}") }
             }
         } catch (timeout: TimeoutCancellationException) {
             milestones.record("canonical_timeout", "buffer=$bufferId")
@@ -168,30 +205,34 @@ class MessageRunProbe(
         requiredText: String,
         excludedText: String,
         timeoutMs: Long = 45_000,
-    ): List<MessageEntity> = try {
-        withTimeout(timeoutMs) {
-            search.search(token, bufferId).map { it.hits }.first { hits ->
-                val rows = hits.map { it.message }.filter { it.text.startsWith("$token row") }
-                rows.any { it.text == requiredText }
-            }.map { it.message }
-                .filter { it.text.startsWith("$token row") }
-                .also { rows ->
-                    check(rows.size in minimumCount..maximumCount) {
-                        "bounded recent history count ${rows.size} is outside $minimumCount..$maximumCount"
+    ): List<MessageEntity> =
+        try {
+            withTimeout(timeoutMs) {
+                search
+                    .search(token, bufferId)
+                    .map { it.hits }
+                    .first { hits ->
+                        val rows = hits.map { it.message }.filter { it.text.startsWith("$token row") }
+                        rows.any { it.text == requiredText }
+                    }.map { it.message }
+                    .filter { it.text.startsWith("$token row") }
+                    .also { rows ->
+                        check(rows.size in minimumCount..maximumCount) {
+                            "bounded recent history count ${rows.size} is outside $minimumCount..$maximumCount"
+                        }
+                        check(rows.none { it.text == excludedText }) {
+                            "bounded recent history unexpectedly contains $excludedText"
+                        }
+                        validateRows(token, bufferId, rows, expectedNewestOrdinal)
                     }
-                    check(rows.none { it.text == excludedText }) {
-                        "bounded recent history unexpectedly contains $excludedText"
-                    }
-                    validateRows(token, bufferId, rows, expectedNewestOrdinal)
-                }
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            milestones.record("history_run_timeout", "buffer=$bufferId count=$minimumCount..$maximumCount")
+            throw AssertionError(
+                "bounded recent history rows timed out for buffer=$bufferId count=$minimumCount..$maximumCount",
+                timeout,
+            )
         }
-    } catch (timeout: TimeoutCancellationException) {
-        milestones.record("history_run_timeout", "buffer=$bufferId count=$minimumCount..$maximumCount")
-        throw AssertionError(
-            "bounded recent history rows timed out for buffer=$bufferId count=$minimumCount..$maximumCount",
-            timeout,
-        )
-    }
 
     /**
      * Waits for the bounded fixture window to stop growing before validating its size.
@@ -220,16 +261,16 @@ class MessageRunProbe(
         var snapshots = 0
         return try {
             withTimeout(timeoutMs) {
-                search.search(token, bufferId).map { it.hits }
+                search
+                    .search(token, bufferId)
+                    .map { it.hits }
                     .map { hits ->
                         hits.map { it.message }.filter { it.text.startsWith("$token row") }
-                    }
-                    .distinctUntilChangedBy { rows -> rows.map { it.id } }
+                    }.distinctUntilChangedBy { rows -> rows.map { it.id } }
                     .onEach { rows ->
                         observed = rows
                         snapshots++
-                    }
-                    .debounce(stableMs)
+                    }.debounce(stableMs)
                     .first { rows -> rows.any { it.text == requiredText } }
                     .also { rows ->
                         check(rows.size in minimumCount..maximumCount) {
@@ -273,23 +314,29 @@ class MessageRunProbe(
     ): List<MessageEntity> =
         try {
             withTimeout(timeoutMs) {
-                search.search(token, bufferId).map { it.hits }.first { hits ->
-                    val messages = hits.map { it.message }
-                    val rows = messages.filter { it.text.startsWith("$token row") }
-                    val extras = messages
-                        .filterNot { it.text.startsWith("$token row") }
-                        .map { it.text }
-                    rows.size == count && extras.size == expectedExtras.size && extras.toSet() == expectedExtras
-                }.map { it.message }.let { messages ->
-                    val rows = messages.filter { it.text.startsWith("$token row") }
-                    val extras = messages
-                        .filterNot { it.text.startsWith("$token row") }
-                        .map { it.text }
-                    check(extras.size == expectedExtras.size && extras.toSet() == expectedExtras) {
-                        "fixture window contains unexpected non-row messages"
+                search
+                    .search(token, bufferId)
+                    .map { it.hits }
+                    .first { hits ->
+                        val messages = hits.map { it.message }
+                        val rows = messages.filter { it.text.startsWith("$token row") }
+                        val extras =
+                            messages
+                                .filterNot { it.text.startsWith("$token row") }
+                                .map { it.text }
+                        rows.size == count && extras.size == expectedExtras.size && extras.toSet() == expectedExtras
+                    }.map { it.message }
+                    .let { messages ->
+                        val rows = messages.filter { it.text.startsWith("$token row") }
+                        val extras =
+                            messages
+                                .filterNot { it.text.startsWith("$token row") }
+                                .map { it.text }
+                        check(extras.size == expectedExtras.size && extras.toSet() == expectedExtras) {
+                            "fixture window contains unexpected non-row messages"
+                        }
+                        rows.also { validateRows(token, bufferId, it, expectedNewestOrdinal) }
                     }
-                    rows.also { validateRows(token, bufferId, it, expectedNewestOrdinal) }
-                }
             }
         } catch (timeout: TimeoutCancellationException) {
             milestones.record("history_run_timeout", "buffer=$bufferId count=$count")

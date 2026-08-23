@@ -26,16 +26,25 @@ class Migration6To7Test {
     @Test fun `migration adds nullable server password and preserves the network`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context).name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(6) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL(CREATE_NETWORKS_V6)
-                    }
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(6) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL(CREATE_NETWORKS_V6)
+                            }
 
-                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
-                }).build(),
-        )
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                old: Int,
+                                new: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL(INSERT_NETWORK)
 

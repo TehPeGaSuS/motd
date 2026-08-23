@@ -83,8 +83,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
-import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentBackend
+import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
@@ -100,8 +100,11 @@ import kotlinx.coroutines.withContext
 
 private sealed interface AttachmentFlow {
     data object Idle : AttachmentFlow
+
     data object Sources : AttachmentFlow
+
     data object EditText : AttachmentFlow
+
     data class Confirm(
         val source: AttachmentSource,
         val replaceDraft: Boolean,
@@ -109,20 +112,23 @@ private sealed interface AttachmentFlow {
     ) : AttachmentFlow
 }
 
-internal data class UploadDestination(val label: String, val config: PasteBackendConfig)
+internal data class UploadDestination(
+    val label: String,
+    val config: PasteBackendConfig,
+)
 
 internal fun uploadDestinations(
     source: AttachmentSource,
     config: PasteBackendConfig,
     sojuFileHostAvailable: Boolean = false,
-): List<UploadDestination> {
-    return AttachmentBackend.entries.filter { backend ->
-        backend.supports(source) &&
-            (backend != AttachmentBackend.SOJU_FILEHOST || sojuFileHostAvailable)
-    }.map { backend ->
-        UploadDestination(backend.label, config.forBackend(backend))
-    }
-}
+): List<UploadDestination> =
+    AttachmentBackend.entries
+        .filter { backend ->
+            backend.supports(source) &&
+                (backend != AttachmentBackend.SOJU_FILEHOST || sojuFileHostAvailable)
+        }.map { backend ->
+            UploadDestination(backend.label, config.forBackend(backend))
+        }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -155,22 +161,29 @@ fun AttachmentSheets(
 
     LaunchedEffect(open, startWithCurrentDraft, sharedFile) {
         if (!open) return@LaunchedEffect
-        flow = when {
-            sharedFile != null -> {
-                // The sender's declared type wins; fall back to the provider's when it omitted one.
-                val mime = sharedFile.mimeType ?: context.contentResolver.getType(sharedFile.uri)
-                val meta = context.contentResolver.queryMeta(sharedFile.uri)
-                val source = if (mime?.startsWith("image/") == true) {
-                    AttachmentSource.Photo(sharedFile.uri, meta.first, mime, meta.second)
-                } else {
-                    AttachmentSource.Document(sharedFile.uri, meta.first, mime, meta.second)
+        flow =
+            when {
+                sharedFile != null -> {
+                    // The sender's declared type wins; fall back to the provider's when it omitted one.
+                    val mime = sharedFile.mimeType ?: context.contentResolver.getType(sharedFile.uri)
+                    val meta = context.contentResolver.queryMeta(sharedFile.uri)
+                    val source =
+                        if (mime?.startsWith("image/") == true) {
+                            AttachmentSource.Photo(sharedFile.uri, meta.first, mime, meta.second)
+                        } else {
+                            AttachmentSource.Document(sharedFile.uri, meta.first, mime, meta.second)
+                        }
+                    AttachmentFlow.Confirm(source, false, defaultConfig)
                 }
-                AttachmentFlow.Confirm(source, false, defaultConfig)
+
+                startWithCurrentDraft && currentDraft.isNotBlank() -> {
+                    AttachmentFlow.Confirm(AttachmentSource.Text(currentDraft), true, defaultConfig)
+                }
+
+                else -> {
+                    AttachmentFlow.Sources
+                }
             }
-            startWithCurrentDraft && currentDraft.isNotBlank() ->
-                AttachmentFlow.Confirm(AttachmentSource.Text(currentDraft), true, defaultConfig)
-            else -> AttachmentFlow.Sources
-        }
     }
 
     fun closeSourceSheet() {
@@ -178,13 +191,17 @@ fun AttachmentSheets(
         onDismiss()
     }
 
-    fun select(uri: Uri, photo: Boolean) {
+    fun select(
+        uri: Uri,
+        photo: Boolean,
+    ) {
         val meta = context.contentResolver.queryMeta(uri)
-        val source = if (photo) {
-            AttachmentSource.Photo(uri, meta.first, context.contentResolver.getType(uri), meta.second)
-        } else {
-            AttachmentSource.Document(uri, meta.first, context.contentResolver.getType(uri), meta.second)
-        }
+        val source =
+            if (photo) {
+                AttachmentSource.Photo(uri, meta.first, context.contentResolver.getType(uri), meta.second)
+            } else {
+                AttachmentSource.Document(uri, meta.first, context.contentResolver.getType(uri), meta.second)
+            }
         flow = AttachmentFlow.Confirm(source, false, defaultConfig)
     }
 
@@ -202,73 +219,88 @@ fun AttachmentSheets(
         }
     }
 
-    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
-        it?.let { uri -> select(uri, false) }
-    }
-    val directFilePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
-        it?.let(onDirectFile)
-    }
-    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) {
-        it?.let { uri -> select(uri, true) }
-    }
+    val filePicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
+            it?.let { uri -> select(uri, false) }
+        }
+    val directFilePicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
+            it?.let(onDirectFile)
+        }
+    val photoPicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) {
+            it?.let { uri -> select(uri, true) }
+        }
 
     when (val current = flow) {
-        AttachmentFlow.Idle -> Unit
-        AttachmentFlow.Sources -> SourceSheet(
-            currentDraft = currentDraft,
-            recent = if (imageOnly) recent.filter { it.mimeType?.startsWith("image/") == true } else recent,
-            imageOnly = imageOnly,
-            onDismiss = ::closeSourceSheet,
-            onPhoto = {
-                closeSourceSheet()
-                photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-            },
-            onFile = {
-                closeSourceSheet()
-                filePicker.launch(arrayOf(if (imageOnly) "image/*" else "*/*"))
-            },
-            directFileTransferAvailable = directFileTransferAvailable,
-            onDirectFile = {
-                closeSourceSheet()
-                directFilePicker.launch(arrayOf("*/*"))
-            },
-            onCurrentDraft = {
-                closeSourceSheet()
-                flow = AttachmentFlow.Confirm(AttachmentSource.Text(currentDraft), true, defaultConfig)
-            },
-            onNewText = {
-                closeSourceSheet()
-                pasteText = ""
-                flow = AttachmentFlow.EditText
-            },
-            onInsertRecent = { record ->
-                onInsertUrl(record.url)
-                closeSourceSheet()
-            },
-            onCopyRecent = { record ->
-                context.getSystemService(ClipboardManager::class.java)
-                    ?.setPrimaryClip(ClipData.newPlainText(record.displayName, record.url))
-            },
-            onDeleteRecent = { deleteTarget = it },
-        )
-        AttachmentFlow.EditText -> TextPasteSheet(
-            text = pasteText,
-            onTextChange = { pasteText = it },
-            onDismiss = ::closeSourceSheet,
-            onContinue = {
-                flow = AttachmentFlow.Confirm(AttachmentSource.Text(pasteText), false, defaultConfig)
-            },
-        )
-        is AttachmentFlow.Confirm -> ConfirmationSheet(
-            request = current,
-            sojuFileHostAvailable = sojuFileHostAvailable,
-            onChangeDestination = {
-                backendPickerRequest = current
-                flow = AttachmentFlow.Idle
-            },
-            onDismiss = ::closeSourceSheet,
-            onUpload = { startUpload(current) },
-        )
+        AttachmentFlow.Idle -> {
+            Unit
+        }
+
+        AttachmentFlow.Sources -> {
+            SourceSheet(
+                currentDraft = currentDraft,
+                recent = if (imageOnly) recent.filter { it.mimeType?.startsWith("image/") == true } else recent,
+                imageOnly = imageOnly,
+                onDismiss = ::closeSourceSheet,
+                onPhoto = {
+                    closeSourceSheet()
+                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                onFile = {
+                    closeSourceSheet()
+                    filePicker.launch(arrayOf(if (imageOnly) "image/*" else "*/*"))
+                },
+                directFileTransferAvailable = directFileTransferAvailable,
+                onDirectFile = {
+                    closeSourceSheet()
+                    directFilePicker.launch(arrayOf("*/*"))
+                },
+                onCurrentDraft = {
+                    closeSourceSheet()
+                    flow = AttachmentFlow.Confirm(AttachmentSource.Text(currentDraft), true, defaultConfig)
+                },
+                onNewText = {
+                    closeSourceSheet()
+                    pasteText = ""
+                    flow = AttachmentFlow.EditText
+                },
+                onInsertRecent = { record ->
+                    onInsertUrl(record.url)
+                    closeSourceSheet()
+                },
+                onCopyRecent = { record ->
+                    context
+                        .getSystemService(ClipboardManager::class.java)
+                        ?.setPrimaryClip(ClipData.newPlainText(record.displayName, record.url))
+                },
+                onDeleteRecent = { deleteTarget = it },
+            )
+        }
+
+        AttachmentFlow.EditText -> {
+            TextPasteSheet(
+                text = pasteText,
+                onTextChange = { pasteText = it },
+                onDismiss = ::closeSourceSheet,
+                onContinue = {
+                    flow = AttachmentFlow.Confirm(AttachmentSource.Text(pasteText), false, defaultConfig)
+                },
+            )
+        }
+
+        is AttachmentFlow.Confirm -> {
+            ConfirmationSheet(
+                request = current,
+                sojuFileHostAvailable = sojuFileHostAvailable,
+                onChangeDestination = {
+                    backendPickerRequest = current
+                    flow = AttachmentFlow.Idle
+                },
+                onDismiss = ::closeSourceSheet,
+                onUpload = { startUpload(current) },
+            )
+        }
     }
 
     backendPickerRequest?.let { request ->
@@ -305,16 +337,27 @@ fun AttachmentSheets(
             text = { Text(message) },
             confirmButton = {
                 lastAttempt?.let { request ->
-                    TextButton(onClick = { viewModel.clearError(); startUpload(request) }) {
+                    TextButton(onClick = {
+                        viewModel.clearError()
+                        startUpload(request)
+                    }) {
                         Icon(Icons.Outlined.Refresh, null)
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.upload_retry))
                     }
                 } ?: TextButton(onClick = viewModel::clearError) { Text(stringResource(R.string.action_ok)) }
             },
-            dismissButton = if (lastAttempt != null) {
-                { TextButton(onClick = { viewModel.clearError(); lastAttempt?.let { flow = it } }) { Text(stringResource(R.string.action_back)) } }
-            } else null,
+            dismissButton =
+                if (lastAttempt != null) {
+                    {
+                        TextButton(onClick = {
+                            viewModel.clearError()
+                            lastAttempt?.let { flow = it }
+                        }) { Text(stringResource(R.string.action_back)) }
+                    }
+                } else {
+                    null
+                },
         )
     }
 
@@ -325,7 +368,10 @@ fun AttachmentSheets(
             title = { Text(stringResource(R.string.upload_delete_title)) },
             text = { Text(stringResource(R.string.upload_delete_body, record.displayName)) },
             confirmButton = {
-                Button(onClick = { viewModel.delete(record); deleteTarget = null }) {
+                Button(onClick = {
+                    viewModel.delete(record)
+                    deleteTarget = null
+                }) {
                     Text(stringResource(R.string.action_delete))
                 }
             },
@@ -446,10 +492,19 @@ private fun RecentUploadRow(
             Box {
                 IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, stringResource(R.string.action_more)) }
                 DropdownMenu(menuOpen, { menuOpen = false }) {
-                    DropdownMenuItem({ Text(stringResource(R.string.upload_insert_link)) }, { menuOpen = false; onInsert(record) }, leadingIcon = { Icon(Icons.Outlined.InsertLink, null) })
-                    DropdownMenuItem({ Text(stringResource(R.string.upload_copy_link)) }, { menuOpen = false; onCopy(record) }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) })
+                    DropdownMenuItem({ Text(stringResource(R.string.upload_insert_link)) }, {
+                        menuOpen = false
+                        onInsert(record)
+                    }, leadingIcon = { Icon(Icons.Outlined.InsertLink, null) })
+                    DropdownMenuItem({ Text(stringResource(R.string.upload_copy_link)) }, {
+                        menuOpen = false
+                        onCopy(record)
+                    }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) })
                     if (record.deletionToken != null) {
-                        DropdownMenuItem({ Text(stringResource(R.string.action_delete)) }, { menuOpen = false; onDelete(record) }, leadingIcon = { Icon(Icons.Filled.Delete, null) })
+                        DropdownMenuItem({ Text(stringResource(R.string.action_delete)) }, {
+                            menuOpen = false
+                            onDelete(record)
+                        }, leadingIcon = { Icon(Icons.Filled.Delete, null) })
                     }
                 }
             }
@@ -460,7 +515,12 @@ private fun RecentUploadRow(
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun TextPasteSheet(text: String, onTextChange: (String) -> Unit, onDismiss: () -> Unit, onContinue: () -> Unit) {
+private fun TextPasteSheet(
+    text: String,
+    onTextChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onContinue: () -> Unit,
+) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -494,13 +554,14 @@ private fun ConfirmationSheet(
 ) {
     val context = LocalContext.current
     val thumbnail by produceState<android.graphics.Bitmap?>(null, request.source) {
-        value = if (request.source is AttachmentSource.Photo) {
-            withContext(Dispatchers.IO) {
-                context.contentResolver.sampledThumbnail(request.source.uri)
+        value =
+            if (request.source is AttachmentSource.Photo) {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.sampledThumbnail(request.source.uri)
+                }
+            } else {
+                null
             }
-        } else {
-            null
-        }
     }
     val sojuUnavailable = request.config.backend == AttachmentBackend.SOJU_FILEHOST && !sojuFileHostAvailable
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -570,7 +631,9 @@ private fun BackendPickerSheet(
     ModalBottomSheet(onDismissRequest = onDismiss) {
         SheetSystemBars()
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
             Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -579,9 +642,12 @@ private fun BackendPickerSheet(
                 ListItem(
                     headlineContent = { Text(destination.label, fontWeight = FontWeight.SemiBold) },
                     supportingContent = { Text(backendRetention(destination.config)) },
-                    trailingContent = if (sameDestination(config, destination.config)) {
-                        { Text("Selected", color = MaterialTheme.colorScheme.primary) }
-                    } else null,
+                    trailingContent =
+                        if (sameDestination(config, destination.config)) {
+                            { Text("Selected", color = MaterialTheme.colorScheme.primary) }
+                        } else {
+                            null
+                        },
                     modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSelect(destination.config) },
                 )
             }
@@ -616,9 +682,10 @@ private fun AttachmentMetadata(source: AttachmentSource) {
 @Composable
 private fun UploadPrivacyCard(config: PasteBackendConfig) {
     val termbin = config.backend == AttachmentBackend.TERMBIN
-    val safe = config.backend == AttachmentBackend.CNET ||
-        config.backend == AttachmentBackend.SOJU_FILEHOST ||
-        (config.protocol == io.github.trevarj.motd.attachment.PasteProtocol.MULTIPART_0X0 && config.secretUrl)
+    val safe =
+        config.backend == AttachmentBackend.CNET ||
+            config.backend == AttachmentBackend.SOJU_FILEHOST ||
+            (config.protocol == io.github.trevarj.motd.attachment.PasteProtocol.MULTIPART_0X0 && config.secretUrl)
     val semanticColors = LocalMotdSemanticColors.current
     Surface(
         shape = RoundedCornerShape(18.dp),
@@ -660,7 +727,10 @@ private fun UploadPrivacyCard(config: PasteBackendConfig) {
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun UploadProgressSheet(progress: UploadProgress, onCancel: () -> Unit) {
+private fun UploadProgressSheet(
+    progress: UploadProgress,
+    onCancel: () -> Unit,
+) {
     ModalBottomSheet(onDismissRequest = onCancel, dragHandle = null) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -676,59 +746,103 @@ private fun UploadProgressSheet(progress: UploadProgress, onCancel: () -> Unit) 
                 if (progress is UploadProgress.Transferring) Text(formatBytes(progress.bytesSent), Modifier.padding(top = 8.dp))
             }
             Spacer(Modifier.height(16.dp))
-            TextButton(onClick = onCancel) { Icon(Icons.Filled.Close, null); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.action_cancel)) }
+            TextButton(onClick = onCancel) {
+                Icon(Icons.Filled.Close, null)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.action_cancel))
+            }
         }
     }
 }
 
-private fun sameDestination(a: PasteBackendConfig, b: PasteBackendConfig): Boolean =
-    a.backend == b.backend && (a.backend != AttachmentBackend.CUSTOM_0X0 || a.endpoint == b.endpoint)
+private fun sameDestination(
+    a: PasteBackendConfig,
+    b: PasteBackendConfig,
+): Boolean = a.backend == b.backend && (a.backend != AttachmentBackend.CUSTOM_0X0 || a.endpoint == b.endpoint)
 
-internal fun backendRetention(config: PasteBackendConfig): String = when (config.backend) {
-    AttachmentBackend.CRAFTERBIN, AttachmentBackend.ZERO_X_ZERO, AttachmentBackend.CUSTOM_0X0 ->
-        config.expiry ?: "server default"
-    AttachmentBackend.X0_AT -> "3–100 days by size"
-    AttachmentBackend.CNET -> "rolling 180 days"
-    AttachmentBackend.UGUU -> "3 hours"
-    AttachmentBackend.LITTERBOX -> when (config.litterboxExpiry) {
-        "1h" -> "1 hour"
-        "12h" -> "12 hours"
-        "24h" -> "24 hours"
-        "72h" -> "72 hours"
-        else -> config.litterboxExpiry
+internal fun backendRetention(config: PasteBackendConfig): String =
+    when (config.backend) {
+        AttachmentBackend.CRAFTERBIN, AttachmentBackend.ZERO_X_ZERO, AttachmentBackend.CUSTOM_0X0 -> {
+            config.expiry ?: "server default"
+        }
+
+        AttachmentBackend.X0_AT -> {
+            "3–100 days by size"
+        }
+
+        AttachmentBackend.CNET -> {
+            "rolling 180 days"
+        }
+
+        AttachmentBackend.UGUU -> {
+            "3 hours"
+        }
+
+        AttachmentBackend.LITTERBOX -> {
+            when (config.litterboxExpiry) {
+                "1h" -> "1 hour"
+                "12h" -> "12 hours"
+                "24h" -> "24 hours"
+                "72h" -> "72 hours"
+                else -> config.litterboxExpiry
+            }
+        }
+
+        AttachmentBackend.CATBOX -> {
+            "up to 2 years without access"
+        }
+
+        AttachmentBackend.SOJU_FILEHOST -> {
+            "server policy"
+        }
+
+        AttachmentBackend.TERMBIN -> {
+            "server default"
+        }
     }
-    AttachmentBackend.CATBOX -> "up to 2 years without access"
-    AttachmentBackend.SOJU_FILEHOST -> "server policy"
-    AttachmentBackend.TERMBIN -> "server default"
-}
 
-internal fun formatBytes(bytes: Long): String = when {
-    bytes < 1024 -> "$bytes B"
-    bytes < 1024 * 1024 -> "%.1f KiB".format(java.util.Locale.ROOT, bytes / 1024.0)
-    else -> "%.1f MiB".format(java.util.Locale.ROOT, bytes / (1024.0 * 1024.0))
-}
+internal fun formatBytes(bytes: Long): String =
+    when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> "%.1f KiB".format(java.util.Locale.ROOT, bytes / 1024.0)
+        else -> "%.1f MiB".format(java.util.Locale.ROOT, bytes / (1024.0 * 1024.0))
+    }
 
-private fun AttachmentSource.displayName() = when (this) {
-    is AttachmentSource.Text -> name
-    is AttachmentSource.Document -> name
-    is AttachmentSource.Photo -> name
-    is AttachmentSource.LocalFile -> name
-}
+private fun AttachmentSource.displayName() =
+    when (this) {
+        is AttachmentSource.Text -> name
+        is AttachmentSource.Document -> name
+        is AttachmentSource.Photo -> name
+        is AttachmentSource.LocalFile -> name
+    }
+
 private fun android.content.ContentResolver.queryMeta(uri: Uri): Pair<String, Long?> {
     var name = uri.lastPathSegment ?: "attachment"
     var size: Long? = null
     val cursor: Cursor? = query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
-    cursor?.use { if (it.moveToFirst()) { name = it.getString(0) ?: name; if (!it.isNull(1)) size = it.getLong(1) } }
+    cursor?.use {
+        if (it.moveToFirst()) {
+            name = it.getString(0) ?: name
+            if (!it.isNull(1)) size = it.getLong(1)
+        }
+    }
     return name to size
 }
 
-private fun android.content.ContentResolver.sampledThumbnail(uri: Uri): android.graphics.Bitmap? = runCatching {
-    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
-    var sample = 1
-    while (bounds.outWidth / sample > 640 || bounds.outHeight / sample > 360) sample *= 2
-    val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1) }
-    openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
-}.getOrNull()
+private fun android.content.ContentResolver.sampledThumbnail(uri: Uri): android.graphics.Bitmap? =
+    runCatching {
+        val bounds =
+            android.graphics.BitmapFactory
+                .Options()
+                .apply { inJustDecodeBounds = true }
+        openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+        var sample = 1
+        while (bounds.outWidth / sample > 640 || bounds.outHeight / sample > 360) sample *= 2
+        val options =
+            android.graphics.BitmapFactory
+                .Options()
+                .apply { inSampleSize = sample.coerceAtLeast(1) }
+        openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
+    }.getOrNull()
 
 fun isLongDraft(text: String): Boolean = text.length >= 1_200 || text.lineSequence().count() >= 4

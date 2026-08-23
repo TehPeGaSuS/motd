@@ -7,35 +7,48 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.isFixedPalette
 import io.github.trevarj.motd.data.prefs.nickColorPaletteFromPreference
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.cbrt
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sqrt
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertTrue
-import org.junit.Test
 
 /** Nick-color resolution order + CLASSIC-palette equality with the legacy nickColor generator. */
 class NickColorResolveTest {
-
     private val nicks = listOf("alice", "Bob", "carol_", "#chan", "dave|away", "eve")
     private val fallback = Color(0.5f, 0.5f, 0.5f)
     private val themeColors = listOf(Color.Red, Color.Green, Color.Blue)
 
     @Test
     fun disabled_returnsFallback() {
-        val c = resolveNickColor("alice", isDark = true, enabled = false,
-            palette = NickColorPalette.VIVID, overrides = mapOf("alice" to 120), fallback = fallback)
+        val c =
+            resolveNickColor(
+                "alice",
+                isDark = true,
+                enabled = false,
+                palette = NickColorPalette.VIVID,
+                overrides = mapOf("alice" to 120),
+                fallback = fallback,
+            )
         assertEquals(fallback, c)
     }
 
     @Test
     fun override_beats_hash() {
         // Override present -> hueColor for that hue; differs from the palette-hash color.
-        val overridden = resolveNickColor("alice", isDark = false, enabled = true,
-            palette = NickColorPalette.CLASSIC, overrides = mapOf("alice" to 210), fallback = fallback)
+        val overridden =
+            resolveNickColor(
+                "alice",
+                isDark = false,
+                enabled = true,
+                palette = NickColorPalette.CLASSIC,
+                overrides = mapOf("alice" to 210),
+                fallback = fallback,
+            )
         assertEquals(hueColor(210, false, NickColorPalette.CLASSIC), overridden)
         assertNotEquals(paletteNickColor("alice", false, NickColorPalette.CLASSIC), overridden)
     }
@@ -43,8 +56,15 @@ class NickColorResolveTest {
     @Test
     fun override_lookup_is_normalized() {
         // Overrides are keyed by normalized nick; a raw " Alice " still resolves.
-        val c = resolveNickColor(" Alice ", isDark = true, enabled = true,
-            palette = NickColorPalette.CLASSIC, overrides = mapOf("alice" to 90), fallback = fallback)
+        val c =
+            resolveNickColor(
+                " Alice ",
+                isDark = true,
+                enabled = true,
+                palette = NickColorPalette.CLASSIC,
+                overrides = mapOf("alice" to 90),
+                fallback = fallback,
+            )
         assertEquals(hueColor(90, true, NickColorPalette.CLASSIC), c)
     }
 
@@ -60,8 +80,14 @@ class NickColorResolveTest {
                 // ...and through the full resolver with no override.
                 assertEquals(
                     nickColor(nick, isDark),
-                    resolveNickColor(nick, isDark, enabled = true,
-                        palette = NickColorPalette.CLASSIC, overrides = emptyMap(), fallback = fallback),
+                    resolveNickColor(
+                        nick,
+                        isDark,
+                        enabled = true,
+                        palette = NickColorPalette.CLASSIC,
+                        overrides = emptyMap(),
+                        fallback = fallback,
+                    ),
                 )
             }
         }
@@ -118,8 +144,13 @@ class NickColorResolveTest {
     @Test
     fun scheme_avatar_ignoresEnabledFlag() {
         // With coloring disabled, sender text goes neutral but avatars keep their generated color.
-        val scheme = NickColorScheme(enabled = false, palette = NickColorPalette.CLASSIC,
-            overrides = emptyMap(), isDark = true)
+        val scheme =
+            NickColorScheme(
+                enabled = false,
+                palette = NickColorPalette.CLASSIC,
+                overrides = emptyMap(),
+                isDark = true,
+            )
         assertEquals(fallback, scheme.nick("alice", fallback))
         assertEquals(paletteNickFill("alice", true, NickColorPalette.CLASSIC), scheme.avatar("alice"))
     }
@@ -127,16 +158,71 @@ class NickColorResolveTest {
     // --- identity colors must come from the theme's own published palette -------------------
 
     /** A 62-name crowd, the same one the palette study measured. */
-    private val crowd = listOf(
-        "alice", "bob", "trevor", "antti", "Lionyx", "morganw", "mango", "emily",
-        "rustacean", "pyBot", "k8s-admin", "dockerfan", "ChanServ", "wumpus", "lambda",
-        "quark", "moss", "roy", "jen", "denholm", "richmond", "zoe", "kai", "juno",
-        "vex", "nova", "orbit", "flux", "cinder", "pixel", "gonzo", "ada", "gr4ce",
-        "linus", "dennis", "ken", "bwk", "rob", "hopper", "lovelace", "turing",
-        "stallman", "torvalds", "carmack", "notch", "shodan", "glados", "wheatley",
-        "cortana", "hal9000", "tars", "case", "marvin", "bender", "data", "lore",
-        "alice_", "alice1", "bob1", "bob2", "trevor_", "nickserv2",
-    )
+    private val crowd =
+        listOf(
+            "alice",
+            "bob",
+            "trevor",
+            "antti",
+            "Lionyx",
+            "morganw",
+            "mango",
+            "emily",
+            "rustacean",
+            "pyBot",
+            "k8s-admin",
+            "dockerfan",
+            "ChanServ",
+            "wumpus",
+            "lambda",
+            "quark",
+            "moss",
+            "roy",
+            "jen",
+            "denholm",
+            "richmond",
+            "zoe",
+            "kai",
+            "juno",
+            "vex",
+            "nova",
+            "orbit",
+            "flux",
+            "cinder",
+            "pixel",
+            "gonzo",
+            "ada",
+            "gr4ce",
+            "linus",
+            "dennis",
+            "ken",
+            "bwk",
+            "rob",
+            "hopper",
+            "lovelace",
+            "turing",
+            "stallman",
+            "torvalds",
+            "carmack",
+            "notch",
+            "shodan",
+            "glados",
+            "wheatley",
+            "cortana",
+            "hal9000",
+            "tars",
+            "case",
+            "marvin",
+            "bender",
+            "data",
+            "lore",
+            "alice_",
+            "alice1",
+            "bob1",
+            "bob2",
+            "trevor_",
+            "nickserv2",
+        )
 
     private class ThemeFixture(
         val accents: List<Color>,
@@ -149,37 +235,61 @@ class NickColorResolveTest {
         val scheme = fixedThemeScheme(preset)!!
         return ThemeFixture(
             accents = listOf(scheme.primary, scheme.tertiary, scheme.secondary).distinct(),
-            backgrounds = listOf(
-                scheme.background, scheme.surface, scheme.surfaceContainerLow,
-                scheme.surfaceContainerHigh, scheme.surfaceContainerHighest,
-                scheme.primaryContainer, scheme.secondaryContainer, scheme.tertiaryContainer,
-            ).distinct(),
+            backgrounds =
+                listOf(
+                    scheme.background,
+                    scheme.surface,
+                    scheme.surfaceContainerLow,
+                    scheme.surfaceContainerHigh,
+                    scheme.surfaceContainerHighest,
+                    scheme.primaryContainer,
+                    scheme.secondaryContainer,
+                    scheme.tertiaryContainer,
+                ).distinct(),
             identityPalette = themeIdentityPalette(preset),
             isDark = preset.isDark,
         )
     }
 
-    private fun themeNick(nick: String, f: ThemeFixture): Color = paletteNickColor(
-        nick, f.isDark, NickColorPalette.THEME, f.accents, f.backgrounds, f.identityPalette,
-    )
+    private fun themeNick(
+        nick: String,
+        f: ThemeFixture,
+    ): Color =
+        paletteNickColor(
+            nick,
+            f.isDark,
+            NickColorPalette.THEME,
+            f.accents,
+            f.backgrounds,
+            f.identityPalette,
+        )
 
     /** Circular hue distance in degrees, so 359.8 and 0.0 read as the same hue. */
-    private fun hueGap(a: Float, b: Float): Float {
+    private fun hueGap(
+        a: Float,
+        b: Float,
+    ): Float {
         val raw = abs(a - b) % 360f
         return min(raw, 360f - raw)
     }
 
     /** CIE Lab deltaE 76; below 12 two identity colors are too close to tell apart at a glance. */
-    private fun deltaE(a: Color, b: Color): Double {
+    private fun deltaE(
+        a: Color,
+        b: Color,
+    ): Double {
         fun lab(c: Color): Triple<Double, Double, Double> {
             fun lin(v: Float): Double {
                 val d = v.toDouble()
                 return if (d <= 0.04045) d / 12.92 else ((d + 0.055) / 1.055).pow(2.4)
             }
-            val r = lin(c.red); val g = lin(c.green); val bl = lin(c.blue)
+            val r = lin(c.red)
+            val g = lin(c.green)
+            val bl = lin(c.blue)
             val x = (r * .4124 + g * .3576 + bl * .1805) / .95047
             val y = r * .2126 + g * .7152 + bl * .0722
             val z = (r * .0193 + g * .1192 + bl * .9505) / 1.08883
+
             fun f(t: Double) = if (t > .008856) cbrt(t) else 7.787 * t + 16.0 / 116.0
             return Triple(116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z)))
         }
@@ -209,9 +319,14 @@ class NickColorResolveTest {
         for (preset in fixedPresets) {
             val f = fixture(preset)
             for (nick in crowd) {
-                val fill = paletteNickFill(
-                    nick, f.isDark, NickColorPalette.THEME, f.accents, f.identityPalette,
-                )
+                val fill =
+                    paletteNickFill(
+                        nick,
+                        f.isDark,
+                        NickColorPalette.THEME,
+                        f.accents,
+                        f.identityPalette,
+                    )
                 assertTrue("$preset/$nick fill is not a declared color", fill in f.identityPalette)
             }
         }
@@ -247,7 +362,9 @@ class NickColorResolveTest {
     fun nickColors_stayDistinguishableEvenOnMutedThemes() {
         // Gruvbox, Zenburn and Nord have the narrowest palettes; they are the worst case.
         for (preset in listOf(
-            ColorThemePreset.GRUVBOX_DARK, ColorThemePreset.ZENBURN, ColorThemePreset.NORD,
+            ColorThemePreset.GRUVBOX_DARK,
+            ColorThemePreset.ZENBURN,
+            ColorThemePreset.NORD,
         )) {
             val f = fixture(preset)
             val colors = crowd.map { themeNick(it, f) }
@@ -268,9 +385,11 @@ class NickColorResolveTest {
     fun everyDeclaredColorGetsUsed() {
         // The hash must reach the whole palette, not favour a prefix of it.
         val f = fixture(ColorThemePreset.GRUVBOX_DARK)
-        val used = (0 until 4000).map {
-            paletteNickFill("user$it", f.isDark, NickColorPalette.THEME, f.accents, f.identityPalette)
-        }.toSet()
+        val used =
+            (0 until 4000)
+                .map {
+                    paletteNickFill("user$it", f.isDark, NickColorPalette.THEME, f.accents, f.identityPalette)
+                }.toSet()
         assertEquals(f.identityPalette.size, used.size)
     }
 

@@ -3,7 +3,9 @@ package io.github.trevarj.motd.e2e.robots
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import io.github.trevarj.motd.e2e.FixtureArgs
 
-internal class OnboardingRobot(compose: ComposeTestRule) : BaseRobot(compose) {
+internal class OnboardingRobot(
+    compose: ComposeTestRule,
+) : BaseRobot(compose) {
     fun importSoju(args: FixtureArgs) {
         click("onboarding_forward_button")
         click("onboarding_choice_bouncer")

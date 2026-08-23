@@ -127,8 +127,7 @@ internal fun nextTimelineRowHeightPx(
 }
 
 /** Heights worth sampling out of one measure pass: real rows that actually occupy space. */
-internal fun timelineRowHeightSamplesPx(keysAndSizes: List<Pair<Any?, Int>>): List<Int> =
-    keysAndSizes.mapNotNull { (key, size) -> size.takeIf { isTimelineRowKey(key) && it > 0 } }
+internal fun timelineRowHeightSamplesPx(keysAndSizes: List<Pair<Any?, Int>>): List<Int> = keysAndSizes.mapNotNull { (key, size) -> size.takeIf { isTimelineRowKey(key) && it > 0 } }
 
 /**
  * A deferred read of the current row-height estimate for [listState].
@@ -144,7 +143,10 @@ internal fun timelineRowHeightSamplesPx(keysAndSizes: List<Pair<Any?, Int>>): Li
  * the list under a stationary reader — is measured at rest.
  */
 @Composable
-internal fun rememberTimelineRowHeight(listState: LazyListState, bufferId: Long?): () -> Dp {
+internal fun rememberTimelineRowHeight(
+    listState: LazyListState,
+    bufferId: Long?,
+): () -> Dp {
     val density = LocalDensity.current
     val bounds = remember(density) { timelineRowHeightBounds(density) }
     // Reset per conversation: a channel of one-line joins and a DM full of link previews have
@@ -165,8 +167,7 @@ internal fun rememberTimelineRowHeight(listState: LazyListState, bufferId: Long?
                 sampledPx = medianTimelineRowHeightPx(heights),
                 bounds = bounds,
             )
-        }
-            .distinctUntilChanged()
+        }.distinctUntilChanged()
             .collect { next -> if (next != null) estimatePx.intValue = next }
     }
     return remember(estimatePx, density) {
@@ -181,10 +182,11 @@ internal fun rememberTimelineRowHeight(listState: LazyListState, bufferId: Long?
     }
 }
 
-internal fun timelineRowHeightBounds(density: Density): TimelineRowHeightBounds = with(density) {
-    TimelineRowHeightBounds(
-        minPx = MIN_TIMELINE_ROW_HEIGHT.roundToPx(),
-        maxPx = MAX_TIMELINE_ROW_HEIGHT.roundToPx(),
-        stepPx = TIMELINE_ROW_HEIGHT_STEP.roundToPx(),
-    )
-}
+internal fun timelineRowHeightBounds(density: Density): TimelineRowHeightBounds =
+    with(density) {
+        TimelineRowHeightBounds(
+            minPx = MIN_TIMELINE_ROW_HEIGHT.roundToPx(),
+            maxPx = MAX_TIMELINE_ROW_HEIGHT.roundToPx(),
+            stepPx = TIMELINE_ROW_HEIGHT_STEP.roundToPx(),
+        )
+    }

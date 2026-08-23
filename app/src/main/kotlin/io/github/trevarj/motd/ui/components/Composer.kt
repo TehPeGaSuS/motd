@@ -7,18 +7,21 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
@@ -27,7 +30,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -63,21 +65,23 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
-import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -86,11 +90,6 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -115,34 +114,44 @@ import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.foundation.lazy.items as lazyItems
 
-data class ComposerReply(val sender: String, val text: String)
+data class ComposerReply(
+    val sender: String,
+    val text: String,
+)
 
 internal enum class ComposerPanel { NONE, AUTOCOMPLETE, EMOJI }
 
-internal fun composerPanel(showEmoji: Boolean, hasAutocomplete: Boolean): ComposerPanel = when {
-    showEmoji -> ComposerPanel.EMOJI
-    hasAutocomplete -> ComposerPanel.AUTOCOMPLETE
-    else -> ComposerPanel.NONE
-}
+internal fun composerPanel(
+    showEmoji: Boolean,
+    hasAutocomplete: Boolean,
+): ComposerPanel =
+    when {
+        showEmoji -> ComposerPanel.EMOJI
+        hasAutocomplete -> ComposerPanel.AUTOCOMPLETE
+        else -> ComposerPanel.NONE
+    }
 
 internal fun autocompletePopupPosition(
     anchorBounds: IntRect,
     popupContentSize: IntSize,
     layoutDirection: LayoutDirection,
-): IntOffset = IntOffset(
-    x = if (layoutDirection == LayoutDirection.Ltr) {
-        anchorBounds.left
-    } else {
-        anchorBounds.right - popupContentSize.width
-    },
-    y = anchorBounds.top - popupContentSize.height,
-)
+): IntOffset =
+    IntOffset(
+        x =
+            if (layoutDirection == LayoutDirection.Ltr) {
+                anchorBounds.left
+            } else {
+                anchorBounds.right - popupContentSize.width
+            },
+        y = anchorBounds.top - popupContentSize.height,
+    )
 
 private object AutocompletePopupPositionProvider : PopupPositionProvider {
     override fun calculatePosition(
@@ -175,19 +184,18 @@ internal fun openEmojiPickerSession(
     val rememberedImeHeightPx = lastVisibleImeHeightPx.coerceAtLeast(0)
     val replacesKeyboard = visibleImeHeightPx > 0 || inputFocused && rememberedImeHeightPx > 0
     return EmojiPickerSession(
-        capturedImeHeightPx = when {
-            replacesKeyboard -> maxOf(visibleImeHeightPx, rememberedImeHeightPx)
-            else -> compactPickerHeightPx.coerceAtLeast(0)
-        },
+        capturedImeHeightPx =
+            when {
+                replacesKeyboard -> maxOf(visibleImeHeightPx, rememberedImeHeightPx)
+                else -> compactPickerHeightPx.coerceAtLeast(0)
+            },
         restoresKeyboard = replacesKeyboard,
     )
 }
 
-internal fun closeEmojiPickerSession(session: EmojiPickerSession): EmojiPickerSession? =
-    if (session.restoresKeyboard) session.copy(phase = EmojiPickerPhase.RESTORING_IME) else null
+internal fun closeEmojiPickerSession(session: EmojiPickerSession): EmojiPickerSession? = if (session.restoresKeyboard) session.copy(phase = EmojiPickerPhase.RESTORING_IME) else null
 
-internal fun reopenEmojiPickerSession(session: EmojiPickerSession): EmojiPickerSession =
-    session.copy(phase = EmojiPickerPhase.OPEN)
+internal fun reopenEmojiPickerSession(session: EmojiPickerSession): EmojiPickerSession = session.copy(phase = EmojiPickerPhase.OPEN)
 
 /**
  * As the consumed IME inset falls, this complementary height grows by the same amount, keeping the
@@ -204,8 +212,10 @@ internal fun emojiPickerReplacementHeight(
  * the measure phase — the same phase `imePadding()` reads in — is what keeps
  * `imePadding + panel height == captured` on every frame of the IME animation.
  */
-internal fun imeContentHeightPx(imeBottomPx: Int, navigationBarsBottomPx: Int): Int =
-    (imeBottomPx - navigationBarsBottomPx).coerceAtLeast(0)
+internal fun imeContentHeightPx(
+    imeBottomPx: Int,
+    navigationBarsBottomPx: Int,
+): Int = (imeBottomPx - navigationBarsBottomPx).coerceAtLeast(0)
 
 /**
  * One frame of the residual collapse. A keyboard that comes back shorter than the captured height
@@ -232,7 +242,9 @@ internal fun collapseCapturedImeHeightPx(
  * rather than the largest one ever seen: rotation, a keyboard switch or a suggestion strip all make
  * the resting height shrink, and capturing a stale maximum leaves the panel with residual height.
  */
-internal class ImeInsetTracker(private val settledFrameCount: Int = IME_SETTLED_FRAME_COUNT) {
+internal class ImeInsetTracker(
+    private val settledFrameCount: Int = IME_SETTLED_FRAME_COUNT,
+) {
     var currentImeHeightPx by mutableIntStateOf(0)
         private set
 
@@ -280,8 +292,7 @@ internal enum class VoiceGestureTarget { NONE, CANCEL, LOCK }
 private const val VOICE_RECORD_HOLD_DELAY_MILLIS = 500L
 
 // Keep the accidental-touch guard even when a device configures a shorter long-press timeout.
-internal fun voiceRecordHoldDelay(longPressTimeoutMillis: Long): Long =
-    maxOf(VOICE_RECORD_HOLD_DELAY_MILLIS, longPressTimeoutMillis)
+internal fun voiceRecordHoldDelay(longPressTimeoutMillis: Long): Long = maxOf(VOICE_RECORD_HOLD_DELAY_MILLIS, longPressTimeoutMillis)
 
 internal fun voiceGestureTarget(
     holdActivated: Boolean,
@@ -290,12 +301,13 @@ internal fun voiceGestureTarget(
     deltaY: Float,
     cancelThreshold: Float,
     lockThreshold: Float,
-): VoiceGestureTarget = when {
-    !holdActivated || !pointerPressed -> VoiceGestureTarget.NONE
-    deltaY <= -lockThreshold && -deltaY >= -deltaX -> VoiceGestureTarget.LOCK
-    deltaX <= -cancelThreshold -> VoiceGestureTarget.CANCEL
-    else -> VoiceGestureTarget.NONE
-}
+): VoiceGestureTarget =
+    when {
+        !holdActivated || !pointerPressed -> VoiceGestureTarget.NONE
+        deltaY <= -lockThreshold && -deltaY >= -deltaX -> VoiceGestureTarget.LOCK
+        deltaX <= -cancelThreshold -> VoiceGestureTarget.CANCEL
+        else -> VoiceGestureTarget.NONE
+    }
 
 /** Modern chat composer with embedded tools and a stable, separate primary send action. */
 @Composable
@@ -333,9 +345,10 @@ fun Composer(
     var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
     val emojiQuery = activeEmojiQuery(value)
     val emojiSearchEntries = remember { systemEmojiSearchEntries() }
-    val emojiSuggestions = remember(emojiQuery, emojiSearchEntries) {
-        emojiQuery?.let { searchSystemEmojis(emojiSearchEntries, it.query) }.orEmpty()
-    }
+    val emojiSuggestions =
+        remember(emojiQuery, emojiSearchEntries) {
+            emojiQuery?.let { searchSystemEmojis(emojiSearchEntries, it.query) }.orEmpty()
+        }
     val hasAutocomplete = emojiSuggestions.isNotEmpty() || autocomplete != null
     // Keep autocomplete hidden for the entire restoration handoff. Otherwise it would introduce
     // another independently-sized panel above the input row while the IME is animating.
@@ -376,12 +389,13 @@ fun Composer(
     }
 
     fun openEmojiPicker() {
-        val session = openEmojiPickerSession(
-            imeHeightPx = imeInsetTracker.currentImeHeightPx,
-            lastVisibleImeHeightPx = imeInsetTracker.lastVisibleImeHeightPx,
-            inputFocused = inputFocused,
-            compactPickerHeightPx = compactPickerHeightPx,
-        )
+        val session =
+            openEmojiPickerSession(
+                imeHeightPx = imeInsetTracker.currentImeHeightPx,
+                lastVisibleImeHeightPx = imeInsetTracker.lastVisibleImeHeightPx,
+                inputFocused = inputFocused,
+                compactPickerHeightPx = compactPickerHeightPx,
+            )
         // Measure the picker content once per session; the restore tail only shrinks the viewport.
         pickerContentHeightPx = session.capturedImeHeightPx
         emojiPickerSession = session
@@ -401,32 +415,36 @@ fun Composer(
         // Most keyboards reopen the still-focused input connection immediately. If one ignores that
         // request, create exactly one fresh focus transition instead of repeatedly clearing focus
         // and flashing the entire composer.
-        val refocus = launch {
-            repeat(IME_RESTORE_REFOCUS_FRAMES) { withFrameNanos { } }
-            if (imeInsetTracker.currentImeHeightPx == 0) {
-                focusManager.clearFocus(force = true)
-                withFrameNanos { }
-                focusRequester.requestFocus()
-                withFrameNanos { }
-                keyboard?.show()
+        val refocus =
+            launch {
+                repeat(IME_RESTORE_REFOCUS_FRAMES) { withFrameNanos { } }
+                if (imeInsetTracker.currentImeHeightPx == 0) {
+                    focusManager.clearFocus(force = true)
+                    withFrameNanos { }
+                    focusRequester.requestFocus()
+                    withFrameNanos { }
+                    keyboard?.show()
+                }
             }
-        }
         // A settle at zero only means the keyboard has not started coming back yet, so keep waiting
         // for a resting height the panel can actually hand its space over to.
-        val restoredHeightPx = withTimeoutOrNull(EMOJI_IME_RESTORE_TIMEOUT_MILLIS) {
-            var generation = startGeneration
-            var heightPx = 0
-            while (heightPx <= 0) {
-                generation = snapshotFlow { imeInsetTracker.settleGeneration }
-                    .first { it != generation }
-                heightPx = imeInsetTracker.currentImeHeightPx
-            }
-            heightPx
-        } ?: 0
+        val restoredHeightPx =
+            withTimeoutOrNull(EMOJI_IME_RESTORE_TIMEOUT_MILLIS) {
+                var generation = startGeneration
+                var heightPx = 0
+                while (heightPx <= 0) {
+                    generation =
+                        snapshotFlow { imeInsetTracker.settleGeneration }
+                            .first { it != generation }
+                    heightPx = imeInsetTracker.currentImeHeightPx
+                }
+                heightPx
+            } ?: 0
         refocus.cancel()
-        val settledSession = emojiPickerSession
-            ?.takeIf { it.phase == EmojiPickerPhase.RESTORING_IME }
-            ?: return@LaunchedEffect
+        val settledSession =
+            emojiPickerSession
+                ?.takeIf { it.phase == EmojiPickerPhase.RESTORING_IME }
+                ?: return@LaunchedEffect
         if (restoredHeightPx <= 0) {
             emojiPickerSession = reopenEmojiPickerSession(settledSession)
             return@LaunchedEffect
@@ -444,13 +462,15 @@ fun Composer(
         ) {
             withFrameNanos { }
             if (emojiPickerSession !== collapsing) return@LaunchedEffect
-            collapsing = collapsing.copy(
-                capturedImeHeightPx = collapseCapturedImeHeightPx(
-                    capturedImeHeightPx = collapsing.capturedImeHeightPx,
-                    currentImeHeightPx = imeInsetTracker.currentImeHeightPx,
-                    remainingFrames = remainingFrames,
-                ),
-            )
+            collapsing =
+                collapsing.copy(
+                    capturedImeHeightPx =
+                        collapseCapturedImeHeightPx(
+                            capturedImeHeightPx = collapsing.capturedImeHeightPx,
+                            currentImeHeightPx = imeInsetTracker.currentImeHeightPx,
+                            remainingFrames = remainingFrames,
+                        ),
+                )
             emojiPickerSession = collapsing
             remainingFrames--
         }
@@ -468,10 +488,12 @@ fun Composer(
         overlay = {
             AnimatedVisibility(
                 visible = visiblePanel == ComposerPanel.AUTOCOMPLETE,
-                enter = fadeIn(MotdMotion.fadeIn) +
-                    slideInVertically(animationSpec = MotdMotion.rowPlacement) { height -> height / 8 },
-                exit = fadeOut(MotdMotion.microFadeOut) +
-                    slideOutVertically(animationSpec = MotdMotion.rowPlacement) { height -> height / 8 },
+                enter =
+                    fadeIn(MotdMotion.fadeIn) +
+                        slideInVertically(animationSpec = MotdMotion.rowPlacement) { height -> height / 8 },
+                exit =
+                    fadeOut(MotdMotion.microFadeOut) +
+                        slideOutVertically(animationSpec = MotdMotion.rowPlacement) { height -> height / 8 },
             ) {
                 Box(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
                     if (emojiSuggestions.isNotEmpty() && emojiQuery != null) {
@@ -505,152 +527,170 @@ fun Composer(
                 }
 
                 Row(
-                    modifier = Modifier
-                        .testTag("chat_composer_input_row")
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    modifier =
+                        Modifier
+                            .testTag("chat_composer_input_row")
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.Bottom,
                 ) {
-                Surface(
-                    modifier = Modifier.weight(1f),
-                    shape = MotdShapes.composer,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                ) {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        if (showEmojiButton) {
-                            IconButton(
-                                onClick = {
-                                    when (emojiPickerSession?.phase) {
-                                        EmojiPickerPhase.OPEN -> dismissEmojiPicker()
-                                        EmojiPickerPhase.RESTORING_IME -> {
-                                            emojiPickerSession = emojiPickerSession?.let(::reopenEmojiPickerSession)
-                                            keyboard?.hide()
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = MotdShapes.composer,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            if (showEmojiButton) {
+                                IconButton(
+                                    onClick = {
+                                        when (emojiPickerSession?.phase) {
+                                            EmojiPickerPhase.OPEN -> {
+                                                dismissEmojiPicker()
+                                            }
+
+                                            EmojiPickerPhase.RESTORING_IME -> {
+                                                emojiPickerSession = emojiPickerSession?.let(::reopenEmojiPickerSession)
+                                                keyboard?.hide()
+                                            }
+
+                                            null -> {
+                                                openEmojiPicker()
+                                            }
                                         }
-                                        null -> openEmojiPicker()
-                                    }
-                                },
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .testTag("chat_composer_emoji")
-                                    .semantics { selected = emojiPickerSession?.phase == EmojiPickerPhase.OPEN },
-                            ) {
-                                Icon(
-                                    Icons.Outlined.Mood,
-                                    contentDescription = stringResource(
-                                        if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) R.string.chat_composer_emoji_close
-                                        else R.string.chat_composer_emoji,
-                                    ),
-                                    tint = if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                    },
+                                    modifier =
+                                        Modifier
+                                            .size(48.dp)
+                                            .testTag("chat_composer_emoji")
+                                            .semantics { selected = emojiPickerSession?.phase == EmojiPickerPhase.OPEN },
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Mood,
+                                        contentDescription =
+                                            stringResource(
+                                                if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) {
+                                                    R.string.chat_composer_emoji_close
+                                                } else {
+                                                    R.string.chat_composer_emoji
+                                                },
+                                            ),
+                                        tint =
+                                            if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                    )
+                                }
                             }
-                        }
 
-                        Box(
-                            Modifier
-                                .weight(1f)
-                                .onGloballyPositioned { onFieldPositioned(it.boundsInWindow()) },
-                        ) {
-                            ComposerTextField(
-                                value = value,
-                                onValueChange = onValueChange,
-                                placeholder = placeholder,
-                                onFocusChanged = { inputFocused = it },
-                                onFocused = { dismissEmojiPicker() },
-                                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-                                onTextPositioned = onFieldTextPositioned,
-                            )
-
-                            // A physical tap on the text field while the picker is open should
-                            // perform the same seamless handoff as the emoji toggle. Letting the
-                            // field receive that tap directly can make Android show the keyboard
-                            // before the complementary panel has been installed.
-                            if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) {
-                                Box(
-                                    modifier = Modifier
-                                        .matchParentSize()
-                                        .clickable { dismissEmojiPicker() }
-                                        .semantics {
-                                            contentDescription = closeEmojiPickerDescription
-                                        },
-                                )
-                            }
-                        }
-
-                        onAttachment?.let { action ->
-                            IconButton(
-                                onClick = {
-                                    emojiPickerSession = null
-                                    keyboard?.hide()
-                                    focusManager.clearFocus(force = true)
-                                    action()
-                                },
-                                modifier = Modifier.size(48.dp).testTag("chat_composer_attachment"),
-                            ) {
-                                Icon(
-                                    Icons.Outlined.AttachFile,
-                                    contentDescription = stringResource(R.string.chat_composer_attachment),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                }
-
-                val canSend = enabled && value.text.isNotBlank()
-                // Send and voice are both fixed 48.dp round buttons, so cross-fading the swap
-                // changes only pixels inside that circle and never shifts the input row.
-                Crossfade(
-                    targetState = canSend || !voiceEnabled,
-                    animationSpec = MotdMotion.microFadeIn,
-                    label = "composer_action",
-                ) { showSend ->
-                    if (showSend) {
-                        FilledIconButton(
-                            onClick = {
-                                dismissEmojiPicker()
-                                onSend()
-                            },
-                            enabled = canSend,
-                            modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
-                            shape = CircleShape,
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
-                            ),
-                        ) {
                             Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center,
+                                Modifier
+                                    .weight(1f)
+                                    .onGloballyPositioned { onFieldPositioned(it.boundsInWindow()) },
                             ) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.Send,
-                                    stringResource(R.string.chat_composer_send),
-                                    modifier = Modifier.size(24.dp),
+                                ComposerTextField(
+                                    value = value,
+                                    onValueChange = onValueChange,
+                                    placeholder = placeholder,
+                                    onFocusChanged = { inputFocused = it },
+                                    onFocused = { dismissEmojiPicker() },
+                                    modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                                    onTextPositioned = onFieldTextPositioned,
                                 )
+
+                                // A physical tap on the text field while the picker is open should
+                                // perform the same seamless handoff as the emoji toggle. Letting the
+                                // field receive that tap directly can make Android show the keyboard
+                                // before the complementary panel has been installed.
+                                if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) {
+                                    Box(
+                                        modifier =
+                                            Modifier
+                                                .matchParentSize()
+                                                .clickable { dismissEmojiPicker() }
+                                                .semantics {
+                                                    contentDescription = closeEmojiPickerDescription
+                                                },
+                                    )
+                                }
+                            }
+
+                            onAttachment?.let { action ->
+                                IconButton(
+                                    onClick = {
+                                        emojiPickerSession = null
+                                        keyboard?.hide()
+                                        focusManager.clearFocus(force = true)
+                                        action()
+                                    },
+                                    modifier = Modifier.size(48.dp).testTag("chat_composer_attachment"),
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.AttachFile,
+                                        contentDescription = stringResource(R.string.chat_composer_attachment),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
-                    } else {
-                        VoiceRecordButton(
-                            enabled = enabled,
-                            recording = voiceRecording,
-                            onHoldStart = {
-                                dismissEmojiPicker()
-                                onVoiceHoldStart()
-                            },
-                            onAccessibilityStart = {
-                                dismissEmojiPicker()
-                                onVoiceAccessibilityStart()
-                            },
-                            onHoldStop = onVoiceHoldStop,
-                            onHoldCancel = onVoiceHoldCancel,
-                            onLock = onVoiceLock,
-                        )
+                    }
+
+                    val canSend = enabled && value.text.isNotBlank()
+                    // Send and voice are both fixed 48.dp round buttons, so cross-fading the swap
+                    // changes only pixels inside that circle and never shifts the input row.
+                    Crossfade(
+                        targetState = canSend || !voiceEnabled,
+                        animationSpec = MotdMotion.microFadeIn,
+                        label = "composer_action",
+                    ) { showSend ->
+                        if (showSend) {
+                            FilledIconButton(
+                                onClick = {
+                                    dismissEmojiPicker()
+                                    onSend()
+                                },
+                                enabled = canSend,
+                                modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
+                                shape = CircleShape,
+                                colors =
+                                    IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                                        disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
+                                    ),
+                            ) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.Send,
+                                        stringResource(R.string.chat_composer_send),
+                                        modifier = Modifier.size(24.dp),
+                                    )
+                                }
+                            }
+                        } else {
+                            VoiceRecordButton(
+                                enabled = enabled,
+                                recording = voiceRecording,
+                                onHoldStart = {
+                                    dismissEmojiPicker()
+                                    onVoiceHoldStart()
+                                },
+                                onAccessibilityStart = {
+                                    dismissEmojiPicker()
+                                    onVoiceAccessibilityStart()
+                                },
+                                onHoldStop = onVoiceHoldStop,
+                                onHoldCancel = onVoiceHoldCancel,
+                                onLock = onVoiceLock,
+                            )
+                        }
                     }
                 }
-            }
 
                 EmojiPickerReplacementSurface(
                     session = emojiPickerSession,
@@ -697,93 +737,108 @@ private fun VoiceRecordButton(
     )
     FilledIconButton(
         onClick = {
-            if (latestRecording) latestHoldStop()
-            else latestAccessibilityStart()
+            if (latestRecording) {
+                latestHoldStop()
+            } else {
+                latestAccessibilityStart()
+            }
         },
         enabled = enabled,
-        modifier = Modifier
-            .size(48.dp)
-            .testTag("chat_composer_voice")
-            .pointerInput(enabled, cancelPx, lockPx) {
-                if (!enabled) return@pointerInput
-                coroutineScope {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(
-                            requireUnconsumed = false,
-                            pass = PointerEventPass.Initial,
-                        )
-                        // Keep the optimized pointer gesture separate from the semantic action:
-                        // consuming the down prevents Material's click from turning a quick tap
-                        // into a locked recording, while keyboard/accessibility clicks still use onClick.
-                        down.consume()
-                        if (latestRecording) {
-                            waitForUpOrCancellation()
-                            latestHoldStop()
-                            return@awaitEachGesture
-                        }
-                        var started = false
-                        var cancelled = false
-                        var locked = false
-                        val longPress = this@coroutineScope.launch {
-                            delay(voiceRecordHoldDelay(viewConfiguration.longPressTimeoutMillis))
-                            started = true
-                            // Confirm the hold threshold itself, when microphone capture begins.
-                            // Quick taps stay silent because they never activate recording.
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            latestHoldStart()
-                        }
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            val delta = change.position - down.position
-                            if (!locked) {
-                                when (
-                                    voiceGestureTarget(
-                                        started,
-                                        change.pressed,
-                                        delta.x,
-                                        delta.y,
-                                        cancelPx,
-                                        lockPx,
-                                    )
-                                ) {
-                                    VoiceGestureTarget.LOCK -> {
-                                        locked = true
-                                        change.consume()
-                                        // Confirm the transition to hands-free recording as soon as it locks.
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        latestLock()
-                                        break
-                                    }
-                                    VoiceGestureTarget.CANCEL -> {
-                                        cancelled = true
-                                        change.consume()
-                                        // Use rejection feedback when the destructive slide target
-                                        // commits so cancellation is unambiguous without looking.
-                                        haptics.performHapticFeedback(HapticFeedbackType.Reject)
-                                        latestHoldCancel()
-                                        break
-                                    }
-                                    VoiceGestureTarget.NONE -> Unit
-                                }
+        modifier =
+            Modifier
+                .size(48.dp)
+                .testTag("chat_composer_voice")
+                .pointerInput(enabled, cancelPx, lockPx) {
+                    if (!enabled) return@pointerInput
+                    coroutineScope {
+                        awaitEachGesture {
+                            val down =
+                                awaitFirstDown(
+                                    requireUnconsumed = false,
+                                    pass = PointerEventPass.Initial,
+                                )
+                            // Keep the optimized pointer gesture separate from the semantic action:
+                            // consuming the down prevents Material's click from turning a quick tap
+                            // into a locked recording, while keyboard/accessibility clicks still use onClick.
+                            down.consume()
+                            if (latestRecording) {
+                                waitForUpOrCancellation()
+                                latestHoldStop()
+                                return@awaitEachGesture
                             }
-                            if (!change.pressed) break
-                        }
-                        longPress.cancel()
-                        when {
-                            !started -> Unit // Pointer taps stay silent; semantic clicks start a locked recording.
-                            cancelled -> Unit
-                            locked -> Unit
-                            else -> latestHoldStop()
+                            var started = false
+                            var cancelled = false
+                            var locked = false
+                            val longPress =
+                                this@coroutineScope.launch {
+                                    delay(voiceRecordHoldDelay(viewConfiguration.longPressTimeoutMillis))
+                                    started = true
+                                    // Confirm the hold threshold itself, when microphone capture begins.
+                                    // Quick taps stay silent because they never activate recording.
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    latestHoldStart()
+                                }
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                val delta = change.position - down.position
+                                if (!locked) {
+                                    when (
+                                        voiceGestureTarget(
+                                            started,
+                                            change.pressed,
+                                            delta.x,
+                                            delta.y,
+                                            cancelPx,
+                                            lockPx,
+                                        )
+                                    ) {
+                                        VoiceGestureTarget.LOCK -> {
+                                            locked = true
+                                            change.consume()
+                                            // Confirm the transition to hands-free recording as soon as it locks.
+                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            latestLock()
+                                            break
+                                        }
+
+                                        VoiceGestureTarget.CANCEL -> {
+                                            cancelled = true
+                                            change.consume()
+                                            // Use rejection feedback when the destructive slide target
+                                            // commits so cancellation is unambiguous without looking.
+                                            haptics.performHapticFeedback(HapticFeedbackType.Reject)
+                                            latestHoldCancel()
+                                            break
+                                        }
+
+                                        VoiceGestureTarget.NONE -> {
+                                            Unit
+                                        }
+                                    }
+                                }
+                                if (!change.pressed) break
+                            }
+                            longPress.cancel()
+                            when {
+                                !started -> Unit
+
+                                // Pointer taps stay silent; semantic clicks start a locked recording.
+                                cancelled -> Unit
+
+                                locked -> Unit
+
+                                else -> latestHoldStop()
+                            }
                         }
                     }
-                }
-            },
+                },
         shape = CircleShape,
-        colors = IconButtonDefaults.filledIconButtonColors(
-            containerColor = containerColor,
-            contentColor = contentColor,
-        ),
+        colors =
+            IconButtonDefaults.filledIconButtonColors(
+                containerColor = containerColor,
+                contentColor = contentColor,
+            ),
     ) {
         // Cross-fade the glyph so the content description always matches the composed branch.
         Crossfade(
@@ -793,9 +848,10 @@ private fun VoiceRecordButton(
         ) { isRecording ->
             Icon(
                 if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
-                contentDescription = stringResource(
-                    if (isRecording) R.string.voice_stop_recording else R.string.voice_record,
-                ),
+                contentDescription =
+                    stringResource(
+                        if (isRecording) R.string.voice_stop_recording else R.string.voice_record,
+                    ),
             )
         }
     }
@@ -820,12 +876,13 @@ private fun AutocompleteOverlayLayout(
         if (anchorWidthPx > 0) {
             Popup(
                 popupPositionProvider = AutocompletePopupPositionProvider,
-                properties = PopupProperties(
-                    focusable = false,
-                    dismissOnBackPress = false,
-                    dismissOnClickOutside = false,
-                    clippingEnabled = false,
-                ),
+                properties =
+                    PopupProperties(
+                        focusable = false,
+                        dismissOnBackPress = false,
+                        dismissOnClickOutside = false,
+                        clippingEnabled = false,
+                    ),
             ) {
                 Box(Modifier.width(with(density) { anchorWidthPx.toDp() })) {
                     overlay()
@@ -867,10 +924,11 @@ private fun EmojiPickerReplacementSurface(
     // frame of the handoff.
     if (contentHeightPx <= 0) return
     Layout(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("chat_composer_emoji_panel")
-            .clipToBounds(),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag("chat_composer_emoji_panel")
+                .clipToBounds(),
         content = {
             // Measure the picker once at the captured keyboard height. Only the clipping viewport
             // changes during the IME animation, so the pager/grid does not relayout every frame.
@@ -880,15 +938,17 @@ private fun EmojiPickerReplacementSurface(
         val fullHeightPx = contentHeightPx.coerceAtMost(constraints.maxHeight)
         // Measure-phase inset read: the ancestor `imePadding()` samples the very same frame, so the
         // input row never moves by one frame of keyboard travel and the timeline viewport is stable.
-        val visibleHeightPx = session?.let {
-            emojiPickerReplacementHeight(
-                capturedImeHeightPx = it.capturedImeHeightPx,
-                currentImeHeightPx = readImeContentHeightPx(this),
-            ).coerceAtMost(fullHeightPx)
-        } ?: 0
-        val placeable = measurables.single().measure(
-            constraints.copy(minHeight = fullHeightPx, maxHeight = fullHeightPx),
-        )
+        val visibleHeightPx =
+            session?.let {
+                emojiPickerReplacementHeight(
+                    capturedImeHeightPx = it.capturedImeHeightPx,
+                    currentImeHeightPx = readImeContentHeightPx(this),
+                ).coerceAtMost(fullHeightPx)
+            } ?: 0
+        val placeable =
+            measurables.single().measure(
+                constraints.copy(minHeight = fullHeightPx, maxHeight = fullHeightPx),
+            )
         layout(placeable.width, visibleHeightPx) {
             placeable.placeRelative(0, 0)
         }
@@ -908,21 +968,22 @@ private fun ComposerTextField(
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = modifier
-            .heightIn(min = 48.dp, max = 148.dp)
-            // Single source of focus truth. Mirroring this through the interaction source as well
-            // dismissed the picker twice for every focus gain.
-            .onFocusChanged {
-                onFocusChanged(it.isFocused)
-                if (it.isFocused) onFocused()
-            }
-            .testTag("chat_composer_field"),
+        modifier =
+            modifier
+                .heightIn(min = 48.dp, max = 148.dp)
+                // Single source of focus truth. Mirroring this through the interaction source as well
+                // dismissed the picker twice for every focus gain.
+                .onFocusChanged {
+                    onFocusChanged(it.isFocused)
+                    if (it.isFocused) onFocused()
+                }.testTag("chat_composer_field"),
         textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-        keyboardOptions = KeyboardOptions(
-            capitalization = KeyboardCapitalization.Sentences,
-            imeAction = ImeAction.Default,
-        ),
+        keyboardOptions =
+            KeyboardOptions(
+                capitalization = KeyboardCapitalization.Sentences,
+                imeAction = ImeAction.Default,
+            ),
         maxLines = 6,
         decorationBox = { inner ->
             Box(
@@ -943,14 +1004,21 @@ private fun ComposerTextField(
     )
 }
 
-fun insertAtCursor(value: TextFieldValue, insertion: String): TextFieldValue {
+fun insertAtCursor(
+    value: TextFieldValue,
+    insertion: String,
+): TextFieldValue {
     val start = value.selection.min
     val end = value.selection.max
     val text = value.text.replaceRange(start, end, insertion)
     return TextFieldValue(text = text, selection = TextRange(start + insertion.length))
 }
 
-internal data class EmojiQuery(val start: Int, val end: Int, val query: String)
+internal data class EmojiQuery(
+    val start: Int,
+    val end: Int,
+    val query: String,
+)
 
 internal fun activeEmojiQuery(value: TextFieldValue): EmojiQuery? {
     if (!value.selection.collapsed) return null
@@ -985,8 +1053,12 @@ private fun EmojiAutocompletePanel(
         LazyColumn(Modifier.heightIn(max = 240.dp)) {
             lazyItems(suggestions, key = { it.emoji }) { suggestion ->
                 Row(
-                    modifier = Modifier.fillMaxWidth().clickable { onPick(suggestion) }
-                        .heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(suggestion) }
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -1009,10 +1081,11 @@ private fun EmojiPickerPanel(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier
-            .testTag("chat_composer_emoji_picker")
-            .padding(start = 8.dp, end = 8.dp, top = 8.dp)
-            .fillMaxSize(),
+        modifier =
+            modifier
+                .testTag("chat_composer_emoji_picker")
+                .padding(start = 8.dp, end = 8.dp, top = 8.dp)
+                .fillMaxSize(),
         shape = MotdShapes.bubble,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
@@ -1025,15 +1098,19 @@ private fun EmojiPickerPanel(
             update = { picker ->
                 picker.setOnEmojiPickedListener { item -> onPick(item.emoji) }
             },
-            modifier = Modifier
-                .fillMaxSize()
-                .testTag("chat_composer_emoji_grid"),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .testTag("chat_composer_emoji_grid"),
         )
     }
 }
 
 @Composable
-private fun ReplyBar(reply: ComposerReply, onCancel: () -> Unit) {
+private fun ReplyBar(
+    reply: ComposerReply,
+    onCancel: () -> Unit,
+) {
     val accent = LocalNickColors.current.nick(reply.sender, MaterialTheme.colorScheme.primary)
     Surface(
         modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 68.dp, top = 8.dp),
@@ -1044,7 +1121,13 @@ private fun ReplyBar(reply: ComposerReply, onCancel: () -> Unit) {
             modifier = Modifier.padding(start = 12.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.width(3.dp).height(36.dp).clip(CircleShape).background(accent))
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .height(36.dp)
+                    .clip(CircleShape)
+                    .background(accent),
+            )
             Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                 Text(
                     stringResource(R.string.chat_composer_replying_to, reply.sender),
@@ -1069,18 +1152,21 @@ private fun ReplyBar(reply: ComposerReply, onCancel: () -> Unit) {
 
 @Preview(showBackground = true)
 @Composable
-private fun ComposerPreview() = MotdTheme {
-    Composer(TextFieldValue("hello there"), {}, {}, true, onAttachment = {})
-}
+private fun ComposerPreview() =
+    MotdTheme {
+        Composer(TextFieldValue("hello there"), {}, {}, true, onAttachment = {})
+    }
 
 @Preview(showBackground = true, widthDp = 320)
 @Composable
-private fun ComposerNarrowMultilinePreview() = MotdTheme {
-    Composer(TextFieldValue("A longer draft that wraps across\nmultiple lines"), {}, {}, true, onAttachment = {})
-}
+private fun ComposerNarrowMultilinePreview() =
+    MotdTheme {
+        Composer(TextFieldValue("A longer draft that wraps across\nmultiple lines"), {}, {}, true, onAttachment = {})
+    }
 
 @Preview(showBackground = true)
 @Composable
-private fun ComposerReplyPreview() = MotdTheme {
-    Composer(TextFieldValue(""), {}, {}, true, reply = ComposerReply("alice", "welcome to the channel!"), onAttachment = {})
-}
+private fun ComposerReplyPreview() =
+    MotdTheme {
+        Composer(TextFieldValue(""), {}, {}, true, reply = ComposerReply("alice", "welcome to the channel!"), onAttachment = {})
+    }

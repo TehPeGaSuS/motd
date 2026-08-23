@@ -15,15 +15,16 @@ import javax.inject.Singleton
  * resolve their own alias rather than the release one.
  */
 internal fun launcherAliasFqcn(icon: LauncherIcon): String {
-    val simpleName = when (icon) {
-        LauncherIcon.DEFAULT -> "LauncherDefault"
-        LauncherIcon.MONO -> "LauncherMono"
-        LauncherIcon.TERMINAL -> "LauncherTerminal"
-        LauncherIcon.GRUVBOX -> "LauncherGruvbox"
-        LauncherIcon.CATPPUCCIN -> "LauncherCatppuccin"
-        LauncherIcon.NORD -> "LauncherNord"
-        LauncherIcon.LIGHT -> "LauncherLight"
-    }
+    val simpleName =
+        when (icon) {
+            LauncherIcon.DEFAULT -> "LauncherDefault"
+            LauncherIcon.MONO -> "LauncherMono"
+            LauncherIcon.TERMINAL -> "LauncherTerminal"
+            LauncherIcon.GRUVBOX -> "LauncherGruvbox"
+            LauncherIcon.CATPPUCCIN -> "LauncherCatppuccin"
+            LauncherIcon.NORD -> "LauncherNord"
+            LauncherIcon.LIGHT -> "LauncherLight"
+        }
     return "io.github.trevarj.motd.$simpleName"
 }
 
@@ -32,7 +33,10 @@ internal fun launcherAliasFqcn(icon: LauncherIcon): String {
  * Pure and Context-free so the enable/disable set (and that [target] is excluded from its own
  * disable list) is unit-testable without Robolectric.
  */
-internal fun launcherComponentPlan(target: LauncherIcon, all: List<LauncherIcon>): Pair<String, List<String>> {
+internal fun launcherComponentPlan(
+    target: LauncherIcon,
+    all: List<LauncherIcon>,
+): Pair<String, List<String>> {
     val toEnable = launcherAliasFqcn(target)
     val toDisable = all.filter { it != target }.map(::launcherAliasFqcn)
     return toEnable to toDisable
@@ -47,51 +51,59 @@ internal fun launcherComponentPlan(target: LauncherIcon, all: List<LauncherIcon>
  * affected by which alias currently owns the MAIN/LAUNCHER filter.
  */
 @Singleton
-class LauncherIconController @Inject constructor(
-    @ApplicationContext private val context: Context,
-) {
-    fun apply(icon: LauncherIcon) {
-        val packageManager = context.packageManager
-        val (enableFqcn, disableFqcns) = launcherComponentPlan(icon, LauncherIcon.entries)
+class LauncherIconController
+    @Inject
+    constructor(
+        @ApplicationContext private val context: Context,
+    ) {
+        fun apply(icon: LauncherIcon) {
+            val packageManager = context.packageManager
+            val (enableFqcn, disableFqcns) = launcherComponentPlan(icon, LauncherIcon.entries)
 
-        setEnabledIfChanged(
-            packageManager = packageManager,
-            fqcn = enableFqcn,
-            enabled = true,
-        )
-        disableFqcns.forEach { fqcn ->
             setEnabledIfChanged(
                 packageManager = packageManager,
-                fqcn = fqcn,
-                enabled = false,
+                fqcn = enableFqcn,
+                enabled = true,
             )
+            disableFqcns.forEach { fqcn ->
+                setEnabledIfChanged(
+                    packageManager = packageManager,
+                    fqcn = fqcn,
+                    enabled = false,
+                )
+            }
         }
-    }
 
-    /**
-     * Applies the target state only when it differs from the component's current state, so a
-     * repeat call (e.g. process restart re-collecting the same preference) never trips the
-     * launcher-icon refresh some home-screen implementations perform on every
-     * `setComponentEnabledSetting` call.
-     *
-     * The default alias ships `android:enabled="true"` in the manifest, so its unset
-     * ([PackageManager.COMPONENT_ENABLED_STATE_DEFAULT]) state counts as enabled; every other
-     * alias ships `android:enabled="false"`, so unset counts as disabled for them.
-     */
-    private fun setEnabledIfChanged(packageManager: PackageManager, fqcn: String, enabled: Boolean) {
-        val component = ComponentName(context.packageName, fqcn)
-        val manifestDefaultEnabled = fqcn == launcherAliasFqcn(LauncherIcon.DEFAULT)
-        val currentlyEnabled = when (packageManager.getComponentEnabledSetting(component)) {
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true
-            PackageManager.COMPONENT_ENABLED_STATE_DISABLED -> false
-            else -> manifestDefaultEnabled
+        /**
+         * Applies the target state only when it differs from the component's current state, so a
+         * repeat call (e.g. process restart re-collecting the same preference) never trips the
+         * launcher-icon refresh some home-screen implementations perform on every
+         * `setComponentEnabledSetting` call.
+         *
+         * The default alias ships `android:enabled="true"` in the manifest, so its unset
+         * ([PackageManager.COMPONENT_ENABLED_STATE_DEFAULT]) state counts as enabled; every other
+         * alias ships `android:enabled="false"`, so unset counts as disabled for them.
+         */
+        private fun setEnabledIfChanged(
+            packageManager: PackageManager,
+            fqcn: String,
+            enabled: Boolean,
+        ) {
+            val component = ComponentName(context.packageName, fqcn)
+            val manifestDefaultEnabled = fqcn == launcherAliasFqcn(LauncherIcon.DEFAULT)
+            val currentlyEnabled =
+                when (packageManager.getComponentEnabledSetting(component)) {
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED -> false
+                    else -> manifestDefaultEnabled
+                }
+            if (currentlyEnabled == enabled) return
+            val state =
+                if (enabled) {
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                } else {
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                }
+            packageManager.setComponentEnabledSetting(component, state, PackageManager.DONT_KILL_APP)
         }
-        if (currentlyEnabled == enabled) return
-        val state = if (enabled) {
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-        } else {
-            PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-        }
-        packageManager.setComponentEnabledSetting(component, state, PackageManager.DONT_KILL_APP)
     }
-}

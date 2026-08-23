@@ -9,7 +9,12 @@ package io.github.trevarj.motd.ui.chat
  */
 
 /** The word being completed: the token boundaries around the cursor and whether it opens the line. */
-data class NickToken(val start: Int, val end: Int, val text: String, val atLineStart: Boolean)
+data class NickToken(
+    val start: Int,
+    val end: Int,
+    val text: String,
+    val atLineStart: Boolean,
+)
 
 /**
  * Find the completion token in [text] at [cursor]. The token starts at the previous whitespace (or
@@ -17,7 +22,10 @@ data class NickToken(val start: Int, val end: Int, val text: String, val atLineS
  * the token is empty. [atLineStart] is true when only whitespace precedes the token, which selects
  * the `nick: ` insertion form.
  */
-fun nickTokenAt(text: String, cursor: Int): NickToken? {
+fun nickTokenAt(
+    text: String,
+    cursor: Int,
+): NickToken? {
     if (cursor < 0 || cursor > text.length) return null
     // Walk left to a word boundary (space) — stop just after it.
     var start = cursor
@@ -74,8 +82,7 @@ fun rankNickCompletions(
                 { recencyRank[it.key] ?: Int.MAX_VALUE },
                 { it.value.lowercase() },
             ),
-        )
-        .take(limit)
+        ).take(limit)
         .map { it.value }
 }
 
@@ -83,9 +90,16 @@ fun rankNickCompletions(
  * Replace the token [token] in [text] with [nick], choosing the insertion form: `nick: ` at line
  * start, otherwise `nick `. Returns the new text and the cursor offset after insertion.
  */
-data class CompletionResult(val text: String, val cursor: Int)
+data class CompletionResult(
+    val text: String,
+    val cursor: Int,
+)
 
-fun applyCompletion(text: String, token: NickToken, nick: String): CompletionResult {
+fun applyCompletion(
+    text: String,
+    token: NickToken,
+    nick: String,
+): CompletionResult {
     val insert = if (token.atLineStart) "$nick: " else "$nick "
     val before = text.substring(0, token.start)
     val after = text.substring(token.end)

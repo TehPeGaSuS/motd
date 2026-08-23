@@ -6,8 +6,14 @@ import android.os.Build
 
 /** A single inbound ACTION_SEND payload waiting for the user to pick a destination buffer. */
 sealed interface PendingShare {
-    data class Text(val text: String) : PendingShare
-    data class File(val uri: Uri, val mimeType: String?) : PendingShare
+    data class Text(
+        val text: String,
+    ) : PendingShare
+
+    data class File(
+        val uri: Uri,
+        val mimeType: String?,
+    ) : PendingShare
 }
 
 /**

@@ -88,29 +88,40 @@ class FillPresentationStabilityTest {
     private var networkId = 0L
     private var bufferId = 0L
 
-    @Before fun setUp() = runTest {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        db = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
-            .allowMainThreadQueries()
-            .setQueryExecutor { it.run() }
-            .setTransactionExecutor { it.run() }
-            .build()
-        processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
-        loader = HistoryPageLoader(processor)
-        networkId = db.networkDao().insert(
-            NetworkEntity(
-                name = "libera", role = NetworkRole.DIRECT, host = "h", port = 6697,
-                nick = "me", username = "me", realname = "Me",
-            ),
-        )
-        processor.onRegistered(networkId, "me", emptyMap())
-        db.bufferDao().insert(
-            BufferEntity(networkId = networkId, name = "#chan", displayName = "#chan", type = BufferType.CHANNEL),
-        )
-        bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
-    }
+    @Before fun setUp() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            db =
+                Room
+                    .inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
+                    .allowMainThreadQueries()
+                    .setQueryExecutor { it.run() }
+                    .setTransactionExecutor { it.run() }
+                    .build()
+            processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
+            loader = HistoryPageLoader(processor)
+            networkId =
+                db.networkDao().insert(
+                    NetworkEntity(
+                        name = "libera",
+                        role = NetworkRole.DIRECT,
+                        host = "h",
+                        port = 6697,
+                        nick = "me",
+                        username = "me",
+                        realname = "Me",
+                    ),
+                )
+            processor.onRegistered(networkId, "me", emptyMap())
+            db.bufferDao().insert(
+                BufferEntity(networkId = networkId, name = "#chan", displayName = "#chan", type = BufferType.CHANNEL),
+            )
+            bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
+        }
 
-    @After fun tearDown() { db.close() }
+    @After fun tearDown() {
+        db.close()
+    }
 
     // --- the pins ---------------------------------------------------------------------------------
 
@@ -124,29 +135,30 @@ class FillPresentationStabilityTest {
      * cannot hide between two settled observations.
      */
     @Test
-    fun aFillNeverPresentsAnEmptyTimeline() = runTest {
-        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
-        try {
-            seedCatchUpIsland()
-            val probe = openTimeline(anchorIndex = 20)
+    fun aFillNeverPresentsAnEmptyTimeline() =
+        runTest {
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            try {
+                seedCatchUpIsland()
+                val probe = openTimeline(anchorIndex = 20)
 
-            assertEquals("the seeded island is on screen", 50, probe.differ.itemCount)
-            probe.counts.clear()
+                assertEquals("the seeded island is on screen", 50, probe.differ.itemCount)
+                probe.counts.clear()
 
-            runAutopilot(scriptedHistory())
-            probe.settle(anchorIndex = 20)
+                runAutopilot(scriptedHistory())
+                probe.settle(anchorIndex = 20)
 
-            assertEquals("the fill landed", 200, probe.differ.itemCount)
-            assertTrue("the fill presented nothing to observe", probe.counts.isNotEmpty())
-            assertTrue(
-                "a fill presented an empty timeline; counts were ${probe.counts}",
-                probe.counts.none { it == 0 },
-            )
-            probe.close()
-        } finally {
-            Dispatchers.resetMain()
+                assertEquals("the fill landed", 200, probe.differ.itemCount)
+                assertTrue("the fill presented nothing to observe", probe.counts.isNotEmpty())
+                assertTrue(
+                    "a fill presented an empty timeline; counts were ${probe.counts}",
+                    probe.counts.none { it == 0 },
+                )
+                probe.close()
+            } finally {
+                Dispatchers.resetMain()
+            }
         }
-    }
 
     /**
      * The rows the reader can see must survive the fill unchanged: same ids, same order, and still
@@ -157,34 +169,35 @@ class FillPresentationStabilityTest {
      * viewport changes, so nothing the reader is looking at may move.
      */
     @Test
-    fun anOlderFillLeavesTheOnScreenRowsIdenticalAndMaterialized() = runTest {
-        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
-        try {
-            seedCatchUpIsland()
-            val probe = openTimeline(anchorIndex = 20)
-            val before = probe.viewport(anchorIndex = 20)
+    fun anOlderFillLeavesTheOnScreenRowsIdenticalAndMaterialized() =
+        runTest {
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            try {
+                seedCatchUpIsland()
+                val probe = openTimeline(anchorIndex = 20)
+                val before = probe.viewport(anchorIndex = 20)
 
-            assertEquals("the modeled viewport before the fill", SEEDED_VIEWPORT_AT_20, before)
+                assertEquals("the modeled viewport before the fill", SEEDED_VIEWPORT_AT_20, before)
 
-            runAutopilot(scriptedHistory())
-            probe.settle(anchorIndex = 20)
+                runAutopilot(scriptedHistory())
+                probe.settle(anchorIndex = 20)
 
-            assertEquals("durable rows after the fill", 200, probe.differ.itemCount)
-            assertEquals("the on-screen rows are the same rows, in the same order", before, probe.viewport(20))
-            assertTrue("no on-screen row degraded to a placeholder", probe.viewport(20).none { it == null })
-            // Non-vacuity, and the defect itself in one line: 200 rows are presented but only
-            // `initialLoadSize` of them are loaded, so rows far from the anchor ARE placeholders.
-            // That is what a skeleton on screen is made of, and it is why the materialization
-            // assertions above are worth making at all.
-            assertTrue(
-                "a bounded loaded window is in play; without one nothing above is being proved",
-                (0 until probe.differ.itemCount).any { probe.differ.peek(it) == null },
-            )
-            probe.close()
-        } finally {
-            Dispatchers.resetMain()
+                assertEquals("durable rows after the fill", 200, probe.differ.itemCount)
+                assertEquals("the on-screen rows are the same rows, in the same order", before, probe.viewport(20))
+                assertTrue("no on-screen row degraded to a placeholder", probe.viewport(20).none { it == null })
+                // Non-vacuity, and the defect itself in one line: 200 rows are presented but only
+                // `initialLoadSize` of them are loaded, so rows far from the anchor ARE placeholders.
+                // That is what a skeleton on screen is made of, and it is why the materialization
+                // assertions above are worth making at all.
+                assertTrue(
+                    "a bounded loaded window is in play; without one nothing above is being proved",
+                    (0 until probe.differ.itemCount).any { probe.differ.peek(it) == null },
+                )
+                probe.close()
+            } finally {
+                Dispatchers.resetMain()
+            }
         }
-    }
 
     /**
      * The catch-up case, where indices genuinely move: sixty rows NEWER than the whole viewport
@@ -197,29 +210,30 @@ class FillPresentationStabilityTest {
      * not true, no scroll correction could put the reader back on it.
      */
     @Test
-    fun rowsAreConservedAcrossACatchUpThatShiftsEveryIndex() = runTest {
-        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
-        try {
-            seedCatchUpIsland()
-            val probe = openTimeline(anchorIndex = 20)
-            val before = probe.viewport(anchorIndex = 20)
-            assertEquals("the modeled viewport before the catch-up", SEEDED_VIEWPORT_AT_20, before)
+    fun rowsAreConservedAcrossACatchUpThatShiftsEveryIndex() =
+        runTest {
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            try {
+                seedCatchUpIsland()
+                val probe = openTimeline(anchorIndex = 20)
+                val before = probe.viewport(anchorIndex = 20)
+                assertEquals("the modeled viewport before the catch-up", SEEDED_VIEWPORT_AT_20, before)
 
-            (300..359).forEach { processor.process(networkId, chatMsg("row$it", it.toLong())) }
-            probe.settle(anchorIndex = 80)
+                (300..359).forEach { processor.process(networkId, chatMsg("row$it", it.toLong())) }
+                probe.settle(anchorIndex = 80)
 
-            assertEquals("60 newer rows joined the 50 seeded ones", 110, probe.differ.itemCount)
-            assertEquals(
-                "every visible row moved by exactly the number of rows inserted above it",
-                before,
-                probe.viewport(anchorIndex = 80),
-            )
-            assertTrue("no on-screen row degraded to a placeholder", probe.viewport(80).none { it == null })
-            probe.close()
-        } finally {
-            Dispatchers.resetMain()
+                assertEquals("60 newer rows joined the 50 seeded ones", 110, probe.differ.itemCount)
+                assertEquals(
+                    "every visible row moved by exactly the number of rows inserted above it",
+                    before,
+                    probe.viewport(anchorIndex = 80),
+                )
+                assertTrue("no on-screen row degraded to a placeholder", probe.viewport(80).none { it == null })
+                probe.close()
+            } finally {
+                Dispatchers.resetMain()
+            }
         }
-    }
 
     /**
      * Both at once, which is what a reconnect actually does: the catch-up lands newer rows and the
@@ -228,28 +242,29 @@ class FillPresentationStabilityTest {
      * over the viewport.
      */
     @Test
-    fun anOverlappingCatchUpAndFillConserveTheOnScreenRows() = runTest {
-        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
-        try {
-            seedCatchUpIsland()
-            val probe = openTimeline(anchorIndex = 20)
-            val before = probe.viewport(anchorIndex = 20)
-            assertEquals("the modeled viewport before either source ran", SEEDED_VIEWPORT_AT_20, before)
-            probe.counts.clear()
+    fun anOverlappingCatchUpAndFillConserveTheOnScreenRows() =
+        runTest {
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            try {
+                seedCatchUpIsland()
+                val probe = openTimeline(anchorIndex = 20)
+                val before = probe.viewport(anchorIndex = 20)
+                assertEquals("the modeled viewport before either source ran", SEEDED_VIEWPORT_AT_20, before)
+                probe.counts.clear()
 
-            (300..359).forEach { processor.process(networkId, chatMsg("row$it", it.toLong())) }
-            runAutopilot(scriptedHistory())
-            probe.settle(anchorIndex = 80)
+                (300..359).forEach { processor.process(networkId, chatMsg("row$it", it.toLong())) }
+                runAutopilot(scriptedHistory())
+                probe.settle(anchorIndex = 80)
 
-            assertEquals("60 newer + 50 seeded + 150 filled", 260, probe.differ.itemCount)
-            assertEquals("the reader's rows are untouched by either source", before, probe.viewport(80))
-            assertTrue("the sources presented nothing to observe", probe.counts.isNotEmpty())
-            assertTrue("no presentation blanked the timeline; counts were ${probe.counts}", probe.counts.none { it == 0 })
-            probe.close()
-        } finally {
-            Dispatchers.resetMain()
+                assertEquals("60 newer + 50 seeded + 150 filled", 260, probe.differ.itemCount)
+                assertEquals("the reader's rows are untouched by either source", before, probe.viewport(80))
+                assertTrue("the sources presented nothing to observe", probe.counts.isNotEmpty())
+                assertTrue("no presentation blanked the timeline; counts were ${probe.counts}", probe.counts.none { it == 0 })
+                probe.close()
+            } finally {
+                Dispatchers.resetMain()
+            }
         }
-    }
 
     // --- fixture ----------------------------------------------------------------------------------
 
@@ -263,25 +278,39 @@ class FillPresentationStabilityTest {
         db.historyGapDao().insert(
             HistoryGapEntity(
                 roomId = bufferId,
-                olderMsgid = "marker", olderServerTime = 10,
-                newerMsgid = "row212", newerServerTime = 212,
+                olderMsgid = "marker",
+                olderServerTime = 10,
+                newerMsgid = "row212",
+                newerServerTime = 212,
                 recoverable = true,
             ),
         )
     }
 
-    private fun chatMsg(msgid: String, time: Long) = IrcEvent.ChatMessage(
+    private fun chatMsg(
+        msgid: String,
+        time: Long,
+    ) = IrcEvent.ChatMessage(
         ctx = MessageContext(msgid, time, null, "b", null),
-        kind = IrcEvent.ChatKind.PRIVMSG, source = Prefix("alice"), target = "#chan", text = msgid,
-        isSelf = false, replyToMsgid = null,
+        kind = IrcEvent.ChatKind.PRIVMSG,
+        source = Prefix("alice"),
+        target = "#chan",
+        text = msgid,
+        isSelf = false,
+        replyToMsgid = null,
     )
 
     private fun messages(events: List<IrcEvent>): ChatHistoryResponse.Messages {
-        val refs = events.mapNotNull { (it as? IrcEvent.ChatMessage)?.ctx }
-            .map { ChatHistoryReference(it.msgid, it.serverTime) }
+        val refs =
+            events
+                .mapNotNull { (it as? IrcEvent.ChatMessage)?.ctx }
+                .map { ChatHistoryReference(it.msgid, it.serverTime) }
         return ChatHistoryResponse.Messages(
-            events, oldest = refs.firstOrNull(), newest = refs.lastOrNull(),
-            endOfHistory = false, primaryMessageCount = refs.size,
+            events,
+            oldest = refs.firstOrNull(),
+            newest = refs.lastOrNull(),
+            endOfHistory = false,
+            primaryMessageCount = refs.size,
         )
     }
 
@@ -291,8 +320,7 @@ class FillPresentationStabilityTest {
      * add a second, uncontrolled source of invalidations to what these tests measure.
      */
     private inner class ScriptedHistory : HistoryGapFillCoordinator.HistorySource {
-        override suspend fun availability() =
-            HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID), 100)
+        override suspend fun availability() = HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID), 100)
 
         override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
             if (req.subcommand != ChatHistoryRequest.Subcommand.BEFORE) return messages(emptyList())
@@ -301,34 +329,45 @@ class FillPresentationStabilityTest {
     }
 
     private inner class SilentHistory : ChatHistoryRemoteMediator.HistorySource {
-        override suspend fun availability() =
-            HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID), 100)
+        override suspend fun availability() = HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID), 100)
 
         override suspend fun chathistory(req: ChatHistoryRequest) = messages(emptyList())
     }
 
     private fun scriptedHistory() = ScriptedHistory()
 
-    private fun repository() = MessageRepositoryImpl(
-        db.bufferDao(), db.networkIdentityDao(), db.messageDao(), db.reactionDao(),
-        ChatHistoryMediatorFactory { roomId ->
-            ChatHistoryRemoteMediator(
-                roomId, db.bufferDao(), db.messageDao(), processor, SilentHistory(), 50,
-                db.historyCursorDao(), db.historyGapDao(), loader,
-            )
-        },
-        db.historyGapDao(),
-    )
+    private fun repository() =
+        MessageRepositoryImpl(
+            db.bufferDao(),
+            db.networkIdentityDao(),
+            db.messageDao(),
+            db.reactionDao(),
+            ChatHistoryMediatorFactory { roomId ->
+                ChatHistoryRemoteMediator(
+                    roomId,
+                    db.bufferDao(),
+                    db.messageDao(),
+                    processor,
+                    SilentHistory(),
+                    50,
+                    db.historyCursorDao(),
+                    db.historyGapDao(),
+                    loader,
+                )
+            },
+            db.historyGapDao(),
+        )
 
-    private suspend fun runAutopilot(history: ScriptedHistory) = HistoryGapFillCoordinator(
-        NoClientConnectionManager,
-        db.bufferDao(),
-        db.messageDao(),
-        db.historyCursorDao(),
-        db.historyGapDao(),
-        loader,
-        DiagnosticLogger.Noop,
-    ).fill(bufferId, HistoryGapFillCoordinator.GapSelection.Newest, history, pageSize = 50)
+    private suspend fun runAutopilot(history: ScriptedHistory) =
+        HistoryGapFillCoordinator(
+            NoClientConnectionManager,
+            db.bufferDao(),
+            db.messageDao(),
+            db.historyCursorDao(),
+            db.historyGapDao(),
+            loader,
+            DiagnosticLogger.Noop,
+        ).fill(bufferId, HistoryGapFillCoordinator.GapSelection.Newest, history, pageSize = 50)
 
     // --- the modeled screen -----------------------------------------------------------------------
 
@@ -369,25 +408,60 @@ class FillPresentationStabilityTest {
         // Sampling from the diffing callbacks is what makes a one-presentation blank observable; a
         // list that empties and refills between two settled reads looks identical to one that never
         // emptied at all.
-        val updates = object : ListUpdateCallback {
-            override fun onInserted(position: Int, count: Int) { counts += differ.itemCount }
-            override fun onRemoved(position: Int, count: Int) { counts += differ.itemCount }
-            override fun onMoved(fromPosition: Int, toPosition: Int) { counts += differ.itemCount }
-            override fun onChanged(position: Int, count: Int, payload: Any?) { counts += differ.itemCount }
-        }
-        differ = AsyncPagingDataDiffer(
-            diffCallback = object : DiffUtil.ItemCallback<MessageEntity>() {
-                override fun areItemsTheSame(a: MessageEntity, b: MessageEntity) = a.id == b.id
-                override fun areContentsTheSame(a: MessageEntity, b: MessageEntity) = a == b
-            },
-            updateCallback = updates,
-            mainDispatcher = Dispatchers.Unconfined,
-            workerDispatcher = Dispatchers.Unconfined,
-        )
+        val updates =
+            object : ListUpdateCallback {
+                override fun onInserted(
+                    position: Int,
+                    count: Int,
+                ) {
+                    counts += differ.itemCount
+                }
+
+                override fun onRemoved(
+                    position: Int,
+                    count: Int,
+                ) {
+                    counts += differ.itemCount
+                }
+
+                override fun onMoved(
+                    fromPosition: Int,
+                    toPosition: Int,
+                ) {
+                    counts += differ.itemCount
+                }
+
+                override fun onChanged(
+                    position: Int,
+                    count: Int,
+                    payload: Any?,
+                ) {
+                    counts += differ.itemCount
+                }
+            }
+        differ =
+            AsyncPagingDataDiffer(
+                diffCallback =
+                    object : DiffUtil.ItemCallback<MessageEntity>() {
+                        override fun areItemsTheSame(
+                            a: MessageEntity,
+                            b: MessageEntity,
+                        ) = a.id == b.id
+
+                        override fun areContentsTheSame(
+                            a: MessageEntity,
+                            b: MessageEntity,
+                        ) = a == b
+                    },
+                updateCallback = updates,
+                mainDispatcher = Dispatchers.Unconfined,
+                workerDispatcher = Dispatchers.Unconfined,
+            )
         val repository = repository()
-        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
-            repository.messages(bufferId, MessageVisibilitySpec()).collectLatest { differ.submitData(it) }
-        }
+        val job =
+            launch(UnconfinedTestDispatcher(testScheduler)) {
+                repository.messages(bufferId, MessageVisibilitySpec()).collectLatest { differ.submitData(it) }
+            }
         val probe = TimelineProbe(differ, job, counts, this)
         probe.settle(anchorIndex)
         return probe
@@ -404,31 +478,45 @@ class FillPresentationStabilityTest {
         const val SETTLE_ROUNDS = 10
 
         /** The nine rows a viewport anchored at index 20 shows over the seeded island. */
-        private val SEEDED_VIEWPORT_AT_20 = listOf(
-            "row244", "row243", "row242", "row241", "row240", "row239", "row238", "row237", "row236",
-        )
+        private val SEEDED_VIEWPORT_AT_20 =
+            listOf(
+                "row244",
+                "row243",
+                "row242",
+                "row241",
+                "row240",
+                "row239",
+                "row238",
+                "row237",
+                "row236",
+            )
 
         /** The interval the fixture server holds inside the gap (rows 12..211), as 50-row pages. */
-        private val BACKLOG_PAGES: Map<String?, List<IrcEvent>> = buildMap {
-            fun page(boundaryMsgid: String, boundaryTime: Long, rows: IntRange) {
-                val events = rows.map { ordinal ->
-                    IrcEvent.ChatMessage(
-                        ctx = MessageContext("row$ordinal", ordinal.toLong(), null, "b", null),
-                        kind = IrcEvent.ChatKind.PRIVMSG,
-                        source = Prefix("alice"),
-                        target = "#chan",
-                        text = "row$ordinal",
-                        isSelf = false,
-                        replyToMsgid = null,
-                    )
+        private val BACKLOG_PAGES: Map<String?, List<IrcEvent>> =
+            buildMap {
+                fun page(
+                    boundaryMsgid: String,
+                    boundaryTime: Long,
+                    rows: IntRange,
+                ) {
+                    val events =
+                        rows.map { ordinal ->
+                            IrcEvent.ChatMessage(
+                                ctx = MessageContext("row$ordinal", ordinal.toLong(), null, "b", null),
+                                kind = IrcEvent.ChatKind.PRIVMSG,
+                                source = Prefix("alice"),
+                                target = "#chan",
+                                text = "row$ordinal",
+                                isSelf = false,
+                                replyToMsgid = null,
+                            )
+                        }
+                    put(ChatHistorySelectors.msgid(boundaryMsgid), events)
+                    put(ChatHistorySelectors.timestamp(boundaryTime), events)
                 }
-                put(ChatHistorySelectors.msgid(boundaryMsgid), events)
-                put(ChatHistorySelectors.timestamp(boundaryTime), events)
+                page("row212", 212, 162..211)
+                page("row162", 162, 112..161)
+                page("row112", 112, 62..111)
             }
-            page("row212", 212, 162..211)
-            page("row162", 162, 112..161)
-            page("row112", 112, 62..111)
-        }
     }
 }
-

@@ -82,9 +82,10 @@ fun LabsContent(
                 headlineContent = { Text(stringResource(R.string.labs_gestures_configure)) },
                 supportingContent = { Text(stringResource(R.string.labs_gestures_configure_desc)) },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                modifier = Modifier
-                    .clickable(onClick = onOpenGestureMenu)
-                    .testTag("labs_gestures_configure"),
+                modifier =
+                    Modifier
+                        .clickable(onClick = onOpenGestureMenu)
+                        .testTag("labs_gestures_configure"),
             )
         }
         SettingsGroup(title = stringResource(R.string.labs_agentwire_section)) {
@@ -100,11 +101,11 @@ fun LabsContent(
                 headlineContent = { Text(stringResource(R.string.labs_agentwire_repo)) },
                 supportingContent = { Text(agentwireUrl) },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                modifier = Modifier
-                    .clickable {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, agentwireUrl.toUri()))
-                    }
-                    .testTag("labs_agentwire_repo"),
+                modifier =
+                    Modifier
+                        .clickable {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, agentwireUrl.toUri()))
+                        }.testTag("labs_agentwire_repo"),
             )
         }
     }

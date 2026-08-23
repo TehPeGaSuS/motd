@@ -47,11 +47,12 @@ internal fun formatAutoFollowTrace(
     bufferId: Long?,
     sessionId: Long?,
     details: String,
-): String = buildString {
-    append("t_ns=").append(timestampNanos)
-    append(" event=").append(event)
-    if (bufferId != null) append(" buffer=").append(bufferId)
-    if (sessionId != null) append(" session=").append(sessionId)
-    val normalized = details.trim()
-    if (normalized.isNotEmpty()) append(' ').append(normalized)
-}
+): String =
+    buildString {
+        append("t_ns=").append(timestampNanos)
+        append(" event=").append(event)
+        if (bufferId != null) append(" buffer=").append(bufferId)
+        if (sessionId != null) append(" session=").append(sessionId)
+        val normalized = details.trim()
+        if (normalized.isNotEmpty()) append(' ').append(normalized)
+    }

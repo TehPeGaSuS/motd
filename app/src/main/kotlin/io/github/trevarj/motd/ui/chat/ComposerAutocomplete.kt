@@ -4,7 +4,10 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 
 /** A composer completion candidate: display text plus whether it is a `/` command hint. */
-data class Completion(val display: String, val isCommand: Boolean)
+data class Completion(
+    val display: String,
+    val isCommand: Boolean,
+)
 
 /**
  * Compute completions for the current composer [value]: `/`-command hints when the line starts with
@@ -34,7 +37,7 @@ fun autocompleteFor(
 
     val token = nickTokenAt(text, cursor) ?: return emptyList()
     // Reduce noise: require >=2 chars before suggesting, unless the user explicitly typed `@`
-    //. The `@` sigil is stripped from token.text, so detect it from the raw source.
+    // . The `@` sigil is stripped from token.text, so detect it from the raw source.
     val atPrefixed = token.start < text.length && text[token.start] == '@'
     if (token.text.length < 2 && !atPrefixed) return emptyList()
     return rankNickCompletions(token.text, members, recentSpeakers, normalize)
@@ -45,7 +48,10 @@ fun autocompleteFor(
  * Apply a picked completion to [value]. For command hints (leading `/`) the whole field becomes
  * "<command> "; for nicks the token under the cursor is replaced per [applyCompletion]'s rules.
  */
-fun applyPick(value: TextFieldValue, picked: String): TextFieldValue {
+fun applyPick(
+    value: TextFieldValue,
+    picked: String,
+): TextFieldValue {
     val text = value.text
     if (picked.startsWith("/")) {
         val next = "$picked "

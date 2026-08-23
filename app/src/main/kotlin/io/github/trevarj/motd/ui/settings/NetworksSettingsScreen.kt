@@ -10,7 +10,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -18,6 +17,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -92,9 +92,14 @@ private fun NetworkRow(
     ListItem(
         headlineContent = { Text(network.name) },
         supportingContent = { Text(networkSupporting(network, all, zncNetworkIds)) },
-        colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        modifier = Modifier.testTag("settings_network_row_${network.id}").clickable { onOpenNetwork(network.id) }
-            .padding(start = if (child) 20.dp else 0.dp),
+        colors =
+            androidx.compose.material3.ListItemDefaults
+                .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+        modifier =
+            Modifier
+                .testTag("settings_network_row_${network.id}")
+                .clickable { onOpenNetwork(network.id) }
+                .padding(start = if (child) 20.dp else 0.dp),
     )
 }
 
@@ -105,18 +110,25 @@ internal data class OrganizedNetworks(
     val orphanChildren: List<NetworkEntity>,
 )
 
-internal fun organizeNetworks(networks: List<NetworkEntity>, zncNetworkIds: Set<Long> = emptySet()): OrganizedNetworks {
+internal fun organizeNetworks(
+    networks: List<NetworkEntity>,
+    zncNetworkIds: Set<Long> = emptySet(),
+): OrganizedNetworks {
     val byName = compareBy<NetworkEntity> { it.name.lowercase() }
     val sojuRoots = networks.filter { it.role == NetworkRole.BOUNCER_ROOT }
-    val roots = (sojuRoots + networks.filter { it.role == NetworkRole.DIRECT && it.id in zncNetworkIds })
-        .sortedWith(byName)
+    val roots =
+        (sojuRoots + networks.filter { it.role == NetworkRole.DIRECT && it.id in zncNetworkIds })
+            .sortedWith(byName)
     val rootIds = sojuRoots.mapTo(mutableSetOf()) { it.id }
     val children = networks.filter { it.role == NetworkRole.BOUNCER_CHILD }
     return OrganizedNetworks(
         bouncerRoots = roots,
         direct = networks.filter { it.role == NetworkRole.DIRECT && it.id !in zncNetworkIds }.sortedWith(byName),
-        childrenByRoot = children.filter { it.parentId in rootIds }.groupBy { it.parentId!! }
-            .mapValues { (_, rows) -> rows.sortedWith(byName) },
+        childrenByRoot =
+            children
+                .filter { it.parentId in rootIds }
+                .groupBy { it.parentId!! }
+                .mapValues { (_, rows) -> rows.sortedWith(byName) },
         orphanChildren = children.filter { it.parentId !in rootIds }.sortedWith(byName),
     )
 }
@@ -126,14 +138,22 @@ internal fun organizeNetworks(networks: List<NetworkEntity>, zncNetworkIds: Set<
 private fun NetworksSettingsPreview() {
     MotdTheme {
         NetworksSettingsContent(
-            networks = listOf(
-                NetworkEntity(
-                    id = 1, name = "Libera", role = NetworkRole.DIRECT,
-                    host = "irc.libera.chat", port = 6697,
-                    nick = "me", username = "me", realname = "Me",
+            networks =
+                listOf(
+                    NetworkEntity(
+                        id = 1,
+                        name = "Libera",
+                        role = NetworkRole.DIRECT,
+                        host = "irc.libera.chat",
+                        port = 6697,
+                        nick = "me",
+                        username = "me",
+                        realname = "Me",
+                    ),
                 ),
-            ),
-            onBack = {}, onOpenNetwork = {}, onOpenAddNetwork = {},
+            onBack = {},
+            onOpenNetwork = {},
+            onOpenAddNetwork = {},
         )
     }
 }

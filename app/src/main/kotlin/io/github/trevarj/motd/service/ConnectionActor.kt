@@ -8,9 +8,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -27,7 +27,9 @@ import kotlin.random.Random
 interface ManagedConnection {
     val state: StateFlow<IrcClientState>
     val criticalEvents: ReceiveChannel<IrcEvent>
+
     fun start()
+
     fun stop()
 
     /** Completes after the producer has closed [criticalEvents] on a normal terminal connection. */
@@ -57,9 +59,13 @@ class IrcClientConnection(
     override val state: StateFlow<IrcClientState> get() = client.state
     override val criticalEvents: ReceiveChannel<IrcEvent> get() = client.criticalEvents
     override val lag: StateFlow<Long?> get() = client.lag
+
     override fun start() = client.start()
+
     override suspend fun awaitTermination() = client.awaitTermination()
+
     override suspend fun probeLiveness(graceMs: Long): Boolean = client.probeLiveness(graceMs)
+
     override fun stop() {
         client.stop()
         onStop()
@@ -100,11 +106,17 @@ enum class WakeCause {
 internal interface ConnectionLifecycleActor {
     val connection: ManagedConnection?
     val isAlive: Boolean
+
     fun start()
+
     fun stop()
+
     suspend fun stopAndJoin()
+
     fun onNetworkAvailable(cause: WakeCause)
+
     fun onNetworkLost()
+
     /** Request one immediate probe when the current connection is Ready. Requests are conflated. */
     fun probe() = Unit
 }
@@ -165,9 +177,10 @@ class ConnectionActor(
 
     override fun start() {
         if (job?.isActive == true) return
-        job = scope.launch { loop() }.also { running ->
-            running.invokeOnCompletion { onStopped(networkId) }
-        }
+        job =
+            scope.launch { loop() }.also { running ->
+                running.invokeOnCompletion { onStopped(networkId) }
+            }
     }
 
     override fun stop() {
@@ -197,10 +210,11 @@ class ConnectionActor(
      * 2s base forever.
      */
     override fun onNetworkAvailable(cause: WakeCause) {
-        val resetsBackoff = when (cause) {
-            WakeCause.Foreground -> true
-            WakeCause.Connectivity -> connectivityLost.getAndSet(false)
-        }
+        val resetsBackoff =
+            when (cause) {
+                WakeCause.Foreground -> true
+                WakeCause.Connectivity -> connectivityLost.getAndSet(false)
+            }
         retryNow.trySend(resetsBackoff)
     }
 
@@ -231,33 +245,36 @@ class ConnectionActor(
             conn.start()
 
             val attemptScope = CoroutineScope(currentCoroutineContext())
-            val collector = attemptScope.launch {
-                for (event in conn.criticalEvents) onEvent(networkId, event)
-            }
+            val collector =
+                attemptScope.launch {
+                    for (event in conn.criticalEvents) onEvent(networkId, event)
+                }
             // Forward latency readings for this connection's lifetime; cancelled with the attempt
             // scope so a replaced/destroyed actor never reports a stale measurement.
-            val lagCollector = attemptScope.launch {
-                conn.lag.collect { lag -> onLag(networkId, lag) }
-            }
-            val outcome = try {
-                runConnection(conn) { attempt = 0 }
-            } finally {
-                if (currentCoroutineContext().isActive) {
-                    // State becomes terminal before the socket reader can publish its final event.
-                    // Wait for the producer to close, then let the sole consumer empty the queue.
-                    conn.awaitTermination()
-                    collector.join()
-                } else {
-                    collector.cancelAndJoin()
+            val lagCollector =
+                attemptScope.launch {
+                    conn.lag.collect { lag -> onLag(networkId, lag) }
                 }
-                conn.stop()
-                connection = null
-                onConnectionChanged(networkId, null)
-                // Stop forwarding readings before clearing the published latency, so a final
-                // emission cannot race the null and repaint a stale RTT during backoff.
-                lagCollector.cancel()
-                onLag(networkId, null)
-            }
+            val outcome =
+                try {
+                    runConnection(conn) { attempt = 0 }
+                } finally {
+                    if (currentCoroutineContext().isActive) {
+                        // State becomes terminal before the socket reader can publish its final event.
+                        // Wait for the producer to close, then let the sole consumer empty the queue.
+                        conn.awaitTermination()
+                        collector.join()
+                    } else {
+                        collector.cancelAndJoin()
+                    }
+                    conn.stop()
+                    connection = null
+                    onConnectionChanged(networkId, null)
+                    // Stop forwarding readings before clearing the published latency, so a final
+                    // emission cannot race the null and repaint a stale RTT during backoff.
+                    lagCollector.cancel()
+                    onLag(networkId, null)
+                }
 
             // TOFU: a cert failure parks the actor (awaiting user trust) rather than backoff-looping.
             val certFailure = pendingCertFailure()
@@ -268,8 +285,14 @@ class ConnectionActor(
             }
 
             when (outcome) {
-                Outcome.Fatal -> return
-                Outcome.RetryImmediately -> Unit
+                Outcome.Fatal -> {
+                    return
+                }
+
+                Outcome.RetryImmediately -> {
+                    Unit
+                }
+
                 Outcome.Retry -> {
                     // A disconnected/non-fatal Failed snapshot describes the socket that just
                     // ended. Publish the current operation (retrying) during backoff so the UI
@@ -314,7 +337,10 @@ class ConnectionActor(
      * that invokes [resetBackoff] after 5 minutes still-connected. Returns Fatal for a fatal
      * Failed, Retry otherwise.
      */
-    private suspend fun runConnection(conn: ManagedConnection, resetBackoff: () -> Unit): Outcome {
+    private suspend fun runConnection(
+        conn: ManagedConnection,
+        resetBackoff: () -> Unit,
+    ): Outcome {
         val connectionScope = CoroutineScope(currentCoroutineContext())
         var state = conn.state.first { it !is IrcClientState.Connecting }
         var stableJob: Job? = null
@@ -332,7 +358,11 @@ class ConnectionActor(
                             // dead socket cancels that work immediately instead of leaving the actor
                             // blocked in onReady for a series of request timeouts.
                             readyJob = connectionScope.launch { onReady(conn) }
-                            stableJob = connectionScope.launch { delay(STABLE_RESET_MS); resetBackoff() }
+                            stableJob =
+                                connectionScope.launch {
+                                    delay(STABLE_RESET_MS)
+                                    resetBackoff()
+                                }
                         }
                         // Runtime CAP ACK/DEL and late 005 replies republish Ready with a new
                         // snapshot. Surface those mutations without re-running one-time setup.
@@ -357,6 +387,7 @@ class ConnectionActor(
                                         }
                                         probeRequested.set(false)
                                     }
+
                                     is ProbeUpdate.StateChanged -> {
                                         probeRequested.set(false)
                                         val next = probe.state
@@ -378,6 +409,7 @@ class ConnectionActor(
                                 }
                                 continue
                             }
+
                             is ReadyUpdate.StateChanged -> {
                                 val next = update.state
                                 if (next is IrcClientState.Ready) {
@@ -398,14 +430,17 @@ class ConnectionActor(
                             }
                         }
                     }
+
                     is IrcClientState.Failed -> {
                         onState(networkId, state)
                         return outcomeFor(state)
                     }
+
                     is IrcClientState.Disconnected -> {
                         onState(networkId, state)
                         return Outcome.Retry
                     }
+
                     is IrcClientState.Registering -> {
                         // Transport is established (SOCKS/TCP/TLS all done) and IRC registration is
                         // in flight. Forwarded — unlike Connecting, which the loop entered with —
@@ -415,7 +450,10 @@ class ConnectionActor(
                         onState(networkId, state)
                         state = conn.state.first { it != state }
                     }
-                    IrcClientState.Connecting -> state = conn.state.first { it != state }
+
+                    IrcClientState.Connecting -> {
+                        state = conn.state.first { it != state }
+                    }
                 }
             }
         } finally {
@@ -424,8 +462,7 @@ class ConnectionActor(
         }
     }
 
-    private fun outcomeFor(state: IrcClientState): Outcome =
-        if (state is IrcClientState.Failed && state.fatal) Outcome.Fatal else Outcome.Retry
+    private fun outcomeFor(state: IrcClientState): Outcome = if (state is IrcClientState.Failed && state.fatal) Outcome.Fatal else Outcome.Retry
 
     private fun clearProbeRequests() {
         probeRequested.set(false)
@@ -434,12 +471,20 @@ class ConnectionActor(
 
     private sealed interface ReadyUpdate {
         data object Probe : ReadyUpdate
-        data class StateChanged(val state: IrcClientState) : ReadyUpdate
+
+        data class StateChanged(
+            val state: IrcClientState,
+        ) : ReadyUpdate
     }
 
     private sealed interface ProbeUpdate {
-        data class Completed(val live: Boolean) : ProbeUpdate
-        data class StateChanged(val state: IrcClientState) : ProbeUpdate
+        data class Completed(
+            val live: Boolean,
+        ) : ProbeUpdate
+
+        data class StateChanged(
+            val state: IrcClientState,
+        ) : ProbeUpdate
     }
 
     /** Wait for either a state transition or one conflated foreground probe request. */
@@ -465,15 +510,16 @@ class ConnectionActor(
         state: IrcClientState,
         connectionScope: CoroutineScope,
     ): ProbeUpdate {
-        val probe = connectionScope.async {
-            try {
-                conn.probeLiveness(FOREGROUND_PROBE_GRACE_MS)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Throwable) {
-                false
+        val probe =
+            connectionScope.async {
+                try {
+                    conn.probeLiveness(FOREGROUND_PROBE_GRACE_MS)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    false
+                }
             }
-        }
         val stateWaiter = connectionScope.async { conn.state.first { it != state } }
         return try {
             select {

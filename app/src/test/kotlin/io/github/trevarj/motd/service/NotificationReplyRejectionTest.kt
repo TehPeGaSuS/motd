@@ -12,7 +12,6 @@ import org.junit.Test
  * and the user gets a retryable failure notice.
  */
 class NotificationReplyRejectionTest {
-
     private class Recorder {
         var preserved = 0
         var released = 0
@@ -36,51 +35,55 @@ class NotificationReplyRejectionTest {
     private val accepted = SendAcceptance.Accepted(eventIds = listOf(7L))
 
     @Test
-    fun rejectedReplyPreservesTheTextAndSurfacesTheFailure() = runTest {
-        val recorder = Recorder()
+    fun rejectedReplyPreservesTheTextAndSurfacesTheFailure() =
+        runTest {
+            val recorder = Recorder()
 
-        deliver(SendAcceptance.Rejected(SendRejectionReason.NOT_IN_CHANNEL), retry = false, recorder)
+            deliver(SendAcceptance.Rejected(SendRejectionReason.NOT_IN_CHANNEL), retry = false, recorder)
 
-        assertEquals(1, recorder.preserved)
-        assertEquals(SendRejectionReason.NOT_IN_CHANNEL, recorder.failedWith)
-        assertEquals(0, recorder.released)
-        assertEquals(0, recorder.resolved)
-    }
-
-    @Test
-    fun acceptedReplyTouchesNothing() = runTest {
-        val recorder = Recorder()
-
-        deliver(accepted, retry = false, recorder)
-
-        assertEquals(0, recorder.preserved)
-        assertEquals(0, recorder.released)
-        assertEquals(0, recorder.resolved)
-        assertNull(recorder.failedWith)
-    }
+            assertEquals(1, recorder.preserved)
+            assertEquals(SendRejectionReason.NOT_IN_CHANNEL, recorder.failedWith)
+            assertEquals(0, recorder.released)
+            assertEquals(0, recorder.resolved)
+        }
 
     @Test
-    fun acceptedRetryReleasesThePreservedDraftAndRetiresTheNotice() = runTest {
-        val recorder = Recorder()
+    fun acceptedReplyTouchesNothing() =
+        runTest {
+            val recorder = Recorder()
 
-        deliver(accepted, retry = true, recorder)
+            deliver(accepted, retry = false, recorder)
 
-        assertEquals(1, recorder.released)
-        assertEquals(1, recorder.resolved)
-        assertEquals(0, recorder.preserved)
-        assertNull(recorder.failedWith)
-    }
+            assertEquals(0, recorder.preserved)
+            assertEquals(0, recorder.released)
+            assertEquals(0, recorder.resolved)
+            assertNull(recorder.failedWith)
+        }
 
     @Test
-    fun rejectedRetryReportsAgainWithoutDuplicatingThePreservedDraft() = runTest {
-        val recorder = Recorder()
+    fun acceptedRetryReleasesThePreservedDraftAndRetiresTheNotice() =
+        runTest {
+            val recorder = Recorder()
 
-        deliver(SendAcceptance.Rejected(SendRejectionReason.BUFFER_NOT_FOUND), retry = true, recorder)
+            deliver(accepted, retry = true, recorder)
 
-        assertEquals(0, recorder.preserved)
-        assertEquals(SendRejectionReason.BUFFER_NOT_FOUND, recorder.failedWith)
-        assertEquals(0, recorder.resolved)
-    }
+            assertEquals(1, recorder.released)
+            assertEquals(1, recorder.resolved)
+            assertEquals(0, recorder.preserved)
+            assertNull(recorder.failedWith)
+        }
+
+    @Test
+    fun rejectedRetryReportsAgainWithoutDuplicatingThePreservedDraft() =
+        runTest {
+            val recorder = Recorder()
+
+            deliver(SendAcceptance.Rejected(SendRejectionReason.BUFFER_NOT_FOUND), retry = true, recorder)
+
+            assertEquals(0, recorder.preserved)
+            assertEquals(SendRejectionReason.BUFFER_NOT_FOUND, recorder.failedWith)
+            assertEquals(0, recorder.resolved)
+        }
 
     @Test
     fun preservedTextIsAppendedToAnInProgressDraft() {

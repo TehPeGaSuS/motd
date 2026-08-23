@@ -4,8 +4,13 @@ import io.github.trevarj.motd.irc.proto.IrcMessage
 
 sealed interface MonitorSupport {
     data object Unsupported : MonitorSupport
+
     data object Unlimited : MonitorSupport
-    data class Limited(val limit: Int) : MonitorSupport
+
+    data class Limited(
+        val limit: Int,
+    ) : MonitorSupport
+
     data object Malformed : MonitorSupport
 }
 
@@ -18,13 +23,24 @@ fun monitorSupport(isupport: Map<String, String>): MonitorSupport {
 
 object MonitorCommands {
     fun clear() = IrcMessage(command = "MONITOR", params = listOf("C"))
-    fun status() = IrcMessage(command = "MONITOR", params = listOf("S"))
-    fun remove(targets: Collection<String>, maxBytes: Int = 400): List<IrcMessage> =
-        chunk("-", targets, maxBytes)
-    fun add(targets: Collection<String>, maxBytes: Int = 400): List<IrcMessage> =
-        chunk("+", targets, maxBytes)
 
-    private fun chunk(operation: String, targets: Collection<String>, maxBytes: Int): List<IrcMessage> {
+    fun status() = IrcMessage(command = "MONITOR", params = listOf("S"))
+
+    fun remove(
+        targets: Collection<String>,
+        maxBytes: Int = 400,
+    ): List<IrcMessage> = chunk("-", targets, maxBytes)
+
+    fun add(
+        targets: Collection<String>,
+        maxBytes: Int = 400,
+    ): List<IrcMessage> = chunk("+", targets, maxBytes)
+
+    private fun chunk(
+        operation: String,
+        targets: Collection<String>,
+        maxBytes: Int,
+    ): List<IrcMessage> {
         val result = mutableListOf<IrcMessage>()
         var current = mutableListOf<String>()
         targets.forEach { target ->
@@ -42,6 +58,8 @@ object MonitorCommands {
         return result
     }
 
-    private fun message(operation: String, targets: List<String>) =
-        IrcMessage(command = "MONITOR", params = listOf(operation, targets.joinToString(",")))
+    private fun message(
+        operation: String,
+        targets: List<String>,
+    ) = IrcMessage(command = "MONITOR", params = listOf(operation, targets.joinToString(",")))
 }

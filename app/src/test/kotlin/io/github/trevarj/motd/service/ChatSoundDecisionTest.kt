@@ -15,13 +15,14 @@ class ChatSoundDecisionTest {
     @Test
     fun `receive melody follows the configured interval sequence and wraps`() {
         val melody = ChatReceiveMelody()
-        val rates = listOf(
-            1f,
-            2.0.pow(2.0 / 12.0).toFloat(),
-            2.0.pow(4.0 / 12.0).toFloat(),
-            2.0.pow(7.0 / 12.0).toFloat(),
-            1f,
-        )
+        val rates =
+            listOf(
+                1f,
+                2.0.pow(2.0 / 12.0).toFloat(),
+                2.0.pow(4.0 / 12.0).toFloat(),
+                2.0.pow(7.0 / 12.0).toFloat(),
+                1f,
+            )
 
         rates.forEachIndexed { index, expected ->
             assertEquals(

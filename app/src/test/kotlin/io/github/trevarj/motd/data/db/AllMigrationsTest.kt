@@ -6,7 +6,6 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
-import java.net.URL
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -18,6 +17,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.net.URL
 
 /** Validates the complete released schema path and the intentional v10 timeline reset. */
 @RunWith(RobolectricTestRunner::class)
@@ -34,15 +34,23 @@ class AllMigrationsTest {
     fun migrateVersion1ToCurrent_preservesNetworkAndResetsIrcDerivedState() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        legacyHelper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(1) {
-                    override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion1(db)
-                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
-                })
-                .build(),
-        )
+        legacyHelper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(1) {
+                            override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion1(db)
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                old: Int,
+                                new: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         legacyHelper!!.writableDatabase.apply {
             execSQL(
                 """INSERT INTO networks
@@ -77,22 +85,26 @@ class AllMigrationsTest {
         legacyHelper!!.close()
         legacyHelper = null
 
-        val migrated = Room.databaseBuilder(
-            context,
-            MotdDatabase::class.java,
-            DB_NAME,
-        ).addMigrations(*ALL_MIGRATIONS).build()
+        val migrated =
+            Room
+                .databaseBuilder(
+                    context,
+                    MotdDatabase::class.java,
+                    DB_NAME,
+                ).addMigrations(*ALL_MIGRATIONS)
+                .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
-            sqlite.query(
-                """SELECT name, host, port, nick FROM networks WHERE id = 1""",
-            ).use { cursor ->
-                check(cursor.moveToFirst())
-                assertEquals("libera", cursor.getString(0))
-                assertEquals("irc.libera.chat", cursor.getString(1))
-                assertEquals(6697, cursor.getInt(2))
-                assertEquals("me", cursor.getString(3))
-            }
+            sqlite
+                .query(
+                    """SELECT name, host, port, nick FROM networks WHERE id = 1""",
+                ).use { cursor ->
+                    check(cursor.moveToFirst())
+                    assertEquals("libera", cursor.getString(0))
+                    assertEquals("irc.libera.chat", cursor.getString(1))
+                    assertEquals(6697, cursor.getInt(2))
+                    assertEquals("me", cursor.getString(3))
+                }
             // The v1 row is ranked into the manual drawer order rather than left at the default.
             sqlite.query("SELECT ordering FROM networks WHERE id = 1").use { cursor ->
                 check(cursor.moveToFirst())
@@ -127,19 +139,23 @@ class AllMigrationsTest {
     fun migrateVersion28To29_preservesNetworkAndDisablesNickServ() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        legacyHelper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(28) {
-                    override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion(db, 28)
-                    override fun onUpgrade(
-                        db: SupportSQLiteDatabase,
-                        oldVersion: Int,
-                        newVersion: Int,
-                    ) = Unit
-                })
-                .build(),
-        )
+        legacyHelper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(28) {
+                            override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion(db, 28)
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         legacyHelper!!.writableDatabase.execSQL(
             """INSERT INTO networks
                 (id, name, role, host, port, tls, nick, username, realname, saslMechanism,
@@ -156,16 +172,17 @@ class AllMigrationsTest {
                 .addMigrations(MIGRATION_28_29, MIGRATION_29_30)
                 .build()
         try {
-            migrated.openHelper.writableDatabase.query(
-                """SELECT nickServPassword, nickServIdentifySyntax, nickServRecoveryEnabled,
+            migrated.openHelper.writableDatabase
+                .query(
+                    """SELECT nickServPassword, nickServIdentifySyntax, nickServRecoveryEnabled,
                           nickServRecoverySequence FROM networks WHERE id = 1""",
-            ).use { cursor ->
-                check(cursor.moveToFirst())
-                assertNull(cursor.getString(0))
-                assertNull(cursor.getString(1))
-                assertEquals(0, cursor.getInt(2))
-                assertNull(cursor.getString(3))
-            }
+                ).use { cursor ->
+                    check(cursor.moveToFirst())
+                    assertNull(cursor.getString(0))
+                    assertNull(cursor.getString(1))
+                    assertEquals(0, cursor.getInt(2))
+                    assertNull(cursor.getString(3))
+                }
         } finally {
             migrated.close()
         }
@@ -270,27 +287,35 @@ class AllMigrationsTest {
         )
     }
 
-    private fun schemaResource(version: Int): URL? =
-        javaClass.classLoader?.getResource("${MotdDatabase::class.java.canonicalName}/$version.json")
+    private fun schemaResource(version: Int): URL? = javaClass.classLoader?.getResource("${MotdDatabase::class.java.canonicalName}/$version.json")
 
     /** Creates the real v1 tables, indices, FTS triggers, and Room identity from the tracked JSON. */
     private fun createExportedVersion1(db: SupportSQLiteDatabase) = createExportedVersion(db, 1)
 
-    private fun createExportedVersion(db: SupportSQLiteDatabase, version: Int) {
+    private fun createExportedVersion(
+        db: SupportSQLiteDatabase,
+        version: Int,
+    ) {
         val resource = "${MotdDatabase::class.java.canonicalName}/$version.json"
-        val schema = checkNotNull(javaClass.classLoader?.getResourceAsStream(resource)) {
-            "missing checked-in Room schema resource $resource"
-        }.bufferedReader().use { Json.parseToJsonElement(it.readText()).jsonObject }
+        val schema =
+            checkNotNull(javaClass.classLoader?.getResourceAsStream(resource)) {
+                "missing checked-in Room schema resource $resource"
+            }.bufferedReader().use { Json.parseToJsonElement(it.readText()).jsonObject }
         val database = schema.getValue("database").jsonObject
         database.getValue("entities").jsonArray.forEach { element ->
             val entity = element.jsonObject
             val tableName = entity.getValue("tableName").jsonPrimitive.content
+
             fun executeTemplate(sql: String) {
                 db.execSQL(sql.replace("\${TABLE_NAME}", tableName))
             }
             executeTemplate(entity.getValue("createSql").jsonPrimitive.content)
             entity["indices"]?.jsonArray.orEmpty().forEach { index ->
-                executeTemplate(index.jsonObject.getValue("createSql").jsonPrimitive.content)
+                executeTemplate(
+                    index.jsonObject
+                        .getValue("createSql")
+                        .jsonPrimitive.content,
+                )
             }
             entity["contentSyncTriggers"]?.jsonArray.orEmpty().forEach { trigger ->
                 db.execSQL(trigger.jsonPrimitive.content)

@@ -9,37 +9,54 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MemberSectioningTest {
-
-    private fun member(nick: String, prefixes: String = "") =
-        MemberEntity(bufferId = 1, nick = nick, prefixes = prefixes)
+    private fun member(
+        nick: String,
+        prefixes: String = "",
+    ) = MemberEntity(bufferId = 1, nick = nick, prefixes = prefixes)
 
     @Test
     fun `groups by highest prefix in default order`() {
-        val members = listOf(
-            member("op", "@"),
-            member("voice", "+"),
-            member("regular"),
-            member("owner", "~"),
-            member("halfop", "%"),
-        )
+        val members =
+            listOf(
+                member("op", "@"),
+                member("voice", "+"),
+                member("regular"),
+                member("owner", "~"),
+                member("halfop", "%"),
+            )
         val sections = sectionMembers(members)
         assertEquals(listOf('~', '@', '%', '+', null), sections.map { it.prefix })
         assertEquals("owner", sections[0].members.single().nick)
-        assertEquals("regular", sections.last().members.single().nick)
+        assertEquals(
+            "regular",
+            sections
+                .last()
+                .members
+                .single()
+                .nick,
+        )
     }
 
     @Test
     fun `member with multiple prefixes sections under highest`() {
         val sections = sectionMembers(listOf(member("boss", "@+")))
         assertEquals(listOf('@'), sections.map { it.prefix })
-        assertEquals("boss", sections.single().members.single().nick)
+        assertEquals(
+            "boss",
+            sections
+                .single()
+                .members
+                .single()
+                .nick,
+        )
     }
 
     @Test
     fun `within a section nicks sort case-insensitively`() {
-        val sections = sectionMembers(
-            listOf(member("Zed"), member("alice"), member("Bob")),
-        )
+        val sections =
+            sectionMembers(
+                listOf(member("Zed"), member("alice"), member("Bob")),
+            )
         assertEquals(1, sections.size)
         assertNull(sections.single().prefix)
         assertEquals(listOf("alice", "Bob", "Zed"), sections.single().members.map { it.nick })
@@ -66,10 +83,11 @@ class MemberSectioningTest {
     @Test
     fun `custom prefix order respected`() {
         // Network where '+' outranks '@' (contrived) — order drives sectioning.
-        val sections = sectionMembers(
-            listOf(member("op", "@"), member("voice", "+")),
-            prefixOrder = "+@",
-        )
+        val sections =
+            sectionMembers(
+                listOf(member("op", "@"), member("voice", "+")),
+                prefixOrder = "+@",
+            )
         assertEquals(listOf('+', '@'), sections.map { it.prefix })
     }
 
@@ -130,28 +148,31 @@ class MemberSectioningTest {
     @Test
     fun `strict and unknown casemaps keep conservative fool identities distinct`() {
         val members = listOf(member("bot~"), member("bot^"), member("[helper]"), member("{helper}"))
-        val strict = sectionMembersSocial(
-            members,
-            fools = setOf("bot~"),
-            identityRules = IrcIdentityRules(caseMapping = IrcCaseMapping.Rfc1459Strict),
-        )
+        val strict =
+            sectionMembersSocial(
+                members,
+                fools = setOf("bot~"),
+                identityRules = IrcIdentityRules(caseMapping = IrcCaseMapping.Rfc1459Strict),
+            )
         assertEquals(listOf("bot~"), strict.fools.map { it.nick })
 
-        val unknown = sectionMembersSocial(
-            members,
-            fools = setOf("[helper]"),
-            identityRules = IrcIdentityRules(caseMapping = IrcCaseMapping.Unknown("vendor")),
-        )
+        val unknown =
+            sectionMembersSocial(
+                members,
+                fools = setOf("[helper]"),
+                identityRules = IrcIdentityRules(caseMapping = IrcCaseMapping.Unknown("vendor")),
+            )
         assertEquals(listOf("[helper]"), unknown.fools.map { it.nick })
     }
 
     @Test
     fun `casemapped sort ties have stable raw nick ordering`() {
         val members = listOf(member("{Nick}"), member("[Nick]"))
-        val sorted = sectionMembers(
-            members,
-            identityRules = IrcIdentityRules(caseMapping = IrcCaseMapping.Rfc1459),
-        ).single().members
+        val sorted =
+            sectionMembers(
+                members,
+                identityRules = IrcIdentityRules(caseMapping = IrcCaseMapping.Rfc1459),
+            ).single().members
 
         assertEquals(listOf("[Nick]", "{Nick}"), sorted.map { it.nick })
     }
@@ -178,23 +199,25 @@ class MemberSectioningTest {
 
     @Test
     fun `sectionMembersSocial applies comparator to sections but fools stay alphabetical`() {
-        val members = listOf(
-            member("op", "@"),
-            member("carol"),
-            member("bob"),
-            member("Zed"),
-            member("alice"),
-        )
+        val members =
+            listOf(
+                member("op", "@"),
+                member("carol"),
+                member("bob"),
+                member("Zed"),
+                member("alice"),
+            )
         // Reverse-alpha for sections; fools {alice, zed} must stay alphabetical regardless.
         val rules = IrcIdentityRules(caseMapping = IrcCaseMapping.Ascii)
         val reverseAlpha: Comparator<MemberEntity> =
             compareByDescending<MemberEntity> { rules.normalize(it.nick) }.thenByDescending { it.nick }
-        val social = sectionMembersSocial(
-            members,
-            fools = setOf("alice", "zed"),
-            identityRules = rules,
-            comparator = reverseAlpha,
-        )
+        val social =
+            sectionMembersSocial(
+                members,
+                fools = setOf("alice", "zed"),
+                identityRules = rules,
+                comparator = reverseAlpha,
+            )
         // Prefix section (@) and regular section use reverse-alpha; fools bucket stays alpha.
         assertEquals(listOf("op", "carol", "bob"), social.sections.flatMap { it.members }.map { it.nick })
         assertEquals(listOf("alice", "Zed"), social.fools.map { it.nick })

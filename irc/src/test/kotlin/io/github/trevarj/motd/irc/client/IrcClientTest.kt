@@ -36,8 +36,7 @@ class IrcClientTest {
      * coroutines run eagerly, while delays still use virtual time. Child of backgroundScope so
      * it is torn down automatically.
      */
-    private fun TestScope.clientScope(): CoroutineScope =
-        CoroutineScope(backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler))
+    private fun TestScope.clientScope(): CoroutineScope = CoroutineScope(backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler))
 
     private fun config(
         sasl: SaslMechanism = SaslMechanism.NONE,

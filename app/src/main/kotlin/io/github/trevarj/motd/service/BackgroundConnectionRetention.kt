@@ -28,27 +28,30 @@ internal class BackgroundConnectionRetention(
         get() = synchronized(lock) { expiryJob != null }
 
     val graceElapsed: Boolean
-        get() = synchronized(lock) {
-            backgroundSinceMs?.let { nowMs() - it >= graceMs } == true
-        }
+        get() =
+            synchronized(lock) {
+                backgroundSinceMs?.let { nowMs() - it >= graceMs } == true
+            }
 
     fun onBackgrounded(onElapsed: suspend () -> Unit) {
-        val job = synchronized(lock) {
-            val startedAt = backgroundSinceMs ?: nowMs().also { backgroundSinceMs = it }
-            if (expiryJob != null) return
-            val remainingMs = (graceMs - (nowMs() - startedAt)).coerceAtLeast(0L)
-            scope.launch(start = CoroutineStart.LAZY) {
-                delay(remainingMs)
-                val runningJob = currentCoroutineContext().job
-                try {
-                    onElapsed()
-                } finally {
-                    synchronized(lock) {
-                        if (expiryJob === runningJob) expiryJob = null
-                    }
-                }
-            }.also { expiryJob = it }
-        }
+        val job =
+            synchronized(lock) {
+                val startedAt = backgroundSinceMs ?: nowMs().also { backgroundSinceMs = it }
+                if (expiryJob != null) return
+                val remainingMs = (graceMs - (nowMs() - startedAt)).coerceAtLeast(0L)
+                scope
+                    .launch(start = CoroutineStart.LAZY) {
+                        delay(remainingMs)
+                        val runningJob = currentCoroutineContext().job
+                        try {
+                            onElapsed()
+                        } finally {
+                            synchronized(lock) {
+                                if (expiryJob === runningJob) expiryJob = null
+                            }
+                        }
+                    }.also { expiryJob = it }
+            }
         job.start()
     }
 

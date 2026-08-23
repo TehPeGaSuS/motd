@@ -39,46 +39,51 @@ class LabsViewModelTest {
 
     private fun vm() = LabsViewModel(gestures, agentwire)
 
-    @Test fun bothLabsStartOff() = runTest {
-        assertEquals(LabsUiState(gesturesEnabled = false, agentwireEnabled = false), vm().state.first())
-    }
+    @Test fun bothLabsStartOff() =
+        runTest {
+            assertEquals(LabsUiState(gesturesEnabled = false, agentwireEnabled = false), vm().state.first())
+        }
 
-    @Test fun gestureToggle_writesOnlyTheGestureStore() = runTest {
-        val model = vm()
-        model.setGesturesEnabled(true)
-        assertEquals(
-            LabsUiState(gesturesEnabled = true, agentwireEnabled = false),
-            model.state.first { it.gesturesEnabled },
-        )
-        assertEquals(false, agentwire.enabled.first())
-    }
+    @Test fun gestureToggle_writesOnlyTheGestureStore() =
+        runTest {
+            val model = vm()
+            model.setGesturesEnabled(true)
+            assertEquals(
+                LabsUiState(gesturesEnabled = true, agentwireEnabled = false),
+                model.state.first { it.gesturesEnabled },
+            )
+            assertEquals(false, agentwire.enabled.first())
+        }
 
     /** Agentwire keeps its own storage, so an already-enabled user stays enabled here. */
-    @Test fun agentwireToggle_reflectsExistingStorageAndWritesBack() = runTest {
-        agentwire.flag.value = true
-        val model = vm()
-        assertEquals(
-            LabsUiState(gesturesEnabled = false, agentwireEnabled = true),
-            model.state.first { it.agentwireEnabled },
-        )
+    @Test fun agentwireToggle_reflectsExistingStorageAndWritesBack() =
+        runTest {
+            agentwire.flag.value = true
+            val model = vm()
+            assertEquals(
+                LabsUiState(gesturesEnabled = false, agentwireEnabled = true),
+                model.state.first { it.agentwireEnabled },
+            )
 
-        model.setAgentwireEnabled(false)
-        assertEquals(
-            LabsUiState(gesturesEnabled = false, agentwireEnabled = false),
-            model.state.first { !it.agentwireEnabled },
-        )
-        assertEquals(false, gestures.enabled.first())
-    }
+            model.setAgentwireEnabled(false)
+            assertEquals(
+                LabsUiState(gesturesEnabled = false, agentwireEnabled = false),
+                model.state.first { !it.agentwireEnabled },
+            )
+            assertEquals(false, gestures.enabled.first())
+        }
 
     private class FakeGesturePrefs : GesturePrefs {
         val flag = MutableStateFlow(false)
         val menuState = MutableStateFlow(GestureMenuConfig())
         override val enabled: Flow<Boolean> = flag
+
         override suspend fun setEnabled(enabled: Boolean) {
             flag.value = enabled
         }
 
         override val menu: Flow<GestureMenuConfig> = menuState
+
         override suspend fun setMenu(config: GestureMenuConfig) {
             menuState.value = config
         }
@@ -89,15 +94,16 @@ class LabsViewModelTest {
 
         val orbState = MutableStateFlow(OrbPlacement())
         override val orb: Flow<OrbPlacement> = orbState
+
         override suspend fun setOrb(placement: OrbPlacement) {
             orbState.value = placement
         }
     }
 
-    private class FakeAgentwirePrefs :
-        AgentwirePrefs(ApplicationProvider.getApplicationContext<Context>()) {
+    private class FakeAgentwirePrefs : AgentwirePrefs(ApplicationProvider.getApplicationContext<Context>()) {
         val flag = MutableStateFlow(false)
         override val enabled: Flow<Boolean> = flag
+
         override suspend fun setEnabled(enabled: Boolean) {
             flag.value = enabled
         }

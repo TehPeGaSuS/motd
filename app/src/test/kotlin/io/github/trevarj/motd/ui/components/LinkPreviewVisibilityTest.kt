@@ -20,13 +20,14 @@ class LinkPreviewVisibilityTest {
     fun successfulPreview_isVisible() {
         assertTrue(
             shouldShowLinkPreview(
-                preview = LinkPreview(
-                    url = "https://example.test",
-                    title = "Example",
-                    description = null,
-                    imageUrl = null,
-                    siteName = null,
-                ),
+                preview =
+                    LinkPreview(
+                        url = "https://example.test",
+                        title = "Example",
+                        description = null,
+                        imageUrl = null,
+                        siteName = null,
+                    ),
                 loading = false,
                 resolved = true,
             ),
@@ -81,11 +82,12 @@ class LinkPreviewVisibilityTest {
         )
     }
 
-    private fun preview(imageUrl: String?): LinkPreview = LinkPreview(
-        url = "https://example.test",
-        title = "Example",
-        description = null,
-        imageUrl = imageUrl,
-        siteName = null,
-    )
+    private fun preview(imageUrl: String?): LinkPreview =
+        LinkPreview(
+            url = "https://example.test",
+            title = "Example",
+            description = null,
+            imageUrl = imageUrl,
+            siteName = null,
+        )
 }

@@ -90,11 +90,12 @@ class OutgoingFlightTest {
 
     @Test
     fun `an accepted flight trusts its event ids over a lookalike row`() {
-        val flight = attachOutgoingFlightEvents(
-            launchOutgoingFlight(token = 1, text = "hello", replyTo = null, nowMs = 0),
-            token = 1,
-            eventIds = listOf(5L),
-        )!!
+        val flight =
+            attachOutgoingFlightEvents(
+                launchOutgoingFlight(token = 1, text = "hello", replyTo = null, nowMs = 0),
+                token = 1,
+                eventIds = listOf(5L),
+            )!!
 
         assertTrue(flight.matches(row(id = 5, text = "anything", pendingLabel = null)))
         assertFalse(flight.matches(row(id = 6, text = "hello", pendingLabel = "motd-1")))
@@ -207,8 +208,10 @@ class OutgoingFlightTest {
         assertEquals(1f, sendFlightMorphSwap(1.1f), 0.001f)
     }
 
-    private fun accepted(eventIds: List<Long>, storedTexts: List<String>) =
-        SendAcceptance.Accepted(eventIds = eventIds, storedTexts = storedTexts)
+    private fun accepted(
+        eventIds: List<Long>,
+        storedTexts: List<String>,
+    ) = SendAcceptance.Accepted(eventIds = eventIds, storedTexts = storedTexts)
 
     private fun row(
         id: Long,

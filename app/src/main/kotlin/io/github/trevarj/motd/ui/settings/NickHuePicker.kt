@@ -58,18 +58,18 @@ fun NickHuePickerDialog(
                         val selected = hue == currentHue
                         // Swatch filled with the resolved palette color; selected swatch gets a border.
                         Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(scheme.hue(hue))
-                                .then(
-                                    if (selected) {
-                                        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                                    } else {
-                                        Modifier
-                                    },
-                                )
-                                .clickable { onPick(hue) },
+                            modifier =
+                                Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(scheme.hue(hue))
+                                    .then(
+                                        if (selected) {
+                                            Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                                        } else {
+                                            Modifier
+                                        },
+                                    ).clickable { onPick(hue) },
                         )
                     }
                 }

@@ -10,8 +10,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material3.MaterialTheme
@@ -60,10 +60,11 @@ internal fun chatWorkspacePolicy(
     if (availableWidthDp < CHAT_WORKSPACE_RESIZABLE_DP) {
         return ChatWorkspacePolicy(ChatWorkspaceMode.DUAL_FIXED, CHAT_LIST_MIN_DP)
     }
-    val maximumListWidth = minOf(
-        CHAT_LIST_MAX_DP,
-        availableWidthDp - CHAT_DETAIL_MIN_DP - CHAT_PANE_DIVIDER_DP,
-    ).coerceAtLeast(CHAT_LIST_MIN_DP)
+    val maximumListWidth =
+        minOf(
+            CHAT_LIST_MAX_DP,
+            availableWidthDp - CHAT_DETAIL_MIN_DP - CHAT_PANE_DIVIDER_DP,
+        ).coerceAtLeast(CHAT_LIST_MIN_DP)
     return ChatWorkspacePolicy(
         ChatWorkspaceMode.DUAL_RESIZABLE,
         requestedListWidthDp.coerceIn(CHAT_LIST_MIN_DP, maximumListWidth),
@@ -77,9 +78,10 @@ internal fun ChatWorkspace(
     detailPane: (@Composable (showBack: Boolean) -> Unit)? = null,
 ) {
     BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
     ) {
         val availableWidth = maxWidth
         var requestedListWidthDp by rememberSaveable { mutableFloatStateOf(CHAT_LIST_INITIAL_DP) }
@@ -102,24 +104,25 @@ internal fun ChatWorkspace(
                 listPane(true)
             }
             Box(
-                modifier = Modifier
-                    .width(CHAT_PANE_DIVIDER_DP.dp)
-                    .fillMaxHeight()
-                    .then(
-                        if (policy.mode == ChatWorkspaceMode.DUAL_RESIZABLE) {
-                            Modifier
-                                .semantics { contentDescription = resizeDescription }
-                                .pointerInput(availableWidth, layoutDirection) {
-                                    detectDragGestures { change, dragAmount ->
-                                        change.consume()
-                                        val direction = if (layoutDirection == LayoutDirection.Ltr) 1f else -1f
-                                        requestedListWidthDp += dragAmount.x.toDp().value * direction
+                modifier =
+                    Modifier
+                        .width(CHAT_PANE_DIVIDER_DP.dp)
+                        .fillMaxHeight()
+                        .then(
+                            if (policy.mode == ChatWorkspaceMode.DUAL_RESIZABLE) {
+                                Modifier
+                                    .semantics { contentDescription = resizeDescription }
+                                    .pointerInput(availableWidth, layoutDirection) {
+                                        detectDragGestures { change, dragAmount ->
+                                            change.consume()
+                                            val direction = if (layoutDirection == LayoutDirection.Ltr) 1f else -1f
+                                            requestedListWidthDp += dragAmount.x.toDp().value * direction
+                                        }
                                     }
-                                }
-                        } else {
-                            Modifier
-                        },
-                    ),
+                            } else {
+                                Modifier
+                            },
+                        ),
                 contentAlignment = Alignment.Center,
             ) {
                 VerticalDivider(

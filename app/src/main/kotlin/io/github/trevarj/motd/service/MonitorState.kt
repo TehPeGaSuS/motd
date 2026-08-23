@@ -54,6 +54,7 @@ internal fun rekeyPresenceState(
 internal fun invalidatePresenceState(
     current: Map<PresenceKey, PresenceState>,
     networkId: Long,
-): Map<PresenceKey, PresenceState> = current.mapValues { (key, state) ->
-    if (key.networkId == networkId) PresenceState.UNKNOWN else state
-}
+): Map<PresenceKey, PresenceState> =
+    current.mapValues { (key, state) ->
+        if (key.networkId == networkId) PresenceState.UNKNOWN else state
+    }

@@ -24,16 +24,25 @@ class Migration15To16Test {
     @Test fun `migration adds active archive default without losing buffers`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(15) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL("CREATE TABLE buffers (id INTEGER PRIMARY KEY NOT NULL, archived INTEGER)")
-                    }
-                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
-                }).build(),
-        )
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(15) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL("CREATE TABLE buffers (id INTEGER PRIMARY KEY NOT NULL, archived INTEGER)")
+                            }
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL("DROP TABLE buffers")
         db.execSQL("CREATE TABLE buffers (id INTEGER PRIMARY KEY NOT NULL)")
@@ -47,5 +56,7 @@ class Migration15To16Test {
         }
     }
 
-    private companion object { const val DB_NAME = "migration-15-16-test.db" }
+    private companion object {
+        const val DB_NAME = "migration-15-16-test.db"
+    }
 }

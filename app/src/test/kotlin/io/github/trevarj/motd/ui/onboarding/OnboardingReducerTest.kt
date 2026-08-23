@@ -14,9 +14,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OnboardingReducerTest {
-
-    private fun reduce(state: OnboardingState, vararg actions: OnboardingAction): OnboardingState =
-        actions.fold(state) { s, a -> onboardingReducer(s, a) }
+    private fun reduce(
+        state: OnboardingState,
+        vararg actions: OnboardingAction,
+    ): OnboardingState = actions.fold(state) { s, a -> onboardingReducer(s, a) }
 
     @Test
     fun `welcome advances to choice`() {
@@ -26,41 +27,45 @@ class OnboardingReducerTest {
 
     @Test
     fun `choice does not advance until a choice is made`() {
-        val s = onboardingReducer(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.Next,
-        )
+        val s =
+            onboardingReducer(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.Next,
+            )
         // No choice yet -> stays put.
         assertEquals(OnboardingStep.CHOICE, s.step)
     }
 
     @Test
     fun `choosing network then next advances to server`() {
-        val s = reduce(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.NETWORK),
-            OnboardingAction.Next,
-        )
+        val s =
+            reduce(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.ChooseConnection(ConnectionChoice.NETWORK),
+                OnboardingAction.Next,
+            )
         assertEquals(OnboardingStep.SERVER, s.step)
         assertEquals(NetworkRole.DIRECT, s.role)
     }
 
     @Test
     fun `soju choice yields bouncer root role`() {
-        val s = onboardingReducer(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
-        )
+        val s =
+            onboardingReducer(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
+            )
         assertTrue(s.isSoju)
         assertEquals(NetworkRole.BOUNCER_ROOT, s.role)
     }
 
     @Test
     fun `soju login maps to SASL PLAIN without mutating direct auth`() {
-        val s = onboardingReducer(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
-        )
+        val s =
+            onboardingReducer(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
+            )
         assertEquals(AuthMode.NONE, s.auth.mode)
         assertEquals(AuthMode.PLAIN, s.activeAuth.mode)
     }
@@ -68,10 +73,11 @@ class OnboardingReducerTest {
     @Test
     fun `soju AUTH advance requires both username and password`() {
         // After choosing soju, mode is PLAIN so AUTH validity gates on both fields.
-        val base = reduce(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
-        ).copy(step = OnboardingStep.AUTH)
+        val base =
+            reduce(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
+            ).copy(step = OnboardingStep.AUTH)
 
         assertFalse(base.canAdvance)
         assertFalse(base.copy(sojuLogin = SojuLoginForm(username = "u")).canAdvance)
@@ -82,16 +88,18 @@ class OnboardingReducerTest {
 
     @Test
     fun `bouncer and direct credential drafts stay independent`() {
-        val soju = reduce(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
-        )
+        val soju =
+            reduce(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
+            )
         val none = onboardingReducer(soju, OnboardingAction.EditAuth(AuthForm(mode = AuthMode.NONE)))
         assertEquals(AuthMode.NONE, none.auth.mode)
-        val external = onboardingReducer(
-            soju,
-            OnboardingAction.EditAuth(AuthForm(mode = AuthMode.EXTERNAL, saslUser = "u", saslPassword = "p")),
-        )
+        val external =
+            onboardingReducer(
+                soju,
+                OnboardingAction.EditAuth(AuthForm(mode = AuthMode.EXTERNAL, saslUser = "u", saslPassword = "p")),
+            )
         assertEquals(AuthMode.EXTERNAL, external.auth.mode)
         assertEquals("u", external.auth.saslUser)
         assertEquals("p", external.auth.saslPassword)
@@ -99,11 +107,12 @@ class OnboardingReducerTest {
 
     @Test
     fun `ZNC selection remains direct and requires separate login fields`() {
-        val base = reduce(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
-            OnboardingAction.ChooseBouncerKind(BouncerKind.ZNC),
-        ).copy(step = OnboardingStep.AUTH)
+        val base =
+            reduce(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
+                OnboardingAction.ChooseBouncerKind(BouncerKind.ZNC),
+            ).copy(step = OnboardingStep.AUTH)
         assertTrue(base.isZnc)
         assertEquals(NetworkRole.DIRECT, base.role)
         assertFalse(base.canAdvance)
@@ -114,24 +123,27 @@ class OnboardingReducerTest {
 
     @Test
     fun `network EditAuth preserves submitted mode`() {
-        val network = reduce(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.NETWORK),
-        )
-        val s = onboardingReducer(
-            network,
-            OnboardingAction.EditAuth(AuthForm(mode = AuthMode.EXTERNAL, certAlias = "a")),
-        )
+        val network =
+            reduce(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.ChooseConnection(ConnectionChoice.NETWORK),
+            )
+        val s =
+            onboardingReducer(
+                network,
+                OnboardingAction.EditAuth(AuthForm(mode = AuthMode.EXTERNAL, certAlias = "a")),
+            )
         assertEquals(AuthMode.EXTERNAL, s.auth.mode)
     }
 
     @Test
     fun `network choice leaves auth mode untouched`() {
         // Direct path keeps the full picker: NONE stays valid, EXTERNAL still selectable.
-        val s = onboardingReducer(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.NETWORK),
-        )
+        val s =
+            onboardingReducer(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.ChooseConnection(ConnectionChoice.NETWORK),
+            )
         assertEquals(AuthMode.NONE, s.auth.mode)
         val none = s.copy(step = OnboardingStep.AUTH)
         assertTrue(none.canAdvance)
@@ -141,10 +153,11 @@ class OnboardingReducerTest {
 
     @Test
     fun `libera preset fills host port tls and selects network path`() {
-        val s = onboardingReducer(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.SelectPreset(NetworkPresetId.LIBERA),
-        )
+        val s =
+            onboardingReducer(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.SelectPreset(NetworkPresetId.LIBERA),
+            )
         assertEquals(ConnectionChoice.NETWORK, s.choice)
         assertEquals("irc.libera.chat", s.server.host)
         assertEquals("6697", s.server.port)
@@ -153,21 +166,23 @@ class OnboardingReducerTest {
 
     @Test
     fun `libera preset preserves already-typed nick`() {
-        val s = reduce(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.EditServer(ServerForm(nick = "trev")),
-            OnboardingAction.SelectPreset(NetworkPresetId.LIBERA),
-        )
+        val s =
+            reduce(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.EditServer(ServerForm(nick = "trev")),
+                OnboardingAction.SelectPreset(NetworkPresetId.LIBERA),
+            )
         assertEquals("trev", s.server.nick)
         assertEquals("irc.libera.chat", s.server.host)
     }
 
     @Test
     fun `legacy preset uses plaintext and requires confirmation`() {
-        val selected = onboardingReducer(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.SelectPreset(NetworkPresetId.QUAKENET),
-        )
+        val selected =
+            onboardingReducer(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.SelectPreset(NetworkPresetId.QUAKENET),
+            )
 
         assertEquals(ConnectionChoice.NETWORK, selected.choice)
         assertEquals(NetworkPresetId.QUAKENET, selected.presetId)
@@ -181,14 +196,16 @@ class OnboardingReducerTest {
 
     @Test
     fun `editing a preset endpoint falls back to custom without losing identity`() {
-        val selected = onboardingReducer(
-            OnboardingState(server = ServerForm(nick = "trev", username = "t")),
-            OnboardingAction.SelectPreset(NetworkPresetId.OFTC),
-        )
-        val edited = onboardingReducer(
-            selected,
-            OnboardingAction.EditServer(selected.server.copy(host = "irc.example.org")),
-        )
+        val selected =
+            onboardingReducer(
+                OnboardingState(server = ServerForm(nick = "trev", username = "t")),
+                OnboardingAction.SelectPreset(NetworkPresetId.OFTC),
+            )
+        val edited =
+            onboardingReducer(
+                selected,
+                OnboardingAction.EditServer(selected.server.copy(host = "irc.example.org")),
+            )
 
         assertEquals(NetworkPresetId.CUSTOM, edited.presetId)
         assertEquals("trev", edited.server.nick)
@@ -217,10 +234,11 @@ class OnboardingReducerTest {
     fun `soju server now requires host, valid port, and a nick`() {
         // soju collects a nick on SERVER (the IRC NICK the bouncer registers with); the bouncer
         // SASL username/password are gathered on AUTH.
-        val soju = reduce(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
-        ).copy(step = OnboardingStep.SERVER)
+        val soju =
+            reduce(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
+            ).copy(step = OnboardingStep.SERVER)
 
         assertFalse(soju.canAdvance) // blank host + nick
         val hostOnly = soju.copy(server = ServerForm(host = "bnc.example.org"))
@@ -236,10 +254,11 @@ class OnboardingReducerTest {
 
     @Test
     fun `direct server still requires a nick`() {
-        val direct = reduce(
-            OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.NETWORK),
-        ).copy(step = OnboardingStep.SERVER, server = ServerForm(host = "irc.example.org"))
+        val direct =
+            reduce(
+                OnboardingState(step = OnboardingStep.CHOICE),
+                OnboardingAction.ChooseConnection(ConnectionChoice.NETWORK),
+            ).copy(step = OnboardingStep.SERVER, server = ServerForm(host = "irc.example.org"))
         assertFalse(direct.canAdvance) // no nick yet
         assertTrue(direct.copy(server = direct.server.copy(nick = "me")).canAdvance)
     }
@@ -307,12 +326,13 @@ class OnboardingReducerTest {
 
     @Test
     fun `conn state changes accumulate a log and surface failure reason`() {
-        val s = reduce(
-            OnboardingState(step = OnboardingStep.CONNECT),
-            OnboardingAction.ConnStateChanged(IrcClientState.Connecting),
-            OnboardingAction.ConnStateChanged(IrcClientState.Registering),
-            OnboardingAction.ConnStateChanged(IrcClientState.Failed("bad password", fatal = true)),
-        )
+        val s =
+            reduce(
+                OnboardingState(step = OnboardingStep.CONNECT),
+                OnboardingAction.ConnStateChanged(IrcClientState.Connecting),
+                OnboardingAction.ConnStateChanged(IrcClientState.Registering),
+                OnboardingAction.ConnStateChanged(IrcClientState.Failed("bad password", fatal = true)),
+            )
         assertEquals(3, s.stateLog.size)
         assertEquals("bad password", s.error)
         assertFalse(s.isReady)
@@ -321,12 +341,13 @@ class OnboardingReducerTest {
 
     @Test
     fun `ready allows advance from connect`() {
-        val s = onboardingReducer(
-            OnboardingState(step = OnboardingStep.CONNECT),
-            OnboardingAction.ConnStateChanged(
-                IrcClientState.Ready("me", emptySet(), emptyMap()),
-            ),
-        )
+        val s =
+            onboardingReducer(
+                OnboardingState(step = OnboardingStep.CONNECT),
+                OnboardingAction.ConnStateChanged(
+                    IrcClientState.Ready("me", emptySet(), emptyMap()),
+                ),
+            )
         assertTrue(s.isReady)
         assertTrue(s.canAdvance)
         assertEquals(OnboardingStep.FINISH, onboardingReducer(s, OnboardingAction.Next).step)
@@ -334,17 +355,20 @@ class OnboardingReducerTest {
 
     @Test
     fun `bouncer list loads and toggles selection`() {
-        val listed = reduce(
-            OnboardingState(step = OnboardingStep.CONNECT, networkId = 1L),
-            OnboardingAction.BouncerListLoading(1L, 1L, 1L),
-            OnboardingAction.BouncerListed(
-                1L, 1L, 1L,
-                listOf(
-                    BouncerNetworkRow("1", "Libera", selected = false),
-                    BouncerNetworkRow("2", "OFTC", selected = false),
+        val listed =
+            reduce(
+                OnboardingState(step = OnboardingStep.CONNECT, networkId = 1L),
+                OnboardingAction.BouncerListLoading(1L, 1L, 1L),
+                OnboardingAction.BouncerListed(
+                    1L,
+                    1L,
+                    1L,
+                    listOf(
+                        BouncerNetworkRow("1", "Libera", selected = false),
+                        BouncerNetworkRow("2", "OFTC", selected = false),
+                    ),
                 ),
-            ),
-        )
+            )
         assertTrue(listed.bouncerDiscovery is BouncerDiscoveryState.Loaded)
         assertEquals(2, listed.bouncerNetworks.size)
 
@@ -355,29 +379,34 @@ class OnboardingReducerTest {
 
     @Test
     fun `passive bouncer snapshot preserves selected imports`() {
-        val selected = reduce(
-            OnboardingState(step = OnboardingStep.CONNECT, networkId = 1L),
-            OnboardingAction.BouncerListLoading(1L, 1L, 1L),
-            OnboardingAction.BouncerListed(
-                1L, 1L, 1L,
-                listOf(
-                    BouncerNetworkRow("1", "Libera", selected = false),
-                    BouncerNetworkRow("2", "OFTC", selected = false),
+        val selected =
+            reduce(
+                OnboardingState(step = OnboardingStep.CONNECT, networkId = 1L),
+                OnboardingAction.BouncerListLoading(1L, 1L, 1L),
+                OnboardingAction.BouncerListed(
+                    1L,
+                    1L,
+                    1L,
+                    listOf(
+                        BouncerNetworkRow("1", "Libera", selected = false),
+                        BouncerNetworkRow("2", "OFTC", selected = false),
+                    ),
                 ),
-            ),
-            OnboardingAction.ToggleBouncerNetwork("1"),
-        )
+                OnboardingAction.ToggleBouncerNetwork("1"),
+            )
 
-        val refreshed = onboardingReducer(
-            selected,
-            OnboardingAction.BouncerSnapshot(
-                1L, 1L,
-                listOf(
-                    BouncerNetworkRow("1", "Libera.Chat", selected = false),
-                    BouncerNetworkRow("3", "ExampleNet", selected = false),
+        val refreshed =
+            onboardingReducer(
+                selected,
+                OnboardingAction.BouncerSnapshot(
+                    1L,
+                    1L,
+                    listOf(
+                        BouncerNetworkRow("1", "Libera.Chat", selected = false),
+                        BouncerNetworkRow("3", "ExampleNet", selected = false),
+                    ),
                 ),
-            ),
-        )
+            )
 
         assertTrue(refreshed.bouncerNetworks.first { it.netId == "1" }.selected)
         assertFalse(refreshed.bouncerNetworks.first { it.netId == "3" }.selected)
@@ -385,47 +414,54 @@ class OnboardingReducerTest {
 
     @Test
     fun `failed discovery retains selected imports and passive snapshots retain the error`() {
-        val selected = reduce(
-            OnboardingState(step = OnboardingStep.CONNECT, networkId = 1L),
-            OnboardingAction.BouncerListLoading(1L, 1L, 1L),
-            OnboardingAction.BouncerListed(
-                1L, 1L, 1L,
-                listOf(BouncerNetworkRow("libera", "Libera", selected = false)),
-            ),
-            OnboardingAction.ToggleBouncerNetwork("libera"),
-        )
+        val selected =
+            reduce(
+                OnboardingState(step = OnboardingStep.CONNECT, networkId = 1L),
+                OnboardingAction.BouncerListLoading(1L, 1L, 1L),
+                OnboardingAction.BouncerListed(
+                    1L,
+                    1L,
+                    1L,
+                    listOf(BouncerNetworkRow("libera", "Libera", selected = false)),
+                ),
+                OnboardingAction.ToggleBouncerNetwork("libera"),
+            )
 
-        val refreshed = onboardingReducer(
-            selected,
-            OnboardingAction.BouncerListFailed(1L, 1L, 1L, BouncerOperationError.ConnectionLost),
-        )
+        val refreshed =
+            onboardingReducer(
+                selected,
+                OnboardingAction.BouncerListFailed(1L, 1L, 1L, BouncerOperationError.ConnectionLost),
+            )
 
         assertEquals(listOf("libera"), refreshed.bouncerNetworks.map { it.netId })
         assertTrue(refreshed.bouncerNetworks.single().selected)
-        val passive = onboardingReducer(
-            refreshed,
-            OnboardingAction.BouncerSnapshot(1L, 1L, listOf(BouncerNetworkRow("2", "OFTC", false))),
-        )
+        val passive =
+            onboardingReducer(
+                refreshed,
+                OnboardingAction.BouncerSnapshot(1L, 1L, listOf(BouncerNetworkRow("2", "OFTC", false))),
+            )
         assertTrue(passive.bouncerDiscovery is BouncerDiscoveryState.Failed)
         assertTrue(passive.bouncerNetworks.single { it.netId == "libera" }.selected)
     }
 
     @Test
     fun `bouncer add preserves drafts on failure and clears them once on success`() {
-        val s = reduce(
-            OnboardingState(step = OnboardingStep.CONNECT, networkId = 1L),
-            OnboardingAction.BouncerListLoading(1L, 1L, 1L),
-            OnboardingAction.BouncerListed(1L, 1L, 1L, emptyList()),
-            OnboardingAction.EditBouncerAddDraft(BouncerAddDraft("New", "irc.new.example")),
-            OnboardingAction.BouncerAddSubmitting(1L, 1L),
-            OnboardingAction.BouncerAddFailed(1L, 1L, BouncerOperationError.ConnectionLost),
-        )
+        val s =
+            reduce(
+                OnboardingState(step = OnboardingStep.CONNECT, networkId = 1L),
+                OnboardingAction.BouncerListLoading(1L, 1L, 1L),
+                OnboardingAction.BouncerListed(1L, 1L, 1L, emptyList()),
+                OnboardingAction.EditBouncerAddDraft(BouncerAddDraft("New", "irc.new.example")),
+                OnboardingAction.BouncerAddSubmitting(1L, 1L),
+                OnboardingAction.BouncerAddFailed(1L, 1L, BouncerOperationError.ConnectionLost),
+            )
         assertEquals(BouncerAddDraft("New", "irc.new.example"), s.bouncerAddDraft)
         assertTrue(s.bouncerAdd is BouncerAddState.Failed)
-        val accepted = onboardingReducer(
-            s,
-            OnboardingAction.BouncerAdded(1L, 1L, BouncerNetworkRow("9", "New", selected = true)),
-        )
+        val accepted =
+            onboardingReducer(
+                s,
+                OnboardingAction.BouncerAdded(1L, 1L, BouncerNetworkRow("9", "New", selected = true)),
+            )
         assertEquals(BouncerAddDraft(), accepted.bouncerAddDraft)
         assertTrue(accepted.bouncerAdd is BouncerAddState.Success)
         assertEquals(1, accepted.bouncerNetworks.size)
@@ -434,35 +470,40 @@ class OnboardingReducerTest {
 
     @Test
     fun `stale list and add results from replaced root are ignored`() {
-        val replacement = reduce(
-            OnboardingState(networkId = 2L),
-            OnboardingAction.BouncerListLoading(2L, 3L, 4L),
-        )
-        val afterList = onboardingReducer(
-            replacement,
-            OnboardingAction.BouncerListed(1L, 1L, 1L, listOf(BouncerNetworkRow("old", "Old", false))),
-        )
-        val afterAdd = onboardingReducer(
-            afterList,
-            OnboardingAction.BouncerAdded(1L, 1L, BouncerNetworkRow("old", "Old", true)),
-        )
+        val replacement =
+            reduce(
+                OnboardingState(networkId = 2L),
+                OnboardingAction.BouncerListLoading(2L, 3L, 4L),
+            )
+        val afterList =
+            onboardingReducer(
+                replacement,
+                OnboardingAction.BouncerListed(1L, 1L, 1L, listOf(BouncerNetworkRow("old", "Old", false))),
+            )
+        val afterAdd =
+            onboardingReducer(
+                afterList,
+                OnboardingAction.BouncerAdded(1L, 1L, BouncerNetworkRow("old", "Old", true)),
+            )
         assertTrue(afterAdd.bouncerNetworks.isEmpty())
         assertTrue(afterAdd.bouncerAdd is BouncerAddState.Idle)
     }
 
     @Test
     fun `discovery retry does not invalidate pending add`() {
-        val submitting = reduce(
-            OnboardingState(networkId = 1L),
-            OnboardingAction.BouncerListLoading(1L, 7L, 1L),
-            OnboardingAction.EditBouncerAddDraft(BouncerAddDraft("New", "irc.new.example")),
-            OnboardingAction.BouncerAddSubmitting(1L, 7L),
-            OnboardingAction.BouncerListLoading(1L, 7L, 2L),
-        )
-        val added = onboardingReducer(
-            submitting,
-            OnboardingAction.BouncerAdded(1L, 7L, BouncerNetworkRow("9", "New", true)),
-        )
+        val submitting =
+            reduce(
+                OnboardingState(networkId = 1L),
+                OnboardingAction.BouncerListLoading(1L, 7L, 1L),
+                OnboardingAction.EditBouncerAddDraft(BouncerAddDraft("New", "irc.new.example")),
+                OnboardingAction.BouncerAddSubmitting(1L, 7L),
+                OnboardingAction.BouncerListLoading(1L, 7L, 2L),
+            )
+        val added =
+            onboardingReducer(
+                submitting,
+                OnboardingAction.BouncerAdded(1L, 7L, BouncerNetworkRow("9", "New", true)),
+            )
         assertTrue(added.bouncerAdd is BouncerAddState.Success)
         assertEquals("9", added.bouncerNetworks.single().netId)
     }
@@ -470,10 +511,11 @@ class OnboardingReducerTest {
     @Test
     fun `history sync depth defaults to a month and follows the selection`() {
         assertEquals(HistorySyncDepth.MONTH, OnboardingState().historySyncDepth)
-        val s = reduce(
-            OnboardingState(step = OnboardingStep.CONNECT),
-            OnboardingAction.SelectHistorySyncDepth(HistorySyncDepth.EVERYTHING),
-        )
+        val s =
+            reduce(
+                OnboardingState(step = OnboardingStep.CONNECT),
+                OnboardingAction.SelectHistorySyncDepth(HistorySyncDepth.EVERYTHING),
+            )
         assertEquals(HistorySyncDepth.EVERYTHING, s.historySyncDepth)
         // The selection is inert for the rest of the wizard.
         assertEquals(OnboardingStep.CONNECT, s.step)
@@ -487,10 +529,11 @@ class OnboardingReducerTest {
 
     @Test
     fun `error clears`() {
-        val s = reduce(
-            OnboardingState(error = "x"),
-            OnboardingAction.Error(null),
-        )
+        val s =
+            reduce(
+                OnboardingState(error = "x"),
+                OnboardingAction.Error(null),
+            )
         assertNull(s.error)
     }
 

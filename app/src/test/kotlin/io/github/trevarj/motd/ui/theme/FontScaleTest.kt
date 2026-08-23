@@ -91,7 +91,8 @@ class FontScaleTest {
         val scaleThenFamily = scaledTypography(140, base).withFontFamily(FontFamily.Monospace)
         val familyThenScale = scaledTypography(140, base.withFontFamily(FontFamily.Monospace))
 
-        typographyStyles(scaleThenFamily).zip(typographyStyles(familyThenScale))
+        typographyStyles(scaleThenFamily)
+            .zip(typographyStyles(familyThenScale))
             .forEachIndexed { index, (a, b) ->
                 assertEquals("font family for role $index", a.fontFamily, b.fontFamily)
                 assertEquals("font size for role $index", a.fontSize, b.fontSize)
@@ -99,21 +100,22 @@ class FontScaleTest {
             }
     }
 
-    private fun typographyStyles(typography: Typography): List<TextStyle> = listOf(
-        typography.displayLarge,
-        typography.displayMedium,
-        typography.displaySmall,
-        typography.headlineLarge,
-        typography.headlineMedium,
-        typography.headlineSmall,
-        typography.titleLarge,
-        typography.titleMedium,
-        typography.titleSmall,
-        typography.bodyLarge,
-        typography.bodyMedium,
-        typography.bodySmall,
-        typography.labelLarge,
-        typography.labelMedium,
-        typography.labelSmall,
-    )
+    private fun typographyStyles(typography: Typography): List<TextStyle> =
+        listOf(
+            typography.displayLarge,
+            typography.displayMedium,
+            typography.displaySmall,
+            typography.headlineLarge,
+            typography.headlineMedium,
+            typography.headlineSmall,
+            typography.titleLarge,
+            typography.titleMedium,
+            typography.titleSmall,
+            typography.bodyLarge,
+            typography.bodyMedium,
+            typography.bodySmall,
+            typography.labelLarge,
+            typography.labelMedium,
+            typography.labelSmall,
+        )
 }

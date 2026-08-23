@@ -33,12 +33,13 @@ class MessageBubbleLayoutTest {
 
     @Test fun bubbleRoles_areDistinctAndReadable() {
         val scheme = MotdLightScheme
-        val roles = listOf(
-            messageBubbleRoleColors(scheme, isSelf = false, mentionHighlighted = false, MessageKind.PRIVMSG),
-            messageBubbleRoleColors(scheme, isSelf = true, mentionHighlighted = false, MessageKind.PRIVMSG),
-            messageBubbleRoleColors(scheme, isSelf = false, mentionHighlighted = true, MessageKind.PRIVMSG),
-            messageBubbleRoleColors(scheme, isSelf = false, mentionHighlighted = false, MessageKind.NOTICE),
-        )
+        val roles =
+            listOf(
+                messageBubbleRoleColors(scheme, isSelf = false, mentionHighlighted = false, MessageKind.PRIVMSG),
+                messageBubbleRoleColors(scheme, isSelf = true, mentionHighlighted = false, MessageKind.PRIVMSG),
+                messageBubbleRoleColors(scheme, isSelf = false, mentionHighlighted = true, MessageKind.PRIVMSG),
+                messageBubbleRoleColors(scheme, isSelf = false, mentionHighlighted = false, MessageKind.NOTICE),
+            )
 
         assertEquals(4, roles.map { it.container }.distinct().size)
         roles.forEach { role ->

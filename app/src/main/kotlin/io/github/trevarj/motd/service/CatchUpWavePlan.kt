@@ -15,7 +15,10 @@ internal data class SyncTarget(
 )
 
 /** A [SyncTarget] paired with the one question that decides whether it is fetched at all. */
-internal data class CatchUpCandidate(val target: SyncTarget, val changed: Boolean)
+internal data class CatchUpCandidate(
+    val target: SyncTarget,
+    val changed: Boolean,
+)
 
 /**
  * How one catch-up pass spends its fan-out.
@@ -49,18 +52,21 @@ internal fun targetChanged(
     advertisedLatest: Long?,
     cursorNewest: Long?,
     hasCursor: Boolean,
-): Boolean = when {
-    !hasCursor -> true
-    advertisedLatest == null -> false
-    else -> !reachedAdvertisedTolerance(cursorNewest, advertisedLatest)
-}
+): Boolean =
+    when {
+        !hasCursor -> true
+        advertisedLatest == null -> false
+        else -> !reachedAdvertisedTolerance(cursorNewest, advertisedLatest)
+    }
 
 /**
  * Advertised-latest comparison with sub-second tolerance: a stored newest in the same second as the
  * advertisement means the page that would be fetched is already local.
  */
-internal fun reachedAdvertisedTolerance(stored: Long?, advertised: Long): Boolean =
-    stored != null && stored / 1000 >= advertised / 1000
+internal fun reachedAdvertisedTolerance(
+    stored: Long?,
+    advertised: Long,
+): Boolean = stored != null && stored / 1000 >= advertised / 1000
 
 /**
  * The order a pass admits targets in, and therefore the order the user sees rooms fill in.
@@ -72,8 +78,7 @@ internal fun reachedAdvertisedTolerance(stored: Long?, advertised: Long): Boolea
 internal fun catchUpOrder(foregroundBufferId: Long?): Comparator<SyncTarget> =
     compareByDescending<SyncTarget> {
         foregroundBufferId != null && it.knownBufferId == foregroundBufferId
-    }
-        .thenByDescending { it.pinned }
+    }.thenByDescending { it.pinned }
         .thenByDescending { it.latestMessageTime != null }
         .thenByDescending { it.latestMessageTime ?: Long.MIN_VALUE }
 

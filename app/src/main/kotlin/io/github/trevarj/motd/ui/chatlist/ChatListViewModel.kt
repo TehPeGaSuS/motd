@@ -11,15 +11,15 @@ import io.github.trevarj.motd.data.db.InvitationEventRow
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkEntity
-import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.AppVisibility
-import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ChannelCloseCoordinator
+import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.service.PresenceKey
@@ -60,19 +60,37 @@ enum class ChatListSyncIndicator { NONE, QUEUED, WAITING, SYNCING, ERROR, UNAVAI
 internal fun chatListSyncIndicators(
     statuses: Map<Long, HistorySyncStatus>,
     queuedCuesVisible: Boolean,
-): Map<Long, ChatListSyncIndicator> = statuses.mapNotNull { (bufferId, status) ->
-    val indicator = when (status) {
-        HistorySyncStatus.Queued ->
-            if (queuedCuesVisible) ChatListSyncIndicator.QUEUED else ChatListSyncIndicator.NONE
-        HistorySyncStatus.AwaitingConnection ->
-            if (queuedCuesVisible) ChatListSyncIndicator.WAITING else ChatListSyncIndicator.NONE
-        HistorySyncStatus.Syncing -> ChatListSyncIndicator.SYNCING
-        is HistorySyncStatus.Failed -> ChatListSyncIndicator.ERROR
-        HistorySyncStatus.Unavailable -> ChatListSyncIndicator.UNAVAILABLE
-        is HistorySyncStatus.Partial, HistorySyncStatus.Idle -> ChatListSyncIndicator.NONE
-    }
-    (bufferId to indicator).takeIf { indicator != ChatListSyncIndicator.NONE }
-}.toMap()
+): Map<Long, ChatListSyncIndicator> =
+    statuses
+        .mapNotNull { (bufferId, status) ->
+            val indicator =
+                when (status) {
+                    HistorySyncStatus.Queued -> {
+                        if (queuedCuesVisible) ChatListSyncIndicator.QUEUED else ChatListSyncIndicator.NONE
+                    }
+
+                    HistorySyncStatus.AwaitingConnection -> {
+                        if (queuedCuesVisible) ChatListSyncIndicator.WAITING else ChatListSyncIndicator.NONE
+                    }
+
+                    HistorySyncStatus.Syncing -> {
+                        ChatListSyncIndicator.SYNCING
+                    }
+
+                    is HistorySyncStatus.Failed -> {
+                        ChatListSyncIndicator.ERROR
+                    }
+
+                    HistorySyncStatus.Unavailable -> {
+                        ChatListSyncIndicator.UNAVAILABLE
+                    }
+
+                    is HistorySyncStatus.Partial, HistorySyncStatus.Idle -> {
+                        ChatListSyncIndicator.NONE
+                    }
+                }
+            (bufferId to indicator).takeIf { indicator != ChatListSyncIndicator.NONE }
+        }.toMap()
 
 /** Single UI state for the chat list screen. */
 data class ChatListState(
@@ -98,6 +116,7 @@ data class ChatListState(
         get() = rows.any { !it.muted && it.unreadCountIncomplete }
     val allMentionsIncomplete: Boolean
         get() = rows.any { !it.muted && it.mentionCountIncomplete }
+
     /** Effective unread count for the current drawer scope; muted activity stays row-local. */
     val scopedUnreadCount: Int
         get() = rows.filterNot { it.type == BufferType.SERVER || it.muted }.sumOf { it.unreadCount }
@@ -127,345 +146,391 @@ data class ChatListInvitation(
 }
 
 @HiltViewModel
-class ChatListViewModel @Inject constructor(
-    private val bufferRepository: BufferRepository,
-    private val networkRepository: NetworkRepository,
-    private val connectionManager: ConnectionManager,
-    private val historyResync: HistoryResyncController,
-    private val channelCloseCoordinator: ChannelCloseCoordinator,
-    private val readMarkerRepository: ReadMarkerSnapshotter,
-    private val settingsRepository: SettingsRepository,
-    onboardingPrefs: OnboardingPrefs,
-    private val savedStateHandle: SavedStateHandle,
-    private val appVisibility: AppVisibility,
-) : ViewModel() {
-
-    init {
-        // The coordinator is process-scoped and observes persisted pending closes, so creating a
-        // fresh ViewModel after process/configuration recreation re-drives any unfinished leaves.
-        channelCloseCoordinator.start()
-    }
-
-    // One-shot: unmuting marked a muted backlog read, so the screen can report it and offer an undo.
-    private val _muteBacklogSuppressions = MutableSharedFlow<List<MuteBacklogSuppression>>(extraBufferCapacity = 1)
-    val muteBacklogSuppressions: SharedFlow<List<MuteBacklogSuppression>> = _muteBacklogSuppressions.asSharedFlow()
-
-    // Aggregate header chrome, debounced so a fast pass never flashes. Engine-owned counts; the
-    // driver's clock is elapsed real time, which keeps the windows honest across Doze.
-    val syncChrome: StateFlow<ChatListSyncChrome> = combine(
-        historyResync.passProgress,
-        historyResync.syncStatuses,
-        ::syncChromeSnapshot,
-    )
-        .distinctUntilChanged()
-        .presentSyncChrome(SystemClock::elapsedRealtime)
-        .stateIn(viewModelScope, WhileSubscribed(5_000), ChatListSyncChrome.Hidden)
-
-    // Deliberately kept out of the [state] combine: the enum map already defeats a retried
-    // Failed's reason-string churn, but folding it into ChatListState would still recompose every
-    // row on any one buffer's sync transition instead of just its own row. Gated by the same
-    // chrome flow as the header so queued rings and the explaining line appear together.
-    val syncIndicators: StateFlow<Map<Long, ChatListSyncIndicator>> = combine(
-        historyResync.syncStatuses,
-        syncChrome.map { it != ChatListSyncChrome.Hidden }.distinctUntilChanged(),
-        ::chatListSyncIndicators,
-    )
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, WhileSubscribed(5_000), emptyMap())
-
-    // Scope selection survives config changes; null = unified list (default).
-    private val selection = MutableStateFlow(savedStateHandle.get<Long?>(KEY_SELECTED))
-
-    // Title-bar connectivity cue, kept out of the [state] combine like the sync flows above so a
-    // socket transition never rebuilds the row list. connectionStates republishes on every caps/
-    // isupport re-snapshot of a Ready connection (the churn ef42ae77 conflated out of the status
-    // notification); collapsing to one boolean BEFORE the anti-flash windows keeps all of that from
-    // ever reaching composition. Scoped to the selected network's ids so a cue beside a network
-    // name reports only that network's sockets.
-    val titleConnecting: StateFlow<Boolean> = combine(
-        connectionManager.connectionStates,
-        networkRepository.observeNetworks(),
-        selection,
-    ) { states, networks, selected ->
-        titleConnectingSnapshot(states, scopeNetworkIds(selected, networks))
-    }
-        .distinctUntilChanged()
-        .presentTitleConnecting(SystemClock::elapsedRealtime)
-        .stateIn(viewModelScope, WhileSubscribed(5_000), false)
-
-    // Manual drawer order the user is arranging or that Room has not published back yet. Null means
-    // "stored order is authoritative"; see [pendingNetworkOrder] and [commitNetworkOrder].
-    private val pendingOrder = MutableStateFlow<List<Long>?>(null)
-    private val selectionAndOrder = selection.combine(pendingOrder, ::Pair)
-    private val archiveOverrides = MutableStateFlow<Map<Long, Boolean>>(emptyMap())
-    private val chatListRows = bufferRepository.observeChatList()
-        .onEach { rows ->
-            val settledIds = settledArchiveOverrideIds(rows, archiveOverrides.value)
-            if (settledIds.isNotEmpty()) archiveOverrides.value = archiveOverrides.value - settledIds
+class ChatListViewModel
+    @Inject
+    constructor(
+        private val bufferRepository: BufferRepository,
+        private val networkRepository: NetworkRepository,
+        private val connectionManager: ConnectionManager,
+        private val historyResync: HistoryResyncController,
+        private val channelCloseCoordinator: ChannelCloseCoordinator,
+        private val readMarkerRepository: ReadMarkerSnapshotter,
+        private val settingsRepository: SettingsRepository,
+        onboardingPrefs: OnboardingPrefs,
+        private val savedStateHandle: SavedStateHandle,
+        private val appVisibility: AppVisibility,
+    ) : ViewModel() {
+        init {
+            // The coordinator is process-scoped and observes persisted pending closes, so creating a
+            // fresh ViewModel after process/configuration recreation re-drives any unfinished leaves.
+            channelCloseCoordinator.start()
         }
-        .combine(archiveOverrides, ::applyArchiveOverrides)
-    private val chatListData = chatListRows.combine(bufferRepository.observeInvitations(), ::Pair)
-    private val settingsAndOnboarding = combine(
-        settingsRepository.settings,
-        onboardingPrefs.completed,
-        ::Pair,
-    )
 
-    val state: StateFlow<ChatListState> =
-        combine(
-            chatListData,
-            networkRepository.observeNetworks(),
-            connectionManager.connectionStates.combine(connectionManager.presenceStates) { connection, presence ->
-                connection to presence
-            },
-            settingsAndOnboarding,
-            selectionAndOrder,
-        ) { listData, networks, connectionAndPresence, settingsAndOnboarding, selectionAndOrder ->
-            val (rows, invitationEvents) = listData
-            val (connection, presence) = connectionAndPresence
-            val (settings, onboardingComplete) = settingsAndOnboarding
-            val (selected, pending) = selectionAndOrder
-            // If the selected network was deleted, fall back to the unified list.
-            val validSelection = selected?.takeIf { id -> networks.any { it.id == id } }
-            if (validSelection != selected) setSelection(validSelection)
+        // One-shot: unmuting marked a muted backlog read, so the screen can report it and offer an undo.
+        private val _muteBacklogSuppressions = MutableSharedFlow<List<MuteBacklogSuppression>>(extraBufferCapacity = 1)
+        val muteBacklogSuppressions: SharedFlow<List<MuteBacklogSuppression>> = _muteBacklogSuppressions.asSharedFlow()
 
-            val storedDrawerRows = buildDrawerRows(networks, rows.filterNot(ChatListRow::archived), connection)
-            // The stored rows already display the pending arrangement: drop the overlay so stored
-            // state is authoritative again. The settled check tolerates rows that differ from what
-            // the write predicted (a network deleted or added in between) — the overlay must always
-            // clear eventually, or the drawer is pinned to a stale order forever. compareAndSet,
-            // because a further move may have landed while this emission was built.
-            if (pending != null && drawerOrderSettled(storedDrawerRows, pending)) {
-                pendingOrder.compareAndSet(pending, null)
-            }
+        // Aggregate header chrome, debounced so a fast pass never flashes. Engine-owned counts; the
+        // driver's clock is elapsed real time, which keeps the windows honest across Doze.
+        val syncChrome: StateFlow<ChatListSyncChrome> =
+            combine(
+                historyResync.passProgress,
+                historyResync.syncStatuses,
+                ::syncChromeSnapshot,
+            ).distinctUntilChanged()
+                .presentSyncChrome(SystemClock::elapsedRealtime)
+                .stateIn(viewModelScope, WhileSubscribed(5_000), ChatListSyncChrome.Hidden)
 
-            val scopedRows = scopeRows(rows, validSelection, networks)
-            val (activeRows, archivedRows) = partitionArchivedRows(scopedRows)
-            val scopedBufferIds = scopedRows.mapTo(mutableSetOf(), ChatListRow::bufferId)
-            ChatListState(
-                rows = activeRows,
-                archivedRows = archivedRows,
-                invitations = invitationEvents
-                    .filter { it.bufferId in scopedBufferIds }
-                    .mapNotNull(::toChatListInvitation),
-                connection = connection,
-                queryPresence = scopedRows.asSequence()
-                    .filter { it.type == BufferType.QUERY }
-                    .mapNotNull { row ->
-                        val normalize = connectionManager.clientFor(row.networkId)?.isupport?.let { it::normalize }
-                            ?: return@mapNotNull null
-                        presence[PresenceKey(row.networkId, normalize(row.displayName))]?.let { row.bufferId to it }
-                    }
-                    .toMap(),
-                networks = networks,
-                loading = false,
-                onboardingComplete = onboardingComplete,
-                friends = settings.friends,
-                fools = settings.fools,
-                selectedNetworkId = validSelection,
-                drawerRows = applyDrawerOrder(storedDrawerRows, pending),
-                allUnread = rows.filterNot { it.muted || it.archived }.sumOf { it.unreadCount },
-                allMentions = rows.filterNot { it.muted || it.archived }.sumOf { it.mentionCount },
+        // Deliberately kept out of the [state] combine: the enum map already defeats a retried
+        // Failed's reason-string churn, but folding it into ChatListState would still recompose every
+        // row on any one buffer's sync transition instead of just its own row. Gated by the same
+        // chrome flow as the header so queued rings and the explaining line appear together.
+        val syncIndicators: StateFlow<Map<Long, ChatListSyncIndicator>> =
+            combine(
+                historyResync.syncStatuses,
+                syncChrome.map { it != ChatListSyncChrome.Hidden }.distinctUntilChanged(),
+                ::chatListSyncIndicators,
+            ).distinctUntilChanged()
+                .stateIn(viewModelScope, WhileSubscribed(5_000), emptyMap())
+
+        // Scope selection survives config changes; null = unified list (default).
+        private val selection = MutableStateFlow(savedStateHandle.get<Long?>(KEY_SELECTED))
+
+        // Title-bar connectivity cue, kept out of the [state] combine like the sync flows above so a
+        // socket transition never rebuilds the row list. connectionStates republishes on every caps/
+        // isupport re-snapshot of a Ready connection (the churn ef42ae77 conflated out of the status
+        // notification); collapsing to one boolean BEFORE the anti-flash windows keeps all of that from
+        // ever reaching composition. Scoped to the selected network's ids so a cue beside a network
+        // name reports only that network's sockets.
+        val titleConnecting: StateFlow<Boolean> =
+            combine(
+                connectionManager.connectionStates,
+                networkRepository.observeNetworks(),
+                selection,
+            ) { states, networks, selected ->
+                titleConnectingSnapshot(states, scopeNetworkIds(selected, networks))
+            }.distinctUntilChanged()
+                .presentTitleConnecting(SystemClock::elapsedRealtime)
+                .stateIn(viewModelScope, WhileSubscribed(5_000), false)
+
+        // Manual drawer order the user is arranging or that Room has not published back yet. Null means
+        // "stored order is authoritative"; see [pendingNetworkOrder] and [commitNetworkOrder].
+        private val pendingOrder = MutableStateFlow<List<Long>?>(null)
+        private val selectionAndOrder = selection.combine(pendingOrder, ::Pair)
+        private val archiveOverrides = MutableStateFlow<Map<Long, Boolean>>(emptyMap())
+        private val chatListRows =
+            bufferRepository
+                .observeChatList()
+                .onEach { rows ->
+                    val settledIds = settledArchiveOverrideIds(rows, archiveOverrides.value)
+                    if (settledIds.isNotEmpty()) archiveOverrides.value = archiveOverrides.value - settledIds
+                }.combine(archiveOverrides, ::applyArchiveOverrides)
+        private val chatListData = chatListRows.combine(bufferRepository.observeInvitations(), ::Pair)
+        private val settingsAndOnboarding =
+            combine(
+                settingsRepository.settings,
+                onboardingPrefs.completed,
+                ::Pair,
             )
-        }.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = ChatListState(),
-        )
 
-    /**
-     * Hold [state] hot for as long as the app is on screen, not merely while this pane is composed.
-     *
-     * Navigation composes one destination on a phone, so opening a chat DISPOSES the chat list and
-     * drops its only subscriber; five seconds later the whole combine is torn down. The StateFlow
-     * keeps serving the last snapshot it produced, which is the one from before the reader cleared
-     * the room — so returning composes the pane against stale data, paints the chat bold with its
-     * old unread count, and only swaps to the truth once a cold restart (a DataStore read plus the
-     * chat-list SQL and the networks query) delivers a fresh emission. That swap is the flash, and
-     * the wait for it is the delay before the chat reads as read.
-     *
-     * Holding it here is bounded on both sides: this ViewModel dies with the chat list's own
-     * back-stack entry, so nothing is kept warm once the user leaves that section of the app, and
-     * [AppVisibility] stops the queries whenever the app itself leaves the screen — which is the
-     * only case the subscription-scoped teardown was protecting.
-     *
-     * Declared after [state] on purpose: initializers run in declaration order, and an earlier one
-     * would capture a null.
-     */
-    init {
-        viewModelScope.launch {
-            appVisibility.onScreen.collectLatest { onScreen -> if (onScreen) state.collect {} }
-        }
-    }
+        val state: StateFlow<ChatListState> =
+            combine(
+                chatListData,
+                networkRepository.observeNetworks(),
+                connectionManager.connectionStates.combine(connectionManager.presenceStates) { connection, presence ->
+                    connection to presence
+                },
+                settingsAndOnboarding,
+                selectionAndOrder,
+            ) { listData, networks, connectionAndPresence, settingsAndOnboarding, selectionAndOrder ->
+                val (rows, invitationEvents) = listData
+                val (connection, presence) = connectionAndPresence
+                val (settings, onboardingComplete) = settingsAndOnboarding
+                val (selected, pending) = selectionAndOrder
+                // If the selected network was deleted, fall back to the unified list.
+                val validSelection = selected?.takeIf { id -> networks.any { it.id == id } }
+                if (validSelection != selected) setSelection(validSelection)
 
-    fun setPinned(bufferId: Long, pinned: Boolean) = setPinned(listOf(bufferId), pinned)
+                val storedDrawerRows = buildDrawerRows(networks, rows.filterNot(ChatListRow::archived), connection)
+                // The stored rows already display the pending arrangement: drop the overlay so stored
+                // state is authoritative again. The settled check tolerates rows that differ from what
+                // the write predicted (a network deleted or added in between) — the overlay must always
+                // clear eventually, or the drawer is pinned to a stale order forever. compareAndSet,
+                // because a further move may have landed while this emission was built.
+                if (pending != null && drawerOrderSettled(storedDrawerRows, pending)) {
+                    pendingOrder.compareAndSet(pending, null)
+                }
 
-    fun setPinned(bufferIds: Collection<Long>, pinned: Boolean) {
-        val ids = bufferIds.toList().distinct()
-        if (ids.isEmpty()) return
-        viewModelScope.launch { ids.forEach { bufferRepository.setPinned(it, pinned) } }
-    }
+                val scopedRows = scopeRows(rows, validSelection, networks)
+                val (activeRows, archivedRows) = partitionArchivedRows(scopedRows)
+                val scopedBufferIds = scopedRows.mapTo(mutableSetOf(), ChatListRow::bufferId)
+                ChatListState(
+                    rows = activeRows,
+                    archivedRows = archivedRows,
+                    invitations =
+                        invitationEvents
+                            .filter { it.bufferId in scopedBufferIds }
+                            .mapNotNull(::toChatListInvitation),
+                    connection = connection,
+                    queryPresence =
+                        scopedRows
+                            .asSequence()
+                            .filter { it.type == BufferType.QUERY }
+                            .mapNotNull { row ->
+                                val normalize =
+                                    connectionManager.clientFor(row.networkId)?.isupport?.let { it::normalize }
+                                        ?: return@mapNotNull null
+                                presence[PresenceKey(row.networkId, normalize(row.displayName))]?.let { row.bufferId to it }
+                            }.toMap(),
+                    networks = networks,
+                    loading = false,
+                    onboardingComplete = onboardingComplete,
+                    friends = settings.friends,
+                    fools = settings.fools,
+                    selectedNetworkId = validSelection,
+                    drawerRows = applyDrawerOrder(storedDrawerRows, pending),
+                    allUnread = rows.filterNot { it.muted || it.archived }.sumOf { it.unreadCount },
+                    allMentions = rows.filterNot { it.muted || it.archived }.sumOf { it.mentionCount },
+                )
+            }.stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = ChatListState(),
+            )
 
-    fun setMuted(bufferId: Long, muted: Boolean) = setMuted(listOf(bufferId), muted)
-
-    fun setMuted(bufferIds: Collection<Long>, muted: Boolean) {
-        val ids = bufferIds.toList().distinct()
-        if (ids.isEmpty()) return
-        viewModelScope.launch {
-            val suppressed = ids.mapNotNull { bufferRepository.setMuted(it, muted) }
-            if (suppressed.isNotEmpty()) _muteBacklogSuppressions.emit(suppressed)
-        }
-    }
-
-    /** Put back the mute backlog floors an unmute advanced past (snackbar undo). */
-    fun undoMuteBacklogSuppression(suppressions: List<MuteBacklogSuppression>) = viewModelScope.launch {
-        suppressions.forEach { bufferRepository.restoreMuteBacklog(it) }
-    }
-
-    fun setArchived(bufferId: Long, archived: Boolean) = setArchived(listOf(bufferId), archived)
-
-    fun setArchived(bufferIds: Collection<Long>, archived: Boolean) {
-        val ids = bufferIds.toList().distinct()
-        if (ids.isEmpty()) return
-        archiveOverrides.value = archiveOverrides.value + ids.associateWith { archived }
-        viewModelScope.launch {
-            runCatching {
-                ids.forEach { bufferRepository.setArchived(it, archived) }
-            }.onFailure {
-                archiveOverrides.value = archiveOverrides.value - ids.toSet()
+        /**
+         * Hold [state] hot for as long as the app is on screen, not merely while this pane is composed.
+         *
+         * Navigation composes one destination on a phone, so opening a chat DISPOSES the chat list and
+         * drops its only subscriber; five seconds later the whole combine is torn down. The StateFlow
+         * keeps serving the last snapshot it produced, which is the one from before the reader cleared
+         * the room — so returning composes the pane against stale data, paints the chat bold with its
+         * old unread count, and only swaps to the truth once a cold restart (a DataStore read plus the
+         * chat-list SQL and the networks query) delivers a fresh emission. That swap is the flash, and
+         * the wait for it is the delay before the chat reads as read.
+         *
+         * Holding it here is bounded on both sides: this ViewModel dies with the chat list's own
+         * back-stack entry, so nothing is kept warm once the user leaves that section of the app, and
+         * [AppVisibility] stops the queries whenever the app itself leaves the screen — which is the
+         * only case the subscription-scoped teardown was protecting.
+         *
+         * Declared after [state] on purpose: initializers run in declaration order, and an earlier one
+         * would capture a null.
+         */
+        init {
+            viewModelScope.launch {
+                appVisibility.onScreen.collectLatest { onScreen -> if (onScreen) state.collect {} }
             }
         }
-    }
 
-    fun joinChannel(networkId: Long, channel: String, key: String?) = viewModelScope.launch {
-        connectionManager.joinChannel(networkId, channel, key)
-    }
+        fun setPinned(
+            bufferId: Long,
+            pinned: Boolean,
+        ) = setPinned(listOf(bufferId), pinned)
 
-    fun acceptInvitation(messageId: Long) = viewModelScope.launch {
-        connectionManager.acceptInvite(messageId)
-    }
+        fun setPinned(
+            bufferIds: Collection<Long>,
+            pinned: Boolean,
+        ) {
+            val ids = bufferIds.toList().distinct()
+            if (ids.isEmpty()) return
+            viewModelScope.launch { ids.forEach { bufferRepository.setPinned(it, pinned) } }
+        }
 
-    fun ignoreInvitation(messageId: Long) = viewModelScope.launch {
-        connectionManager.dismissInvite(messageId)
-    }
+        fun setMuted(
+            bufferId: Long,
+            muted: Boolean,
+        ) = setMuted(listOf(bufferId), muted)
 
-    /**
-     * Delete a chat/buffer from the list. QUERY/SERVER rows are local-only and are removed at once.
-     * CHANNEL rows are marked pending immediately (which hides them from every normal projection);
-     * the process-scoped coordinator performs the server close and removes history only after it
-     * succeeds. Scope selection keys off networkId, never a bufferId, so no scope reset is needed.
-     */
-    fun deleteBuffer(row: ChatListRow) = deleteBuffers(listOf(row))
+        fun setMuted(
+            bufferIds: Collection<Long>,
+            muted: Boolean,
+        ) {
+            val ids = bufferIds.toList().distinct()
+            if (ids.isEmpty()) return
+            viewModelScope.launch {
+                val suppressed = ids.mapNotNull { bufferRepository.setMuted(it, muted) }
+                if (suppressed.isNotEmpty()) _muteBacklogSuppressions.emit(suppressed)
+            }
+        }
 
-    fun deleteBuffers(rows: Collection<ChatListRow>) {
-        val targets = rows.toList().distinctBy(ChatListRow::bufferId)
-        if (targets.isEmpty()) return
-        viewModelScope.launch {
-            targets.forEach { row ->
-                if (row.type == BufferType.CHANNEL) {
-                    channelCloseCoordinator.requestClose(row.bufferId)
-                } else {
-                    bufferRepository.deleteBuffer(row.bufferId)
+        /** Put back the mute backlog floors an unmute advanced past (snackbar undo). */
+        fun undoMuteBacklogSuppression(suppressions: List<MuteBacklogSuppression>) =
+            viewModelScope.launch {
+                suppressions.forEach { bufferRepository.restoreMuteBacklog(it) }
+            }
+
+        fun setArchived(
+            bufferId: Long,
+            archived: Boolean,
+        ) = setArchived(listOf(bufferId), archived)
+
+        fun setArchived(
+            bufferIds: Collection<Long>,
+            archived: Boolean,
+        ) {
+            val ids = bufferIds.toList().distinct()
+            if (ids.isEmpty()) return
+            archiveOverrides.value = archiveOverrides.value + ids.associateWith { archived }
+            viewModelScope.launch {
+                runCatching {
+                    ids.forEach { bufferRepository.setArchived(it, archived) }
+                }.onFailure {
+                    archiveOverrides.value = archiveOverrides.value - ids.toSet()
                 }
             }
         }
-    }
 
-    /** Find-or-create a query buffer, then hand the id to [onOpen] for navigation. */
-    fun messageUser(networkId: Long, nick: String, onOpen: (Long) -> Unit) = viewModelScope.launch {
-        val bufferId = connectionManager.ensureQueryBuffer(networkId, nick)
-        onOpen(bufferId)
-    }
+        fun joinChannel(
+            networkId: Long,
+            channel: String,
+            key: String?,
+        ) = viewModelScope.launch {
+            connectionManager.joinChannel(networkId, channel, key)
+        }
 
-    // -- Round 5: drawer selection + per-network / global connectivity --
+        fun acceptInvitation(messageId: Long) =
+            viewModelScope.launch {
+                connectionManager.acceptInvite(messageId)
+            }
 
-    /** Scope the list to [networkId] (root includes children); null clears the scope. */
-    fun selectNetwork(networkId: Long?) = setSelection(networkId)
+        fun ignoreInvitation(messageId: Long) =
+            viewModelScope.launch {
+                connectionManager.dismissInvite(messageId)
+            }
 
-    // -- Manual drawer order (see DrawerReorder.kt for the pure move rules) --
-    //
-    // Persistence timing: a completed intent is written once, immediately. The move actions are one
-    // intent each, so they persist as they happen. A drag lives entirely in the composable while the
-    // finger is down and arrives here once, as the finished arrangement, on any termination (drop,
-    // cancel, drawer dismissed mid-drag) — a write per crossed row would persist arrangements the
-    // user was only passing through. So the only order that can be lost is one whose gesture never
-    // finished.
+        /**
+         * Delete a chat/buffer from the list. QUERY/SERVER rows are local-only and are removed at once.
+         * CHANNEL rows are marked pending immediately (which hides them from every normal projection);
+         * the process-scoped coordinator performs the server close and removes history only after it
+         * succeeds. Scope selection keys off networkId, never a bufferId, so no scope reset is needed.
+         */
+        fun deleteBuffer(row: ChatListRow) = deleteBuffers(listOf(row))
 
-    /** Move a drawer entry one position within its sibling list and persist immediately. */
-    fun moveNetwork(networkId: Long, delta: Int) {
-        val moved = movedRows(networkId, delta) ?: return
-        persistNetworkOrder(drawerOrderIds(moved))
-    }
+        fun deleteBuffers(rows: Collection<ChatListRow>) {
+            val targets = rows.toList().distinctBy(ChatListRow::bufferId)
+            if (targets.isEmpty()) return
+            viewModelScope.launch {
+                targets.forEach { row ->
+                    if (row.type == BufferType.CHANNEL) {
+                        channelCloseCoordinator.requestClose(row.bufferId)
+                    } else {
+                        bufferRepository.deleteBuffer(row.bufferId)
+                    }
+                }
+            }
+        }
 
-    /**
-     * Persist the arrangement a finished drag is showing. [orderIds] is layered onto the live rows
-     * before writing, so a network that appeared mid-drag keeps its place and a deleted id drops
-     * out. An arrangement the drawer already shows writes nothing — a drag that only wobbled in
-     * place, or returned everything to where it started, is not an intent to reorder.
-     */
-    fun commitNetworkOrder(orderIds: List<Long>) {
-        val current = applyDrawerOrder(state.value.drawerRows, pendingOrder.value)
-        val order = drawerOrderIds(applyDrawerOrder(current, orderIds))
-        if (order == drawerOrderIds(current)) return
-        persistNetworkOrder(order)
-    }
+        /** Find-or-create a query buffer, then hand the id to [onOpen] for navigation. */
+        fun messageUser(
+            networkId: Long,
+            nick: String,
+            onOpen: (Long) -> Unit,
+        ) = viewModelScope.launch {
+            val bufferId = connectionManager.ensureQueryBuffer(networkId, nick)
+            onOpen(bufferId)
+        }
 
-    /** Rows after moving [networkId] by [delta], or null when the move is not possible. */
-    private fun movedRows(networkId: Long, delta: Int): List<DrawerRow>? {
-        // Layer the pending order over the published state: consecutive drag steps must not race a
-        // recomposition, and a step computed from a stale arrangement would move the wrong row.
-        val rows = applyDrawerOrder(state.value.drawerRows, pendingOrder.value)
-        if (!canMoveDrawerRow(rows, networkId, delta)) return null
-        return moveDrawerRow(rows, networkId, delta)
-    }
+        // -- Round 5: drawer selection + per-network / global connectivity --
 
-    private fun persistNetworkOrder(order: List<Long>) {
-        // Keep showing the new arrangement until Room publishes it, so the drawer never flickers
-        // back through the old order between the write and its invalidation.
-        pendingOrder.value = order
-        viewModelScope.launch {
-            runCatching { networkRepository.reorderNetworks(order) }
-                // A failed write will never be published back; drop the overlay rather than pin
-                // the drawer to an arrangement the database never accepted (archiveOverrides idiom).
-                .onFailure { pendingOrder.compareAndSet(order, null) }
+        /** Scope the list to [networkId] (root includes children); null clears the scope. */
+        fun selectNetwork(networkId: Long?) = setSelection(networkId)
+
+        // -- Manual drawer order (see DrawerReorder.kt for the pure move rules) --
+        //
+        // Persistence timing: a completed intent is written once, immediately. The move actions are one
+        // intent each, so they persist as they happen. A drag lives entirely in the composable while the
+        // finger is down and arrives here once, as the finished arrangement, on any termination (drop,
+        // cancel, drawer dismissed mid-drag) — a write per crossed row would persist arrangements the
+        // user was only passing through. So the only order that can be lost is one whose gesture never
+        // finished.
+
+        /** Move a drawer entry one position within its sibling list and persist immediately. */
+        fun moveNetwork(
+            networkId: Long,
+            delta: Int,
+        ) {
+            val moved = movedRows(networkId, delta) ?: return
+            persistNetworkOrder(drawerOrderIds(moved))
+        }
+
+        /**
+         * Persist the arrangement a finished drag is showing. [orderIds] is layered onto the live rows
+         * before writing, so a network that appeared mid-drag keeps its place and a deleted id drops
+         * out. An arrangement the drawer already shows writes nothing — a drag that only wobbled in
+         * place, or returned everything to where it started, is not an intent to reorder.
+         */
+        fun commitNetworkOrder(orderIds: List<Long>) {
+            val current = applyDrawerOrder(state.value.drawerRows, pendingOrder.value)
+            val order = drawerOrderIds(applyDrawerOrder(current, orderIds))
+            if (order == drawerOrderIds(current)) return
+            persistNetworkOrder(order)
+        }
+
+        /** Rows after moving [networkId] by [delta], or null when the move is not possible. */
+        private fun movedRows(
+            networkId: Long,
+            delta: Int,
+        ): List<DrawerRow>? {
+            // Layer the pending order over the published state: consecutive drag steps must not race a
+            // recomposition, and a step computed from a stale arrangement would move the wrong row.
+            val rows = applyDrawerOrder(state.value.drawerRows, pendingOrder.value)
+            if (!canMoveDrawerRow(rows, networkId, delta)) return null
+            return moveDrawerRow(rows, networkId, delta)
+        }
+
+        private fun persistNetworkOrder(order: List<Long>) {
+            // Keep showing the new arrangement until Room publishes it, so the drawer never flickers
+            // back through the old order between the write and its invalidation.
+            pendingOrder.value = order
+            viewModelScope.launch {
+                runCatching { networkRepository.reorderNetworks(order) }
+                    // A failed write will never be published back; drop the overlay rather than pin
+                    // the drawer to an arrangement the database never accepted (archiveOverrides idiom).
+                    .onFailure { pendingOrder.compareAndSet(order, null) }
+            }
+        }
+
+        fun connect(networkId: Long) = viewModelScope.launch { connectionManager.connect(networkId) }
+
+        fun disconnect(networkId: Long) = viewModelScope.launch { connectionManager.disconnect(networkId) }
+
+        /** Global go-offline: disconnect every network (in-memory intent, resets on restart). */
+        fun goOffline() =
+            viewModelScope.launch {
+                state.value.networks.forEach { connectionManager.disconnect(it.id) }
+            }
+
+        /** Global go-online: connect everything (explicit "connect all", may include autoConnect=false). */
+        fun goOnline() =
+            viewModelScope.launch {
+                state.value.networks.forEach { connectionManager.connect(it.id) }
+            }
+
+        /** Find-or-create the SERVER buffer for [networkId], then navigate to it. */
+        fun openServerBuffer(
+            networkId: Long,
+            onOpen: (Long) -> Unit,
+        ) = viewModelScope.launch {
+            onOpen(connectionManager.ensureServerBuffer(networkId))
+        }
+
+        /** Mark every currently unread chat in the current drawer scope through one Room snapshot. */
+        fun markCurrentScopeRead() {
+            val bufferIds = unreadBufferIds(state.value.rows)
+            if (bufferIds.isEmpty()) return
+            viewModelScope.launch { markChatsRead(bufferIds, readMarkerRepository, connectionManager) }
+        }
+
+        private fun setSelection(networkId: Long?) {
+            selection.value = networkId
+            savedStateHandle[KEY_SELECTED] = networkId
+        }
+
+        private companion object {
+            const val KEY_SELECTED = "selected_network"
         }
     }
-
-    fun connect(networkId: Long) = viewModelScope.launch { connectionManager.connect(networkId) }
-
-    fun disconnect(networkId: Long) = viewModelScope.launch { connectionManager.disconnect(networkId) }
-
-    /** Global go-offline: disconnect every network (in-memory intent, resets on restart). */
-    fun goOffline() = viewModelScope.launch {
-        state.value.networks.forEach { connectionManager.disconnect(it.id) }
-    }
-
-    /** Global go-online: connect everything (explicit "connect all", may include autoConnect=false). */
-    fun goOnline() = viewModelScope.launch {
-        state.value.networks.forEach { connectionManager.connect(it.id) }
-    }
-
-    /** Find-or-create the SERVER buffer for [networkId], then navigate to it. */
-    fun openServerBuffer(networkId: Long, onOpen: (Long) -> Unit) = viewModelScope.launch {
-        onOpen(connectionManager.ensureServerBuffer(networkId))
-    }
-
-    /** Mark every currently unread chat in the current drawer scope through one Room snapshot. */
-    fun markCurrentScopeRead() {
-        val bufferIds = unreadBufferIds(state.value.rows)
-        if (bufferIds.isEmpty()) return
-        viewModelScope.launch { markChatsRead(bufferIds, readMarkerRepository, connectionManager) }
-    }
-
-    private fun setSelection(networkId: Long?) {
-        selection.value = networkId
-        savedStateHandle[KEY_SELECTED] = networkId
-    }
-
-    private companion object {
-        const val KEY_SELECTED = "selected_network"
-    }
-}
 
 internal fun toChatListInvitation(event: InvitationEventRow): ChatListInvitation? {
     val payload = InvitePayloadV1.decode(event.eventPayload) ?: return null

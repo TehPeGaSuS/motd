@@ -16,7 +16,6 @@ import io.github.trevarj.motd.gesture.GestureNode
 import io.github.trevarj.motd.gesture.GesturePrefs
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
-import javax.inject.Inject
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +23,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /** Everything the orb needs before a finger touches it. */
 data class GestureOrbUiState(
@@ -66,12 +66,13 @@ class GestureOrbViewModel internal constructor(
         backLabel = context.getString(R.string.gesture_away_leaf_back),
     )
 
-    val state: StateFlow<GestureOrbUiState> = combine(
-        prefs.enabled,
-        prefs.orb,
-        appearance.config,
-    ) { enabled, orb, config -> GestureOrbUiState(enabled, orb, config) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GestureOrbUiState())
+    val state: StateFlow<GestureOrbUiState> =
+        combine(
+            prefs.enabled,
+            prefs.orb,
+            appearance.config,
+        ) { enabled, orb, config -> GestureOrbUiState(enabled, orb, config) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GestureOrbUiState())
 
     /** Navigation the dispatcher wants performed; the host owns the `NavController` that can do it. */
     val navRequests: SharedFlow<GestureNavRequest> = dispatcher.navRequests
@@ -91,13 +92,24 @@ class GestureOrbViewModel internal constructor(
         viewModelScope.launch { prefs.setOrb(placement) }
     }
 
-    private suspend fun resolveNode(node: GestureNode, away: Boolean): RadialEntry = when (node) {
-        is GestureNode.Submenu -> radialEntryOf(node, node.children.map { resolveNode(it, away) }, away, backLabel)
-        // Resolved leaves are throwaway: they never nest, so no further walk is needed.
-        is GestureNode.Provider ->
-            radialEntryOf(node, providers.resolveProvider(node).map { radialEntryOf(it, emptyList(), away, backLabel) }, away, backLabel)
-        else -> radialEntryOf(node, emptyList(), away, backLabel)
-    }
+    private suspend fun resolveNode(
+        node: GestureNode,
+        away: Boolean,
+    ): RadialEntry =
+        when (node) {
+            is GestureNode.Submenu -> {
+                radialEntryOf(node, node.children.map { resolveNode(it, away) }, away, backLabel)
+            }
+
+            // Resolved leaves are throwaway: they never nest, so no further walk is needed.
+            is GestureNode.Provider -> {
+                radialEntryOf(node, providers.resolveProvider(node).map { radialEntryOf(it, emptyList(), away, backLabel) }, away, backLabel)
+            }
+
+            else -> {
+                radialEntryOf(node, emptyList(), away, backLabel)
+            }
+        }
 }
 
 /** Flatten one menu node into the slice the machine draws. */
@@ -106,13 +118,14 @@ internal fun radialEntryOf(
     children: List<RadialEntry>,
     away: Boolean,
     backLabel: String,
-): RadialEntry = RadialEntry(
-    id = node.id,
-    label = entryLabel(node, away, backLabel),
-    icon = node.icon,
-    children = children,
-    action = (node as? GestureNode.Leaf)?.action,
-)
+): RadialEntry =
+    RadialEntry(
+        id = node.id,
+        label = entryLabel(node, away, backLabel),
+        icon = node.icon,
+        children = children,
+        action = (node as? GestureNode.Leaf)?.action,
+    )
 
 /**
  * A self-away toggle has to say which way it will flip.
@@ -120,8 +133,11 @@ internal fun radialEntryOf(
  * The authored label is user data and names the away direction, so it stands while we are present;
  * the return direction is app state, not authorship, and gets the localized string.
  */
-internal fun entryLabel(node: GestureNode, away: Boolean, backLabel: String): String =
-    if (away && (node as? GestureNode.Leaf)?.action is GestureAction.ToggleAway) backLabel else node.label
+internal fun entryLabel(
+    node: GestureNode,
+    away: Boolean,
+    backLabel: String,
+): String = if (away && (node as? GestureNode.Leaf)?.action is GestureAction.ToggleAway) backLabel else node.label
 
 /**
  * True when at least one connected network still reports us away.
@@ -129,5 +145,7 @@ internal fun entryLabel(node: GestureNode, away: Boolean, backLabel: String): St
  * Deliberately the same test `GestureActionDispatcher` applies when it decides which way a toggle
  * goes, so the slice can never promise the opposite of what pressing it does.
  */
-internal fun anySelfAway(states: Map<Long, IrcClientState>, away: Map<Long, String?>): Boolean =
-    states.any { (networkId, state) -> state is IrcClientState.Ready && networkId in away }
+internal fun anySelfAway(
+    states: Map<Long, IrcClientState>,
+    away: Map<Long, String?>,
+): Boolean = states.any { (networkId, state) -> state is IrcClientState.Ready && networkId in away }

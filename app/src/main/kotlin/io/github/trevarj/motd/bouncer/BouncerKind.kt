@@ -12,11 +12,12 @@ data class SojuLoginForm(
 ) {
     val isValid: Boolean get() = username.isNotBlank() && password.isNotBlank()
 
-    fun toAuthForm() = AuthForm(
-        mode = AuthMode.PLAIN,
-        saslUser = username.trim(),
-        saslPassword = password,
-    )
+    fun toAuthForm() =
+        AuthForm(
+            mode = AuthMode.PLAIN,
+            saslUser = username.trim(),
+            saslPassword = password,
+        )
 }
 
 data class ZncLoginForm(
@@ -25,20 +26,25 @@ data class ZncLoginForm(
     val password: String = "",
 ) {
     val isValid: Boolean
-        get() = username.isNotBlank() && network.isNotBlank() && password.isNotBlank() &&
-            '/' !in username && '/' !in network
+        get() =
+            username.isNotBlank() && network.isNotBlank() && password.isNotBlank() &&
+                '/' !in username && '/' !in network
 
     val authcid: String get() = "${username.trim()}/${network.trim()}"
 
-    fun toAuthForm() = AuthForm(
-        mode = AuthMode.PLAIN,
-        saslUser = authcid,
-        saslPassword = password,
-    )
+    fun toAuthForm() =
+        AuthForm(
+            mode = AuthMode.PLAIN,
+            saslUser = authcid,
+            saslPassword = password,
+        )
 }
 
 /** Decode persisted `username/network` credentials without throwing on malformed legacy data. */
-fun parseZncLogin(authcid: String?, password: String?): ZncLoginForm {
+fun parseZncLogin(
+    authcid: String?,
+    password: String?,
+): ZncLoginForm {
     val value = authcid.orEmpty()
     val separator = value.indexOf('/')
     return if (separator >= 0) {

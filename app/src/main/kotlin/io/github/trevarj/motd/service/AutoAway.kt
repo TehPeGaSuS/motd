@@ -11,8 +11,10 @@ package io.github.trevarj.motd.service
  */
 
 /** Networks a firing auto-away should mark: Ready right now and not already away. */
-internal fun autoAwayTargets(readyNetworkIds: Set<Long>, awayNetworkIds: Set<Long>): Set<Long> =
-    readyNetworkIds - awayNetworkIds
+internal fun autoAwayTargets(
+    readyNetworkIds: Set<Long>,
+    awayNetworkIds: Set<Long>,
+): Set<Long> = readyNetworkIds - awayNetworkIds
 
 /**
  * Markers worth keeping: ours, and still away.
@@ -21,12 +23,16 @@ internal fun autoAwayTargets(readyNetworkIds: Set<Long>, awayNetworkIds: Set<Lon
  * connection dropped and cleared the state -- stops being ours the moment the server says so, so a
  * later foreground cannot resurrect a decision the user already made.
  */
-internal fun retainedMarkers(markedNetworkIds: Set<Long>, awayNetworkIds: Set<Long>): Set<Long> =
-    markedNetworkIds intersect awayNetworkIds
+internal fun retainedMarkers(
+    markedNetworkIds: Set<Long>,
+    awayNetworkIds: Set<Long>,
+): Set<Long> = markedNetworkIds intersect awayNetworkIds
 
 /** Networks the returning foreground should send `AWAY` (back) to: marked by us and still away. */
-internal fun autoBackTargets(markedNetworkIds: Set<Long>, awayNetworkIds: Set<Long>): Set<Long> =
-    retainedMarkers(markedNetworkIds, awayNetworkIds)
+internal fun autoBackTargets(
+    markedNetworkIds: Set<Long>,
+    awayNetworkIds: Set<Long>,
+): Set<Long> = retainedMarkers(markedNetworkIds, awayNetworkIds)
 
 /**
  * In-flight auto-away writes worth remembering: those whose network is still Ready.
@@ -36,12 +42,16 @@ internal fun autoBackTargets(markedNetworkIds: Set<Long>, awayNetworkIds: Set<Lo
  * not landed yet. Dropping the request when the network leaves Ready is what re-arms auto-away for a
  * network that reconnects while the app is still backgrounded.
  */
-internal fun retainedAwayRequests(requestedNetworkIds: Set<Long>, readyNetworkIds: Set<Long>): Set<Long> =
-    requestedNetworkIds intersect readyNetworkIds
+internal fun retainedAwayRequests(
+    requestedNetworkIds: Set<Long>,
+    readyNetworkIds: Set<Long>,
+): Set<Long> = requestedNetworkIds intersect readyNetworkIds
 
 /** How long the app must stay backgrounded before auto-away fires. */
 internal fun autoAwayDelayMillis(minutes: Int): Long = minutes.coerceAtLeast(1).toLong() * 60_000L
 
 /** Configured text, or the localized default when the user left the field blank. */
-internal fun autoAwayText(configured: String, default: String): String =
-    configured.trim().ifEmpty { default }
+internal fun autoAwayText(
+    configured: String,
+    default: String,
+): String = configured.trim().ifEmpty { default }

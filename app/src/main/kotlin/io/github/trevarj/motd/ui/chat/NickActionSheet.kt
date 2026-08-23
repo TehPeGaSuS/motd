@@ -42,12 +42,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.channelinfo.BanTargetDialog
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
 import io.github.trevarj.motd.ui.components.Avatar
-import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.ReasonPresetChips
-import io.github.trevarj.motd.service.PresenceState
+import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 /**
@@ -165,9 +165,10 @@ fun NickActionSheet(
         AlertDialog(
             onDismissRequest = { kickTarget = false },
             // A dialog is its own Compose window, so it needs its own testTagsAsResourceId opt-in.
-            modifier = Modifier
-                .semantics { testTagsAsResourceId = true }
-                .testTag("nick_sheet_kick_dialog"),
+            modifier =
+                Modifier
+                    .semantics { testTagsAsResourceId = true }
+                    .testTag("nick_sheet_kick_dialog"),
             title = { Text(stringResource(R.string.nick_sheet_kick_title, nick)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -213,7 +214,10 @@ fun NickActionSheet(
             hostLoading = hostLoading,
             onNickSelected = onNickSelected,
             preselectedNick = nick,
-            onDismiss = { banTarget = false; onNickSelected(null) },
+            onDismiss = {
+                banTarget = false
+                onNickSelected(null)
+            },
             onBan = { _, mask, alsoKick ->
                 banTarget = false
                 onNickSelected(null)
@@ -225,17 +229,21 @@ fun NickActionSheet(
 
 /** WHOIS summary lines, or the "details in server messages" fallback while whois is null. */
 @Composable
-private fun WhoisSummary(whois: WhoisInfo?, presence: PresenceState?) {
+private fun WhoisSummary(
+    whois: WhoisInfo?,
+    presence: PresenceState?,
+) {
     Column {
         if (presence != null) {
             Text(
-                text = stringResource(
-                    when (presence) {
-                        PresenceState.ONLINE -> R.string.presence_online
-                        PresenceState.OFFLINE -> R.string.presence_offline
-                        PresenceState.UNKNOWN -> R.string.presence_unknown
-                    },
-                ),
+                text =
+                    stringResource(
+                        when (presence) {
+                            PresenceState.ONLINE -> R.string.presence_online
+                            PresenceState.OFFLINE -> R.string.presence_offline
+                            PresenceState.UNKNOWN -> R.string.presence_unknown
+                        },
+                    ),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.testTag("nick_sheet_presence_${presence.name.lowercase()}"),

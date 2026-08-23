@@ -121,11 +121,12 @@ fun NetworkToolsContent(
         },
     ) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             state.status?.let { status ->
@@ -283,9 +284,10 @@ private fun OperatorSection(
                     contentDescription = null,
                 )
             },
-            modifier = Modifier
-                .clickable { expanded = !expanded }
-                .testTag("network_tools_ircop_expand"),
+            modifier =
+                Modifier
+                    .clickable { expanded = !expanded }
+                    .testTag("network_tools_ircop_expand"),
         )
         // Eased expand/collapse instead of the previous hard conditional; the content composes as
         // the expansion starts, so scroll-to targets inside it resolve immediately.
@@ -296,11 +298,12 @@ private fun OperatorSection(
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = if (enabled) {
-                        stringResource(R.string.network_tools_operator_help)
-                    } else {
-                        stringResource(R.string.network_tools_disconnected)
-                    },
+                    text =
+                        if (enabled) {
+                            stringResource(R.string.network_tools_operator_help)
+                        } else {
+                            stringResource(R.string.network_tools_disconnected)
+                        },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -321,7 +324,10 @@ private fun OperatorSection(
                     modifier = Modifier.fillMaxWidth().testTag("network_tools_oper_password"),
                 )
                 Button(
-                    onClick = { onSendCommand(operMessage(operUser, operPassword)); operPassword = "" },
+                    onClick = {
+                        onSendCommand(operMessage(operUser, operPassword))
+                        operPassword = ""
+                    },
                     enabled = enabled && operUser.isNotBlank() && operPassword.isNotBlank(),
                     modifier = Modifier.testTag("network_tools_oper_send"),
                 ) { Text(stringResource(R.string.network_tools_send_oper)) }
@@ -339,10 +345,11 @@ private fun OperatorSection(
                         label = { Text(stringResource(R.string.network_tools_target)) },
                         singleLine = true,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(modeTargetExpanded) },
-                        modifier = Modifier
-                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable)
-                            .fillMaxWidth()
-                            .testTag("network_tools_mode_target"),
+                        modifier =
+                            Modifier
+                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable)
+                                .fillMaxWidth()
+                                .testTag("network_tools_mode_target"),
                     )
                     ExposedDropdownMenu(
                         expanded = modeTargetExpanded,
@@ -351,13 +358,19 @@ private fun OperatorSection(
                         state.selfNick?.let { nick ->
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.network_tools_target_self, nick)) },
-                                onClick = { modeTarget = nick; modeTargetExpanded = false },
+                                onClick = {
+                                    modeTarget = nick
+                                    modeTargetExpanded = false
+                                },
                             )
                         }
                         state.buffers.filter { it.type == BufferType.CHANNEL }.forEach { row ->
                             DropdownMenuItem(
                                 text = { Text(row.displayName) },
-                                onClick = { modeTarget = row.displayName; modeTargetExpanded = false },
+                                onClick = {
+                                    modeTarget = row.displayName
+                                    modeTargetExpanded = false
+                                },
                             )
                         }
                     }
@@ -510,20 +523,28 @@ private fun OperatorSection(
             onDismissRequest = { pending = null },
             // An AlertDialog is its own Compose window, so the Activity root's testTagsAsResourceId
             // does not reach it; opt this window in the same way.
-            modifier = Modifier
-                .semantics { testTagsAsResourceId = true }
-                .testTag("network_tools_confirm_dialog"),
+            modifier =
+                Modifier
+                    .semantics { testTagsAsResourceId = true }
+                    .testTag("network_tools_confirm_dialog"),
             title = {
                 Text(
                     when (command.kind) {
-                        OperatorCommandKind.KILL ->
+                        OperatorCommandKind.KILL -> {
                             stringResource(R.string.network_tools_confirm_kill_title, command.target)
-                        OperatorCommandKind.REHASH ->
+                        }
+
+                        OperatorCommandKind.REHASH -> {
                             stringResource(R.string.network_tools_confirm_rehash_title)
-                        OperatorCommandKind.CONNECT ->
+                        }
+
+                        OperatorCommandKind.CONNECT -> {
                             stringResource(R.string.network_tools_confirm_connect_title, command.target)
-                        OperatorCommandKind.SQUIT ->
+                        }
+
+                        OperatorCommandKind.SQUIT -> {
                             stringResource(R.string.network_tools_confirm_squit_title, command.target)
+                        }
                     },
                 )
             },
@@ -531,14 +552,21 @@ private fun OperatorSection(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
                         when (command.kind) {
-                            OperatorCommandKind.KILL ->
+                            OperatorCommandKind.KILL -> {
                                 stringResource(R.string.network_tools_confirm_kill_body, command.target)
-                            OperatorCommandKind.REHASH ->
+                            }
+
+                            OperatorCommandKind.REHASH -> {
                                 stringResource(R.string.network_tools_confirm_rehash_body)
-                            OperatorCommandKind.CONNECT ->
+                            }
+
+                            OperatorCommandKind.CONNECT -> {
                                 stringResource(R.string.network_tools_confirm_connect_body, command.target)
-                            OperatorCommandKind.SQUIT ->
+                            }
+
+                            OperatorCommandKind.SQUIT -> {
                                 stringResource(R.string.network_tools_confirm_squit_body, command.target)
+                            }
                         },
                     )
                     // The exact wire line, from the same message instance the confirm button sends.
@@ -569,7 +597,12 @@ private fun OperatorSection(
 }
 
 @Composable
-private fun ReasonField(value: String, onValueChange: (String) -> Unit, label: String, tag: String) {
+private fun ReasonField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    tag: String,
+) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
@@ -605,7 +638,10 @@ private data class PendingOperatorCommand(
 )
 
 /** A status string resource plus its format arguments; pure, so the mapping is unit-testable. */
-internal data class NetworkToolsStatusText(val resId: Int, val args: Array<Any>) {
+internal data class NetworkToolsStatusText(
+    val resId: Int,
+    val args: Array<Any>,
+) {
     override fun equals(other: Any?): Boolean =
         this === other ||
             (other is NetworkToolsStatusText && resId == other.resId && args.contentEquals(other.args))
@@ -616,19 +652,30 @@ internal data class NetworkToolsStatusText(val resId: Int, val args: Array<Any>)
 /** Map a [NetworkToolsStatus] to user-facing copy. Lives in the screen layer, never the ViewModel. */
 internal fun networkToolsStatusText(status: NetworkToolsStatus): NetworkToolsStatusText =
     when (status) {
-        NetworkToolsStatus.IgnoreAdded ->
+        NetworkToolsStatus.IgnoreAdded -> {
             NetworkToolsStatusText(R.string.network_tools_status_ignore_added, emptyArray())
-        is NetworkToolsStatus.IgnoreFailed ->
+        }
+
+        is NetworkToolsStatus.IgnoreFailed -> {
             NetworkToolsStatusText(R.string.network_tools_status_ignore_failed, arrayOf(status.message))
-        NetworkToolsStatus.NotConnected ->
+        }
+
+        NetworkToolsStatus.NotConnected -> {
             NetworkToolsStatusText(R.string.network_tools_status_not_connected, emptyArray())
-        is NetworkToolsStatus.CommandSent ->
+        }
+
+        is NetworkToolsStatus.CommandSent -> {
             NetworkToolsStatusText(R.string.network_tools_status_sent, arrayOf(status.command))
-        is NetworkToolsStatus.CommandFailed ->
+        }
+
+        is NetworkToolsStatus.CommandFailed -> {
             NetworkToolsStatusText(
                 R.string.network_tools_status_failed,
                 arrayOf(status.command, status.message),
             )
-        NetworkToolsStatus.MissingFields ->
+        }
+
+        NetworkToolsStatus.MissingFields -> {
             NetworkToolsStatusText(R.string.network_tools_status_missing_fields, emptyArray())
+        }
     }

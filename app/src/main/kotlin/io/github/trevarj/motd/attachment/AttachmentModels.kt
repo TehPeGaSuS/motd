@@ -252,7 +252,6 @@ fun normalizedConfig(config: PasteBackendConfig): PasteBackendConfig {
     )
 }
 
-fun PasteBackendConfig.forBackend(backend: AttachmentBackend): PasteBackendConfig =
-    normalizedConfig(copy(backend = backend, endpoint = backend.endpoint ?: customEndpoint))
+fun PasteBackendConfig.forBackend(backend: AttachmentBackend): PasteBackendConfig = normalizedConfig(copy(backend = backend, endpoint = backend.endpoint ?: customEndpoint))
 
 fun AttachmentBackend.supports(source: AttachmentSource): Boolean = source is AttachmentSource.Text || acceptsBinary

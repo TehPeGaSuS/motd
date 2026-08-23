@@ -54,21 +54,23 @@ data class MotdSpacing(
  * [MotdSpacing.bubbleRowVPad], [MotdSpacing.compactRowVPad], [MotdSpacing.actionVPad],
  * [MotdSpacing.systemPillVPad]) — never inner-bubble padding or horizontal tokens.
  */
-private fun MessageSpacing.multiplier(): Float = when (this) {
-    MessageSpacing.COMPACT -> 0.5f
-    MessageSpacing.DEFAULT -> 1f
-    MessageSpacing.RELAXED -> 1.75f
-}
+private fun MessageSpacing.multiplier(): Float =
+    when (this) {
+        MessageSpacing.COMPACT -> 0.5f
+        MessageSpacing.DEFAULT -> 1f
+        MessageSpacing.RELAXED -> 1.75f
+    }
 
 /**
  * (bubbleCorner, bubbleGroupedCorner) for the COMFORTABLE bubble renderer, which is the only mode
  * [BubbleCornerStyle] affects; COMPACT/TWO_LINE keep their own corner regardless of this setting.
  */
-private fun BubbleCornerStyle.comfortableCorners(): Pair<Dp, Dp> = when (this) {
-    BubbleCornerStyle.ROUNDED -> 20.dp to 6.dp
-    BubbleCornerStyle.SUBTLE -> 12.dp to 4.dp
-    BubbleCornerStyle.SQUARE -> 2.dp to 2.dp
-}
+private fun BubbleCornerStyle.comfortableCorners(): Pair<Dp, Dp> =
+    when (this) {
+        BubbleCornerStyle.ROUNDED -> 20.dp to 6.dp
+        BubbleCornerStyle.SUBTLE -> 12.dp to 4.dp
+        BubbleCornerStyle.SQUARE -> 2.dp to 2.dp
+    }
 
 /** Pure token mapping; unit-tested. */
 fun spacingFor(
@@ -78,26 +80,29 @@ fun spacingFor(
 ): MotdSpacing {
     val scale = messageSpacing.multiplier()
     return when (density) {
-        LayoutDensity.COMPACT -> MotdSpacing(
-            compact = true,
-            twoLine = false,
-            messageOuterHPad = 12.dp,
-            compactRowVPad = 1.dp * scale,
-            bubbleRowVPad = 0.dp * scale,
-            bubbleInnerVPad = 4.dp,
-            bubbleInnerHPad = 8.dp,
-            bubbleBurstGap = 0.dp * scale,
-            bubbleBreakGap = 0.dp * scale,
-            bubbleCorner = 12.dp,
-            bubbleGroupedCorner = 6.dp,
-            bubbleAvatar = 26.dp,
-            bubbleAvatarColumn = 34.dp,
-            actionVPad = 2.dp * scale,
-            systemPillVPad = 2.dp * scale,
-            chatListVPad = 6.dp,
-            chatListAvatar = 40.dp,
-            memberAvatar = 32.dp,
-        )
+        LayoutDensity.COMPACT -> {
+            MotdSpacing(
+                compact = true,
+                twoLine = false,
+                messageOuterHPad = 12.dp,
+                compactRowVPad = 1.dp * scale,
+                bubbleRowVPad = 0.dp * scale,
+                bubbleInnerVPad = 4.dp,
+                bubbleInnerHPad = 8.dp,
+                bubbleBurstGap = 0.dp * scale,
+                bubbleBreakGap = 0.dp * scale,
+                bubbleCorner = 12.dp,
+                bubbleGroupedCorner = 6.dp,
+                bubbleAvatar = 26.dp,
+                bubbleAvatarColumn = 34.dp,
+                actionVPad = 2.dp * scale,
+                systemPillVPad = 2.dp * scale,
+                chatListVPad = 6.dp,
+                chatListAvatar = 40.dp,
+                memberAvatar = 32.dp,
+            )
+        }
+
         LayoutDensity.COMFORTABLE -> {
             val (corner, groupedCorner) = cornerStyle.comfortableCorners()
             MotdSpacing(
@@ -121,30 +126,33 @@ fun spacingFor(
                 memberAvatar = 36.dp,
             )
         }
+
         // TWO_LINE = a compact two-line row: small avatar + nick + time header over the body. Not a
         // bubble and not the single-line IRC row; [twoLine] routes MessageBubble to that renderer.
-        LayoutDensity.TWO_LINE -> MotdSpacing(
-            compact = false,
-            twoLine = true,
-            messageOuterHPad = 12.dp,
-            compactRowVPad = 2.dp * scale,
-            // Tight outer padding for the two-line row; the inner header/body spacing lives in the renderer.
-            bubbleRowVPad = 2.dp * scale,
-            bubbleInnerVPad = 4.dp,
-            bubbleInnerHPad = 12.dp,
-            bubbleBurstGap = 0.dp * scale,
-            bubbleBreakGap = 0.dp * scale,
-            bubbleCorner = 20.dp,
-            bubbleGroupedCorner = 6.dp,
-            // Small header avatar (line 1) — smaller than the bubble avatar to keep the row compact.
-            bubbleAvatar = 20.dp,
-            bubbleAvatarColumn = 28.dp,
-            actionVPad = 3.dp * scale,
-            systemPillVPad = 4.dp * scale,
-            chatListVPad = 10.dp,
-            chatListAvatar = 48.dp,
-            memberAvatar = 36.dp,
-        )
+        LayoutDensity.TWO_LINE -> {
+            MotdSpacing(
+                compact = false,
+                twoLine = true,
+                messageOuterHPad = 12.dp,
+                compactRowVPad = 2.dp * scale,
+                // Tight outer padding for the two-line row; the inner header/body spacing lives in the renderer.
+                bubbleRowVPad = 2.dp * scale,
+                bubbleInnerVPad = 4.dp,
+                bubbleInnerHPad = 12.dp,
+                bubbleBurstGap = 0.dp * scale,
+                bubbleBreakGap = 0.dp * scale,
+                bubbleCorner = 20.dp,
+                bubbleGroupedCorner = 6.dp,
+                // Small header avatar (line 1) — smaller than the bubble avatar to keep the row compact.
+                bubbleAvatar = 20.dp,
+                bubbleAvatarColumn = 28.dp,
+                actionVPad = 3.dp * scale,
+                systemPillVPad = 4.dp * scale,
+                chatListVPad = 10.dp,
+                chatListAvatar = 48.dp,
+                memberAvatar = 36.dp,
+            )
+        }
     }
 }
 

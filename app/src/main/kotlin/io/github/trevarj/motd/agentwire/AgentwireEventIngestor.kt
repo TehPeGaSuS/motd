@@ -12,7 +12,10 @@ import io.github.trevarj.motd.irc.event.messageContextOrNull
 /** Envelope validation failures inside one handshake before it is called a protocol mismatch. */
 internal const val AGENTWIRE_PROTOCOL_FAILURE_LIMIT = 3
 
-internal fun acceptsAgentwireEpoch(envelope: AgentwireEnvelope, currentEpoch: String?): Boolean =
+internal fun acceptsAgentwireEpoch(
+    envelope: AgentwireEnvelope,
+    currentEpoch: String?,
+): Boolean =
     envelope.kind == "agent.hello" || envelope.history == true || currentEpoch == null ||
         envelope.epoch == currentEpoch
 
@@ -28,7 +31,9 @@ internal class AgentwireEventIngestor(
     private val reassembler: AgentwireReassembler = AgentwireReassembler(),
 ) {
     sealed interface Result {
-        data class Ignored(val why: IgnoreReason) : Result
+        data class Ignored(
+            val why: IgnoreReason,
+        ) : Result
 
         /** [protocolFailure] marks a malformed envelope, as opposed to an untrusted sender. */
         data class Rejected(
@@ -38,8 +43,13 @@ internal class AgentwireEventIngestor(
             /** Present for an untrusted sender; fingerprinted, never logged raw. */
             val account: String? = null,
         ) : Result
+
         data object ReassemblyExpired : Result
-        data class Applied(val state: AgentwireUiState, val envelope: AgentwireEnvelope) : Result
+
+        data class Applied(
+            val state: AgentwireUiState,
+            val envelope: AgentwireEnvelope,
+        ) : Result
     }
 
     fun reset() {
@@ -58,14 +68,16 @@ internal class AgentwireEventIngestor(
         }
         val context = event.messageContextOrNull() ?: return Result.Ignored(IgnoreReason.NOT_PROTOCOL)
         val raw = context.clientTags[AGENTWIRE_TAG] ?: return Result.Ignored(IgnoreReason.NOT_PROTOCOL)
-        val target = when (event) {
-            is IrcEvent.ChatMessage -> event.target
-            is IrcEvent.TagMessage -> event.target
-            else -> return Result.Ignored(IgnoreReason.NOT_PROTOCOL)
-        }
+        val target =
+            when (event) {
+                is IrcEvent.ChatMessage -> event.target
+                is IrcEvent.TagMessage -> event.target
+                else -> return Result.Ignored(IgnoreReason.NOT_PROTOCOL)
+            }
         if (!target.equals(state.channel, ignoreCase = true)) return Result.Ignored(IgnoreReason.TARGET_MISMATCH)
-        val account = context.account?.takeUnless { it == "*" }
-            ?: return Result.Ignored(IgnoreReason.MISSING_ACCOUNT)
+        val account =
+            context.account?.takeUnless { it == "*" }
+                ?: return Result.Ignored(IgnoreReason.MISSING_ACCOUNT)
         val trusted = state.backendAccount ?: return Result.Ignored(IgnoreReason.NO_TRUST_ANCHOR)
         if (!account.equals(trusted, ignoreCase = true)) {
             // Actions are authorized separately by controllerAccount. They never authenticate
@@ -76,34 +88,45 @@ internal class AgentwireEventIngestor(
             return untrusted(state, account, trusted)
         }
         if (reassembler.expire()) return Result.ReassemblyExpired
-        val decoded = decodeAgentwireValue(raw).getOrElse {
-            return protocolFailure(state, "Invalid Agentwire message: ${it.message}")
-        }
-        val envelope = when (decoded) {
-            is AgentwireValue.Envelope -> decoded.value
-            is AgentwireValue.Fragment -> reassembler.accept(decoded.value).getOrElse {
-                return protocolFailure(state, "Invalid Agentwire fragments: ${it.message}")
-            } ?: return Result.Ignored(IgnoreReason.FRAGMENT_PENDING)
-        }
+        val decoded =
+            decodeAgentwireValue(raw).getOrElse {
+                return protocolFailure(state, "Invalid Agentwire message: ${it.message}")
+            }
+        val envelope =
+            when (decoded) {
+                is AgentwireValue.Envelope -> {
+                    decoded.value
+                }
+
+                is AgentwireValue.Fragment -> {
+                    reassembler.accept(decoded.value).getOrElse {
+                        return protocolFailure(state, "Invalid Agentwire fragments: ${it.message}")
+                    } ?: return Result.Ignored(IgnoreReason.FRAGMENT_PENDING)
+                }
+            }
         if (envelope.type != "event") return Result.Ignored(IgnoreReason.NOT_EVENT)
         val correlated = syncId != null && envelope.reply == syncId
         val pinned = state.botAccount
-        val candidate = if (pinned == null) {
-            when {
-                // Only a correlated hello may pin the backend identity for this epoch.
-                envelope.kind == "agent.hello" && correlated -> state.copy(botAccount = account)
-                // A correlated action.failed is the bridge's definitive answer to our own request.
-                // It carries no epoch and must stay visible, or a wire-level "no" is
-                // indistinguishable from silence.
-                envelope.kind == "action.failed" && correlated -> state
-                envelope.kind == "agent.hello" -> return Result.Ignored(IgnoreReason.STALE_REPLY)
-                else -> return Result.Ignored(IgnoreReason.UNCORRELATED_HELLO)
+        val candidate =
+            if (pinned == null) {
+                when {
+                    // Only a correlated hello may pin the backend identity for this epoch.
+                    envelope.kind == "agent.hello" && correlated -> state.copy(botAccount = account)
+
+                    // A correlated action.failed is the bridge's definitive answer to our own request.
+                    // It carries no epoch and must stay visible, or a wire-level "no" is
+                    // indistinguishable from silence.
+                    envelope.kind == "action.failed" && correlated -> state
+
+                    envelope.kind == "agent.hello" -> return Result.Ignored(IgnoreReason.STALE_REPLY)
+
+                    else -> return Result.Ignored(IgnoreReason.UNCORRELATED_HELLO)
+                }
+            } else if (!account.equals(pinned, ignoreCase = true)) {
+                return untrusted(state, account, pinned)
+            } else {
+                state
             }
-        } else if (!account.equals(pinned, ignoreCase = true)) {
-            return untrusted(state, account, pinned)
-        } else {
-            state
-        }
         // A correlated `action.failed` answers a request sent before any epoch existed, so it is
         // epoch-exempt exactly like `agent.hello`.
         val epochExempt = correlated && envelope.kind == "action.failed"
@@ -114,14 +137,20 @@ internal class AgentwireEventIngestor(
         return Result.Applied(reducer.reduce(candidate, envelope), envelope)
     }
 
-    private fun untrusted(state: AgentwireUiState, account: String, trusted: String): Result.Rejected {
+    private fun untrusted(
+        state: AgentwireUiState,
+        account: String,
+        trusted: String,
+    ): Result.Rejected {
         // Shown to the user, never logged: the diagnostic journal only records a fingerprint.
         val detail = "Ignoring agent events from account $account. The channel topic trusts only agent=$trusted."
         return Result.Rejected(state.copy(error = detail), protocolFailure = false, detail = detail, account = account)
     }
 
-    private fun protocolFailure(state: AgentwireUiState, detail: String): Result.Rejected =
-        Result.Rejected(state.copy(error = detail), protocolFailure = true, detail = detail)
+    private fun protocolFailure(
+        state: AgentwireUiState,
+        detail: String,
+    ): Result.Rejected = Result.Rejected(state.copy(error = detail), protocolFailure = true, detail = detail)
 }
 
 /**
@@ -133,20 +162,34 @@ internal class AgentwireDeliveryCoordinator(
     private val ingestor: AgentwireEventIngestor = AgentwireEventIngestor(),
 ) {
     sealed interface Result {
-        data class Ignored(val why: IgnoreReason) : Result
+        data class Ignored(
+            val why: IgnoreReason,
+        ) : Result
+
         data class Updated(
             val state: AgentwireUiState,
             val envelope: AgentwireEnvelope,
             val syncCompleted: Boolean,
         ) : Result
+
         /** [untrustedAccount] is set when the sender is not the topic-provisioned backend. */
-        data class Rejected(val state: AgentwireUiState, val untrustedAccount: String? = null) : Result
+        data class Rejected(
+            val state: AgentwireUiState,
+            val untrustedAccount: String? = null,
+        ) : Result
 
         /** The bridge answered the live sync id with `action.failed`. */
-        data class SyncRejected(val state: AgentwireUiState, val detail: String) : Result
+        data class SyncRejected(
+            val state: AgentwireUiState,
+            val detail: String,
+        ) : Result
 
         /** Repeated envelope validation failures inside one handshake. */
-        data class ProtocolMismatch(val state: AgentwireUiState, val detail: String) : Result
+        data class ProtocolMismatch(
+            val state: AgentwireUiState,
+            val detail: String,
+        ) : Result
+
         data class ResyncRequired(
             val state: AgentwireUiState,
             val reason: String,
@@ -179,7 +222,10 @@ internal class AgentwireDeliveryCoordinator(
         ingestor.reset()
     }
 
-    fun beginSync(state: AgentwireUiState, error: String? = null): AgentwireUiState {
+    fun beginSync(
+        state: AgentwireUiState,
+        error: String? = null,
+    ): AgentwireUiState {
         syncId = null
         syncHello = false
         awaitingSync = true
@@ -196,7 +242,10 @@ internal class AgentwireDeliveryCoordinator(
     /** Every non-advancing delivery seen since the current handshake began. */
     fun ignoreCounters(): IgnoreCounters = IgnoreCounters(ignored.toMap())
 
-    fun ingest(state: AgentwireUiState, delivered: SequencedIrcEvent): Result {
+    fun ingest(
+        state: AgentwireUiState,
+        delivered: SequencedIrcEvent,
+    ): Result {
         val prior = lastSequence
         lastSequence = delivered.sequence
         // The sequence is the client's global observer counter, not an agentwire-only one, so any
@@ -210,37 +259,50 @@ internal class AgentwireDeliveryCoordinator(
                 delivered.sequence - prior,
             )
         }
-        val result = ingestor.ingest(
-            state = state,
-            event = delivered.event,
-            syncId = syncId,
-            accept = { envelope ->
-                if (!awaitingSync) {
-                    true
-                } else {
-                    when (envelope.kind) {
-                        "agent.hello" -> envelope.reply == syncId
-                        "channel.snapshot" -> syncHello && envelope.reply == syncId && envelope.epoch == state.epoch
-                        // A definitive failure answer to our own request must not be filtered out.
-                        "action.failed" -> envelope.reply == syncId
-                        else -> false
+        val result =
+            ingestor.ingest(
+                state = state,
+                event = delivered.event,
+                syncId = syncId,
+                accept = { envelope ->
+                    if (!awaitingSync) {
+                        true
+                    } else {
+                        when (envelope.kind) {
+                            "agent.hello" -> envelope.reply == syncId
+
+                            "channel.snapshot" -> syncHello && envelope.reply == syncId && envelope.epoch == state.epoch
+
+                            // A definitive failure answer to our own request must not be filtered out.
+                            "action.failed" -> envelope.reply == syncId
+
+                            else -> false
+                        }
                     }
-                }
-            },
-        )
+                },
+            )
         return when (result) {
             is AgentwireEventIngestor.Result.Ignored -> {
                 count(result.why)
                 Result.Ignored(result.why)
             }
-            AgentwireEventIngestor.Result.ReassemblyExpired -> resync(
-                state,
-                "Agentwire fragment assembly expired; resynchronizing",
-                AgentwireResyncCause.FRAGMENT_EXPIRY,
-                null,
-            )
-            is AgentwireEventIngestor.Result.Rejected -> rejected(result)
-            is AgentwireEventIngestor.Result.Applied -> applied(state, result)
+
+            AgentwireEventIngestor.Result.ReassemblyExpired -> {
+                resync(
+                    state,
+                    "Agentwire fragment assembly expired; resynchronizing",
+                    AgentwireResyncCause.FRAGMENT_EXPIRY,
+                    null,
+                )
+            }
+
+            is AgentwireEventIngestor.Result.Rejected -> {
+                rejected(result)
+            }
+
+            is AgentwireEventIngestor.Result.Applied -> {
+                applied(state, result)
+            }
         }
     }
 
@@ -257,7 +319,10 @@ internal class AgentwireDeliveryCoordinator(
         return Result.Rejected(result.state)
     }
 
-    private fun applied(state: AgentwireUiState, result: AgentwireEventIngestor.Result.Applied): Result {
+    private fun applied(
+        state: AgentwireUiState,
+        result: AgentwireEventIngestor.Result.Applied,
+    ): Result {
         val envelope = result.envelope
         val correlated = envelope.reply != null && envelope.reply == syncId
         if (awaitingSync && envelope.kind == "action.failed" && correlated) {
@@ -266,8 +331,9 @@ internal class AgentwireDeliveryCoordinator(
             return Result.SyncRejected(result.state, detail)
         }
         if (envelope.kind == "agent.hello" && correlated) syncHello = true
-        val complete = awaitingSync && envelope.kind == "channel.snapshot" && correlated && syncHello &&
-            envelope.epoch == result.state.epoch
+        val complete =
+            awaitingSync && envelope.kind == "channel.snapshot" && correlated && syncHello &&
+                envelope.epoch == result.state.epoch
         if (complete) awaitingSync = false
         return Result.Updated(result.state, envelope, complete)
     }
@@ -290,8 +356,10 @@ internal class AgentwireSessionOrchestrator(
 ) {
     fun reset() = delivery.reset()
 
-    fun beginSync(state: AgentwireUiState, error: String? = null): AgentwireUiState =
-        delivery.beginSync(state, error)
+    fun beginSync(
+        state: AgentwireUiState,
+        error: String? = null,
+    ): AgentwireUiState = delivery.beginSync(state, error)
 
     fun syncRequested(id: String) = delivery.syncRequested(id)
 
@@ -299,8 +367,10 @@ internal class AgentwireSessionOrchestrator(
 
     val awaitingSync: Boolean get() = delivery.awaitingSyncNow
 
-    fun ingest(state: AgentwireUiState, event: SequencedIrcEvent): AgentwireDeliveryCoordinator.Result =
-        delivery.ingest(state, event)
+    fun ingest(
+        state: AgentwireUiState,
+        event: SequencedIrcEvent,
+    ): AgentwireDeliveryCoordinator.Result = delivery.ingest(state, event)
 
     suspend fun retryUntilReady(
         budget: AgentwireSyncBudget,
@@ -326,33 +396,34 @@ internal class AgentwireSessionOrchestrator(
 }
 
 /** Clears all data derived from an Agentwire epoch before a replacement snapshot is accepted. */
-internal fun AgentwireUiState.awaitingAgentwireSync(error: String? = null): AgentwireUiState = copy(
-    epoch = null,
-    botAccount = null,
-    activeSid = null,
-    cwd = null,
-    busy = false,
-    currentTid = null,
-    actions = emptySet(),
-    supportedSettings = emptySet(),
-    settings = emptyMap(),
-    modelOptions = emptyList(),
-    workspaceChildren = emptyMap(),
-    liveSessions = emptyList(),
-    workspaceSessions = emptyMap(),
-    loadedSessionDirectories = emptySet(),
-    queue = emptyList(),
-    requests = emptyList(),
-    timeline = emptyList(),
-    actionStatus = emptyMap(),
-    historyLoading = false,
-    historyPage = null,
-    historyRequestId = null,
-    historySid = null,
-    historyCursor = null,
-    historyStaged = emptyList(),
-    historyBeforeAt = null,
-    olderHistoryAvailable = false,
-    error = error,
-    autoReviewConfirmed = false,
-)
+internal fun AgentwireUiState.awaitingAgentwireSync(error: String? = null): AgentwireUiState =
+    copy(
+        epoch = null,
+        botAccount = null,
+        activeSid = null,
+        cwd = null,
+        busy = false,
+        currentTid = null,
+        actions = emptySet(),
+        supportedSettings = emptySet(),
+        settings = emptyMap(),
+        modelOptions = emptyList(),
+        workspaceChildren = emptyMap(),
+        liveSessions = emptyList(),
+        workspaceSessions = emptyMap(),
+        loadedSessionDirectories = emptySet(),
+        queue = emptyList(),
+        requests = emptyList(),
+        timeline = emptyList(),
+        actionStatus = emptyMap(),
+        historyLoading = false,
+        historyPage = null,
+        historyRequestId = null,
+        historySid = null,
+        historyCursor = null,
+        historyStaged = emptyList(),
+        historyBeforeAt = null,
+        olderHistoryAvailable = false,
+        error = error,
+        autoReviewConfirmed = false,
+    )

@@ -39,16 +39,22 @@ const val GESTURE_ORB_TAG = "gesture_orb"
 
 /** The resting tab's paint. Never the pointer target: it slides while a reposition drag is in flight. */
 @Composable
-internal fun OrbTab(edge: OrbEdge, alpha: Float, modifier: Modifier = Modifier) {
-    val shape = if (edge == OrbEdge.LEFT) {
-        RoundedCornerShape(topEndPercent = 100, bottomEndPercent = 100)
-    } else {
-        RoundedCornerShape(topStartPercent = 100, bottomStartPercent = 100)
-    }
+internal fun OrbTab(
+    edge: OrbEdge,
+    alpha: Float,
+    modifier: Modifier = Modifier,
+) {
+    val shape =
+        if (edge == OrbEdge.LEFT) {
+            RoundedCornerShape(topEndPercent = 100, bottomEndPercent = 100)
+        } else {
+            RoundedCornerShape(topStartPercent = 100, bottomStartPercent = 100)
+        }
     Surface(
-        modifier = modifier
-            .size(RadialDimens.OrbWidth, RadialDimens.OrbHeight)
-            .graphicsLayer { this.alpha = alpha },
+        modifier =
+            modifier
+                .size(RadialDimens.OrbWidth, RadialDimens.OrbHeight)
+                .graphicsLayer { this.alpha = alpha },
         shape = shape,
         color = MaterialTheme.colorScheme.primaryContainer,
         tonalElevation = 3.dp,
@@ -95,56 +101,66 @@ internal fun GestureOrbTouchTarget(
     val latestDragMove by rememberUpdatedState(onDragMove)
     val latestDragEnd by rememberUpdatedState(onDragEnd)
     Box(
-        modifier = modifier
-            .testTag(GESTURE_ORB_TAG)
-            .size(RadialDimens.OrbTouchWidth, RadialDimens.OrbTouchHeight)
-            // The tab is docked inside the system back-gesture edge zone, and a radial drag toward
-            // the screen centre is byte-for-byte a back swipe. Without this exclusion the system
-            // dispatches a back alongside the menu gesture, and that back can pop the chat the
-            // released action is concurrently replacing — corrupting the NavHost transition into a
-            // blank screen. Excluding the touch target keeps the whole gesture ours.
-            .systemGestureExclusion()
-            .onGloballyPositioned { origin.value = it.positionInRoot() }
-            .pointerInput(Unit) {
-                coroutineScope {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        // Claim the press up front: the screen underneath must not also act on it.
-                        down.consume()
-                        var armed = false
-                        var dragging = false
-                        var last = latestOrigin + down.position
-                        val hold = this@coroutineScope.launch {
-                            delay(viewConfiguration.longPressTimeoutMillis)
-                            armed = true
-                            latestHoldStart(last)
-                        }
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            change.consume()
-                            last = latestOrigin + change.position
-                            when {
-                                armed -> latestHoldMove(last)
-                                dragging -> latestDragMove(last)
-                                (change.position - down.position).getDistance() > viewConfiguration.touchSlop -> {
-                                    dragging = true
-                                    hold.cancel()
-                                    latestDragMove(last)
+        modifier =
+            modifier
+                .testTag(GESTURE_ORB_TAG)
+                .size(RadialDimens.OrbTouchWidth, RadialDimens.OrbTouchHeight)
+                // The tab is docked inside the system back-gesture edge zone, and a radial drag toward
+                // the screen centre is byte-for-byte a back swipe. Without this exclusion the system
+                // dispatches a back alongside the menu gesture, and that back can pop the chat the
+                // released action is concurrently replacing — corrupting the NavHost transition into a
+                // blank screen. Excluding the touch target keeps the whole gesture ours.
+                .systemGestureExclusion()
+                .onGloballyPositioned { origin.value = it.positionInRoot() }
+                .pointerInput(Unit) {
+                    coroutineScope {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            // Claim the press up front: the screen underneath must not also act on it.
+                            down.consume()
+                            var armed = false
+                            var dragging = false
+                            var last = latestOrigin + down.position
+                            val hold =
+                                this@coroutineScope.launch {
+                                    delay(viewConfiguration.longPressTimeoutMillis)
+                                    armed = true
+                                    latestHoldStart(last)
                                 }
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                change.consume()
+                                last = latestOrigin + change.position
+                                when {
+                                    armed -> {
+                                        latestHoldMove(last)
+                                    }
+
+                                    dragging -> {
+                                        latestDragMove(last)
+                                    }
+
+                                    (change.position - down.position).getDistance() > viewConfiguration.touchSlop -> {
+                                        dragging = true
+                                        hold.cancel()
+                                        latestDragMove(last)
+                                    }
+                                }
+                                if (!change.pressed) break
                             }
-                            if (!change.pressed) break
-                        }
-                        hold.cancel()
-                        when {
-                            armed -> latestHoldEnd()
-                            dragging -> latestDragEnd(last)
-                            // A plain tap does nothing: the semantic click is the accessible entry point.
-                            else -> Unit
+                            hold.cancel()
+                            when {
+                                armed -> latestHoldEnd()
+
+                                dragging -> latestDragEnd(last)
+
+                                // A plain tap does nothing: the semantic click is the accessible entry point.
+                                else -> Unit
+                            }
                         }
                     }
-                }
-            },
+                },
     )
 }
 
@@ -162,10 +178,11 @@ internal fun AccessibleGestureOrb(
 ) {
     val latestClick by rememberUpdatedState(onClick)
     Box(
-        modifier = modifier
-            .testTag(GESTURE_ORB_TAG)
-            .size(RadialDimens.OrbTouchWidth, RadialDimens.OrbTouchHeight)
-            .clickable(role = Role.Button) { latestClick() }
-            .semantics(mergeDescendants = true) { this.contentDescription = contentDescription },
+        modifier =
+            modifier
+                .testTag(GESTURE_ORB_TAG)
+                .size(RadialDimens.OrbTouchWidth, RadialDimens.OrbTouchHeight)
+                .clickable(role = Role.Button) { latestClick() }
+                .semantics(mergeDescendants = true) { this.contentDescription = contentDescription },
     )
 }

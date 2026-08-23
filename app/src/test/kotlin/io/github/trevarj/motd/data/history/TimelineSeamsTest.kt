@@ -25,8 +25,11 @@ import org.junit.Test
  *     undecidable, so [seamAbove] abstains rather than guessing.
  */
 class TimelineSeamsTest {
-
-    private fun row(serverTime: Long, id: Long, timelineOrder: Long = id) = MessageEntity(
+    private fun row(
+        serverTime: Long,
+        id: Long,
+        timelineOrder: Long = id,
+    ) = MessageEntity(
         id = id,
         bufferId = 1,
         serverTime = serverTime,
@@ -43,15 +46,16 @@ class TimelineSeamsTest {
         recoverable: Boolean = true,
         older: GapEdgeAnchor = GapEdgeAnchor.Exact(TimelineAnchor(0, 0)),
     ) = ResolvedGap(
-        gap = HistoryGapEntity(
-            id = id,
-            roomId = 1,
-            olderMsgid = null,
-            olderServerTime = 0,
-            newerMsgid = null,
-            newerServerTime = 0,
-            recoverable = recoverable,
-        ),
+        gap =
+            HistoryGapEntity(
+                id = id,
+                roomId = 1,
+                olderMsgid = null,
+                olderServerTime = 0,
+                newerMsgid = null,
+                newerServerTime = 0,
+                recoverable = recoverable,
+            ),
         older = older,
         newer = newer,
     )
@@ -65,9 +69,10 @@ class TimelineSeamsTest {
     private fun placements(
         rows: List<MessageEntity>,
         seams: List<TimelineSeam>,
-    ): List<Pair<Long, Long>> = rows.mapIndexedNotNull { index, r ->
-        seamAbove(r, rows.getOrNull(index + 1), seams)?.let { r.id to it.gapId }
-    }
+    ): List<Pair<Long, Long>> =
+        rows.mapIndexedNotNull { index, r ->
+            seamAbove(r, rows.getOrNull(index + 1), seams)?.let { r.id to it.gapId }
+        }
 
     // --- projection choice ----------------------------------------------------------------------
 
@@ -118,9 +123,10 @@ class TimelineSeamsTest {
     @Test
     fun exactEdgeSitsExactlyBetweenTheTwoAdjacentRows() {
         val rows = listOf(row(600, 11), row(500, 10), row(400, 9))
-        val seams = timelineSeams(
-            listOf(resolvedGap(id = 4, newer = GapEdgeAnchor.Exact(TimelineAnchor(500, 10, 10)))),
-        )
+        val seams =
+            timelineSeams(
+                listOf(resolvedGap(id = 4, newer = GapEdgeAnchor.Exact(TimelineAnchor(500, 10, 10)))),
+            )
 
         // Above row 10 (the seam's own anchor), and nowhere else.
         assertEquals(listOf(10L to 4L), placements(rows, seams))
@@ -134,9 +140,10 @@ class TimelineSeamsTest {
         val older = row(400, 9)
         val onIt = row(500, 10)
         val newer = row(600, 11)
-        val seams = timelineSeams(
-            listOf(resolvedGap(id = 2, newer = GapEdgeAnchor.Exact(TimelineAnchor(500, 10, 10)))),
-        )
+        val seams =
+            timelineSeams(
+                listOf(resolvedGap(id = 2, newer = GapEdgeAnchor.Exact(TimelineAnchor(500, 10, 10)))),
+            )
 
         assertEquals(2L, seamAbove(onIt, older, seams)?.gapId)
         assertNull(seamAbove(newer, onIt, seams))
@@ -149,9 +156,10 @@ class TimelineSeamsTest {
         val evenOlder = row(300, 8)
         val older = row(400, 9)
         val newer = row(500, 10)
-        val seams = timelineSeams(
-            listOf(resolvedGap(id = 5, newer = GapEdgeAnchor.Exact(TimelineAnchor(400, 9, 9)))),
-        )
+        val seams =
+            timelineSeams(
+                listOf(resolvedGap(id = 5, newer = GapEdgeAnchor.Exact(TimelineAnchor(400, 9, 9)))),
+            )
 
         assertNull(seamAbove(newer, older, seams))
         assertEquals(5L, seamAbove(older, evenOlder, seams)?.gapId)
@@ -162,9 +170,10 @@ class TimelineSeamsTest {
     @Test
     fun aPlaceholderOlderNeighborAbstainsInsteadOfGuessing() {
         val target = row(500, 10)
-        val seams = timelineSeams(
-            listOf(resolvedGap(id = 6, newer = GapEdgeAnchor.Exact(TimelineAnchor(500, 10, 10)))),
-        )
+        val seams =
+            timelineSeams(
+                listOf(resolvedGap(id = 6, newer = GapEdgeAnchor.Exact(TimelineAnchor(500, 10, 10)))),
+            )
 
         // The seam WOULD attach here once the neighbor materializes...
         assertEquals(6L, seamAbove(target, row(400, 9), seams)?.gapId)
@@ -216,10 +225,11 @@ class TimelineSeamsTest {
         // sentinel an unlocatable edge takes. A ceiling here would split the equal-time cohort.
         val edge = GapEdgeAnchor.TimeOnly(500)
 
-        val position = timelineSeams(
-            listOf(resolvedGap(id = 7, newer = edge)),
-            newestPresented = TimelineAnchor(900, 20, 20),
-        ).single().position
+        val position =
+            timelineSeams(
+                listOf(resolvedGap(id = 7, newer = edge)),
+                newestPresented = TimelineAnchor(900, 20, 20),
+            ).single().position
 
         assertEquals(edge.asInclusiveLowerBound(), position)
         assertNotEquals(edge.asFocusNewerPosition(), position)
@@ -242,12 +252,13 @@ class TimelineSeamsTest {
     fun multipleGapsProduceOrderedSeamsAndEachRowMatchesAtMostOne() {
         val rows = listOf(row(900, 14), row(800, 13), row(500, 12), row(400, 11), row(200, 10), row(100, 9))
         // Deliberately supplied newest-first so the ordering cannot come from the input.
-        val seams = timelineSeams(
-            listOf(
-                resolvedGap(id = 2, newer = GapEdgeAnchor.Exact(TimelineAnchor(800, 13, 13))),
-                resolvedGap(id = 1, newer = GapEdgeAnchor.Exact(TimelineAnchor(400, 11, 11))),
-            ),
-        )
+        val seams =
+            timelineSeams(
+                listOf(
+                    resolvedGap(id = 2, newer = GapEdgeAnchor.Exact(TimelineAnchor(800, 13, 13))),
+                    resolvedGap(id = 1, newer = GapEdgeAnchor.Exact(TimelineAnchor(400, 11, 11))),
+                ),
+            )
 
         assertEquals(listOf(1L, 2L), seams.map { it.gapId })
         assertTrue(seams[0].position < seams[1].position)
@@ -278,15 +289,16 @@ class TimelineSeamsTest {
         // Suppressing it is the defect this model exists to fix: an unrecoverable gap used to clamp
         // the window and hide the user's own stored history behind a break that can never close.
         val rows = listOf(row(600, 11), row(500, 10), row(400, 9))
-        val seams = timelineSeams(
-            listOf(
-                resolvedGap(
-                    id = 1,
-                    newer = GapEdgeAnchor.Exact(TimelineAnchor(500, 10, 10)),
-                    recoverable = false,
+        val seams =
+            timelineSeams(
+                listOf(
+                    resolvedGap(
+                        id = 1,
+                        newer = GapEdgeAnchor.Exact(TimelineAnchor(500, 10, 10)),
+                        recoverable = false,
+                    ),
                 ),
-            ),
-        )
+            )
 
         assertEquals(1, seams.size)
         assertFalse(seams.single().recoverable)
@@ -295,12 +307,13 @@ class TimelineSeamsTest {
 
     @Test
     fun recoverabilityIsCarriedPerGapNotCollapsed() {
-        val seams = timelineSeams(
-            listOf(
-                resolvedGap(id = 1, newer = GapEdgeAnchor.Exact(TimelineAnchor(400, 9, 9)), recoverable = false),
-                resolvedGap(id = 2, newer = GapEdgeAnchor.Exact(TimelineAnchor(800, 13, 13))),
-            ),
-        )
+        val seams =
+            timelineSeams(
+                listOf(
+                    resolvedGap(id = 1, newer = GapEdgeAnchor.Exact(TimelineAnchor(400, 9, 9)), recoverable = false),
+                    resolvedGap(id = 2, newer = GapEdgeAnchor.Exact(TimelineAnchor(800, 13, 13))),
+                ),
+            )
 
         assertEquals(listOf(false, true), seams.map { it.recoverable })
     }

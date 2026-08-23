@@ -23,9 +23,10 @@ class ChatSubtitleTest {
 
     @Test
     fun transientFailureShowsCurrentReconnectStateWithoutStaleProxyDetail() {
-        val state = ChatState(
-            connState = IrcClientState.Failed("SOCKS5 proxy not connected", fatal = false),
-        )
+        val state =
+            ChatState(
+                connState = IrcClientState.Failed("SOCKS5 proxy not connected", fatal = false),
+            )
 
         assertEquals(context.getString(R.string.drawer_state_connecting), chatSubtitle(state, context))
     }
@@ -39,10 +40,11 @@ class ChatSubtitleTest {
 
     @Test
     fun readyConnectionReturnsToConversationSubtitle() {
-        val state = ChatState(
-            connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
-            typingNicks = listOf("alice"),
-        )
+        val state =
+            ChatState(
+                connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
+                typingNicks = listOf("alice"),
+            )
 
         assertEquals("alice is typing…", chatSubtitle(state, context))
     }
@@ -78,12 +80,13 @@ class ChatSubtitleTest {
         memberCount: Int,
         typingNicks: List<String> = emptyList(),
     ) = ChatState(
-        buffer = BufferEntity(
-            networkId = 1,
-            name = "#motd",
-            displayName = "#motd",
-            type = BufferType.CHANNEL,
-        ),
+        buffer =
+            BufferEntity(
+                networkId = 1,
+                name = "#motd",
+                displayName = "#motd",
+                type = BufferType.CHANNEL,
+            ),
         connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
         memberCount = memberCount,
         typingNicks = typingNicks,

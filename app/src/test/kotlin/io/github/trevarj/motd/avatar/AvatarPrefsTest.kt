@@ -22,18 +22,19 @@ class AvatarPrefsTest {
         assertEquals(set, decodeSelfSetting(encodeSelfSetting(set)))
     }
 
-    @Test fun defaults_and_per_network_state_round_trip() = runTest {
-        val prefs = AvatarPrefsImpl(ApplicationProvider.getApplicationContext<Context>())
-        assertEquals(AvatarConfig(), prefs.config.first())
-        assertEquals(SelfAvatarSetting.Unmanaged, prefs.selfSetting(41).first())
+    @Test fun defaults_and_per_network_state_round_trip() =
+        runTest {
+            val prefs = AvatarPrefsImpl(ApplicationProvider.getApplicationContext<Context>())
+            assertEquals(AvatarConfig(), prefs.config.first())
+            assertEquals(SelfAvatarSetting.Unmanaged, prefs.selfSetting(41).first())
 
-        prefs.setShowSharedAvatars(false)
-        prefs.setSelfSetting(41, SelfAvatarSetting.Set("https://example.com/{size}.png"))
-        assertEquals(AvatarConfig(showSharedAvatars = false), prefs.config.first())
-        assertEquals(
-            SelfAvatarSetting.Set("https://example.com/{size}.png"),
-            prefs.selfSetting(41).first(),
-        )
-        assertEquals(SelfAvatarSetting.Unmanaged, prefs.selfSetting(42).first())
-    }
+            prefs.setShowSharedAvatars(false)
+            prefs.setSelfSetting(41, SelfAvatarSetting.Set("https://example.com/{size}.png"))
+            assertEquals(AvatarConfig(showSharedAvatars = false), prefs.config.first())
+            assertEquals(
+                SelfAvatarSetting.Set("https://example.com/{size}.png"),
+                prefs.selfSetting(41).first(),
+            )
+            assertEquals(SelfAvatarSetting.Unmanaged, prefs.selfSetting(42).first())
+        }
 }

@@ -86,11 +86,12 @@ class SelfAwayStateTest {
 
     @Test fun `unrelated events are inert and skipped by the hot-path guard`() {
         val current = mapOf(1L to "lunch")
-        val quit = IrcEvent.Quit(
-            ctx = MessageContext(null, 0L, null, null, null),
-            nick = "me",
-            reason = null,
-        )
+        val quit =
+            IrcEvent.Quit(
+                ctx = MessageContext(null, 0L, null, null, null),
+                nick = "me",
+                reason = null,
+            )
         assertEquals(current, apply(current, quit))
         assertFalse(affectsSelfAway(quit))
     }

@@ -106,15 +106,20 @@ class AgentwireConformanceTest {
         )
     }
 
-    private fun activeState() = AgentwireUiState(
-        gate = AgentwireGate.ACTIVE,
-        channel = "#claude",
-        controllerAccount = "trev",
-        backendAccount = "agentwire",
-        backend = TOPIC_BACKEND,
-    )
+    private fun activeState() =
+        AgentwireUiState(
+            gate = AgentwireGate.ACTIVE,
+            channel = "#claude",
+            controllerAccount = "trev",
+            backendAccount = "agentwire",
+            backend = TOPIC_BACKEND,
+        )
 
-    private data class Step(val kind: String, val tag: String, val state: JsonObject)
+    private data class Step(
+        val kind: String,
+        val tag: String,
+        val state: JsonObject,
+    )
 
     private fun corpus(name: String): List<Step> =
         json.parseToJsonElement(resource("$name.json")).jsonObject.getValue("steps").jsonArray.map { entry ->
@@ -126,18 +131,17 @@ class AgentwireConformanceTest {
             )
         }
 
-    private fun JsonObject.text(key: String): String? =
-        (this[key] as? JsonPrimitive)?.takeUnless { it is JsonNull }?.contentOrNull
+    private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.takeUnless { it is JsonNull }?.contentOrNull
 
     private fun JsonObject.flag(key: String): Boolean? = (this[key] as? JsonPrimitive)?.booleanOrNull
 
     private fun JsonObject.strings(key: String): Map<String, String> =
-        (this[key] as? JsonObject)?.mapNotNull { (k, v) -> (v as? JsonPrimitive)?.contentOrNull?.let { k to it } }
+        (this[key] as? JsonObject)
+            ?.mapNotNull { (k, v) -> (v as? JsonPrimitive)?.contentOrNull?.let { k to it } }
             ?.toMap()
             .orEmpty()
 
-    private fun JsonObject.queueIds(): List<String> =
-        (this["queue"] as? JsonArray)?.mapNotNull { it.jsonObject.text("iid") }.orEmpty()
+    private fun JsonObject.queueIds(): List<String> = (this["queue"] as? JsonArray)?.mapNotNull { it.jsonObject.text("iid") }.orEmpty()
 
     private fun JsonObject.requestIds(): List<String> = (this["requests"] as? JsonObject)?.keys?.sorted().orEmpty()
 

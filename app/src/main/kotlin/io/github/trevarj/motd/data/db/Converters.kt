@@ -91,13 +91,11 @@ internal class Converters {
     fun layoutDensityToString(v: LayoutDensity?): String? = v?.name
 
     @TypeConverter
-    fun stringToLayoutDensity(v: String?): LayoutDensity? =
-        v?.let { runCatching { LayoutDensity.valueOf(it) }.getOrNull() }
+    fun stringToLayoutDensity(v: String?): LayoutDensity? = v?.let { runCatching { LayoutDensity.valueOf(it) }.getOrNull() }
 
     @TypeConverter
     fun presenceModeToString(v: PresenceMode?): String? = v?.name
 
     @TypeConverter
-    fun stringToPresenceMode(v: String?): PresenceMode? =
-        v?.let { runCatching { PresenceMode.valueOf(it) }.getOrNull() }
+    fun stringToPresenceMode(v: String?): PresenceMode? = v?.let { runCatching { PresenceMode.valueOf(it) }.getOrNull() }
 }

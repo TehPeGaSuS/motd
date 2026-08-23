@@ -14,16 +14,18 @@ import javax.inject.Inject
  * MainActivity. Kept minimal: it just exposes the prompt flow and forwards trust/dismiss.
  */
 @HiltViewModel
-class CertPromptViewModel @Inject constructor(
-    private val connectionManager: ConnectionManager,
-) : ViewModel() {
-    val certPrompts: StateFlow<List<CertPrompt>> = connectionManager.certPrompts
+class CertPromptViewModel
+    @Inject
+    constructor(
+        private val connectionManager: ConnectionManager,
+    ) : ViewModel() {
+        val certPrompts: StateFlow<List<CertPrompt>> = connectionManager.certPrompts
 
-    fun trust(prompt: CertPrompt) {
-        viewModelScope.launch { connectionManager.trustCert(prompt) }
-    }
+        fun trust(prompt: CertPrompt) {
+            viewModelScope.launch { connectionManager.trustCert(prompt) }
+        }
 
-    fun dismiss(prompt: CertPrompt) {
-        connectionManager.dismissCertPrompt(prompt)
+        fun dismiss(prompt: CertPrompt) {
+            connectionManager.dismissCertPrompt(prompt)
+        }
     }
-}

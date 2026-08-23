@@ -8,10 +8,11 @@ class ChatForegroundLifecycleGateTest {
     @Test
     fun homeAndResume_clearThenRestoreForegroundState() {
         val transitions = mutableListOf<String>()
-        val gate = ChatForegroundLifecycleGate(
-            onResume = { transitions += "resume" },
-            onPause = { transitions += "pause" },
-        )
+        val gate =
+            ChatForegroundLifecycleGate(
+                onResume = { transitions += "resume" },
+                onPause = { transitions += "pause" },
+            )
 
         gate.onEvent(Lifecycle.Event.ON_RESUME)
         gate.onEvent(Lifecycle.Event.ON_PAUSE)

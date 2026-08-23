@@ -47,10 +47,11 @@ class SearchScreenUiTest {
         compose.onAllNodesWithTag("search_result_alpha").assertCountEquals(0)
 
         compose.runOnIdle {
-            state = SearchUiState(
-                rawQuery = "beta",
-                groups = listOf(group(hit(2, "beta", "beta-only result"))),
-            )
+            state =
+                SearchUiState(
+                    rawQuery = "beta",
+                    groups = listOf(group(hit(2, "beta", "beta-only result"))),
+                )
         }
 
         compose.onAllNodesWithTag("search_loading").assertCountEquals(0)
@@ -59,24 +60,30 @@ class SearchScreenUiTest {
         compose.onAllNodesWithText("beta-only result").assertCountEquals(1)
     }
 
-    private fun group(hit: SearchHit) = SearchGroup(
-        bufferId = hit.message.bufferId,
-        bufferDisplayName = "#kotlin",
-        networkName = "Libera",
-        hits = listOf(hit),
-    )
+    private fun group(hit: SearchHit) =
+        SearchGroup(
+            bufferId = hit.message.bufferId,
+            bufferDisplayName = "#kotlin",
+            networkName = "Libera",
+            hits = listOf(hit),
+        )
 
-    private fun hit(id: Long, msgid: String, text: String) = SearchHit(
-        message = MessageEntity(
-            id = id,
-            bufferId = 1,
-            serverTime = 1_000L,
-            msgid = msgid,
-            sender = "alice",
-            kind = MessageKind.PRIVMSG,
-            text = text,
-            dedupKey = "key-$id",
-        ),
+    private fun hit(
+        id: Long,
+        msgid: String,
+        text: String,
+    ) = SearchHit(
+        message =
+            MessageEntity(
+                id = id,
+                bufferId = 1,
+                serverTime = 1_000L,
+                msgid = msgid,
+                sender = "alice",
+                kind = MessageKind.PRIVMSG,
+                text = text,
+                dedupKey = "key-$id",
+            ),
         bufferDisplayName = "#kotlin",
         networkName = "Libera",
     )

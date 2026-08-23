@@ -10,7 +10,10 @@ internal class ConnectionGenerationGate {
 
     fun begin(networkId: Long): Long = sequence.incrementAndGet().also { current[networkId] = it }
 
-    fun isCurrent(networkId: Long, generation: Long): Boolean = current[networkId] == generation
+    fun isCurrent(
+        networkId: Long,
+        generation: Long,
+    ): Boolean = current[networkId] == generation
 
     fun invalidate(networkId: Long) {
         current.remove(networkId)

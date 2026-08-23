@@ -3,10 +3,10 @@ package io.github.trevarj.motd.irc.fuzz
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.IrcParseException
 import io.github.trevarj.motd.irc.proto.Prefix
-import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.random.Random
 
 class IrcMessageGenerativeTest {
     @Test
@@ -53,23 +53,25 @@ private fun Random.validMessage(): IrcMessage {
     repeat(nextInt(0, 5)) { index ->
         tags["tag$index"] = wellFormedText(nextInt(0, 25))
     }
-    val source = if (nextBoolean()) {
-        val host = if (nextBoolean()) safeToken(1, 16) else null
-        Prefix(
-            nick = safeToken(1, 12),
-            user = if (host != null && nextBoolean()) safeToken(1, 10) else null,
-            host = host,
-        )
-    } else {
-        null
-    }
-    val paramCount = nextInt(0, 5)
-    val params = buildList {
-        repeat(paramCount) { index ->
-            val last = index == paramCount - 1
-            add(if (last) wellFormedText(nextInt(0, 48)) else safeToken(1, 18))
+    val source =
+        if (nextBoolean()) {
+            val host = if (nextBoolean()) safeToken(1, 16) else null
+            Prefix(
+                nick = safeToken(1, 12),
+                user = if (host != null && nextBoolean()) safeToken(1, 10) else null,
+                host = host,
+            )
+        } else {
+            null
         }
-    }
+    val paramCount = nextInt(0, 5)
+    val params =
+        buildList {
+            repeat(paramCount) { index ->
+                val last = index == paramCount - 1
+                add(if (last) wellFormedText(nextInt(0, 48)) else safeToken(1, 18))
+            }
+        }
     return IrcMessage(tags, source, commands.random(this), params)
 }
 
@@ -79,7 +81,10 @@ private fun Random.rawLine(): String {
     return arbitraryUtf16(length)
 }
 
-private fun Random.safeToken(min: Int, max: Int): String {
+private fun Random.safeToken(
+    min: Int,
+    max: Int,
+): String {
     val alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#&[]{}|^-_."
     return buildString {
         repeat(nextInt(min, max + 1)) { append(alphabet[nextInt(alphabet.length)]) }
@@ -87,11 +92,25 @@ private fun Random.safeToken(min: Int, max: Int): String {
 }
 
 private fun Random.wellFormedText(length: Int): String {
-    val specials = intArrayOf(
-        ' '.code, ':'.code, ';'.code, '\\'.code, '`'.code, '\u0001'.code, '\u0002'.code,
-        '\u000f'.code, '\u202a'.code, '\u202e'.code, '\u2066'.code, '\u2069'.code,
-        0x03a9, 0x0416, 0x4e2d, 0x1f642,
-    )
+    val specials =
+        intArrayOf(
+            ' '.code,
+            ':'.code,
+            ';'.code,
+            '\\'.code,
+            '`'.code,
+            '\u0001'.code,
+            '\u0002'.code,
+            '\u000f'.code,
+            '\u202a'.code,
+            '\u202e'.code,
+            '\u2066'.code,
+            '\u2069'.code,
+            0x03a9,
+            0x0416,
+            0x4e2d,
+            0x1f642,
+        )
     return buildString {
         repeat(length) {
             val codePoint = if (nextInt(4) == 0) specials.random(this@wellFormedText) else nextInt(0x21, 0x7f)
@@ -100,30 +119,32 @@ private fun Random.wellFormedText(length: Int): String {
     }
 }
 
-private fun Random.arbitraryUtf16(length: Int): String = buildString(length) {
-    repeat(length) {
-        append(
-            when (nextInt(12)) {
-                0 -> nextInt(0x00, 0x20).toChar()
-                1 -> nextInt(0xd800, 0xe000).toChar()
-                2 -> listOf('\u202a', '\u202e', '\u2066', '\u2069').random(this@arbitraryUtf16)
-                else -> nextInt(0x20, 0xd800).toChar()
-            },
-        )
+private fun Random.arbitraryUtf16(length: Int): String =
+    buildString(length) {
+        repeat(length) {
+            append(
+                when (nextInt(12)) {
+                    0 -> nextInt(0x00, 0x20).toChar()
+                    1 -> nextInt(0xd800, 0xe000).toChar()
+                    2 -> listOf('\u202a', '\u202e', '\u2066', '\u2069').random(this@arbitraryUtf16)
+                    else -> nextInt(0x20, 0xd800).toChar()
+                },
+            )
+        }
     }
-}
 
-private fun IrcMessage.summary(): String =
-    "command=$command tags=${tags.keys} source=${source?.nick} params=${params.map { it.quotedSummary() }}"
+private fun IrcMessage.summary(): String = "command=$command tags=${tags.keys} source=${source?.nick} params=${params.map { it.quotedSummary() }}"
 
 internal fun String.quotedSummary(limit: Int = 160): String {
-    val escaped = take(limit).flatMap { char ->
-        when (char) {
-            '\n' -> listOf('\\', 'n')
-            '\r' -> listOf('\\', 'r')
-            '\t' -> listOf('\\', 't')
-            else -> listOf(char)
-        }
-    }.joinToString("")
-    return "\"$escaped${if (length > limit) "…(${length})" else ""}\""
+    val escaped =
+        take(limit)
+            .flatMap { char ->
+                when (char) {
+                    '\n' -> listOf('\\', 'n')
+                    '\r' -> listOf('\\', 'r')
+                    '\t' -> listOf('\\', 't')
+                    else -> listOf(char)
+                }
+            }.joinToString("")
+    return "\"$escaped${if (length > limit) "…($length)" else ""}\""
 }

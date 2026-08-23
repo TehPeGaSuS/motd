@@ -11,12 +11,12 @@ import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcClientState
-import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /**
  * Foreground-service keeper for the connection subsystem. Thin [LifecycleService]:
@@ -27,9 +27,10 @@ import kotlinx.coroutines.launch
  */
 @AndroidEntryPoint
 class IrcForegroundService : LifecycleService() {
-
     @Inject lateinit var connectionManager: ConnectionManager
+
     @Inject lateinit var notifications: MotdNotifications
+
     @Inject lateinit var diagnostics: DiagnosticLogger
 
     /**
@@ -43,13 +44,18 @@ class IrcForegroundService : LifecycleService() {
         // Reflect live connection state in the status notification, conflated on the wording rather
         // than on the raw state map — see [statusNotificationShapes].
         lifecycleScope.launch {
-            val states = (connectionManager as? ConnectionManagerImpl)?.connectionStates
-                ?: return@launch
+            val states =
+                (connectionManager as? ConnectionManagerImpl)?.connectionStates
+                    ?: return@launch
             statusNotificationShapes(states).collect { shape -> updateStatus(shape) }
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int,
+    ): Int {
         super.onStartCommand(intent, flags, startId)
         if (intent?.action == ACTION_STOP) {
             lifecycleScope.launch {
@@ -76,15 +82,16 @@ class IrcForegroundService : LifecycleService() {
         // Still correct for the cold start this was written for: an empty state map is "starting".
         val shape = statusNotificationShape(connectionManager.connectionStates.value)
         val notification = statusNotification(shape)
-        val started = startForegroundSafely(diagnostics, source = "service") {
-            // FOREGROUND_SERVICE_TYPE_SPECIAL_USE is an API 34 constant; only pass the type on 34+.
-            // On 29-33 use the 2-arg overload (the manifest still declares foregroundServiceType).
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(STATUS_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-            } else {
-                startForeground(STATUS_ID, notification)
+        val started =
+            startForegroundSafely(diagnostics, source = "service") {
+                // FOREGROUND_SERVICE_TYPE_SPECIAL_USE is an API 34 constant; only pass the type on 34+.
+                // On 29-33 use the 2-arg overload (the manifest still declares foregroundServiceType).
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    startForeground(STATUS_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                } else {
+                    startForeground(STATUS_ID, notification)
+                }
             }
-        }
         // startForeground posts STATUS_ID itself, so seed the shared dedupe state with what is now
         // on screen. A refused start posts nothing and must leave the collector free to repost.
         if (started) postedShape = shape
@@ -106,14 +113,19 @@ class IrcForegroundService : LifecycleService() {
         val notification = statusNotification(shape)
         // POST_NOTIFICATIONS is only a runtime permission on API 33+; guard so lint's flow
         // analysis is satisfied and we don't attempt to post the status update without it.
-        val canPost = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            androidx.core.content.ContextCompat.checkSelfPermission(
-                this, android.Manifest.permission.POST_NOTIFICATIONS,
-            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val canPost =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    this,
+                    android.Manifest.permission.POST_NOTIFICATIONS,
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         if (canPost) {
-            val posted = runCatching {
-                androidx.core.app.NotificationManagerCompat.from(this).notify(STATUS_ID, notification)
-            }.isSuccess
+            val posted =
+                runCatching {
+                    androidx.core.app.NotificationManagerCompat
+                        .from(this)
+                        .notify(STATUS_ID, notification)
+                }.isSuccess
             // Only a notification that actually reached the shade may suppress the next repost.
             if (posted) postedShape = shape
         }
@@ -148,19 +160,20 @@ internal fun startForegroundSafely(
     diagnostics: DiagnosticLogger,
     source: String,
     start: () -> Unit,
-): Boolean = try {
-    start()
-    true
-} catch (cancelled: CancellationException) {
-    // Callers run inside coroutines; swallowing cancellation here would break their teardown.
-    throw cancelled
-} catch (error: Exception) {
-    Log.w(FOREGROUND_START_TAG, "foreground service start refused (source=$source)", error)
-    diagnostics.record("lifecycle", "foreground_start_refused") {
-        mapOf("source" to source, "error" to error::class.simpleName)
+): Boolean =
+    try {
+        start()
+        true
+    } catch (cancelled: CancellationException) {
+        // Callers run inside coroutines; swallowing cancellation here would break their teardown.
+        throw cancelled
+    } catch (error: Exception) {
+        Log.w(FOREGROUND_START_TAG, "foreground service start refused (source=$source)", error)
+        diagnostics.record("lifecycle", "foreground_start_refused") {
+            mapOf("source" to source, "error" to error::class.simpleName)
+        }
+        false
     }
-    false
-}
 
 /** The three arguments [MotdNotifications.statusNotification] takes, derived from live state. */
 internal data class StatusNotificationShape(
@@ -179,9 +192,10 @@ internal data class StatusNotificationShape(
  */
 internal fun statusNotificationShape(states: Map<Long, IrcClientState>): StatusNotificationShape {
     val connected = states.values.count { it is IrcClientState.Ready }
-    val reconnecting = states.values.any {
-        it is IrcClientState.Connecting || it is IrcClientState.Registering
-    }
+    val reconnecting =
+        states.values.any {
+            it is IrcClientState.Connecting || it is IrcClientState.Registering
+        }
     return StatusNotificationShape(
         connectedCount = connected,
         reconnecting = reconnecting && connected == 0,

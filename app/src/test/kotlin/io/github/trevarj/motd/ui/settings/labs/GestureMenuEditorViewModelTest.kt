@@ -70,309 +70,365 @@ class GestureMenuEditorViewModelTest {
         return model.state.value
     }
 
-    private fun TestScope.rowFor(model: GestureMenuEditorViewModel, nodeId: String): GestureEditorRow =
-        settled(model).rows.first { it.node.id == nodeId }
+    private fun TestScope.rowFor(
+        model: GestureMenuEditorViewModel,
+        nodeId: String,
+    ): GestureEditorRow = settled(model).rows.first { it.node.id == nodeId }
 
     // -- loading and dirty tracking ---------------------------------------------------------------
 
-    @Test fun loadsTheStoredTreeAsAnIndentedPreorderList() = runTest {
-        val state = settled(editor())
+    @Test fun loadsTheStoredTreeAsAnIndentedPreorderList() =
+        runTest {
+            val state = settled(editor())
 
-        assertTrue(state.loaded)
-        assertEquals("default-root", state.rows.first().node.id)
-        assertEquals(0, state.rows.first().depth)
-        assertEquals(8, state.rows.count { it.depth == 1 })
-        assertEquals(
-            listOf("default-search", "default-channel-info", "default-attach", "default-theme"),
-            state.rows.filter { it.depth == 2 }.map { it.node.id },
-        )
-        assertFalse(state.dirty)
-        assertFalse(state.canSave)
-        assertTrue(state.isDefault)
-    }
+            assertTrue(state.loaded)
+            assertEquals(
+                "default-root",
+                state.rows
+                    .first()
+                    .node.id,
+            )
+            assertEquals(0, state.rows.first().depth)
+            assertEquals(8, state.rows.count { it.depth == 1 })
+            assertEquals(
+                listOf("default-search", "default-channel-info", "default-attach", "default-theme"),
+                state.rows.filter { it.depth == 2 }.map { it.node.id },
+            )
+            assertFalse(state.dirty)
+            assertFalse(state.canSave)
+            assertTrue(state.isDefault)
+        }
 
-    @Test fun pickersComeFromTheRepositories() = runTest {
-        buffers.chats.value = listOf(chatRow(7L, "#kotlin"), chatRow(8L, "#nix"))
+    @Test fun pickersComeFromTheRepositories() =
+        runTest {
+            buffers.chats.value = listOf(chatRow(7L, "#kotlin"), chatRow(8L, "#nix"))
 
-        val state = settled(editor())
+            val state = settled(editor())
 
-        assertEquals(listOf(7L, 8L), state.chats.map { it.bufferId })
-        assertEquals(listOf("#kotlin", "#nix"), state.chats.map { it.label })
-        assertEquals(listOf("libera", "oftc"), state.networks.map { it.name })
-    }
+            assertEquals(listOf(7L, 8L), state.chats.map { it.bufferId })
+            assertEquals(listOf("#kotlin", "#nix"), state.chats.map { it.label })
+            assertEquals(listOf("libera", "oftc"), state.networks.map { it.name })
+        }
 
-    @Test fun anEditIsDirtyButNothingReachesPreferencesUntilSave() = runTest {
-        val model = editor()
+    @Test fun anEditIsDirtyButNothingReachesPreferencesUntilSave() =
+        runTest {
+            val model = editor()
 
-        model.rename("default-tools", "Utilities")
-        val edited = settled(model)
-        assertTrue(edited.dirty)
-        assertTrue(edited.canSave)
-        assertEquals(GestureMenuConfig(), prefs.menuState.value)
+            model.rename("default-tools", "Utilities")
+            val edited = settled(model)
+            assertTrue(edited.dirty)
+            assertTrue(edited.canSave)
+            assertEquals(GestureMenuConfig(), prefs.menuState.value)
 
-        model.save()
-        val saved = settled(model)
-        assertFalse(saved.dirty)
-        assertFalse(saved.canSave)
-        assertEquals("Utilities", prefs.menuState.value.findNode("default-tools")?.label)
-    }
+            model.save()
+            val saved = settled(model)
+            assertFalse(saved.dirty)
+            assertFalse(saved.canSave)
+            assertEquals(
+                "Utilities",
+                prefs.menuState.value
+                    .findNode("default-tools")
+                    ?.label,
+            )
+        }
 
     // -- validation gating ------------------------------------------------------------------------
 
-    @Test fun aBlankLabelBlocksSaveAndIsReportedOnItsOwnRow() = runTest {
-        val model = editor()
+    @Test fun aBlankLabelBlocksSaveAndIsReportedOnItsOwnRow() =
+        runTest {
+            val model = editor()
 
-        model.rename("default-away", "  ")
-        val state = settled(model)
+            model.rename("default-away", "  ")
+            val state = settled(model)
 
-        assertTrue(state.dirty)
-        assertFalse(state.canSave)
-        assertEquals(
-            listOf(GestureMenuViolation.BlankLabel("default-away")),
-            state.rows.first { it.node.id == "default-away" }.violations,
-        )
+            assertTrue(state.dirty)
+            assertFalse(state.canSave)
+            assertEquals(
+                listOf(GestureMenuViolation.BlankLabel("default-away")),
+                state.rows.first { it.node.id == "default-away" }.violations,
+            )
 
-        model.save()
-        advanceUntilIdle()
-        assertEquals(GestureMenuConfig(), prefs.menuState.value)
-    }
+            model.save()
+            advanceUntilIdle()
+            assertEquals(GestureMenuConfig(), prefs.menuState.value)
+        }
 
-    @Test fun aNinthSliceOverflowsTheRingAndBlocksSave() = runTest {
-        val model = editor()
+    @Test fun aNinthSliceOverflowsTheRingAndBlocksSave() =
+        runTest {
+            val model = editor()
 
-        model.addChild("default-root", GestureNodeKind.LEAF)
-        val state = settled(model)
+            model.addChild("default-root", GestureNodeKind.LEAF)
+            val state = settled(model)
 
-        assertEquals(listOf(GestureMenuViolation.RingOverflow("default-root", 9)), state.violations)
-        assertFalse(state.canSave)
-    }
+            assertEquals(listOf(GestureMenuViolation.RingOverflow("default-root", 9)), state.violations)
+            assertFalse(state.canSave)
+        }
 
-    @Test fun aFourthRingIsReportedTooDeep() = runTest {
-        val model = editor(smallMenu())
+    @Test fun aFourthRingIsReportedTooDeep() =
+        runTest {
+            val model = editor(smallMenu())
 
-        // root > outer > inner > new: the new submenu would open a fourth ring.
-        model.addChild("inner", GestureNodeKind.SUBMENU)
-        val state = settled(model)
+            // root > outer > inner > new: the new submenu would open a fourth ring.
+            model.addChild("inner", GestureNodeKind.SUBMENU)
+            val state = settled(model)
 
-        val deepest = state.rows.last().node.id
-        assertEquals(3, state.rows.last().depth)
-        assertEquals(listOf(GestureMenuViolation.TooDeep(deepest, 4)), state.violations)
-        assertFalse(state.canSave)
-    }
+            val deepest =
+                state.rows
+                    .last()
+                    .node.id
+            assertEquals(3, state.rows.last().depth)
+            assertEquals(listOf(GestureMenuViolation.TooDeep(deepest, 4)), state.violations)
+            assertFalse(state.canSave)
+        }
 
     // -- structural edits -------------------------------------------------------------------------
 
-    @Test fun movesReorderWithinTheRingAndAreNotOfferedAtTheEnds() = runTest {
-        val model = editor()
+    @Test fun movesReorderWithinTheRingAndAreNotOfferedAtTheEnds() =
+        runTest {
+            val model = editor()
 
-        val first = rowFor(model, "default-unread")
-        assertFalse(first.canMoveUp)
-        assertTrue(first.canMoveDown)
-        assertFalse(rowFor(model, "default-networks").canMoveDown)
+            val first = rowFor(model, "default-unread")
+            assertFalse(first.canMoveUp)
+            assertTrue(first.canMoveDown)
+            assertFalse(rowFor(model, "default-networks").canMoveDown)
 
-        model.moveDown("default-unread")
-        val state = settled(model)
+            model.moveDown("default-unread")
+            val state = settled(model)
 
-        assertEquals(
-            listOf("default-pinned", "default-unread"),
-            state.rows.filter { it.depth == 1 }.take(2).map { it.node.id },
-        )
-    }
+            assertEquals(
+                listOf("default-pinned", "default-unread"),
+                state.rows
+                    .filter { it.depth == 1 }
+                    .take(2)
+                    .map { it.node.id },
+            )
+        }
 
-    @Test fun indentPushesANodeIntoTheRingAboveItAndOutdentLiftsItBackOut() = runTest {
-        val model = editor()
-        assertTrue(rowFor(model, "default-networks").canIndent)
+    @Test fun indentPushesANodeIntoTheRingAboveItAndOutdentLiftsItBackOut() =
+        runTest {
+            val model = editor()
+            assertTrue(rowFor(model, "default-networks").canIndent)
 
-        model.indent("default-networks")
-        val nested = settled(model)
-        assertEquals(2, nested.rows.first { it.node.id == "default-networks" }.depth)
-        assertEquals(
-            listOf("default-search", "default-channel-info", "default-attach", "default-theme", "default-networks"),
-            nested.rows.filter { it.depth == 2 }.map { it.node.id },
-        )
-        assertTrue(nested.rows.first { it.node.id == "default-networks" }.canOutdent)
+            model.indent("default-networks")
+            val nested = settled(model)
+            assertEquals(2, nested.rows.first { it.node.id == "default-networks" }.depth)
+            assertEquals(
+                listOf("default-search", "default-channel-info", "default-attach", "default-theme", "default-networks"),
+                nested.rows.filter { it.depth == 2 }.map { it.node.id },
+            )
+            assertTrue(nested.rows.first { it.node.id == "default-networks" }.canOutdent)
 
-        model.outdent("default-networks")
-        val flat = settled(model)
-        assertEquals(1, flat.rows.first { it.node.id == "default-networks" }.depth)
-        assertEquals("default-networks", flat.rows.last { it.depth == 1 }.node.id)
-        assertEquals(defaultGestureMenu(), flatConfigEquivalent(flat))
-    }
+            model.outdent("default-networks")
+            val flat = settled(model)
+            assertEquals(1, flat.rows.first { it.node.id == "default-networks" }.depth)
+            assertEquals(
+                "default-networks",
+                flat.rows
+                    .last { it.depth == 1 }
+                    .node.id,
+            )
+            assertEquals(defaultGestureMenu(), flatConfigEquivalent(flat))
+        }
 
-    @Test fun indentIsRefusedWhenTheSliceAboveOpensNoRing() = runTest {
-        val model = editor()
-        // "Mark all read" follows "Next unread"; a leaf cannot take children.
-        assertFalse(rowFor(model, "default-mark-all-read").canIndent)
+    @Test fun indentIsRefusedWhenTheSliceAboveOpensNoRing() =
+        runTest {
+            val model = editor()
+            // "Mark all read" follows "Next unread"; a leaf cannot take children.
+            assertFalse(rowFor(model, "default-mark-all-read").canIndent)
 
-        model.indent("default-mark-all-read")
+            model.indent("default-mark-all-read")
 
-        assertFalse(settled(model).dirty)
-    }
+            assertFalse(settled(model).dirty)
+        }
 
-    @Test fun outdentIsNotOfferedForTheRootsOwnChildren() = runTest {
-        val model = editor()
+    @Test fun outdentIsNotOfferedForTheRootsOwnChildren() =
+        runTest {
+            val model = editor()
 
-        assertFalse(rowFor(model, "default-tools").canOutdent)
+            assertFalse(rowFor(model, "default-tools").canOutdent)
 
-        model.outdent("default-tools")
-        assertFalse(settled(model).dirty)
-    }
+            model.outdent("default-tools")
+            assertFalse(settled(model).dirty)
+        }
 
-    @Test fun deleteTakesTheWholeSubtree() = runTest {
-        val model = editor()
+    @Test fun deleteTakesTheWholeSubtree() =
+        runTest {
+            val model = editor()
 
-        model.delete("default-tools")
-        val state = settled(model)
+            model.delete("default-tools")
+            val state = settled(model)
 
-        assertNull(state.rows.firstOrNull { it.node.id == "default-tools" })
-        assertNull(state.rows.firstOrNull { it.node.id == "default-search" })
-    }
+            assertNull(state.rows.firstOrNull { it.node.id == "default-tools" })
+            assertNull(state.rows.firstOrNull { it.node.id == "default-search" })
+        }
 
-    @Test fun theRootIsNeitherDeletableNorMovable() = runTest {
-        val model = editor()
-        val root = rowFor(model, "default-root")
+    @Test fun theRootIsNeitherDeletableNorMovable() =
+        runTest {
+            val model = editor()
+            val root = rowFor(model, "default-root")
 
-        assertFalse(root.canDelete)
-        assertFalse(root.canMoveUp)
-        assertFalse(root.canMoveDown)
-        assertFalse(root.canOutdent)
-        assertTrue(root.canAddChild)
+            assertFalse(root.canDelete)
+            assertFalse(root.canMoveUp)
+            assertFalse(root.canMoveDown)
+            assertFalse(root.canOutdent)
+            assertTrue(root.canAddChild)
 
-        model.delete("default-root")
-        assertFalse(settled(model).dirty)
-    }
+            model.delete("default-root")
+            assertFalse(settled(model).dirty)
+        }
 
-    @Test fun addedNodesCarryUsableDefaults() = runTest {
-        val model = editor(smallMenu())
+    @Test fun addedNodesCarryUsableDefaults() =
+        runTest {
+            val model = editor(smallMenu())
 
-        model.addChild("root", GestureNodeKind.LEAF)
-        model.addChild("root", GestureNodeKind.PROVIDER)
-        val state = settled(model)
+            model.addChild("root", GestureNodeKind.LEAF)
+            model.addChild("root", GestureNodeKind.PROVIDER)
+            val state = settled(model)
 
-        assertEquals(5, state.rows.size)
-        val leaf = state.rows.map { it.node }.filterIsInstance<GestureNode.Leaf>().last()
-        assertEquals("New action", leaf.label)
-        assertEquals(GestureAction.OpenChatList, leaf.action)
-        val provider = state.rows.map { it.node }.filterIsInstance<GestureNode.Provider>().last()
-        assertEquals("New list", provider.label)
-        assertEquals(GestureProviderKind.PINNED_CHATS, provider.kind)
-        // A fresh node must never be born invalid.
-        assertTrue(state.violations.isEmpty())
-    }
+            assertEquals(5, state.rows.size)
+            val leaf =
+                state.rows
+                    .map { it.node }
+                    .filterIsInstance<GestureNode.Leaf>()
+                    .last()
+            assertEquals("New action", leaf.label)
+            assertEquals(GestureAction.OpenChatList, leaf.action)
+            val provider =
+                state.rows
+                    .map { it.node }
+                    .filterIsInstance<GestureNode.Provider>()
+                    .last()
+            assertEquals("New list", provider.label)
+            assertEquals(GestureProviderKind.PINNED_CHATS, provider.kind)
+            // A fresh node must never be born invalid.
+            assertTrue(state.violations.isEmpty())
+        }
 
     // -- bindings ---------------------------------------------------------------------------------
 
-    @Test fun bindingRepointsALeafAndLeavesEverythingElseAlone() = runTest {
-        val model = editor()
+    @Test fun bindingRepointsALeafAndLeavesEverythingElseAlone() =
+        runTest {
+            val model = editor()
 
-        model.bindAction("default-search", GestureAction.OpenChat(12L))
-        val bound = settled(model)
-        assertEquals(
-            GestureAction.OpenChat(12L),
-            (bound.rows.first { it.node.id == "default-search" }.node as GestureNode.Leaf).action,
-        )
+            model.bindAction("default-search", GestureAction.OpenChat(12L))
+            val bound = settled(model)
+            assertEquals(
+                GestureAction.OpenChat(12L),
+                (bound.rows.first { it.node.id == "default-search" }.node as GestureNode.Leaf).action,
+            )
 
-        model.bindAction("default-tools", GestureAction.MarkAllRead)
-        assertTrue(settled(model).rows.first { it.node.id == "default-tools" }.node is GestureNode.Submenu)
-    }
+            model.bindAction("default-tools", GestureAction.MarkAllRead)
+            assertTrue(settled(model).rows.first { it.node.id == "default-tools" }.node is GestureNode.Submenu)
+        }
 
-    @Test fun providerLimitIsClampedToWhatARingCanShow() = runTest {
-        val model = editor()
+    @Test fun providerLimitIsClampedToWhatARingCanShow() =
+        runTest {
+            val model = editor()
 
-        model.setProvider("default-unread", GestureProviderKind.FRIENDS, limit = 99)
-        val state = settled(model)
+            model.setProvider("default-unread", GestureProviderKind.FRIENDS, limit = 99)
+            val state = settled(model)
 
-        val provider = state.rows.first { it.node.id == "default-unread" }.node as GestureNode.Provider
-        assertEquals(GestureProviderKind.FRIENDS, provider.kind)
-        assertEquals(8, provider.limit)
-        assertTrue(state.violations.isEmpty())
-    }
+            val provider = state.rows.first { it.node.id == "default-unread" }.node as GestureNode.Provider
+            assertEquals(GestureProviderKind.FRIENDS, provider.kind)
+            assertEquals(8, provider.limit)
+            assertTrue(state.violations.isEmpty())
+        }
 
-    @Test fun iconsAreEditableOnEveryKnownNode() = runTest {
-        val model = editor()
+    @Test fun iconsAreEditableOnEveryKnownNode() =
+        runTest {
+            val model = editor()
 
-        model.setIcon("default-tools", GestureIcon.STAR)
+            model.setIcon("default-tools", GestureIcon.STAR)
 
-        assertEquals(GestureIcon.STAR, rowFor(model, "default-tools").node.icon)
-    }
+            assertEquals(GestureIcon.STAR, rowFor(model, "default-tools").node.icon)
+        }
 
     // -- forward compatibility --------------------------------------------------------------------
 
-    @Test fun anUnknownNodeIsShownButNeverRewritten() = runTest {
-        val model = editor(menuWithUnknown())
-        val row = rowFor(model, "from-the-future")
+    @Test fun anUnknownNodeIsShownButNeverRewritten() =
+        runTest {
+            val model = editor(menuWithUnknown())
+            val row = rowFor(model, "from-the-future")
 
-        assertTrue(row.node is GestureNode.Unknown)
-        assertFalse(row.canRename)
-        assertTrue(row.canDelete)
-        // An unknown node is exempt from the label rule, so it never blocks a save on its own.
-        assertTrue(settled(model).violations.isEmpty())
+            assertTrue(row.node is GestureNode.Unknown)
+            assertFalse(row.canRename)
+            assertTrue(row.canDelete)
+            // An unknown node is exempt from the label rule, so it never blocks a save on its own.
+            assertTrue(settled(model).violations.isEmpty())
 
-        model.rename("from-the-future", "Renamed")
-        model.setIcon("from-the-future", GestureIcon.STAR)
-        assertFalse(settled(model).dirty)
+            model.rename("from-the-future", "Renamed")
+            model.setIcon("from-the-future", GestureIcon.STAR)
+            assertFalse(settled(model).dirty)
 
-        model.moveUp("from-the-future")
-        assertTrue(settled(model).dirty)
-        model.save()
-        advanceUntilIdle()
+            model.moveUp("from-the-future")
+            assertTrue(settled(model).dirty)
+            model.save()
+            advanceUntilIdle()
 
-        val stored = prefs.menuState.value.findNode("from-the-future")
-        assertTrue(stored is GestureNode.Unknown)
-        assertEquals(
-            JsonPrimitive("Slice from a newer build"),
-            (stored as GestureNode.Unknown).raw["label"],
-        )
-        assertEquals("from-the-future", prefs.menuState.value.root.children.first().id)
-    }
+            val stored = prefs.menuState.value.findNode("from-the-future")
+            assertTrue(stored is GestureNode.Unknown)
+            assertEquals(
+                JsonPrimitive("Slice from a newer build"),
+                (stored as GestureNode.Unknown).raw["label"],
+            )
+            assertEquals(
+                "from-the-future",
+                prefs.menuState.value.root.children
+                    .first()
+                    .id,
+            )
+        }
 
-    @Test fun anUnknownNodeRendersAsTheUnsupportedPlaceholder() = runTest {
-        val model = editor(menuWithUnknown())
+    @Test fun anUnknownNodeRendersAsTheUnsupportedPlaceholder() =
+        runTest {
+            val model = editor(menuWithUnknown())
 
-        // The screen keys the "Unsupported item (kept)" label off the node type, not its own text.
-        assertTrue(rowFor(model, "from-the-future").node is GestureNode.Unknown)
-        assertFalse(rowFor(model, "known").node is GestureNode.Unknown)
-    }
+            // The screen keys the "Unsupported item (kept)" label off the node type, not its own text.
+            assertTrue(rowFor(model, "from-the-future").node is GestureNode.Unknown)
+            assertFalse(rowFor(model, "known").node is GestureNode.Unknown)
+        }
 
     // -- reset ------------------------------------------------------------------------------------
 
-    @Test fun resetGoesBackToTheStockTreeAndStillNeedsASave() = runTest {
-        val model = editor(smallMenu())
+    @Test fun resetGoesBackToTheStockTreeAndStillNeedsASave() =
+        runTest {
+            val model = editor(smallMenu())
 
-        model.resetToDefault()
-        val state = settled(model)
+            model.resetToDefault()
+            val state = settled(model)
 
-        assertTrue(state.isDefault)
-        assertTrue(state.dirty)
-        assertTrue(state.canSave)
-        assertEquals(smallMenu(), prefs.menuState.value)
+            assertTrue(state.isDefault)
+            assertTrue(state.dirty)
+            assertTrue(state.canSave)
+            assertEquals(smallMenu(), prefs.menuState.value)
 
-        model.save()
-        advanceUntilIdle()
-        assertFalse(model.state.value.dirty)
-        assertEquals(defaultGestureMenu(), prefs.menuState.value)
-    }
+            model.save()
+            advanceUntilIdle()
+            assertFalse(model.state.value.dirty)
+            assertEquals(defaultGestureMenu(), prefs.menuState.value)
+        }
 
     // -- pure action-draft helpers ----------------------------------------------------------------
 
     @Test fun everyFamilyRoundTripsThroughItsDraft() {
-        val actions = listOf(
-            GestureAction.OpenChat(3L),
-            GestureAction.OpenChatList,
-            GestureAction.NextUnread,
-            GestureAction.MarkAllRead,
-            GestureAction.OpenSearch,
-            GestureAction.ChannelInfoCurrent,
-            GestureAction.AttachCurrent,
-            GestureAction.InsertMention("trev"),
-            GestureAction.InsertSnippet("brb"),
-            GestureAction.StartQuery(2L, "trev"),
-            GestureAction.JoinChannel(2L, "#motd", "hunter2"),
-            GestureAction.ToggleAway("afk"),
-            GestureAction.ToggleTheme,
-            GestureAction.ReconnectNetwork(4L),
-            GestureAction.DisconnectNetwork(4L),
-        )
+        val actions =
+            listOf(
+                GestureAction.OpenChat(3L),
+                GestureAction.OpenChatList,
+                GestureAction.NextUnread,
+                GestureAction.MarkAllRead,
+                GestureAction.OpenSearch,
+                GestureAction.ChannelInfoCurrent,
+                GestureAction.AttachCurrent,
+                GestureAction.InsertMention("trev"),
+                GestureAction.InsertSnippet("brb"),
+                GestureAction.StartQuery(2L, "trev"),
+                GestureAction.JoinChannel(2L, "#motd", "hunter2"),
+                GestureAction.ToggleAway("afk"),
+                GestureAction.ToggleTheme,
+                GestureAction.ReconnectNetwork(4L),
+                GestureAction.DisconnectNetwork(4L),
+            )
 
         actions.forEach { action ->
             assertEquals(action, buildGestureAction(gestureActionDraft(action)))
@@ -416,39 +472,44 @@ class GestureMenuEditorViewModelTest {
     // -- fixtures ---------------------------------------------------------------------------------
 
     /** Rebuild a config from the flattened rows, to prove an indent/outdent pair is a true no-op. */
-    private fun flatConfigEquivalent(state: GestureEditorUiState): GestureMenuConfig =
-        GestureMenuConfig(root = state.rows.first().node as GestureNode.Submenu)
+    private fun flatConfigEquivalent(state: GestureEditorUiState): GestureMenuConfig = GestureMenuConfig(root = state.rows.first().node as GestureNode.Submenu)
 
-    private fun smallMenu(): GestureMenuConfig = GestureMenuConfig(
-        root = GestureNode.Submenu(
-            id = "root",
-            label = "Menu",
-            children = listOf(
+    private fun smallMenu(): GestureMenuConfig =
+        GestureMenuConfig(
+            root =
                 GestureNode.Submenu(
-                    id = "outer",
-                    label = "Outer",
-                    children = listOf(GestureNode.Submenu(id = "inner", label = "Inner")),
-                ),
-            ),
-        ),
-    )
-
-    private fun menuWithUnknown(): GestureMenuConfig = GestureMenuConfig(
-        root = GestureNode.Submenu(
-            id = "root",
-            label = "Menu",
-            children = listOf(
-                GestureNode.Leaf(id = "known", label = "Search", action = GestureAction.OpenSearch),
-                GestureNode.Unknown(
-                    JsonObject(
-                        mapOf(
-                            "type" to JsonPrimitive("hologram"),
-                            "id" to JsonPrimitive("from-the-future"),
-                            "label" to JsonPrimitive("Slice from a newer build"),
+                    id = "root",
+                    label = "Menu",
+                    children =
+                        listOf(
+                            GestureNode.Submenu(
+                                id = "outer",
+                                label = "Outer",
+                                children = listOf(GestureNode.Submenu(id = "inner", label = "Inner")),
+                            ),
                         ),
-                    ),
                 ),
-            ),
-        ),
-    )
+        )
+
+    private fun menuWithUnknown(): GestureMenuConfig =
+        GestureMenuConfig(
+            root =
+                GestureNode.Submenu(
+                    id = "root",
+                    label = "Menu",
+                    children =
+                        listOf(
+                            GestureNode.Leaf(id = "known", label = "Search", action = GestureAction.OpenSearch),
+                            GestureNode.Unknown(
+                                JsonObject(
+                                    mapOf(
+                                        "type" to JsonPrimitive("hologram"),
+                                        "id" to JsonPrimitive("from-the-future"),
+                                        "label" to JsonPrimitive("Slice from a newer build"),
+                                    ),
+                                ),
+                            ),
+                        ),
+                ),
+        )
 }

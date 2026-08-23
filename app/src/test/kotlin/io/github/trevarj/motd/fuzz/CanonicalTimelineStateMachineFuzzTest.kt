@@ -15,9 +15,6 @@ import io.github.trevarj.motd.data.db.ObservationOrigin
 import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.sync.CanonicalTimelineStore
 import io.github.trevarj.motd.data.sync.TimelineObservation
-import java.nio.charset.StandardCharsets
-import kotlin.random.Random
-import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -27,137 +24,149 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.nio.charset.StandardCharsets
+import kotlin.random.Random
+import kotlin.time.Duration.Companion.minutes
 
 @RunWith(RobolectricTestRunner::class)
 class CanonicalTimelineStateMachineFuzzTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
 
     @Test
-    fun generatedDeliveryAndHistorySequencesPreserveCanonicalInvariants() = runTest(timeout = 10.minutes) {
-        SeededFuzz.runSuspending(
-            target = "canonical-timeline",
-            version = 1,
-            prCases = 24,
-            nightlyCases = 1_500,
-            replayTest = CanonicalTimelineStateMachineFuzzTest::class.java.name,
-        ) { fuzz ->
-            val databaseName = "canonical-fuzz-${fuzz.seed.hashCode()}-${fuzz.index}.db"
-            context.deleteDatabase(databaseName)
-            var db: MotdDatabase? = null
-            try {
-                val initialDb = open(databaseName)
-                db = initialDb
-                val networkId = initialDb.networkDao().insert(network())
-                val roomId = initialDb.bufferDao().insert(room(networkId, "#room"))
-                val logical = List(4) { index ->
-                    LogicalEvent(
-                        index = index,
-                        msgid = if (index % 2 == 0) "Case-${fuzz.index}-$index" else "case-${fuzz.index}-$index",
-                        text = "fuzztoken${fuzz.index}event$index",
-                        serverTime = 20_000L + fuzz.index * 1_000L + index * 100L,
-                    )
-                }
-                val returnedIds = logical.associateWith { mutableSetOf<Long>() }
-                val mandatory = buildList {
-                    logical.forEach { event ->
-                        add(Operation.Single(event, Delivery.LIVE_LOCAL))
-                        add(Operation.Single(event, Delivery.PUSH_TAGGED))
-                        add(Operation.Single(event, Delivery.ECHO_TAGGED))
-                    }
-                    add(Operation.History(logical.take(2)))
-                    add(Operation.History(logical.drop(1)))
-                    add(Operation.History(logical))
-                }.shuffled(fuzz.random)
-                val replayable = buildList {
-                    logical.forEach { event ->
-                        add(Operation.Single(event, Delivery.PUSH_TAGGED))
-                        add(Operation.Single(event, Delivery.ECHO_TAGGED))
-                    }
-                    add(Operation.History(logical))
-                    add(Operation.History(logical.takeLast(3)))
-                }
-                val operationCount = fuzzSteps(pr = 32, nightly = 128).coerceAtLeast(mandatory.size)
-                val reopenAt = setOf(
-                    fuzz.random.nextInt(1, operationCount),
-                    fuzz.random.nextInt(1, operationCount),
-                )
-
-                repeat(operationCount) { step ->
-                    if (step in reopenAt) {
-                        fuzz.record("reopen step=$step")
-                        db?.close()
-                        db = open(databaseName)
-                    }
-                    val operation = mandatory.getOrNull(step) ?: replayable.random(fuzz.random)
-                    val store = CanonicalTimelineStore(checkNotNull(db))
-                    when (operation) {
-                        is Operation.Single -> {
-                            fuzz.record("single step=$step delivery=${operation.delivery} logical=${operation.event.index}")
-                            val result = store.ingest(
-                                observation(networkId, roomId, operation.event, operation.delivery),
+    fun generatedDeliveryAndHistorySequencesPreserveCanonicalInvariants() =
+        runTest(timeout = 10.minutes) {
+            SeededFuzz.runSuspending(
+                target = "canonical-timeline",
+                version = 1,
+                prCases = 24,
+                nightlyCases = 1_500,
+                replayTest = CanonicalTimelineStateMachineFuzzTest::class.java.name,
+            ) { fuzz ->
+                val databaseName = "canonical-fuzz-${fuzz.seed.hashCode()}-${fuzz.index}.db"
+                context.deleteDatabase(databaseName)
+                var db: MotdDatabase? = null
+                try {
+                    val initialDb = open(databaseName)
+                    db = initialDb
+                    val networkId = initialDb.networkDao().insert(network())
+                    val roomId = initialDb.bufferDao().insert(room(networkId, "#room"))
+                    val logical =
+                        List(4) { index ->
+                            LogicalEvent(
+                                index = index,
+                                msgid = if (index % 2 == 0) "Case-${fuzz.index}-$index" else "case-${fuzz.index}-$index",
+                                text = "fuzztoken${fuzz.index}event$index",
+                                serverTime = 20_000L + fuzz.index * 1_000L + index * 100L,
                             )
-                            returnedIds.getValue(operation.event) += result.event.id
                         }
-                        is Operation.History -> {
-                            fuzz.record("history step=$step logical=${operation.events.map { it.index }}")
-                            val results = store.ingestBatch(
-                                operation.events.map { event ->
-                                    observation(networkId, roomId, event, Delivery.HISTORY_TAGGED)
-                                },
-                            )
-                            operation.events.zip(results).forEach { (event, result) ->
-                                returnedIds.getValue(event) += result.event.id
+                    val returnedIds = logical.associateWith { mutableSetOf<Long>() }
+                    val mandatory =
+                        buildList {
+                            logical.forEach { event ->
+                                add(Operation.Single(event, Delivery.LIVE_LOCAL))
+                                add(Operation.Single(event, Delivery.PUSH_TAGGED))
+                                add(Operation.Single(event, Delivery.ECHO_TAGGED))
+                            }
+                            add(Operation.History(logical.take(2)))
+                            add(Operation.History(logical.drop(1)))
+                            add(Operation.History(logical))
+                        }.shuffled(fuzz.random)
+                    val replayable =
+                        buildList {
+                            logical.forEach { event ->
+                                add(Operation.Single(event, Delivery.PUSH_TAGGED))
+                                add(Operation.Single(event, Delivery.ECHO_TAGGED))
+                            }
+                            add(Operation.History(logical))
+                            add(Operation.History(logical.takeLast(3)))
+                        }
+                    val operationCount = fuzzSteps(pr = 32, nightly = 128).coerceAtLeast(mandatory.size)
+                    val reopenAt =
+                        setOf(
+                            fuzz.random.nextInt(1, operationCount),
+                            fuzz.random.nextInt(1, operationCount),
+                        )
+
+                    repeat(operationCount) { step ->
+                        if (step in reopenAt) {
+                            fuzz.record("reopen step=$step")
+                            db?.close()
+                            db = open(databaseName)
+                        }
+                        val operation = mandatory.getOrNull(step) ?: replayable.random(fuzz.random)
+                        val store = CanonicalTimelineStore(checkNotNull(db))
+                        when (operation) {
+                            is Operation.Single -> {
+                                fuzz.record("single step=$step delivery=${operation.delivery} logical=${operation.event.index}")
+                                val result =
+                                    store.ingest(
+                                        observation(networkId, roomId, operation.event, operation.delivery),
+                                    )
+                                returnedIds.getValue(operation.event) += result.event.id
+                            }
+
+                            is Operation.History -> {
+                                fuzz.record("history step=$step logical=${operation.events.map { it.index }}")
+                                val results =
+                                    store.ingestBatch(
+                                        operation.events.map { event ->
+                                            observation(networkId, roomId, event, Delivery.HISTORY_TAGGED)
+                                        },
+                                    )
+                                operation.events.zip(results).forEach { (event, result) ->
+                                    returnedIds.getValue(event) += result.event.id
+                                }
                             }
                         }
+                        assertCanonicalIntegrity(checkNotNull(db))
                     }
-                    assertCanonicalIntegrity(checkNotNull(db))
-                }
 
-                val activeDb = checkNotNull(db)
-                val store = CanonicalTimelineStore(activeDb)
-                logical.forEach { event ->
-                    val canonical = checkNotNull(
-                        activeDb.canonicalTimelineDao().eventByAlias(
-                            networkId,
-                            EventAliasNamespace.MSGID,
-                            event.msgid.toByteArray(StandardCharsets.UTF_8),
-                        ),
-                    )
-                    assertEquals(event.text, canonical.text)
-                    assertEquals(event.serverTime, canonical.serverTime)
-                    assertTrue(canonical.serverTimeAuthoritative)
-                    returnedIds.getValue(event).forEach { observedId ->
-                        assertEquals(canonical.id, activeDb.canonicalTimelineDao().canonicalEventId(observedId))
+                    val activeDb = checkNotNull(db)
+                    val store = CanonicalTimelineStore(activeDb)
+                    logical.forEach { event ->
+                        val canonical =
+                            checkNotNull(
+                                activeDb.canonicalTimelineDao().eventByAlias(
+                                    networkId,
+                                    EventAliasNamespace.MSGID,
+                                    event.msgid.toByteArray(StandardCharsets.UTF_8),
+                                ),
+                            )
+                        assertEquals(event.text, canonical.text)
+                        assertEquals(event.serverTime, canonical.serverTime)
+                        assertTrue(canonical.serverTimeAuthoritative)
+                        returnedIds.getValue(event).forEach { observedId ->
+                            assertEquals(canonical.id, activeDb.canonicalTimelineDao().canonicalEventId(observedId))
+                        }
+                        assertEquals(1, scalar(activeDb, "SELECT COUNT(*) FROM messages WHERE text = ?", event.text))
+                        assertEquals(
+                            1,
+                            scalar(
+                                activeDb,
+                                "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH ?",
+                                event.text,
+                            ),
+                        )
+                        assertTrue(store.claimSound(canonical.id))
+                        assertFalse(store.claimSound(canonical.id))
+                        assertTrue(store.claimNotification(canonical.id))
+                        store.completeNotification(canonical.id)
+                        assertFalse(store.claimNotification(canonical.id))
                     }
-                    assertEquals(1, scalar(activeDb, "SELECT COUNT(*) FROM messages WHERE text = ?", event.text))
-                    assertEquals(
-                        1,
-                        scalar(
-                            activeDb,
-                            "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH ?",
-                            event.text,
-                        ),
-                    )
-                    assertTrue(store.claimSound(canonical.id))
-                    assertFalse(store.claimSound(canonical.id))
-                    assertTrue(store.claimNotification(canonical.id))
-                    store.completeNotification(canonical.id)
-                    assertFalse(store.claimNotification(canonical.id))
-                }
 
-                exerciseCaseSensitiveMsgids(fuzz, activeDb, store, networkId, roomId)
-                exerciseOpaqueLabelsAcrossGenerations(fuzz, activeDb, store, networkId, roomId)
-                exerciseIdentityFreeOverlaps(fuzz, activeDb, store, networkId, roomId)
-                exercisePresentationRollback(fuzz, activeDb, store, networkId, roomId)
-                assertUnreadProjection(activeDb, roomId)
-                exerciseRollback(fuzz, activeDb, networkId)
-                assertCanonicalIntegrity(activeDb)
-            } finally {
-                db?.close()
-                context.deleteDatabase(databaseName)
+                    exerciseCaseSensitiveMsgids(fuzz, activeDb, store, networkId, roomId)
+                    exerciseOpaqueLabelsAcrossGenerations(fuzz, activeDb, store, networkId, roomId)
+                    exerciseIdentityFreeOverlaps(fuzz, activeDb, store, networkId, roomId)
+                    exercisePresentationRollback(fuzz, activeDb, store, networkId, roomId)
+                    assertUnreadProjection(activeDb, roomId)
+                    exerciseRollback(fuzz, activeDb, networkId)
+                    assertCanonicalIntegrity(activeDb)
+                } finally {
+                    db?.close()
+                    context.deleteDatabase(databaseName)
+                }
             }
         }
-    }
 
     private suspend fun exerciseCaseSensitiveMsgids(
         fuzz: FuzzCase,
@@ -168,14 +177,16 @@ class CanonicalTimelineStateMachineFuzzTest {
     ) {
         val text = "caseconflict${fuzz.index}"
         val time = 100_000L + fuzz.index
-        fun tagged(msgid: String) = TimelineObservation(
-            networkId,
-            message(roomId, msgid, time, text),
-            ObservationOrigin.HISTORY,
-            1,
-            batchId = "case-conflict",
-            timeProvenance = TimeProvenance.SERVER_TAG,
-        )
+
+        fun tagged(msgid: String) =
+            TimelineObservation(
+                networkId,
+                message(roomId, msgid, time, text),
+                ObservationOrigin.HISTORY,
+                1,
+                batchId = "case-conflict",
+                timeProvenance = TimeProvenance.SERVER_TAG,
+            )
         val upper = store.ingest(tagged("Conflict-${fuzz.index}"))
         val lower = store.ingest(tagged("conflict-${fuzz.index}"))
         val different = store.ingest(tagged("different-${fuzz.index}"))
@@ -199,32 +210,34 @@ class CanonicalTimelineStateMachineFuzzTest {
             text: String,
         ): Pair<Long, Long> {
             val label = "opaque-label-${fuzz.index}-$ordinal"
-            val pending = store.ingest(
-                TimelineObservation(
-                    networkId,
-                    message(roomId, null, 110_000 + sendGeneration, text).copy(
-                        isSelf = true,
-                        pendingLabel = label,
-                        serverTimeAuthoritative = false,
+            val pending =
+                store.ingest(
+                    TimelineObservation(
+                        networkId,
+                        message(roomId, null, 110_000 + sendGeneration, text).copy(
+                            isSelf = true,
+                            pendingLabel = label,
+                            serverTimeAuthoritative = false,
+                        ),
+                        ObservationOrigin.LOCAL_SEND,
+                        sendGeneration,
+                        label = label,
+                        batchId = null,
+                        timeProvenance = TimeProvenance.LOCAL_CLOCK,
                     ),
-                    ObservationOrigin.LOCAL_SEND,
-                    sendGeneration,
-                    label = label,
-                    batchId = null,
-                    timeProvenance = TimeProvenance.LOCAL_CLOCK,
-                ),
-            )
-            val echo = store.ingest(
-                TimelineObservation(
-                    networkId,
-                    message(roomId, msgid, 111_000 + echoGeneration, text).copy(isSelf = true),
-                    ObservationOrigin.LIVE,
-                    echoGeneration,
-                    label = label,
-                    batchId = null,
-                    timeProvenance = TimeProvenance.SERVER_TAG,
-                ),
-            )
+                )
+            val echo =
+                store.ingest(
+                    TimelineObservation(
+                        networkId,
+                        message(roomId, msgid, 111_000 + echoGeneration, text).copy(isSelf = true),
+                        ObservationOrigin.LIVE,
+                        echoGeneration,
+                        label = label,
+                        batchId = null,
+                        timeProvenance = TimeProvenance.SERVER_TAG,
+                    ),
+                )
             return pending.event.id to echo.event.id
         }
         val first = attempt(0, 7, 8, "label-msgid-${fuzz.index}-a", "labelattempt${fuzz.index}a")
@@ -267,14 +280,23 @@ class CanonicalTimelineStateMachineFuzzTest {
         }
     }
 
-    private suspend fun assertUnreadProjection(db: MotdDatabase, roomId: Long) {
-        val expected = scalar(
-            db,
-            """SELECT COUNT(*) FROM messages
+    private suspend fun assertUnreadProjection(
+        db: MotdDatabase,
+        roomId: Long,
+    ) {
+        val expected =
+            scalar(
+                db,
+                """SELECT COUNT(*) FROM messages
                WHERE bufferId = ? AND isSelf = 0 AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')""",
-            roomId,
-        )
-        val room = db.bufferDao().observeChatList().first().single { it.bufferId == roomId }
+                roomId,
+            )
+        val room =
+            db
+                .bufferDao()
+                .observeChatList()
+                .first()
+                .single { it.bufferId == roomId }
         assertEquals(expected, room.unreadCount)
     }
 
@@ -285,21 +307,23 @@ class CanonicalTimelineStateMachineFuzzTest {
         networkId: Long,
         roomId: Long,
     ) {
-        val event = store.ingest(
-            TimelineObservation(
-                networkId,
-                message(
-                    roomId,
-                    "presentation-${fuzz.index}",
-                    125_000L + fuzz.index,
-                    "presentationrollback${fuzz.index}",
-                ),
-                ObservationOrigin.HISTORY,
-                1,
-                batchId = "presentation-rollback",
-                timeProvenance = TimeProvenance.SERVER_TAG,
-            ),
-        ).event
+        val event =
+            store
+                .ingest(
+                    TimelineObservation(
+                        networkId,
+                        message(
+                            roomId,
+                            "presentation-${fuzz.index}",
+                            125_000L + fuzz.index,
+                            "presentationrollback${fuzz.index}",
+                        ),
+                        ObservationOrigin.HISTORY,
+                        1,
+                        batchId = "presentation-rollback",
+                        timeProvenance = TimeProvenance.SERVER_TAG,
+                    ),
+                ).event
         val sound = fuzz.index % 2 == 0
         val column = if (sound) "soundHandled" else "notificationClaimed"
         val trigger = "presentation_fuzz_abort_${fuzz.index}"
@@ -307,13 +331,14 @@ class CanonicalTimelineStateMachineFuzzTest {
             "CREATE TRIGGER $trigger BEFORE UPDATE OF $column ON messages " +
                 "WHEN OLD.id = ${event.id} BEGIN SELECT RAISE(ABORT, 'generated presentation rollback'); END",
         )
-        val failed = try {
-            runCatching {
-                if (sound) store.claimSound(event.id) else store.claimNotification(event.id)
+        val failed =
+            try {
+                runCatching {
+                    if (sound) store.claimSound(event.id) else store.claimNotification(event.id)
+                }
+            } finally {
+                db.openHelper.writableDatabase.execSQL("DROP TRIGGER $trigger")
             }
-        } finally {
-            db.openHelper.writableDatabase.execSQL("DROP TRIGGER $trigger")
-        }
         fuzz.record("presentation-rollback column=$column failure=${failed.exceptionOrNull()?.javaClass?.simpleName}")
         assertTrue(failed.isFailure)
         assertEquals(
@@ -340,29 +365,30 @@ class CanonicalTimelineStateMachineFuzzTest {
             "CREATE TRIGGER $trigger BEFORE INSERT ON $table " +
                 "BEGIN SELECT RAISE(ABORT, 'generated rollback'); END",
         )
-        val result = try {
-            runCatching {
-                CanonicalTimelineStore(db).ingestBatch(
-                    listOf(
-                        TimelineObservation(
-                            networkId,
-                            message(
-                                rollbackRoom,
-                                "rollback-${fuzz.index}",
-                                130_000L + fuzz.index,
-                                "rollbacktoken${fuzz.index}",
+        val result =
+            try {
+                runCatching {
+                    CanonicalTimelineStore(db).ingestBatch(
+                        listOf(
+                            TimelineObservation(
+                                networkId,
+                                message(
+                                    rollbackRoom,
+                                    "rollback-${fuzz.index}",
+                                    130_000L + fuzz.index,
+                                    "rollbacktoken${fuzz.index}",
+                                ),
+                                ObservationOrigin.HISTORY,
+                                1,
+                                batchId = "rollback",
+                                timeProvenance = TimeProvenance.SERVER_TAG,
                             ),
-                            ObservationOrigin.HISTORY,
-                            1,
-                            batchId = "rollback",
-                            timeProvenance = TimeProvenance.SERVER_TAG,
                         ),
-                    ),
-                )
+                    )
+                }
+            } finally {
+                db.openHelper.writableDatabase.execSQL("DROP TRIGGER $trigger")
             }
-        } finally {
-            db.openHelper.writableDatabase.execSQL("DROP TRIGGER $trigger")
-        }
         fuzz.record("rollback table=$table failure=${result.exceptionOrNull()?.javaClass?.simpleName}")
         assertTrue(result.isFailure)
         assertEquals(before, snapshot(db))
@@ -402,25 +428,31 @@ class CanonicalTimelineStateMachineFuzzTest {
         )
     }
 
-    private fun snapshot(db: MotdDatabase): Map<String, Int> = listOf(
-        "buffers",
-        "messages",
-        "messages_fts",
-        "event_aliases",
-        "event_redirects",
-        "event_observations",
-        "history_cursors",
-        "reactions",
-    ).associateWith { table -> scalar(db, "SELECT COUNT(*) FROM $table") }
+    private fun snapshot(db: MotdDatabase): Map<String, Int> =
+        listOf(
+            "buffers",
+            "messages",
+            "messages_fts",
+            "event_aliases",
+            "event_redirects",
+            "event_observations",
+            "history_cursors",
+            "reactions",
+        ).associateWith { table -> scalar(db, "SELECT COUNT(*) FROM $table") }
 
-    private fun scalar(db: MotdDatabase, query: String, vararg args: Any?): Int =
+    private fun scalar(
+        db: MotdDatabase,
+        query: String,
+        vararg args: Any?,
+    ): Int =
         db.openHelper.readableDatabase.query(query, args).use { cursor ->
             check(cursor.moveToFirst())
             cursor.getInt(0)
         }
 
     private fun open(name: String): MotdDatabase =
-        Room.databaseBuilder(context, MotdDatabase::class.java, name)
+        Room
+            .databaseBuilder(context, MotdDatabase::class.java, name)
             .allowMainThreadQueries()
             .build()
 
@@ -431,11 +463,12 @@ class CanonicalTimelineStateMachineFuzzTest {
         delivery: Delivery,
     ): TimelineObservation {
         val tagged = delivery != Delivery.LIVE_LOCAL
-        val origin = when (delivery) {
-            Delivery.LIVE_LOCAL, Delivery.ECHO_TAGGED -> ObservationOrigin.LIVE
-            Delivery.PUSH_TAGGED -> ObservationOrigin.PUSH
-            Delivery.HISTORY_TAGGED -> ObservationOrigin.HISTORY
-        }
+        val origin =
+            when (delivery) {
+                Delivery.LIVE_LOCAL, Delivery.ECHO_TAGGED -> ObservationOrigin.LIVE
+                Delivery.PUSH_TAGGED -> ObservationOrigin.PUSH
+                Delivery.HISTORY_TAGGED -> ObservationOrigin.HISTORY
+            }
         return TimelineObservation(
             networkId,
             message(
@@ -451,24 +484,33 @@ class CanonicalTimelineStateMachineFuzzTest {
         )
     }
 
-    private fun network() = NetworkEntity(
-        name = "fuzz-network",
-        role = NetworkRole.DIRECT,
-        host = "irc.example",
-        port = 6697,
-        nick = "me",
-        username = "me",
-        realname = "Me",
-    )
+    private fun network() =
+        NetworkEntity(
+            name = "fuzz-network",
+            role = NetworkRole.DIRECT,
+            host = "irc.example",
+            port = 6697,
+            nick = "me",
+            username = "me",
+            realname = "Me",
+        )
 
-    private fun room(networkId: Long, name: String) = BufferEntity(
+    private fun room(
+        networkId: Long,
+        name: String,
+    ) = BufferEntity(
         networkId = networkId,
         name = name,
         displayName = name,
         type = BufferType.CHANNEL,
     )
 
-    private fun message(roomId: Long, msgid: String?, time: Long, text: String) = MessageEntity(
+    private fun message(
+        roomId: Long,
+        msgid: String?,
+        time: Long,
+        text: String,
+    ) = MessageEntity(
         bufferId = roomId,
         msgid = msgid,
         serverTime = time,
@@ -489,7 +531,13 @@ class CanonicalTimelineStateMachineFuzzTest {
     private enum class Delivery { LIVE_LOCAL, PUSH_TAGGED, ECHO_TAGGED, HISTORY_TAGGED }
 
     private sealed interface Operation {
-        data class Single(val event: LogicalEvent, val delivery: Delivery) : Operation
-        data class History(val events: List<LogicalEvent>) : Operation
+        data class Single(
+            val event: LogicalEvent,
+            val delivery: Delivery,
+        ) : Operation
+
+        data class History(
+            val events: List<LogicalEvent>,
+        ) : Operation
     }
 }

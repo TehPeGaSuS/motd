@@ -53,8 +53,10 @@ class EmptyStateLayoutTest {
             }
         }
 
-        val node = compose.onNodeWithTag("empty_state_ghost_rows", useUnmergedTree = true)
-            .fetchSemanticsNode()
+        val node =
+            compose
+                .onNodeWithTag("empty_state_ghost_rows", useUnmergedTree = true)
+                .fetchSemanticsNode()
         val width = with(compose.density) { node.size.width.toDp() }
 
         assertTrue("ghost rows stretched to $width", width <= EmptyStateGhostRows.MaxWidth)

@@ -54,7 +54,8 @@ class HistoryGapDividerUiTest {
             }
         }
 
-        compose.onNodeWithTag(CHAT_GAP_DIVIDER_TAG)
+        compose
+            .onNodeWithTag(CHAT_GAP_DIVIDER_TAG)
             .assertHeightIsAtLeast(48.dp)
             .assertHasClickAction()
             .performClick()
@@ -71,7 +72,8 @@ class HistoryGapDividerUiTest {
             }
         }
 
-        compose.onNodeWithTag(CHAT_GAP_DIVIDER_TAG)
+        compose
+            .onNodeWithTag(CHAT_GAP_DIVIDER_TAG)
             .assertHeightIsAtLeast(48.dp)
             .assertHasClickAction()
             .performClick()

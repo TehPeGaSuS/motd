@@ -54,7 +54,8 @@ class NetworkToolsOperatorUiTest {
         compose.onNodeWithTag("network_tools_kill_send").performScrollTo().performClick()
 
         // The confirmation shows the exact line the confirm button will hand to the transport.
-        compose.onNodeWithTag("network_tools_confirm_preview")
+        compose
+            .onNodeWithTag("network_tools_confirm_preview")
             .assertTextEquals("KILL spammer :Being disruptive")
         compose.onNodeWithTag("network_tools_confirm_accept").performClick()
 

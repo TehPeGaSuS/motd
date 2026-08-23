@@ -70,8 +70,7 @@ internal open class NoopConnectionManager(
         replyToEventId: TimelineEventId?,
     ): SendAcceptance = SendAcceptance.Accepted(emptyList())
 
-    override suspend fun retryMessage(eventId: TimelineEventId): SendAcceptance =
-        SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
+    override suspend fun retryMessage(eventId: TimelineEventId): SendAcceptance = SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
 
     override suspend fun sendTyping(
         bufferId: Long,
@@ -122,8 +121,7 @@ internal open class NoopConnectionManager(
 
     override fun serverSearchAvailable(networkId: Long): Boolean = clientFor(networkId)?.searchAvailable == true
 
-    override fun historyAvailabilityFor(networkId: Long): HistoryAvailability =
-        clientFor(networkId)?.historyAvailability ?: HistoryAvailability.NegotiatingOrOffline
+    override fun historyAvailabilityFor(networkId: Long): HistoryAvailability = clientFor(networkId)?.historyAvailability ?: HistoryAvailability.NegotiatingOrOffline
 
     override suspend fun searchMessages(
         networkId: Long,

@@ -6,10 +6,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -27,9 +27,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -53,9 +53,10 @@ fun AboutScreen(
     viewModel: AboutViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val createDiagnosticDocument = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/plain"),
-    ) { uri -> uri?.let(viewModel::export) }
+    val createDiagnosticDocument =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("text/plain"),
+        ) { uri -> uri?.let(viewModel::export) }
     AboutContent(
         state = state,
         onBack = onBack,
@@ -148,9 +149,10 @@ private fun AboutContent(
                             modifier = Modifier.testTag("about_diagnostic_logging_switch"),
                         )
                     },
-                    modifier = Modifier.clickable {
-                        onDiagnosticLoggingChanged(!state.enabled)
-                    },
+                    modifier =
+                        Modifier.clickable {
+                            onDiagnosticLoggingChanged(!state.enabled)
+                        },
                 )
             }
             item {
@@ -165,9 +167,10 @@ private fun AboutContent(
                             },
                         )
                     },
-                    modifier = Modifier
-                        .clickable(enabled = !state.exporting, onClick = onExportDiagnostics)
-                        .testTag("about_export_diagnostics"),
+                    modifier =
+                        Modifier
+                            .clickable(enabled = !state.exporting, onClick = onExportDiagnostics)
+                            .testTag("about_export_diagnostics"),
                 )
                 HorizontalDivider()
             }
@@ -184,18 +187,22 @@ private fun AboutContent(
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.about_license)) },
                     supportingContent = { Text(stringResource(R.string.about_license_gpl)) },
-                    modifier = Modifier.clickable {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, licenseUrl.toUri()))
-                    }.testTag("about_license"),
+                    modifier =
+                        Modifier
+                            .clickable {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, licenseUrl.toUri()))
+                            }.testTag("about_license"),
                 )
             }
             item {
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.settings_github)) },
                     supportingContent = { Text(githubUrl) },
-                    modifier = Modifier.clickable {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, githubUrl.toUri()))
-                    }.testTag("about_github"),
+                    modifier =
+                        Modifier
+                            .clickable {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, githubUrl.toUri()))
+                            }.testTag("about_github"),
                 )
             }
         }
@@ -208,8 +215,10 @@ internal fun appVersion(context: android.content.Context): String =
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?"
     }.getOrDefault("?")
 
-internal fun aboutBuildLabel(version: String, sourceCommit: String): String =
-    "$version ($sourceCommit)"
+internal fun aboutBuildLabel(
+    version: String,
+    sourceCommit: String,
+): String = "$version ($sourceCommit)"
 
 @Preview
 @Composable

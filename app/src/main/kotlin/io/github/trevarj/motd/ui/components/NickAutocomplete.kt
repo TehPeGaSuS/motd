@@ -5,9 +5,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -43,12 +43,13 @@ fun AutocompletePanel(
         LazyColumn(modifier = Modifier.heightIn(max = 180.dp)) {
             items(candidates, key = { it }) { candidate ->
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        // >=48dp touch target for autocomplete rows.
-                        .heightIn(min = 48.dp)
-                        .clickable { onPick(candidate) }
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            // >=48dp touch target for autocomplete rows.
+                            .heightIn(min = 48.dp)
+                            .clickable { onPick(candidate) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (!isCommand && !avatarsHidden()) {

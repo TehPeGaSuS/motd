@@ -2,7 +2,8 @@
 
 Run all Gradle commands through the repository Nix shell. Run the nearest useful
 check in each changed boundary; do not expand into full local suites. Hosted CI
-owns broad verification.
+owns broad verification. Run `nix develop -c ./gradlew ktlintCheck` before handoff;
+use `ktlintFormat` to apply the enforced Kotlin style.
 
 ## Command matrix
 

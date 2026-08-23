@@ -13,15 +13,16 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class BouncerKindPrefsTest {
     @Test
-    fun `ZNC classification survives a new repository instance and can be cleared`() = runTest {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val networkId = System.nanoTime()
-        val first: BouncerKindPrefs = BouncerKindPrefsImpl(context)
+    fun `ZNC classification survives a new repository instance and can be cleared`() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val networkId = System.nanoTime()
+            val first: BouncerKindPrefs = BouncerKindPrefsImpl(context)
 
-        first.markZnc(networkId)
-        assertTrue(networkId in BouncerKindPrefsImpl(context).zncNetworkIds.first())
+            first.markZnc(networkId)
+            assertTrue(networkId in BouncerKindPrefsImpl(context).zncNetworkIds.first())
 
-        first.clear(networkId)
-        assertFalse(networkId in BouncerKindPrefsImpl(context).zncNetworkIds.first())
-    }
+            first.clear(networkId)
+            assertFalse(networkId in BouncerKindPrefsImpl(context).zncNetworkIds.first())
+        }
 }

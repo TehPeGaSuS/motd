@@ -27,17 +27,18 @@ class ChatListOnboardingTest {
         assertFalse(
             shouldOpenOnboarding(
                 ChatListState(
-                    networks = listOf(
-                        NetworkEntity(
-                            name = "Libera",
-                            role = NetworkRole.DIRECT,
-                            host = "irc.example",
-                            port = 6697,
-                            nick = "me",
-                            username = "me",
-                            realname = "Me",
+                    networks =
+                        listOf(
+                            NetworkEntity(
+                                name = "Libera",
+                                role = NetworkRole.DIRECT,
+                                host = "irc.example",
+                                port = 6697,
+                                nick = "me",
+                                username = "me",
+                                realname = "Me",
+                            ),
                         ),
-                    ),
                     loading = false,
                 ),
             ),

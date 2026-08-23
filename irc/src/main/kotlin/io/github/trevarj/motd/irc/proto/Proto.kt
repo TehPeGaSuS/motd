@@ -1,7 +1,11 @@
 package io.github.trevarj.motd.irc.proto
 
 /** Parsed IRC prefix (`:nick!user@host`). */
-data class Prefix(val nick: String, val user: String? = null, val host: String? = null)
+data class Prefix(
+    val nick: String,
+    val user: String? = null,
+    val host: String? = null,
+)
 
 /** One IRC protocol message. Tags are unescaped values; empty map when absent. */
 data class IrcMessage(
@@ -50,11 +54,12 @@ data class IrcMessage(
             // Numerics stay 3-digit; letter commands are uppercased.
             val command = if (rawCommand.all { it.isDigit() }) rawCommand else rawCommand.uppercase()
 
-            val params = if (cmdEnd < 0) {
-                emptyList()
-            } else {
-                parseParams(rest.substring(cmdEnd + 1))
-            }
+            val params =
+                if (cmdEnd < 0) {
+                    emptyList()
+                } else {
+                    parseParams(rest.substring(cmdEnd + 1))
+                }
 
             return IrcMessage(tags = tags, source = source, command = command, params = params)
         }
@@ -81,7 +86,10 @@ data class IrcMessage(
             return params
         }
 
-        private fun parseTags(raw: String, line: String): Map<String, String> {
+        private fun parseTags(
+            raw: String,
+            line: String,
+        ): Map<String, String> {
             if (raw.isEmpty()) return emptyMap()
             val out = LinkedHashMap<String, String>()
             for (part in raw.split(';')) {
@@ -181,10 +189,13 @@ data class IrcMessage(
             sb.append(' ')
         }
 
-        val tagSectionBytes = if (sb.isEmpty()) 0 else {
-            // bytes between '@' and the trailing space, exclusive of both delimiters
-            sb.substring(1, sb.length - 1).toByteArray(Charsets.UTF_8).size
-        }
+        val tagSectionBytes =
+            if (sb.isEmpty()) {
+                0
+            } else {
+                // bytes between '@' and the trailing space, exclusive of both delimiters
+                sb.substring(1, sb.length - 1).toByteArray(Charsets.UTF_8).size
+            }
         if (tagSectionBytes > TAG_LIMIT) {
             throw IllegalArgumentException("tag section exceeds $TAG_LIMIT bytes: $tagSectionBytes")
         }
@@ -241,7 +252,10 @@ fun parseIrcPrefix(raw: String): Prefix? {
     )
 }
 
-class IrcParseException(message: String, val line: String) : Exception(message)
+class IrcParseException(
+    message: String,
+    val line: String,
+) : Exception(message)
 
 /** RPL_ISUPPORT (005) accumulator. */
 class Isupport {

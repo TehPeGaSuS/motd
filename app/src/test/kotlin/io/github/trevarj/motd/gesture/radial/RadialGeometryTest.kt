@@ -12,14 +12,15 @@ import org.junit.Test
  * dp figures the design is specified in.
  */
 class RadialGeometryTest {
-    private val metrics = RadialMetrics(
-        deadzoneRadius = 40f,
-        bandInnerRadius = 40f,
-        bandOuterRadius = 104f,
-        descendRadius = 116f,
-        labelRadius = 124f,
-        edgeMargin = 16f,
-    )
+    private val metrics =
+        RadialMetrics(
+            deadzoneRadius = 40f,
+            bandInnerRadius = 40f,
+            bandOuterRadius = 104f,
+            descendRadius = 116f,
+            labelRadius = 124f,
+            edgeMargin = 16f,
+        )
     private val screen = Size(400f, 900f)
 
     // --- docking ---

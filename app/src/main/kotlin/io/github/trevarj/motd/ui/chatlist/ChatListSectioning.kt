@@ -28,19 +28,19 @@ data class ChatListSections(
 }
 
 /** Splits the already-scoped projection before badges, drawer rollups, or sectioning run. */
-internal fun partitionArchivedRows(rows: List<ChatListRow>): Pair<List<ChatListRow>, List<ChatListRow>> =
-    rows.filterNot(ChatListRow::archived) to rows.filter(ChatListRow::archived)
+internal fun partitionArchivedRows(rows: List<ChatListRow>): Pair<List<ChatListRow>, List<ChatListRow>> = rows.filterNot(ChatListRow::archived) to rows.filter(ChatListRow::archived)
 
 /** Active empty state must not hide the only route to an existing archived folder. */
 internal fun shouldRenderChatList(
     archiveMode: Boolean,
     activeRows: List<ChatListRow>,
     archivedRows: List<ChatListRow>,
-): Boolean = if (archiveMode) {
-    archivedRows.isNotEmpty()
-} else {
-    activeRows.isNotEmpty() || archivedRows.isNotEmpty()
-}
+): Boolean =
+    if (archiveMode) {
+        archivedRows.isNotEmpty()
+    } else {
+        activeRows.isNotEmpty() || archivedRows.isNotEmpty()
+    }
 
 /** The folder is hidden above active chats until pull-revealed, but remains the only-row route. */
 internal fun shouldShowArchiveFolder(
@@ -75,6 +75,7 @@ internal data class ArchiveFolderPullGeometry(
 }
 
 internal enum class ArchiveFolderPullPhase { HIDDEN, PULLING, ARMED, REVEALED }
+
 internal enum class ArchiveFolderPullSource { USER_INPUT, NON_USER_INPUT }
 
 /** Transient gesture truth. Revealed is intentionally local UI state, not persisted state. */
@@ -89,7 +90,10 @@ internal data class ArchiveFolderPullState(
 )
 
 internal sealed interface ArchiveFolderPullEvent {
-    data class StartGesture(val timestampMs: Long) : ArchiveFolderPullEvent
+    data class StartGesture(
+        val timestampMs: Long,
+    ) : ArchiveFolderPullEvent
+
     data class DragDelta(
         val deltaY: Float,
         val timestampMs: Long,
@@ -97,17 +101,28 @@ internal sealed interface ArchiveFolderPullEvent {
         val listAtTop: Boolean,
     ) : ArchiveFolderPullEvent
 
-    data class Tick(val timestampMs: Long) : ArchiveFolderPullEvent
-    data class Release(val timestampMs: Long) : ArchiveFolderPullEvent
+    data class Tick(
+        val timestampMs: Long,
+    ) : ArchiveFolderPullEvent
+
+    data class Release(
+        val timestampMs: Long,
+    ) : ArchiveFolderPullEvent
+
     data object Cancel : ArchiveFolderPullEvent
+
     data object RevealedRowHidden : ArchiveFolderPullEvent
+
     data object RevealAccessibilityAction : ArchiveFolderPullEvent
+
     data object Reset : ArchiveFolderPullEvent
 }
 
 internal sealed interface ArchiveFolderPullEffect {
     data object HapticThresholdActivated : ArchiveFolderPullEffect
+
     data object AnnounceShown : ArchiveFolderPullEffect
+
     data object AnnounceHidden : ArchiveFolderPullEffect
 }
 
@@ -130,15 +145,17 @@ internal fun reduceArchiveFolderPull(
     if (!geometry.isValid) return ArchiveFolderPullResult(ArchiveFolderPullState())
 
     fun hidden(): ArchiveFolderPullState = ArchiveFolderPullState(gestureId = state.gestureId)
+
     fun normalized(input: ArchiveFolderPullState): ArchiveFolderPullState {
         if (!input.exposurePx.isFinite()) return hidden()
         val exposure = input.exposurePx.coerceIn(0f, geometry.maxExposurePx)
-        val phase = when {
-            input.phase == ArchiveFolderPullPhase.REVEALED -> ArchiveFolderPullPhase.REVEALED
-            exposure <= 0f -> ArchiveFolderPullPhase.HIDDEN
-            input.phase == ArchiveFolderPullPhase.ARMED && exposure >= geometry.disarmPx -> ArchiveFolderPullPhase.ARMED
-            else -> ArchiveFolderPullPhase.PULLING
-        }
+        val phase =
+            when {
+                input.phase == ArchiveFolderPullPhase.REVEALED -> ArchiveFolderPullPhase.REVEALED
+                exposure <= 0f -> ArchiveFolderPullPhase.HIDDEN
+                input.phase == ArchiveFolderPullPhase.ARMED && exposure >= geometry.disarmPx -> ArchiveFolderPullPhase.ARMED
+                else -> ArchiveFolderPullPhase.PULLING
+            }
         return input.copy(
             exposurePx = if (phase == ArchiveFolderPullPhase.REVEALED) geometry.rowPx else exposure,
             phase = phase,
@@ -164,16 +181,19 @@ internal fun reduceArchiveFolderPull(
         is ArchiveFolderPullEvent.DragDelta -> {
             if (event.source != ArchiveFolderPullSource.USER_INPUT || !event.listAtTop ||
                 !current.gestureActive || event.timestampMs < 0L || !event.deltaY.isFinite()
-            ) return ArchiveFolderPullResult(current)
+            ) {
+                return ArchiveFolderPullResult(current)
+            }
 
             val rawBefore = exposureToRaw(current.exposurePx, geometry)
             val rawAfter = (rawBefore + event.deltaY).coerceIn(0f, exposureToRaw(geometry.maxExposurePx, geometry))
             val exposure = rawToExposure(rawAfter, geometry)
-            val dwellStart = when {
-                exposure < geometry.dwellStartPx -> null
-                current.dwellStartedAtMs == null -> event.timestampMs
-                else -> current.dwellStartedAtMs
-            }
+            val dwellStart =
+                when {
+                    exposure < geometry.dwellStartPx -> null
+                    current.dwellStartedAtMs == null -> event.timestampMs
+                    else -> current.dwellStartedAtMs
+                }
             return evaluateArming(
                 current.copy(exposurePx = exposure, dwellStartedAtMs = dwellStart),
                 event.timestampMs,
@@ -233,19 +253,26 @@ internal fun reduceArchiveFolderPull(
             }
         }
 
-        ArchiveFolderPullEvent.Reset -> return ArchiveFolderPullResult(hidden())
+        ArchiveFolderPullEvent.Reset -> {
+            return ArchiveFolderPullResult(hidden())
+        }
     }
 }
 
 /** Visible hint alpha, kept pure so frame rendering never creates a layout dependency. */
-internal fun archiveFolderPullHintAlpha(exposurePx: Float, geometry: ArchiveFolderPullGeometry): Float {
+internal fun archiveFolderPullHintAlpha(
+    exposurePx: Float,
+    geometry: ArchiveFolderPullGeometry,
+): Float {
     if (!geometry.isValid || !exposurePx.isFinite()) return 0f
     val denominator = (geometry.armPx - geometry.hintStartPx).coerceAtLeast(.0001f)
     return ((exposurePx - geometry.hintStartPx) / denominator).coerceIn(0f, 1f)
 }
 
-internal fun archiveFolderPullSettleTarget(state: ArchiveFolderPullState, geometry: ArchiveFolderPullGeometry): Float =
-    if (geometry.isValid && state.phase == ArchiveFolderPullPhase.REVEALED) geometry.rowPx else 0f
+internal fun archiveFolderPullSettleTarget(
+    state: ArchiveFolderPullState,
+    geometry: ArchiveFolderPullGeometry,
+): Float = if (geometry.isValid && state.phase == ArchiveFolderPullPhase.REVEALED) geometry.rowPx else 0f
 
 /** Keep the overlay through the committed-row anchor handoff so no blank frame can appear. */
 internal data class RevealedArchiveFolderScrollResult(
@@ -281,18 +308,20 @@ private fun evaluateArming(
     geometry: ArchiveFolderPullGeometry,
     consumedY: Float = 0f,
 ): ArchiveFolderPullResult {
-    val state = if (input.phase == ArchiveFolderPullPhase.ARMED && input.exposurePx < geometry.disarmPx) {
-        input.copy(phase = if (input.exposurePx <= 0f) ArchiveFolderPullPhase.HIDDEN else ArchiveFolderPullPhase.PULLING)
-    } else if (input.exposurePx <= 0f) {
-        input.copy(phase = ArchiveFolderPullPhase.HIDDEN)
-    } else if (input.phase != ArchiveFolderPullPhase.ARMED) {
-        input.copy(phase = ArchiveFolderPullPhase.PULLING)
-    } else {
-        input
-    }
-    val eligible = state.phase != ArchiveFolderPullPhase.ARMED &&
-        state.exposurePx >= geometry.armPx &&
-        state.dwellStartedAtMs != null && timestampMs - state.dwellStartedAtMs >= ArchiveFolderPull.DwellMillis
+    val state =
+        if (input.phase == ArchiveFolderPullPhase.ARMED && input.exposurePx < geometry.disarmPx) {
+            input.copy(phase = if (input.exposurePx <= 0f) ArchiveFolderPullPhase.HIDDEN else ArchiveFolderPullPhase.PULLING)
+        } else if (input.exposurePx <= 0f) {
+            input.copy(phase = ArchiveFolderPullPhase.HIDDEN)
+        } else if (input.phase != ArchiveFolderPullPhase.ARMED) {
+            input.copy(phase = ArchiveFolderPullPhase.PULLING)
+        } else {
+            input
+        }
+    val eligible =
+        state.phase != ArchiveFolderPullPhase.ARMED &&
+            state.exposurePx >= geometry.armPx &&
+            state.dwellStartedAtMs != null && timestampMs - state.dwellStartedAtMs >= ArchiveFolderPull.DwellMillis
     return if (eligible) {
         val armed = state.copy(phase = ArchiveFolderPullPhase.ARMED)
         ArchiveFolderPullResult(
@@ -305,17 +334,33 @@ private fun evaluateArming(
     }
 }
 
-private fun exposureToRaw(exposurePx: Float, geometry: ArchiveFolderPullGeometry): Float =
-    if (exposurePx <= geometry.rowPx) exposurePx else geometry.rowPx +
-        (exposurePx - geometry.rowPx) / ArchiveFolderPull.BeyondRowResistance
+private fun exposureToRaw(
+    exposurePx: Float,
+    geometry: ArchiveFolderPullGeometry,
+): Float =
+    if (exposurePx <= geometry.rowPx) {
+        exposurePx
+    } else {
+        geometry.rowPx +
+            (exposurePx - geometry.rowPx) / ArchiveFolderPull.BeyondRowResistance
+    }
 
-private fun rawToExposure(rawPx: Float, geometry: ArchiveFolderPullGeometry): Float =
-    if (rawPx <= geometry.rowPx) rawPx else geometry.rowPx +
-        (rawPx - geometry.rowPx) * ArchiveFolderPull.BeyondRowResistance
+private fun rawToExposure(
+    rawPx: Float,
+    geometry: ArchiveFolderPullGeometry,
+): Float =
+    if (rawPx <= geometry.rowPx) {
+        rawPx
+    } else {
+        geometry.rowPx +
+            (rawPx - geometry.rowPx) * ArchiveFolderPull.BeyondRowResistance
+    }
 
 /** Whether [row] keeps the friend presentation, including when it is globally pinned. */
-internal fun isFriendQuery(row: ChatListRow, friends: Set<String>): Boolean =
-    row.type == BufferType.QUERY && row.identityRules.matchesConfiguredNick(row.displayName, friends)
+internal fun isFriendQuery(
+    row: ChatListRow,
+    friends: Set<String>,
+): Boolean = row.type == BufferType.QUERY && row.identityRules.matchesConfiguredNick(row.displayName, friends)
 
 fun sectionChatList(
     rows: List<ChatListRow>,
@@ -330,9 +375,12 @@ fun sectionChatList(
     for (row in rows) {
         when {
             row.pinned -> pinnedRows.add(row)
+
             isFriendQuery(row, friends) -> friendRows.add(row)
+
             row.type == BufferType.QUERY &&
                 row.identityRules.matchesConfiguredNick(row.displayName, fools) -> foolRows.add(row)
+
             else -> regular.add(row)
         }
     }
@@ -398,16 +446,36 @@ internal fun chatListTopItemKey(
     invitations: List<ChatListInvitation>,
     actionableInvitationCount: Int,
     sections: ChatListSections,
-): Any? = when {
-    invitationMode ->
-        invitations.firstOrNull()?.let { "invitation-${it.messageId}" } ?: "invitations-empty"
-    actionableInvitationCount > 0 -> "invitations-folder"
-    sections.pinned.isNotEmpty() -> sections.pinned.first().bufferId
-    sections.friends.isNotEmpty() -> "friends-header"
-    sections.regular.isNotEmpty() -> sections.regular.first().bufferId
-    sections.fools.isNotEmpty() -> "fools-header"
-    else -> null
-}
+): Any? =
+    when {
+        invitationMode -> {
+            invitations.firstOrNull()?.let { "invitation-${it.messageId}" } ?: "invitations-empty"
+        }
+
+        actionableInvitationCount > 0 -> {
+            "invitations-folder"
+        }
+
+        sections.pinned.isNotEmpty() -> {
+            sections.pinned.first().bufferId
+        }
+
+        sections.friends.isNotEmpty() -> {
+            "friends-header"
+        }
+
+        sections.regular.isNotEmpty() -> {
+            sections.regular.first().bufferId
+        }
+
+        sections.fools.isNotEmpty() -> {
+            "fools-header"
+        }
+
+        else -> {
+            null
+        }
+    }
 
 /**
  * Whether a change of the top item should re-pin the viewport to index 0. LazyColumn re-anchors
@@ -429,7 +497,9 @@ internal fun shouldRepinChatListTop(
         !scrollInProgress
 
 /** Plain mutable holder: composition-time change detection without a state backwards write. */
-internal class ChatListTopItemTracker(var key: Any?)
+internal class ChatListTopItemTracker(
+    var key: Any?,
+)
 
 private val ChatListRow.identityRules: IrcIdentityRules
     get() = IrcIdentityRules.from(caseMapping, chanTypes)

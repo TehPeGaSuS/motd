@@ -37,20 +37,23 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
-import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import javax.inject.Inject
 
 /**
  * Share targets in the chat list's own order (pinned first, then recency). Archived and SERVER
  * buffers are never share destinations; the DAO already excludes SERVER, so that check is
  * defensive. A blank query keeps everything.
  */
-internal fun filterShareTargets(rows: List<ChatListRow>, query: String): List<ChatListRow> {
+internal fun filterShareTargets(
+    rows: List<ChatListRow>,
+    query: String,
+): List<ChatListRow> {
     val needle = query.trim()
     return rows.filter { row ->
         !row.archived &&
@@ -60,51 +63,55 @@ internal fun filterShareTargets(rows: List<ChatListRow>, query: String): List<Ch
 }
 
 @HiltViewModel
-class SharePickerViewModel @Inject constructor(
-    bufferRepository: BufferRepository,
-    private val store: PendingShareStore,
-    private val draftStore: ComposerDraftStore,
-) : ViewModel() {
-    private val queryState = MutableStateFlow("")
-    val query: StateFlow<String> = queryState.asStateFlow()
+class SharePickerViewModel
+    @Inject
+    constructor(
+        bufferRepository: BufferRepository,
+        private val store: PendingShareStore,
+        private val draftStore: ComposerDraftStore,
+    ) : ViewModel() {
+        private val queryState = MutableStateFlow("")
+        val query: StateFlow<String> = queryState.asStateFlow()
 
-    // Set once the payload leaves this screen (picked or explicitly dismissed) so teardown never
-    // discards someone else's parked share.
-    private var handled = false
+        // Set once the payload leaves this screen (picked or explicitly dismissed) so teardown never
+        // discards someone else's parked share.
+        private var handled = false
 
-    val targets: StateFlow<List<ChatListRow>> = bufferRepository.observeChatList()
-        .combine(queryState, ::filterShareTargets)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        val targets: StateFlow<List<ChatListRow>> =
+            bufferRepository
+                .observeChatList()
+                .combine(queryState, ::filterShareTargets)
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun onQueryChange(value: String) {
-        queryState.value = value
-    }
-
-    /**
-     * Route the parked payload to [bufferId]: text becomes a composer prefill, a file is queued for
-     * that buffer's upload sheet. False when the payload was already consumed (nothing to open).
-     */
-    fun pick(bufferId: Long): Boolean {
-        val share = store.consume() ?: return false
-        when (share) {
-            is PendingShare.Text -> draftStore.push(bufferId, share.text)
-            is PendingShare.File -> store.assignFile(bufferId, share)
+        fun onQueryChange(value: String) {
+            queryState.value = value
         }
-        handled = true
-        return true
+
+        /**
+         * Route the parked payload to [bufferId]: text becomes a composer prefill, a file is queued for
+         * that buffer's upload sheet. False when the payload was already consumed (nothing to open).
+         */
+        fun pick(bufferId: Long): Boolean {
+            val share = store.consume() ?: return false
+            when (share) {
+                is PendingShare.Text -> draftStore.push(bufferId, share.text)
+                is PendingShare.File -> store.assignFile(bufferId, share)
+            }
+            handled = true
+            return true
+        }
+
+        fun cancel() = discardUnhandled()
+
+        /** System back / pop tears the screen down without a cancel callback; clean up here too. */
+        override fun onCleared() = discardUnhandled()
+
+        private fun discardUnhandled() {
+            if (handled) return
+            handled = true
+            store.consume()
+        }
     }
-
-    fun cancel() = discardUnhandled()
-
-    /** System back / pop tears the screen down without a cancel callback; clean up here too. */
-    override fun onCleared() = discardUnhandled()
-
-    private fun discardUnhandled() {
-        if (handled) return
-        handled = true
-        store.consume()
-    }
-}
 
 /** Chat picker for an inbound share. Picking never sends: it prefills or opens the upload sheet. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -122,7 +129,10 @@ fun SharePickerScreen(
                 title = { Text(stringResource(R.string.share_picker_title)) },
                 navigationIcon = {
                     IconButton(
-                        onClick = { viewModel.cancel(); onCancel() },
+                        onClick = {
+                            viewModel.cancel()
+                            onCancel()
+                        },
                         modifier = Modifier.testTag("share_picker_close"),
                     ) {
                         Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_cancel))
@@ -135,10 +145,11 @@ fun SharePickerScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = viewModel::onQueryChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .testTag("share_picker_search"),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .testTag("share_picker_search"),
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                 placeholder = { Text(stringResource(R.string.share_picker_search)) },

@@ -27,9 +27,10 @@ class ForegroundStartTest {
     @Test
     fun refusedStartIsContainedAndRecorded() {
         // What Android 12+ answers a background foreground-service start with.
-        val accepted = startForegroundSafely(diagnostics, source = "activity") {
-            throw SecurityException("startForegroundService() not allowed")
-        }
+        val accepted =
+            startForegroundSafely(diagnostics, source = "activity") {
+                throw SecurityException("startForegroundService() not allowed")
+            }
 
         assertFalse(accepted)
         val recorded = diagnostics.events.single()

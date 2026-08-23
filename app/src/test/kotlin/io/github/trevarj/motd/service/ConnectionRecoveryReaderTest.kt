@@ -20,23 +20,25 @@ class ConnectionRecoveryReaderTest {
     private var networkId = 0L
 
     @Before
-    fun setUp() = runTest {
-        db = inMemoryDb()
-        reader = ConnectionRecoveryReader(db.bufferDao())
-        networkId = db.networkDao().insert(network())
-    }
+    fun setUp() =
+        runTest {
+            db = inMemoryDb()
+            reader = ConnectionRecoveryReader(db.bufferDao())
+            networkId = db.networkDao().insert(network())
+        }
 
     @After
     fun tearDown() = db.close()
 
     @Test
-    fun restoresOnlyChannelsStillMarkedJoinedInDurableState() = runTest {
-        db.bufferDao().insert(buffer(networkId, "#joined").copy(displayName = "#Joined", joined = true))
-        db.bufferDao().insert(buffer(networkId, "#parted").copy(joined = false))
-        db.bufferDao().insert(
-            buffer(networkId, "alice").copy(type = BufferType.QUERY, joined = true),
-        )
+    fun restoresOnlyChannelsStillMarkedJoinedInDurableState() =
+        runTest {
+            db.bufferDao().insert(buffer(networkId, "#joined").copy(displayName = "#Joined", joined = true))
+            db.bufferDao().insert(buffer(networkId, "#parted").copy(joined = false))
+            db.bufferDao().insert(
+                buffer(networkId, "alice").copy(type = BufferType.QUERY, joined = true),
+            )
 
-        assertEquals(listOf("#Joined"), reader.joinedChannels(networkId))
-    }
+            assertEquals(listOf("#Joined"), reader.joinedChannels(networkId))
+        }
 }

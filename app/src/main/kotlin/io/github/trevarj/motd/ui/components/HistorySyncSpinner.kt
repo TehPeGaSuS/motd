@@ -17,11 +17,15 @@ import androidx.compose.ui.unit.dp
  * supply their own test tag through [modifier].
  */
 @Composable
-fun HistorySyncSpinner(contentDescription: String, modifier: Modifier = Modifier) {
+fun HistorySyncSpinner(
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+) {
     CircularProgressIndicator(
         strokeWidth = 2.dp,
-        modifier = modifier
-            .size(12.dp)
-            .semantics { this.contentDescription = contentDescription },
+        modifier =
+            modifier
+                .size(12.dp)
+                .semantics { this.contentDescription = contentDescription },
     )
 }

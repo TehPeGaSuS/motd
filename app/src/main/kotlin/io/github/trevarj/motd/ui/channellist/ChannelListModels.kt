@@ -13,18 +13,18 @@ const val CHANNEL_SEARCH_LIMIT = 2000
  * Sort listings by user count descending, stable for ties.
  * Kotlin's [sortedByDescending] is a stable sort, so equal counts keep input order.
  */
-fun sortListings(listings: List<ChannelListing>): List<ChannelListing> =
-    listings.sortedByDescending { it.userCount }
+fun sortListings(listings: List<ChannelListing>): List<ChannelListing> = listings.sortedByDescending { it.userCount }
 
 /** Prefer the scoped client's live state, especially when the manager snapshot has not caught up. */
 fun channelBrowserConnectionState(
     managerState: IrcClientState?,
     clientState: IrcClientState?,
-): IrcClientState = when {
-    clientState != null -> clientState
-    managerState != null -> managerState
-    else -> IrcClientState.Disconnected
-}
+): IrcClientState =
+    when {
+        clientState != null -> clientState
+        managerState != null -> managerState
+        else -> IrcClientState.Disconnected
+    }
 
 enum class ChannelBrowserAvailability {
     INITIALIZING,
@@ -39,15 +39,32 @@ fun channelBrowserAvailability(
     initialized: Boolean,
     isRoot: Boolean,
     connection: IrcClientState,
-): ChannelBrowserAvailability = when {
-    !initialized -> ChannelBrowserAvailability.INITIALIZING
-    isRoot -> ChannelBrowserAvailability.ROOT_UNAVAILABLE
-    connection is IrcClientState.Ready -> ChannelBrowserAvailability.READY
-    connection is IrcClientState.Connecting || connection is IrcClientState.Registering ->
-        ChannelBrowserAvailability.CONNECTING
-    connection is IrcClientState.Failed -> ChannelBrowserAvailability.FAILED
-    else -> ChannelBrowserAvailability.OFFLINE
-}
+): ChannelBrowserAvailability =
+    when {
+        !initialized -> {
+            ChannelBrowserAvailability.INITIALIZING
+        }
+
+        isRoot -> {
+            ChannelBrowserAvailability.ROOT_UNAVAILABLE
+        }
+
+        connection is IrcClientState.Ready -> {
+            ChannelBrowserAvailability.READY
+        }
+
+        connection is IrcClientState.Connecting || connection is IrcClientState.Registering -> {
+            ChannelBrowserAvailability.CONNECTING
+        }
+
+        connection is IrcClientState.Failed -> {
+            ChannelBrowserAvailability.FAILED
+        }
+
+        else -> {
+            ChannelBrowserAvailability.OFFLINE
+        }
+    }
 
 /** Whether entering the browser should request the locally bounded popular-channel set. */
 fun shouldAutoFetchPopularChannels(
@@ -67,7 +84,10 @@ fun shouldAutoFetchPopularChannels(
  * ELIST 'U' is present). Without ELIST 'U', the IRC client streams the response through its
  * memory-bounded top-[POPULAR_CHANNEL_LIMIT] accumulator.
  */
-data class ListArgs(val mask: String?, val minUsers: Int?)
+data class ListArgs(
+    val mask: String?,
+    val minUsers: Int?,
+)
 
 fun listArgsFor(query: String): ListArgs =
     if (query.isBlank()) {
@@ -77,22 +97,27 @@ fun listArgsFor(query: String): ListArgs =
     }
 
 /** Popular browsing is deliberately compact; explicit searches may return a larger result set. */
-fun channelListLimit(query: String): Int =
-    if (query.isBlank()) POPULAR_CHANNEL_LIMIT else CHANNEL_SEARCH_LIMIT
+fun channelListLimit(query: String): Int = if (query.isBlank()) POPULAR_CHANNEL_LIMIT else CHANNEL_SEARCH_LIMIT
 
 /** While LIST is in flight, only a different query should be queued for the next request. */
-fun shouldQueueChannelListFetch(activeQuery: String?, requestedQuery: String): Boolean =
-    activeQuery != null && activeQuery != requestedQuery
+fun shouldQueueChannelListFetch(
+    activeQuery: String?,
+    requestedQuery: String,
+): Boolean = activeQuery != null && activeQuery != requestedQuery
 
 /** Prevent a slow popular LIST from being rendered as results for a newer typed search. */
-fun shouldApplyChannelListFetchResult(fetchQuery: String, currentQuery: String): Boolean =
-    fetchQuery == currentQuery
+fun shouldApplyChannelListFetchResult(
+    fetchQuery: String,
+    currentQuery: String,
+): Boolean = fetchQuery == currentQuery
 
 enum class ChannelJoinStatus { JOIN, JOINING, JOINED }
 
 /** Applies the current server CASEMAPPING to persisted or optimistic channel names. */
-fun normalizeChannelNames(channels: Collection<String>, identityRules: IrcIdentityRules): Set<String> =
-    channels.map(identityRules::normalize).toSet()
+fun normalizeChannelNames(
+    channels: Collection<String>,
+    identityRules: IrcIdentityRules,
+): Set<String> = channels.map(identityRules::normalize).toSet()
 
 /** Drops pending spellings confirmed joined by Room, or all pending names after Ready is lost. */
 fun reconcilePendingChannelNames(
@@ -100,11 +125,12 @@ fun reconcilePendingChannelNames(
     joinedChannels: Set<String>,
     identityRules: IrcIdentityRules,
     isReady: Boolean,
-): Set<String> = if (isReady) {
-    pendingChannelNames.filterTo(linkedSetOf()) { identityRules.normalize(it) !in joinedChannels }
-} else {
-    emptySet()
-}
+): Set<String> =
+    if (isReady) {
+        pendingChannelNames.filterTo(linkedSetOf()) { identityRules.normalize(it) !in joinedChannels }
+    } else {
+        emptySet()
+    }
 
 /** Removes every raw spelling equivalent to the target under the current server CASEMAPPING. */
 fun removePendingChannelName(
@@ -135,11 +161,12 @@ fun channelJoinStatus(
     pendingChannels: Set<String>,
     joinedChannels: Set<String>,
     identityRules: IrcIdentityRules,
-): ChannelJoinStatus = when (identityRules.normalize(channel)) {
-    in joinedChannels -> ChannelJoinStatus.JOINED
-    in pendingChannels -> ChannelJoinStatus.JOINING
-    else -> ChannelJoinStatus.JOIN
-}
+): ChannelJoinStatus =
+    when (identityRules.normalize(channel)) {
+        in joinedChannels -> ChannelJoinStatus.JOINED
+        in pendingChannels -> ChannelJoinStatus.JOINING
+        else -> ChannelJoinStatus.JOIN
+    }
 
 /** Confirmation and connection loss are the only paths that clear optimistic pending names. */
 fun reconcilePendingChannels(
@@ -147,7 +174,8 @@ fun reconcilePendingChannels(
     joinedChannels: Set<String>,
     identityRules: IrcIdentityRules,
     isReady: Boolean,
-): Set<String> = normalizeChannelNames(
-    reconcilePendingChannelNames(pendingChannelNames, joinedChannels, identityRules, isReady),
-    identityRules,
-)
+): Set<String> =
+    normalizeChannelNames(
+        reconcilePendingChannelNames(pendingChannelNames, joinedChannels, identityRules, isReady),
+        identityRules,
+    )

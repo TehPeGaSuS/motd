@@ -19,8 +19,6 @@ import io.github.trevarj.motd.service.unreadBufferIds
 import io.github.trevarj.motd.service.unreadChatRows
 import io.github.trevarj.motd.ui.chat.AttachmentRequestStore
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -28,6 +26,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /** What running a leaf actually achieved, so the overlay can say something useful on release. */
 sealed interface GestureActionResult {
@@ -92,10 +92,11 @@ class GestureActionDispatcher internal constructor(
         },
     )
 
-    private val _navRequests = MutableSharedFlow<GestureNavRequest>(
-        extraBufferCapacity = NAV_BUFFER,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
+    private val _navRequests =
+        MutableSharedFlow<GestureNavRequest>(
+            extraBufferCapacity = NAV_BUFFER,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
 
     /**
      * One-shot navigation requests. Zero replay on purpose: a request the host was not around to
@@ -106,30 +107,78 @@ class GestureActionDispatcher internal constructor(
     /** The conversation behind the orb, or null when no chat is on screen. */
     val currentBufferId: StateFlow<Long?> = foregroundBuffer.foregroundBufferId
 
-    suspend fun execute(action: GestureAction): GestureActionResult = when (action) {
-        is GestureAction.OpenChat -> openChat(action.bufferId)
-        GestureAction.OpenSearch -> navigate(GestureNavRequest.OpenSearch)
-        GestureAction.OpenChatList -> navigate(GestureNavRequest.OpenChatList)
-        GestureAction.ChannelInfoCurrent -> withCurrentChat { navigate(GestureNavRequest.OpenChannelInfo(it)) }
-        GestureAction.NextUnread -> nextUnread()
-        is GestureAction.InsertMention -> prefillCurrentChat("${action.nick}: ")
-        is GestureAction.InsertSnippet -> prefillCurrentChat(action.text)
-        is GestureAction.StartQuery -> startQuery(action.networkId, action.nick)
-        is GestureAction.ToggleAway -> toggleAway(action.message)
-        is GestureAction.ReconnectNetwork -> onNetwork(action.networkId) { connections.connect(it) }
-        is GestureAction.DisconnectNetwork -> onNetwork(action.networkId) { connections.disconnect(it) }
-        is GestureAction.JoinChannel -> onNetwork(action.networkId) {
-            connections.joinChannel(it, action.channel, action.key)
+    suspend fun execute(action: GestureAction): GestureActionResult =
+        when (action) {
+            is GestureAction.OpenChat -> {
+                openChat(action.bufferId)
+            }
+
+            GestureAction.OpenSearch -> {
+                navigate(GestureNavRequest.OpenSearch)
+            }
+
+            GestureAction.OpenChatList -> {
+                navigate(GestureNavRequest.OpenChatList)
+            }
+
+            GestureAction.ChannelInfoCurrent -> {
+                withCurrentChat { navigate(GestureNavRequest.OpenChannelInfo(it)) }
+            }
+
+            GestureAction.NextUnread -> {
+                nextUnread()
+            }
+
+            is GestureAction.InsertMention -> {
+                prefillCurrentChat("${action.nick}: ")
+            }
+
+            is GestureAction.InsertSnippet -> {
+                prefillCurrentChat(action.text)
+            }
+
+            is GestureAction.StartQuery -> {
+                startQuery(action.networkId, action.nick)
+            }
+
+            is GestureAction.ToggleAway -> {
+                toggleAway(action.message)
+            }
+
+            is GestureAction.ReconnectNetwork -> {
+                onNetwork(action.networkId) { connections.connect(it) }
+            }
+
+            is GestureAction.DisconnectNetwork -> {
+                onNetwork(action.networkId) { connections.disconnect(it) }
+            }
+
+            is GestureAction.JoinChannel -> {
+                onNetwork(action.networkId) {
+                    connections.joinChannel(it, action.channel, action.key)
+                }
+            }
+
+            GestureAction.MarkAllRead -> {
+                markAllRead()
+            }
+
+            GestureAction.ToggleTheme -> {
+                toggleTheme()
+            }
+
+            GestureAction.AttachCurrent -> {
+                withCurrentChat { bufferId ->
+                    attachments.push(bufferId)
+                    GestureActionResult.Done
+                }
+            }
+
+            // A leaf this build cannot interpret is inert rather than fatal; the node itself is kept.
+            is GestureAction.Unknown -> {
+                GestureActionResult.Unavailable
+            }
         }
-        GestureAction.MarkAllRead -> markAllRead()
-        GestureAction.ToggleTheme -> toggleTheme()
-        GestureAction.AttachCurrent -> withCurrentChat { bufferId ->
-            attachments.push(bufferId)
-            GestureActionResult.Done
-        }
-        // A leaf this build cannot interpret is inert rather than fatal; the node itself is kept.
-        is GestureAction.Unknown -> GestureActionResult.Unavailable
-    }
 
     private suspend fun openChat(bufferId: Long): GestureActionResult {
         val canonical = canonical(bufferId) ?: return GestureActionResult.Unavailable
@@ -137,8 +186,9 @@ class GestureActionDispatcher internal constructor(
     }
 
     private suspend fun nextUnread(): GestureActionResult {
-        val row = unreadChatRows(buffers.observeChatList().first()).firstOrNull()
-            ?: return GestureActionResult.Unavailable
+        val row =
+            unreadChatRows(buffers.observeChatList().first()).firstOrNull()
+                ?: return GestureActionResult.Unavailable
         return openChat(row.bufferId)
     }
 
@@ -150,21 +200,26 @@ class GestureActionDispatcher internal constructor(
      * while [ComposerDraftStore.prefillPushes] is what actually delivers the text into an open
      * composer (a `launchSingleTop` re-entry runs no entry effect to drain it).
      */
-    private suspend fun prefillCurrentChat(text: String): GestureActionResult = withCurrentChat { bufferId ->
-        drafts.push(bufferId, text)
-        navigate(GestureNavRequest.OpenChat(bufferId))
-    }
+    private suspend fun prefillCurrentChat(text: String): GestureActionResult =
+        withCurrentChat { bufferId ->
+            drafts.push(bufferId, text)
+            navigate(GestureNavRequest.OpenChat(bufferId))
+        }
 
-    private suspend fun startQuery(networkId: Long, nick: String): GestureActionResult {
+    private suspend fun startQuery(
+        networkId: Long,
+        nick: String,
+    ): GestureActionResult {
         if (nick.isBlank()) return GestureActionResult.Unavailable
         if (networks.networkById(networkId) == null) return GestureActionResult.Unavailable
-        val bufferId = try {
-            connections.ensureQueryBuffer(networkId, nick)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            return GestureActionResult.Unavailable
-        }
+        val bufferId =
+            try {
+                connections.ensureQueryBuffer(networkId, nick)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                return GestureActionResult.Unavailable
+            }
         return openChat(bufferId)
     }
 
@@ -176,9 +231,10 @@ class GestureActionDispatcher internal constructor(
      * half-away, which is what an independent per-network toggle would do.
      */
     private suspend fun toggleAway(message: String?): GestureActionResult {
-        val ready = connections.connectionStates.value
-            .filterValues { it is IrcClientState.Ready }
-            .keys
+        val ready =
+            connections.connectionStates.value
+                .filterValues { it is IrcClientState.Ready }
+                .keys
         if (ready.isEmpty()) return GestureActionResult.Unavailable
         val away = ready intersect connections.selfAwayStates.value.keys
         val targets = away.ifEmpty { ready }
@@ -215,18 +271,22 @@ class GestureActionDispatcher internal constructor(
      */
     private suspend fun toggleTheme(): GestureActionResult {
         val config = appearance.config.first()
-        val shown = if (config.theme == ColorThemePreset.SYSTEM) {
-            if (systemDark()) ColorThemePreset.DARK else ColorThemePreset.LIGHT
-        } else {
-            resolveAutoPalette(config.theme, config.followSystem, systemDark())
-        }
+        val shown =
+            if (config.theme == ColorThemePreset.SYSTEM) {
+                if (systemDark()) ColorThemePreset.DARK else ColorThemePreset.LIGHT
+            } else {
+                resolveAutoPalette(config.theme, config.followSystem, systemDark())
+            }
         val partner = shown.systemPartner ?: return GestureActionResult.Unavailable
         if (config.followSystem) appearance.setFollowSystem(false)
         appearance.setTheme(partner)
         return GestureActionResult.Done
     }
 
-    private suspend fun onNetwork(networkId: Long, act: suspend (Long) -> Unit): GestureActionResult {
+    private suspend fun onNetwork(
+        networkId: Long,
+        act: suspend (Long) -> Unit,
+    ): GestureActionResult {
         if (networks.networkById(networkId) == null) return GestureActionResult.Unavailable
         return try {
             act(networkId)
@@ -238,7 +298,10 @@ class GestureActionDispatcher internal constructor(
         }
     }
 
-    private suspend fun writeAway(networkId: Long, message: String?) {
+    private suspend fun writeAway(
+        networkId: Long,
+        message: String?,
+    ) {
         try {
             connections.setAway(networkId, message)
         } catch (cancelled: CancellationException) {

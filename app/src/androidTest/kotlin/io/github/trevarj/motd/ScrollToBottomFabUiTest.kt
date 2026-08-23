@@ -29,7 +29,8 @@ class ScrollToBottomFabUiTest {
             }
         }
 
-        compose.onNodeWithTag("chat_scroll_to_bottom_fab")
+        compose
+            .onNodeWithTag("chat_scroll_to_bottom_fab")
             .performTouchInput { click() }
 
         compose.runOnIdle {

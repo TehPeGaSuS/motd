@@ -3,7 +3,6 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
-import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,99 +22,105 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicInteger
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class BackgroundConnectionRetentionTest {
-
     @Test
-    fun repeatedBackgroundSignalsDoNotExtendDeadline() = runTest {
-        var elapsed = false
-        val retention = BackgroundConnectionRetention(
-            scope = this,
-            graceMs = 300_000L,
-            nowMs = { testScheduler.currentTime },
-        )
+    fun repeatedBackgroundSignalsDoNotExtendDeadline() =
+        runTest {
+            var elapsed = false
+            val retention =
+                BackgroundConnectionRetention(
+                    scope = this,
+                    graceMs = 300_000L,
+                    nowMs = { testScheduler.currentTime },
+                )
 
-        retention.onBackgrounded { elapsed = true }
-        runCurrent()
-        advanceTimeBy(240_000L)
-        retention.onBackgrounded { elapsed = true }
-        advanceTimeBy(59_999L)
-        runCurrent()
-        assertFalse(elapsed)
-        assertTrue(retention.isRetaining)
-
-        advanceTimeBy(1L)
-        runCurrent()
-        assertTrue(elapsed)
-        assertTrue(retention.graceElapsed)
-        assertFalse(retention.isRetaining)
-    }
-
-    @Test
-    fun foregroundCancellationPreventsObsoleteHandoffAndResetsDeadline() = runTest {
-        var elapsedCount = 0
-        val retention = BackgroundConnectionRetention(
-            scope = this,
-            graceMs = 300_000L,
-            nowMs = { testScheduler.currentTime },
-        )
-
-        retention.onBackgrounded { elapsedCount++ }
-        runCurrent()
-        advanceTimeBy(120_000L)
-        retention.cancel()
-        advanceTimeBy(300_000L)
-        runCurrent()
-        assertTrue(elapsedCount == 0)
-        assertFalse(retention.graceElapsed)
-
-        retention.onBackgrounded { elapsedCount++ }
-        advanceTimeBy(299_999L)
-        runCurrent()
-        assertTrue(elapsedCount == 0)
-        advanceTimeBy(1L)
-        runCurrent()
-        assertTrue(elapsedCount == 1)
-    }
-
-    @Test
-    fun concurrentBackgroundSignalsCreateOneExpiryCallback() = runBlocking {
-        val elapsedCount = AtomicInteger()
-        val callbackStarted = CompletableDeferred<Unit>()
-        val releaseCallback = CompletableDeferred<Unit>()
-        val retentionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val retention = BackgroundConnectionRetention(
-            scope = retentionScope,
-            graceMs = 0L,
-        )
-
-        try {
-            coroutineScope {
-                List(64) {
-                    async(Dispatchers.Default) {
-                        retention.onBackgrounded {
-                            callbackStarted.complete(Unit)
-                            releaseCallback.await()
-                            elapsedCount.incrementAndGet()
-                        }
-                    }
-                }.awaitAll()
-            }
-            withTimeout(5_000L) { callbackStarted.await() }
+            retention.onBackgrounded { elapsed = true }
+            runCurrent()
+            advanceTimeBy(240_000L)
+            retention.onBackgrounded { elapsed = true }
+            advanceTimeBy(59_999L)
+            runCurrent()
+            assertFalse(elapsed)
             assertTrue(retention.isRetaining)
 
-            releaseCallback.complete(Unit)
-            withTimeout(5_000L) {
-                while (retention.isRetaining) yield()
-            }
-
-            assertEquals(1, elapsedCount.get())
+            advanceTimeBy(1L)
+            runCurrent()
+            assertTrue(elapsed)
+            assertTrue(retention.graceElapsed)
             assertFalse(retention.isRetaining)
-        } finally {
-            retentionScope.cancel()
         }
-    }
+
+    @Test
+    fun foregroundCancellationPreventsObsoleteHandoffAndResetsDeadline() =
+        runTest {
+            var elapsedCount = 0
+            val retention =
+                BackgroundConnectionRetention(
+                    scope = this,
+                    graceMs = 300_000L,
+                    nowMs = { testScheduler.currentTime },
+                )
+
+            retention.onBackgrounded { elapsedCount++ }
+            runCurrent()
+            advanceTimeBy(120_000L)
+            retention.cancel()
+            advanceTimeBy(300_000L)
+            runCurrent()
+            assertTrue(elapsedCount == 0)
+            assertFalse(retention.graceElapsed)
+
+            retention.onBackgrounded { elapsedCount++ }
+            advanceTimeBy(299_999L)
+            runCurrent()
+            assertTrue(elapsedCount == 0)
+            advanceTimeBy(1L)
+            runCurrent()
+            assertTrue(elapsedCount == 1)
+        }
+
+    @Test
+    fun concurrentBackgroundSignalsCreateOneExpiryCallback() =
+        runBlocking {
+            val elapsedCount = AtomicInteger()
+            val callbackStarted = CompletableDeferred<Unit>()
+            val releaseCallback = CompletableDeferred<Unit>()
+            val retentionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val retention =
+                BackgroundConnectionRetention(
+                    scope = retentionScope,
+                    graceMs = 0L,
+                )
+
+            try {
+                coroutineScope {
+                    List(64) {
+                        async(Dispatchers.Default) {
+                            retention.onBackgrounded {
+                                callbackStarted.complete(Unit)
+                                releaseCallback.await()
+                                elapsedCount.incrementAndGet()
+                            }
+                        }
+                    }.awaitAll()
+                }
+                withTimeout(5_000L) { callbackStarted.await() }
+                assertTrue(retention.isRetaining)
+
+                releaseCallback.complete(Unit)
+                withTimeout(5_000L) {
+                    while (retention.isRetaining) yield()
+                }
+
+                assertEquals(1, elapsedCount.get())
+                assertFalse(retention.isRetaining)
+            } finally {
+                retentionScope.cancel()
+            }
+        }
 
     @Test
     fun embeddedRealityDetectionUsesPhysicalRootForBouncerChildren() {

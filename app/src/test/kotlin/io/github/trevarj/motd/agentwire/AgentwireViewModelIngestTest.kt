@@ -7,9 +7,9 @@ import io.github.trevarj.motd.irc.client.EventMapper
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.Isupport
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -21,11 +21,12 @@ class AgentwireViewModelIngestTest {
     fun `only topic provisioned backend can establish or retain Agentwire state`() {
         val ingestor = AgentwireEventIngestor()
         val syncId = "11111111-1111-4111-8111-111111111111"
-        var state = AgentwireUiState(
-            channel = "#codex",
-            controllerAccount = "controller",
-            backendAccount = "agent-a",
-        )
+        var state =
+            AgentwireUiState(
+                channel = "#codex",
+                controllerAccount = "controller",
+                backendAccount = "agent-a",
+            )
 
         val forgedHello = hello(syncId, "evil-epoch", setOf("turn.prompt"))
         state = rejected(ingestor, state, inbound("agent-b", forgedHello), syncId)
@@ -54,15 +55,16 @@ class AgentwireViewModelIngestTest {
         // Topic metadata may deliberately rotate the backend account. A reconnect must reject
         // the former identity and only establish state from the newly provisioned one.
         ingestor.reset()
-        val reconnect = state.copy(
-            backendAccount = "agent-c",
-            epoch = null,
-            botAccount = null,
-            actions = emptySet(),
-            activeSid = null,
-            requests = emptyList(),
-            error = null,
-        )
+        val reconnect =
+            state.copy(
+                backendAccount = "agent-c",
+                epoch = null,
+                botAccount = null,
+                actions = emptySet(),
+                activeSid = null,
+                requests = emptyList(),
+                error = null,
+            )
         state = rejected(ingestor, reconnect, inbound("agent-a", hello("22222222-2222-4222-8222-222222222222", "old-epoch", setOf("turn.prompt"))), "22222222-2222-4222-8222-222222222222")
         assertNull(state.botAccount)
         assertNull(state.epoch)
@@ -77,12 +79,13 @@ class AgentwireViewModelIngestTest {
         // Controller authorization and event-source provisioning remain distinct fields even
         // when a deployment intentionally assigns them the same IRC account.
         ingestor.reset()
-        state = applied(
-            ingestor,
-            AgentwireUiState(channel = "#codex", controllerAccount = "shared", backendAccount = "shared"),
-            inbound("shared", hello(syncId, "shared-epoch", setOf("turn.prompt"))),
-            syncId,
-        )
+        state =
+            applied(
+                ingestor,
+                AgentwireUiState(channel = "#codex", controllerAccount = "shared", backendAccount = "shared"),
+                inbound("shared", hello(syncId, "shared-epoch", setOf("turn.prompt"))),
+                syncId,
+            )
         assertEquals("shared", state.botAccount)
         assertEquals("shared-epoch", state.epoch)
     }
@@ -101,13 +104,21 @@ class AgentwireViewModelIngestTest {
         syncId: String,
     ): AgentwireUiState = (ingestor.ingest(state, event, syncId) as AgentwireEventIngestor.Result.Rejected).state
 
-    private fun inbound(account: String, envelope: AgentwireEnvelope): IrcEvent = checkNotNull(
-        EventMapper({ "me" }, { Isupport() }).map(
-            IrcMessage.parse("@account=$account;$AGENTWIRE_TAG=${encodeAgentwireEnvelope(envelope)} :$account!u@h TAGMSG #codex"),
-        ),
-    )
+    private fun inbound(
+        account: String,
+        envelope: AgentwireEnvelope,
+    ): IrcEvent =
+        checkNotNull(
+            EventMapper({ "me" }, { Isupport() }).map(
+                IrcMessage.parse("@account=$account;$AGENTWIRE_TAG=${encodeAgentwireEnvelope(envelope)} :$account!u@h TAGMSG #codex"),
+            ),
+        )
 
-    private fun hello(reply: String, epoch: String, actions: Set<String>) = AgentwireEnvelope(
+    private fun hello(
+        reply: String,
+        epoch: String,
+        actions: Set<String>,
+    ) = AgentwireEnvelope(
         kind = "agent.hello",
         type = "event",
         id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -115,13 +126,17 @@ class AgentwireViewModelIngestTest {
         instance = "agent",
         epoch = epoch,
         reply = reply,
-        data = buildJsonObject {
-            put("epoch", epoch)
-            put("actions", buildJsonArray { actions.forEach { add(JsonPrimitive(it)) } })
-        },
+        data =
+            buildJsonObject {
+                put("epoch", epoch)
+                put("actions", buildJsonArray { actions.forEach { add(JsonPrimitive(it)) } })
+            },
     )
 
-    private fun snapshot(reply: String, sid: String) = AgentwireEnvelope(
+    private fun snapshot(
+        reply: String,
+        sid: String,
+    ) = AgentwireEnvelope(
         kind = "channel.snapshot",
         type = "event",
         id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -129,8 +144,9 @@ class AgentwireViewModelIngestTest {
         instance = "agent",
         epoch = "epoch-a",
         reply = reply,
-        data = buildJsonObject {
-            put("binding", buildJsonObject { put("sid", sid) })
-        },
+        data =
+            buildJsonObject {
+                put("binding", buildJsonObject { put("sid", sid) })
+            },
     )
 }

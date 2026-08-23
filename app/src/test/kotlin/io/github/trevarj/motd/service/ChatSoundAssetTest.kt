@@ -3,16 +3,16 @@ package io.github.trevarj.motd.service
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.R
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import kotlin.math.abs
-import kotlin.math.pow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import kotlin.math.abs
+import kotlin.math.pow
 
 @RunWith(RobolectricTestRunner::class)
 class ChatSoundAssetTest {

@@ -1048,13 +1048,11 @@ class ChatViewModel
         // Room lookup across recompositions and its WhileSubscribed policy cancels unused collection.
         private val replyPreviewCache =
             object : LinkedHashMap<String, StateFlow<ReplyPreviewData?>>() {
-                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, StateFlow<ReplyPreviewData?>>): Boolean =
-                    size > MAX_REPLY_PREVIEW_CACHE
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, StateFlow<ReplyPreviewData?>>): Boolean = size > MAX_REPLY_PREVIEW_CACHE
             }
         private val dccTransferCache =
             object : LinkedHashMap<Long, StateFlow<DccTransferEntity?>>() {
-                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, StateFlow<DccTransferEntity?>>): Boolean =
-                    size > MAX_REPLY_PREVIEW_CACHE
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, StateFlow<DccTransferEntity?>>): Boolean = size > MAX_REPLY_PREVIEW_CACHE
             }
 
         fun replyPreview(msgid: String): StateFlow<ReplyPreviewData?> =
@@ -1378,8 +1376,7 @@ class ChatViewModel
             networkId: Long?,
         ): AudioMetadata? = if (contentPreviews.value.showLinkPreviews) audioMetadataRepository.metadata(url, networkId) else null
 
-        fun cachedAudioMetadata(url: String): CachedAudioMetadata? =
-            if (contentPreviews.value.showLinkPreviews) audioMetadataRepository.cached(url) else null
+        fun cachedAudioMetadata(url: String): CachedAudioMetadata? = if (contentPreviews.value.showLinkPreviews) audioMetadataRepository.cached(url) else null
 
         val audioPlaybackState = audioPlaybackController.state
         val audioWaveforms = audioPlaybackController.waveforms

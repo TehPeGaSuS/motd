@@ -25,39 +25,40 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
-import java.io.File
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
-import io.github.trevarj.motd.data.prefs.LayoutDensity
-import io.github.trevarj.motd.data.prefs.MessageSpacing
-import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.FontChoice
+import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.normalizeFontScalePercent
 import io.github.trevarj.motd.data.prefs.resolveAutoPalette
+import java.io.File
 
 private val BaseTypography = Typography()
 
-internal fun typographyScaleFactor(percent: Int): Float =
-    normalizeFontScalePercent(percent) / 100f
+internal fun typographyScaleFactor(percent: Int): Float = normalizeFontScalePercent(percent) / 100f
 
-internal fun conversationTypographyScaleFactor(percent: Int): Float =
-    normalizeFontScalePercent(percent) / 100f
+internal fun conversationTypographyScaleFactor(percent: Int): Float = normalizeFontScalePercent(percent) / 100f
 
-private fun TextUnit.scaledBy(factor: Float): TextUnit =
-    if (this != TextUnit.Unspecified) this * factor else this
+private fun TextUnit.scaledBy(factor: Float): TextUnit = if (this != TextUnit.Unspecified) this * factor else this
 
 // Keep Material's per-role tracking intact; it is tuned for each type role rather than being a
 // proportional dimension of the glyph size.
-internal fun TextStyle.scaledBy(factor: Float): TextStyle = copy(
-    fontSize = fontSize.scaledBy(factor),
-    lineHeight = lineHeight.scaledBy(factor),
-)
+internal fun TextStyle.scaledBy(factor: Float): TextStyle =
+    copy(
+        fontSize = fontSize.scaledBy(factor),
+        lineHeight = lineHeight.scaledBy(factor),
+    )
 
-private fun scaledTypographyBy(base: Typography, factor: Float): Typography =
+private fun scaledTypographyBy(
+    base: Typography,
+    factor: Float,
+): Typography =
     base.copy(
         displayLarge = base.displayLarge.scaledBy(factor),
         displayMedium = base.displayMedium.scaledBy(factor),
@@ -76,11 +77,15 @@ private fun scaledTypographyBy(base: Typography, factor: Float): Typography =
         labelSmall = base.labelSmall.scaledBy(factor),
     )
 
-internal fun scaledTypography(percent: Int, base: Typography = BaseTypography): Typography =
-    scaledTypographyBy(base, typographyScaleFactor(percent))
+internal fun scaledTypography(
+    percent: Int,
+    base: Typography = BaseTypography,
+): Typography = scaledTypographyBy(base, typographyScaleFactor(percent))
 
-internal fun scaledConversationTypography(percent: Int, base: Typography = BaseTypography): Typography =
-    scaledTypographyBy(base, conversationTypographyScaleFactor(percent))
+internal fun scaledConversationTypography(
+    percent: Int,
+    base: Typography = BaseTypography,
+): Typography = scaledTypographyBy(base, conversationTypographyScaleFactor(percent))
 
 /** Override text tokens only; colors, shapes, density, icons, and geometry remain unchanged. */
 @Composable
@@ -89,9 +94,10 @@ fun ConversationTypography(
     content: @Composable () -> Unit,
 ) {
     val family = LocalAppFontFamily.current
-    val typography = remember(scalePercent, family) {
-        scaledConversationTypography(scalePercent, BaseTypography.withFontFamily(family))
-    }
+    val typography =
+        remember(scalePercent, family) {
+            scaledConversationTypography(scalePercent, BaseTypography.withFontFamily(family))
+        }
     MaterialTheme(
         colorScheme = MaterialTheme.colorScheme,
         shapes = MaterialTheme.shapes,
@@ -111,7 +117,10 @@ val LocalAvatarStyle: ProvidableCompositionLocal<AvatarStyle> =
 val LocalAppFontFamily: ProvidableCompositionLocal<FontFamily?> = staticCompositionLocalOf { null }
 
 /** Whether message timestamps are shown and, when shown, which 12h/24h format they resolve to. */
-data class TimestampConfig(val show: Boolean = true, val format: TimeFormat = TimeFormat.AUTO)
+data class TimestampConfig(
+    val show: Boolean = true,
+    val format: TimeFormat = TimeFormat.AUTO,
+)
 
 /** CompositionLocal carrying the active timestamp display config; defaults to always-shown/AUTO. */
 val LocalTimestampConfig: ProvidableCompositionLocal<TimestampConfig> =
@@ -128,11 +137,12 @@ interface SystemBarThemeHost
 
 // Previews and Compose tests host content in a non-activity context; system-bar styling is
 // activity-only, so resolve to null there instead of requiring a ComponentActivity.
-private tailrec fun Context.findComponentActivity(): ComponentActivity? = when (this) {
-    is ComponentActivity -> this
-    is ContextWrapper -> baseContext.findComponentActivity()
-    else -> null
-}
+private tailrec fun Context.findComponentActivity(): ComponentActivity? =
+    when (this) {
+        is ComponentActivity -> this
+        is ContextWrapper -> baseContext.findComponentActivity()
+        else -> null
+    }
 
 /**
  * Sync a ModalBottomSheet's dialog window with the app theme. M3 sheets live in their own window,
@@ -186,18 +196,25 @@ fun MotdTheme(
     val resolvedPreset = resolveAutoPalette(themePreset, followSystem, systemDark)
     val dark = if (resolvedPreset == ColorThemePreset.SYSTEM) systemDark else resolvedPreset.isDark
     val effectivePreset = if (resolvedPreset == ColorThemePreset.AMOLED) ColorThemePreset.DARK else resolvedPreset
-    val resolvedScheme = fixedThemeScheme(effectivePreset) ?: when {
-        // Material You dynamic color, API 31+.
-        resolvedPreset == ColorThemePreset.SYSTEM &&
-            dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            accessibleColorScheme(
-                if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context),
-                dark,
-            )
+    val resolvedScheme =
+        fixedThemeScheme(effectivePreset) ?: when {
+            // Material You dynamic color, API 31+.
+            resolvedPreset == ColorThemePreset.SYSTEM &&
+                dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                accessibleColorScheme(
+                    if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context),
+                    dark,
+                )
+            }
+
+            dark -> {
+                MotdDarkScheme
+            }
+
+            else -> {
+                MotdLightScheme
+            }
         }
-        dark -> MotdDarkScheme
-        else -> MotdLightScheme
-    }
     val useTrueBlack = dark && (trueBlack || themePreset == ColorThemePreset.AMOLED)
     val colorScheme = if (useTrueBlack) resolvedScheme.withTrueBlackSurfaces() else resolvedScheme
     // System bars must follow the resolved palette, not the OS night mode: the bare
@@ -209,41 +226,45 @@ fun MotdTheme(
     val activity = remember(context) { context.findComponentActivity()?.takeIf { it is SystemBarThemeHost } }
     LaunchedEffect(activity, dark) {
         if (activity == null) return@LaunchedEffect
-        val barStyle = if (dark) {
-            SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-        } else {
-            SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
-        }
+        val barStyle =
+            if (dark) {
+                SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+            } else {
+                SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+            }
         activity.enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // Let the root Surface background show through instead of the automatic nav scrim.
             activity.window.isNavigationBarContrastEnforced = false
         }
     }
-    val nickTextBackgrounds = remember(colorScheme) {
-        listOf(
-            colorScheme.background,
-            colorScheme.surface,
-            colorScheme.surfaceContainerLow,
-            colorScheme.surfaceContainerHigh,
-            colorScheme.surfaceContainerHighest,
-            colorScheme.primaryContainer,
-            colorScheme.secondaryContainer,
-            colorScheme.tertiaryContainer,
-        ).distinct()
-    }
-    val nickThemeColors = remember(colorScheme) {
-        listOf(colorScheme.primary, colorScheme.tertiary, colorScheme.secondary).distinct()
-    }
+    val nickTextBackgrounds =
+        remember(colorScheme) {
+            listOf(
+                colorScheme.background,
+                colorScheme.surface,
+                colorScheme.surfaceContainerLow,
+                colorScheme.surfaceContainerHigh,
+                colorScheme.surfaceContainerHighest,
+                colorScheme.primaryContainer,
+                colorScheme.secondaryContainer,
+                colorScheme.tertiaryContainer,
+            ).distinct()
+        }
+    val nickThemeColors =
+        remember(colorScheme) {
+            listOf(colorScheme.primary, colorScheme.tertiary, colorScheme.secondary).distinct()
+        }
     // Terminal and editor themes publish a real accent palette; identity colors are picked from it
     // rather than synthesized, so a nick is always one of the theme's own colors.
     val nickIdentityPalette = remember(effectivePreset) { themeIdentityPalette(effectivePreset) }
     // Style-only concerns (spacing, nick colors, avatar style) flow through CompositionLocals so
     // components never receive them as parameters.
     val appFontFamily = rememberAppFontFamily(fontChoice, customFontFile)
-    val typography = remember(uiFontScalePercent, fontChoice, appFontFamily) {
-        scaledTypography(uiFontScalePercent, BaseTypography.withFontFamily(appFontFamily))
-    }
+    val typography =
+        remember(uiFontScalePercent, fontChoice, appFontFamily) {
+            scaledTypography(uiFontScalePercent, BaseTypography.withFontFamily(appFontFamily))
+        }
     MaterialTheme(
         colorScheme = colorScheme,
         shapes = MotdMaterialShapes,
@@ -251,15 +272,16 @@ fun MotdTheme(
     ) {
         CompositionLocalProvider(
             LocalSpacing provides spacingFor(layoutDensity, messageSpacing, bubbleCornerStyle),
-            LocalNickColors provides NickColorScheme(
-                nickColorsEnabled,
-                nickColorPalette,
-                nickColorOverrides,
-                dark,
-                nickTextBackgrounds,
-                nickThemeColors,
-                nickIdentityPalette,
-            ),
+            LocalNickColors provides
+                NickColorScheme(
+                    nickColorsEnabled,
+                    nickColorPalette,
+                    nickColorOverrides,
+                    dark,
+                    nickTextBackgrounds,
+                    nickThemeColors,
+                    nickIdentityPalette,
+                ),
             LocalAvatarStyle provides avatarStyle,
             LocalAppFontFamily provides appFontFamily,
             LocalTimestampConfig provides timestampConfig,

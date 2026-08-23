@@ -4,7 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ChatWorkspaceTest {
-
     @Test
     fun `single pane remains active below the fit threshold`() {
         assertEquals(ChatWorkspaceMode.SINGLE, chatWorkspacePolicy(719f).mode)

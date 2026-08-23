@@ -5,11 +5,18 @@ import org.junit.Test
 import java.util.Calendar
 
 class DaySeparatorTest {
-    private fun at(year: Int, month: Int, day: Int, hour: Int): Long =
-        Calendar.getInstance().apply {
-            clear()
-            set(year, month, day, hour, 0, 0)
-        }.timeInMillis
+    private fun at(
+        year: Int,
+        month: Int,
+        day: Int,
+        hour: Int,
+    ): Long =
+        Calendar
+            .getInstance()
+            .apply {
+                clear()
+                set(year, month, day, hour, 0, 0)
+            }.timeInMillis
 
     @Test fun today_is_classified_as_today() {
         val now = at(2024, Calendar.MARCH, 15, 12)

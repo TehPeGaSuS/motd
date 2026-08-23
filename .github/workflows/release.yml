@@ -46,7 +46,7 @@ jobs:
           MOTD_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           MOTD_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: >-
-          ./gradlew :irc:build
+          ./gradlew ktlintCheck :irc:build
           :app:testDebugUnitTest :app:testReleaseUnitTest
           :app:assembleRelease
           --stacktrace

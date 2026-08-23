@@ -1,7 +1,7 @@
 package io.github.trevarj.motd.irc.client
 
-import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.proto.IrcMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -9,17 +9,18 @@ import org.junit.Test
 class RegistrationStateMachineTest {
     @Test
     fun `server password is sent before CAP NICK and USER`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                host = "cloak",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd-android",
-                realname = "motd",
-                serverPassword = "trev/libera:secret",
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    host = "cloak",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd-android",
+                    realname = "motd",
+                    serverPassword = "trev/libera:secret",
+                ),
+            )
 
         assertEquals(
             listOf(
@@ -34,34 +35,36 @@ class RegistrationStateMachineTest {
 
     @Test
     fun `server password uses safe trailing parameter serialization`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                host = "irc.example",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd",
-                realname = "motd",
-                serverPassword = "secret with spaces",
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    host = "irc.example",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    serverPassword = "secret with spaces",
+                ),
+            )
 
         assertEquals("PASS :secret with spaces", machine.start().sentLines().first())
     }
 
     @Test
     fun `invalid server password fails without transmitting registration`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                host = "irc.example",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd",
-                realname = "motd",
-                serverPassword = "secret\r\nQUIT",
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    host = "irc.example",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    serverPassword = "secret\r\nQUIT",
+                ),
+            )
 
         val actions = machine.start()
         val fail = actions.single() as RegistrationStateMachine.Action.Fail
@@ -71,13 +74,16 @@ class RegistrationStateMachineTest {
 
     @Test
     fun `password mismatch is a fatal registration failure`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig("cloak", 6697, true, "motd", "motd", "motd", serverPassword = "bad"),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig("cloak", 6697, true, "motd", "motd", "motd", serverPassword = "bad"),
+            )
 
-        val fail = machine.onMessage(
-            IrcMessage(command = "464", params = listOf("motd", "Password incorrect")),
-        ).single() as RegistrationStateMachine.Action.Fail
+        val fail =
+            machine
+                .onMessage(
+                    IrcMessage(command = "464", params = listOf("motd", "Password incorrect")),
+                ).single() as RegistrationStateMachine.Action.Fail
 
         assertEquals("server password rejected", fail.reason)
         assertTrue(fail.fatal)
@@ -85,22 +91,24 @@ class RegistrationStateMachineTest {
 
     @Test
     fun `NickServ identify supports both argument orders after welcome`() {
-        val base = IrcClientConfig(
-            host = "irc.example",
-            port = 6697,
-            tls = true,
-            nick = "motd",
-            username = "motd",
-            realname = "motd",
-            nickServPassword = "nick-secret",
-        )
+        val base =
+            IrcClientConfig(
+                host = "irc.example",
+                port = 6697,
+                tls = true,
+                nick = "motd",
+                username = "motd",
+                realname = "motd",
+                nickServPassword = "nick-secret",
+            )
 
         val nickPassword = RegistrationStateMachine(base)
         nickPassword.start()
         nickPassword.onMessage(cap("LS", ""))
-        val nickPasswordWelcome = nickPassword.onMessage(
-            IrcMessage(command = "001", params = listOf("motd", "Welcome")),
-        )
+        val nickPasswordWelcome =
+            nickPassword.onMessage(
+                IrcMessage(command = "001", params = listOf("motd", "Welcome")),
+            )
         assertEquals(
             listOf("PRIVMSG NickServ :IDENTIFY motd nick-secret"),
             nickPasswordWelcome.sentLines(),
@@ -110,33 +118,36 @@ class RegistrationStateMachineTest {
                 nickPasswordWelcome.indexOfFirst { it is RegistrationStateMachine.Action.Complete },
         )
 
-        val passwordNick = RegistrationStateMachine(
-            base.copy(nickServIdentifySyntax = NickServIdentifySyntax.PASSWORD_NICK),
-        )
+        val passwordNick =
+            RegistrationStateMachine(
+                base.copy(nickServIdentifySyntax = NickServIdentifySyntax.PASSWORD_NICK),
+            )
         passwordNick.start()
         passwordNick.onMessage(cap("LS", ""))
         assertEquals(
             listOf("PRIVMSG NickServ :IDENTIFY nick-secret motd"),
-            passwordNick.onMessage(
-                IrcMessage(command = "001", params = listOf("motd", "Welcome")),
-            ).sentLines(),
+            passwordNick
+                .onMessage(
+                    IrcMessage(command = "001", params = listOf("motd", "Welcome")),
+                ).sentLines(),
         )
     }
 
     @Test
     fun `alternate nick runs configured recovery then requests preferred nick`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                host = "irc.example",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd",
-                realname = "motd",
-                nickServPassword = "nick-secret",
-                nickServRecoveryCommands = listOf("GHOST", "REGAIN"),
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    host = "irc.example",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    nickServPassword = "nick-secret",
+                    nickServRecoveryCommands = listOf("GHOST", "REGAIN"),
+                ),
+            )
 
         machine.start()
         assertEquals(
@@ -152,9 +163,10 @@ class RegistrationStateMachineTest {
                 "PRIVMSG NickServ :REGAIN motd nick-secret",
                 "NICK motd",
             ),
-            machine.onMessage(
-                IrcMessage(command = "001", params = listOf("motd_", "Welcome")),
-            ).sentLines(),
+            machine
+                .onMessage(
+                    IrcMessage(command = "001", params = listOf("motd_", "Welcome")),
+                ).sentLines(),
         )
     }
 
@@ -162,21 +174,37 @@ class RegistrationStateMachineTest {
     fun `invalid persisted NickServ values fail before registration`() {
         listOf(
             IrcClientConfig(
-                "irc.example", 6697, true, "motd", "motd", "motd",
+                "irc.example",
+                6697,
+                true,
+                "motd",
+                "motd",
+                "motd",
                 nickServPassword = "two words",
             ),
             IrcClientConfig(
-                "irc.example", 6697, true, "motd", "motd", "motd",
+                "irc.example",
+                6697,
+                true,
+                "motd",
+                "motd",
+                "motd",
                 nickServPassword = "secret",
                 nickServRecoveryCommands = listOf("QUIT now"),
             ),
             IrcClientConfig(
-                "irc.example", 6697, true, "motd", "motd", "motd",
+                "irc.example",
+                6697,
+                true,
+                "motd",
+                "motd",
+                "motd",
                 nickServPassword = "x".repeat(500),
             ),
         ).forEach { config ->
-            val fail = RegistrationStateMachine(config).start().single()
-                as RegistrationStateMachine.Action.Fail
+            val fail =
+                RegistrationStateMachine(config).start().single()
+                    as RegistrationStateMachine.Action.Fail
             assertEquals("invalid NickServ configuration", fail.reason)
             assertTrue(fail.fatal)
         }
@@ -184,74 +212,97 @@ class RegistrationStateMachineTest {
 
     @Test
     fun `disabled or missing NickServ recovery sends no recovery commands`() {
-        val disabled = RegistrationStateMachine(
-            IrcClientConfig(
-                "irc.example", 6697, true, "motd", "motd", "motd",
-                nickServPassword = "secret",
-            ),
-        )
+        val disabled =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    "irc.example",
+                    6697,
+                    true,
+                    "motd",
+                    "motd",
+                    "motd",
+                    nickServPassword = "secret",
+                ),
+            )
         disabled.start()
         disabled.onMessage(IrcMessage(command = "433", params = listOf("*", "motd")))
         disabled.onMessage(cap("LS", ""))
         assertEquals(
             listOf("PRIVMSG NickServ :IDENTIFY motd secret"),
-            disabled.onMessage(
-                IrcMessage(command = "001", params = listOf("motd_", "Welcome")),
-            ).sentLines(),
+            disabled
+                .onMessage(
+                    IrcMessage(command = "001", params = listOf("motd_", "Welcome")),
+                ).sentLines(),
         )
 
-        val missing = RegistrationStateMachine(
-            IrcClientConfig(
-                "irc.example", 6697, true, "motd", "motd", "motd",
-                nickServRecoveryCommands = listOf("REGAIN"),
-            ),
-        )
+        val missing =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    "irc.example",
+                    6697,
+                    true,
+                    "motd",
+                    "motd",
+                    "motd",
+                    nickServRecoveryCommands = listOf("REGAIN"),
+                ),
+            )
         missing.start()
         missing.onMessage(IrcMessage(command = "433", params = listOf("*", "motd")))
         missing.onMessage(cap("LS", ""))
         assertTrue(
-            missing.onMessage(
-                IrcMessage(command = "001", params = listOf("motd_", "Welcome")),
-            ).sentLines().isEmpty(),
+            missing
+                .onMessage(
+                    IrcMessage(command = "001", params = listOf("motd_", "Welcome")),
+                ).sentLines()
+                .isEmpty(),
         )
     }
 
     @Test
     fun `SASL configuration ignores NickServ fallback`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                "irc.example", 6697, true, "motd", "motd", "motd",
-                sasl = SaslMechanism.PLAIN,
-                nickServPassword = "two words",
-                nickServRecoveryCommands = listOf("QUIT now"),
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    "irc.example",
+                    6697,
+                    true,
+                    "motd",
+                    "motd",
+                    "motd",
+                    sasl = SaslMechanism.PLAIN,
+                    nickServPassword = "two words",
+                    nickServRecoveryCommands = listOf("QUIT now"),
+                ),
+            )
 
         assertTrue(machine.start().none { it is RegistrationStateMachine.Action.Fail })
     }
 
     @Test
     fun `bouncer bind negotiates replay safety before fallback ready`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                host = "soju",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd",
-                realname = "motd",
-                bouncerNetId = "2",
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    host = "soju",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    bouncerNetId = "2",
+                ),
+            )
 
         machine.start()
-        val req = machine.onMessage(
-            cap(
-                "LS",
-                "sasl soju.im/bouncer-networks cap-notify draft/chathistory batch " +
-                    "message-tags server-time echo-message extended-monitor",
-            ),
-        )
+        val req =
+            machine.onMessage(
+                cap(
+                    "LS",
+                    "sasl soju.im/bouncer-networks cap-notify draft/chathistory batch " +
+                        "message-tags server-time echo-message extended-monitor",
+                ),
+            )
         val replayBarrier =
             "sasl soju.im/bouncer-networks draft/chathistory batch message-tags server-time"
         assertEquals(listOf("CAP REQ :$replayBarrier"), req.sentLines())
@@ -271,21 +322,23 @@ class RegistrationStateMachineTest {
 
     @Test
     fun `registration FAIL surfaces instead of hanging`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                host = "soju",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd",
-                realname = "motd",
-                bouncerNetId = "404",
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    host = "soju",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    bouncerNetId = "404",
+                ),
+            )
 
-        val actions = machine.onMessage(
-            IrcMessage(command = "FAIL", params = listOf("BOUNCER", "INVALID_NETID", "No such network")),
-        )
+        val actions =
+            machine.onMessage(
+                IrcMessage(command = "FAIL", params = listOf("BOUNCER", "INVALID_NETID", "No such network")),
+            )
 
         val fail = actions.single() as RegistrationStateMachine.Action.Fail
         assertEquals("INVALID_NETID No such network", fail.reason)
@@ -294,17 +347,18 @@ class RegistrationStateMachineTest {
 
     @Test
     fun `pre-away sends AWAY before CAP END when capability is acked`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                host = "irc.example",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd",
-                realname = "motd",
-                initialAwayMessage = "back later",
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    host = "irc.example",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    initialAwayMessage = "back later",
+                ),
+            )
 
         machine.start()
         assertEquals(listOf("CAP REQ :draft/pre-away"), machine.onMessage(cap("LS", "draft/pre-away")).sentLines())
@@ -316,17 +370,18 @@ class RegistrationStateMachineTest {
 
     @Test
     fun `initial away falls back after welcome when pre-away is absent`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                host = "irc.example",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd",
-                realname = "motd",
-                initialAwayMessage = "back later",
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    host = "irc.example",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    initialAwayMessage = "back later",
+                ),
+            )
 
         machine.start()
         assertEquals(listOf("CAP END"), machine.onMessage(cap("LS", "")).sentLines())
@@ -338,24 +393,27 @@ class RegistrationStateMachineTest {
 
     @Test
     fun `pre-away failure is reported and retried after welcome`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                host = "irc.example",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd",
-                realname = "motd",
-                initialAwayMessage = "back later",
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    host = "irc.example",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    initialAwayMessage = "back later",
+                ),
+            )
 
         machine.start()
         machine.onMessage(cap("LS", "draft/pre-away"))
         machine.onMessage(cap("ACK", "draft/pre-away"))
-        val failure = machine.onMessage(
-            IrcMessage(command = "FAIL", params = listOf("AWAY", "INVALID_PARAMS", "rejected")),
-        ).single() as RegistrationStateMachine.Action.Emit
+        val failure =
+            machine
+                .onMessage(
+                    IrcMessage(command = "FAIL", params = listOf("AWAY", "INVALID_PARAMS", "rejected")),
+                ).single() as RegistrationStateMachine.Action.Emit
         val reply = failure.event as IrcEvent.StandardReply
         assertEquals("AWAY", reply.commandName)
 
@@ -365,26 +423,28 @@ class RegistrationStateMachineTest {
 
     @Test
     fun `account network authcid negotiates replay safety before fallback ready`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                host = "soju",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd",
-                realname = "motd",
-                saslUser = "motd/libera",
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    host = "soju",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    saslUser = "motd/libera",
+                ),
+            )
 
         machine.start()
-        val req = machine.onMessage(
-            cap(
-                "LS",
-                "cap-notify sasl soju.im/bouncer-networks draft/chathistory batch message-tags " +
-                    "server-time znc.in/server-time-iso echo-message",
-            ),
-        )
+        val req =
+            machine.onMessage(
+                cap(
+                    "LS",
+                    "cap-notify sasl soju.im/bouncer-networks draft/chathistory batch message-tags " +
+                        "server-time znc.in/server-time-iso echo-message",
+                ),
+            )
         val replayBarrier = "sasl draft/chathistory batch message-tags server-time"
         assertEquals(listOf("CAP REQ :$replayBarrier"), req.sentLines())
 
@@ -399,17 +459,18 @@ class RegistrationStateMachineTest {
 
     @Test
     fun `normal bouncer welcome exposes deferred capability decisions`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                host = "soju",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd",
-                realname = "motd",
-                bouncerNetId = "2",
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    host = "soju",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    bouncerNetId = "2",
+                ),
+            )
         machine.start()
         val replayBarrier =
             "sasl soju.im/bouncer-networks draft/chathistory batch message-tags server-time"
@@ -425,17 +486,18 @@ class RegistrationStateMachineTest {
 
     @Test
     fun `fallback CAP DEL updates ready snapshot and drops stale deferred caps`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                host = "soju",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd",
-                realname = "motd",
-                bouncerNetId = "2",
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    host = "soju",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    bouncerNetId = "2",
+                ),
+            )
 
         machine.start()
         val replayBarrier =
@@ -458,17 +520,18 @@ class RegistrationStateMachineTest {
 
     @Test
     fun `fallback CAP NEW adds newly advertised desired cap to deferred requests`() {
-        val machine = RegistrationStateMachine(
-            IrcClientConfig(
-                host = "soju",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd",
-                realname = "motd",
-                bouncerNetId = "2",
-            ),
-        )
+        val machine =
+            RegistrationStateMachine(
+                IrcClientConfig(
+                    host = "soju",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    bouncerNetId = "2",
+                ),
+            )
 
         machine.start()
         val replayBarrier =
@@ -476,9 +539,10 @@ class RegistrationStateMachineTest {
         machine.onMessage(cap("LS", replayBarrier))
         machine.onMessage(cap("ACK", replayBarrier))
 
-        val actions = machine.onMessage(
-            cap("NEW", "draft/metadata-2=before-connect,max-keys=0,max-value-bytes=1"),
-        )
+        val actions =
+            machine.onMessage(
+                cap("NEW", "draft/metadata-2=before-connect,max-keys=0,max-value-bytes=1"),
+            )
 
         assertTrue(actions.deferredLines().contains("CAP REQ :draft/metadata-2"))
         val ready = actions.filterIsInstance<RegistrationStateMachine.Action.Complete>().single()
@@ -486,12 +550,12 @@ class RegistrationStateMachineTest {
         assertTrue("draft/metadata-2" in ready.deferredCaps)
     }
 
-    private fun cap(subcommand: String, caps: String) =
-        IrcMessage(command = "CAP", params = listOf("*", subcommand, caps))
+    private fun cap(
+        subcommand: String,
+        caps: String,
+    ) = IrcMessage(command = "CAP", params = listOf("*", subcommand, caps))
 
-    private fun List<RegistrationStateMachine.Action>.sentLines(): List<String> =
-        filterIsInstance<RegistrationStateMachine.Action.Send>().map { it.line }
+    private fun List<RegistrationStateMachine.Action>.sentLines(): List<String> = filterIsInstance<RegistrationStateMachine.Action.Send>().map { it.line }
 
-    private fun List<RegistrationStateMachine.Action>.deferredLines(): List<String> =
-        filterIsInstance<RegistrationStateMachine.Action.SendDeferred>().map { it.line }
+    private fun List<RegistrationStateMachine.Action>.deferredLines(): List<String> = filterIsInstance<RegistrationStateMachine.Action.SendDeferred>().map { it.line }
 }

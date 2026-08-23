@@ -3,10 +3,10 @@ package io.github.trevarj.motd.irc.client
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -51,16 +51,17 @@ internal class LagMonitor(
     fun start() {
         stop()
         sink.value = null
-        job = scope.launch {
-            while (isActive) {
-                delay(intervalMs)
-                if (!isRegistered()) continue
-                pruneStale()
-                val token = "motd-lag-${counter.incrementAndGet()}"
-                pending[token] = nowMs()
-                runCatching { sendPing(token) }
+        job =
+            scope.launch {
+                while (isActive) {
+                    delay(intervalMs)
+                    if (!isRegistered()) continue
+                    pruneStale()
+                    val token = "motd-lag-${counter.incrementAndGet()}"
+                    pending[token] = nowMs()
+                    runCatching { sendPing(token) }
+                }
             }
-        }
     }
 
     /**
@@ -100,9 +101,11 @@ internal class LagMonitor(
 
     companion object {
         const val DEFAULT_INTERVAL_MS = 30_000L
+
         // Drop probes whose PONG is taking longer than twice the cadence; the watchdog owns the
         // real dead-connection decision, so lingering entries only risk matching a very late echo.
         const val STALE_AFTER_MS = 2 * DEFAULT_INTERVAL_MS
+
         // Ignore readings beyond this threshold rather than flashing a bogus multi-minute value.
         const val MAX_LAG_MS = 5 * 60 * 1000L
     }

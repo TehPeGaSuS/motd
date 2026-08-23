@@ -7,22 +7,22 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.PushKeys
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.service.DeliveryMode
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import io.github.trevarj.motd.data.prefs.PresenceMode
 
 class PushInstanceCoordinatorTest {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -35,95 +35,210 @@ class PushInstanceCoordinatorTest {
         val registered = mutableListOf<String>()
         val unregistered = mutableListOf<String>()
         val saved = mutableListOf<String>()
+
         override fun getDistributors(): List<String> = installed
+
         override fun getAckDistributor(): String? = acked
+
         override fun saveDistributor(distributor: String) {
-            saved.add(distributor); acked = distributor
+            saved.add(distributor)
+            acked = distributor
         }
-        override fun registerApp(instance: String) { registered.add(instance) }
-        override fun unregisterApp(instance: String) { unregistered.add(instance) }
+
+        override fun registerApp(instance: String) {
+            registered.add(instance)
+        }
+
+        override fun unregisterApp(instance: String) {
+            unregistered.add(instance)
+        }
     }
 
-    private class FakePushPrefs(private val endpoints: MutableMap<Long, String> = mutableMapOf()) : PushPrefs {
+    private class FakePushPrefs(
+        private val endpoints: MutableMap<Long, String> = mutableMapOf(),
+    ) : PushPrefs {
         override suspend fun endpoints(): Map<Long, String> = endpoints.toMap()
+
         override suspend fun endpointFor(networkId: Long): String? = endpoints[networkId]
-        override suspend fun setEndpointFor(networkId: Long, endpoint: String?) {
+
+        override suspend fun setEndpointFor(
+            networkId: Long,
+            endpoint: String?,
+        ) {
             if (endpoint == null) endpoints.remove(networkId) else endpoints[networkId] = endpoint
         }
-        override suspend fun clearEndpoints() { endpoints.clear() }
+
+        override suspend fun clearEndpoints() {
+            endpoints.clear()
+        }
+
         override suspend fun keys(): PushKeys? = null
+
         override suspend fun setKeys(keys: PushKeys) = Unit
     }
 
     private class RecordingHealthStore : PushHealthStore {
         override val health: Flow<Map<Long, NetworkPushHealth>> = MutableStateFlow(emptyMap())
         val endpointRequests = mutableListOf<Long>()
+
         override suspend fun snapshot() = emptyMap<Long, NetworkPushHealth>()
-        override suspend fun requestingEndpoint(networkId: Long) { endpointRequests += networkId }
-        override suspend fun endpointReceived(networkId: Long, endpoint: String) = Unit
+
+        override suspend fun requestingEndpoint(networkId: Long) {
+            endpointRequests += networkId
+        }
+
+        override suspend fun endpointReceived(
+            networkId: Long,
+            endpoint: String,
+        ) = Unit
+
         override suspend fun waitingForServer(networkId: Long) = Unit
-        override suspend fun capability(networkId: Long, supported: Boolean) = Unit
+
+        override suspend fun capability(
+            networkId: Long,
+            supported: Boolean,
+        ) = Unit
+
         override suspend fun verifying(networkId: Long) = Unit
+
         override suspend fun registered(networkId: Long) = Unit
+
         override suspend fun probeDelivered(networkId: Long) = Unit
+
         override suspend fun messageDelivered(networkId: Long) = Unit
-        override suspend fun failed(networkId: Long, code: String) = Unit
-        override suspend fun warning(networkId: Long, code: String) = Unit
+
+        override suspend fun failed(
+            networkId: Long,
+            code: String,
+        ) = Unit
+
+        override suspend fun warning(
+            networkId: Long,
+            code: String,
+        ) = Unit
+
         override suspend fun clear(networkId: Long) = Unit
+
         override suspend fun retain(networkIds: Set<Long>) = Unit
     }
 
-    private class FakeSettingsRepository(mode: DeliveryMode) : SettingsRepository {
+    private class FakeSettingsRepository(
+        mode: DeliveryMode,
+    ) : SettingsRepository {
         override val settings = MutableStateFlow(Settings(ThemeMode.SYSTEM, true, mode))
+
         override suspend fun setThemeMode(m: ThemeMode) = Unit
+
         override suspend fun setDynamicColor(enabled: Boolean) = Unit
+
         override suspend fun setDeliveryMode(m: DeliveryMode) {
             settings.value = settings.value.copy(deliveryMode = m)
         }
+
         // Round 4 members: unused by this test.
         override suspend fun setLayoutDensity(d: LayoutDensity) = Unit
+
         override suspend fun setNickColorsEnabled(enabled: Boolean) = Unit
+
         override suspend fun setNickColorPalette(p: NickColorPalette) = Unit
-        override suspend fun setNickColorOverride(nick: String, hue: Int?) = Unit
-        override suspend fun setFriend(nick: String, isFriend: Boolean) = Unit
-        override suspend fun setFool(nick: String, isFool: Boolean) = Unit
+
+        override suspend fun setNickColorOverride(
+            nick: String,
+            hue: Int?,
+        ) = Unit
+
+        override suspend fun setFriend(
+            nick: String,
+            isFriend: Boolean,
+        ) = Unit
+
+        override suspend fun setFool(
+            nick: String,
+            isFool: Boolean,
+        ) = Unit
+
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
+
         override suspend fun setPresenceMode(m: PresenceMode) = Unit
+
         override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
+
         override suspend fun setChatWallpaper(w: io.github.trevarj.motd.data.prefs.ChatWallpaper) = Unit
+
         override suspend fun setShowComposerEmoji(show: Boolean) = Unit
+
         override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
+
         override suspend fun setHistorySyncDepth(d: io.github.trevarj.motd.data.prefs.HistorySyncDepth) = Unit
+
         override suspend fun setAutoAwayEnabled(enabled: Boolean) = Unit
+
         override suspend fun setAutoAwayMinutes(minutes: Int) = Unit
+
         override suspend fun setAutoAwayMessage(message: String) = Unit
     }
 
-    private class FakeNetworkDao(nets: List<NetworkEntity>) : NetworkDao {
+    private class FakeNetworkDao(
+        nets: List<NetworkEntity>,
+    ) : NetworkDao {
         val flow = MutableStateFlow(nets)
+
         override fun observeAll(): Flow<List<NetworkEntity>> = flow
+
         override suspend fun connectable(): List<NetworkEntity> = flow.value.filter { it.autoConnect }
+
         override suspend fun byId(id: Long): NetworkEntity? = flow.value.firstOrNull { it.id == id }
+
         override suspend fun insert(n: NetworkEntity): Long = 0
+
         override suspend fun update(n: NetworkEntity) = Unit
-        override suspend fun updateBouncerConnection(id: Long, host: String, port: Int, nick: String) = Unit
+
+        override suspend fun updateBouncerConnection(
+            id: Long,
+            host: String,
+            port: Int,
+            nick: String,
+        ) = Unit
+
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = emptyList()
-        override suspend fun localTreeIds(id: Long): List<Long> = flow.value
-            .filter { it.id == id || it.parentId == id }
-            .map { it.id }
+
+        override suspend fun localTreeIds(id: Long): List<Long> =
+            flow.value
+                .filter { it.id == id || it.parentId == id }
+                .map { it.id }
+
         override suspend fun deleteMembersForNetworks(networkIds: List<Long>) = Unit
+
         override suspend fun deleteReactionsForNetworks(networkIds: List<Long>) = Unit
+
         override suspend fun deleteUsersForNetworks(networkIds: List<Long>) = Unit
+
         override suspend fun deleteNetworkRows(networkIds: List<Long>) = Unit
+
         override suspend fun allNow(): List<NetworkEntity> = flow.value
+
         override suspend fun maxOrdering(): Int = flow.value.maxOfOrNull { it.ordering } ?: -1
+
         override suspend fun idsInOrder(): List<Long> = flow.value.map { it.id }
-        override suspend fun setOrdering(id: Long, ordering: Int) = Unit
+
+        override suspend fun setOrdering(
+            id: Long,
+            ordering: Int,
+        ) = Unit
     }
 
-    private fun net(id: Long, autoConnect: Boolean = true) = NetworkEntity(
-        id = id, name = "n$id", role = NetworkRole.DIRECT,
-        host = "h", port = 6697, nick = "me", username = "me", realname = "me",
+    private fun net(
+        id: Long,
+        autoConnect: Boolean = true,
+    ) = NetworkEntity(
+        id = id,
+        name = "n$id",
+        role = NetworkRole.DIRECT,
+        host = "h",
+        port = 6697,
+        nick = "me",
+        username = "me",
+        realname = "me",
         autoConnect = autoConnect,
     )
 
@@ -142,74 +257,81 @@ class PushInstanceCoordinatorTest {
     )
 
     @Test
-    fun push_mode_registers_every_connectable_and_saves_distributor() = runTest {
-        val up = FakeUnifiedPushApi(installed = listOf("dist.a"), acked = null)
-        coordinator(up).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(1L, 2L))
+    fun push_mode_registers_every_connectable_and_saves_distributor() =
+        runTest {
+            val up = FakeUnifiedPushApi(installed = listOf("dist.a"), acked = null)
+            coordinator(up).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(1L, 2L))
 
-        assertEquals(listOf("dist.a"), up.saved) // auto-selected first distributor
-        assertEquals(setOf("1", "2"), up.registered.toSet())
-        assertTrue(up.unregistered.isEmpty())
-    }
-
-    @Test
-    fun already_acked_distributor_is_not_resaved() = runTest {
-        val up = FakeUnifiedPushApi(acked = "dist.a")
-        coordinator(up).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(1L))
-        assertTrue(up.saved.isEmpty())
-        assertEquals(listOf("1"), up.registered)
-    }
+            assertEquals(listOf("dist.a"), up.saved) // auto-selected first distributor
+            assertEquals(setOf("1", "2"), up.registered.toSet())
+            assertTrue(up.unregistered.isEmpty())
+        }
 
     @Test
-    fun missing_endpoint_is_recorded_while_waiting_for_distributor_callback() = runTest {
-        val up = FakeUnifiedPushApi(acked = "dist.a")
-        val health = RecordingHealthStore()
-
-        coordinator(up, health = health).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(7L))
-
-        assertEquals(listOf(7L), health.endpointRequests)
-        assertEquals(listOf("7"), up.registered)
-    }
+    fun already_acked_distributor_is_not_resaved() =
+        runTest {
+            val up = FakeUnifiedPushApi(acked = "dist.a")
+            coordinator(up).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(1L))
+            assertTrue(up.saved.isEmpty())
+            assertEquals(listOf("1"), up.registered)
+        }
 
     @Test
-    fun no_distributor_is_a_no_op() = runTest {
-        val up = FakeUnifiedPushApi(installed = emptyList(), acked = null)
-        coordinator(up).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(1L, 2L))
-        assertTrue(up.registered.isEmpty())
-        assertTrue(up.unregistered.isEmpty())
-        assertTrue(up.saved.isEmpty())
-    }
+    fun missing_endpoint_is_recorded_while_waiting_for_distributor_callback() =
+        runTest {
+            val up = FakeUnifiedPushApi(acked = "dist.a")
+            val health = RecordingHealthStore()
+
+            coordinator(up, health = health).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(7L))
+
+            assertEquals(listOf(7L), health.endpointRequests)
+            assertEquals(listOf("7"), up.registered)
+        }
 
     @Test
-    fun multiple_distributors_wait_for_explicit_choice() = runTest {
-        val up = FakeUnifiedPushApi(installed = listOf("dist.a", "dist.b"), acked = null)
-        coordinator(up).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(1L))
-
-        assertTrue(up.saved.isEmpty())
-        assertTrue(up.registered.isEmpty())
-    }
-
-    @Test
-    fun socket_mode_unregisters_all_connectable_and_held_endpoints() = runTest {
-        val up = FakeUnifiedPushApi()
-        val prefs = FakePushPrefs(mutableMapOf(3L to "https://e/3"))
-        coordinator(up, prefs).reconcile(DeliveryMode.PERSISTENT_SOCKET, setOf(1L, 2L))
-
-        assertTrue(up.registered.isEmpty())
-        // connectable {1,2} + held endpoint {3} all unregistered under socket mode.
-        assertEquals(setOf("1", "2", "3"), up.unregistered.toSet())
-    }
+    fun no_distributor_is_a_no_op() =
+        runTest {
+            val up = FakeUnifiedPushApi(installed = emptyList(), acked = null)
+            coordinator(up).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(1L, 2L))
+            assertTrue(up.registered.isEmpty())
+            assertTrue(up.unregistered.isEmpty())
+            assertTrue(up.saved.isEmpty())
+        }
 
     @Test
-    fun network_removed_under_push_unregisters_the_delta() = runTest {
-        val up = FakeUnifiedPushApi(acked = "dist.a")
-        // We hold an endpoint for a network no longer connectable.
-        val prefs = FakePushPrefs(mutableMapOf(1L to "https://e/1", 9L to "https://e/9"))
-        coordinator(up, prefs).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(1L))
+    fun multiple_distributors_wait_for_explicit_choice() =
+        runTest {
+            val up = FakeUnifiedPushApi(installed = listOf("dist.a", "dist.b"), acked = null)
+            coordinator(up).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(1L))
 
-        assertEquals(listOf("1"), up.registered)
-        // held {1,9} + connectable {1} - desired {1} = {9}
-        assertEquals(setOf("9"), up.unregistered.toSet())
-    }
+            assertTrue(up.saved.isEmpty())
+            assertTrue(up.registered.isEmpty())
+        }
+
+    @Test
+    fun socket_mode_unregisters_all_connectable_and_held_endpoints() =
+        runTest {
+            val up = FakeUnifiedPushApi()
+            val prefs = FakePushPrefs(mutableMapOf(3L to "https://e/3"))
+            coordinator(up, prefs).reconcile(DeliveryMode.PERSISTENT_SOCKET, setOf(1L, 2L))
+
+            assertTrue(up.registered.isEmpty())
+            // connectable {1,2} + held endpoint {3} all unregistered under socket mode.
+            assertEquals(setOf("1", "2", "3"), up.unregistered.toSet())
+        }
+
+    @Test
+    fun network_removed_under_push_unregisters_the_delta() =
+        runTest {
+            val up = FakeUnifiedPushApi(acked = "dist.a")
+            // We hold an endpoint for a network no longer connectable.
+            val prefs = FakePushPrefs(mutableMapOf(1L to "https://e/1", 9L to "https://e/9"))
+            coordinator(up, prefs).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(1L))
+
+            assertEquals(listOf("1"), up.registered)
+            // held {1,9} + connectable {1} - desired {1} = {9}
+            assertEquals(setOf("9"), up.unregistered.toSet())
+        }
 
     @Test
     fun start_collects_and_reconciles_from_live_streams() {

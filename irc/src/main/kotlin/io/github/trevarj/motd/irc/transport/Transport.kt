@@ -28,6 +28,7 @@ interface IrcTransport {
 
     /** Send one line; CRLF appended by the transport. */
     suspend fun send(line: String)
+
     suspend fun close()
 }
 
@@ -36,7 +37,9 @@ interface IrcTransport {
  * Unlike a transient IO failure, retrying cannot fix it; [IrcClient] exposes it as a fatal failed
  * state so the connection actor parks until the user changes the setting.
  */
-class TransportConfigurationException(message: String) : IllegalStateException(message)
+class TransportConfigurationException(
+    message: String,
+) : IllegalStateException(message)
 
 fun interface TransportFactory {
     /**
@@ -46,7 +49,13 @@ fun interface TransportFactory {
      * the connection is dialed through a SOCKS5 proxy with remote DNS; the pure-JVM default ignores
      * it too. TLS/pinning still key on the real [host]:[port] through the tunnel.
      */
-    fun create(host: String, port: Int, tls: Boolean, wsUrl: String?, proxy: Proxy?): IrcTransport
+    fun create(
+        host: String,
+        port: Int,
+        tls: Boolean,
+        wsUrl: String?,
+        proxy: Proxy?,
+    ): IrcTransport
 }
 
 /** okio-over-Socket/SSLSocket implementation lives in :irc (JVM default factory). */
@@ -80,7 +89,6 @@ class OkioLineTransport(
      */
     private val onConnectPhase: (phase: String, elapsedMs: Long) -> Unit = { _, _ -> },
 ) : IrcTransport {
-
     private companion object {
         const val CONNECT_TIMEOUT_MS = 15_000
         const val LINE_LIMIT = 16_384L
@@ -99,32 +107,35 @@ class OkioLineTransport(
             // Proxied path: Socket(proxy) + an UNRESOLVED destination forces remote DNS through the
             // SOCKS5 proxy (leak-free, .onion-capable). Direct path keeps the resolving address.
             val raw = if (proxy != null) Socket(proxy) else Socket()
-            val dest = if (proxy != null) {
-                InetSocketAddress.createUnresolved(host, port)
-            } else {
-                InetSocketAddress(host, port)
-            }
+            val dest =
+                if (proxy != null) {
+                    InetSocketAddress.createUnresolved(host, port)
+                } else {
+                    InetSocketAddress(host, port)
+                }
             raw.connect(dest, CONNECT_TIMEOUT_MS)
             raw.keepAlive = true
             raw.soTimeout = 0 // reads block; watchdog handles death.
             onConnectPhase("socket_connected", System.nanoTime() / 1_000_000 - dialStartMs)
 
-            val finalSocket: Socket = if (tls) {
-                val ctx = sslContext ?: SSLContext.getDefault()
-                val ssl = ctx.socketFactory.createSocket(raw, host, port, true) as SSLSocket
-                // createSocket(host, ...) sets SNI; endpoint identification adds hostname
-                // verification on top, which we skip for leaf-pinned hosts (verifyHostname=false).
-                if (verifyHostname) {
-                    ssl.sslParameters = ssl.sslParameters.apply {
-                        endpointIdentificationAlgorithm = "HTTPS"
+            val finalSocket: Socket =
+                if (tls) {
+                    val ctx = sslContext ?: SSLContext.getDefault()
+                    val ssl = ctx.socketFactory.createSocket(raw, host, port, true) as SSLSocket
+                    // createSocket(host, ...) sets SNI; endpoint identification adds hostname
+                    // verification on top, which we skip for leaf-pinned hosts (verifyHostname=false).
+                    if (verifyHostname) {
+                        ssl.sslParameters =
+                            ssl.sslParameters.apply {
+                                endpointIdentificationAlgorithm = "HTTPS"
+                            }
                     }
+                    ssl.startHandshake()
+                    onConnectPhase("tls_done", System.nanoTime() / 1_000_000 - dialStartMs)
+                    ssl
+                } else {
+                    raw
                 }
-                ssl.startHandshake()
-                onConnectPhase("tls_done", System.nanoTime() / 1_000_000 - dialStartMs)
-                ssl
-            } else {
-                raw
-            }
 
             socket = finalSocket
             source = finalSocket.source().buffer()
@@ -132,20 +143,22 @@ class OkioLineTransport(
         }
     }
 
-    override val incoming: Flow<String> = channelFlow {
-        val src = source ?: throw IllegalStateException("connect() not called")
-        while (true) {
-            val line = try {
-                src.readUtf8LineStrict(LINE_LIMIT)
-            } catch (e: EOFException) {
-                // Clean EOF: complete the flow normally.
-                break
+    override val incoming: Flow<String> =
+        channelFlow {
+            val src = source ?: throw IllegalStateException("connect() not called")
+            while (true) {
+                val line =
+                    try {
+                        src.readUtf8LineStrict(LINE_LIMIT)
+                    } catch (e: EOFException) {
+                        // Clean EOF: complete the flow normally.
+                        break
+                    }
+                // Suspending send; respects backpressure and channel closure.
+                send(line)
             }
-            // Suspending send; respects backpressure and channel closure.
-            send(line)
-        }
-        // Returning from the block completes the channelFlow normally.
-    }.flowOn(Dispatchers.IO)
+            // Returning from the block completes the channelFlow normally.
+        }.flowOn(Dispatchers.IO)
 
     override suspend fun send(line: String) {
         val s = sink ?: throw IllegalStateException("connect() not called")

@@ -108,15 +108,16 @@ class CapabilityAliasTest {
     }
 
     @Test fun `issue 32 capability set requests only real CAP names`() {
-        val advertised = setOf(
-            "standard-replies",
-            "draft/relaymsg",
-            "draft/pre-away",
-            "draft/channel-rename",
-            "message-ids",
-            "utf8only",
-            "znc.in/playback",
-        )
+        val advertised =
+            setOf(
+                "standard-replies",
+                "draft/relaymsg",
+                "draft/pre-away",
+                "draft/channel-rename",
+                "message-ids",
+                "utf8only",
+                "znc.in/playback",
+            )
         assertEquals(
             setOf("standard-replies", "draft/relaymsg", "draft/pre-away", "draft/channel-rename"),
             CapNegotiator.requestSet(advertised, emptySet()),

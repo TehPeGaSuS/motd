@@ -10,6 +10,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -22,23 +27,23 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -47,8 +52,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -96,11 +101,6 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -109,11 +109,22 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -122,31 +133,20 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.res.pluralStringResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -161,9 +161,9 @@ import io.github.trevarj.motd.attachment.sojuFileHostAdvertised
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
 import io.github.trevarj.motd.audio.AudioMetadata
-import io.github.trevarj.motd.audio.AudioPlaybackState
-import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.audio.AudioPlaybackOrigin
+import io.github.trevarj.motd.audio.AudioPlaybackRequest
+import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.audio.CachedAudioMetadata
 import io.github.trevarj.motd.audio.VoiceSendProgress
@@ -179,13 +179,12 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
-import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.canSendReactionTags
+import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
-import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Avatar
@@ -194,24 +193,25 @@ import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.WaveformScrubber
+import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.ConversationTypography
+import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdSizes
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.spacingFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -245,8 +245,7 @@ private const val SCROLL_TO_BOTTOM_FAB_SETTLE_MS = 160
 private const val SCROLL_TO_BOTTOM_FAB_HELD_SCALE = 0.92f
 
 /** Continuous icon compression used while the FAB's hold ring fills. */
-internal fun scrollToBottomFabIconScale(progress: Float): Float =
-    1f - (1f - SCROLL_TO_BOTTOM_FAB_HELD_SCALE) * progress.coerceIn(0f, 1f)
+internal fun scrollToBottomFabIconScale(progress: Float): Float = 1f - (1f - SCROLL_TO_BOTTOM_FAB_HELD_SCALE) * progress.coerceIn(0f, 1f)
 
 internal class ChatForegroundLifecycleGate(
     private val onResume: () -> Unit,
@@ -263,10 +262,12 @@ internal class ChatForegroundLifecycleGate(
     fun onEvent(event: Lifecycle.Event) {
         when (event) {
             Lifecycle.Event.ON_RESUME -> sync(true)
+
             Lifecycle.Event.ON_PAUSE,
             Lifecycle.Event.ON_STOP,
             Lifecycle.Event.ON_DESTROY,
             -> sync(false)
+
             else -> Unit
         }
     }
@@ -305,15 +306,16 @@ fun ChatScreen(
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
-    val onHeaderBack = remember(focusManager, keyboardController, onBack) {
-        {
-            dismissKeyboardBeforeNavigating(
-                clearFocus = focusManager::clearFocus,
-                hideKeyboard = { keyboardController?.hide() },
-                onBack = onBack,
-            )
+    val onHeaderBack =
+        remember(focusManager, keyboardController, onBack) {
+            {
+                dismissKeyboardBeforeNavigating(
+                    clearFocus = focusManager::clearFocus,
+                    hideKeyboard = { keyboardController?.hide() },
+                    onBack = onBack,
+                )
+            }
         }
-    }
     var mentionRequest by remember { mutableStateOf<Pair<Long, String>?>(null) }
     var avatarEditorOpen by rememberSaveable { mutableStateOf(false) }
     var avatarUploadOpen by rememberSaveable { mutableStateOf(false) }
@@ -336,21 +338,23 @@ fun ChatScreen(
     val knownNicks by viewModel.knownNicks.collectAsStateWithLifecycle()
     val voiceState by voiceViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val voicePermissionGate = remember(context, voiceViewModel) {
-        VoiceRecordingPermissionGate(
-            permissionGranted = {
-                ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-                    PackageManager.PERMISSION_GRANTED
-            },
-            onStart = voiceViewModel::startRecording,
-            onDenied = voiceViewModel::recordingPermissionDenied,
-        )
-    }
-    val microphonePermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        voicePermissionGate.onPermissionResult(granted)
-    }
+    val voicePermissionGate =
+        remember(context, voiceViewModel) {
+            VoiceRecordingPermissionGate(
+                permissionGranted = {
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                        PackageManager.PERMISSION_GRANTED
+                },
+                onStart = voiceViewModel::startRecording,
+                onDenied = voiceViewModel::recordingPermissionDenied,
+            )
+        }
+    val microphonePermission =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { granted ->
+            voicePermissionGate.onPermissionResult(granted)
+        }
 
     fun startVoiceRecording(locked: Boolean) {
         if (voicePermissionGate.start(locked)) {
@@ -363,17 +367,18 @@ fun ChatScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     var destinationResumed by remember(lifecycleOwner) { mutableStateOf(false) }
     DisposableEffect(lifecycleOwner, viewModel, voiceViewModel) {
-        val gate = ChatForegroundLifecycleGate(
-            onResume = {
-                destinationResumed = true
-                viewModel.onResume()
-            },
-            onPause = {
-                destinationResumed = false
-                viewModel.onPause()
-                voiceViewModel.stopForBackground()
-            },
-        )
+        val gate =
+            ChatForegroundLifecycleGate(
+                onResume = {
+                    destinationResumed = true
+                    viewModel.onResume()
+                },
+                onPause = {
+                    destinationResumed = false
+                    viewModel.onPause()
+                    voiceViewModel.stopForBackground()
+                },
+            )
         val observer = LifecycleEventObserver { _, event -> gate.onEvent(event) }
         lifecycleOwner.lifecycle.addObserver(observer)
         gate.sync(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
@@ -385,9 +390,10 @@ fun ChatScreen(
 
     val chipsByMsgid by viewModel.reactionChips.collectAsStateWithLifecycle()
     val identityRules by viewModel.identityRules.collectAsStateWithLifecycle()
-    val reactionChipsForMessage = remember(chipsByMsgid) {
-        { msgid: String -> chipsByMsgid[msgid].orEmpty() }
-    }
+    val reactionChipsForMessage =
+        remember(chipsByMsgid) {
+            { msgid: String -> chipsByMsgid[msgid].orEmpty() }
+        }
     // The VM resolves the live ISUPPORT normalizer. Memoize the returned lambda so unrelated
     // header/composer state changes do not invalidate every lazy-list row through a new function
     // identity.
@@ -576,13 +582,18 @@ fun ChatScreen(
             isFool = identityRules.matchesConfiguredNick(sheet.nick, settings.fools),
             canModerate = viewModel.canModerate(),
             whois = sheet.details,
-            presence = state.buffer?.networkId?.let { networkId ->
-                state.presence[
-                    io.github.trevarj.motd.service.PresenceKey(networkId, norm(sheet.nick)),
-                ]
-            },
+            presence =
+                state.buffer?.networkId?.let { networkId ->
+                    state.presence[
+                        io.github.trevarj.motd.service
+                            .PresenceKey(networkId, norm(sheet.nick)),
+                    ]
+                },
             onDismiss = viewModel::dismissNickSheet,
-            onMessage = { viewModel.dismissNickSheet(); viewModel.submit("/query ${sheet.nick}", onOpenBuffer) },
+            onMessage = {
+                viewModel.dismissNickSheet()
+                viewModel.submit("/query ${sheet.nick}", onOpenBuffer)
+            },
             onMention = {
                 mentionRequest = System.nanoTime() to "${sheet.nick}: "
                 viewModel.dismissNickSheet()
@@ -592,7 +603,10 @@ fun ChatScreen(
             onIgnoreNetwork = { viewModel.ignoreNickOnNetwork(sheet.nick) },
             onOp = { grant -> viewModel.setMemberMode(sheet.nick, 'o', grant) },
             onVoice = { grant -> viewModel.setMemberMode(sheet.nick, 'v', grant) },
-            onKick = { reason -> viewModel.dismissNickSheet(); viewModel.kick(sheet.nick, reason) },
+            onKick = { reason ->
+                viewModel.dismissNickSheet()
+                viewModel.kick(sheet.nick, reason)
+            },
             onBan = { mask, alsoKick ->
                 viewModel.dismissNickSheet()
                 viewModel.banWithMask(sheet.nick, mask, alsoKick)
@@ -722,7 +736,9 @@ fun ChatContent(
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
     hiddenFoolsRevealed: Boolean = false,
     onHiddenFoolsRevealedChange: (Boolean) -> Unit = {},
-    chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection = io.github.trevarj.motd.data.prefs.WallpaperSelection(),
+    chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection =
+        io.github.trevarj.motd.data.prefs
+            .WallpaperSelection(),
     conversationFontScalePercent: Int = io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT,
     messageSpacing: io.github.trevarj.motd.data.prefs.MessageSpacing =
         io.github.trevarj.motd.data.prefs.MessageSpacing.DEFAULT,
@@ -814,46 +830,50 @@ fun ChatContent(
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
     var liveEntryIds by remember(state.buffer?.id) { mutableStateOf(emptySet<Long>()) }
     val presenceMode = state.conversationPresence.effective
-    val visibilityPolicy = remember(
-        presenceMode,
-        fools,
-        foolsMode,
-        hiddenFoolsRevealed,
-        identityRules,
-    ) {
-        MessageVisibilityPolicy(
-            MessageVisibilitySpec(
-                presenceMode,
-                fools,
-                foolsMode,
-                revealHiddenFools = hiddenFoolsRevealed,
-            ),
+    val visibilityPolicy =
+        remember(
+            presenceMode,
+            fools,
+            foolsMode,
+            hiddenFoolsRevealed,
             identityRules,
-        )
-    }
+        ) {
+            MessageVisibilityPolicy(
+                MessageVisibilitySpec(
+                    presenceMode,
+                    fools,
+                    foolsMode,
+                    revealHiddenFools = hiddenFoolsRevealed,
+                ),
+                identityRules,
+            )
+        }
     // Scroll-driven paging: the footer reflects the Paging APPEND state at the older end directly.
     val olderHistoryLoad = items.loadState.append
-    val historyUiState = chatHistoryUiState(
-        bufferType = state.buffer?.type,
-        connectionState = state.connState,
-        availability = historyAvailability,
-        append = olderHistoryLoad,
-        historyComplete = state.buffer?.historyComplete == true,
-    )
-    val unreadEntryLabel = unreadEntrySnapshot?.let { snapshot ->
-        pluralStringResource(
-            R.plurals.chat_new_messages_count,
-            snapshot.loadedCount,
-            if (snapshot.lowerBound) "${snapshot.loadedCount}+" else snapshot.loadedCount.toString(),
+    val historyUiState =
+        chatHistoryUiState(
+            bufferType = state.buffer?.type,
+            connectionState = state.connState,
+            availability = historyAvailability,
+            append = olderHistoryLoad,
+            historyComplete = state.buffer?.historyComplete == true,
         )
-    }
+    val unreadEntryLabel =
+        unreadEntrySnapshot?.let { snapshot ->
+            pluralStringResource(
+                R.plurals.chat_new_messages_count,
+                snapshot.loadedCount,
+                if (snapshot.lowerBound) "${snapshot.loadedCount}+" else snapshot.loadedCount.toString(),
+            )
+        }
     val newerHistoryLoad = items.loadState.prepend
-    val timelineHistoryStatus = timelineHistoryStatus(
-        refresh = items.loadState.refresh,
-        prepend = newerHistoryLoad,
-        itemCount = items.itemCount,
-        syncStatus = historySyncStatus,
-    )
+    val timelineHistoryStatus =
+        timelineHistoryStatus(
+            refresh = items.loadState.refresh,
+            prepend = newerHistoryLoad,
+            itemCount = items.itemCount,
+            syncStatus = historySyncStatus,
+        )
     val readyRetryGate = remember(items) { HistoryReadyRetryGate() }
     LaunchedEffect(historyAvailability, olderHistoryLoad) {
         if (readyRetryGate.update(historyAvailability, olderHistoryLoad)) {
@@ -861,9 +881,10 @@ fun ChatContent(
         }
     }
     val traceBufferId = state.buffer?.id
-    val traceSessionId = remember(traceBufferId) {
-        traceBufferId?.let { AutoFollowTrace.nextSessionId() }
-    }
+    val traceSessionId =
+        remember(traceBufferId) {
+            traceBufferId?.let { AutoFollowTrace.nextSessionId() }
+        }
     val scope = rememberCoroutineScope()
     // Expanded fool rows: keyed by MessageEntity.id, expand-only for the session.
     // Ephemeral by design (lost on config change; an accepted tradeoff).
@@ -873,15 +894,16 @@ fun ChatContent(
     val resources = LocalResources.current
     val snackbarHostState = remember { SnackbarHostState() }
     var pendingDccAccept by remember { mutableStateOf<PendingDccAccept?>(null) }
-    val dccDestinationPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream"),
-    ) { uri ->
-        val pending = pendingDccAccept
-        pendingDccAccept = null
-        if (uri != null && pending != null) {
-            onAcceptDccTransfer(pending.transferId, uri, pending.allowPrivateEndpoint)
+    val dccDestinationPicker =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("application/octet-stream"),
+        ) { uri ->
+            val pending = pendingDccAccept
+            pendingDccAccept = null
+            if (uri != null && pending != null) {
+                onAcceptDccTransfer(pending.transferId, uri, pending.allowPrivateEndpoint)
+            }
         }
-    }
     LaunchedEffect(voiceState.notice) {
         val notice = voiceState.notice ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(notice)
@@ -916,33 +938,36 @@ fun ChatContent(
     // The silhouette is decided at launch, before the pending row exists: predict whether the
     // landing row opens a new group or continues our own burst, against the newest row the flight
     // is not itself standing in for (its own row may already be in the pager by now).
-    val flightShowSender = remember(outgoingFlight?.token) {
-        val flight = outgoingFlight ?: return@remember true
-        if (selfNick.isEmpty()) return@remember true
-        val newest = (0 until minOf(items.itemCount, MAX_PLACEHOLDER_PROBES))
-            .asSequence()
-            .mapNotNull { items.peek(it) }
-            .firstOrNull { !flight.matches(it) }
-        predictFlightShowsSender(
-            newest = newest,
-            selfNick = selfNick,
-            normalizedSelf = nickNormalizer(selfNick),
-            nowMs = flight.launchedAtMs,
-        )
-    }
+    val flightShowSender =
+        remember(outgoingFlight?.token) {
+            val flight = outgoingFlight ?: return@remember true
+            if (selfNick.isEmpty()) return@remember true
+            val newest =
+                (0 until minOf(items.itemCount, MAX_PLACEHOLDER_PROBES))
+                    .asSequence()
+                    .mapNotNull { items.peek(it) }
+                    .firstOrNull { !flight.matches(it) }
+            predictFlightShowsSender(
+                newest = newest,
+                selfNick = selfNick,
+                normalizedSelf = nickNormalizer(selfNick),
+                nowMs = flight.launchedAtMs,
+            )
+        }
     // One spring per tap, carrying the bubble and opening the gap it lands in.
-    val flightMotion = remember(outgoingFlight?.token) {
-        // Reset here rather than in the effect below: effects are dispatched on the frame clock
-        // and can run after the new tap's first draw, which would then read the previous flight's
-        // landing rect and start the ghost mid-timeline instead of at the composer.
-        flightAnchors.landingRow = null
-        flightAnchors.ghostHeight = 0f
-        // The field still holds its pre-clear (possibly multi-line) rect during this
-        // composition; layout shrinks it afterwards, and composerShrink() measures against
-        // this pinned height.
-        flightAnchors.launchFieldHeight = flightAnchors.composerField?.height ?: 0f
-        SendFlightMotion()
-    }
+    val flightMotion =
+        remember(outgoingFlight?.token) {
+            // Reset here rather than in the effect below: effects are dispatched on the frame clock
+            // and can run after the new tap's first draw, which would then read the previous flight's
+            // landing rect and start the ghost mid-timeline instead of at the composer.
+            flightAnchors.landingRow = null
+            flightAnchors.ghostHeight = 0f
+            // The field still holds its pre-clear (possibly multi-line) rect during this
+            // composition; layout shrinks it afterwards, and composerShrink() measures against
+            // this pinned height.
+            flightAnchors.launchFieldHeight = flightAnchors.composerField?.height ?: 0f
+            SendFlightMotion()
+        }
     val flightProgress = remember(flightMotion) { { flightMotion.progress.value } }
     // Driven here rather than inside the overlay: the landing row's reveal must complete even if
     // the ghost never gets a composer rect to launch from, or the row would stay collapsed.
@@ -1046,29 +1071,32 @@ fun ChatContent(
         if (entryVeilLifted) return@LaunchedEffect
         // Bounded wait: a slow or offline entry degrades to today's visible correction rather than
         // a stuck blank pane.
-        val resolved = withTimeoutOrNull(ENTRY_VEIL_TIMEOUT_MS) {
-            snapshotFlow {
-                val entry = latestEntryState
-                // Both statements of settlement: the screen's own flag reveals a frame or two
-                // earlier, and the entry state carries it when the flag's keyed remember is
-                // rebuilt by the very transition that settles it.
-                val settled = initialPositionSettled || entry is EntryPositionState.Settled
-                settled to (entry is EntryPositionState.Unresolved)
-            }.first { (settled, unresolved) ->
-                shouldLiftEntryVeil(settled, unresolved, timedOut = false)
+        val resolved =
+            withTimeoutOrNull(ENTRY_VEIL_TIMEOUT_MS) {
+                snapshotFlow {
+                    val entry = latestEntryState
+                    // Both statements of settlement: the screen's own flag reveals a frame or two
+                    // earlier, and the entry state carries it when the flag's keyed remember is
+                    // rebuilt by the very transition that settles it.
+                    val settled = initialPositionSettled || entry is EntryPositionState.Settled
+                    settled to (entry is EntryPositionState.Unresolved)
+                }.first { (settled, unresolved) ->
+                    shouldLiftEntryVeil(settled, unresolved, timedOut = false)
+                }
             }
-        }
-        entryVeilLifted = shouldLiftEntryVeil(
-            initialPositionSettled = resolved?.first == true,
-            entryUnresolved = resolved?.second == true,
-            timedOut = resolved == null,
-        )
+        entryVeilLifted =
+            shouldLiftEntryVeil(
+                initialPositionSettled = resolved?.first == true,
+                entryUnresolved = resolved?.second == true,
+                timedOut = resolved == null,
+            )
         AutoFollowTrace.record("entry_veil_lifted", traceBufferId, traceSessionId) {
-            val reason = when {
-                resolved == null -> "timeout"
-                resolved.first -> "settled"
-                else -> "unresolved"
-            }
+            val reason =
+                when {
+                    resolved == null -> "timeout"
+                    resolved.first -> "settled"
+                    else -> "unresolved"
+                }
             "reason=$reason item_count=${items.itemCount}"
         }
     }
@@ -1079,10 +1107,11 @@ fun ChatContent(
     LaunchedEffect(traceBufferId, composerDraft.hydrated, composerDraft.revision) {
         if (traceBufferId == null || !composerDraft.hydrated) return@LaunchedEffect
         if (composerText.text != composerDraft.text) {
-            composerText = TextFieldValue(
-                composerDraft.text,
-                TextRange(composerDraft.text.length),
-            )
+            composerText =
+                TextFieldValue(
+                    composerDraft.text,
+                    TextRange(composerDraft.text.length),
+                )
         }
         if (!prefillConsumed) {
             prefillConsumed = true
@@ -1101,18 +1130,20 @@ fun ChatContent(
     val latestComposerText by rememberUpdatedState(composerText)
     val latestBufferType by rememberUpdatedState(state.buffer?.type)
     val latestVisibleReplyPrefix by rememberUpdatedState(visibleReplyPrefix)
-    val timelineReply = remember(onSetReply, onDraftChanged) {
-        { target: MessageEntity ->
-            onSetReply(target)
-            composerText = composerTextForReply(
-                value = latestComposerText,
-                sender = target.sender,
-                bufferType = latestBufferType,
-                visibleReplyPrefix = latestVisibleReplyPrefix,
-            )
-            onDraftChanged(composerText.text)
+    val timelineReply =
+        remember(onSetReply, onDraftChanged) {
+            { target: MessageEntity ->
+                onSetReply(target)
+                composerText =
+                    composerTextForReply(
+                        value = latestComposerText,
+                        sender = target.sender,
+                        bufferType = latestBufferType,
+                        visibleReplyPrefix = latestVisibleReplyPrefix,
+                    )
+                onDraftChanged(composerText.text)
+            }
         }
-    }
 
     val jumpNotLoaded = stringResource(R.string.chat_jump_not_loaded)
     // Only an explicit message destination reports failure; normal entry positioning is silent.
@@ -1122,29 +1153,31 @@ fun ChatContent(
         }
     }
 
-    val eventText = uiEvent?.value?.let { event ->
-        when (event) {
-            ChatUiEvent.InvalidCommand -> stringResource(R.string.chat_server_invalid_command)
-            ChatUiEvent.ReactionBlocked -> stringResource(R.string.chat_reaction_blocked)
-            ChatUiEvent.ReactionTargetUnavailable -> stringResource(R.string.chat_react_failed)
-            ChatUiEvent.ReactionSendFailed -> stringResource(R.string.chat_reaction_send_failed)
-            ChatUiEvent.SendRejected -> stringResource(R.string.chat_send_rejected)
-            ChatUiEvent.SendDropped -> stringResource(R.string.chat_send_dropped)
-            ChatUiEvent.NotInChannel -> stringResource(R.string.chat_not_in_channel)
-            ChatUiEvent.ConversationLayoutWriteFailed -> stringResource(R.string.chat_layout_write_failed)
-            ChatUiEvent.PresenceModeWriteFailed -> stringResource(R.string.chat_presence_write_failed)
-            is ChatUiEvent.ReplyJumpUnavailable -> jumpNotLoaded
+    val eventText =
+        uiEvent?.value?.let { event ->
+            when (event) {
+                ChatUiEvent.InvalidCommand -> stringResource(R.string.chat_server_invalid_command)
+                ChatUiEvent.ReactionBlocked -> stringResource(R.string.chat_reaction_blocked)
+                ChatUiEvent.ReactionTargetUnavailable -> stringResource(R.string.chat_react_failed)
+                ChatUiEvent.ReactionSendFailed -> stringResource(R.string.chat_reaction_send_failed)
+                ChatUiEvent.SendRejected -> stringResource(R.string.chat_send_rejected)
+                ChatUiEvent.SendDropped -> stringResource(R.string.chat_send_dropped)
+                ChatUiEvent.NotInChannel -> stringResource(R.string.chat_not_in_channel)
+                ChatUiEvent.ConversationLayoutWriteFailed -> stringResource(R.string.chat_layout_write_failed)
+                ChatUiEvent.PresenceModeWriteFailed -> stringResource(R.string.chat_presence_write_failed)
+                is ChatUiEvent.ReplyJumpUnavailable -> jumpNotLoaded
+            }
         }
-    }
     val retryLabel = stringResource(R.string.chat_retry)
     LaunchedEffect(uiEvent?.id) {
         val pending = uiEvent ?: return@LaunchedEffect
         val text = eventText ?: return@LaunchedEffect
         val actionLabel = retryLabel.takeIf { pending.value.hasRetryAction() }
-        val result = snackbarHostState.showSnackbar(
-            message = text,
-            actionLabel = actionLabel,
-        )
+        val result =
+            snackbarHostState.showSnackbar(
+                message = text,
+                actionLabel = actionLabel,
+            )
         handleChatUiEventResult(
             event = pending,
             actionPerformed = result == SnackbarResult.ActionPerformed,
@@ -1153,16 +1186,20 @@ fun ChatContent(
         )
     }
 
-    suspend fun materializeTarget(target: ChatPositionTarget, scroll: Boolean): MaterializedChatTarget? {
+    suspend fun materializeTarget(
+        target: ChatPositionTarget,
+        scroll: Boolean,
+    ): MaterializedChatTarget? {
         // itemCount is used only to establish that the position is addressable. A non-null peek is
         // the sole proof that the target placeholder has materialized.
-        val pageReady = withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
-            snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
-                .first { (refresh, append, count) ->
-                    refresh is LoadState.NotLoading &&
-                        initialPagingPage(count, append) != InitialPagingPage.Pending
-                }
-        } != null
+        val pageReady =
+            withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+                snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
+                    .first { (refresh, append, count) ->
+                        refresh is LoadState.NotLoading &&
+                            initialPagingPage(count, append) != InitialPagingPage.Pending
+                    }
+            } != null
         if (!pageReady) {
             AutoFollowTrace.record("materialize_page_not_ready", traceBufferId, traceSessionId) {
                 "target_index=${target.index} refresh=${items.loadState.refresh} " +
@@ -1170,39 +1207,42 @@ fun ChatContent(
             }
             return null
         }
-        val materializedIndex = materializableTargetIndex(
-            requestedIndex = target.index,
-            itemCount = items.itemCount,
-            hasExactIdentity = target.expectedEventId != null || target.expectedMsgid != null,
-        )
+        val materializedIndex =
+            materializableTargetIndex(
+                requestedIndex = target.index,
+                itemCount = items.itemCount,
+                hasExactIdentity = target.expectedEventId != null || target.expectedMsgid != null,
+            )
         if (materializedIndex == null) {
             AutoFollowTrace.record("materialize_index_unaddressable", traceBufferId, traceSessionId) {
                 "target_index=${target.index} item_count=${items.itemCount}"
             }
             return null
         }
-        val row = requestAndAwaitTarget(
-            index = materializedIndex,
-            request = { index ->
-                val count = items.itemCount
-                if (index !in 0 until count) {
-                    false
-                } else {
-                    try {
-                        if (scroll) listState.scrollToItem(index, target.offset)
-                        // This is the only item access: it sends Paging a load hint for the exact target.
-                        items[index]
-                        true
-                    } catch (_: IndexOutOfBoundsException) {
-                        // A new Paging generation replaced the snapshot between the bound and access.
+        val row =
+            requestAndAwaitTarget(
+                index = materializedIndex,
+                request = { index ->
+                    val count = items.itemCount
+                    if (index !in 0 until count) {
                         false
+                    } else {
+                        try {
+                            if (scroll) listState.scrollToItem(index, target.offset)
+                            // This is the only item access: it sends Paging a load hint for the exact target.
+                            items[index]
+                            true
+                        } catch (_: IndexOutOfBoundsException) {
+                            // A new Paging generation replaced the snapshot between the bound and access.
+                            false
+                        }
                     }
-                }
-            },
-            snapshots = snapshotFlow {
-                targetMaterialization(items, materializedIndex)
-            },
-        )
+                },
+                snapshots =
+                    snapshotFlow {
+                        targetMaterialization(items, materializedIndex)
+                    },
+            )
         if (row == null) {
             AutoFollowTrace.record("materialize_target_missing", traceBufferId, traceSessionId) {
                 "target_index=$materializedIndex refresh=${items.loadState.refresh} " +
@@ -1221,16 +1261,20 @@ fun ChatContent(
         AutoFollowTrace.record("deep_jump_start", traceBufferId, traceSessionId) {
             "target_index=${j.index} item_count=${items.itemCount}"
         }
-        val targetRow = try {
-            materializeTarget(j, scroll = true)?.row
-        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-            throw cancelled
-        } catch (_: RuntimeException) {
-            null
-        }
+        val targetRow =
+            try {
+                materializeTarget(j, scroll = true)?.row
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: RuntimeException) {
+                null
+            }
         if (targetRow == null) {
-            if (j.expectedEventId != null || j.expectedMsgid != null) onReresolveJump(j.requestToken)
-            else onJumpUnresolved(j.requestToken)
+            if (j.expectedEventId != null || j.expectedMsgid != null) {
+                onReresolveJump(j.requestToken)
+            } else {
+                onJumpUnresolved(j.requestToken)
+            }
         } else if (!positionTargetMatches(j, targetRow)) {
             onReresolveJump(j.requestToken)
         } else {
@@ -1253,13 +1297,14 @@ fun ChatContent(
             "target_index=${target.index} target_offset=${target.offset} " +
                 "saved=${target.fromSavedPosition} item_count=${items.itemCount}"
         }
-        val pageReady = withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
-            snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
-                .first { (refresh, append, count) ->
-                    refresh is LoadState.NotLoading &&
-                        initialPagingPage(count, append) != InitialPagingPage.Pending
-                }
-        } != null
+        val pageReady =
+            withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+                snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
+                    .first { (refresh, append, count) ->
+                        refresh is LoadState.NotLoading &&
+                            initialPagingPage(count, append) != InitialPagingPage.Pending
+                    }
+            } != null
         if (!pageReady) {
             AutoFollowTrace.record("initial_position_page_not_ready", traceBufferId, traceSessionId) {
                 "target_index=${target.index} refresh=${items.loadState.refresh} " +
@@ -1268,114 +1313,122 @@ fun ChatContent(
             onInitialPositionUnresolved()
             return@LaunchedEffect
         }
-        val currentlyAtBottom = listState.firstVisibleItemIndex == 0 &&
-            listState.firstVisibleItemScrollOffset <= AUTOSCROLL_BOTTOM_TOLERANCE_PX
-        val terminalEmpty = target.index == 0 && target.expectedEventId == null &&
-            target.expectedMsgid == null &&
-            initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty
-        val targetRow = if (terminalEmpty) {
-            null
-        } else if (target.placeAtTop) {
-            // Open-at-first-unread: scroll to the target placeholder so Paging receives a viewport
-            // load hint even from an empty cold generation, then snap it to the top with the
-            // remaining unread below. This all runs before settlement, so it cannot advance read
-            // state or be misclassified as a user drag.
-            val materialized = try {
-                materializeTarget(target, scroll = true)
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (_: RuntimeException) {
+        val currentlyAtBottom =
+            listState.firstVisibleItemIndex == 0 &&
+                listState.firstVisibleItemScrollOffset <= AUTOSCROLL_BOTTOM_TOLERANCE_PX
+        val terminalEmpty =
+            target.index == 0 && target.expectedEventId == null &&
+                target.expectedMsgid == null &&
+                initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty
+        val targetRow =
+            if (terminalEmpty) {
                 null
-            }
-            if (materialized != null) {
-                val row = materialized.row
-                // The materialization scroll places the target at the reversed viewport start
-                // (visually the bottom). Align that measured row directly instead of estimating a
-                // second index from placeholder row counts: cold Paging swaps those placeholders
-                // for variable-height messages and can otherwise move the target outside layout.
-                val item = withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
-                    snapshotFlow {
-                        val visible = listState.layoutInfo.visibleItemsInfo
-                        val currentIndex = materializedTargetVisibleIndex(
-                            visible.map { it.key to it.index },
-                            row.id,
-                        )
-                        visible.firstOrNull { it.index == currentIndex }
-                    }.first { it != null }
-                }
-                if (item != null) {
-                    // A single fire-and-forget correction can race a Paging generation swap (the
-                    // reopen backfill deletes the history gap milliseconds after materialization,
-                    // regenerating the Pager): the lazy layout clamps the scroll mid-presentation
-                    // and silently discards the remainder, leaving the entry row at the reversed
-                    // viewport start (visual bottom) with the unread run below it uncomposed.
-                    // Re-measure and re-correct across frames until the row rests at the top. A
-                    // layout that legitimately cannot align (content shorter than the viewport)
-                    // stops moving and exits through the pass cap with the single-shot behavior.
-                    var pass = 0
-                    var unconsumedPasses = 0
-                    while (pass < TOP_ALIGNMENT_MAX_PASSES) {
-                        val visible = listState.layoutInfo.visibleItemsInfo
-                        val currentIndex = materializedTargetVisibleIndex(
-                            visible.map { it.key to it.index },
-                            row.id,
-                        )
-                        val current = visible.firstOrNull { it.index == currentIndex }
-                        if (current == null) {
-                            // A generation presentation can hide the row for a frame; observe the
-                            // settled layout before concluding it left the viewport.
+            } else if (target.placeAtTop) {
+                // Open-at-first-unread: scroll to the target placeholder so Paging receives a viewport
+                // load hint even from an empty cold generation, then snap it to the top with the
+                // remaining unread below. This all runs before settlement, so it cannot advance read
+                // state or be misclassified as a user drag.
+                val materialized =
+                    try {
+                        materializeTarget(target, scroll = true)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (_: RuntimeException) {
+                        null
+                    }
+                if (materialized != null) {
+                    val row = materialized.row
+                    // The materialization scroll places the target at the reversed viewport start
+                    // (visually the bottom). Align that measured row directly instead of estimating a
+                    // second index from placeholder row counts: cold Paging swaps those placeholders
+                    // for variable-height messages and can otherwise move the target outside layout.
+                    val item =
+                        withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+                            snapshotFlow {
+                                val visible = listState.layoutInfo.visibleItemsInfo
+                                val currentIndex =
+                                    materializedTargetVisibleIndex(
+                                        visible.map { it.key to it.index },
+                                        row.id,
+                                    )
+                                visible.firstOrNull { it.index == currentIndex }
+                            }.first { it != null }
+                        }
+                    if (item != null) {
+                        // A single fire-and-forget correction can race a Paging generation swap (the
+                        // reopen backfill deletes the history gap milliseconds after materialization,
+                        // regenerating the Pager): the lazy layout clamps the scroll mid-presentation
+                        // and silently discards the remainder, leaving the entry row at the reversed
+                        // viewport start (visual bottom) with the unread run below it uncomposed.
+                        // Re-measure and re-correct across frames until the row rests at the top. A
+                        // layout that legitimately cannot align (content shorter than the viewport)
+                        // stops moving and exits through the pass cap with the single-shot behavior.
+                        var pass = 0
+                        var unconsumedPasses = 0
+                        while (pass < TOP_ALIGNMENT_MAX_PASSES) {
+                            val visible = listState.layoutInfo.visibleItemsInfo
+                            val currentIndex =
+                                materializedTargetVisibleIndex(
+                                    visible.map { it.key to it.index },
+                                    row.id,
+                                )
+                            val current = visible.firstOrNull { it.index == currentIndex }
+                            if (current == null) {
+                                // A generation presentation can hide the row for a frame; observe the
+                                // settled layout before concluding it left the viewport.
+                                pass++
+                                withFrameNanos { }
+                                continue
+                            }
+                            val layout = listState.layoutInfo
+                            val correction =
+                                reverseItemTopAlignmentCorrection(
+                                    itemOffset = current.offset,
+                                    itemSize = current.size,
+                                    viewportEndOffset = layout.viewportEndOffset,
+                                )
+                            AutoFollowTrace.record("initial_position_align", traceBufferId, traceSessionId) {
+                                "target_index=${current.index} item_offset=${current.offset} " +
+                                    "item_size=${current.size} " +
+                                    "viewport_start=${layout.viewportStartOffset} " +
+                                    "viewport_end=${layout.viewportEndOffset} " +
+                                    "correction=$correction pass=$pass"
+                            }
+                            if (kotlin.math.abs(correction) <= TOP_ALIGNMENT_TOLERANCE_PX) break
+                            val consumed = listState.scrollBy(correction.toFloat())
                             pass++
+                            // Let the pending layout (and any racing generation presentation) apply
+                            // before re-measuring, so a clamped scroll is observed rather than trusted.
                             withFrameNanos { }
-                            continue
+                            // Two consecutive fully unconsumed scrolls mean the list is legitimately
+                            // clamped (fewer unread than fit the viewport keep the newest row pinned at
+                            // the bottom, as firstUnreadTopAnchorIndex documents) — the rest position is
+                            // final. A single one may just be a racing presentation frame; retry.
+                            unconsumedPasses = if (consumed == 0f) unconsumedPasses + 1 else 0
+                            if (unconsumedPasses >= 2) break
                         }
-                        val layout = listState.layoutInfo
-                        val correction = reverseItemTopAlignmentCorrection(
-                            itemOffset = current.offset,
-                            itemSize = current.size,
-                            viewportEndOffset = layout.viewportEndOffset,
-                        )
-                        AutoFollowTrace.record("initial_position_align", traceBufferId, traceSessionId) {
-                            "target_index=${current.index} item_offset=${current.offset} " +
-                                "item_size=${current.size} " +
-                                "viewport_start=${layout.viewportStartOffset} " +
-                                "viewport_end=${layout.viewportEndOffset} " +
-                                "correction=$correction pass=$pass"
+                        row
+                    } else {
+                        AutoFollowTrace.record("initial_position_align_missing", traceBufferId, traceSessionId) {
+                            "target_index=${target.index} item_count=${items.itemCount}"
                         }
-                        if (kotlin.math.abs(correction) <= TOP_ALIGNMENT_TOLERANCE_PX) break
-                        val consumed = listState.scrollBy(correction.toFloat())
-                        pass++
-                        // Let the pending layout (and any racing generation presentation) apply
-                        // before re-measuring, so a clamped scroll is observed rather than trusted.
-                        withFrameNanos { }
-                        // Two consecutive fully unconsumed scrolls mean the list is legitimately
-                        // clamped (fewer unread than fit the viewport keep the newest row pinned at
-                        // the bottom, as firstUnreadTopAnchorIndex documents) — the rest position is
-                        // final. A single one may just be a racing presentation frame; retry.
-                        unconsumedPasses = if (consumed == 0f) unconsumedPasses + 1 else 0
-                        if (unconsumedPasses >= 2) break
+                        null
                     }
-                    row
                 } else {
-                    AutoFollowTrace.record("initial_position_align_missing", traceBufferId, traceSessionId) {
-                        "target_index=${target.index} item_count=${items.itemCount}"
-                    }
                     null
                 }
             } else {
-                null
+                try {
+                    materializeTarget(
+                        target,
+                        scroll = shouldScrollToInitialTarget(target, currentlyAtBottom),
+                    )?.row
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: RuntimeException) {
+                    null
+                }
             }
-        } else {
-            try {
-                materializeTarget(
-                    target,
-                    scroll = shouldScrollToInitialTarget(target, currentlyAtBottom),
-                )?.row
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (_: RuntimeException) {
-                null
-            }
-        }
         if (terminalEmpty) {
             initialPositionSettled = true
             suppressNextAutoFollow = true
@@ -1426,15 +1479,24 @@ fun ChatContent(
         // buffer's QUERY snapshot before onDispose (the previous direct peek crashed DM
         // navigation), or one with no anchorable row in probe reach — proves neither a bottom nor
         // a place to save, so it only forgets; see [scrollPositionOutcome].
-        when (val outcome = scrollPositionOutcome(
-            firstVisibleIndex = index,
-            firstVisibleOffset = listState.firstVisibleItemScrollOffset,
-            itemCount = items.itemCount,
-            peek = items::peek,
-            policy = visibilityPolicy,
-        )) {
-            ScrollPositionOutcome.ParkAtBottom -> onClearScrollPosition()
-            ScrollPositionOutcome.Forget -> onForgetScrollPosition()
+        when (
+            val outcome =
+                scrollPositionOutcome(
+                    firstVisibleIndex = index,
+                    firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+                    itemCount = items.itemCount,
+                    peek = items::peek,
+                    policy = visibilityPolicy,
+                )
+        ) {
+            ScrollPositionOutcome.ParkAtBottom -> {
+                onClearScrollPosition()
+            }
+
+            ScrollPositionOutcome.Forget -> {
+                onForgetScrollPosition()
+            }
+
             is ScrollPositionOutcome.Save -> {
                 AutoFollowTrace.record("position_saved", traceBufferId, traceSessionId) {
                     "index=$index anchor_index=${outcome.anchorIndex} " +
@@ -1444,8 +1506,9 @@ fun ChatContent(
                 onScrollPositionChanged(
                     ChatScrollPosition(
                         index = outcome.anchorIndex,
-                        offset = listState.firstVisibleItemScrollOffset
-                            .takeIf { outcome.anchorIndex == index } ?: 0,
+                        offset =
+                            listState.firstVisibleItemScrollOffset
+                                .takeIf { outcome.anchorIndex == index } ?: 0,
                         msgid = outcome.row.msgid,
                         serverTime = outcome.row.serverTime,
                         rowId = outcome.row.id,
@@ -1484,13 +1547,17 @@ fun ChatContent(
     // wrong "already seen".
     fun recordFurthestDisplayed() {
         if (!initialPositionSettled) return
-        val deepest = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return
-        val anchor = displayedDepthAnchor(
-            deepestVisibleIndex = deepest,
-            itemCount = items.itemCount,
-            peek = items::peek,
-            policy = visibilityPolicy,
-        ) ?: return
+        val deepest =
+            listState.layoutInfo.visibleItemsInfo
+                .lastOrNull()
+                ?.index ?: return
+        val anchor =
+            displayedDepthAnchor(
+                deepestVisibleIndex = deepest,
+                itemCount = items.itemCount,
+                peek = items::peek,
+                policy = visibilityPolicy,
+            ) ?: return
         onFurthestDisplayedChanged(anchor)
     }
     LaunchedEffect(initialPositionSettled, listState, visibilityPolicy) {
@@ -1513,8 +1580,7 @@ fun ChatContent(
             } else {
                 items.itemCount to listState.firstVisibleItemIndex
             }
-        }
-            .distinctUntilChanged()
+        }.distinctUntilChanged()
             .collect { idleWindow ->
                 if (idleWindow != null) {
                     onVisibleMsgidsChanged(visibleReactionMsgids(items, listState))
@@ -1586,29 +1652,30 @@ fun ChatContent(
                     viewportAnchorAt(newestIndex, items.itemCount, items::peek),
                 )
             }
-        }
-            .distinctUntilChanged()
+        }.distinctUntilChanged()
             .debounce(SEAM_PREFETCH_SETTLE_MS)
             .collect { range ->
-                val (newestIndex, oldestIndex, anchor) = range ?: return@collect reportDemand(
-                    "empty_range",
-                    firstIndex = -1,
-                    lastIndex = -1,
-                    anchor = null,
-                    gapIds = emptySet(),
-                )
+                val (newestIndex, oldestIndex, anchor) =
+                    range ?: return@collect reportDemand(
+                        "empty_range",
+                        firstIndex = -1,
+                        lastIndex = -1,
+                        anchor = null,
+                        gapIds = emptySet(),
+                    )
                 reportDemand(
                     "range",
                     firstIndex = newestIndex,
                     lastIndex = oldestIndex,
                     anchor = anchor,
-                    gapIds = seamsWithinPrefetch(
-                        firstVisibleIndex = newestIndex,
-                        lastVisibleIndex = oldestIndex,
-                        itemCount = items.itemCount,
-                        peek = items::peek,
-                        seams = timelineSeams.seams,
-                    ),
+                    gapIds =
+                        seamsWithinPrefetch(
+                            firstVisibleIndex = newestIndex,
+                            lastVisibleIndex = oldestIndex,
+                            itemCount = items.itemCount,
+                            peek = items::peek,
+                            seams = timelineSeams.seams,
+                        ),
                 )
             }
     }
@@ -1647,8 +1714,7 @@ fun ChatContent(
                 peek = items::peek,
                 policy = visibilityPolicy,
             )
-        }
-            .distinctUntilChanged()
+        }.distinctUntilChanged()
             .collect { anchor ->
                 val seen = renderedNewestAnchor
                 if (anchor != null && (seen == null || anchor > seen)) renderedNewestAnchor = anchor
@@ -1659,7 +1725,11 @@ fun ChatContent(
     // an explicit animation, and the cancelled animation must not briefly masquerade as a user drag.
     var programmaticScrolls by remember { mutableIntStateOf(0) }
     val autoScrolling = programmaticScrolls > 0
-    suspend fun scrollToNewest(animate: Boolean, reason: String) {
+
+    suspend fun scrollToNewest(
+        animate: Boolean,
+        reason: String,
+    ) {
         AutoFollowTrace.record("scroll_start", traceBufferId, traceSessionId) {
             "reason=$reason animate=$animate index=${listState.firstVisibleItemIndex} " +
                 "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
@@ -1679,7 +1749,11 @@ fun ChatContent(
 
     // Jump to a mid-list row (e.g. the nearest unread @mention) without arming auto-follow: a live
     // arrival must not yank the viewport away from the mention the user just navigated to.
-    suspend fun scrollToIndex(index: Int, animate: Boolean, reason: String) {
+    suspend fun scrollToIndex(
+        index: Int,
+        animate: Boolean,
+        reason: String,
+    ) {
         AutoFollowTrace.record("scroll_start", traceBufferId, traceSessionId) {
             "reason=$reason animate=$animate target=$index index=${listState.firstVisibleItemIndex} " +
                 "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
@@ -1733,8 +1807,7 @@ fun ChatContent(
         if (!initialPositionSettled) return@LaunchedEffect
         snapshotFlow {
             items.itemCount to newestEffectiveMessageId(items.itemCount, items::peek, visibilityPolicy)
-        }
-            .distinctUntilChanged()
+        }.distinctUntilChanged()
             .collect { (newCount, newestEffectiveId) ->
                 val oldCount = autoFollow.presentedItemCount
                 val followingBefore = autoFollow.following
@@ -1749,9 +1822,10 @@ fun ChatContent(
                     }
                 } else {
                     val change = autoFollow.onTimelineChangedWithEntry(newCount, newestEffectiveId)
-                    val animatedEntryId = change.liveEntryId?.takeUnless {
-                        extendsSystemRun(it, newCount, items::peek)
-                    }
+                    val animatedEntryId =
+                        change.liveEntryId?.takeUnless {
+                            extendsSystemRun(it, newCount, items::peek)
+                        }
                     liveEntryIds = appendLiveEntryId(liveEntryIds, animatedEntryId)
                     val newest = if (newCount > 0) items.peek(0) else null
                     AutoFollowTrace.record("follow_decision", traceBufferId, traceSessionId) {
@@ -1806,25 +1880,28 @@ fun ChatContent(
             // still loads is one Compose re-anchors natively. Checked here without materializing
             // either window so an ordinary live arrival allocates nothing.
             if (snapshot.items.any { it.id == key }) return@collect
-            val pin = timelinePresentationPin(
-                anchor = TimelineViewportAnchor(
-                    index = index,
-                    offset = listState.firstVisibleItemScrollOffset,
-                    key = key,
-                ),
-                previous = prior.toTimelineWindow(),
-                current = snapshot.toTimelineWindow(),
-            ) ?: return@collect
+            val pin =
+                timelinePresentationPin(
+                    anchor =
+                        TimelineViewportAnchor(
+                            index = index,
+                            offset = listState.firstVisibleItemScrollOffset,
+                            key = key,
+                        ),
+                    previous = prior.toTimelineWindow(),
+                    current = snapshot.toTimelineWindow(),
+                ) ?: return@collect
             listState.requestScrollToItem(pin.index, pin.offset)
-            val fields = mapOf(
-                "anchor_key" to key,
-                "from_index" to index,
-                "to_index" to pin.index,
-                "offset" to pin.offset,
-                "item_count" to snapshot.size,
-                "placeholders_before" to snapshot.placeholdersBefore,
-                "loaded_count" to snapshot.items.size,
-            )
+            val fields =
+                mapOf(
+                    "anchor_key" to key,
+                    "from_index" to index,
+                    "to_index" to pin.index,
+                    "offset" to pin.offset,
+                    "item_count" to snapshot.size,
+                    "placeholders_before" to snapshot.placeholdersBefore,
+                    "loaded_count" to snapshot.items.size,
+                )
             diagnostics.record("chat_timeline", "presentation_pin") { fields }
             AutoFollowTrace.record("presentation_pin", traceBufferId, traceSessionId) {
                 formatTimelineGenerationFields(fields)
@@ -1857,28 +1934,31 @@ fun ChatContent(
             // Read before the frame: the lazy list has not remeasured against this presentation
             // yet, so index/offset still describe the layout `prior` was measured into.
             val beforeIndex = listState.firstVisibleItemIndex
-            val before = TimelineViewportAnchor(
-                index = beforeIndex,
-                offset = listState.firstVisibleItemScrollOffset,
-                key = prior?.idAt(beforeIndex),
-            )
+            val before =
+                TimelineViewportAnchor(
+                    index = beforeIndex,
+                    offset = listState.firstVisibleItemScrollOffset,
+                    key = prior?.idAt(beforeIndex),
+                )
             withFrameNanos { }
             val afterIndex = listState.firstVisibleItemIndex
-            val after = TimelineViewportAnchor(
-                index = afterIndex,
-                offset = listState.firstVisibleItemScrollOffset,
-                key = current.idAt(afterIndex),
-            )
-            val fields = timelineGenerationFields(
-                generation = generation,
-                previous = prior,
-                current = current,
-                before = before,
-                after = after,
-                settled = initialPositionSettled,
-                scrolling = listState.isScrollInProgress,
-                following = autoFollow.following,
-            )
+            val after =
+                TimelineViewportAnchor(
+                    index = afterIndex,
+                    offset = listState.firstVisibleItemScrollOffset,
+                    key = current.idAt(afterIndex),
+                )
+            val fields =
+                timelineGenerationFields(
+                    generation = generation,
+                    previous = prior,
+                    current = current,
+                    before = before,
+                    after = after,
+                    settled = initialPositionSettled,
+                    scrolling = listState.isScrollInProgress,
+                    following = autoFollow.following,
+                )
             diagnostics.record("chat_timeline", "generation_presented") { fields }
             AutoFollowTrace.record("generation_presented", traceBufferId, traceSessionId) {
                 formatTimelineGenerationFields(fields)
@@ -1887,11 +1967,12 @@ fun ChatContent(
     }
     val buffer = state.buffer
     val titleTarget = chatTitleTarget(buffer?.type)
-    val titleClickLabel = when (titleTarget) {
-        ChatTitleTarget.CHANNEL_INFO -> stringResource(R.string.chat_open_channel_info)
-        ChatTitleTarget.NICK_DETAILS -> stringResource(R.string.chat_open_nick_details)
-        ChatTitleTarget.NONE -> null
-    }
+    val titleClickLabel =
+        when (titleTarget) {
+            ChatTitleTarget.CHANNEL_INFO -> stringResource(R.string.chat_open_channel_info)
+            ChatTitleTarget.NICK_DETAILS -> stringResource(R.string.chat_open_nick_details)
+            ChatTitleTarget.NONE -> null
+        }
     // Mark read on new-message-while-at-bottom only: syncing while scrolled up
     // reading history would clear unread on other clients and destroy the local unread UX. What
     // "at bottom" is allowed to mean is therefore load-bearing, and `atBottom` is the only thing
@@ -1917,16 +1998,18 @@ fun ChatContent(
         }
         val resumed = pausedSinceLastRun.value
         pausedSinceLastRun.value = false
-        val newest = viewportMarkReadAnchor(
-            rawNewest = rawNewestAnchor,
-            renderedNewest = renderedNewestAnchor,
-            resumed = resumed,
-        ) ?: return@LaunchedEffect
-        val ackable = shouldMarkReadFromViewport(
-            atBottom = atBottom,
-            initialPositionSettled = initialPositionSettled,
-            viewportReadEnabled = viewportReadEnabled,
-        )
+        val newest =
+            viewportMarkReadAnchor(
+                rawNewest = rawNewestAnchor,
+                renderedNewest = renderedNewestAnchor,
+                resumed = resumed,
+            ) ?: return@LaunchedEffect
+        val ackable =
+            shouldMarkReadFromViewport(
+                atBottom = atBottom,
+                initialPositionSettled = initialPositionSettled,
+                viewportReadEnabled = viewportReadEnabled,
+            )
         if (ackable && newest.serverTime > 0) {
             AutoFollowTrace.record("viewport_markread", traceBufferId, traceSessionId) {
                 "marker=${newest.serverTime}:${newest.eventId} item_count=${items.itemCount}"
@@ -1934,39 +2017,41 @@ fun ChatContent(
             onMarkRead(newest)
         }
     }
-    val recentSpeakers = remember(items.itemCount) {
-        // Exclude system-event senders and self so recency ranking reflects real conversation
-        // partners. Only the newest rows matter for recency, so cap the scan (the list
-        // is reverse-laid-out, so index 0.. are the newest) to stay cheap on large loaded windows.
-        (0 until minOf(items.itemCount, 60))
-            .mapNotNull { items.peek(it) }
-            .filterNot { isSystemKind(it.kind) || it.isSelf }
-            .map { it.sender }
-    }
+    val recentSpeakers =
+        remember(items.itemCount) {
+            // Exclude system-event senders and self so recency ranking reflects real conversation
+            // partners. Only the newest rows matter for recency, so cap the scan (the list
+            // is reverse-laid-out, so index 0.. are the newest) to stay cheap on large loaded windows.
+            (0 until minOf(items.itemCount, 60))
+                .mapNotNull { items.peek(it) }
+                .filterNot { isSystemKind(it.kind) || it.isSelf }
+                .map { it.sender }
+        }
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
         topBar = {
             TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
+                colors =
+                    TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ),
                 title = {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 48.dp)
-                            .then(
-                                if (titleClickLabel != null) {
-                                    Modifier.clickable(onClickLabel = titleClickLabel) {
-                                        buffer?.let { onOpenChannelInfo(it.id) }
-                                    }
-                                } else {
-                                    Modifier
-                                },
-                            )
-                            .testTag("chat_title"),
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .then(
+                                    if (titleClickLabel != null) {
+                                        Modifier.clickable(onClickLabel = titleClickLabel) {
+                                            buffer?.let { onOpenChannelInfo(it.id) }
+                                        }
+                                    } else {
+                                        Modifier
+                                    },
+                                ).testTag("chat_title"),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         val hideAvatar = avatarsHidden()
@@ -2005,7 +2090,10 @@ fun ChatContent(
                                             overflow = TextOverflow.Ellipsis,
                                         )
                                     }
-                                    null -> Unit
+
+                                    null -> {
+                                        Unit
+                                    }
                                 }
                             }
                         }
@@ -2083,18 +2171,22 @@ fun ChatContent(
                             },
                         )
                         if (fools.isNotEmpty()) {
-                            val foolsShown = if (foolsMode == FoolsMode.HIDE) {
-                                hiddenFoolsRevealed
-                            } else {
-                                expandAllFools
-                            }
+                            val foolsShown =
+                                if (foolsMode == FoolsMode.HIDE) {
+                                    hiddenFoolsRevealed
+                                } else {
+                                    expandAllFools
+                                }
                             DropdownMenuItem(
                                 modifier = Modifier.testTag("chat_toggle_fools_visibility"),
                                 text = {
                                     Text(
                                         stringResource(
-                                            if (foolsShown) R.string.chat_fool_collapse_all
-                                            else R.string.chat_fool_expand_all,
+                                            if (foolsShown) {
+                                                R.string.chat_fool_collapse_all
+                                            } else {
+                                                R.string.chat_fool_expand_all
+                                            },
                                         ),
                                     )
                                 },
@@ -2125,453 +2217,485 @@ fun ChatContent(
         // while these consuming modifiers keep the composer above navigation and animated IME
         // insets without double-padding their overlap.
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .navigationBarsPadding()
-                .imePadding(),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .navigationBarsPadding()
+                    .imePadding(),
         ) {
             // No composition-phase IME read here on purpose: the composer samples the animated inset
             // in its own measure phase, so the whole timeline stays skippable while the keyboard
             // animates instead of recomposing once per frame.
-            val conversationSpacing = remember(conversationLayout.effective, messageSpacing, bubbleCornerStyle) {
-                spacingFor(conversationLayout.effective, messageSpacing, bubbleCornerStyle)
-            }
+            val conversationSpacing =
+                remember(conversationLayout.effective, messageSpacing, bubbleCornerStyle) {
+                    spacingFor(conversationLayout.effective, messageSpacing, bubbleCornerStyle)
+                }
             // The runway: how far the whole timeline slides up while a flight is airborne, so
             // vacated space exists under the ghost from the tap frame onward. Hoisted to this
             // scope because both the timeline (deep in the pane) and the ghost overlay (a
             // sibling drawn over the composer) read it. Deferred lambda: read only in the
             // list's layer and the ghost's, never composed.
             val density = LocalDensity.current
-            val flightListShift = remember(
-                outgoingFlight?.token, conversationSpacing, density,
-            ) {
-                val active = outgoingFlight != null
-                val gapPx = with(density) {
-                    bubbleGap(flightShowSender, items.itemCount > 0, conversationSpacing).toPx()
+            val flightListShift =
+                remember(
+                    outgoingFlight?.token,
+                    conversationSpacing,
+                    density,
+                ) {
+                    val active = outgoingFlight != null
+                    val gapPx =
+                        with(density) {
+                            bubbleGap(flightShowSender, items.itemCount > 0, conversationSpacing).toPx()
+                        }
+                    val shift: () -> Float = shift@{
+                        if (!active) return@shift 0f
+                        val revealed = flightAnchors.landingRow?.second?.height ?: 0f
+                        sendFlightListShift(
+                            runwayHeight = flightAnchors.ghostHeight + gapPx,
+                            liftFraction = flightMotion.lift.value,
+                            revealedGap = revealed,
+                            footDrop = flightAnchors.composerShrink(),
+                        )
+                    }
+                    shift
                 }
-                val shift: () -> Float = shift@{
-                    if (!active) return@shift 0f
-                    val revealed = flightAnchors.landingRow?.second?.height ?: 0f
-                    sendFlightListShift(
-                        runwayHeight = flightAnchors.ghostHeight + gapPx,
-                        liftFraction = flightMotion.lift.value,
-                        revealedGap = revealed,
-                        footDrop = flightAnchors.composerShrink(),
-                    )
-                }
-                shift
-            }
             ConversationTypography(conversationFontScalePercent) {
-            Box(modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Box(modifier = Modifier.weight(1f)) {
-                    // Subtle IRC-themed wallpaper layered UNDER the message list only (never over the
-                    // composer). NONE renders the plain theme background; MessageList is untouched.
-                    ChatWallpaperBackground(chatWallpaper, modifier = Modifier.matchParentSize())
-                    CompositionLocalProvider(LocalSpacing provides conversationSpacing) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            // The runway slides the whole timeline up past this pane's top edge;
-                            // without the clip those rows would paint over the app bar.
-                            .clipToBounds()
-                            .testTag("chat_layout_effective_${conversationLayout.effective.name.lowercase()}"),
-                    ) {
-                    // Keep the timeline's callbacks stable. A freshly allocated lambda on every
-                    // recomposition of this scope defeats MessageList's skipping, which is what
-                    // turned any surrounding state change into a full timeline recomposition.
-                    // Keyed like `liveEntryIds` itself, which is re-remembered per buffer.
-                    val onLiveEntryConsumed = remember(state.buffer?.id) {
-                        { id: Long -> liveEntryIds = consumeLiveEntryId(liveEntryIds, id) }
-                    }
-                    val onFlightRowPositioned = remember(flightAnchors) {
-                        { id: Long, bounds: Rect ->
-                            flightAnchors.reportLandingRow(id, bounds)
-                            // Recorded here rather than from the flight's event ids: this fires on
-                            // the row's first layout, before any accept could have named it. The
-                            // guard matters -- this runs on every frame of the reveal.
-                            if (id !in flownRowIds) flownRowIds = flownRowIds + id
-                        }
-                    }
-                    val onTimelineLongPress = remember {
-                        { message: MessageEntity -> sheetTarget = message }
-                    }
-                    val canRetryMessage = remember(state.buffer) {
-                        { message: MessageEntity ->
-                            state.buffer?.let { buffer ->
-                                io.github.trevarj.motd.service.isGenericRetryEligible(buffer, message)
-                            } == true
-                        }
-                    }
-                    val onAcceptDccTransferRequest = remember(dccDestinationPicker) {
-                        { transferId: Long, filename: String, allowPrivate: Boolean ->
-                            pendingDccAccept = PendingDccAccept(transferId, allowPrivate)
-                            dccDestinationPicker.launch(filename)
-                        }
-                    }
-                    // Link-preview tap opens the URL in the system browser.
-                    val onOpenLink = remember(ctx) {
-                        { url: String -> ctx.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
-                    }
-                    // Effective expansion: global expand-all default, minus rows the user
-                    // re-collapsed; otherwise only individually expanded rows show (bug #9).
-                    val foolExpanded = remember {
-                        { id: Long ->
-                            if (expandAllFools) id !in collapsedFools else id in expandedFools
-                        }
-                    }
-                    // Bidirectional per-row toggle, respecting the global default.
-                    val onToggleFool = remember {
-                        { id: Long ->
-                            if (expandAllFools) {
-                                collapsedFools =
-                                    if (id in collapsedFools) collapsedFools - id else collapsedFools + id
-                            } else {
-                                expandedFools =
-                                    if (id in expandedFools) expandedFools - id else expandedFools + id
-                            }
-                        }
-                    }
-                    // Entry veil: the list is transparent until entry positioning settles, then
-                    // fades in. The animated value is read inside the graphicsLayer lambda so the
-                    // fade never recomposes the timeline subtree. Starting lifted (a restored
-                    // visit) initializes at 1f, so there is no fade-in on re-entry -- which is also
-                    // why the overlay's own gate is seeded from the initial state rather than
-                    // waiting for a finish callback that never fires.
-                    val veilAlpha by animateFloatAsState(
-                        targetValue = if (entryVeilLifted) 1f else 0f,
-                        animationSpec = MotdMotion.fadeIn,
-                        label = "chat_entry_veil_alpha",
-                        finishedListener = { entryVeilCleared = true },
-                    )
-                    Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = veilAlpha }) {
-                    MessageList(
-                        items = items,
-                        listState = listState,
-                        liveEntryIds = liveEntryIds,
-                        onLiveEntryConsumed = onLiveEntryConsumed,
-                        outgoingFlight = outgoingFlight,
-                        flownRowIds = flownRowIds,
-                        flightProgress = flightProgress,
-                        onFlightRowPositioned = onFlightRowPositioned,
-                        listShift = flightListShift,
-                        networkId = state.buffer?.networkId,
-                        bufferId = state.buffer?.id,
-                        conversationName = state.buffer?.displayName,
-                        directMessage = state.buffer?.type == BufferType.QUERY,
-                        collapseSystemEvents = !isServerBuffer,
-                        // Frozen read-marker so the "New messages" divider stays put.
-                        readMarkerTime = unreadEntrySnapshot?.marker,
-                        readMarkerLabel = unreadEntryLabel,
-                        timelineSeams = timelineSeams,
-                        onLoadGap = onLoadGap,
-                        reactionChips = reactionChips,
-                        replyPreview = replyPreview,
-                        onReplyPreviewClick = onReplyPreviewClick,
-                        onLongPress = onTimelineLongPress,
-                        onReply = timelineReply,
-                        onReact = onReact,
-                        onImageClick = onOpenImage,
-                        onRetry = onRetry,
-                        canRetry = canRetryMessage,
-                        onDelete = onDelete,
-                        onAcceptInvite = onAcceptInvite,
-                        onDismissInvite = onDismissInvite,
-                        dccTransfer = dccTransfer,
-                        onAcceptDccTransfer = onAcceptDccTransferRequest,
-                        onRejectDccTransfer = onRejectDccTransfer,
-                        onRemoveDccTransfer = onRemoveDccTransfer,
-                        loadPreview = loadPreview,
-                        richContentReady = initialPositionSettled,
-                        showImages = showImages,
-                        showLinkPreviews = showLinkPreviews,
-                        cachedPreview = cachedPreview,
-                        loadAudioMetadata = loadAudioMetadata,
-                        cachedAudioMetadata = cachedAudioMetadata,
-                        audioPlaybackState = audioPlaybackState,
-                        audioWaveforms = audioWaveforms,
-                        audioCacheStatuses = audioCacheStatuses,
-                        onAudioToggle = onAudioToggle,
-                        onAudioCacheInspect = onAudioCacheInspect,
-                        onAudioSeek = onAudioSeek,
-                        onOpenLink = onOpenLink,
-                        highlightMsgid = highlightMsgid,
-                        knownNicks = knownNicks,
-                        friends = friends,
-                        fools = fools,
-                        foolsMode = foolsMode,
-                        identityRules = identityRules,
-                        historyUiState = historyUiState,
-                        foolExpanded = foolExpanded,
-                        onToggleFool = onToggleFool,
-                        onSenderClick = onSenderClick,
-                    )
-                    }
-                    // Swallow input until the fade has actually finished, not merely started: a
-                    // barely-visible list is still a list, and a drag or long-press landing on a row
-                    // the user cannot see yet is the same bug as one landing on a hidden row. Gated
-                    // on a boolean rather than on veilAlpha directly so the reveal costs two
-                    // recompositions instead of one per animation frame.
-                    if (!entryVeilCleared) {
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .testTag(CHAT_ENTRY_VEIL_TAG)
-                                .pointerInput(Unit) {
-                                    awaitPointerEventScope {
-                                        while (true) {
-                                            awaitPointerEvent(PointerEventPass.Initial)
-                                                .changes.forEach { it.consume() }
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            // Subtle IRC-themed wallpaper layered UNDER the message list only (never over the
+                            // composer). NONE renders the plain theme background; MessageList is untouched.
+                            ChatWallpaperBackground(chatWallpaper, modifier = Modifier.matchParentSize())
+                            CompositionLocalProvider(LocalSpacing provides conversationSpacing) {
+                                Box(
+                                    modifier =
+                                        Modifier
+                                            .fillMaxSize()
+                                            // The runway slides the whole timeline up past this pane's top edge;
+                                            // without the clip those rows would paint over the app bar.
+                                            .clipToBounds()
+                                            .testTag("chat_layout_effective_${conversationLayout.effective.name.lowercase()}"),
+                                ) {
+                                    // Keep the timeline's callbacks stable. A freshly allocated lambda on every
+                                    // recomposition of this scope defeats MessageList's skipping, which is what
+                                    // turned any surrounding state change into a full timeline recomposition.
+                                    // Keyed like `liveEntryIds` itself, which is re-remembered per buffer.
+                                    val onLiveEntryConsumed =
+                                        remember(state.buffer?.id) {
+                                            { id: Long -> liveEntryIds = consumeLiveEntryId(liveEntryIds, id) }
                                         }
+                                    val onFlightRowPositioned =
+                                        remember(flightAnchors) {
+                                            { id: Long, bounds: Rect ->
+                                                flightAnchors.reportLandingRow(id, bounds)
+                                                // Recorded here rather than from the flight's event ids: this fires on
+                                                // the row's first layout, before any accept could have named it. The
+                                                // guard matters -- this runs on every frame of the reveal.
+                                                if (id !in flownRowIds) flownRowIds = flownRowIds + id
+                                            }
+                                        }
+                                    val onTimelineLongPress =
+                                        remember {
+                                            { message: MessageEntity -> sheetTarget = message }
+                                        }
+                                    val canRetryMessage =
+                                        remember(state.buffer) {
+                                            { message: MessageEntity ->
+                                                state.buffer?.let { buffer ->
+                                                    io.github.trevarj.motd.service
+                                                        .isGenericRetryEligible(buffer, message)
+                                                } == true
+                                            }
+                                        }
+                                    val onAcceptDccTransferRequest =
+                                        remember(dccDestinationPicker) {
+                                            { transferId: Long, filename: String, allowPrivate: Boolean ->
+                                                pendingDccAccept = PendingDccAccept(transferId, allowPrivate)
+                                                dccDestinationPicker.launch(filename)
+                                            }
+                                        }
+                                    // Link-preview tap opens the URL in the system browser.
+                                    val onOpenLink =
+                                        remember(ctx) {
+                                            { url: String -> ctx.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
+                                        }
+                                    // Effective expansion: global expand-all default, minus rows the user
+                                    // re-collapsed; otherwise only individually expanded rows show (bug #9).
+                                    val foolExpanded =
+                                        remember {
+                                            { id: Long ->
+                                                if (expandAllFools) id !in collapsedFools else id in expandedFools
+                                            }
+                                        }
+                                    // Bidirectional per-row toggle, respecting the global default.
+                                    val onToggleFool =
+                                        remember {
+                                            { id: Long ->
+                                                if (expandAllFools) {
+                                                    collapsedFools =
+                                                        if (id in collapsedFools) collapsedFools - id else collapsedFools + id
+                                                } else {
+                                                    expandedFools =
+                                                        if (id in expandedFools) expandedFools - id else expandedFools + id
+                                                }
+                                            }
+                                        }
+                                    // Entry veil: the list is transparent until entry positioning settles, then
+                                    // fades in. The animated value is read inside the graphicsLayer lambda so the
+                                    // fade never recomposes the timeline subtree. Starting lifted (a restored
+                                    // visit) initializes at 1f, so there is no fade-in on re-entry -- which is also
+                                    // why the overlay's own gate is seeded from the initial state rather than
+                                    // waiting for a finish callback that never fires.
+                                    val veilAlpha by animateFloatAsState(
+                                        targetValue = if (entryVeilLifted) 1f else 0f,
+                                        animationSpec = MotdMotion.fadeIn,
+                                        label = "chat_entry_veil_alpha",
+                                        finishedListener = { entryVeilCleared = true },
+                                    )
+                                    Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = veilAlpha }) {
+                                        MessageList(
+                                            items = items,
+                                            listState = listState,
+                                            liveEntryIds = liveEntryIds,
+                                            onLiveEntryConsumed = onLiveEntryConsumed,
+                                            outgoingFlight = outgoingFlight,
+                                            flownRowIds = flownRowIds,
+                                            flightProgress = flightProgress,
+                                            onFlightRowPositioned = onFlightRowPositioned,
+                                            listShift = flightListShift,
+                                            networkId = state.buffer?.networkId,
+                                            bufferId = state.buffer?.id,
+                                            conversationName = state.buffer?.displayName,
+                                            directMessage = state.buffer?.type == BufferType.QUERY,
+                                            collapseSystemEvents = !isServerBuffer,
+                                            // Frozen read-marker so the "New messages" divider stays put.
+                                            readMarkerTime = unreadEntrySnapshot?.marker,
+                                            readMarkerLabel = unreadEntryLabel,
+                                            timelineSeams = timelineSeams,
+                                            onLoadGap = onLoadGap,
+                                            reactionChips = reactionChips,
+                                            replyPreview = replyPreview,
+                                            onReplyPreviewClick = onReplyPreviewClick,
+                                            onLongPress = onTimelineLongPress,
+                                            onReply = timelineReply,
+                                            onReact = onReact,
+                                            onImageClick = onOpenImage,
+                                            onRetry = onRetry,
+                                            canRetry = canRetryMessage,
+                                            onDelete = onDelete,
+                                            onAcceptInvite = onAcceptInvite,
+                                            onDismissInvite = onDismissInvite,
+                                            dccTransfer = dccTransfer,
+                                            onAcceptDccTransfer = onAcceptDccTransferRequest,
+                                            onRejectDccTransfer = onRejectDccTransfer,
+                                            onRemoveDccTransfer = onRemoveDccTransfer,
+                                            loadPreview = loadPreview,
+                                            richContentReady = initialPositionSettled,
+                                            showImages = showImages,
+                                            showLinkPreviews = showLinkPreviews,
+                                            cachedPreview = cachedPreview,
+                                            loadAudioMetadata = loadAudioMetadata,
+                                            cachedAudioMetadata = cachedAudioMetadata,
+                                            audioPlaybackState = audioPlaybackState,
+                                            audioWaveforms = audioWaveforms,
+                                            audioCacheStatuses = audioCacheStatuses,
+                                            onAudioToggle = onAudioToggle,
+                                            onAudioCacheInspect = onAudioCacheInspect,
+                                            onAudioSeek = onAudioSeek,
+                                            onOpenLink = onOpenLink,
+                                            highlightMsgid = highlightMsgid,
+                                            knownNicks = knownNicks,
+                                            friends = friends,
+                                            fools = fools,
+                                            foolsMode = foolsMode,
+                                            identityRules = identityRules,
+                                            historyUiState = historyUiState,
+                                            foolExpanded = foolExpanded,
+                                            onToggleFool = onToggleFool,
+                                            onSenderClick = onSenderClick,
+                                        )
                                     }
-                                },
-                        )
-                    }
-                    }
-                    }
+                                    // Swallow input until the fade has actually finished, not merely started: a
+                                    // barely-visible list is still a list, and a drag or long-press landing on a row
+                                    // the user cannot see yet is the same bug as one landing on a hidden row. Gated
+                                    // on a boolean rather than on veilAlpha directly so the reveal costs two
+                                    // recompositions instead of one per animation frame.
+                                    if (!entryVeilCleared) {
+                                        Box(
+                                            modifier =
+                                                Modifier
+                                                    .matchParentSize()
+                                                    .testTag(CHAT_ENTRY_VEIL_TAG)
+                                                    .pointerInput(Unit) {
+                                                        awaitPointerEventScope {
+                                                            while (true) {
+                                                                awaitPointerEvent(PointerEventPass.Initial)
+                                                                    .changes
+                                                                    .forEach { it.consume() }
+                                                            }
+                                                        }
+                                                    },
+                                        )
+                                    }
+                                }
+                            }
 
-                    // Paging begins with a transient empty refresh before Room delivers its first
-                    // page. Only show the empty state once APPEND proves the buffer is terminally
-                    // empty; otherwise the large placeholder flashes during every chat entry.
-                    if (items.loadState.refresh is LoadState.NotLoading &&
-                        initialPagingPage(items.itemCount, items.loadState.append) ==
-                        InitialPagingPage.TerminalEmpty &&
-                        !historySyncStatus.isActive
-                    ) {
-                        io.github.trevarj.motd.ui.components.EmptyState(
-                            icon = Icons.Outlined.Forum,
-                            title = stringResource(R.string.chat_empty_title),
-                            message = stringResource(R.string.chat_empty_message),
-                            ghostRows = true,
-                        )
-                    }
-
-                    // Keep the hot firstVisibleItemIndex read inside the FAB subtree. Reading it in
-                    // ChatContent made every row boundary re-run the entire Scaffold/list/composer.
-                    ViewportScrollToBottomFab(
-                        listState = listState,
-                        readMarker = readMarkerLive,
-                        visibilityPolicy = visibilityPolicy,
-                        countUnreadBelowViewport = countUnreadBelowViewport,
-                        nearestUnreadMentionBelow = nearestUnreadMentionBelow,
-                        visible = shouldShowNewestFab(atBottom, autoScrolling),
-                        onJumpMention = onFocusRecentMention,
-                        onJumpNewest = {
-                            onJumpToNewest()
-                            scope.launch { scrollToNewest(animate = true, reason = "jump_fab") }
-                        },
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-                    )
-
-                    val stagedVoicePlaybackId = voiceState.staged?.let { "voice:${it.file.toURI()}" }
-                    TimelineTopOverlays(
-                        audioPlayer = {
-                            if (audioPlaybackState.activeId != stagedVoicePlaybackId) {
-                                AudioMiniPlayer(
-                                    state = audioPlaybackState,
-                                    onToggle = onAudioToggleActive,
-                                    onCancelLoading = onAudioCancelLoading,
-                                    onRetry = onAudioRetry,
-                                    onDismiss = onAudioDismiss,
-                                    onSeek = { positionMs ->
-                                        audioPlaybackState.attachment?.let { onAudioSeek(it, positionMs) }
-                                    },
-                                    onOpenOrigin = onOpenAudioOrigin,
-                                    onSpeed = { speed ->
-                                        audioPlaybackState.attachment?.let { onAudioSpeed(it, speed) }
-                                    },
-                                    includeNetwork =
-                                        audioPlaybackState.origin?.networkId != state.buffer?.networkId,
+                            // Paging begins with a transient empty refresh before Room delivers its first
+                            // page. Only show the empty state once APPEND proves the buffer is terminally
+                            // empty; otherwise the large placeholder flashes during every chat entry.
+                            if (items.loadState.refresh is LoadState.NotLoading &&
+                                initialPagingPage(items.itemCount, items.loadState.append) ==
+                                InitialPagingPage.TerminalEmpty &&
+                                !historySyncStatus.isActive
+                            ) {
+                                io.github.trevarj.motd.ui.components.EmptyState(
+                                    icon = Icons.Outlined.Forum,
+                                    title = stringResource(R.string.chat_empty_title),
+                                    message = stringResource(R.string.chat_empty_message),
+                                    ghostRows = true,
                                 )
                             }
-                        },
-                        historyFailure = {
-                            TimelineHistorySyncFailure(
-                                status = timelineHistoryStatus,
-                                retryEnabled = state.connState is IrcClientState.Ready,
-                                // Both halves of history recovery: the coordinator re-runs the
-                                // reconciliation pass (coalescing onto any in-flight one) while
-                                // Paging re-attempts the failed newer/older fetch.
-                                onRetry = {
-                                    onHistorySyncRetry()
-                                    items.retry()
+
+                            // Keep the hot firstVisibleItemIndex read inside the FAB subtree. Reading it in
+                            // ChatContent made every row boundary re-run the entire Scaffold/list/composer.
+                            ViewportScrollToBottomFab(
+                                listState = listState,
+                                readMarker = readMarkerLive,
+                                visibilityPolicy = visibilityPolicy,
+                                countUnreadBelowViewport = countUnreadBelowViewport,
+                                nearestUnreadMentionBelow = nearestUnreadMentionBelow,
+                                visible = shouldShowNewestFab(atBottom, autoScrolling),
+                                onJumpMention = onFocusRecentMention,
+                                onJumpNewest = {
+                                    onJumpToNewest()
+                                    scope.launch { scrollToNewest(animate = true, reason = "jump_fab") }
+                                },
+                                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                            )
+
+                            val stagedVoicePlaybackId = voiceState.staged?.let { "voice:${it.file.toURI()}" }
+                            TimelineTopOverlays(
+                                audioPlayer = {
+                                    if (audioPlaybackState.activeId != stagedVoicePlaybackId) {
+                                        AudioMiniPlayer(
+                                            state = audioPlaybackState,
+                                            onToggle = onAudioToggleActive,
+                                            onCancelLoading = onAudioCancelLoading,
+                                            onRetry = onAudioRetry,
+                                            onDismiss = onAudioDismiss,
+                                            onSeek = { positionMs ->
+                                                audioPlaybackState.attachment?.let { onAudioSeek(it, positionMs) }
+                                            },
+                                            onOpenOrigin = onOpenAudioOrigin,
+                                            onSpeed = { speed ->
+                                                audioPlaybackState.attachment?.let { onAudioSpeed(it, speed) }
+                                            },
+                                            includeNetwork =
+                                                audioPlaybackState.origin?.networkId != state.buffer?.networkId,
+                                        )
+                                    }
+                                },
+                                historyFailure = {
+                                    TimelineHistorySyncFailure(
+                                        status = timelineHistoryStatus,
+                                        retryEnabled = state.connState is IrcClientState.Ready,
+                                        // Both halves of history recovery: the coordinator re-runs the
+                                        // reconciliation pass (coalescing onto any in-flight one) while
+                                        // Paging re-attempts the failed newer/older fetch.
+                                        onRetry = {
+                                            onHistorySyncRetry()
+                                            items.retry()
+                                        },
+                                    )
+                                },
+                                staleChip = {
+                                    TimelineHistoryStaleChip(
+                                        status = timelineHistoryStatus,
+                                        timelineEmpty = items.itemCount == 0,
+                                        onDismiss = onHistorySyncDismiss,
+                                    )
                                 },
                             )
-                        },
-                        staleChip = {
-                            TimelineHistoryStaleChip(
-                                status = timelineHistoryStatus,
-                                timelineEmpty = items.itemCount == 0,
-                                onDismiss = onHistorySyncDismiss,
-                            )
-                        },
-                    )
-                }
+                        }
 
-                val isChannelBuffer = state.buffer?.type == BufferType.CHANNEL
-                val completions = remember(composerText, memberNicks, recentSpeakers, isChannelBuffer) {
-                    autocompleteFor(
-                        composerText,
-                        memberNicks,
-                        recentSpeakers,
-                        nickNormalizer,
-                        isChannel = isChannelBuffer,
-                    )
-                }
-                val needsMemberCompletion = remember(composerText) {
-                    composerNeedsMemberNicks(composerText)
-                }
-                LaunchedEffect(needsMemberCompletion) {
-                    if (needsMemberCompletion) onNeedMembers()
-                }
-                // Debounce the SHOW so fast typing doesn't flash the suggestion panel on every
-                // keystroke: only reveal completions after a brief pause. Hiding stays immediate
-                // (an empty result clears the panel at once) so the panel never lingers stale.
-                var showAutocomplete by remember { mutableStateOf(false) }
-                LaunchedEffect(completions) {
-                    if (completions.isEmpty()) {
-                        showAutocomplete = false
-                    } else {
-                        kotlinx.coroutines.delay(AUTOCOMPLETE_SHOW_DEBOUNCE_MS)
-                        showAutocomplete = true
-                    }
-                }
-                // Keyed on the buffer like the sibling composer state so the panel's held exit
-                // content never leaks across a buffer switch.
-                key(traceBufferId) {
-                    VoiceComposerPanel(
-                        state = voiceState,
-                        playbackState = audioPlaybackState,
-                        onDelete = onVoiceDelete,
-                        onCancelRecording = onVoiceHoldCancel,
-                        onStopRecording = onVoiceHoldStop,
-                        onSend = onVoiceSend,
-                        onPreview = { attachment -> onAudioToggle(AudioPlaybackRequest(attachment, null)) },
-                        onPreviewSeek = { attachment, positionMs -> onAudioSeek(attachment, positionMs) },
-                        onToggleEncryption = onVoiceToggleEncryption,
-                        onDestinationSelected = onVoiceDestinationSelected,
-                        onErrorDismissed = onVoiceErrorDismissed,
-                    )
-                }
-                // The buffer stays non-null while a rejoin animates the banner out, so the exiting
-                // content can keep reading it without snapshotting.
-                AnimatedVisibility(
-                    visible = state.parted,
-                    enter = expandVertically(animationSpec = MotdMotion.contentSize) + fadeIn(MotdMotion.fadeIn),
-                    exit = shrinkVertically(animationSpec = MotdMotion.contentSize) + fadeOut(MotdMotion.microFadeOut),
-                ) {
-                    PartedChannelBanner(
-                        channel = state.buffer?.displayName.orEmpty(),
-                        onRejoin = onRejoin,
-                    )
-                }
-                Composer(
-                    value = composerText,
-                    onValueChange = {
-                        val wasBlank = composerText.text.isBlank()
-                        composerText = it
-                        onDraftChanged(it.text)
-                        if (it.text.isNotBlank()) onTyping(true)
-                        else if (!wasBlank) onTyping(false)
-                    },
-                    onSend = {
-                        val text = composerText.text
-                        if (text.isNotBlank()) {
-                            if (isLongDraft(text)) {
-                                AutoFollowTrace.record("long_draft_prompt_open", traceBufferId, traceSessionId)
-                                longDraftPrompt = true
+                        val isChannelBuffer = state.buffer?.type == BufferType.CHANNEL
+                        val completions =
+                            remember(composerText, memberNicks, recentSpeakers, isChannelBuffer) {
+                                autocompleteFor(
+                                    composerText,
+                                    memberNicks,
+                                    recentSpeakers,
+                                    nickNormalizer,
+                                    isChannel = isChannelBuffer,
+                                )
+                            }
+                        val needsMemberCompletion =
+                            remember(composerText) {
+                                composerNeedsMemberNicks(composerText)
+                            }
+                        LaunchedEffect(needsMemberCompletion) {
+                            if (needsMemberCompletion) onNeedMembers()
+                        }
+                        // Debounce the SHOW so fast typing doesn't flash the suggestion panel on every
+                        // keystroke: only reveal completions after a brief pause. Hiding stays immediate
+                        // (an empty result clears the panel at once) so the panel never lingers stale.
+                        var showAutocomplete by remember { mutableStateOf(false) }
+                        LaunchedEffect(completions) {
+                            if (completions.isEmpty()) {
+                                showAutocomplete = false
                             } else {
-                                AutoFollowTrace.record("composer_submit", traceBufferId, traceSessionId) {
-                                    "long_draft=false"
-                                }
-                                onSubmit(text)
-                                // Empty the field on the tap frame. The ViewModel still owns the
-                                // durable draft and republishes it if the send never lands, so this
-                                // is presentation only -- notifying onDraftChanged here would count
-                                // as an edit and make the submission itself stale.
-                                composerText = TextFieldValue("")
-                                scope.launch {
-                                    scrollToNewest(animate = true, reason = "composer_send_action")
-                                }
+                                kotlinx.coroutines.delay(AUTOCOMPLETE_SHOW_DEBOUNCE_MS)
+                                showAutocomplete = true
                             }
                         }
-                    },
-                    enabled = composerEnabled,
-                    onFieldPositioned = { flightAnchors.composerField = it },
-                    onFieldTextPositioned = { flightAnchors.composerTextOrigin = it },
-                    // Keep the reply content mounted while its banner exits, but start that exit on
-                    // the send tap rather than after persistence clears the durable draft.
-                    reply = outgoingFlight?.let { flight ->
-                        flight.replyText?.let { ComposerReply(flight.replySender.orEmpty(), it) }
-                    } ?: state.replyTo?.let { ComposerReply(it.sender, it.text) },
-                    replyVisible = outgoingFlight?.replyText == null,
-                    onCancelReply = { onSetReply(null) },
-                    // SERVER buffers send raw commands; hint that in the placeholder.
-                    // Held blank while a flight is airborne: the ghost is born over the input box
-                    // at exactly the field-text origin, and the placeholder appearing beneath the
-                    // departing line read as two texts fighting for the same spot.
-                    placeholder = when {
-                        outgoingFlight != null -> ""
-                        isServerBuffer -> stringResource(R.string.chat_server_composer_hint)
-                        else -> stringResource(R.string.chat_composer_placeholder)
-                    },
-                    showEmojiButton = showComposerEmoji,
-                    onAttachment = { uploadCurrentDraftDirectly = false; attachmentSheetOpen = true },
-                    voiceEnabled = voiceEnabled && voiceState.staged == null && composerText.text.isBlank(),
-                    voiceRecording = voiceState.recording != null,
-                    onVoiceHoldStart = onVoiceHoldStart,
-                    onVoiceAccessibilityStart = onVoiceAccessibilityStart,
-                    onVoiceHoldStop = onVoiceHoldStop,
-                    onVoiceHoldCancel = onVoiceHoldCancel,
-                    onVoiceLock = onVoiceLock,
-                    autocomplete = if (showAutocomplete && completions.isNotEmpty()) {
-                        {
-                            AutocompletePanel(
-                                candidates = completions.map { it.display },
-                                isCommand = completions.firstOrNull()?.isCommand == true,
-                                networkId = state.buffer?.networkId,
-                                onPick = { picked ->
-                                    composerText = applyPick(composerText, picked)
-                                    onDraftChanged(composerText.text)
-                                },
+                        // Keyed on the buffer like the sibling composer state so the panel's held exit
+                        // content never leaks across a buffer switch.
+                        key(traceBufferId) {
+                            VoiceComposerPanel(
+                                state = voiceState,
+                                playbackState = audioPlaybackState,
+                                onDelete = onVoiceDelete,
+                                onCancelRecording = onVoiceHoldCancel,
+                                onStopRecording = onVoiceHoldStop,
+                                onSend = onVoiceSend,
+                                onPreview = { attachment -> onAudioToggle(AudioPlaybackRequest(attachment, null)) },
+                                onPreviewSeek = { attachment, positionMs -> onAudioSeek(attachment, positionMs) },
+                                onToggleEncryption = onVoiceToggleEncryption,
+                                onDestinationSelected = onVoiceDestinationSelected,
+                                onErrorDismissed = onVoiceErrorDismissed,
                             )
                         }
-                    } else null,
-                )
-            }
-            // The ghost overlay draws ABOVE the composer layer: a sent bubble materializes over
-            // the input box -- the morph pins its stand-in text to the still-warm field text --
-            // and then rides up into the timeline, instead of being born occluded behind the
-            // input bar. The clip and the coordinate origin sit on this stationary wrapper:
-            // clipping the ghost itself would clip nothing, since its layer translation carries
-            // its bounds along with its pixels. The spacing provider mirrors the timeline
-            // pane's, so the replica renders under exactly the tokens the rows use.
-            CompositionLocalProvider(LocalSpacing provides conversationSpacing) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .clipToBounds()
-                    // Layout-phase write only: the flight resolves the composer's and the
-                    // landing row's window rects against this origin.
-                    .onGloballyPositioned {
-                        flightAnchors.hostOrigin = it.positionInWindow()
-                    },
-            ) {
-                SendFlightOverlay(
-                    flight = outgoingFlight,
-                    anchors = flightAnchors,
-                    motion = flightMotion,
-                    listShift = flightListShift,
-                    selfNick = selfNick,
-                    showSender = flightShowSender,
-                    networkId = state.buffer?.networkId,
-                    knownNicks = knownNicks,
-                    identityRules = identityRules,
-                )
-            }
-            }
-            }
+                        // The buffer stays non-null while a rejoin animates the banner out, so the exiting
+                        // content can keep reading it without snapshotting.
+                        AnimatedVisibility(
+                            visible = state.parted,
+                            enter = expandVertically(animationSpec = MotdMotion.contentSize) + fadeIn(MotdMotion.fadeIn),
+                            exit = shrinkVertically(animationSpec = MotdMotion.contentSize) + fadeOut(MotdMotion.microFadeOut),
+                        ) {
+                            PartedChannelBanner(
+                                channel = state.buffer?.displayName.orEmpty(),
+                                onRejoin = onRejoin,
+                            )
+                        }
+                        Composer(
+                            value = composerText,
+                            onValueChange = {
+                                val wasBlank = composerText.text.isBlank()
+                                composerText = it
+                                onDraftChanged(it.text)
+                                if (it.text.isNotBlank()) {
+                                    onTyping(true)
+                                } else if (!wasBlank) {
+                                    onTyping(false)
+                                }
+                            },
+                            onSend = {
+                                val text = composerText.text
+                                if (text.isNotBlank()) {
+                                    if (isLongDraft(text)) {
+                                        AutoFollowTrace.record("long_draft_prompt_open", traceBufferId, traceSessionId)
+                                        longDraftPrompt = true
+                                    } else {
+                                        AutoFollowTrace.record("composer_submit", traceBufferId, traceSessionId) {
+                                            "long_draft=false"
+                                        }
+                                        onSubmit(text)
+                                        // Empty the field on the tap frame. The ViewModel still owns the
+                                        // durable draft and republishes it if the send never lands, so this
+                                        // is presentation only -- notifying onDraftChanged here would count
+                                        // as an edit and make the submission itself stale.
+                                        composerText = TextFieldValue("")
+                                        scope.launch {
+                                            scrollToNewest(animate = true, reason = "composer_send_action")
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = composerEnabled,
+                            onFieldPositioned = { flightAnchors.composerField = it },
+                            onFieldTextPositioned = { flightAnchors.composerTextOrigin = it },
+                            // Keep the reply content mounted while its banner exits, but start that exit on
+                            // the send tap rather than after persistence clears the durable draft.
+                            reply =
+                                outgoingFlight?.let { flight ->
+                                    flight.replyText?.let { ComposerReply(flight.replySender.orEmpty(), it) }
+                                } ?: state.replyTo?.let { ComposerReply(it.sender, it.text) },
+                            replyVisible = outgoingFlight?.replyText == null,
+                            onCancelReply = { onSetReply(null) },
+                            // SERVER buffers send raw commands; hint that in the placeholder.
+                            // Held blank while a flight is airborne: the ghost is born over the input box
+                            // at exactly the field-text origin, and the placeholder appearing beneath the
+                            // departing line read as two texts fighting for the same spot.
+                            placeholder =
+                                when {
+                                    outgoingFlight != null -> ""
+                                    isServerBuffer -> stringResource(R.string.chat_server_composer_hint)
+                                    else -> stringResource(R.string.chat_composer_placeholder)
+                                },
+                            showEmojiButton = showComposerEmoji,
+                            onAttachment = {
+                                uploadCurrentDraftDirectly = false
+                                attachmentSheetOpen = true
+                            },
+                            voiceEnabled = voiceEnabled && voiceState.staged == null && composerText.text.isBlank(),
+                            voiceRecording = voiceState.recording != null,
+                            onVoiceHoldStart = onVoiceHoldStart,
+                            onVoiceAccessibilityStart = onVoiceAccessibilityStart,
+                            onVoiceHoldStop = onVoiceHoldStop,
+                            onVoiceHoldCancel = onVoiceHoldCancel,
+                            onVoiceLock = onVoiceLock,
+                            autocomplete =
+                                if (showAutocomplete && completions.isNotEmpty()) {
+                                    {
+                                        AutocompletePanel(
+                                            candidates = completions.map { it.display },
+                                            isCommand = completions.firstOrNull()?.isCommand == true,
+                                            networkId = state.buffer?.networkId,
+                                            onPick = { picked ->
+                                                composerText = applyPick(composerText, picked)
+                                                onDraftChanged(composerText.text)
+                                            },
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
+                        )
+                    }
+                    // The ghost overlay draws ABOVE the composer layer: a sent bubble materializes over
+                    // the input box -- the morph pins its stand-in text to the still-warm field text --
+                    // and then rides up into the timeline, instead of being born occluded behind the
+                    // input bar. The clip and the coordinate origin sit on this stationary wrapper:
+                    // clipping the ghost itself would clip nothing, since its layer translation carries
+                    // its bounds along with its pixels. The spacing provider mirrors the timeline
+                    // pane's, so the replica renders under exactly the tokens the rows use.
+                    CompositionLocalProvider(LocalSpacing provides conversationSpacing) {
+                        Box(
+                            modifier =
+                                Modifier
+                                    .matchParentSize()
+                                    .clipToBounds()
+                                    // Layout-phase write only: the flight resolves the composer's and the
+                                    // landing row's window rects against this origin.
+                                    .onGloballyPositioned {
+                                        flightAnchors.hostOrigin = it.positionInWindow()
+                                    },
+                        ) {
+                            SendFlightOverlay(
+                                flight = outgoingFlight,
+                                anchors = flightAnchors,
+                                motion = flightMotion,
+                                listShift = flightListShift,
+                                selfNick = selfNick,
+                                showSender = flightShowSender,
+                                networkId = state.buffer?.networkId,
+                                knownNicks = knownNicks,
+                                identityRules = identityRules,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -2582,20 +2706,33 @@ fun ChatContent(
         networkId = state.buffer?.networkId,
         // Offer-only. The upload path binds the advertised endpoint to the connected network's own
         // host and refuses an off-host one there, where the credential is actually attached.
-        sojuFileHostAvailable = (state.connState as? IrcClientState.Ready)
-            ?.isupport
-            ?.let(::sojuFileHostAdvertised) == true,
+        sojuFileHostAvailable =
+            (state.connState as? IrcClientState.Ready)
+                ?.isupport
+                ?.let(::sojuFileHostAdvertised) == true,
         startWithCurrentDraft = uploadCurrentDraftDirectly,
         sharedFile = sharedFile,
-        directFileTransferAvailable = state.buffer?.type == BufferType.QUERY &&
-            state.connState is IrcClientState.Ready,
-        onDismiss = { attachmentSheetOpen = false; uploadCurrentDraftDirectly = false; sharedFile = null },
+        directFileTransferAvailable =
+            state.buffer?.type == BufferType.QUERY &&
+                state.connState is IrcClientState.Ready,
+        onDismiss = {
+            attachmentSheetOpen = false
+            uploadCurrentDraftDirectly = false
+            sharedFile = null
+        },
         onInsertUrl = {
-            composerText = io.github.trevarj.motd.ui.components.insertAtCursor(composerText, it)
+            composerText =
+                io.github.trevarj.motd.ui.components
+                    .insertAtCursor(composerText, it)
             onDraftChanged(composerText.text)
         },
         onReplaceDraft = {
-            composerText = TextFieldValue(it, androidx.compose.ui.text.TextRange(it.length))
+            composerText =
+                TextFieldValue(
+                    it,
+                    androidx.compose.ui.text
+                        .TextRange(it.length),
+                )
             onDraftChanged(composerText.text)
         },
         onDirectFile = onSendDccFile,
@@ -2608,25 +2745,29 @@ fun ChatContent(
             },
             title = { Text("Long draft") },
             text = { Text("Upload the draft as a paste, or send it as ordinary IRC messages?") },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = {
-                AutoFollowTrace.record("long_draft_upload", traceBufferId, traceSessionId)
-                longDraftPrompt = false
-                uploadCurrentDraftDirectly = true
-                attachmentSheetOpen = true
-            }) { Text("Upload as paste") } },
-            dismissButton = { Row {
+            confirmButton = {
                 androidx.compose.material3.TextButton(onClick = {
-                    AutoFollowTrace.record("long_draft_send_messages", traceBufferId, traceSessionId)
+                    AutoFollowTrace.record("long_draft_upload", traceBufferId, traceSessionId)
                     longDraftPrompt = false
-                    onSubmit(composerText.text)
-                    composerText = TextFieldValue("")
-                    scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }
-                }) { Text("Send as messages") }
-                androidx.compose.material3.TextButton(onClick = {
-                    AutoFollowTrace.record("long_draft_cancel", traceBufferId, traceSessionId)
-                    longDraftPrompt = false
-                }) { Text("Cancel") }
-            } },
+                    uploadCurrentDraftDirectly = true
+                    attachmentSheetOpen = true
+                }) { Text("Upload as paste") }
+            },
+            dismissButton = {
+                Row {
+                    androidx.compose.material3.TextButton(onClick = {
+                        AutoFollowTrace.record("long_draft_send_messages", traceBufferId, traceSessionId)
+                        longDraftPrompt = false
+                        onSubmit(composerText.text)
+                        composerText = TextFieldValue("")
+                        scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }
+                    }) { Text("Send as messages") }
+                    androidx.compose.material3.TextButton(onClick = {
+                        AutoFollowTrace.record("long_draft_cancel", traceBufferId, traceSessionId)
+                        longDraftPrompt = false
+                    }) { Text("Cancel") }
+                }
+            },
         )
     }
 
@@ -2645,12 +2786,13 @@ fun ChatContent(
             onReply = {
                 hideThen {
                     onSetReply(target)
-                    composerText = composerTextForReply(
-                        value = composerText,
-                        sender = target.sender,
-                        bufferType = state.buffer?.type,
-                        visibleReplyPrefix = visibleReplyPrefix,
-                    )
+                    composerText =
+                        composerTextForReply(
+                            value = composerText,
+                            sender = target.sender,
+                            bufferType = state.buffer?.type,
+                            visibleReplyPrefix = visibleReplyPrefix,
+                        )
                     onDraftChanged(composerText.text)
                 }
             },
@@ -2659,9 +2801,10 @@ fun ChatContent(
             onReact = { emoji -> hideThen { onReact(target, emoji) } },
             reactionEnabled = { emoji ->
                 val ready = state.connState as? IrcClientState.Ready
-                val mine = target.msgid?.let { msgid ->
-                    reactionChips(msgid).firstOrNull { it.emoji == emoji }?.mine
-                } == true
+                val mine =
+                    target.msgid?.let { msgid ->
+                        reactionChips(msgid).firstOrNull { it.emoji == emoji }?.mine
+                    } == true
                 ready != null && canSendReactionTags(ready.caps, ready.isupport, remove = mine)
             },
             onCopy = {
@@ -2722,14 +2865,18 @@ internal fun reverseItemTopAlignmentCorrection(
 
 internal enum class ChatTitleTarget { CHANNEL_INFO, NICK_DETAILS, NONE }
 
-internal data class MaterializedChatTarget(val row: MessageEntity, val index: Int)
+internal data class MaterializedChatTarget(
+    val row: MessageEntity,
+    val index: Int,
+)
 
 /** The title bar destination is a property of the buffer, not its display-name prefix. */
-internal fun chatTitleTarget(type: BufferType?): ChatTitleTarget = when (type) {
-    BufferType.CHANNEL -> ChatTitleTarget.CHANNEL_INFO
-    BufferType.QUERY -> ChatTitleTarget.NICK_DETAILS
-    BufferType.SERVER, null -> ChatTitleTarget.NONE
-}
+internal fun chatTitleTarget(type: BufferType?): ChatTitleTarget =
+    when (type) {
+        BufferType.CHANNEL -> ChatTitleTarget.CHANNEL_INFO
+        BufferType.QUERY -> ChatTitleTarget.NICK_DETAILS
+        BufferType.SERVER, null -> ChatTitleTarget.NONE
+    }
 
 internal data class PagingTargetGeneration(
     val itemCount: Int,
@@ -2745,11 +2892,12 @@ internal fun relevantTargetLoadState(
     loadedEnd: Int,
     prepend: LoadState,
     append: LoadState,
-): LoadState? = when {
-    index < loadedStart -> prepend
-    index >= loadedEnd -> append
-    else -> null
-}
+): LoadState? =
+    when {
+        index < loadedStart -> prepend
+        index >= loadedEnd -> append
+        else -> null
+    }
 
 /** Snapshot only the requested position and the load direction capable of materializing it. */
 internal fun targetMaterialization(
@@ -2760,26 +2908,28 @@ internal fun targetMaterialization(
     val snapshot = items.itemSnapshotList
     val loadedStart = snapshot.placeholdersBefore
     val loadedEnd = loadedStart + snapshot.items.size
-    val directionalState = relevantTargetLoadState(
-        index,
-        loadedStart,
-        loadedEnd,
-        items.loadState.prepend,
-        items.loadState.append,
-    )
+    val directionalState =
+        relevantTargetLoadState(
+            index,
+            loadedStart,
+            loadedEnd,
+            items.loadState.prepend,
+            items.loadState.append,
+        )
     val refresh = items.loadState.refresh
     return TargetMaterialization(
         item = pagingSnapshotItemOrNull(index, itemCount, items::peek),
         loading = refresh is LoadState.Loading || directionalState is LoadState.Loading,
         addressable = index in 0 until itemCount,
         failed = refresh is LoadState.Error || directionalState is LoadState.Error,
-        generation = PagingTargetGeneration(
-            itemCount = itemCount,
-            placeholdersBefore = snapshot.placeholdersBefore,
-            placeholdersAfter = snapshot.placeholdersAfter,
-            firstLoadedId = snapshot.items.firstOrNull()?.id,
-            lastLoadedId = snapshot.items.lastOrNull()?.id,
-        ),
+        generation =
+            PagingTargetGeneration(
+                itemCount = itemCount,
+                placeholdersBefore = snapshot.placeholdersBefore,
+                placeholdersAfter = snapshot.placeholdersAfter,
+                firstLoadedId = snapshot.items.firstOrNull()?.id,
+                lastLoadedId = snapshot.items.lastOrNull()?.id,
+            ),
     )
 }
 
@@ -2801,43 +2951,62 @@ internal inline fun <T> pagingSnapshotItemOrNull(
  * Append [prefill] to [value], inserting a single space when the current text is non-empty and
  * doesn't already end in whitespace. Places the cursor at the end.
  */
-fun appendPrefill(value: TextFieldValue, prefill: String): TextFieldValue {
+fun appendPrefill(
+    value: TextFieldValue,
+    prefill: String,
+): TextFieldValue {
     val current = value.text
     val sep = if (current.isNotEmpty() && !current.last().isWhitespace()) " " else ""
     val text = current + sep + prefill
-    return TextFieldValue(text = text, selection = androidx.compose.ui.text.TextRange(text.length))
+    return TextFieldValue(
+        text = text,
+        selection =
+            androidx.compose.ui.text
+                .TextRange(text.length),
+    )
 }
 
 /** Hand the raw message text to the system share sheet (mirrors the image viewer's share). */
-private fun shareMessageText(context: android.content.Context, text: String) {
-    val intent = Intent(Intent.ACTION_SEND).apply {
-        type = "text/plain"
-        putExtra(Intent.EXTRA_TEXT, text)
-    }
+private fun shareMessageText(
+    context: android.content.Context,
+    text: String,
+) {
+    val intent =
+        Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
     context.startActivity(
         Intent.createChooser(intent, context.getString(R.string.chat_action_share_chooser)),
     )
 }
 
 /** Restore a buffer draft, then merge a one-shot mention prefill without losing the cursor. */
-internal fun restoreComposerDraft(draft: String?, prefill: String?): TextFieldValue {
+internal fun restoreComposerDraft(
+    draft: String?,
+    prefill: String?,
+): TextFieldValue {
     val saved = draft.orEmpty()
     val value = TextFieldValue(saved, TextRange(saved.length))
     return prefill?.let { appendPrefill(value, it) } ?: value
 }
 
 /** Add the visible channel-reply prefix while preserving the current selection. */
-fun prependReplyPrefix(value: TextFieldValue, sender: String): TextFieldValue {
+fun prependReplyPrefix(
+    value: TextFieldValue,
+    sender: String,
+): TextFieldValue {
     if (sender.isBlank()) return value
     val prefix = "$sender: "
     if (value.text.startsWith(prefix)) return value
     val text = prefix + value.text
     return value.copy(
         text = text,
-        selection = androidx.compose.ui.text.TextRange(
-            value.selection.start + prefix.length,
-            value.selection.end + prefix.length,
-        ),
+        selection =
+            androidx.compose.ui.text.TextRange(
+                value.selection.start + prefix.length,
+                value.selection.end + prefix.length,
+            ),
     )
 }
 
@@ -2847,46 +3016,53 @@ internal fun composerTextForReply(
     sender: String,
     bufferType: BufferType?,
     visibleReplyPrefix: Boolean,
-): TextFieldValue = if (visibleReplyPrefix && bufferType == BufferType.CHANNEL) {
-    prependReplyPrefix(value, sender)
-} else {
-    value
-}
+): TextFieldValue =
+    if (visibleReplyPrefix && bufferType == BufferType.CHANNEL) {
+        prependReplyPrefix(value, sender)
+    } else {
+        value
+    }
 
 /**
  * Header subtitle: typing summary if anyone is typing, else a localized member count for channels.
  * Uses the [Context] typing overload and a plural for the count.
  */
+
 /** A durable explicit-jump failure is the sole source of the not-loaded snackbar. */
-internal fun shouldPresentUnresolvedEntrySnackbar(entryState: EntryPositionState): Boolean =
-    entryState is EntryPositionState.Unresolved && entryState.messageUnavailable
+internal fun shouldPresentUnresolvedEntrySnackbar(entryState: EntryPositionState): Boolean = entryState is EntryPositionState.Unresolved && entryState.messageUnavailable
 
 /**
  * A completed REFRESH may still be followed by a Room/RemoteMediator APPEND. Do not decide entry
  * positioning from a transient empty window; only rows or a terminal empty append are conclusive.
  */
-internal fun initialPagingPage(itemCount: Int, append: LoadState): InitialPagingPage = when {
-    itemCount > 0 -> InitialPagingPage.RowsAvailable
-    append is LoadState.Error -> InitialPagingPage.TerminalEmpty
-    append is LoadState.NotLoading && append.endOfPaginationReached -> InitialPagingPage.TerminalEmpty
-    else -> InitialPagingPage.Pending
-}
+internal fun initialPagingPage(
+    itemCount: Int,
+    append: LoadState,
+): InitialPagingPage =
+    when {
+        itemCount > 0 -> InitialPagingPage.RowsAvailable
+        append is LoadState.Error -> InitialPagingPage.TerminalEmpty
+        append is LoadState.NotLoading && append.endOfPaginationReached -> InitialPagingPage.TerminalEmpty
+        else -> InitialPagingPage.Pending
+    }
 
 internal enum class InitialPagingPage { Pending, RowsAvailable, TerminalEmpty }
 
-internal fun loadStateName(state: LoadState): String = when (state) {
-    is LoadState.Loading -> "LOADING"
-    is LoadState.NotLoading -> if (state.endOfPaginationReached) "DONE" else "IDLE"
-    is LoadState.Error -> "ERROR"
-}
+internal fun loadStateName(state: LoadState): String =
+    when (state) {
+        is LoadState.Loading -> "LOADING"
+        is LoadState.NotLoading -> if (state.endOfPaginationReached) "DONE" else "IDLE"
+        is LoadState.Error -> "ERROR"
+    }
 
 internal fun visibleReactionMsgids(
     items: LazyPagingItems<MessageEntity>,
     listState: androidx.compose.foundation.lazy.LazyListState,
 ): List<String> {
-    val visible = listState.layoutInfo.visibleItemsInfo
-        .map { it.index }
-        .filter { it >= 0 && it < items.itemCount }
+    val visible =
+        listState.layoutInfo.visibleItemsInfo
+            .map { it.index }
+            .filter { it >= 0 && it < items.itemCount }
     val start: Int
     val endExclusive: Int
     if (visible.isEmpty()) {
@@ -2894,8 +3070,9 @@ internal fun visibleReactionMsgids(
         endExclusive = minOf(items.itemCount, REACTION_PREFETCH_ROWS * 2)
     } else {
         start = (visible.minOrNull() ?: 0).minus(REACTION_PREFETCH_ROWS).coerceAtLeast(0)
-        endExclusive = ((visible.maxOrNull() ?: 0) + REACTION_PREFETCH_ROWS + 1)
-            .coerceAtMost(items.itemCount)
+        endExclusive =
+            ((visible.maxOrNull() ?: 0) + REACTION_PREFETCH_ROWS + 1)
+                .coerceAtMost(items.itemCount)
     }
     if (start >= endExclusive) return emptyList()
     return (start until endExclusive)
@@ -2938,7 +3115,10 @@ internal val HistorySyncStatus.isActive: Boolean
  * polite announcements. Only the failure pill, which asks for an action, announces itself.
  */
 @Composable
-internal fun ChatTitleSyncSpinner(status: HistorySyncStatus, modifier: Modifier = Modifier) {
+internal fun ChatTitleSyncSpinner(
+    status: HistorySyncStatus,
+    modifier: Modifier = Modifier,
+) {
     AnimatedVisibility(
         visible = status.isActive,
         modifier = modifier,
@@ -2948,9 +3128,10 @@ internal fun ChatTitleSyncSpinner(status: HistorySyncStatus, modifier: Modifier 
         HistorySyncSpinner(
             contentDescription = stringResource(R.string.chatlist_sync_syncing),
             // Padding inside the visibility scope so a settled sync leaves no gap in the title.
-            modifier = Modifier
-                .padding(start = 8.dp)
-                .testTag(CHAT_TITLE_SYNC_SPINNER_TAG),
+            modifier =
+                Modifier
+                    .padding(start = 8.dp)
+                    .testTag(CHAT_TITLE_SYNC_SPINNER_TAG),
         )
     }
 }
@@ -2963,9 +3144,10 @@ internal fun BoxScope.TimelineTopOverlays(
     staleChip: @Composable () -> Unit,
 ) {
     Column(
-        modifier = Modifier
-            .align(Alignment.TopCenter)
-            .fillMaxWidth(),
+        modifier =
+            Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // Keep playback controls stationary when a delayed sync failure becomes visible.
@@ -2981,8 +3163,10 @@ internal fun BoxScope.TimelineTopOverlays(
  * without offering an action. An empty timeline has nothing to qualify, and a Failed pass keeps the
  * retry on its pill, so neither renders this.
  */
-internal fun showsStaleChip(status: HistorySyncStatus, timelineEmpty: Boolean): Boolean =
-    status is HistorySyncStatus.Partial && !timelineEmpty
+internal fun showsStaleChip(
+    status: HistorySyncStatus,
+    timelineEmpty: Boolean,
+): Boolean = status is HistorySyncStatus.Partial && !timelineEmpty
 
 /** Quiet companion to the sync pill for a settled-but-incomplete history pass; tap to dismiss. */
 @Composable
@@ -2994,9 +3178,10 @@ internal fun TimelineHistoryStaleChip(
 ) {
     AnimatedVisibility(
         visible = showsStaleChip(status, timelineEmpty),
-        modifier = modifier
-            .padding(horizontal = 24.dp, vertical = 8.dp)
-            .testTag(CHAT_HISTORY_PARTIAL_CHIP_TAG),
+        modifier =
+            modifier
+                .padding(horizontal = 24.dp, vertical = 8.dp)
+                .testTag(CHAT_HISTORY_PARTIAL_CHIP_TAG),
         enter = fadeIn(MotdMotion.microFadeIn),
         exit = fadeOut(MotdMotion.microFadeOut),
     ) {
@@ -3004,9 +3189,10 @@ internal fun TimelineHistoryStaleChip(
         Surface(
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier
-                .semantics { liveRegion = LiveRegionMode.Polite }
-                .clickable(onClickLabel = dismissLabel, onClick = onDismiss),
+            modifier =
+                Modifier
+                    .semantics { liveRegion = LiveRegionMode.Polite }
+                    .clickable(onClickLabel = dismissLabel, onClick = onDismiss),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -3046,9 +3232,10 @@ internal fun TimelineHistorySyncFailure(
 ) {
     AnimatedVisibility(
         visible = status is HistorySyncStatus.Failed,
-        modifier = modifier
-            .padding(horizontal = 24.dp, vertical = 16.dp)
-            .testTag(CHAT_HISTORY_SYNC_FAILURE_TAG),
+        modifier =
+            modifier
+                .padding(horizontal = 24.dp, vertical = 16.dp)
+                .testTag(CHAT_HISTORY_SYNC_FAILURE_TAG),
         enter = fadeIn(MotdMotion.microFadeIn) + scaleIn(MotdMotion.microFadeIn, initialScale = 0.96f),
         exit = fadeOut(MotdMotion.microFadeOut) + scaleOut(MotdMotion.microFadeOut, targetScale = 0.96f),
     ) {
@@ -3072,9 +3259,10 @@ internal fun TimelineHistorySyncFailure(
                 Button(
                     onClick = onRetry,
                     enabled = retryEnabled,
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .testTag(CHAT_HISTORY_SYNC_RETRY_TAG),
+                    modifier =
+                        Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag(CHAT_HISTORY_SYNC_RETRY_TAG),
                 ) {
                     Text(stringResource(R.string.chat_retry))
                 }
@@ -3084,11 +3272,15 @@ internal fun TimelineHistorySyncFailure(
 }
 
 internal sealed interface ChatSubtitleModel {
-    data class Text(val value: String) : ChatSubtitleModel
+    data class Text(
+        val value: String,
+    ) : ChatSubtitleModel
 }
 
-internal fun chatSubtitle(state: ChatState, context: android.content.Context): String? =
-    (chatSubtitleModel(state, context) as? ChatSubtitleModel.Text)?.value
+internal fun chatSubtitle(
+    state: ChatState,
+    context: android.content.Context,
+): String? = (chatSubtitleModel(state, context) as? ChatSubtitleModel.Text)?.value
 
 internal fun chatSubtitleModel(
     state: ChatState,
@@ -3096,14 +3288,19 @@ internal fun chatSubtitleModel(
 ): ChatSubtitleModel? {
     when (val connection = state.connState) {
         null -> return null
+
         IrcClientState.Connecting -> return ChatSubtitleModel.Text(context.getString(R.string.drawer_state_connecting))
+
         IrcClientState.Registering -> return ChatSubtitleModel.Text(context.getString(R.string.drawer_state_registering))
+
         IrcClientState.Disconnected -> return ChatSubtitleModel.Text(context.getString(R.string.drawer_state_disconnected))
+
         is IrcClientState.Failed -> return if (connection.fatal) {
             ChatSubtitleModel.Text(connection.reason)
         } else {
             ChatSubtitleModel.Text(context.getString(R.string.drawer_state_connecting))
         }
+
         is IrcClientState.Ready -> Unit
     }
     if (state.typingNicks.isNotEmpty()) {
@@ -3143,10 +3340,11 @@ internal fun ScrollToBottomFab(
         scope.launch {
             holdProgress.animateTo(
                 targetValue = 0f,
-                animationSpec = tween(
-                    durationMillis = SCROLL_TO_BOTTOM_FAB_SETTLE_MS,
-                    easing = FastOutSlowInEasing,
-                ),
+                animationSpec =
+                    tween(
+                        durationMillis = SCROLL_TO_BOTTOM_FAB_SETTLE_MS,
+                        easing = FastOutSlowInEasing,
+                    ),
             )
         }
     }
@@ -3181,80 +3379,84 @@ internal fun ScrollToBottomFab(
                 // Keep the semantic click functional for accessibility and non-touch input. The
                 // custom pointer recognizer consumes physical releases before Surface sees them.
                 onClick = latestOnClick,
-                modifier = Modifier
-                    .testTag("chat_scroll_to_bottom_fab")
-                    .pointerInput(Unit) {
-                        awaitEachGesture {
-                            awaitFirstDown(requireUnconsumed = false)
-                            val holdJob = scope.launch {
-                                holdProgress.snapTo(0f)
-                                holdProgress.animateTo(
-                                    1f,
-                                    tween(
-                                        durationMillis = SCROLL_TO_BOTTOM_FAB_HOLD_MS,
-                                        easing = LinearEasing,
-                                    ),
-                                )
-                            }
-                            // Observe and consume the release before the FAB's internal Surface
-                            // click so the physical tap dispatches exactly once through this path.
-                            val releaseResult = withTimeoutOrNull(SCROLL_TO_BOTTOM_FAB_HOLD_MS.toLong()) {
-                                Result.success(waitForUpOrCancellation(PointerEventPass.Initial))
-                            }
-                            holdJob.cancel()
-                            when {
-                                releaseResult == null -> {
-                                    // Held past the threshold: skip mentions, jump to newest.
-                                    fire()
-                                    // Swallow the trailing release so it doesn't leak to handlers
-                                    // behind the FAB.
-                                    waitForUpOrCancellation(PointerEventPass.Initial)?.consume()
+                modifier =
+                    Modifier
+                        .testTag("chat_scroll_to_bottom_fab")
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                val holdJob =
+                                    scope.launch {
+                                        holdProgress.snapTo(0f)
+                                        holdProgress.animateTo(
+                                            1f,
+                                            tween(
+                                                durationMillis = SCROLL_TO_BOTTOM_FAB_HOLD_MS,
+                                                easing = LinearEasing,
+                                            ),
+                                        )
+                                    }
+                                // Observe and consume the release before the FAB's internal Surface
+                                // click so the physical tap dispatches exactly once through this path.
+                                val releaseResult =
+                                    withTimeoutOrNull(SCROLL_TO_BOTTOM_FAB_HOLD_MS.toLong()) {
+                                        Result.success(waitForUpOrCancellation(PointerEventPass.Initial))
+                                    }
+                                holdJob.cancel()
+                                when {
+                                    releaseResult == null -> {
+                                        // Held past the threshold: skip mentions, jump to newest.
+                                        fire()
+                                        // Swallow the trailing release so it doesn't leak to handlers
+                                        // behind the FAB.
+                                        waitForUpOrCancellation(PointerEventPass.Initial)?.consume()
+                                    }
+
+                                    releaseResult.getOrNull() != null -> {
+                                        // Released early: settle the partial ring and perform a tap.
+                                        releaseResult.getOrNull()?.consume()
+                                        settle()
+                                        latestOnClick()
+                                    }
+
+                                    else -> {
+                                        // Leaving the gesture bounds or another recognizer taking over
+                                        // cancels cleanly instead of being mistaken for a completed hold.
+                                        settle()
+                                    }
                                 }
-                                releaseResult.getOrNull() != null -> {
-                                    // Released early: settle the partial ring and perform a tap.
-                                    releaseResult.getOrNull()?.consume()
-                                    settle()
-                                    latestOnClick()
-                                }
-                                else -> {
-                                    // Leaving the gesture bounds or another recognizer taking over
-                                    // cancels cleanly instead of being mistaken for a completed hold.
-                                    settle()
+                            }
+                        }.drawWithContent {
+                            drawContent()
+                            val progress = holdProgress.value
+                            if (progress > 0f) {
+                                val stroke = 3.dp.toPx()
+                                val inset = stroke / 2 + 2.dp.toPx()
+                                val diameter = minOf(size.width, size.height) - inset * 2
+                                if (diameter > 0f) {
+                                    val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
+                                    val arcSize = Size(diameter, diameter)
+                                    drawArc(
+                                        color = ringColor.copy(alpha = 0.22f * (progress * 4f).coerceAtMost(1f)),
+                                        startAngle = -90f,
+                                        sweepAngle = 360f,
+                                        useCenter = false,
+                                        topLeft = topLeft,
+                                        size = arcSize,
+                                        style = Stroke(width = stroke, cap = StrokeCap.Round),
+                                    )
+                                    drawArc(
+                                        color = ringColor,
+                                        startAngle = -90f,
+                                        sweepAngle = 360f * progress,
+                                        useCenter = false,
+                                        topLeft = topLeft,
+                                        size = arcSize,
+                                        style = Stroke(width = stroke, cap = StrokeCap.Round),
+                                    )
                                 }
                             }
-                        }
-                    }
-                    .drawWithContent {
-                        drawContent()
-                        val progress = holdProgress.value
-                        if (progress > 0f) {
-                            val stroke = 3.dp.toPx()
-                            val inset = stroke / 2 + 2.dp.toPx()
-                            val diameter = minOf(size.width, size.height) - inset * 2
-                            if (diameter > 0f) {
-                                val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
-                                val arcSize = Size(diameter, diameter)
-                                drawArc(
-                                    color = ringColor.copy(alpha = 0.22f * (progress * 4f).coerceAtMost(1f)),
-                                    startAngle = -90f,
-                                    sweepAngle = 360f,
-                                    useCenter = false,
-                                    topLeft = topLeft,
-                                    size = arcSize,
-                                    style = Stroke(width = stroke, cap = StrokeCap.Round),
-                                )
-                                drawArc(
-                                    color = ringColor,
-                                    startAngle = -90f,
-                                    sweepAngle = 360f * progress,
-                                    useCenter = false,
-                                    topLeft = topLeft,
-                                    size = arcSize,
-                                    style = Stroke(width = stroke, cap = StrokeCap.Round),
-                                )
-                            }
-                        }
-                    },
+                        },
             ) {
                 Icon(
                     Icons.Filled.KeyboardArrowDown,
@@ -3367,24 +3569,28 @@ internal fun VoiceComposerPanel(
     state.staged?.let { lastStaged = it }
     AnimatedVisibility(
         visible = state.recording != null,
-        enter = expandVertically(animationSpec = MotdMotion.contentSize, expandFrom = Alignment.Top) +
-            fadeIn(MotdMotion.microFadeIn),
-        exit = shrinkVertically(animationSpec = MotdMotion.contentSize, shrinkTowards = Alignment.Top) +
-            fadeOut(MotdMotion.microFadeOut),
+        enter =
+            expandVertically(animationSpec = MotdMotion.contentSize, expandFrom = Alignment.Top) +
+                fadeIn(MotdMotion.microFadeIn),
+        exit =
+            shrinkVertically(animationSpec = MotdMotion.contentSize, shrinkTowards = Alignment.Top) +
+                fadeOut(MotdMotion.microFadeOut),
     ) {
         val recording = lastRecording ?: return@AnimatedVisibility
         Surface(
-            modifier = modifier
-                .fillMaxWidth()
-                .testTag("voice_recording_panel")
-                .semantics {
-                    liveRegion = LiveRegionMode.Polite
-                    contentDescription = if (recording.locked) {
-                        "Recording locked. Cancel recording or stop and review."
-                    } else {
-                        "Recording. Slide left to cancel or swipe up to lock."
-                    }
-                },
+            modifier =
+                modifier
+                    .fillMaxWidth()
+                    .testTag("voice_recording_panel")
+                    .semantics {
+                        liveRegion = LiveRegionMode.Polite
+                        contentDescription =
+                            if (recording.locked) {
+                                "Recording locked. Cancel recording or stop and review."
+                            } else {
+                                "Recording. Slide left to cancel or swipe up to lock."
+                            }
+                    },
             color = MaterialTheme.colorScheme.errorContainer,
             contentColor = MaterialTheme.colorScheme.onErrorContainer,
         ) {
@@ -3433,24 +3639,27 @@ internal fun VoiceComposerPanel(
     }
     AnimatedVisibility(
         visible = state.staged != null,
-        enter = expandVertically(animationSpec = MotdMotion.contentSize, expandFrom = Alignment.Top) +
-            fadeIn(MotdMotion.microFadeIn),
-        exit = shrinkVertically(animationSpec = MotdMotion.contentSize, shrinkTowards = Alignment.Top) +
-            fadeOut(MotdMotion.microFadeOut),
+        enter =
+            expandVertically(animationSpec = MotdMotion.contentSize, expandFrom = Alignment.Top) +
+                fadeIn(MotdMotion.microFadeIn),
+        exit =
+            shrinkVertically(animationSpec = MotdMotion.contentSize, shrinkTowards = Alignment.Top) +
+                fadeOut(MotdMotion.microFadeOut),
     ) {
         val staged = lastStaged ?: return@AnimatedVisibility
         val progress = state.progress
         val destination = staged.destination
-        val preview = remember(staged.file, staged.durationMs, staged.mimeType, staged.sizeBytes) {
-            AudioAttachment(
-                url = staged.file.toURI().toString(),
-                title = "Voice message",
-                mimeType = staged.mimeType,
-                durationMs = staged.durationMs,
-                sizeBytes = staged.sizeBytes,
-                voice = true,
-            )
-        }
+        val preview =
+            remember(staged.file, staged.durationMs, staged.mimeType, staged.sizeBytes) {
+                AudioAttachment(
+                    url = staged.file.toURI().toString(),
+                    title = "Voice message",
+                    mimeType = staged.mimeType,
+                    durationMs = staged.durationMs,
+                    sizeBytes = staged.sizeBytes,
+                    voice = true,
+                )
+            }
         val previewActive = playbackState.activeId == preview.playbackId
         val previewPlaying = previewActive && playbackState.playing
         val previewDurationMs = playbackState.durationMs?.takeIf { previewActive && it > 0 } ?: staged.durationMs
@@ -3487,11 +3696,12 @@ internal fun VoiceComposerPanel(
                     onValueChangeFinished = {},
                     seed = preview.playbackId,
                     enabled = progress == null && previewActive && !playbackState.loading,
-                    bufferedValue = if (previewActive && previewDurationMs > 0) {
-                        (playbackState.bufferedMs.toFloat() / previewDurationMs).coerceIn(0f, 1f)
-                    } else {
-                        0f
-                    },
+                    bufferedValue =
+                        if (previewActive && previewDurationMs > 0) {
+                            (playbackState.bufferedMs.toFloat() / previewDurationMs).coerceIn(0f, 1f)
+                        } else {
+                            0f
+                        },
                     waveform = staged.waveform,
                     modifier = Modifier.fillMaxWidth().testTag("voice_preview_scrubber"),
                 )
@@ -3546,9 +3756,12 @@ internal fun VoiceComposerPanel(
                             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         }
                     }
+
                     is VoiceSendProgress.Complete,
                     null,
-                    -> Unit
+                    -> {
+                        Unit
+                    }
                 }
                 Button(onClick = onSend, enabled = progress == null, modifier = Modifier.fillMaxWidth().testTag("voice_send")) {
                     Icon(Icons.Outlined.CloudUpload, null)
@@ -3564,7 +3777,9 @@ internal fun VoiceComposerPanel(
         if (destinationSheet) {
             VoiceDestinationSheet(
                 staged = staged,
-                config = staged.destination ?: io.github.trevarj.motd.attachment.PasteBackendConfig(),
+                config =
+                    staged.destination ?: io.github.trevarj.motd.attachment
+                        .PasteBackendConfig(),
                 onSelect = {
                     destinationSheet = false
                     onDestinationSelected(it)

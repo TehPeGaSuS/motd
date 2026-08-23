@@ -14,9 +14,9 @@ import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.unreadChatRows
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlinx.coroutines.flow.first
 
 /**
  * Fans a [GestureNode.Provider] out into the leaves its ring shows.
@@ -61,29 +61,36 @@ class GestureMenuProviders internal constructor(
     )
 
     suspend fun resolveProvider(node: GestureNode.Provider): List<GestureNode.Leaf> {
-        val leaves = when (node.kind) {
-            GestureProviderKind.PINNED_CHATS -> chatLeaves(node) { rows -> rows.filter { it.pinned } }
-            GestureProviderKind.UNREAD_CHATS -> chatLeaves(node) { rows -> unreadChatRows(rows) }
-            GestureProviderKind.RECENT_DMS -> recentDmLeaves(node)
-            GestureProviderKind.FRIENDS -> friendLeaves(node)
-            GestureProviderKind.NETWORKS -> networkLeaves(node)
-            // A kind invented by a newer build: an empty ring, never a broken menu.
-            GestureProviderKind.UNKNOWN -> emptyList()
-        }
+        val leaves =
+            when (node.kind) {
+                GestureProviderKind.PINNED_CHATS -> chatLeaves(node) { rows -> rows.filter { it.pinned } }
+
+                GestureProviderKind.UNREAD_CHATS -> chatLeaves(node) { rows -> unreadChatRows(rows) }
+
+                GestureProviderKind.RECENT_DMS -> recentDmLeaves(node)
+
+                GestureProviderKind.FRIENDS -> friendLeaves(node)
+
+                GestureProviderKind.NETWORKS -> networkLeaves(node)
+
+                // A kind invented by a newer build: an empty ring, never a broken menu.
+                GestureProviderKind.UNKNOWN -> emptyList()
+            }
         return leaves.take(node.clampedLimit)
     }
 
     private suspend fun chatLeaves(
         node: GestureNode.Provider,
         select: (List<ChatListRow>) -> List<ChatListRow>,
-    ): List<GestureNode.Leaf> = select(buffers.observeChatList().first()).map { row ->
-        GestureNode.Leaf(
-            id = providerLeafId(node, "chat", row.bufferId.toString()),
-            label = row.displayName,
-            icon = node.icon,
-            action = GestureAction.OpenChat(row.bufferId),
-        )
-    }
+    ): List<GestureNode.Leaf> =
+        select(buffers.observeChatList().first()).map { row ->
+            GestureNode.Leaf(
+                id = providerLeafId(node, "chat", row.bufferId.toString()),
+                label = row.displayName,
+                icon = node.icon,
+                action = GestureAction.OpenChat(row.bufferId),
+            )
+        }
 
     private suspend fun recentDmLeaves(node: GestureNode.Provider): List<GestureNode.Leaf> =
         recentDmOrder(buffers.observeQueryConversations().first()).map { row ->
@@ -98,11 +105,12 @@ class GestureMenuProviders internal constructor(
         }
 
     private suspend fun friendLeaves(node: GestureNode.Provider): List<GestureNode.Leaf> {
-        val targets = friendTargets(
-            friends = settings.settings.first().friends,
-            presence = connections.presenceStates.value,
-            readyNetworks = readyNetworkIds(),
-        )
+        val targets =
+            friendTargets(
+                friends = settings.settings.first().friends,
+                presence = connections.presenceStates.value,
+                readyNetworks = readyNetworkIds(),
+            )
         return targets.map { target ->
             GestureNode.Leaf(
                 id = providerLeafId(node, "friend", "${target.networkId}:${target.nick}"),
@@ -126,21 +134,27 @@ class GestureMenuProviders internal constructor(
         }
     }
 
-    private fun readyNetworkIds(): List<Long> = connections.connectionStates.value
-        .filterValues { it is IrcClientState.Ready }
-        .keys
-        .sorted()
+    private fun readyNetworkIds(): List<Long> =
+        connections.connectionStates.value
+            .filterValues { it is IrcClientState.Ready }
+            .keys
+            .sorted()
 }
 
 /** A friend the menu can actually message, and where. */
-internal data class FriendTarget(val nick: String, val networkId: Long, val online: Boolean)
+internal data class FriendTarget(
+    val nick: String,
+    val networkId: Long,
+    val online: Boolean,
+)
 
 /** Pinned DMs first, then most recent; a query with no messages yet sorts last. */
-internal fun recentDmOrder(rows: List<MonitorQueryRow>): List<MonitorQueryRow> = rows.sortedWith(
-    compareByDescending<MonitorQueryRow> { it.pinned }
-        .thenByDescending { it.lastMessageTime ?: 0L }
-        .thenBy { it.displayName },
-)
+internal fun recentDmOrder(rows: List<MonitorQueryRow>): List<MonitorQueryRow> =
+    rows.sortedWith(
+        compareByDescending<MonitorQueryRow> { it.pinned }
+            .thenByDescending { it.lastMessageTime ?: 0L }
+            .thenBy { it.displayName },
+    )
 
 /**
  * Friends worth showing, online ones first.
@@ -161,17 +175,22 @@ internal fun friendTargets(
         .filter { it.isNotBlank() }
         .distinct()
         .map { nick ->
-            val onlineOn = readyNetworks.firstOrNull { networkId ->
-                presence[PresenceKey(networkId, nick)] == PresenceState.ONLINE
-            }
+            val onlineOn =
+                readyNetworks.firstOrNull { networkId ->
+                    presence[PresenceKey(networkId, nick)] == PresenceState.ONLINE
+                }
             FriendTarget(nick, onlineOn ?: readyNetworks.first(), online = onlineOn != null)
-        }
-        .sortedWith(compareByDescending<FriendTarget> { it.online }.thenBy { it.nick })
+        }.sortedWith(compareByDescending<FriendTarget> { it.online }.thenBy { it.nick })
 }
 
 /** Connected networks offer the disconnect; everything else offers the way back on. */
-internal fun networkLeafAction(networkId: Long, connected: Boolean): GestureAction =
-    if (connected) GestureAction.DisconnectNetwork(networkId) else GestureAction.ReconnectNetwork(networkId)
+internal fun networkLeafAction(
+    networkId: Long,
+    connected: Boolean,
+): GestureAction = if (connected) GestureAction.DisconnectNetwork(networkId) else GestureAction.ReconnectNetwork(networkId)
 
-private fun providerLeafId(node: GestureNode.Provider, kind: String, key: String): String =
-    "${node.id}/$kind/$key"
+private fun providerLeafId(
+    node: GestureNode.Provider,
+    kind: String,
+    key: String,
+): String = "${node.id}/$kind/$key"

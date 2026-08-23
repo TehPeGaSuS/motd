@@ -28,23 +28,32 @@ class Migration5To6Test {
     @Test fun `migration preserves messages and FTS while enforcing typed event identity`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context).name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(5) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL(CREATE_MESSAGES_V5)
-                        db.execSQL(CREATE_USERS_V5)
-                        db.execSQL(CREATE_BUFFERS_V5)
-                        db.execSQL(CREATE_MEMBERS_V5)
-                        db.execSQL(CREATE_DEDUP_INDEX)
-                        db.execSQL(CREATE_MSGID_INDEX)
-                        db.execSQL(CREATE_TIME_INDEX)
-                        db.execSQL(CREATE_FTS)
-                    }
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(5) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL(CREATE_MESSAGES_V5)
+                                db.execSQL(CREATE_USERS_V5)
+                                db.execSQL(CREATE_BUFFERS_V5)
+                                db.execSQL(CREATE_MEMBERS_V5)
+                                db.execSQL(CREATE_DEDUP_INDEX)
+                                db.execSQL(CREATE_MSGID_INDEX)
+                                db.execSQL(CREATE_TIME_INDEX)
+                                db.execSQL(CREATE_FTS)
+                            }
 
-                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
-                }).build(),
-        )
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                old: Int,
+                                new: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL(INSERT_MESSAGE)
         db.execSQL(INSERT_BUFFER)
@@ -53,15 +62,16 @@ class Migration5To6Test {
 
         MIGRATION_5_6.migrate(db)
 
-        db.query(
-            "SELECT text, eventKey, eventPayload, inviteState FROM messages WHERE id = 1",
-        ).use { cursor ->
-            assertTrue(cursor.moveToFirst())
-            assertEquals("hello world", cursor.getString(0))
-            assertNull(cursor.getString(1))
-            assertNull(cursor.getString(2))
-            assertNull(cursor.getString(3))
-        }
+        db
+            .query(
+                "SELECT text, eventKey, eventPayload, inviteState FROM messages WHERE id = 1",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("hello world", cursor.getString(0))
+                assertNull(cursor.getString(1))
+                assertNull(cursor.getString(2))
+                assertNull(cursor.getString(3))
+            }
         db.query("SELECT text FROM messages_fts WHERE messages_fts MATCH 'hello*'").use { cursor ->
             assertTrue(cursor.moveToFirst())
             assertEquals("hello world", cursor.getString(0))
@@ -95,7 +105,10 @@ class Migration5To6Test {
         }
     }
 
-    private fun insertTyped(id: Long, eventKey: String?): String {
+    private fun insertTyped(
+        id: Long,
+        eventKey: String?,
+    ): String {
         val key = eventKey?.let { "'$it'" } ?: "NULL"
         return """INSERT INTO messages
             (id, bufferId, serverTime, sender, kind, text, isSelf, hasMention, failed, dedupKey,

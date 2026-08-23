@@ -29,13 +29,16 @@ class Migration23To24Test {
     private fun openV23(): SupportSQLiteDatabase {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(23) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL(
-                            """CREATE TABLE networks (
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(23) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL(
+                                    """CREATE TABLE networks (
                                 id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                                 name TEXT NOT NULL,
                                 role TEXT NOT NULL,
@@ -46,24 +49,28 @@ class Migration23To24Test {
                                 autoConnect INTEGER NOT NULL,
                                 ordering INTEGER NOT NULL
                             )""",
-                        )
-                    }
+                                )
+                            }
 
-                    override fun onUpgrade(
-                        db: SupportSQLiteDatabase,
-                        oldVersion: Int,
-                        newVersion: Int,
-                    ) = Unit
-                }).build(),
-        )
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         return helper!!.writableDatabase
     }
 
-    private fun SupportSQLiteDatabase.insertNetwork(id: Long, name: String, ordering: Int) =
-        execSQL(
-            """INSERT INTO networks (id, name, role, host, port, nick, autoConnect, ordering)
+    private fun SupportSQLiteDatabase.insertNetwork(
+        id: Long,
+        name: String,
+        ordering: Int,
+    ) = execSQL(
+        """INSERT INTO networks (id, name, role, host, port, nick, autoConnect, ordering)
                VALUES ($id, '$name', 'DIRECT', '$name.example', 6697, 'me', 1, $ordering)""",
-        )
+    )
 
     /** Read the table the way NetworkDao.observeAll does. */
     private fun SupportSQLiteDatabase.displayOrder(): List<String> =

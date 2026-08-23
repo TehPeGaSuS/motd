@@ -51,16 +51,73 @@ val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢")
 /**
  * ~64 common emoji for the "more" grid. No external emoji-picker dependency.
  */
-val EMOJI_GRID = listOf(
-    "👍", "👎", "❤️", "🔥", "😂", "🤣", "😊", "😍",
-    "😎", "😭", "😢", "😮", "😯", "😳", "🥳", "🤔",
-    "🙄", "😴", "😅", "😇", "🙃", "😉", "😜", "🤯",
-    "🤗", "🤝", "🙏", "👏", "🙌", "💪", "✌️", "🤞",
-    "👌", "👀", "💯", "✨", "⭐", "🎉", "🎊", "🚀",
-    "💥", "⚡", "☀️", "🌈", "🌙", "❄️", "☕", "🍺",
-    "🍕", "🎂", "🐶", "🐱", "🦊", "🐢", "🦄", "🐝",
-    "💀", "👻", "🤖", "👽", "💩", "❓", "❗", "✅",
-)
+val EMOJI_GRID =
+    listOf(
+        "👍",
+        "👎",
+        "❤️",
+        "🔥",
+        "😂",
+        "🤣",
+        "😊",
+        "😍",
+        "😎",
+        "😭",
+        "😢",
+        "😮",
+        "😯",
+        "😳",
+        "🥳",
+        "🤔",
+        "🙄",
+        "😴",
+        "😅",
+        "😇",
+        "🙃",
+        "😉",
+        "😜",
+        "🤯",
+        "🤗",
+        "🤝",
+        "🙏",
+        "👏",
+        "🙌",
+        "💪",
+        "✌️",
+        "🤞",
+        "👌",
+        "👀",
+        "💯",
+        "✨",
+        "⭐",
+        "🎉",
+        "🎊",
+        "🚀",
+        "💥",
+        "⚡",
+        "☀️",
+        "🌈",
+        "🌙",
+        "❄️",
+        "☕",
+        "🍺",
+        "🍕",
+        "🎂",
+        "🐶",
+        "🐱",
+        "🦊",
+        "🐢",
+        "🦄",
+        "🐝",
+        "💀",
+        "👻",
+        "🤖",
+        "👽",
+        "💩",
+        "❓",
+        "❗",
+        "✅",
+    )
 
 /**
  * Long-press action sheet: quick-reaction row + Reply/Copy/Quote actions, expandable to the full
@@ -90,73 +147,77 @@ fun MessageActionSheet(
         SheetSystemBars()
         Column(modifier = Modifier.padding(bottom = 24.dp)) {
             if (!isServerBuffer) {
-            // Quick reactions + "more".
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                QUICK_REACTIONS.forEach { emoji ->
-                    val enabled = reactionEnabled(emoji)
-                    Box(
-                        // >=48dp touch target.
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .alpha(if (enabled) 1f else 0.38f)
-                            .clickable(enabled = enabled) { onReact(emoji) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(text = emoji, fontSize = 28.sp)
-                    }
-                }
-                val moreLabel = stringResource(R.string.chat_action_more_reactions)
-                Box(
-                    modifier = Modifier
-                        .testTag("message_more_reactions")
-                        .minimumInteractiveComponentSize()
-                        // Expander a11y: label + expanded/collapsed state.
-                        .semantics {
-                            role = Role.Button
-                            contentDescription = moreLabel
-                            stateDescription = if (showGrid) "Expanded" else "Collapsed"
-                        }
-                        .clickable { showGrid = !showGrid },
-                    contentAlignment = Alignment.Center,
+                // Quick reactions + "more".
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = "＋",
-                        fontSize = 24.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            if (showGrid) {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(8),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 200.dp)
-                        .padding(horizontal = 12.dp),
-                ) {
-                    items(EMOJI_GRID) { emoji ->
+                    QUICK_REACTIONS.forEach { emoji ->
                         val enabled = reactionEnabled(emoji)
                         Box(
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .alpha(if (enabled) 1f else 0.38f)
-                                .clickable(enabled = enabled) { onReact(emoji) },
+                            // >=48dp touch target.
+                            modifier =
+                                Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .alpha(if (enabled) 1f else 0.38f)
+                                    .clickable(enabled = enabled) { onReact(emoji) },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(text = emoji, fontSize = 24.sp, textAlign = TextAlign.Center)
+                            Text(text = emoji, fontSize = 28.sp)
+                        }
+                    }
+                    val moreLabel = stringResource(R.string.chat_action_more_reactions)
+                    Box(
+                        modifier =
+                            Modifier
+                                .testTag("message_more_reactions")
+                                .minimumInteractiveComponentSize()
+                                // Expander a11y: label + expanded/collapsed state.
+                                .semantics {
+                                    role = Role.Button
+                                    contentDescription = moreLabel
+                                    stateDescription = if (showGrid) "Expanded" else "Collapsed"
+                                }.clickable { showGrid = !showGrid },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "＋",
+                            fontSize = 24.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                if (showGrid) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(8),
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 200.dp)
+                                .padding(horizontal = 12.dp),
+                    ) {
+                        items(EMOJI_GRID) { emoji ->
+                            val enabled = reactionEnabled(emoji)
+                            Box(
+                                modifier =
+                                    Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .alpha(if (enabled) 1f else 0.38f)
+                                        .clickable(enabled = enabled) { onReact(emoji) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(text = emoji, fontSize = 24.sp, textAlign = TextAlign.Center)
+                            }
                         }
                     }
                 }
-            }
 
-            ActionItem(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_action_reply), onReply)
+                ActionItem(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_action_reply), onReply)
             } // end !isServerBuffer (reactions + reply hidden for SERVER buffers)
             ActionItem(Icons.Filled.ContentCopy, stringResource(R.string.chat_action_copy), onCopy)
             ActionItem(
@@ -178,10 +239,11 @@ private fun ActionItem(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(horizontal = 24.dp, vertical = 14.dp),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .clickable { onClick() }
+                .padding(horizontal = 24.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -17,11 +17,17 @@ import io.github.trevarj.motd.service.HistoryResyncController
 @InstallIn(SingletonComponent::class)
 interface RequiredE2eEntryPoint {
     fun networks(): NetworkRepository
+
     fun buffers(): BufferRepository
+
     fun search(): SearchRepository
+
     fun certTrust(): CertTrustStore
+
     fun connections(): ConnectionManager
+
     fun history(): HistoryResyncController
+
     fun voiceMessages(): VoiceMessageSender
 
     /**

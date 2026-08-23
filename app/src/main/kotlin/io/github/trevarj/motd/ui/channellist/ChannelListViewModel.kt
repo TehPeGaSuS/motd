@@ -13,14 +13,14 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.nav.ChannelListRoute
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 
 /**
@@ -57,223 +57,247 @@ data class ChannelListUiState(
 }
 
 @HiltViewModel
-class ChannelListViewModel @Inject constructor(
-    private val savedStateHandle: SavedStateHandle,
-    private val networkRepository: NetworkRepository,
-    private val bufferRepository: BufferRepository,
-    private val connectionManager: ConnectionManager,
-) : ViewModel() {
+class ChannelListViewModel
+    @Inject
+    constructor(
+        private val savedStateHandle: SavedStateHandle,
+        private val networkRepository: NetworkRepository,
+        private val bufferRepository: BufferRepository,
+        private val connectionManager: ConnectionManager,
+    ) : ViewModel() {
+        private val networkId: Long = savedStateHandle.toRoute<ChannelListRoute>().networkId
 
-    private val networkId: Long = savedStateHandle.toRoute<ChannelListRoute>().networkId
+        private val _state = MutableStateFlow(ChannelListUiState(networkId = networkId))
+        val state: StateFlow<ChannelListUiState> = _state.asStateFlow()
 
-    private val _state = MutableStateFlow(ChannelListUiState(networkId = networkId))
-    val state: StateFlow<ChannelListUiState> = _state.asStateFlow()
+        private var started = false
+        private var fetchJob: Job? = null
+        private var activeFetchQuery: String? = null
+        private var queuedFetchQuery: String? = null
 
-    private var started = false
-    private var fetchJob: Job? = null
-    private var activeFetchQuery: String? = null
-    private var queuedFetchQuery: String? = null
-
-    /** Idempotent entry point: mirrors connection state and auto-fetches once Ready. */
-    fun start() {
-        if (started) return
-        started = true
-        viewModelScope.launch {
-            val network = networkRepository.networkById(networkId)
-            _state.value = _state.value.copy(
-                networkName = network?.name.orEmpty(),
-                isRoot = network?.role == NetworkRole.BOUNCER_ROOT,
-            )
-            connectionManager.connectionStates.collect { states ->
-                val clientState = connectionManager.clientFor(networkId)?.state?.value
-                val rules = connectionManager.clientFor(networkId)?.isupport?.identityRules
-                    ?: _state.value.identityRules
-                val conn = channelBrowserConnectionState(states[networkId], clientState)
-                val current = _state.value
-                val normalizedJoined = normalizeChannelNames(current.persistedJoinedChannels, rules)
-                val pendingChannelNames = reconcilePendingChannelNames(
-                    current.pendingChannelNames,
-                    normalizedJoined,
-                    rules,
-                    conn is IrcClientState.Ready,
-                )
-                _state.value = current.copy(
-                    connState = conn,
-                    initialized = true,
-                    identityRules = rules,
-                    joinedChannels = normalizedJoined,
-                    pendingChannelNames = pendingChannelNames,
-                    pendingChannels = normalizeChannelNames(
-                        pendingChannelNames,
-                        rules,
-                    ),
-                )
-                // Auto-fetch a bounded set of the busiest channels. ELIST 'U' applies the
-                // population floor server-side; other servers stream into the bounded collector.
-                if (shouldAutoFetchPopularChannels(
-                        connection = conn,
-                        loaded = _state.value.loaded,
-                        isRoot = _state.value.isRoot,
+        /** Idempotent entry point: mirrors connection state and auto-fetches once Ready. */
+        fun start() {
+            if (started) return
+            started = true
+            viewModelScope.launch {
+                val network = networkRepository.networkById(networkId)
+                _state.value =
+                    _state.value.copy(
+                        networkName = network?.name.orEmpty(),
+                        isRoot = network?.role == NetworkRole.BOUNCER_ROOT,
                     )
-                ) {
-                    fetch()
+                connectionManager.connectionStates.collect { states ->
+                    val clientState = connectionManager.clientFor(networkId)?.state?.value
+                    val rules =
+                        connectionManager.clientFor(networkId)?.isupport?.identityRules
+                            ?: _state.value.identityRules
+                    val conn = channelBrowserConnectionState(states[networkId], clientState)
+                    val current = _state.value
+                    val normalizedJoined = normalizeChannelNames(current.persistedJoinedChannels, rules)
+                    val pendingChannelNames =
+                        reconcilePendingChannelNames(
+                            current.pendingChannelNames,
+                            normalizedJoined,
+                            rules,
+                            conn is IrcClientState.Ready,
+                        )
+                    _state.value =
+                        current.copy(
+                            connState = conn,
+                            initialized = true,
+                            identityRules = rules,
+                            joinedChannels = normalizedJoined,
+                            pendingChannelNames = pendingChannelNames,
+                            pendingChannels =
+                                normalizeChannelNames(
+                                    pendingChannelNames,
+                                    rules,
+                                ),
+                        )
+                    // Auto-fetch a bounded set of the busiest channels. ELIST 'U' applies the
+                    // population floor server-side; other servers stream into the bounded collector.
+                    if (shouldAutoFetchPopularChannels(
+                            connection = conn,
+                            loaded = _state.value.loaded,
+                            isRoot = _state.value.isRoot,
+                        )
+                    ) {
+                        fetch()
+                    }
+                }
+            }
+            viewModelScope.launch {
+                bufferRepository.observeJoinedChannelNames(networkId).collect { joined ->
+                    val current = _state.value
+                    val normalizedJoined = normalizeChannelNames(joined, current.identityRules)
+                    val pendingChannelNames =
+                        reconcilePendingChannelNames(
+                            current.pendingChannelNames,
+                            normalizedJoined,
+                            current.identityRules,
+                            current.connState is IrcClientState.Ready,
+                        )
+                    _state.value =
+                        current.copy(
+                            persistedJoinedChannels = joined,
+                            joinedChannels = normalizedJoined,
+                            pendingChannelNames = pendingChannelNames,
+                            pendingChannels =
+                                normalizeChannelNames(
+                                    pendingChannelNames,
+                                    current.identityRules,
+                                ),
+                        )
+                }
+            }
+            viewModelScope.launch {
+                connectionManager.channelJoinOutcomes.collect { outcome ->
+                    val rejection =
+                        outcome as? io.github.trevarj.motd.service.ChannelJoinOutcome.Rejected
+                            ?: return@collect
+                    if (rejection.networkId != networkId) return@collect
+                    val current = _state.value
+                    val pendingChannelNames =
+                        pendingChannelNamesAfterJoinRejection(
+                            current.pendingChannelNames,
+                            rejection.channel,
+                            current.identityRules,
+                            current.connState is IrcClientState.Ready,
+                        ) ?: return@collect
+                    _state.value =
+                        current.copy(
+                            pendingChannelNames = pendingChannelNames,
+                            pendingChannels = normalizeChannelNames(pendingChannelNames, current.identityRules),
+                            joinError = rejection.reason,
+                        )
                 }
             }
         }
-        viewModelScope.launch {
-            bufferRepository.observeJoinedChannelNames(networkId).collect { joined ->
-                val current = _state.value
-                val normalizedJoined = normalizeChannelNames(joined, current.identityRules)
-                val pendingChannelNames = reconcilePendingChannelNames(
-                    current.pendingChannelNames,
-                    normalizedJoined,
-                    current.identityRules,
-                    current.connState is IrcClientState.Ready,
-                )
-                _state.value = current.copy(
-                    persistedJoinedChannels = joined,
-                    joinedChannels = normalizedJoined,
-                    pendingChannelNames = pendingChannelNames,
-                    pendingChannels = normalizeChannelNames(
-                        pendingChannelNames,
-                        current.identityRules,
-                    ),
-                )
-            }
-        }
-        viewModelScope.launch {
-            connectionManager.channelJoinOutcomes.collect { outcome ->
-                val rejection = outcome as? io.github.trevarj.motd.service.ChannelJoinOutcome.Rejected
-                    ?: return@collect
-                if (rejection.networkId != networkId) return@collect
-                val current = _state.value
-                val pendingChannelNames = pendingChannelNamesAfterJoinRejection(
-                    current.pendingChannelNames,
-                    rejection.channel,
-                    current.identityRules,
-                    current.connState is IrcClientState.Ready,
-                ) ?: return@collect
-                _state.value = current.copy(
-                    pendingChannelNames = pendingChannelNames,
-                    pendingChannels = normalizeChannelNames(pendingChannelNames, current.identityRules),
-                    joinError = rejection.reason,
-                )
-            }
-        }
-    }
 
-    fun onQueryChange(query: String) {
-        _state.value = _state.value.copy(query = query)
-    }
-
-    /** Fetch (or re-fetch) via LIST/ELIST, then sort by user count descending. */
-    fun fetch() = fetch(_state.value.query)
-
-    /** Fetch the query submitted by the visible field, synchronizing it before request queuing. */
-    fun fetch(requestedQuery: String) {
-        val current = _state.value
-        val s = if (current.query == requestedQuery) {
-            current
-        } else {
-            current.copy(query = requestedQuery).also { _state.value = it }
+        fun onQueryChange(query: String) {
+            _state.value = _state.value.copy(query = query)
         }
-        if (s.isRoot || !s.isReady) return
-        if (fetchJob?.isActive == true) {
-            if (shouldQueueChannelListFetch(activeFetchQuery, requestedQuery)) {
-                queuedFetchQuery = requestedQuery
-            }
-            return
-        }
-        startFetch(requestedQuery)
-    }
 
-    private fun startFetch(query: String) {
-        val s = _state.value
-        if (s.isRoot || !s.isReady) return
-        val args = listArgsFor(query)
-        activeFetchQuery = query
-        _state.value = s.copy(loading = true, error = null)
-        fetchJob = viewModelScope.launch {
-            val client = withTimeoutOrNull(CLIENT_WAIT_TIMEOUT_MS) {
-                var current = connectionManager.clientFor(networkId)
-                while (current == null) {
-                    delay(CLIENT_WAIT_POLL_MS)
-                    current = connectionManager.clientFor(networkId)
+        /** Fetch (or re-fetch) via LIST/ELIST, then sort by user count descending. */
+        fun fetch() = fetch(_state.value.query)
+
+        /** Fetch the query submitted by the visible field, synchronizing it before request queuing. */
+        fun fetch(requestedQuery: String) {
+            val current = _state.value
+            val s =
+                if (current.query == requestedQuery) {
+                    current
+                } else {
+                    current.copy(query = requestedQuery).also { _state.value = it }
                 }
-                current
+            if (s.isRoot || !s.isReady) return
+            if (fetchJob?.isActive == true) {
+                if (shouldQueueChannelListFetch(activeFetchQuery, requestedQuery)) {
+                    queuedFetchQuery = requestedQuery
+                }
+                return
             }
-            val result = if (client == null) {
-                Result.failure(IllegalStateException("Channel listing is not available yet. Try again."))
-            } else runCatching {
-                client.listChannels(
-                    mask = args.mask,
-                    minUsers = args.minUsers,
-                    cap = channelListLimit(query),
+            startFetch(requestedQuery)
+        }
+
+        private fun startFetch(query: String) {
+            val s = _state.value
+            if (s.isRoot || !s.isReady) return
+            val args = listArgsFor(query)
+            activeFetchQuery = query
+            _state.value = s.copy(loading = true, error = null)
+            fetchJob =
+                viewModelScope.launch {
+                    val client =
+                        withTimeoutOrNull(CLIENT_WAIT_TIMEOUT_MS) {
+                            var current = connectionManager.clientFor(networkId)
+                            while (current == null) {
+                                delay(CLIENT_WAIT_POLL_MS)
+                                current = connectionManager.clientFor(networkId)
+                            }
+                            current
+                        }
+                    val result =
+                        if (client == null) {
+                            Result.failure(IllegalStateException("Channel listing is not available yet. Try again."))
+                        } else {
+                            runCatching {
+                                client.listChannels(
+                                    mask = args.mask,
+                                    minUsers = args.minUsers,
+                                    cap = channelListLimit(query),
+                                )
+                            }
+                        }
+                    val latest = _state.value
+                    if (shouldApplyChannelListFetchResult(query, latest.query)) {
+                        _state.value =
+                            latest.copy(
+                                loading = false,
+                                loaded = result.isSuccess,
+                                listings = result.getOrNull()?.let(::sortListings) ?: latest.listings,
+                                error = result.exceptionOrNull()?.message,
+                            )
+                    } else {
+                        _state.value = latest.copy(loading = false)
+                    }
+                    activeFetchQuery = null
+                    queuedFetchQuery?.let { queued ->
+                        queuedFetchQuery = null
+                        if (_state.value.isReady && !_state.value.isRoot) startFetch(queued)
+                    }
+                }
+        }
+
+        /** Send a JOIN and retain its pending state until EventProcessor persists our self-JOIN. */
+        fun join(channel: String) {
+            val current = _state.value
+            if (!current.isReady) return
+            val normalized = current.identityRules.normalize(channel)
+            if (normalized in current.pendingChannels || normalized in current.joinedChannels) return
+            _state.value =
+                current.copy(
+                    pendingChannelNames = current.pendingChannelNames + channel,
+                    pendingChannels = current.pendingChannels + normalized,
+                    joinError = null,
                 )
-            }
-            val latest = _state.value
-            if (shouldApplyChannelListFetchResult(query, latest.query)) {
-                _state.value = latest.copy(
-                    loading = false,
-                    loaded = result.isSuccess,
-                    listings = result.getOrNull()?.let(::sortListings) ?: latest.listings,
-                    error = result.exceptionOrNull()?.message,
-                )
-            } else {
-                _state.value = latest.copy(loading = false)
-            }
-            activeFetchQuery = null
-            queuedFetchQuery?.let { queued ->
-                queuedFetchQuery = null
-                if (_state.value.isReady && !_state.value.isRoot) startFetch(queued)
+            viewModelScope.launch {
+                try {
+                    connectionManager.joinChannel(networkId, channel)
+                } catch (cancelled: CancellationException) {
+                    val latest = _state.value
+                    val pendingChannelNames =
+                        removePendingChannelName(
+                            latest.pendingChannelNames,
+                            channel,
+                            latest.identityRules,
+                        )
+                    _state.value =
+                        latest.copy(
+                            pendingChannelNames = pendingChannelNames,
+                            pendingChannels = normalizeChannelNames(pendingChannelNames, latest.identityRules),
+                        )
+                    throw cancelled
+                } catch (error: Exception) {
+                    val latest = _state.value
+                    val pendingChannelNames =
+                        removePendingChannelName(
+                            latest.pendingChannelNames,
+                            channel,
+                            latest.identityRules,
+                        )
+                    _state.value =
+                        latest.copy(
+                            pendingChannelNames = pendingChannelNames,
+                            pendingChannels = normalizeChannelNames(pendingChannelNames, latest.identityRules),
+                            joinError = error.message,
+                        )
+                }
             }
         }
-    }
 
-    /** Send a JOIN and retain its pending state until EventProcessor persists our self-JOIN. */
-    fun join(channel: String) {
-        val current = _state.value
-        if (!current.isReady) return
-        val normalized = current.identityRules.normalize(channel)
-        if (normalized in current.pendingChannels || normalized in current.joinedChannels) return
-        _state.value = current.copy(
-            pendingChannelNames = current.pendingChannelNames + channel,
-            pendingChannels = current.pendingChannels + normalized,
-            joinError = null,
-        )
-        viewModelScope.launch {
-            try {
-                connectionManager.joinChannel(networkId, channel)
-            } catch (cancelled: CancellationException) {
-                val latest = _state.value
-                val pendingChannelNames = removePendingChannelName(
-                    latest.pendingChannelNames,
-                    channel,
-                    latest.identityRules,
-                )
-                _state.value = latest.copy(
-                    pendingChannelNames = pendingChannelNames,
-                    pendingChannels = normalizeChannelNames(pendingChannelNames, latest.identityRules),
-                )
-                throw cancelled
-            } catch (error: Exception) {
-                val latest = _state.value
-                val pendingChannelNames = removePendingChannelName(
-                    latest.pendingChannelNames,
-                    channel,
-                    latest.identityRules,
-                )
-                _state.value = latest.copy(
-                    pendingChannelNames = pendingChannelNames,
-                    pendingChannels = normalizeChannelNames(pendingChannelNames, latest.identityRules),
-                    joinError = error.message,
-                )
-            }
+        private companion object {
+            const val CLIENT_WAIT_TIMEOUT_MS = 2_000L
+            const val CLIENT_WAIT_POLL_MS = 50L
         }
     }
-
-    private companion object {
-        const val CLIENT_WAIT_TIMEOUT_MS = 2_000L
-        const val CLIENT_WAIT_POLL_MS = 50L
-    }
-}

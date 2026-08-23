@@ -37,12 +37,23 @@ fun rankMembersFuzzy(
         var firstOffset = 0
         var span = needle.length
         when {
-            hay == needle -> Unit
-            hay.startsWith(needle) -> { tier = 1 }
-            hay.indexOf(needle).also { firstOffset = it } >= 0 -> { tier = 2 }
+            hay == needle -> {
+                Unit
+            }
+
+            hay.startsWith(needle) -> {
+                tier = 1
+            }
+
+            hay.indexOf(needle).also { firstOffset = it } >= 0 -> {
+                tier = 2
+            }
+
             else -> {
                 val match = subsequenceMatch(hay, needle) ?: continue
-                tier = 3; firstOffset = match.first; span = match.second
+                tier = 3
+                firstOffset = match.first
+                span = match.second
             }
         }
         scored.add(Scored(member, tier, firstOffset, span, hay))
@@ -58,8 +69,7 @@ fun rankMembersFuzzy(
                 .thenByDescending { lastSpokeAt(it.member) ?: Long.MIN_VALUE }
                 .thenBy { it.key }
                 .thenBy { it.member.nick },
-        )
-        .map { it.member }
+        ).map { it.member }
 }
 
 /**
@@ -67,7 +77,10 @@ fun rankMembersFuzzy(
  * subsequence of [haystack] (in order, not necessarily contiguous), or null otherwise. Inclusive
  * span is `lastMatch - firstMatch + 1`; smaller is tighter.
  */
-private fun subsequenceMatch(haystack: String, needle: String): Pair<Int, Int>? {
+private fun subsequenceMatch(
+    haystack: String,
+    needle: String,
+): Pair<Int, Int>? {
     var ni = 0
     var first = -1
     var last = -1

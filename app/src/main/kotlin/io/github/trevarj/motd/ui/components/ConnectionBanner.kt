@@ -45,9 +45,9 @@ import com.airbnb.lottie.model.KeyPath
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
-import io.github.trevarj.motd.ui.theme.lottieStrokeColor
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.lottieStrokeColor
 import kotlinx.coroutines.delay
 
 /** Avoid flashing a transient reconnect/connecting banner during short network handoffs. */
@@ -93,17 +93,28 @@ fun ConnectionBanner(
     AnimatedContent(
         targetState = visibleStatus,
         transitionSpec = {
-            val contentTransform = when {
-                initialState == null ->
-                    (fadeIn(MotdMotion.fadeIn) +
-                        expandVertically(animationSpec = MotdMotion.contentSize)) togetherWith
-                        ExitTransition.None
-                targetState == null ->
-                    EnterTransition.None togetherWith
-                        (fadeOut(MotdMotion.fadeOut) +
-                            shrinkVertically(animationSpec = MotdMotion.contentSize))
-                else -> fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
-            }
+            val contentTransform =
+                when {
+                    initialState == null -> {
+                        (
+                            fadeIn(MotdMotion.fadeIn) +
+                                expandVertically(animationSpec = MotdMotion.contentSize)
+                        ) togetherWith
+                            ExitTransition.None
+                    }
+
+                    targetState == null -> {
+                        EnterTransition.None togetherWith
+                            (
+                                fadeOut(MotdMotion.fadeOut) +
+                                    shrinkVertically(animationSpec = MotdMotion.contentSize)
+                            )
+                    }
+
+                    else -> {
+                        fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
+                    }
+                }
             // expand/shrink already own the null <-> content size change. Disable
             // AnimatedContent's default SizeTransform so the same height is not animated twice.
             contentTransform.using(null)
@@ -114,13 +125,16 @@ fun ConnectionBanner(
         // AnimatedContent retains this non-null snapshot while it runs the exit transition.
         if (current == null) return@AnimatedContent
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    if (current.error) MaterialTheme.colorScheme.errorContainer
-                    else MaterialTheme.colorScheme.surfaceContainerHighest,
-                )
-                .padding(horizontal = 16.dp, vertical = 6.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (current.error) {
+                            MaterialTheme.colorScheme.errorContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHighest
+                        },
+                    ).padding(horizontal = 16.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -131,8 +145,12 @@ fun ConnectionBanner(
                 text = current.text,
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (current.error) MaterialTheme.colorScheme.onErrorContainer
-                else MaterialTheme.colorScheme.onSurfaceVariant,
+                color =
+                    if (current.error) {
+                        MaterialTheme.colorScheme.onErrorContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
             )
             IconButton(
                 onClick = { dismissedStatusKey = current.dismissalKey },
@@ -169,13 +187,13 @@ internal object ConnectionStateFrames {
     val connectingProgress: Float = ConnectingFirst.toFloat() / Total
     val resolvedProgress: Float = (ResolveLast - 1).toFloat() / Total
 
-    fun clipSpec(beat: ConnectionBeat?): LottieClipSpec = when (beat) {
-        ConnectionBeat.RESOLVE -> LottieClipSpec.Frame(ResolveFirst, ResolveLast, maxInclusive = false)
-        else -> LottieClipSpec.Frame(ConnectingFirst, ConnectingLast, maxInclusive = false)
-    }
+    fun clipSpec(beat: ConnectionBeat?): LottieClipSpec =
+        when (beat) {
+            ConnectionBeat.RESOLVE -> LottieClipSpec.Frame(ResolveFirst, ResolveLast, maxInclusive = false)
+            else -> LottieClipSpec.Frame(ConnectingFirst, ConnectingLast, maxInclusive = false)
+        }
 
-    fun settledProgress(beat: ConnectionBeat?): Float =
-        if (beat == ConnectionBeat.RESOLVE) resolvedProgress else connectingProgress
+    fun settledProgress(beat: ConnectionBeat?): Float = if (beat == ConnectionBeat.RESOLVE) resolvedProgress else connectingProgress
 }
 
 /**
@@ -187,11 +205,15 @@ internal object ConnectionStateFrames {
  * and a manual disconnect mid-connect must not play the success beat. An error banner shows no
  * glyph, as before -- its text carries the failure.
  */
-internal fun connectionBeat(snapshot: BannerStatus?, allReady: Boolean): ConnectionBeat? = when {
-    snapshot == null || snapshot.error -> null
-    allReady -> ConnectionBeat.RESOLVE
-    else -> ConnectionBeat.CONNECTING
-}
+internal fun connectionBeat(
+    snapshot: BannerStatus?,
+    allReady: Boolean,
+): ConnectionBeat? =
+    when {
+        snapshot == null || snapshot.error -> null
+        allReady -> ConnectionBeat.RESOLVE
+        else -> ConnectionBeat.CONNECTING
+    }
 
 /** Holds the most recent non-null [value], mirroring what AnimatedContent keeps through its exit. */
 @Composable
@@ -234,17 +256,18 @@ private fun ConnectionStateGlyph(progress: Float) {
     )
     val arcColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
     val checkColor = MaterialTheme.colorScheme.primary.toArgb()
-    val dynamicProperties = remember(arcColor, checkColor) {
-        // Built directly rather than through rememberLottieDynamicProperty, which keys on the
-        // vararg keypath array's identity and so rebuilds (and re-resolves keypaths) every pass.
-        // The arc keeps the banner's existing progress ink; the check earns the theme accent.
-        LottieDynamicProperties(
-            listOf(
-                lottieStrokeColor(arcColor, KeyPath("arc", "**")),
-                lottieStrokeColor(checkColor, KeyPath("check", "**")),
-            ),
-        )
-    }
+    val dynamicProperties =
+        remember(arcColor, checkColor) {
+            // Built directly rather than through rememberLottieDynamicProperty, which keys on the
+            // vararg keypath array's identity and so rebuilds (and re-resolves keypaths) every pass.
+            // The arc keeps the banner's existing progress ink; the check earns the theme accent.
+            LottieDynamicProperties(
+                listOf(
+                    lottieStrokeColor(arcColor, KeyPath("arc", "**")),
+                    lottieStrokeColor(checkColor, KeyPath("check", "**")),
+                ),
+            )
+        }
     LottieAnimation(
         composition = composition,
         progress = { progress },
@@ -266,11 +289,12 @@ internal fun visibleBannerStatus(
     status: BannerStatus?,
     dismissedStatusKey: String?,
     transientGraceElapsed: Boolean,
-): BannerStatus? = when {
-    status == null || status.dismissalKey == dismissedStatusKey -> null
-    !status.transient || transientGraceElapsed -> status
-    else -> null
-}
+): BannerStatus? =
+    when {
+        status == null || status.dismissalKey == dismissedStatusKey -> null
+        !status.transient || transientGraceElapsed -> status
+        else -> null
+    }
 
 /** null when nothing to report (empty or all Ready). Prefers errors over in-progress states. */
 internal fun bannerStatus(
@@ -295,9 +319,10 @@ internal fun bannerStatus(
     // Only active in-flight states get a progress banner. A plain Disconnected row is quiescent
     // (for example an old imported network or a manually disconnected account); showing it as
     // "Connecting…" makes a healthy bouncer child look stuck.
-    val pending = states.entries.firstOrNull { (_, s) ->
-        s is IrcClientState.Connecting || s is IrcClientState.Registering
-    } ?: return null
+    val pending =
+        states.entries.firstOrNull { (_, s) ->
+            s is IrcClientState.Connecting || s is IrcClientState.Registering
+        } ?: return null
 
     val name = networkName(pending.key)
     return BannerStatus(

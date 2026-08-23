@@ -60,7 +60,9 @@ data class RadialRing(
 )
 
 /** The open menu. Never empty: the root ring exists for as long as the menu does. */
-data class RadialMenuState(val rings: List<RadialRing>) {
+data class RadialMenuState(
+    val rings: List<RadialRing>,
+) {
     val active: RadialRing get() = rings.last()
 
     val focusedEntry: RadialEntry? get() = active.focus?.let { active.entries.getOrNull(it) }
@@ -72,12 +74,17 @@ data class RadialMenuState(val rings: List<RadialRing>) {
 /** What one pointer sample changed, so the caller can fire the matching haptic. */
 enum class RadialEffect { NONE, FOCUS_CHANGED, DESCENDED, POPPED }
 
-data class RadialUpdate(val state: RadialMenuState, val effect: RadialEffect)
+data class RadialUpdate(
+    val state: RadialMenuState,
+    val effect: RadialEffect,
+)
 
 /** What lifting the finger means. */
 sealed interface RadialRelease {
     /** [entry] is a leaf under the finger; run its action. */
-    data class Execute(val entry: RadialEntry) : RadialRelease
+    data class Execute(
+        val entry: RadialEntry,
+    ) : RadialRelease
 
     /** Released in the centre well, off the arc, or on a slice that only opens a ring. */
     data object Cancel : RadialRelease
@@ -108,18 +115,20 @@ fun buildRadialRing(
     overflow: Boolean = false,
 ): RadialRing {
     val capacity = ringCapacity(availableSweepDegrees(center, screenSize, metrics))
-    val drawn = if (entries.size <= capacity) {
-        entries
-    } else {
-        val kept = entries.take(capacity - 1)
-        kept + RadialEntry(
-            id = "$OVERFLOW_ID_PREFIX${entries.size}",
-            label = moreLabel,
-            icon = GestureIcon.MORE,
-            children = entries.drop(capacity - 1),
-            overflow = true,
-        )
-    }
+    val drawn =
+        if (entries.size <= capacity) {
+            entries
+        } else {
+            val kept = entries.take(capacity - 1)
+            kept +
+                RadialEntry(
+                    id = "$OVERFLOW_ID_PREFIX${entries.size}",
+                    label = moreLabel,
+                    icon = GestureIcon.MORE,
+                    children = entries.drop(capacity - 1),
+                    overflow = true,
+                )
+        }
     return RadialRing(
         entries = drawn,
         center = center,
@@ -138,27 +147,36 @@ fun onRadialPointer(
 ): RadialUpdate {
     val active = state.active
     return when (val hit = radialHit(active.center, position, active.arc, metrics)) {
-        RadialHit.Deadzone ->
+        RadialHit.Deadzone -> {
             if (active.armed && state.rings.size > 1) {
                 RadialUpdate(RadialMenuState(state.rings.dropLast(1)), RadialEffect.POPPED)
             } else {
                 // Not yet armed: the finger has simply not left the well this ring was born under.
                 focused(state, null, arm = false)
             }
-        RadialHit.Outside -> focused(state, null, arm = true)
-        is RadialHit.Slice -> focused(state, hit.index, arm = true)
+        }
+
+        RadialHit.Outside -> {
+            focused(state, null, arm = true)
+        }
+
+        is RadialHit.Slice -> {
+            focused(state, hit.index, arm = true)
+        }
+
         is RadialHit.Descend -> {
             val entry = active.entries.getOrNull(hit.index)
             if (entry != null && entry.children.isNotEmpty() && canDescend(state, entry)) {
                 val armed = state.rings.dropLast(1) + active.copy(focus = hit.index, armed = true)
-                val ring = buildRadialRing(
-                    entries = entry.children,
-                    center = position,
-                    screenSize = screenSize,
-                    metrics = metrics,
-                    moreLabel = moreLabel,
-                    overflow = entry.overflow,
-                )
+                val ring =
+                    buildRadialRing(
+                        entries = entry.children,
+                        center = position,
+                        screenSize = screenSize,
+                        metrics = metrics,
+                        moreLabel = moreLabel,
+                        overflow = entry.overflow,
+                    )
                 RadialUpdate(RadialMenuState(armed + ring), RadialEffect.DESCENDED)
             } else {
                 // A leaf dragged past the commit radius stays selected: releasing out there runs it.
@@ -177,13 +195,21 @@ fun onRadialRelease(state: RadialMenuState): RadialRelease {
 }
 
 /** Overflow continues the current level, so only authored rings spend the nesting budget. */
-private fun canDescend(state: RadialMenuState, entry: RadialEntry): Boolean = when {
-    state.rings.size >= MAX_RADIAL_RINGS -> false
-    entry.overflow -> true
-    else -> state.depth < MAX_GESTURE_RINGS
-}
+private fun canDescend(
+    state: RadialMenuState,
+    entry: RadialEntry,
+): Boolean =
+    when {
+        state.rings.size >= MAX_RADIAL_RINGS -> false
+        entry.overflow -> true
+        else -> state.depth < MAX_GESTURE_RINGS
+    }
 
-private fun focused(state: RadialMenuState, index: Int?, arm: Boolean): RadialUpdate {
+private fun focused(
+    state: RadialMenuState,
+    index: Int?,
+    arm: Boolean,
+): RadialUpdate {
     val active = state.active
     val armed = active.armed || arm
     if (active.focus == index && active.armed == armed) return RadialUpdate(state, RadialEffect.NONE)

@@ -8,12 +8,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatListItemMotionTest {
-    private fun settledGate(): ChatListPlacementGate = ChatListPlacementGate()
-        .signal(ChatListPlacementSignal.PaneResumed)
-        .signal(ChatListPlacementSignal.FrameRendered)
+    private fun settledGate(): ChatListPlacementGate =
+        ChatListPlacementGate()
+            .signal(ChatListPlacementSignal.PaneResumed)
+            .signal(ChatListPlacementSignal.FrameRendered)
 
-    private fun ChatListPlacementGate.signal(signal: ChatListPlacementSignal) =
-        reduceChatListPlacement(this, signal)
+    private fun ChatListPlacementGate.signal(signal: ChatListPlacementSignal) = reduceChatListPlacement(this, signal)
 
     @Test
     fun `a watched chat list springs rows into place and keeps the shared micro fades`() {

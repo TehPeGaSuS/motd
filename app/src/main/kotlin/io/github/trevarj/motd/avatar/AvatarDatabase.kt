@@ -37,10 +37,18 @@ interface AvatarDao {
     }
 
     @Query("DELETE FROM remote_avatars WHERE networkId = :networkId AND (identity = :identity OR nick = :normalizedNick)")
-    suspend fun remove(networkId: Long, identity: String, normalizedNick: String)
+    suspend fun remove(
+        networkId: Long,
+        identity: String,
+        normalizedNick: String,
+    )
 
     @Query("SELECT * FROM remote_avatars WHERE networkId = :networkId AND (identity = :identity OR nick = :normalizedNick) LIMIT 1")
-    suspend fun find(networkId: Long, identity: String, normalizedNick: String): AvatarRecordEntity?
+    suspend fun find(
+        networkId: Long,
+        identity: String,
+        normalizedNick: String,
+    ): AvatarRecordEntity?
 
     @Query("DELETE FROM remote_avatars WHERE networkId = :networkId")
     suspend fun clearNetwork(networkId: Long)

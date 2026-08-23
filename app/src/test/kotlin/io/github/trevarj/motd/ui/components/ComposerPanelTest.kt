@@ -133,12 +133,13 @@ class ComposerPanelTest {
 
     @Test
     fun `emoji picker captures a visible ime and restores it when dismissed`() {
-        val session = openEmojiPickerSession(
-            imeHeightPx = 320,
-            lastVisibleImeHeightPx = 320,
-            inputFocused = true,
-            compactPickerHeightPx = 250,
-        )
+        val session =
+            openEmojiPickerSession(
+                imeHeightPx = 320,
+                lastVisibleImeHeightPx = 320,
+                inputFocused = true,
+                compactPickerHeightPx = 250,
+            )
 
         assertEquals(
             EmojiPickerSession(
@@ -156,12 +157,13 @@ class ComposerPanelTest {
 
     @Test
     fun `reopening during ime restoration preserves the captured keyboard height`() {
-        val session = openEmojiPickerSession(
-            imeHeightPx = 320,
-            lastVisibleImeHeightPx = 320,
-            inputFocused = true,
-            compactPickerHeightPx = 250,
-        )
+        val session =
+            openEmojiPickerSession(
+                imeHeightPx = 320,
+                lastVisibleImeHeightPx = 320,
+                inputFocused = true,
+                compactPickerHeightPx = 250,
+            )
         val restoringSession = closeEmojiPickerSession(session)!!
 
         assertEquals(session, reopenEmojiPickerSession(restoringSession))
@@ -169,12 +171,13 @@ class ComposerPanelTest {
 
     @Test
     fun `emoji picker opened without an ime uses compact panel and does not restore keyboard`() {
-        val session = openEmojiPickerSession(
-            imeHeightPx = 0,
-            lastVisibleImeHeightPx = 320,
-            inputFocused = false,
-            compactPickerHeightPx = 250,
-        )
+        val session =
+            openEmojiPickerSession(
+                imeHeightPx = 0,
+                lastVisibleImeHeightPx = 320,
+                inputFocused = false,
+                compactPickerHeightPx = 250,
+            )
 
         assertEquals(
             EmojiPickerSession(capturedImeHeightPx = 250, restoresKeyboard = false),
@@ -268,12 +271,13 @@ class ComposerPanelTest {
     fun `panel height complements the ime across a full hide and restore including a shorter keyboard`() {
         val tracker = ImeInsetTracker(settledFrameCount = 3)
         tracker.settleAt(320)
-        val session = openEmojiPickerSession(
-            imeHeightPx = tracker.currentImeHeightPx,
-            lastVisibleImeHeightPx = tracker.lastVisibleImeHeightPx,
-            inputFocused = true,
-            compactPickerHeightPx = 250,
-        )
+        val session =
+            openEmojiPickerSession(
+                imeHeightPx = tracker.currentImeHeightPx,
+                lastVisibleImeHeightPx = tracker.lastVisibleImeHeightPx,
+                inputFocused = true,
+                compactPickerHeightPx = 250,
+            )
 
         // Hide, then restore to a shorter keyboard: every frame must still add up to the captured
         // height, which is what keeps the message-list viewport from resizing.
@@ -281,10 +285,11 @@ class ComposerPanelTest {
             tracker.update(currentImeHeightPx)
             assertEquals(
                 session.capturedImeHeightPx,
-                currentImeHeightPx + emojiPickerReplacementHeight(
-                    session.capturedImeHeightPx,
-                    currentImeHeightPx,
-                ),
+                currentImeHeightPx +
+                    emojiPickerReplacementHeight(
+                        session.capturedImeHeightPx,
+                        currentImeHeightPx,
+                    ),
             )
         }
     }
@@ -299,11 +304,12 @@ class ComposerPanelTest {
             remainingFrames > 0 &&
             emojiPickerReplacementHeight(capturedImeHeightPx, restoredImeHeightPx) > 0
         ) {
-            capturedImeHeightPx = collapseCapturedImeHeightPx(
-                capturedImeHeightPx = capturedImeHeightPx,
-                currentImeHeightPx = restoredImeHeightPx,
-                remainingFrames = remainingFrames,
-            )
+            capturedImeHeightPx =
+                collapseCapturedImeHeightPx(
+                    capturedImeHeightPx = capturedImeHeightPx,
+                    currentImeHeightPx = restoredImeHeightPx,
+                    remainingFrames = remainingFrames,
+                )
             remainingFrames--
         }
 

@@ -31,13 +31,14 @@ fun ConversationLayoutSheet(
                 value = null,
                 selected = state.override == null,
                 tag = "chat_layout_global",
-                label = stringResource(
-                    if (state.bufferDefault != null) {
-                        R.string.chat_layout_use_server_default
-                    } else {
-                        R.string.chat_layout_use_global
-                    },
-                ),
+                label =
+                    stringResource(
+                        if (state.bufferDefault != null) {
+                            R.string.chat_layout_use_server_default
+                        } else {
+                            R.string.chat_layout_use_global
+                        },
+                    ),
                 supporting =
                     if (state.bufferDefault == null) {
                         stringResource(
@@ -73,13 +74,14 @@ private fun LayoutOption(
     onSelect: (LayoutDensity?) -> Unit,
 ) {
     ListItem(
-        modifier = Modifier
-            .testTag(tag)
-            .selectable(
-                selected = selected,
-                role = Role.RadioButton,
-                onClick = { onSelect(value) },
-            ),
+        modifier =
+            Modifier
+                .testTag(tag)
+                .selectable(
+                    selected = selected,
+                    role = Role.RadioButton,
+                    onClick = { onSelect(value) },
+                ),
         headlineContent = { Text(label) },
         supportingContent = supporting?.let { text -> { Text(text) } },
         trailingContent = { RadioButton(selected = selected, onClick = null) },
@@ -87,10 +89,11 @@ private fun LayoutOption(
 }
 
 @Composable
-internal fun densityLabel(density: LayoutDensity): String = stringResource(
-    when (density) {
-        LayoutDensity.COMPACT -> R.string.settings_density_compact
-        LayoutDensity.COMFORTABLE -> R.string.settings_density_comfortable
-        LayoutDensity.TWO_LINE -> R.string.settings_density_two_line
-    },
-)
+internal fun densityLabel(density: LayoutDensity): String =
+    stringResource(
+        when (density) {
+            LayoutDensity.COMPACT -> R.string.settings_density_compact
+            LayoutDensity.COMFORTABLE -> R.string.settings_density_comfortable
+            LayoutDensity.TWO_LINE -> R.string.settings_density_two_line
+        },
+    )

@@ -38,139 +38,149 @@ class PendingChannelCloseCoordinatorTest {
     }
 
     @Test
-    fun directClose_waitsForReady_thenKeepsHistoryUntilServerAcknowledgesPart() = runTest {
-        val database = inMemoryDb().also { db = it }
-        val networkId = database.networkDao().insert(directNetwork())
-        val bufferId = database.bufferDao().insert(channel(networkId))
-        val connections = FakeConnections()
-        val coordinator = coordinator(database, connections, backgroundScope)
+    fun directClose_waitsForReady_thenKeepsHistoryUntilServerAcknowledgesPart() =
+        runTest {
+            val database = inMemoryDb().also { db = it }
+            val networkId = database.networkDao().insert(directNetwork())
+            val bufferId = database.bufferDao().insert(channel(networkId))
+            val connections = FakeConnections()
+            val coordinator = coordinator(database, connections, backgroundScope)
 
-        coordinator.requestClose(bufferId)
-        assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
-        assertTrue(connections.parts.isEmpty())
-        assertNotNull(database.bufferDao().observeById(bufferId))
+            coordinator.requestClose(bufferId)
+            assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
+            assertTrue(connections.parts.isEmpty())
+            assertNotNull(database.bufferDao().observeById(bufferId))
 
-        connections.states.value = mapOf(networkId to ready())
-        coordinator.retryPendingCloses()
+            connections.states.value = mapOf(networkId to ready())
+            coordinator.retryPendingCloses()
 
-        assertEquals(listOf(bufferId), connections.parts)
-        assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
-    }
-
-    @Test
-    fun directClose_sendFailure_keepsPendingForLaterRetry() = runTest {
-        val database = inMemoryDb().also { db = it }
-        val networkId = database.networkDao().insert(directNetwork())
-        val bufferId = database.bufferDao().insert(channel(networkId))
-        val connections = FakeConnections().apply { failPart = true }
-        connections.states.value = mapOf(networkId to ready())
-        val releaseRetry = CompletableDeferred<Unit>()
-        val retryScheduled = CompletableDeferred<Unit>()
-        val coordinator = coordinator(
-            database = database,
-            connections = connections,
-            scope = backgroundScope,
-            retryWait = { attempt ->
-                if (attempt == 1) {
-                    retryScheduled.complete(Unit)
-                    releaseRetry.await()
-                } else {
-                    awaitCancellation()
-                }
-            },
-        )
-
-        coordinator.requestClose(bufferId)
-        retryScheduled.await()
-
-        assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
-        assertNotNull(database.bufferDao().observeById(bufferId))
-        assertEquals(listOf(bufferId), connections.parts)
-
-        connections.failPart = false
-        releaseRetry.complete(Unit)
-        connections.secondPartAttempted.await()
-
-        assertEquals(listOf(bufferId, bufferId), connections.parts)
-        assertNotNull(database.bufferDao().observeById(bufferId))
-    }
-
-    @Test
-    fun directClose_transportDisappearsAtSendBoundary_keepsPending() = runTest {
-        val database = inMemoryDb().also { db = it }
-        val networkId = database.networkDao().insert(directNetwork())
-        val bufferId = database.bufferDao().insert(channel(networkId))
-        val connections = FakeConnections().apply { reportPartSuccess = false }
-        connections.states.value = mapOf(networkId to ready())
-        val coordinator = coordinator(database, connections, backgroundScope)
-
-        coordinator.requestClose(bufferId)
-
-        assertEquals(listOf(bufferId), connections.parts)
-        assertNotNull(database.bufferDao().observeById(bufferId))
-        assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
-    }
-
-    @Test
-    fun sojuClose_waitsForBoundChild_thenUsesNormalPart() = runTest {
-        val database = inMemoryDb().also { db = it }
-        val rootId = database.networkDao().insert(
-            directNetwork(name = "soju", role = NetworkRole.BOUNCER_ROOT),
-        )
-        val childId = database.networkDao().insert(
-            directNetwork(
-                name = "libera",
-                role = NetworkRole.BOUNCER_CHILD,
-                parentId = rootId,
-                bouncerNetId = "net-1",
-            ),
-        )
-        val bufferId = database.bufferDao().insert(channel(childId, "#motd"))
-        val connections = FakeConnections().apply {
-            states.value = mapOf(rootId to ready())
-        }
-        val coordinator = coordinator(database, connections, backgroundScope)
-
-        coordinator.requestClose(bufferId)
-        assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
-        assertTrue(connections.parts.isEmpty())
-
-        connections.states.value = mapOf(rootId to ready(), childId to ready())
-        coordinator.retryPendingCloses()
-
-        assertEquals(listOf(bufferId), connections.parts)
-        assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
-    }
-
-    @Test
-    fun start_retriesPersistedCloseWhenReadyArrives() = runTest {
-        val database = inMemoryDb().also { db = it }
-        val networkId = database.networkDao().insert(directNetwork())
-        val bufferId = database.bufferDao().insert(channel(networkId))
-        database.bufferDao().markPendingClose(bufferId, 55)
-        val connections = FakeConnections()
-        // Simulate process recreation after the socket is already Ready: subscribing to the
-        // StateFlow must observe its current value, not only future transitions.
-        connections.states.value = mapOf(networkId to ready())
-        val job = SupervisorJob()
-        val coordinator = coordinator(
-            database,
-            connections,
-            CoroutineScope(job + UnconfinedTestDispatcher(testScheduler)),
-        )
-
-        try {
-            coordinator.start()
-            // Await on the test scheduler. Hopping to Dispatchers.Default blocked the test thread,
-            // so the scheduler could not advance and any dispatched work deadlocked until a real
-            // five second timeout expired: green locally, flaky on a loaded CI machine.
-            connections.partAttempted.await()
             assertEquals(listOf(bufferId), connections.parts)
             assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
-        } finally {
-            job.cancel()
         }
-    }
+
+    @Test
+    fun directClose_sendFailure_keepsPendingForLaterRetry() =
+        runTest {
+            val database = inMemoryDb().also { db = it }
+            val networkId = database.networkDao().insert(directNetwork())
+            val bufferId = database.bufferDao().insert(channel(networkId))
+            val connections = FakeConnections().apply { failPart = true }
+            connections.states.value = mapOf(networkId to ready())
+            val releaseRetry = CompletableDeferred<Unit>()
+            val retryScheduled = CompletableDeferred<Unit>()
+            val coordinator =
+                coordinator(
+                    database = database,
+                    connections = connections,
+                    scope = backgroundScope,
+                    retryWait = { attempt ->
+                        if (attempt == 1) {
+                            retryScheduled.complete(Unit)
+                            releaseRetry.await()
+                        } else {
+                            awaitCancellation()
+                        }
+                    },
+                )
+
+            coordinator.requestClose(bufferId)
+            retryScheduled.await()
+
+            assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
+            assertNotNull(database.bufferDao().observeById(bufferId))
+            assertEquals(listOf(bufferId), connections.parts)
+
+            connections.failPart = false
+            releaseRetry.complete(Unit)
+            connections.secondPartAttempted.await()
+
+            assertEquals(listOf(bufferId, bufferId), connections.parts)
+            assertNotNull(database.bufferDao().observeById(bufferId))
+        }
+
+    @Test
+    fun directClose_transportDisappearsAtSendBoundary_keepsPending() =
+        runTest {
+            val database = inMemoryDb().also { db = it }
+            val networkId = database.networkDao().insert(directNetwork())
+            val bufferId = database.bufferDao().insert(channel(networkId))
+            val connections = FakeConnections().apply { reportPartSuccess = false }
+            connections.states.value = mapOf(networkId to ready())
+            val coordinator = coordinator(database, connections, backgroundScope)
+
+            coordinator.requestClose(bufferId)
+
+            assertEquals(listOf(bufferId), connections.parts)
+            assertNotNull(database.bufferDao().observeById(bufferId))
+            assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
+        }
+
+    @Test
+    fun sojuClose_waitsForBoundChild_thenUsesNormalPart() =
+        runTest {
+            val database = inMemoryDb().also { db = it }
+            val rootId =
+                database.networkDao().insert(
+                    directNetwork(name = "soju", role = NetworkRole.BOUNCER_ROOT),
+                )
+            val childId =
+                database.networkDao().insert(
+                    directNetwork(
+                        name = "libera",
+                        role = NetworkRole.BOUNCER_CHILD,
+                        parentId = rootId,
+                        bouncerNetId = "net-1",
+                    ),
+                )
+            val bufferId = database.bufferDao().insert(channel(childId, "#motd"))
+            val connections =
+                FakeConnections().apply {
+                    states.value = mapOf(rootId to ready())
+                }
+            val coordinator = coordinator(database, connections, backgroundScope)
+
+            coordinator.requestClose(bufferId)
+            assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
+            assertTrue(connections.parts.isEmpty())
+
+            connections.states.value = mapOf(rootId to ready(), childId to ready())
+            coordinator.retryPendingCloses()
+
+            assertEquals(listOf(bufferId), connections.parts)
+            assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
+        }
+
+    @Test
+    fun start_retriesPersistedCloseWhenReadyArrives() =
+        runTest {
+            val database = inMemoryDb().also { db = it }
+            val networkId = database.networkDao().insert(directNetwork())
+            val bufferId = database.bufferDao().insert(channel(networkId))
+            database.bufferDao().markPendingClose(bufferId, 55)
+            val connections = FakeConnections()
+            // Simulate process recreation after the socket is already Ready: subscribing to the
+            // StateFlow must observe its current value, not only future transitions.
+            connections.states.value = mapOf(networkId to ready())
+            val job = SupervisorJob()
+            val coordinator =
+                coordinator(
+                    database,
+                    connections,
+                    CoroutineScope(job + UnconfinedTestDispatcher(testScheduler)),
+                )
+
+            try {
+                coordinator.start()
+                // Await on the test scheduler. Hopping to Dispatchers.Default blocked the test thread,
+                // so the scheduler could not advance and any dispatched work deadlocked until a real
+                // five second timeout expired: green locally, flaky on a loaded CI machine.
+                connections.partAttempted.await()
+                assertEquals(listOf(bufferId), connections.parts)
+                assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
+            } finally {
+                job.cancel()
+            }
+        }
 
     private fun coordinator(
         database: MotdDatabase,
@@ -193,18 +203,31 @@ class PendingChannelCloseCoordinatorTest {
         val secondPartAttempted = CompletableDeferred<Unit>()
         var failPart = false
         var reportPartSuccess = true
-        override suspend fun partChannel(bufferId: Long, reason: String?) {
+
+        override suspend fun partChannel(
+            bufferId: Long,
+            reason: String?,
+        ) {
             parts += bufferId
             if (failPart) error("send failed")
         }
-        override suspend fun partChannelForClose(bufferId: Long, reason: String?): Boolean {
+
+        override suspend fun partChannelForClose(
+            bufferId: Long,
+            reason: String?,
+        ): Boolean {
             parts += bufferId
             partAttempted.complete(Unit)
             if (parts.size >= 2) secondPartAttempted.complete(Unit)
             if (failPart) error("send failed")
             return reportPartSuccess
         }
-        override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 0
+
+        override suspend fun ensureQueryBuffer(
+            networkId: Long,
+            nick: String,
+        ): Long = 0
+
         override suspend fun ensureServerBuffer(networkId: Long): Long = 0
     }
 
@@ -225,7 +248,10 @@ class PendingChannelCloseCoordinatorTest {
         realname = "Me",
     )
 
-    private fun channel(networkId: Long, name: String = "#channel") = BufferEntity(
+    private fun channel(
+        networkId: Long,
+        name: String = "#channel",
+    ) = BufferEntity(
         networkId = networkId,
         name = name,
         displayName = name,

@@ -149,11 +149,12 @@ fun BouncerLoginFields(
                     onValueChange = { onSojuLoginChange(sojuLogin.copy(username = it)) },
                     label = { Text(stringResource(R.string.bouncer_username)) },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.None,
-                        autoCorrectEnabled = false,
-                        imeAction = ImeAction.Next,
-                    ),
+                    keyboardOptions =
+                        KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            autoCorrectEnabled = false,
+                            imeAction = ImeAction.Next,
+                        ),
                     modifier = Modifier.fillMaxWidth().testTag("bouncer_username_field"),
                 )
                 PasswordField(
@@ -163,6 +164,7 @@ fun BouncerLoginFields(
                     modifier = Modifier.testTag("bouncer_password_field"),
                 )
             }
+
             BouncerKind.ZNC -> {
                 Text(
                     stringResource(R.string.bouncer_znc_login_guidance),
@@ -173,32 +175,40 @@ fun BouncerLoginFields(
                     value = zncLogin.username,
                     onValueChange = { onZncLoginChange(zncLogin.copy(username = it)) },
                     label = { Text(stringResource(R.string.bouncer_username)) },
-                    supportingText = if ('/' in zncLogin.username) {
-                        { Text(stringResource(R.string.bouncer_znc_no_slash)) }
-                    } else null,
+                    supportingText =
+                        if ('/' in zncLogin.username) {
+                            { Text(stringResource(R.string.bouncer_znc_no_slash)) }
+                        } else {
+                            null
+                        },
                     isError = '/' in zncLogin.username,
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.None,
-                        autoCorrectEnabled = false,
-                        imeAction = ImeAction.Next,
-                    ),
+                    keyboardOptions =
+                        KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            autoCorrectEnabled = false,
+                            imeAction = ImeAction.Next,
+                        ),
                     modifier = Modifier.fillMaxWidth().testTag("bouncer_username_field"),
                 )
                 OutlinedTextField(
                     value = zncLogin.network,
                     onValueChange = { onZncLoginChange(zncLogin.copy(network = it)) },
                     label = { Text(stringResource(R.string.bouncer_znc_network)) },
-                    supportingText = if ('/' in zncLogin.network) {
-                        { Text(stringResource(R.string.bouncer_znc_no_slash)) }
-                    } else null,
+                    supportingText =
+                        if ('/' in zncLogin.network) {
+                            { Text(stringResource(R.string.bouncer_znc_no_slash)) }
+                        } else {
+                            null
+                        },
                     isError = '/' in zncLogin.network,
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.None,
-                        autoCorrectEnabled = false,
-                        imeAction = ImeAction.Next,
-                    ),
+                    keyboardOptions =
+                        KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            autoCorrectEnabled = false,
+                            imeAction = ImeAction.Next,
+                        ),
                     modifier = Modifier.fillMaxWidth().testTag("bouncer_znc_network_field"),
                 )
                 PasswordField(
@@ -214,7 +224,10 @@ fun BouncerLoginFields(
 
 /** Endpoint-only editor used by the reorganized network settings connection card. */
 @Composable
-internal fun NetworkEndpointFields(server: ServerForm, onServerChange: (ServerForm) -> Unit) {
+internal fun NetworkEndpointFields(
+    server: ServerForm,
+    onServerChange: (ServerForm) -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         HostField(server, onServerChange)
         PortField(server, onServerChange)
@@ -239,11 +252,12 @@ internal fun NetworkIdentityFields(
                 onValueChange = { onAuthChange(auth.copy(saslUser = it)) },
                 label = { Text(stringResource(R.string.onboarding_field_username)) },
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.None,
-                    autoCorrectEnabled = false,
-                    imeAction = ImeAction.Next,
-                ),
+                keyboardOptions =
+                    KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                        imeAction = ImeAction.Next,
+                    ),
                 modifier = Modifier.fillMaxWidth(),
             )
             PasswordField(
@@ -300,11 +314,12 @@ private fun SojuFields(
         onValueChange = { onAuthChange(auth.copy(saslUser = it)) },
         label = { Text(stringResource(R.string.onboarding_field_username)) },
         singleLine = true,
-        keyboardOptions = KeyboardOptions(
-            capitalization = KeyboardCapitalization.None,
-            autoCorrectEnabled = false,
-            imeAction = ImeAction.Next,
-        ),
+        keyboardOptions =
+            KeyboardOptions(
+                capitalization = KeyboardCapitalization.None,
+                autoCorrectEnabled = false,
+                imeAction = ImeAction.Next,
+            ),
         modifier = Modifier.fillMaxWidth(),
     )
     PasswordField(
@@ -347,11 +362,12 @@ private fun ServerFields(
             label = { Text(stringResource(R.string.onboarding_field_username)) },
             placeholder = { Text(stringResource(R.string.onboarding_field_username_hint)) },
             singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.None,
-                autoCorrectEnabled = false,
-                imeAction = ImeAction.Next,
-            ),
+            keyboardOptions =
+                KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    autoCorrectEnabled = false,
+                    imeAction = ImeAction.Next,
+                ),
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
@@ -369,38 +385,49 @@ private fun ServerFields(
 // ---- Shared field composables ----------------------------------------------------------------
 
 @Composable
-private fun HostField(server: ServerForm, onServerChange: (ServerForm) -> Unit) {
+private fun HostField(
+    server: ServerForm,
+    onServerChange: (ServerForm) -> Unit,
+) {
     OutlinedTextField(
         value = server.host,
         onValueChange = { onServerChange(server.copy(host = it)) },
         label = { Text(stringResource(R.string.onboarding_field_host)) },
         singleLine = true,
-        keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Uri,
-            autoCorrectEnabled = false,
-            imeAction = ImeAction.Next,
-        ),
+        keyboardOptions =
+            KeyboardOptions(
+                keyboardType = KeyboardType.Uri,
+                autoCorrectEnabled = false,
+                imeAction = ImeAction.Next,
+            ),
         modifier = Modifier.fillMaxWidth().testTag("network_host_field"),
     )
 }
 
 @Composable
-private fun PortField(server: ServerForm, onServerChange: (ServerForm) -> Unit) {
+private fun PortField(
+    server: ServerForm,
+    onServerChange: (ServerForm) -> Unit,
+) {
     OutlinedTextField(
         value = server.port,
         onValueChange = { onServerChange(server.copy(port = it.filter(Char::isDigit))) },
         label = { Text(stringResource(R.string.onboarding_field_port)) },
         singleLine = true,
-        keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Number,
-            imeAction = ImeAction.Next,
-        ),
+        keyboardOptions =
+            KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Next,
+            ),
         modifier = Modifier.fillMaxWidth().testTag("network_port_field"),
     )
 }
 
 @Composable
-private fun TlsRow(server: ServerForm, onServerChange: (ServerForm) -> Unit) {
+private fun TlsRow(
+    server: ServerForm,
+    onServerChange: (ServerForm) -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -423,11 +450,12 @@ private fun NickField(
         onValueChange = { onServerChange(server.copy(nick = it)) },
         label = { Text(stringResource(R.string.onboarding_field_nick)) },
         singleLine = true,
-        keyboardOptions = KeyboardOptions(
-            capitalization = KeyboardCapitalization.None,
-            autoCorrectEnabled = false,
-            imeAction = imeAction,
-        ),
+        keyboardOptions =
+            KeyboardOptions(
+                capitalization = KeyboardCapitalization.None,
+                autoCorrectEnabled = false,
+                imeAction = imeAction,
+            ),
         modifier = Modifier.fillMaxWidth().testTag("network_nick_field"),
     )
 }
@@ -457,9 +485,10 @@ fun PasswordField(
             IconButton(onClick = { visible = !visible }) {
                 Icon(
                     imageVector = if (visible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                    contentDescription = stringResource(
-                        if (visible) R.string.password_hide else R.string.password_show,
-                    ),
+                    contentDescription =
+                        stringResource(
+                            if (visible) R.string.password_hide else R.string.password_show,
+                        ),
                 )
             }
         },
@@ -468,7 +497,10 @@ fun PasswordField(
 }
 
 @Composable
-private fun AuthSection(auth: AuthForm, onAuthChange: (AuthForm) -> Unit) {
+private fun AuthSection(
+    auth: AuthForm,
+    onAuthChange: (AuthForm) -> Unit,
+) {
     val context = LocalContext.current
     PasswordField(
         value = auth.serverPassword,
@@ -503,119 +535,135 @@ private fun AuthSection(auth: AuthForm, onAuthChange: (AuthForm) -> Unit) {
             label = "auth_mode_fields",
         ) { mode ->
             when (mode) {
-                AuthMode.PLAIN -> Column(
-                    modifier = Modifier.padding(top = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    OutlinedTextField(
-                        value = auth.saslUser,
-                        onValueChange = { onAuthChange(auth.copy(saslUser = it)) },
-                        label = { Text(stringResource(R.string.onboarding_auth_sasl_user)) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.None,
-                            autoCorrectEnabled = false,
-                            imeAction = ImeAction.Next,
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    PasswordField(
-                        value = auth.saslPassword,
-                        onValueChange = { onAuthChange(auth.copy(saslPassword = it)) },
-                        label = stringResource(R.string.onboarding_auth_sasl_password),
-                        imeAction = ImeAction.Done,
-                    )
-                }
-
-                AuthMode.EXTERNAL -> Column(
-                    modifier = Modifier.padding(top = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Button(
-                        onClick = {
-                            // System client-cert picker; result folds back into the form.
-                            KeyChain.choosePrivateKeyAlias(
-                                context as android.app.Activity,
-                                { alias -> onAuthChange(auth.copy(certAlias = alias)) },
-                                null, null, null, -1, null,
-                            )
-                        },
-                    ) { Text(stringResource(R.string.onboarding_auth_choose_cert)) }
-                    auth.certAlias?.let {
-                        Text(stringResource(R.string.onboarding_auth_cert_selected, it))
+                AuthMode.PLAIN -> {
+                    Column(
+                        modifier = Modifier.padding(top = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        OutlinedTextField(
+                            value = auth.saslUser,
+                            onValueChange = { onAuthChange(auth.copy(saslUser = it)) },
+                            label = { Text(stringResource(R.string.onboarding_auth_sasl_user)) },
+                            singleLine = true,
+                            keyboardOptions =
+                                KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.None,
+                                    autoCorrectEnabled = false,
+                                    imeAction = ImeAction.Next,
+                                ),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        PasswordField(
+                            value = auth.saslPassword,
+                            onValueChange = { onAuthChange(auth.copy(saslPassword = it)) },
+                            label = stringResource(R.string.onboarding_auth_sasl_password),
+                            imeAction = ImeAction.Done,
+                        )
                     }
                 }
 
-                AuthMode.NONE -> Column(
-                    modifier = Modifier.padding(top = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        stringResource(R.string.onboarding_auth_nickserv_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    PasswordField(
-                        value = auth.nickServPassword,
-                        onValueChange = { onAuthChange(auth.copy(nickServPassword = it)) },
-                        label = stringResource(R.string.onboarding_auth_nickserv_password),
-                        supportingText = if (auth.nickServValid) null else
-                            stringResource(R.string.onboarding_auth_nickserv_invalid),
-                        isError = !auth.nickServValid,
-                    )
-                    if (auth.nickServPassword.isNotBlank()) {
+                AuthMode.EXTERNAL -> {
+                    Column(
+                        modifier = Modifier.padding(top = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = {
+                                // System client-cert picker; result folds back into the form.
+                                KeyChain.choosePrivateKeyAlias(
+                                    context as android.app.Activity,
+                                    { alias -> onAuthChange(auth.copy(certAlias = alias)) },
+                                    null,
+                                    null,
+                                    null,
+                                    -1,
+                                    null,
+                                )
+                            },
+                        ) { Text(stringResource(R.string.onboarding_auth_choose_cert)) }
+                        auth.certAlias?.let {
+                            Text(stringResource(R.string.onboarding_auth_cert_selected, it))
+                        }
+                    }
+                }
+
+                AuthMode.NONE -> {
+                    Column(
+                        modifier = Modifier.padding(top = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
                         Text(
-                            stringResource(R.string.onboarding_auth_nickserv_syntax),
-                            style = MaterialTheme.typography.titleSmall,
+                            stringResource(R.string.onboarding_auth_nickserv_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Column(Modifier.selectableGroup()) {
-                            NickServSyntaxOption(
-                                NickServIdentifySyntax.NICK_PASSWORD,
-                                auth,
-                                stringResource(R.string.onboarding_auth_nickserv_nick_password),
-                                onAuthChange,
-                            )
-                            NickServSyntaxOption(
-                                NickServIdentifySyntax.PASSWORD_NICK,
-                                auth,
-                                stringResource(R.string.onboarding_auth_nickserv_password_nick),
-                                onAuthChange,
-                            )
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
+                        PasswordField(
+                            value = auth.nickServPassword,
+                            onValueChange = { onAuthChange(auth.copy(nickServPassword = it)) },
+                            label = stringResource(R.string.onboarding_auth_nickserv_password),
+                            supportingText =
+                                if (auth.nickServValid) {
+                                    null
+                                } else {
+                                    stringResource(R.string.onboarding_auth_nickserv_invalid)
+                                },
+                            isError = !auth.nickServValid,
+                        )
+                        if (auth.nickServPassword.isNotBlank()) {
                             Text(
-                                stringResource(R.string.onboarding_auth_nickserv_recovery),
-                                modifier = Modifier.weight(1f),
+                                stringResource(R.string.onboarding_auth_nickserv_syntax),
+                                style = MaterialTheme.typography.titleSmall,
                             )
-                            Switch(
-                                checked = auth.nickServRecoveryEnabled,
-                                onCheckedChange = {
-                                    onAuthChange(auth.copy(nickServRecoveryEnabled = it))
-                                },
-                            )
-                        }
-                        if (auth.nickServRecoveryEnabled) {
-                            OutlinedTextField(
-                                value = auth.nickServRecoverySequence,
-                                onValueChange = {
-                                    onAuthChange(auth.copy(nickServRecoverySequence = it))
-                                },
-                                label = { Text(stringResource(R.string.onboarding_auth_nickserv_sequence)) },
-                                supportingText = {
-                                    Text(stringResource(R.string.onboarding_auth_nickserv_sequence_desc))
-                                },
-                                isError = !auth.nickServValid,
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(
-                                    capitalization = KeyboardCapitalization.Characters,
-                                    autoCorrectEnabled = false,
-                                    imeAction = ImeAction.Done,
-                                ),
+                            Column(Modifier.selectableGroup()) {
+                                NickServSyntaxOption(
+                                    NickServIdentifySyntax.NICK_PASSWORD,
+                                    auth,
+                                    stringResource(R.string.onboarding_auth_nickserv_nick_password),
+                                    onAuthChange,
+                                )
+                                NickServSyntaxOption(
+                                    NickServIdentifySyntax.PASSWORD_NICK,
+                                    auth,
+                                    stringResource(R.string.onboarding_auth_nickserv_password_nick),
+                                    onAuthChange,
+                                )
+                            }
+                            Row(
                                 modifier = Modifier.fillMaxWidth(),
-                            )
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    stringResource(R.string.onboarding_auth_nickserv_recovery),
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Switch(
+                                    checked = auth.nickServRecoveryEnabled,
+                                    onCheckedChange = {
+                                        onAuthChange(auth.copy(nickServRecoveryEnabled = it))
+                                    },
+                                )
+                            }
+                            if (auth.nickServRecoveryEnabled) {
+                                OutlinedTextField(
+                                    value = auth.nickServRecoverySequence,
+                                    onValueChange = {
+                                        onAuthChange(auth.copy(nickServRecoverySequence = it))
+                                    },
+                                    label = { Text(stringResource(R.string.onboarding_auth_nickserv_sequence)) },
+                                    supportingText = {
+                                        Text(stringResource(R.string.onboarding_auth_nickserv_sequence_desc))
+                                    },
+                                    isError = !auth.nickServValid,
+                                    singleLine = true,
+                                    keyboardOptions =
+                                        KeyboardOptions(
+                                            capitalization = KeyboardCapitalization.Characters,
+                                            autoCorrectEnabled = false,
+                                            imeAction = ImeAction.Done,
+                                        ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
                         }
                     }
                 }
@@ -644,7 +692,12 @@ private fun NickServSyntaxOption(
 }
 
 @Composable
-private fun AuthOption(mode: AuthMode, selected: AuthMode, label: String, onSelect: () -> Unit) {
+private fun AuthOption(
+    mode: AuthMode,
+    selected: AuthMode,
+    label: String,
+    onSelect: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -656,17 +709,19 @@ private fun AuthOption(mode: AuthMode, selected: AuthMode, label: String, onSele
 
 // ---- Mapping helpers between form types and NetworkEntity ------------------------------------
 
-fun AuthMode.toSaslMechanism(): SaslMechanism = when (this) {
-    AuthMode.NONE -> SaslMechanism.NONE
-    AuthMode.PLAIN -> SaslMechanism.PLAIN
-    AuthMode.EXTERNAL -> SaslMechanism.EXTERNAL
-}
+fun AuthMode.toSaslMechanism(): SaslMechanism =
+    when (this) {
+        AuthMode.NONE -> SaslMechanism.NONE
+        AuthMode.PLAIN -> SaslMechanism.PLAIN
+        AuthMode.EXTERNAL -> SaslMechanism.EXTERNAL
+    }
 
-fun saslToAuthMode(name: String): AuthMode = when (name) {
-    SaslMechanism.PLAIN.name -> AuthMode.PLAIN
-    SaslMechanism.EXTERNAL.name -> AuthMode.EXTERNAL
-    else -> AuthMode.NONE
-}
+fun saslToAuthMode(name: String): AuthMode =
+    when (name) {
+        SaslMechanism.PLAIN.name -> AuthMode.PLAIN
+        SaslMechanism.EXTERNAL.name -> AuthMode.EXTERNAL
+        else -> AuthMode.NONE
+    }
 
 /** Build a NetworkEntity from the shared forms. [role] distinguishes soju root vs. direct. */
 fun buildNetworkEntity(
@@ -715,17 +770,21 @@ fun buildNetworkEntity(
         saslUser = auth.saslUser.trim().ifBlank { null },
         saslPassword = auth.saslPassword.ifBlank { null },
         serverPassword = auth.serverPassword.ifEmpty { null },
-        nickServPassword = auth.nickServPassword.takeIf {
-            !isSoju && auth.mode == AuthMode.NONE && it.isNotBlank()
-        },
-        nickServIdentifySyntax = auth.nickServIdentifySyntax.name.takeUnless {
-            it == NickServIdentifySyntax.NICK_PASSWORD.name
-        },
-        nickServRecoveryEnabled = !isSoju && auth.mode == AuthMode.NONE &&
-            auth.nickServPassword.isNotBlank() && auth.nickServRecoveryEnabled,
-        nickServRecoverySequence = auth.nickServRecoveryCommands
-            .joinToString(",")
-            .takeUnless { it == "REGAIN" },
+        nickServPassword =
+            auth.nickServPassword.takeIf {
+                !isSoju && auth.mode == AuthMode.NONE && it.isNotBlank()
+            },
+        nickServIdentifySyntax =
+            auth.nickServIdentifySyntax.name.takeUnless {
+                it == NickServIdentifySyntax.NICK_PASSWORD.name
+            },
+        nickServRecoveryEnabled =
+            !isSoju && auth.mode == AuthMode.NONE &&
+                auth.nickServPassword.isNotBlank() && auth.nickServRecoveryEnabled,
+        nickServRecoverySequence =
+            auth.nickServRecoveryCommands
+                .joinToString(",")
+                .takeUnless { it == "REGAIN" },
         clientCertAlias = if (isSoju) null else auth.certAlias,
         wsUrl = wsUrl?.trim()?.ifBlank { null },
         // NONE stores null so a direct row stays clean; other modes store the mode + trimmed proxy.
@@ -740,25 +799,28 @@ fun buildNetworkEntity(
 private const val DEFAULT_IDENTITY = "motd"
 
 /** Inverse: seed the forms from an existing entity for editing. */
-fun NetworkEntity.toServerForm(): ServerForm = ServerForm(
-    host = host,
-    port = port.toString(),
-    tls = tls,
-    nick = nick,
-    username = username,
-    realname = realname,
-)
+fun NetworkEntity.toServerForm(): ServerForm =
+    ServerForm(
+        host = host,
+        port = port.toString(),
+        tls = tls,
+        nick = nick,
+        username = username,
+        realname = realname,
+    )
 
-fun NetworkEntity.toAuthForm(): AuthForm = AuthForm(
-    mode = saslToAuthMode(saslMechanism),
-    saslUser = saslUser.orEmpty(),
-    saslPassword = saslPassword.orEmpty(),
-    certAlias = clientCertAlias,
-    serverPassword = serverPassword.orEmpty(),
-    nickServPassword = nickServPassword.orEmpty(),
-    nickServIdentifySyntax = nickServIdentifySyntax?.let {
-        runCatching { NickServIdentifySyntax.valueOf(it) }.getOrNull()
-    } ?: NickServIdentifySyntax.NICK_PASSWORD,
-    nickServRecoveryEnabled = nickServRecoveryEnabled,
-    nickServRecoverySequence = nickServRecoverySequence ?: "REGAIN",
-)
+fun NetworkEntity.toAuthForm(): AuthForm =
+    AuthForm(
+        mode = saslToAuthMode(saslMechanism),
+        saslUser = saslUser.orEmpty(),
+        saslPassword = saslPassword.orEmpty(),
+        certAlias = clientCertAlias,
+        serverPassword = serverPassword.orEmpty(),
+        nickServPassword = nickServPassword.orEmpty(),
+        nickServIdentifySyntax =
+            nickServIdentifySyntax?.let {
+                runCatching { NickServIdentifySyntax.valueOf(it) }.getOrNull()
+            } ?: NickServIdentifySyntax.NICK_PASSWORD,
+        nickServRecoveryEnabled = nickServRecoveryEnabled,
+        nickServRecoverySequence = nickServRecoverySequence ?: "REGAIN",
+    )

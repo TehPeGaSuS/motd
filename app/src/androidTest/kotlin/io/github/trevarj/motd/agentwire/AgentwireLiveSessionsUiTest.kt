@@ -23,17 +23,19 @@ class AgentwireLiveSessionsUiTest {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 AgentwireLiveSessions(
-                    sessions = listOf(
-                        AgentwireListItem(
-                            id = "thread-desktop",
-                            title = "Desktop TUI",
-                            subtitle = "/work/motd",
-                            raw = buildJsonObject {
-                                put("busy", true)
-                                put("tuiAttached", true)
-                            },
+                    sessions =
+                        listOf(
+                            AgentwireListItem(
+                                id = "thread-desktop",
+                                title = "Desktop TUI",
+                                subtitle = "/work/motd",
+                                raw =
+                                    buildJsonObject {
+                                        put("busy", true)
+                                        put("tuiAttached", true)
+                                    },
+                            ),
                         ),
-                    ),
                     activeSid = null,
                     actions = emptySet(),
                     onAttach = { sid, cwd -> attached = sid to cwd },

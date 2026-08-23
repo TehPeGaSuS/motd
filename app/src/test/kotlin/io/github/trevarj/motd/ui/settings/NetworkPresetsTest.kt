@@ -65,14 +65,15 @@ class NetworkPresetsTest {
 
     @Test
     fun applying_preset_preserves_identity_and_clears_auth() {
-        val original = ServerForm(
-            host = "old.example",
-            port = "7000",
-            tls = false,
-            nick = "trev",
-            username = "ident",
-            realname = "Trev",
-        )
+        val original =
+            ServerForm(
+                host = "old.example",
+                port = "7000",
+                tls = false,
+                nick = "trev",
+                username = "ident",
+                realname = "Trev",
+            )
         val preset = COMMON_NETWORK_PRESETS.first { it.id == NetworkPresetId.LIBERA }
 
         val (server, auth) = applyNetworkPreset(preset, original)

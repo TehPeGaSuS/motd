@@ -1,8 +1,8 @@
 package io.github.trevarj.motd.agentwire
 
 import io.github.trevarj.motd.di.AppClock
-import java.util.UUID
 import kotlinx.coroutines.delay
+import java.util.UUID
 
 internal const val AGENTWIRE_SYNC_RETRY_INITIAL_MS = 1_000L
 internal const val AGENTWIRE_SYNC_RETRY_MAX_MS = 10_000L
@@ -26,43 +26,62 @@ sealed interface AgentwireSyncState {
 
     /** The gate is ACTIVE but this device is not in the channel, so no session is started. */
     data object NotJoined : AgentwireSyncState
-    data class Syncing(val attempt: Int, val startedAtMs: Long) : AgentwireSyncState
+
+    data class Syncing(
+        val attempt: Int,
+        val startedAtMs: Long,
+    ) : AgentwireSyncState
+
     data object Ready : AgentwireSyncState
-    data class Failed(val failure: AgentwireSyncFailure) : AgentwireSyncState
+
+    data class Failed(
+        val failure: AgentwireSyncFailure,
+    ) : AgentwireSyncState
 }
 
 /** The five distinguishable ways a handshake can end without state. */
 sealed interface AgentwireSyncFailure {
     /** The budget expired with no correlated reply at all. */
-    data class Timeout(val attempts: Int, val counters: IgnoreCounters) : AgentwireSyncFailure
+    data class Timeout(
+        val attempts: Int,
+        val counters: IgnoreCounters,
+    ) : AgentwireSyncFailure
 
     /** The bridge answered our sync id with `action.failed`: a definitive wire-level no. */
-    data class Rejected(val detail: String) : AgentwireSyncFailure
+    data class Rejected(
+        val detail: String,
+    ) : AgentwireSyncFailure
 
     /** Repeated envelope validation failures from the trusted account within one handshake. */
-    data class ProtocolMismatch(val detail: String) : AgentwireSyncFailure
+    data class ProtocolMismatch(
+        val detail: String,
+    ) : AgentwireSyncFailure
 
     /** The request never reached the wire. */
-    data class SendFailed(val detail: String) : AgentwireSyncFailure
+    data class SendFailed(
+        val detail: String,
+    ) : AgentwireSyncFailure
 }
 
 /** Diagnostic journal component for everything in this package. */
 internal const val AGENTWIRE_DIAGNOSTIC_COMPONENT = "agentwire"
 
-internal fun AgentwireSyncFailure.endReason(): String = when (this) {
-    is AgentwireSyncFailure.Timeout -> "timeout"
-    is AgentwireSyncFailure.Rejected -> "rejected"
-    is AgentwireSyncFailure.ProtocolMismatch -> "protocol"
-    is AgentwireSyncFailure.SendFailed -> "send"
-}
+internal fun AgentwireSyncFailure.endReason(): String =
+    when (this) {
+        is AgentwireSyncFailure.Timeout -> "timeout"
+        is AgentwireSyncFailure.Rejected -> "rejected"
+        is AgentwireSyncFailure.ProtocolMismatch -> "protocol"
+        is AgentwireSyncFailure.SendFailed -> "send"
+    }
 
 /** Human phrasing for a send stage, used in the failure card. Classification only, no user data. */
-internal fun sendFailureDetail(stage: String): String = when (stage) {
-    "not_ready" -> "the connection is not ready"
-    "caps" -> "the connection is missing a required capability"
-    "client_tag" -> "the server does not allow this client tag"
-    else -> "the write did not reach the server"
-}
+internal fun sendFailureDetail(stage: String): String =
+    when (stage) {
+        "not_ready" -> "the connection is not ready"
+        "caps" -> "the connection is missing a required capability"
+        "client_tag" -> "the server does not allow this client tag"
+        else -> "the write did not reach the server"
+    }
 
 /** Why a delivered Agentwire event did not advance state. Every silent path names itself. */
 enum class IgnoreReason {
@@ -86,16 +105,19 @@ enum class IgnoreReason {
 }
 
 /** Per-attempt tally of [IgnoreReason]s, carried into the failure state as evidence. */
-data class IgnoreCounters(val counts: Map<IgnoreReason, Int> = emptyMap()) {
+data class IgnoreCounters(
+    val counts: Map<IgnoreReason, Int> = emptyMap(),
+) {
     val total: Int get() = counts.values.sum()
 
     /** Diagnostic fields, one per non-zero counter, using the redaction-safe `ignored_*` prefix. */
-    fun diagnosticFields(): Map<String, Int> =
-        counts.filterValues { it > 0 }.mapKeys { (reason, _) -> "ignored_${reason.name.lowercase()}" }
+    fun diagnosticFields(): Map<String, Int> = counts.filterValues { it > 0 }.mapKeys { (reason, _) -> "ignored_${reason.name.lowercase()}" }
 }
 
 /** What made the client enter or re-enter a handshake; recorded verbatim as a diagnostic field. */
-enum class AgentwireSyncTrigger(val wireName: String) {
+enum class AgentwireSyncTrigger(
+    val wireName: String,
+) {
     OPEN("open"),
     RETRY("retry"),
     REJOIN("rejoin"),
@@ -105,7 +127,9 @@ enum class AgentwireSyncTrigger(val wireName: String) {
 }
 
 /** Why the coordinator abandoned the current epoch. */
-enum class AgentwireResyncCause(val wireName: String) {
+enum class AgentwireResyncCause(
+    val wireName: String,
+) {
     GAP("gap"),
     FRAGMENT_EXPIRY("fragment_expiry"),
 }
@@ -144,9 +168,10 @@ internal class AgentwireSyncBudget(
 
     fun elapsedMs(): Long = (clock.nowMillis() - startedAtMs).coerceAtLeast(0L)
 
-    fun sendFloorMs(): Long = lastSendAtMs
-        ?.let { (AGENTWIRE_SYNC_MIN_INTERVAL_MS - (clock.nowMillis() - it)).coerceAtLeast(0L) }
-        ?: 0L
+    fun sendFloorMs(): Long =
+        lastSendAtMs
+            ?.let { (AGENTWIRE_SYNC_MIN_INTERVAL_MS - (clock.nowMillis() - it)).coerceAtLeast(0L) }
+            ?: 0L
 
     fun recordSend(): Int {
         lastSendAtMs = clock.nowMillis()

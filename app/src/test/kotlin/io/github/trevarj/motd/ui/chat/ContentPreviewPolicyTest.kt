@@ -7,10 +7,11 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ContentPreviewPolicyTest {
-    private val urls = MessageUrls(
-        imageUrl = "https://example.test/image.png",
-        linkUrl = "https://example.test/article",
-    )
+    private val urls =
+        MessageUrls(
+            imageUrl = "https://example.test/image.png",
+            linkUrl = "https://example.test/article",
+        )
 
     @Test
     fun image_and_link_gates_form_an_independent_matrix() {
@@ -31,14 +32,15 @@ class ContentPreviewPolicyTest {
 
     @Test
     fun disabling_images_removes_link_card_thumbnail_but_keeps_metadata() {
-        val preview = LinkPreview(
-            url = urls.linkUrl!!,
-            title = "Article",
-            description = "Description",
-            imageUrl = urls.imageUrl,
-            siteName = "Example",
-            kind = LinkPreviewKind.TEXT,
-        )
+        val preview =
+            LinkPreview(
+                url = urls.linkUrl!!,
+                title = "Article",
+                description = "Description",
+                imageUrl = urls.imageUrl,
+                siteName = "Example",
+                kind = LinkPreviewKind.TEXT,
+            )
 
         val gated = preview.withImageGate(showImages = false)
 

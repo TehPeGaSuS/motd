@@ -27,7 +27,6 @@ import org.junit.Test
  * surfaced as guidance, and the toggle enables live once a connection reaches Ready with the cap.
  */
 class RealPushAvailabilityProviderTest {
-
     private val readyWithCap =
         IrcClientState.Ready(nick = "me", caps = setOf(WebPushRegistrar.WEBPUSH_CAP, "sasl"), isupport = emptyMap())
     private val readyNoCap =
@@ -42,110 +41,125 @@ class RealPushAvailabilityProviderTest {
         hasDistributor: Boolean,
     ) = RealPushAvailabilityProvider(FakeConnectionManager(states)) { hasDistributor }
 
-    private fun network(id: Long) = NetworkEntity(
-        id = id,
-        name = "Network $id",
-        role = NetworkRole.DIRECT,
-        host = "irc.example.test",
-        port = 6697,
-        nick = "me",
-        username = "me",
-        realname = "Me",
-    )
-
-    @Test
-    fun cap_and_distributor_present_is_selectable_without_guidance() = runTest {
-        val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to readyWithCap))
-        provider(states, hasDistributor = true).availability().test {
-            val a = awaitItem()
-            assertTrue("selectable when cap + distributor", a.selectable)
-            assertFalse("no guidance when distributor present", a.needsDistributor)
-        }
-    }
-
-    @Test
-    fun cap_present_but_no_distributor_is_selectable_with_guidance() = runTest {
-        val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to readyWithCap))
-        provider(states, hasDistributor = false).availability().test {
-            val a = awaitItem()
-            assertTrue("still selectable so registration self-heals", a.selectable)
-            assertTrue("guidance shown to install a distributor", a.needsDistributor)
-        }
-    }
-
-    @Test
-    fun no_cap_is_not_selectable_regardless_of_distributor() = runTest {
-        val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to readyNoCap))
-        provider(states, hasDistributor = true).availability().test {
-            val a = awaitItem()
-            assertFalse("not selectable without bouncer webpush", a.selectable)
-            assertFalse(a.needsDistributor)
-        }
-    }
-
-    @Test
-    fun disconnected_state_is_not_selectable() = runTest {
-        val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to IrcClientState.Connecting))
-        provider(states, hasDistributor = true).availability().test {
-            assertFalse(awaitItem().selectable)
-        }
-    }
-
-    @Test
-    fun becomes_selectable_reactively_when_bouncer_reaches_ready() = runTest {
-        // Settings opens before the soju root is Ready: starts unavailable, flips live on Ready.
-        val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to IrcClientState.Registering))
-        provider(states, hasDistributor = true).availability().test {
-            assertFalse("stale/false before Ready", awaitItem().selectable)
-            states.value = mapOf(1L to readyWithCap)
-            assertTrue("enables once bouncer advertises webpush", awaitItem().selectable)
-        }
-    }
-
-    @Test
-    fun endpoint_received_waiting_for_bouncer_is_not_reported_as_endpoint_request() = runTest {
-        val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to readyWithCap))
-        val provider = RealPushAvailabilityProvider(
-            connectionManager = FakeConnectionManager(states),
-            hasDistributor = { true },
-            networks = flowOf(listOf(network(1L))),
-            health = flowOf(
-                mapOf(1L to NetworkPushHealth(
-                    endpointFingerprint = "redacted",
-                    registrationState = PushRegistrationState.WAITING_FOR_SERVER,
-                )),
-            ),
+    private fun network(id: Long) =
+        NetworkEntity(
+            id = id,
+            name = "Network $id",
+            role = NetworkRole.DIRECT,
+            host = "irc.example.test",
+            port = 6697,
+            nick = "me",
+            username = "me",
+            realname = "Me",
         )
 
-        provider.availability().test {
-            assertEquals(PushSetupStatus.WAITING_FOR_SERVER, awaitItem().setupStatus)
+    @Test
+    fun cap_and_distributor_present_is_selectable_without_guidance() =
+        runTest {
+            val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to readyWithCap))
+            provider(states, hasDistributor = true).availability().test {
+                val a = awaitItem()
+                assertTrue("selectable when cap + distributor", a.selectable)
+                assertFalse("no guidance when distributor present", a.needsDistributor)
+            }
         }
-    }
 
     @Test
-    fun notification_permission_flow_recomputes_without_other_delivery_emissions() = runTest {
-        val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to readyWithCap))
-        val notificationPermission = MutableStateFlow(true)
-        val provider = RealPushAvailabilityProvider(
-            connectionManager = FakeConnectionManager(states),
-            hasDistributor = { true },
-            notificationPermission = notificationPermission,
-        )
-
-        provider.availability().test {
-            assertTrue(awaitItem().notificationsGranted)
-            notificationPermission.value = false
-            assertFalse(awaitItem().notificationsGranted)
+    fun cap_present_but_no_distributor_is_selectable_with_guidance() =
+        runTest {
+            val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to readyWithCap))
+            provider(states, hasDistributor = false).availability().test {
+                val a = awaitItem()
+                assertTrue("still selectable so registration self-heals", a.selectable)
+                assertTrue("guidance shown to install a distributor", a.needsDistributor)
+            }
         }
-    }
+
+    @Test
+    fun no_cap_is_not_selectable_regardless_of_distributor() =
+        runTest {
+            val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to readyNoCap))
+            provider(states, hasDistributor = true).availability().test {
+                val a = awaitItem()
+                assertFalse("not selectable without bouncer webpush", a.selectable)
+                assertFalse(a.needsDistributor)
+            }
+        }
+
+    @Test
+    fun disconnected_state_is_not_selectable() =
+        runTest {
+            val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to IrcClientState.Connecting))
+            provider(states, hasDistributor = true).availability().test {
+                assertFalse(awaitItem().selectable)
+            }
+        }
+
+    @Test
+    fun becomes_selectable_reactively_when_bouncer_reaches_ready() =
+        runTest {
+            // Settings opens before the soju root is Ready: starts unavailable, flips live on Ready.
+            val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to IrcClientState.Registering))
+            provider(states, hasDistributor = true).availability().test {
+                assertFalse("stale/false before Ready", awaitItem().selectable)
+                states.value = mapOf(1L to readyWithCap)
+                assertTrue("enables once bouncer advertises webpush", awaitItem().selectable)
+            }
+        }
+
+    @Test
+    fun endpoint_received_waiting_for_bouncer_is_not_reported_as_endpoint_request() =
+        runTest {
+            val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to readyWithCap))
+            val provider =
+                RealPushAvailabilityProvider(
+                    connectionManager = FakeConnectionManager(states),
+                    hasDistributor = { true },
+                    networks = flowOf(listOf(network(1L))),
+                    health =
+                        flowOf(
+                            mapOf(
+                                1L to
+                                    NetworkPushHealth(
+                                        endpointFingerprint = "redacted",
+                                        registrationState = PushRegistrationState.WAITING_FOR_SERVER,
+                                    ),
+                            ),
+                        ),
+                )
+
+            provider.availability().test {
+                assertEquals(PushSetupStatus.WAITING_FOR_SERVER, awaitItem().setupStatus)
+            }
+        }
+
+    @Test
+    fun notification_permission_flow_recomputes_without_other_delivery_emissions() =
+        runTest {
+            val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to readyWithCap))
+            val notificationPermission = MutableStateFlow(true)
+            val provider =
+                RealPushAvailabilityProvider(
+                    connectionManager = FakeConnectionManager(states),
+                    hasDistributor = { true },
+                    notificationPermission = notificationPermission,
+                )
+
+            provider.availability().test {
+                assertTrue(awaitItem().notificationsGranted)
+                notificationPermission.value = false
+                assertFalse(awaitItem().notificationsGranted)
+            }
+        }
 
     @Test fun permission_refresh_delegates_to_the_status_controller() {
         var refreshes = 0
-        val provider = RealPushAvailabilityProvider(
-            connectionManager = FakeConnectionManager(MutableStateFlow(emptyMap())),
-            hasDistributor = { false },
-            refreshNotificationPermission = { refreshes++ },
-        )
+        val provider =
+            RealPushAvailabilityProvider(
+                connectionManager = FakeConnectionManager(MutableStateFlow(emptyMap())),
+                hasDistributor = { false },
+                refreshNotificationPermission = { refreshes++ },
+            )
 
         provider.refreshNotificationPermission()
 

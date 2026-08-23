@@ -7,7 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class OperatorCommandsTest {
-
     @Test fun kill_preview_is_the_exact_wire_line() {
         // serialize() already excludes the trailing CRLF the transport appends, and only reaches
         // for the trailing ':' form when the reason contains a space.

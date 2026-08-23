@@ -21,11 +21,12 @@ class ChatSoundsRepositoryTest {
     }
 
     @Test
-    fun chat_sounds_round_trip() = runTest {
-        repository.setChatSoundsEnabled(false)
-        assertFalse(repository.settings.first().chatSoundsEnabled)
+    fun chat_sounds_round_trip() =
+        runTest {
+            repository.setChatSoundsEnabled(false)
+            assertFalse(repository.settings.first().chatSoundsEnabled)
 
-        repository.setChatSoundsEnabled(true)
-        assertTrue(repository.settings.first().chatSoundsEnabled)
-    }
+            repository.setChatSoundsEnabled(true)
+            assertTrue(repository.settings.first().chatSoundsEnabled)
+        }
 }

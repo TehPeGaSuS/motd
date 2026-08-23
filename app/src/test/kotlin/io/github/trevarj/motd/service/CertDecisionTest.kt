@@ -5,7 +5,6 @@ import org.junit.Test
 
 /** Pure TOFU pin-decision logic: pinned/mismatch/first-use → Trust/Prompt/Changed. */
 class CertDecisionTest {
-
     private val fp = "a1b2c3"
 
     @Test

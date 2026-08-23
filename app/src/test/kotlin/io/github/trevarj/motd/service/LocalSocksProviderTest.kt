@@ -11,9 +11,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LocalSocksProviderTest {
-    private val link = VlessLink.parse(
-        "vless://123e4567-e89b-12d3-a456-426614174000@edge.example:443?type=tcp&security=reality&sni=www.example.com&pbk=public-key&sid=abcd&fp=firefox",
-    ).getOrThrow()
+    private val link =
+        VlessLink
+            .parse(
+                "vless://123e4567-e89b-12d3-a456-426614174000@edge.example:443?type=tcp&security=reality&sni=www.example.com&pbk=public-key&sid=abcd&fp=firefox",
+            ).getOrThrow()
 
     @Test
     fun `shares one endpoint for leases of the same link`() {
@@ -85,22 +87,23 @@ class LocalSocksProviderTest {
     @Test
     fun `embedded link starts loopback provider before legacy SOCKS validation`() {
         val engine = FakeEngine(Result.success(11001))
-        val endpoint = NetworkEntity(
-            id = 1,
-            name = "soju",
-            role = NetworkRole.BOUNCER_ROOT,
-            host = "bouncer.example",
-            port = 6697,
-            tls = true,
-            nick = "motd",
-            username = "motd",
-            realname = "motd",
-            obfsMode = ObfsMode.EMBEDDED_REALITY,
-            // Embedded REALITY intentionally clears legacy SOCKS settings when persisting a VLESS link.
-            proxyHost = null,
-            proxyPort = null,
-            obfsLink = validLink,
-        )
+        val endpoint =
+            NetworkEntity(
+                id = 1,
+                name = "soju",
+                role = NetworkRole.BOUNCER_ROOT,
+                host = "bouncer.example",
+                port = 6697,
+                tls = true,
+                nick = "motd",
+                username = "motd",
+                realname = "motd",
+                obfsMode = ObfsMode.EMBEDDED_REALITY,
+                // Embedded REALITY intentionally clears legacy SOCKS settings when persisting a VLESS link.
+                proxyHost = null,
+                proxyPort = null,
+                obfsLink = validLink,
+            )
 
         val resolution = resolveTransportProxy(endpoint, LocalSocksProvider.forTest { engine })
 
@@ -111,19 +114,20 @@ class LocalSocksProviderTest {
 
     @Test
     fun `invalid embedded link remains a fail closed configuration error`() {
-        val endpoint = NetworkEntity(
-            id = 1,
-            name = "soju",
-            role = NetworkRole.BOUNCER_ROOT,
-            host = "bouncer.example",
-            port = 6697,
-            tls = true,
-            nick = "motd",
-            username = "motd",
-            realname = "motd",
-            obfsMode = ObfsMode.EMBEDDED_REALITY,
-            obfsLink = "not-a-vless-link",
-        )
+        val endpoint =
+            NetworkEntity(
+                id = 1,
+                name = "soju",
+                role = NetworkRole.BOUNCER_ROOT,
+                host = "bouncer.example",
+                port = 6697,
+                tls = true,
+                nick = "motd",
+                username = "motd",
+                realname = "motd",
+                obfsMode = ObfsMode.EMBEDDED_REALITY,
+                obfsLink = "not-a-vless-link",
+            )
 
         val resolution = resolveTransportProxy(endpoint, LocalSocksProvider.forTest { FakeEngine(Result.success(11001)) })
 
@@ -141,10 +145,11 @@ class LocalSocksProviderTest {
     @Test
     fun `local SOCKS allocation asks libbox to scan from a nonzero port`() {
         var startPort = 0
-        val port = selectLocalSocksPort { start ->
-            startPort = start
-            24_321
-        }
+        val port =
+            selectLocalSocksPort { start ->
+                startPort = start
+                24_321
+            }
 
         assertEquals(20_000, startPort)
         assertEquals(24_321, port)
@@ -155,16 +160,22 @@ class LocalSocksProviderTest {
         assertTrue(runCatching { selectLocalSocksPort { 0 } }.isFailure)
     }
 
-    private class FakeEngine(private val result: Result<Int>) : LocalSocksEngine {
+    private class FakeEngine(
+        private val result: Result<Int>,
+    ) : LocalSocksEngine {
         var starts = 0
         var stops = 0
         var lastJson: String? = null
+
         override fun start(configJson: String): Result<Int> {
             starts++
             lastJson = configJson
             return result
         }
-        override fun stop() { stops++ }
+
+        override fun stop() {
+            stops++
+        }
     }
 
     private companion object {

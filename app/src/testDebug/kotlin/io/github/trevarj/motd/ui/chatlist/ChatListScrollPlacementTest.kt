@@ -50,7 +50,6 @@ import org.robolectric.annotation.GraphicsMode
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ChatListScrollPlacementTest {
-
     @get:Rule
     val compose = createComposeRule()
 
@@ -80,14 +79,15 @@ class ChatListScrollPlacementTest {
                 val topKey = presentedOrder.first()
                 val tracker = remember { ChatListTopItemTracker(topKey) }
                 if (tracker.key != topKey) {
-                    val repin = Snapshot.withoutReadObservation {
-                        shouldRepinChatListTop(
-                            previousTopKey = tracker.key,
-                            topKey = topKey,
-                            canScrollBackward = listState.canScrollBackward,
-                            scrollInProgress = listState.isScrollInProgress,
-                        )
-                    }
+                    val repin =
+                        Snapshot.withoutReadObservation {
+                            shouldRepinChatListTop(
+                                previousTopKey = tracker.key,
+                                topKey = topKey,
+                                canScrollBackward = listState.canScrollBackward,
+                                scrollInProgress = listState.isScrollInProgress,
+                            )
+                        }
                     tracker.key = topKey
                     if (repin) listState.requestScrollToItem(0)
                 }
@@ -95,10 +95,11 @@ class ChatListScrollPlacementTest {
             with(LocalDensity.current) {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier
-                        .width(200.toDp())
-                        .height(viewportPx.toDp())
-                        .testTag("list"),
+                    modifier =
+                        Modifier
+                            .width(200.toDp())
+                            .height(viewportPx.toDp())
+                            .testTag("list"),
                 ) {
                     items(count = presentedOrder.size, key = { presentedOrder[it] }) { i ->
                         Box(
@@ -109,10 +110,11 @@ class ChatListScrollPlacementTest {
                                 .animateItem(
                                     fadeInSpec = tween(90),
                                     fadeOutSpec = tween(90),
-                                    placementSpec = spring(
-                                        stiffness = Spring.StiffnessMediumLow,
-                                        visibilityThreshold = IntOffset.VisibilityThreshold,
-                                    ),
+                                    placementSpec =
+                                        spring(
+                                            stiffness = Spring.StiffnessMediumLow,
+                                            visibilityThreshold = IntOffset.VisibilityThreshold,
+                                        ),
                                 ),
                         ) {}
                     }
@@ -127,7 +129,10 @@ class ChatListScrollPlacementTest {
         return job!!
     }
 
-    private fun advanceUntil(job: Job, maxFrames: Int = 600) {
+    private fun advanceUntil(
+        job: Job,
+        maxFrames: Int = 600,
+    ) {
         var frames = 0
         while (job.isActive && frames < maxFrames) {
             compose.mainClock.advanceTimeByFrame()
@@ -141,20 +146,27 @@ class ChatListScrollPlacementTest {
      * so a row peeking past the viewport edge still reports its true offset.
      */
     private fun visibleRowTops(): Map<Int, Float> {
-        val visible = compose.runOnUiThread {
-            listState.layoutInfo.visibleItemsInfo.map { it.key as Int }
-        }
+        val visible =
+            compose.runOnUiThread {
+                listState.layoutInfo.visibleItemsInfo.map { it.key as Int }
+            }
         return visible.associateWith { id ->
-            compose.onNodeWithTag("row-$id").fetchSemanticsNode().positionInRoot.y
+            compose
+                .onNodeWithTag("row-$id")
+                .fetchSemanticsNode()
+                .positionInRoot.y
         }
     }
 
     /** Rows must tile exactly: consecutive visible rows differ by exactly one row height. */
     private fun assertRowsTile(label: String) {
         val tops = visibleRowTops()
-        val visible = compose.runOnUiThread {
-            listState.layoutInfo.visibleItemsInfo.sortedBy { it.offset }.map { it.key as Int }
-        }
+        val visible =
+            compose.runOnUiThread {
+                listState.layoutInfo.visibleItemsInfo
+                    .sortedBy { it.offset }
+                    .map { it.key as Int }
+            }
         visible.zipWithNext().forEach { (a, b) ->
             assertEquals(
                 "$label: rows $a/$b not tiled (tops ${tops.getValue(a)}/${tops.getValue(b)})",
@@ -166,7 +178,10 @@ class ChatListScrollPlacementTest {
     }
 
     /** With no input and no data change, row positions must not move between frames. */
-    private fun assertRowsFrozen(label: String, frames: Int = 40) {
+    private fun assertRowsFrozen(
+        label: String,
+        frames: Int = 40,
+    ) {
         val before = visibleRowTops()
         repeat(frames) { compose.mainClock.advanceTimeByFrame() }
         val after = visibleRowTops()
@@ -180,7 +195,11 @@ class ChatListScrollPlacementTest {
         }
     }
 
-    private fun scrollDownInSteps(steps: Int, stepPx: Float, label: String) {
+    private fun scrollDownInSteps(
+        steps: Int,
+        stepPx: Float,
+        label: String,
+    ) {
         repeat(steps) {
             val job = launchOnUi { listState.scrollBy(stepPx) }
             compose.mainClock.advanceTimeByFrame()
@@ -257,7 +276,6 @@ class ChatListScrollPlacementTest {
         assertRowsFrozen("post-snap settle")
     }
 
-
     /**
      * Frozen-clock reorder: the snapshot write must be announced explicitly (nothing else pumps
      * apply notifications while the clock is paused), then two frames compose and measure it.
@@ -271,9 +289,12 @@ class ChatListScrollPlacementTest {
         compose.mainClock.advanceTimeByFrame()
     }
 
-    private fun visibleKeysInLayout(): List<Int> = compose.runOnUiThread {
-        listState.layoutInfo.visibleItemsInfo.sortedBy { it.offset }.map { it.key as Int }
-    }
+    private fun visibleKeysInLayout(): List<Int> =
+        compose.runOnUiThread {
+            listState.layoutInfo.visibleItemsInfo
+                .sortedBy { it.offset }
+                .map { it.key as Int }
+        }
 
     /**
      * The idle-at-top case: a row re-sorted to the top while the viewport rests at the true top

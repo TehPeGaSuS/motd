@@ -29,14 +29,20 @@ import javax.net.ssl.X509TrustManager
  * Stored as JSON via the DataStore STS accessor.
  */
 @Serializable
-data class StsPolicy(val host: String, val port: Int, val until: Long)
+data class StsPolicy(
+    val host: String,
+    val port: Int,
+    val until: Long,
+)
 
 /**
  * STS policy store over the DataStore `sts_policies` JSON blob (WP4's internal accessor).
  * Enforcement: rewrite (port, tls=true) before connect when a live policy exists.
  * Persistence: on Ready, parse the `sts=...` cap value and upsert a policy.
  */
-class StsPolicyStore(private val prefs: DataStoreSettingsRepository) {
+class StsPolicyStore(
+    private val prefs: DataStoreSettingsRepository,
+) {
     private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun all(now: Long = System.currentTimeMillis()): Map<String, StsPolicy> {
@@ -45,8 +51,10 @@ class StsPolicyStore(private val prefs: DataStoreSettingsRepository) {
         return list.filter { it.until > now }.associateBy { it.host.lowercase() }
     }
 
-    suspend fun policyFor(host: String, now: Long = System.currentTimeMillis()): StsPolicy? =
-        all(now)[host.lowercase()]
+    suspend fun policyFor(
+        host: String,
+        now: Long = System.currentTimeMillis(),
+    ): StsPolicy? = all(now)[host.lowercase()]
 
     suspend fun upsert(policy: StsPolicy) {
         val current = all().values.filterNot { it.host.equals(policy.host, ignoreCase = true) }
@@ -58,11 +66,21 @@ class StsPolicyStore(private val prefs: DataStoreSettingsRepository) {
      * Applies only over TLS (a plaintext STS upgrade is a separate reconnect the caller performs);
      * returns null when no duration is present.
      */
-    fun parse(host: String, capValue: String?, tls: Boolean, currentPort: Int, now: Long = System.currentTimeMillis()): StsPolicy? {
+    fun parse(
+        host: String,
+        capValue: String?,
+        tls: Boolean,
+        currentPort: Int,
+        now: Long = System.currentTimeMillis(),
+    ): StsPolicy? {
         if (capValue == null) return null
-        val attrs = capValue.split(',').mapNotNull {
-            val eq = it.indexOf('='); if (eq < 0) null else it.substring(0, eq) to it.substring(eq + 1)
-        }.toMap()
+        val attrs =
+            capValue
+                .split(',')
+                .mapNotNull {
+                    val eq = it.indexOf('=')
+                    if (eq < 0) null else it.substring(0, eq) to it.substring(eq + 1)
+                }.toMap()
         val duration = attrs["duration"]?.toLongOrNull() ?: return null
         if (!tls) return null
         val port = attrs["port"]?.toIntOrNull() ?: currentPort
@@ -111,7 +129,13 @@ class AppTransportFactory(
      */
     private val onConnectPhase: (phase: String, elapsedMs: Long) -> Unit = { _, _ -> },
 ) : TransportFactory {
-    override fun create(host: String, port: Int, tls: Boolean, wsUrl: String?, proxy: Proxy?): IrcTransport {
+    override fun create(
+        host: String,
+        port: Int,
+        tls: Boolean,
+        wsUrl: String?,
+        proxy: Proxy?,
+    ): IrcTransport {
         // The per-network proxy captured at construction is the source of truth; the create() param
         // (unused by IrcClient, present for the fun-interface) takes precedence if a caller supplies one.
         val effProxy = proxy ?: this.proxy
@@ -177,11 +201,15 @@ class AppTransportFactory(
     }
 
     /** SSLContext with the optional KeyChain client-cert KeyManager + the pinning trust manager. */
-    private fun buildTlsContext(alias: String?, trustManager: TrustManager): SSLContext {
-        val keyManagers: Array<KeyManager>? = alias?.let {
-            val km = KeyChainKeyManager(appContext, it).also { m -> m.resolve() }
-            arrayOf(km)
-        }
+    private fun buildTlsContext(
+        alias: String?,
+        trustManager: TrustManager,
+    ): SSLContext {
+        val keyManagers: Array<KeyManager>? =
+            alias?.let {
+                val km = KeyChainKeyManager(appContext, it).also { m -> m.resolve() }
+                arrayOf(km)
+            }
         return SSLContext.getInstance("TLS").apply { init(keyManagers, arrayOf(trustManager), null) }
     }
 }
@@ -201,10 +229,11 @@ suspend fun prepareTransportSecurity(
     pinnedFor: suspend (String, Int) -> String?,
 ): PreparedTransportSecurity {
     if (!wsUrl.isNullOrBlank()) {
-        val wsPin = wsUrl.takeIf { it.startsWith("wss://") }?.let { secureUrl ->
-            val (wsHost, wsPort) = wsEndpoint(secureUrl)
-            pinnedFor(wsHost, wsPort)
-        }
+        val wsPin =
+            wsUrl.takeIf { it.startsWith("wss://") }?.let { secureUrl ->
+                val (wsHost, wsPort) = wsEndpoint(secureUrl)
+                pinnedFor(wsHost, wsPort)
+            }
         return PreparedTransportSecurity(stsPolicy = null, tcpPin = null, wsPin = wsPin)
     }
     val policy = policyFor(host)
@@ -214,10 +243,12 @@ suspend fun prepareTransportSecurity(
 
 /** OkHttp-backed endpoint parsing plus a defensive fallback for unusual persisted URLs. */
 internal fun wsEndpoint(wsUrl: String): Pair<String, Int> {
-    val httpUrl = wsUrl.replaceFirst("wss://", "https://")
-        .replaceFirst("ws+insecure://", "http://")
-        .replaceFirst("ws://", "http://")
-        .toHttpUrlOrNull()
+    val httpUrl =
+        wsUrl
+            .replaceFirst("wss://", "https://")
+            .replaceFirst("ws+insecure://", "http://")
+            .replaceFirst("ws://", "http://")
+            .toHttpUrlOrNull()
     val host = httpUrl?.host ?: wsUrl.substringAfter("://").substringBefore('/').substringBefore(':')
     val port = httpUrl?.port ?: if (wsUrl.startsWith("wss://")) 443 else 80
     return host to port
@@ -241,22 +272,33 @@ const val ORBOT_SOCKS_PORT = 9050
  * The destination is left UNRESOLVED (`createUnresolved`) so DNS is performed remotely by the proxy
  * (leak-free, `.onion`-capable) — the same rule [OkioLineTransport] applies when dialing.
  */
-fun proxyForNetwork(obfsMode: ObfsMode?, proxyHost: String?, proxyPort: Int?): Proxy? = when (obfsMode) {
-    null, ObfsMode.NONE -> null
-    ObfsMode.TOR -> Proxy(
-        Proxy.Type.SOCKS,
-        InetSocketAddress.createUnresolved(ORBOT_SOCKS_HOST, ORBOT_SOCKS_PORT),
-    )
-    ObfsMode.SOCKS5, ObfsMode.EMBEDDED_REALITY -> {
-        val host = proxyHost?.trim()?.ifBlank { null }
-        // No usable host/port → treat as direct (defensive; the UI keeps host/port populated).
-        if (host == null || proxyPort == null || proxyPort !in 1..65535) {
+fun proxyForNetwork(
+    obfsMode: ObfsMode?,
+    proxyHost: String?,
+    proxyPort: Int?,
+): Proxy? =
+    when (obfsMode) {
+        null, ObfsMode.NONE -> {
             null
-        } else {
-            Proxy(Proxy.Type.SOCKS, InetSocketAddress.createUnresolved(host, proxyPort))
+        }
+
+        ObfsMode.TOR -> {
+            Proxy(
+                Proxy.Type.SOCKS,
+                InetSocketAddress.createUnresolved(ORBOT_SOCKS_HOST, ORBOT_SOCKS_PORT),
+            )
+        }
+
+        ObfsMode.SOCKS5, ObfsMode.EMBEDDED_REALITY -> {
+            val host = proxyHost?.trim()?.ifBlank { null }
+            // No usable host/port → treat as direct (defensive; the UI keeps host/port populated).
+            if (host == null || proxyPort == null || proxyPort !in 1..65535) {
+                null
+            } else {
+                Proxy(Proxy.Type.SOCKS, InetSocketAddress.createUnresolved(host, proxyPort))
+            }
         }
     }
-}
 
 /**
  * Validate an enabled persisted proxy mode before a connection is built. This must be checked
@@ -268,14 +310,20 @@ internal fun proxyConfigurationErrorForNetwork(
     obfsMode: ObfsMode?,
     proxyHost: String?,
     proxyPort: Int?,
-): String? = when (obfsMode) {
-    null, ObfsMode.NONE, ObfsMode.TOR -> null
-    ObfsMode.SOCKS5, ObfsMode.EMBEDDED_REALITY -> when {
-        proxyHost.isNullOrBlank() -> "SOCKS5 proxy host is required"
-        proxyPort == null || proxyPort !in 1..65535 -> "SOCKS5 proxy port must be between 1 and 65535"
-        else -> null
+): String? =
+    when (obfsMode) {
+        null, ObfsMode.NONE, ObfsMode.TOR -> {
+            null
+        }
+
+        ObfsMode.SOCKS5, ObfsMode.EMBEDDED_REALITY -> {
+            when {
+                proxyHost.isNullOrBlank() -> "SOCKS5 proxy host is required"
+                proxyPort == null || proxyPort !in 1..65535 -> "SOCKS5 proxy port must be between 1 and 65535"
+                else -> null
+            }
+        }
     }
-}
 
 /**
  * WSS is currently implemented by OkHttp without proxy plumbing. Selecting both transports used
@@ -285,14 +333,17 @@ internal fun transportConfigurationError(
     wsUrl: String?,
     proxy: Proxy?,
     proxyConfigurationError: String?,
-): String? = proxyConfigurationError ?: if (!wsUrl.isNullOrBlank() && proxy != null) {
-    "WebSocket transport cannot be used with a SOCKS5 or Tor proxy"
-} else {
-    null
-}
+): String? =
+    proxyConfigurationError ?: if (!wsUrl.isNullOrBlank() && proxy != null) {
+        "WebSocket transport cannot be used with a SOCKS5 or Tor proxy"
+    } else {
+        null
+    }
 
 /** A deferred configuration error: [connect] throws inside IrcClient's existing failure boundary. */
-private class ConfigurationFailureTransport(private val reason: String) : IrcTransport {
+private class ConfigurationFailureTransport(
+    private val reason: String,
+) : IrcTransport {
     override suspend fun connect(): Nothing = throw TransportConfigurationException(reason)
 
     override val incoming = kotlinx.coroutines.flow.emptyFlow<String>()
@@ -306,8 +357,12 @@ private class ConfigurationFailureTransport(private val reason: String) : IrcTra
  * [X509KeyManager] resolving the private key + chain from the Android KeyChain by alias. KeyChain
  * calls are blocking; [resolve] is invoked on the transport's IO connect path before handshake.
  */
-private class KeyChainKeyManager(private val ctx: Context, private val alias: String) : X509KeyManager {
+private class KeyChainKeyManager(
+    private val ctx: Context,
+    private val alias: String,
+) : X509KeyManager {
     @Volatile private var resolvedKey: PrivateKey? = null
+
     @Volatile private var resolvedChain: Array<X509Certificate>? = null
 
     fun resolve() {
@@ -315,10 +370,29 @@ private class KeyChainKeyManager(private val ctx: Context, private val alias: St
         resolvedChain = runCatching { KeyChain.getCertificateChain(ctx, alias) }.getOrNull()
     }
 
-    override fun chooseClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, socket: Socket?): String = alias
-    override fun getClientAliases(keyType: String?, issuers: Array<out Principal>?): Array<String> = arrayOf(alias)
+    override fun chooseClientAlias(
+        keyType: Array<out String>?,
+        issuers: Array<out Principal>?,
+        socket: Socket?,
+    ): String = alias
+
+    override fun getClientAliases(
+        keyType: String?,
+        issuers: Array<out Principal>?,
+    ): Array<String> = arrayOf(alias)
+
     override fun getPrivateKey(alias: String): PrivateKey? = resolvedKey
+
     override fun getCertificateChain(alias: String): Array<X509Certificate>? = resolvedChain
-    override fun chooseServerAlias(keyType: String?, issuers: Array<out Principal>?, socket: Socket?): String? = null
-    override fun getServerAliases(keyType: String?, issuers: Array<out Principal>?): Array<String>? = null
+
+    override fun chooseServerAlias(
+        keyType: String?,
+        issuers: Array<out Principal>?,
+        socket: Socket?,
+    ): String? = null
+
+    override fun getServerAliases(
+        keyType: String?,
+        issuers: Array<out Principal>?,
+    ): Array<String>? = null
 }

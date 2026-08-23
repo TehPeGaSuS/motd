@@ -13,7 +13,10 @@ package io.github.trevarj.motd.ui.channelinfo
  */
 
 /** A PREFIX entry: the mode letter and the glyph it puts in front of a nick (e.g. `o` and `@`). */
-data class PrefixRole(val mode: Char, val glyph: Char)
+data class PrefixRole(
+    val mode: Char,
+    val glyph: Char,
+)
 
 data class ModeCatalog(
     /** PREFIX roles, most privileged first. */
@@ -43,8 +46,7 @@ data class ModeCatalog(
             prefixRoles.any { it.mode == letter }
 
     /** True when [letter] appears in no advertised group at all (so we cannot say anything useful). */
-    fun isUnknown(letter: Char): Boolean =
-        !needsValueOnSet(letter) && letter !in flagModes
+    fun isUnknown(letter: Char): Boolean = !needsValueOnSet(letter) && letter !in flagModes
 
     companion object {
         /** RFC 1459/2812 groups, used when a server omits or mangles CHANMODES. */
@@ -129,10 +131,14 @@ data class ModeCatalog(
 /** A single advisory about a letter typed into the free-text "Custom mode" dialog. */
 sealed interface ModeHint {
     /** The network advertises [letter] in a group that takes an argument when set. */
-    data class NeedsValue(val letter: Char) : ModeHint
+    data class NeedsValue(
+        val letter: Char,
+    ) : ModeHint
 
     /** The network's CHANMODES/PREFIX never mention [letter]. */
-    data class Unknown(val letter: Char) : ModeHint
+    data class Unknown(
+        val letter: Char,
+    ) : ModeHint
 }
 
 /**
@@ -140,7 +146,8 @@ sealed interface ModeHint {
  * catalog can be stale and the server is always the authority, so a hint must never block a send.
  */
 fun ModeCatalog.hintsFor(letters: String): List<ModeHint> =
-    letters.asSequence()
+    letters
+        .asSequence()
         .filter { it != '+' && it != '-' && !it.isWhitespace() }
         .distinct()
         .mapNotNull { letter ->
@@ -149,5 +156,4 @@ fun ModeCatalog.hintsFor(letters: String): List<ModeHint> =
                 needsValueOnSet(letter) -> ModeHint.NeedsValue(letter)
                 else -> null
             }
-        }
-        .toList()
+        }.toList()

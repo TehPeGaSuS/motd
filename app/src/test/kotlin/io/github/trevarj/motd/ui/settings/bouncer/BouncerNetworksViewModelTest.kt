@@ -43,10 +43,13 @@ class BouncerNetworksViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
-        database = Room.inMemoryDatabaseBuilder(
-            ApplicationProvider.getApplicationContext<Context>(),
-            MotdDatabase::class.java,
-        ).allowMainThreadQueries().build()
+        database =
+            Room
+                .inMemoryDatabaseBuilder(
+                    ApplicationProvider.getApplicationContext<Context>(),
+                    MotdDatabase::class.java,
+                ).allowMainThreadQueries()
+                .build()
     }
 
     @After
@@ -56,69 +59,89 @@ class BouncerNetworksViewModelTest {
     }
 
     @Test
-    fun `late root lookup cannot overwrite a ready connection state`() = runTest(dispatcher) {
-        val root = rootNetwork()
-        val lookupStarted = CompletableDeferred<Unit>()
-        val releaseLookup = CompletableDeferred<Unit>()
-        val repository = object : NetworkRepository {
-            override fun observeNetworks() = flowOf(listOf(root))
-            override suspend fun addNetwork(n: NetworkEntity) = error("unused")
-            override suspend fun updateNetwork(n: NetworkEntity) = error("unused")
-            override suspend fun deleteNetwork(id: Long) = error("unused")
-            override suspend fun reorderNetworks(orderedIds: List<Long>) = error("unused")
-            override suspend fun networkById(id: Long): NetworkEntity {
-                lookupStarted.complete(Unit)
-                releaseLookup.await()
-                return root
-            }
-            override suspend fun childrenOf(rootId: Long) = emptyList<NetworkEntity>()
+    fun `late root lookup cannot overwrite a ready connection state`() =
+        runTest(dispatcher) {
+            val root = rootNetwork()
+            val lookupStarted = CompletableDeferred<Unit>()
+            val releaseLookup = CompletableDeferred<Unit>()
+            val repository =
+                object : NetworkRepository {
+                    override fun observeNetworks() = flowOf(listOf(root))
+
+                    override suspend fun addNetwork(n: NetworkEntity) = error("unused")
+
+                    override suspend fun updateNetwork(n: NetworkEntity) = error("unused")
+
+                    override suspend fun deleteNetwork(id: Long) = error("unused")
+
+                    override suspend fun reorderNetworks(orderedIds: List<Long>) = error("unused")
+
+                    override suspend fun networkById(id: Long): NetworkEntity {
+                        lookupStarted.complete(Unit)
+                        releaseLookup.await()
+                        return root
+                    }
+
+                    override suspend fun childrenOf(rootId: Long) = emptyList<NetworkEntity>()
+                }
+            val ready = IrcClientState.Ready("motd", emptySet(), emptyMap())
+            val connections = FakeConnectionManager(mapOf(root.id to ready))
+            val viewModel =
+                BouncerNetworksViewModel(
+                    networkRepository = repository,
+                    connectionManager = connections,
+                    bouncerServ = FakeBouncerServClient,
+                    messageDao = database.messageDao(),
+                )
+
+            viewModel.init(root.id)
+            runCurrent()
+            assertTrue(lookupStarted.isCompleted)
+            assertTrue(viewModel.state.value.rootState is IrcClientState.Ready)
+
+            releaseLookup.complete(Unit)
+            runCurrent()
+
+            assertEquals(root, viewModel.state.value.root)
+            assertTrue(viewModel.state.value.rootState is IrcClientState.Ready)
         }
-        val ready = IrcClientState.Ready("motd", emptySet(), emptyMap())
-        val connections = FakeConnectionManager(mapOf(root.id to ready))
-        val viewModel = BouncerNetworksViewModel(
-            networkRepository = repository,
-            connectionManager = connections,
-            bouncerServ = FakeBouncerServClient,
-            messageDao = database.messageDao(),
-        )
 
-        viewModel.init(root.id)
-        runCurrent()
-        assertTrue(lookupStarted.isCompleted)
-        assertTrue(viewModel.state.value.rootState is IrcClientState.Ready)
-
-        releaseLookup.complete(Unit)
-        runCurrent()
-
-        assertEquals(root, viewModel.state.value.root)
-        assertTrue(viewModel.state.value.rootState is IrcClientState.Ready)
-    }
-
-    private class FakeConnectionManager(initial: Map<Long, IrcClientState>) : NoopConnectionManager() {
+    private class FakeConnectionManager(
+        initial: Map<Long, IrcClientState>,
+    ) : NoopConnectionManager() {
         override val connectionStates = MutableStateFlow(initial)
-        override suspend fun ensureQueryBuffer(networkId: Long, nick: String) = 0L
+
+        override suspend fun ensureQueryBuffer(
+            networkId: Long,
+            nick: String,
+        ) = 0L
+
         override suspend fun ensureServerBuffer(networkId: Long) = 0L
     }
 
     private object FakeBouncerServClient : BouncerServClient {
-        override suspend fun execute(rootNetworkId: Long, command: BouncerServCommand) =
-            BouncerServResult.Success(command.display, emptyList())
+        override suspend fun execute(
+            rootNetworkId: Long,
+            command: BouncerServCommand,
+        ) = BouncerServResult.Success(command.display, emptyList())
 
-        override suspend fun probe(rootNetworkId: Long) = BouncerServCapabilities(
-            commandPaths = setOf("network create", "server status"),
-            verified = true,
-        )
+        override suspend fun probe(rootNetworkId: Long) =
+            BouncerServCapabilities(
+                commandPaths = setOf("network create", "server status"),
+                verified = true,
+            )
     }
 
-    private fun rootNetwork() = NetworkEntity(
-        id = 1L,
-        name = "Local soju",
-        role = NetworkRole.BOUNCER_ROOT,
-        host = "127.0.0.1",
-        port = 6697,
-        tls = true,
-        nick = "motd",
-        username = "motd",
-        realname = "motd",
-    )
+    private fun rootNetwork() =
+        NetworkEntity(
+            id = 1L,
+            name = "Local soju",
+            role = NetworkRole.BOUNCER_ROOT,
+            host = "127.0.0.1",
+            port = 6697,
+            tls = true,
+            nick = "motd",
+            username = "motd",
+            realname = "motd",
+        )
 }

@@ -7,7 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ChatListDefaultSelectionTest {
-
     @Test
     fun `newest visible conversation is selected deterministically`() {
         val rows = listOf(row(1, 100), row(2, 300), row(3, 300))
@@ -20,7 +19,10 @@ class ChatListDefaultSelectionTest {
         assertNull(defaultChatBufferId(emptyList()))
     }
 
-    private fun row(id: Long, time: Long?) = ChatListRow(
+    private fun row(
+        id: Long,
+        time: Long?,
+    ) = ChatListRow(
         bufferId = id,
         networkId = 1,
         networkName = "network",

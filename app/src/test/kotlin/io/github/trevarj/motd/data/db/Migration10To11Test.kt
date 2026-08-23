@@ -27,73 +27,76 @@ class Migration10To11Test {
     fun migrationPreservesHistoryStateButQuarantinesLegacyCursorsAndCompletion() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(10) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL(
-                            """CREATE TABLE networks(
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(10) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL(
+                                    """CREATE TABLE networks(
                                 id INTEGER NOT NULL PRIMARY KEY
                             )""",
-                        )
-                        db.execSQL(
-                            """CREATE TABLE buffers(
+                                )
+                                db.execSQL(
+                                    """CREATE TABLE buffers(
                                 id INTEGER PRIMARY KEY, networkId INTEGER NOT NULL,
                                 historyComplete INTEGER NOT NULL,
                                 FOREIGN KEY(networkId) REFERENCES networks(id) ON DELETE CASCADE
                             )""",
-                        )
-                        db.execSQL(
-                            """CREATE TABLE messages(
+                                )
+                                db.execSQL(
+                                    """CREATE TABLE messages(
                                 id INTEGER PRIMARY KEY, bufferId INTEGER NOT NULL, msgid TEXT,
                                 replyToMsgid TEXT, replyToEventId INTEGER
                             )""",
-                        )
-                        db.execSQL(
-                            """CREATE TABLE history_cursors(
+                                )
+                                db.execSQL(
+                                    """CREATE TABLE history_cursors(
                                 roomId INTEGER NOT NULL PRIMARY KEY,
                                 newestMsgid TEXT, newestServerTime INTEGER,
                                 oldestMsgid TEXT, oldestServerTime INTEGER,
                                 historyComplete INTEGER NOT NULL,
                                 FOREIGN KEY(roomId) REFERENCES buffers(id) ON DELETE CASCADE
                             )""",
-                        )
-                        db.execSQL(
-                            """CREATE TABLE network_history_cursors(
+                                )
+                                db.execSQL(
+                                    """CREATE TABLE network_history_cursors(
                                 networkId INTEGER NOT NULL PRIMARY KEY,
                                 lastSuccessfulSync INTEGER NOT NULL,
                                 FOREIGN KEY(networkId) REFERENCES networks(id) ON DELETE CASCADE
                             )""",
-                        )
-                        db.execSQL(
-                            """CREATE TABLE users(
+                                )
+                                db.execSQL(
+                                    """CREATE TABLE users(
                                 networkId INTEGER NOT NULL, nick TEXT NOT NULL, account TEXT,
                                 PRIMARY KEY(networkId, nick)
                             )""",
-                        )
-                        db.execSQL(
-                            """CREATE TABLE reactions(
+                                )
+                                db.execSQL(
+                                    """CREATE TABLE reactions(
                                 id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                                 bufferId INTEGER NOT NULL, targetMsgid TEXT NOT NULL,
                                 sender TEXT NOT NULL, emoji TEXT NOT NULL,
                                 serverTime INTEGER NOT NULL, targetEventId INTEGER
                             )""",
-                        )
-                        db.execSQL(
-                            """CREATE UNIQUE INDEX index_reactions_bufferId_targetMsgid_sender
+                                )
+                                db.execSQL(
+                                    """CREATE UNIQUE INDEX index_reactions_bufferId_targetMsgid_sender
                                ON reactions(bufferId, targetMsgid, sender)""",
-                        )
-                    }
+                                )
+                            }
 
-                    override fun onUpgrade(
-                        db: SupportSQLiteDatabase,
-                        oldVersion: Int,
-                        newVersion: Int,
-                    ) = Unit
-                })
-                .build(),
-        )
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL("INSERT INTO networks(id) VALUES (7)")
         db.execSQL("INSERT INTO buffers(id, networkId, historyComplete) VALUES (1, 7, 1)")
@@ -122,25 +125,26 @@ class Migration10To11Test {
 
         MIGRATION_10_11.migrate(db)
 
-        db.query(
-            "SELECT id, actorKey, sender, emoji, serverTime, targetEventId FROM reactions ORDER BY id",
-        ).use { cursor ->
-            assertEquals(3, cursor.count)
-            assertTrue(cursor.moveToFirst())
-            assertEquals(1L, cursor.getLong(0))
-            assertEquals("nick:nick{}", cursor.getString(1))
-            assertEquals("Nick[]", cursor.getString(2))
-            assertTrue(cursor.moveToNext())
-            assertEquals(2L, cursor.getLong(0))
-            assertEquals("nick:nick{}\u0000legacy:2", cursor.getString(1))
-            assertEquals("nick{}", cursor.getString(2))
-            assertTrue(cursor.moveToNext())
-            assertEquals(3L, cursor.getLong(0))
-            assertEquals("nick:nick{}", cursor.getString(1))
-            assertEquals("other-emoji", cursor.getString(3))
-            assertEquals(12L, cursor.getLong(4))
-            assertEquals(1L, cursor.getLong(5))
-        }
+        db
+            .query(
+                "SELECT id, actorKey, sender, emoji, serverTime, targetEventId FROM reactions ORDER BY id",
+            ).use { cursor ->
+                assertEquals(3, cursor.count)
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1L, cursor.getLong(0))
+                assertEquals("nick:nick{}", cursor.getString(1))
+                assertEquals("Nick[]", cursor.getString(2))
+                assertTrue(cursor.moveToNext())
+                assertEquals(2L, cursor.getLong(0))
+                assertEquals("nick:nick{}\u0000legacy:2", cursor.getString(1))
+                assertEquals("nick{}", cursor.getString(2))
+                assertTrue(cursor.moveToNext())
+                assertEquals(3L, cursor.getLong(0))
+                assertEquals("nick:nick{}", cursor.getString(1))
+                assertEquals("other-emoji", cursor.getString(3))
+                assertEquals(12L, cursor.getLong(4))
+                assertEquals(1L, cursor.getLong(5))
+            }
         db.query("SELECT COUNT(*) FROM messages").use { cursor ->
             assertTrue(cursor.moveToFirst())
             assertEquals(2, cursor.getInt(0))
@@ -149,29 +153,32 @@ class Migration10To11Test {
             assertTrue(cursor.moveToFirst())
             assertEquals(0, cursor.getInt(0))
         }
-        db.query(
-            """SELECT newestMsgid, newestServerTime, oldestMsgid, oldestServerTime,
+        db
+            .query(
+                """SELECT newestMsgid, newestServerTime, oldestMsgid, oldestServerTime,
                       historyComplete FROM history_cursors WHERE roomId = 1""",
-        ).use { cursor ->
-            assertTrue(cursor.moveToFirst())
-            assertEquals("newest", cursor.getString(0))
-            assertEquals(200L, cursor.getLong(1))
-            assertEquals("oldest", cursor.getString(2))
-            assertEquals(100L, cursor.getLong(3))
-            assertEquals(0, cursor.getInt(4))
-        }
-        db.query(
-            "SELECT lastSuccessfulSync, serverDerived FROM network_history_cursors WHERE networkId = 7",
-        ).use { cursor ->
-            assertTrue(cursor.moveToFirst())
-            assertEquals(1234L, cursor.getLong(0))
-            assertEquals(0, cursor.getInt(1))
-        }
-        db.query("PRAGMA index_list(`messages`)").use { cursor ->
-            val names = buildSet {
-                val name = cursor.getColumnIndexOrThrow("name")
-                while (cursor.moveToNext()) add(cursor.getString(name))
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("newest", cursor.getString(0))
+                assertEquals(200L, cursor.getLong(1))
+                assertEquals("oldest", cursor.getString(2))
+                assertEquals(100L, cursor.getLong(3))
+                assertEquals(0, cursor.getInt(4))
             }
+        db
+            .query(
+                "SELECT lastSuccessfulSync, serverDerived FROM network_history_cursors WHERE networkId = 7",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1234L, cursor.getLong(0))
+                assertEquals(0, cursor.getInt(1))
+            }
+        db.query("PRAGMA index_list(`messages`)").use { cursor ->
+            val names =
+                buildSet {
+                    val name = cursor.getColumnIndexOrThrow("name")
+                    while (cursor.moveToNext()) add(cursor.getString(name))
+                }
             assertTrue("index_messages_bufferId_msgid" in names)
             assertTrue("index_messages_bufferId_replyToMsgid_replyToEventId" in names)
         }

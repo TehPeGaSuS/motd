@@ -8,15 +8,15 @@ import org.junit.Test
 
 class ModerationTest {
     @Test fun op_and_above_can_moderate() {
-        assertTrue(canModerate("@", DEFAULT_PREFIX_ORDER))   // op
-        assertTrue(canModerate("&", DEFAULT_PREFIX_ORDER))   // admin
-        assertTrue(canModerate("~", DEFAULT_PREFIX_ORDER))   // owner
+        assertTrue(canModerate("@", DEFAULT_PREFIX_ORDER)) // op
+        assertTrue(canModerate("&", DEFAULT_PREFIX_ORDER)) // admin
+        assertTrue(canModerate("~", DEFAULT_PREFIX_ORDER)) // owner
     }
 
     @Test fun voice_and_halfop_cannot_moderate() {
-        assertFalse(canModerate("+", DEFAULT_PREFIX_ORDER))  // voice
-        assertFalse(canModerate("%", DEFAULT_PREFIX_ORDER))  // halfop excluded (Confirmed #7)
-        assertFalse(canModerate("", DEFAULT_PREFIX_ORDER))   // no prefix
+        assertFalse(canModerate("+", DEFAULT_PREFIX_ORDER)) // voice
+        assertFalse(canModerate("%", DEFAULT_PREFIX_ORDER)) // halfop excluded (Confirmed #7)
+        assertFalse(canModerate("", DEFAULT_PREFIX_ORDER)) // no prefix
     }
 
     @Test fun highest_held_prefix_is_honored() {

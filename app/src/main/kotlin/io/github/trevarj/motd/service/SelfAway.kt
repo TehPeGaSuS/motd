@@ -16,8 +16,7 @@ import io.github.trevarj.motd.irc.event.IrcEvent
  * [affectsSelfAway] names exactly the events the fold can move, so the per-event hot path can skip
  * the rest without duplicating that knowledge.
  */
-internal fun affectsSelfAway(event: IrcEvent): Boolean =
-    event is IrcEvent.SelfAwayChanged || event is IrcEvent.AwayChanged || event is IrcEvent.Disconnected
+internal fun affectsSelfAway(event: IrcEvent): Boolean = event is IrcEvent.SelfAwayChanged || event is IrcEvent.AwayChanged || event is IrcEvent.Disconnected
 
 internal fun selfAwayAfterEvent(
     current: Map<Long, String?>,
@@ -26,18 +25,27 @@ internal fun selfAwayAfterEvent(
     pendingMessage: String?,
     selfNick: String?,
     normalize: (String) -> String,
-): Map<Long, String?> = when (event) {
-    is IrcEvent.SelfAwayChanged ->
-        if (event.isAway) current + (networkId to pendingMessage) else current - networkId
-    is IrcEvent.AwayChanged -> {
-        if (selfNick == null || normalize(event.nick) != normalize(selfNick)) {
-            current
-        } else if (event.awayMessage != null) {
-            current + (networkId to event.awayMessage)
-        } else {
+): Map<Long, String?> =
+    when (event) {
+        is IrcEvent.SelfAwayChanged -> {
+            if (event.isAway) current + (networkId to pendingMessage) else current - networkId
+        }
+
+        is IrcEvent.AwayChanged -> {
+            if (selfNick == null || normalize(event.nick) != normalize(selfNick)) {
+                current
+            } else if (event.awayMessage != null) {
+                current + (networkId to event.awayMessage)
+            } else {
+                current - networkId
+            }
+        }
+
+        is IrcEvent.Disconnected -> {
             current - networkId
         }
+
+        else -> {
+            current
+        }
     }
-    is IrcEvent.Disconnected -> current - networkId
-    else -> current
-}

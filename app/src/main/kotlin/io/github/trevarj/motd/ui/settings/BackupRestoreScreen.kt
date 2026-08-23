@@ -50,13 +50,13 @@ import io.github.trevarj.motd.data.backup.BackupImportMode
 import io.github.trevarj.motd.data.backup.ConfigurationBackupRepository
 import io.github.trevarj.motd.data.backup.ConfigurationImportPreview
 import io.github.trevarj.motd.ui.theme.MotdMotion
-import java.io.ByteArrayOutputStream
-import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
+import javax.inject.Inject
 
 @Composable
 fun BackupRestoreScreen(
@@ -68,16 +68,18 @@ fun BackupRestoreScreen(
     var exportPassword by rememberSaveable { mutableStateOf("") }
     var importPassword by rememberSaveable { mutableStateOf("") }
 
-    val createDocument = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json"),
-    ) { uri -> if (uri != null) viewModel.writePreparedExport(uri) else viewModel.cancelPreparedExport() }
-    val openDocument = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri -> if (uri != null) viewModel.loadImport(uri) }
+    val createDocument =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("application/json"),
+        ) { uri -> if (uri != null) viewModel.writePreparedExport(uri) else viewModel.cancelPreparedExport() }
+    val openDocument =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocument(),
+        ) { uri -> if (uri != null) viewModel.loadImport(uri) }
 
     LaunchedEffect(state.exportRequestToken) {
         val token = state.exportRequestToken ?: return@LaunchedEffect
-        createDocument.launch("motd-${token}.motdconfig")
+        createDocument.launch("motd-$token.motdconfig")
     }
 
     SettingsScaffold(
@@ -92,10 +94,11 @@ fun BackupRestoreScreen(
                 // field sits outside the spacedBy flow; its 12dp gap lives inside the animation.
                 Column {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(role = Role.Switch) { includeSecrets = !includeSecrets }
-                            .padding(vertical = 4.dp),
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable(role = Role.Switch) { includeSecrets = !includeSecrets }
+                                .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
@@ -130,11 +133,12 @@ fun BackupRestoreScreen(
                 Button(
                     onClick = {
                         viewModel.prepareExport(
-                            mode = if (includeSecrets) {
-                                BackupExportMode.ENCRYPTED_WITH_CREDENTIALS
-                            } else {
-                                BackupExportMode.CREDENTIALS_EXCLUDED
-                            },
+                            mode =
+                                if (includeSecrets) {
+                                    BackupExportMode.ENCRYPTED_WITH_CREDENTIALS
+                                } else {
+                                    BackupExportMode.CREDENTIALS_EXCLUDED
+                                },
                             password = exportPassword,
                         )
                     },
@@ -255,11 +259,12 @@ private fun ImportModeOption(
 ) {
     val isSelected = selected == mode
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .selectable(selected = isSelected, role = Role.RadioButton) { onSelected(mode) }
-            .testTag("backup_import_mode_${mode.name.lowercase()}")
-            .padding(vertical = 8.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .selectable(selected = isSelected, role = Role.RadioButton) { onSelected(mode) }
+                .testTag("backup_import_mode_${mode.name.lowercase()}")
+                .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -285,137 +290,142 @@ private fun ImportPreview(preview: ConfigurationImportPreview) {
 }
 
 @HiltViewModel
-class BackupRestoreViewModel @Inject constructor(
-    private val repository: ConfigurationBackupRepository,
-    @ApplicationContext private val context: Context,
-) : ViewModel() {
-    private val _state = MutableStateFlow(BackupRestoreUiState())
-    val state: StateFlow<BackupRestoreUiState> = _state.asStateFlow()
-    private var preparedExport: String? = null
-    private var importedDocument: String? = null
+class BackupRestoreViewModel
+    @Inject
+    constructor(
+        private val repository: ConfigurationBackupRepository,
+        @ApplicationContext private val context: Context,
+    ) : ViewModel() {
+        private val _state = MutableStateFlow(BackupRestoreUiState())
+        val state: StateFlow<BackupRestoreUiState> = _state.asStateFlow()
+        private var preparedExport: String? = null
+        private var importedDocument: String? = null
 
-    fun prepareExport(mode: BackupExportMode, password: String) {
-        viewModelScope.launch {
-            runBusy {
-                preparedExport = repository.exportToString(mode, password.takeIf(String::isNotBlank))
-                _state.update {
-                    it.copy(
-                        exportRequestToken = System.currentTimeMillis(),
-                        message = null,
-                        error = false,
-                    )
+        fun prepareExport(
+            mode: BackupExportMode,
+            password: String,
+        ) {
+            viewModelScope.launch {
+                runBusy {
+                    preparedExport = repository.exportToString(mode, password.takeIf(String::isNotBlank))
+                    _state.update {
+                        it.copy(
+                            exportRequestToken = System.currentTimeMillis(),
+                            message = null,
+                            error = false,
+                        )
+                    }
                 }
             }
         }
-    }
 
-    fun writePreparedExport(uri: Uri) {
-        viewModelScope.launch {
-            runBusy {
-                val content = preparedExport ?: error("No export is ready.")
-                context.contentResolver.openOutputStream(uri)?.use { output ->
-                    output.write(content.encodeToByteArray())
-                } ?: error("Could not open export destination.")
-                preparedExport = null
-                _state.update { it.copy(exportRequestToken = null, message = "Configuration exported.", error = false) }
-            }
-        }
-    }
-
-    fun cancelPreparedExport() {
-        preparedExport = null
-        _state.update { it.copy(exportRequestToken = null) }
-    }
-
-    fun loadImport(uri: Uri) {
-        viewModelScope.launch {
-            runBusy {
-                importedDocument = readText(uri)
-                val encrypted = repository.isEncrypted(importedDocument.orEmpty())
-                _state.update {
-                    it.copy(
-                        importNeedsPassword = encrypted,
-                        preview = null,
-                        message = if (encrypted) "Enter the backup password to preview." else null,
-                        error = false,
-                    )
-                }
-                if (!encrypted) previewImport("")
-            }
-        }
-    }
-
-    fun setImportMode(mode: BackupImportMode) {
-        _state.update { it.copy(importMode = mode) }
-        if (importedDocument != null && !_state.value.importNeedsPassword) previewImport("")
-    }
-
-    fun previewImport(password: String) {
-        viewModelScope.launch {
-            runBusy {
-                val raw = importedDocument ?: error("Choose a backup first.")
-                val preview = repository.preview(raw, password.takeIf(String::isNotBlank), _state.value.importMode)
-                _state.update {
-                    it.copy(
-                        preview = preview,
-                        message = null,
-                        error = false,
-                    )
+        fun writePreparedExport(uri: Uri) {
+            viewModelScope.launch {
+                runBusy {
+                    val content = preparedExport ?: error("No export is ready.")
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        output.write(content.encodeToByteArray())
+                    } ?: error("Could not open export destination.")
+                    preparedExport = null
+                    _state.update { it.copy(exportRequestToken = null, message = "Configuration exported.", error = false) }
                 }
             }
         }
-    }
 
-    fun applyImport(password: String) {
-        viewModelScope.launch {
-            runBusy {
-                val raw = importedDocument ?: error("Choose a backup first.")
-                val result = repository.import(raw, password.takeIf(String::isNotBlank), _state.value.importMode)
-                _state.update {
-                    it.copy(
-                        preview = null,
-                        message = "Imported ${result.addedNetworks} added, ${result.updatedNetworks} updated, ${result.removedNetworks} removed. ${result.missingCredentialNetworks} need credentials.",
-                        error = false,
-                    )
+        fun cancelPreparedExport() {
+            preparedExport = null
+            _state.update { it.copy(exportRequestToken = null) }
+        }
+
+        fun loadImport(uri: Uri) {
+            viewModelScope.launch {
+                runBusy {
+                    importedDocument = readText(uri)
+                    val encrypted = repository.isEncrypted(importedDocument.orEmpty())
+                    _state.update {
+                        it.copy(
+                            importNeedsPassword = encrypted,
+                            preview = null,
+                            message = if (encrypted) "Enter the backup password to preview." else null,
+                            error = false,
+                        )
+                    }
+                    if (!encrypted) previewImport("")
                 }
             }
         }
-    }
 
-    private suspend fun runBusy(block: suspend () -> Unit) {
-        _state.update { it.copy(busy = true, message = null, error = false) }
-        runCatching { block() }
-            .onFailure { failure ->
-                _state.update {
-                    it.copy(
-                        message = failure.message ?: "Backup operation failed.",
-                        error = true,
-                    )
+        fun setImportMode(mode: BackupImportMode) {
+            _state.update { it.copy(importMode = mode) }
+            if (importedDocument != null && !_state.value.importNeedsPassword) previewImport("")
+        }
+
+        fun previewImport(password: String) {
+            viewModelScope.launch {
+                runBusy {
+                    val raw = importedDocument ?: error("Choose a backup first.")
+                    val preview = repository.preview(raw, password.takeIf(String::isNotBlank), _state.value.importMode)
+                    _state.update {
+                        it.copy(
+                            preview = preview,
+                            message = null,
+                            error = false,
+                        )
+                    }
                 }
             }
-        _state.update { it.copy(busy = false) }
-    }
+        }
 
-    private fun readText(uri: Uri): String {
-        val output = ByteArrayOutputStream()
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            var total = 0
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                total += read
-                require(total <= MAX_IMPORT_BYTES) { "Backup file is too large." }
-                output.write(buffer, 0, read)
+        fun applyImport(password: String) {
+            viewModelScope.launch {
+                runBusy {
+                    val raw = importedDocument ?: error("Choose a backup first.")
+                    val result = repository.import(raw, password.takeIf(String::isNotBlank), _state.value.importMode)
+                    _state.update {
+                        it.copy(
+                            preview = null,
+                            message = "Imported ${result.addedNetworks} added, ${result.updatedNetworks} updated, ${result.removedNetworks} removed. ${result.missingCredentialNetworks} need credentials.",
+                            error = false,
+                        )
+                    }
+                }
             }
-        } ?: error("Could not open backup file.")
-        return output.toString(Charsets.UTF_8.name())
-    }
+        }
 
-    private companion object {
-        const val MAX_IMPORT_BYTES = 4 * 1024 * 1024
+        private suspend fun runBusy(block: suspend () -> Unit) {
+            _state.update { it.copy(busy = true, message = null, error = false) }
+            runCatching { block() }
+                .onFailure { failure ->
+                    _state.update {
+                        it.copy(
+                            message = failure.message ?: "Backup operation failed.",
+                            error = true,
+                        )
+                    }
+                }
+            _state.update { it.copy(busy = false) }
+        }
+
+        private fun readText(uri: Uri): String {
+            val output = ByteArrayOutputStream()
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                var total = 0
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    total += read
+                    require(total <= MAX_IMPORT_BYTES) { "Backup file is too large." }
+                    output.write(buffer, 0, read)
+                }
+            } ?: error("Could not open backup file.")
+            return output.toString(Charsets.UTF_8.name())
+        }
+
+        private companion object {
+            const val MAX_IMPORT_BYTES = 4 * 1024 * 1024
+        }
     }
-}
 
 data class BackupRestoreUiState(
     val busy: Boolean = false,

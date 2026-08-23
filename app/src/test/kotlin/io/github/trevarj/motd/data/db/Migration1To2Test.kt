@@ -20,7 +20,6 @@ import org.robolectric.RobolectricTestRunner
  */
 @RunWith(RobolectricTestRunner::class)
 class Migration1To2Test {
-
     private var helper: SupportSQLiteOpenHelper? = null
 
     @After
@@ -37,17 +36,25 @@ class Migration1To2Test {
         // Open a fresh support DB and hand-build the v1 `networks` schema, then insert a row that
         // predates the migration (wsUrl does not exist yet).
         val factory = FrameworkSQLiteOpenHelperFactory()
-        val h = factory.create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(1) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL(CREATE_NETWORKS_V1)
-                    }
-                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) {}
-                })
-                .build(),
-        )
+        val h =
+            factory.create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(1) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL(CREATE_NETWORKS_V1)
+                            }
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                old: Int,
+                                new: Int,
+                            ) {}
+                        },
+                    ).build(),
+            )
         helper = h
         val db = h.writableDatabase
         db.execSQL(

@@ -94,17 +94,18 @@ private var SemanticsPropertyReceiver.imageViewerTransform by ImageViewerTransfo
  * tap) and overshoot wildly on large photos. Rebasing on `initialScale` restores the fitted-relative
  * 2.5x this screen has always used.
  */
-private val doubleTapZoom = DoubleClickToZoomListener { state, centroid ->
-    val metadata = state.contentTransformation.scaleMetadata
-    if (metadata.userZoom > 1.01f) {
-        state.resetZoom()
-    } else {
-        state.zoomTo(
-            zoomFactor = DOUBLE_TAP_ZOOM_FACTOR * metadata.initialScale.scaleX,
-            centroid = centroid,
-        )
+private val doubleTapZoom =
+    DoubleClickToZoomListener { state, centroid ->
+        val metadata = state.contentTransformation.scaleMetadata
+        if (metadata.userZoom > 1.01f) {
+            state.resetZoom()
+        } else {
+            state.zoomTo(
+                zoomFactor = DOUBLE_TAP_ZOOM_FACTOR * metadata.initialScale.scaleX,
+                centroid = centroid,
+            )
+        }
     }
-}
 
 /**
  * The zoom and pan Telephoto currently applies, flattened so instrumentation can read it without
@@ -152,9 +153,10 @@ internal fun ImageViewerContent(
     onBack: () -> Unit,
     onShare: () -> Unit,
     onSave: suspend () -> ImageSaveFeedback,
-    state: ZoomableImageState = rememberZoomableImageState(
-        rememberZoomableState(ZoomSpec(maxZoomFactor = MAX_IMAGE_SCALE)),
-    ),
+    state: ZoomableImageState =
+        rememberZoomableImageState(
+            rememberZoomableState(ZoomSpec(maxZoomFactor = MAX_IMAGE_SCALE)),
+        ),
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -164,16 +166,17 @@ internal fun ImageViewerContent(
     // Telephoto reports when an image is displayed but not why one failed, so the request listener
     // is the only signal for the error affordance. Both reset whenever the request changes.
     var loadFailed by remember(context, model) { mutableStateOf(false) }
-    val request = remember(context, model) {
-        ImageRequest.Builder(context)
-            .data(model)
-            .crossfade(true)
-            .listener(
-                onError = { _, _ -> loadFailed = true },
-                onSuccess = { _, _ -> loadFailed = false },
-            )
-            .build()
-    }
+    val request =
+        remember(context, model) {
+            ImageRequest
+                .Builder(context)
+                .data(model)
+                .crossfade(true)
+                .listener(
+                    onError = { _, _ -> loadFailed = true },
+                    onSuccess = { _, _ -> loadFailed = false },
+                ).build()
+        }
     val zoomableState = state.zoomableState
 
     // Coil can report success while Telephoto's sub-sampling decode still fails silently, leaving
@@ -184,9 +187,10 @@ internal fun ImageViewerContent(
     }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black),
         contentAlignment = Alignment.Center,
     ) {
         ZoomableAsyncImage(
@@ -198,24 +202,28 @@ internal fun ImageViewerContent(
             contentScale = ContentScale.Fit,
             onClick = { chromeVisible = !chromeVisible },
             onDoubleClick = doubleTapZoom,
-            modifier = Modifier
-                .fillMaxSize()
-                // Read inside the semantics lambda so gesture frames invalidate semantics only,
-                // instead of recomposing the whole screen.
-                .semantics { imageViewerTransform = zoomableState.currentTransform() }
-                .testTag(IMAGE_VIEWER_IMAGE_TAG),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    // Read inside the semantics lambda so gesture frames invalidate semantics only,
+                    // instead of recomposing the whole screen.
+                    .semantics { imageViewerTransform = zoomableState.currentTransform() }
+                    .testTag(IMAGE_VIEWER_IMAGE_TAG),
         )
 
         // Loading / error affordances.
         when {
-            loadFailed ->
+            loadFailed -> {
                 Text(
                     text = stringResource(R.string.image_viewer_load_failed),
                     color = Color.White,
                     style = MaterialTheme.typography.bodyMedium,
                 )
-            !state.isImageDisplayed ->
+            }
+
+            !state.isImageDisplayed -> {
                 CircularProgressIndicator(color = Color.White)
+            }
         }
 
         // Fade only: the chrome overlays the image, so the default expand/shrink would clip the
@@ -287,23 +295,29 @@ internal fun ImageViewerContent(
             visible = saveFeedback != null,
             enter = fadeIn(MotdMotion.fadeIn),
             exit = fadeOut(MotdMotion.microFadeOut),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(24.dp),
+            modifier =
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(24.dp),
         ) {
             lastFeedback?.let { feedback ->
                 Text(
-                    text = stringResource(
-                        if (feedback == ImageSaveFeedback.SAVED) R.string.image_viewer_saved
-                        else R.string.image_viewer_save_failed,
-                    ),
+                    text =
+                        stringResource(
+                            if (feedback == ImageSaveFeedback.SAVED) {
+                                R.string.image_viewer_saved
+                            } else {
+                                R.string.image_viewer_save_failed
+                            },
+                        ),
                     color = Color.White,
                     style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier
-                        .background(Color.Black.copy(alpha = 0.72f), MaterialTheme.shapes.small)
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                        .semantics { liveRegion = LiveRegionMode.Polite }
-                        .testTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG),
+                    modifier =
+                        Modifier
+                            .background(Color.Black.copy(alpha = 0.72f), MaterialTheme.shapes.small)
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                            .semantics { liveRegion = LiveRegionMode.Polite }
+                            .testTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG),
                 )
             }
         }
@@ -318,18 +332,23 @@ private fun ZoomableState.currentTransform(): ImageViewerTransform {
         // userZoom is relative to the fitted image, so 1f means "exactly fits" on every image.
         scale = transformation.scaleMetadata.userZoom,
         offset = transformation.offset,
-        contentBounds = with(coordinateSystem) {
-            contentBounds(clipToViewport = false).rectIn(CoordinateSpace.Viewport)
-        },
+        contentBounds =
+            with(coordinateSystem) {
+                contentBounds(clipToViewport = false).rectIn(CoordinateSpace.Viewport)
+            },
     )
 }
 
 /** Share the image URL via a plain-text intent (viewers resolve the link). */
-private fun shareImage(context: Context, url: String) {
-    val intent = Intent(Intent.ACTION_SEND).apply {
-        type = "text/plain"
-        putExtra(Intent.EXTRA_TEXT, url)
-    }
+private fun shareImage(
+    context: Context,
+    url: String,
+) {
+    val intent =
+        Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, url)
+        }
     context.startActivity(
         Intent.createChooser(intent, context.getString(R.string.image_viewer_share_chooser)),
     )
@@ -340,13 +359,17 @@ private fun shareImage(context: Context, url: String) {
  * Only called on API 29+ (the caller hides Save below Q).
  */
 @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
-private suspend fun saveImage(context: Context, url: String): ImageSaveFeedback {
-    val result = withContext(Dispatchers.IO) {
-        ImageSaveOperation(
-            connectionFactory = UrlConnectionImageSaveConnectionFactory(),
-            store = MediaStoreImageSaveStore(context.contentResolver),
-        ).save(url)
-    }
+private suspend fun saveImage(
+    context: Context,
+    url: String,
+): ImageSaveFeedback {
+    val result =
+        withContext(Dispatchers.IO) {
+            ImageSaveOperation(
+                connectionFactory = UrlConnectionImageSaveConnectionFactory(),
+                store = MediaStoreImageSaveStore(context.contentResolver),
+            ).save(url)
+        }
     return result.feedback()
 }
 

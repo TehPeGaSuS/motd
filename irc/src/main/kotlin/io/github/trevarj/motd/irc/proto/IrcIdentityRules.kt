@@ -19,8 +19,7 @@ sealed class IrcCaseMapping {
     data object Rfc1459 : IrcCaseMapping() {
         override val rawName: String = "rfc1459"
 
-        override fun normalize(value: String): String =
-            fold(value, foldBrackets = true, foldTilde = true)
+        override fun normalize(value: String): String = fold(value, foldBrackets = true, foldTilde = true)
     }
 
     data object Rfc1459Strict : IrcCaseMapping() {
@@ -30,7 +29,9 @@ sealed class IrcCaseMapping {
     }
 
     /** Unknown mappings use ASCII folding rather than merging extra identities speculatively. */
-    data class Unknown(override val rawName: String) : IrcCaseMapping() {
+    data class Unknown(
+        override val rawName: String,
+    ) : IrcCaseMapping() {
         override val diagnostic: String =
             "Unsupported IRC CASEMAPPING '$rawName'; using conservative ASCII folding"
 
@@ -66,12 +67,18 @@ data class IrcIdentityRules(
     fun isChannel(target: String): Boolean = target.firstOrNull()?.let { it in chanTypes } == true
 
     /** Stable reaction identity: authenticated accounts win, otherwise use the network casemap. */
-    fun actorKey(nick: String, account: String?): String =
+    fun actorKey(
+        nick: String,
+        account: String?,
+    ): String =
         account?.takeUnless { it.isEmpty() || it == "*" }?.let { "account:$it" }
             ?: "nick:${normalize(nick)}"
 
     /** Mention matching uses IRC casemapping while retaining the existing word-boundary contract. */
-    fun containsMention(text: String, identity: String): Boolean {
+    fun containsMention(
+        text: String,
+        identity: String,
+    ): Boolean {
         if (identity.isEmpty() || text.length < identity.length) return false
         val normalizedIdentity = normalize(identity)
         val lastStart = text.length - identity.length
@@ -87,7 +94,10 @@ data class IrcIdentityRules(
     companion object {
         const val DEFAULT_CHAN_TYPES: String = "#&"
 
-        fun from(rawCaseMapping: String?, advertisedChanTypes: String?): IrcIdentityRules =
+        fun from(
+            rawCaseMapping: String?,
+            advertisedChanTypes: String?,
+        ): IrcIdentityRules =
             IrcIdentityRules(
                 caseMapping = IrcCaseMapping.from(rawCaseMapping),
                 advertisedChanTypes = advertisedChanTypes,
@@ -97,7 +107,11 @@ data class IrcIdentityRules(
 
 private fun Char.isMentionWordCharacter(): Boolean = this == '_' || isLetterOrDigit()
 
-private fun fold(value: String, foldBrackets: Boolean = false, foldTilde: Boolean = false): String =
+private fun fold(
+    value: String,
+    foldBrackets: Boolean = false,
+    foldTilde: Boolean = false,
+): String =
     buildString(value.length) {
         for (char in value) {
             append(

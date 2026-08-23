@@ -13,33 +13,45 @@ import org.junit.Test
 
 /** The ring stack and its transitions, driven exactly as a finger would drive them. */
 class RadialMenuMachineTest {
-    private val metrics = RadialMetrics(
-        deadzoneRadius = 40f,
-        bandInnerRadius = 40f,
-        bandOuterRadius = 104f,
-        descendRadius = 116f,
-        labelRadius = 124f,
-        edgeMargin = 16f,
-    )
+    private val metrics =
+        RadialMetrics(
+            deadzoneRadius = 40f,
+            bandInnerRadius = 40f,
+            bandOuterRadius = 104f,
+            descendRadius = 116f,
+            labelRadius = 124f,
+            edgeMargin = 16f,
+        )
     private val screen = Size(400f, 900f)
     private val orb = Offset(12f, 450f)
     private val more = "More…"
 
-    private fun leaf(id: String, action: GestureAction = GestureAction.NextUnread) =
-        RadialEntry(id = id, label = id, icon = GestureIcon.BOLT, action = action)
+    private fun leaf(
+        id: String,
+        action: GestureAction = GestureAction.NextUnread,
+    ) = RadialEntry(id = id, label = id, icon = GestureIcon.BOLT, action = action)
 
-    private fun submenu(id: String, vararg children: RadialEntry) =
-        RadialEntry(id = id, label = id, icon = GestureIcon.FOLDER, children = children.toList())
+    private fun submenu(
+        id: String,
+        vararg children: RadialEntry,
+    ) = RadialEntry(id = id, label = id, icon = GestureIcon.FOLDER, children = children.toList())
 
-    private fun open(root: RadialEntry, center: Offset = orb) =
-        openRadialMenu(root, center, screen, metrics, more)
+    private fun open(
+        root: RadialEntry,
+        center: Offset = orb,
+    ) = openRadialMenu(root, center, screen, metrics, more)
 
-    private fun move(state: RadialMenuState, position: Offset) =
-        onRadialPointer(state, position, screen, metrics, more)
+    private fun move(
+        state: RadialMenuState,
+        position: Offset,
+    ) = onRadialPointer(state, position, screen, metrics, more)
 
     /** A point [radius] out from the ring's centre, on slice [index]. */
-    private fun onSlice(ring: RadialRing, index: Int, radius: Float): Offset =
-        sliceAnchor(ring.center, ring.arc, index, radius)
+    private fun onSlice(
+        ring: RadialRing,
+        index: Int,
+        radius: Float,
+    ): Offset = sliceAnchor(ring.center, ring.arc, index, radius)
 
     // --- opening ---
 
@@ -128,7 +140,11 @@ class RadialMenuMachineTest {
         assertEquals(RadialEffect.DESCENDED, update.effect)
         assertEquals(2, update.state.rings.size)
         assertEquals(crossing, update.state.active.center)
-        assertEquals(listOf("x", "y"), update.state.active.entries.map { it.id })
+        assertEquals(
+            listOf("x", "y"),
+            update.state.active.entries
+                .map { it.id },
+        )
     }
 
     /** The new ring is born under the finger, so its own centre must not read as "backed out". */
@@ -153,7 +169,11 @@ class RadialMenuMachineTest {
 
         assertEquals(RadialEffect.POPPED, popped.effect)
         assertEquals(1, popped.state.rings.size)
-        assertEquals(listOf("tools", "b"), popped.state.active.entries.map { it.id })
+        assertEquals(
+            listOf("tools", "b"),
+            popped.state.active.entries
+                .map { it.id },
+        )
     }
 
     @Test fun `nesting stops at the authored ring limit`() {

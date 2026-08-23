@@ -42,7 +42,8 @@ class ChatHistoryFooterUiTest {
             }
         }
 
-        compose.onNodeWithTag(CHAT_HISTORY_RETRY_TAG)
+        compose
+            .onNodeWithTag(CHAT_HISTORY_RETRY_TAG)
             .assertHeightIsAtLeast(48.dp)
             .performClick()
         assertEquals(1, retries)
@@ -134,7 +135,8 @@ class ChatHistoryFooterUiTest {
             }
         }
 
-        compose.onNodeWithTag(CHAT_HISTORY_LOAD_OLDER_TAG)
+        compose
+            .onNodeWithTag(CHAT_HISTORY_LOAD_OLDER_TAG)
             .assertHeightIsAtLeast(48.dp)
             .performClick()
         assertEquals(1, loads)

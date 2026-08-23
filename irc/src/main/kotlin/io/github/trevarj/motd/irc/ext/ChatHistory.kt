@@ -12,8 +12,7 @@ object ChatHistorySelectors {
     private val timestampFormatter = DateTimeFormatterBuilder().appendInstant(3).toFormatter()
 
     /** Millisecond-precision ISO instant; soju rejects a dropped zero fractional part. */
-    fun isoTimestamp(epochMillis: Long): String =
-        timestampFormatter.format(Instant.ofEpochMilli(epochMillis))
+    fun isoTimestamp(epochMillis: Long): String = timestampFormatter.format(Instant.ofEpochMilli(epochMillis))
 
     fun timestamp(epochMillis: Long): String = "timestamp=${isoTimestamp(epochMillis)}"
 
@@ -36,24 +35,44 @@ object ChatHistorySelectors {
  * Bounds are pre-rendered selectors like `timestamp=<ISO>` or `msgid=<id>`.
  */
 internal object ChatHistoryCommands {
-    fun latest(target: String, bound: String?, limit: Int): IrcMessage =
+    fun latest(
+        target: String,
+        bound: String?,
+        limit: Int,
+    ): IrcMessage =
         IrcMessage(
             command = "CHATHISTORY",
             params = listOf("LATEST", target, bound ?: "*", limit.toString()),
         )
 
-    fun before(target: String, bound: String, limit: Int): IrcMessage =
-        IrcMessage(command = "CHATHISTORY", params = listOf("BEFORE", target, bound, limit.toString()))
+    fun before(
+        target: String,
+        bound: String,
+        limit: Int,
+    ): IrcMessage = IrcMessage(command = "CHATHISTORY", params = listOf("BEFORE", target, bound, limit.toString()))
 
-    fun after(target: String, bound: String, limit: Int): IrcMessage =
-        IrcMessage(command = "CHATHISTORY", params = listOf("AFTER", target, bound, limit.toString()))
+    fun after(
+        target: String,
+        bound: String,
+        limit: Int,
+    ): IrcMessage = IrcMessage(command = "CHATHISTORY", params = listOf("AFTER", target, bound, limit.toString()))
 
-    fun around(target: String, bound: String, limit: Int): IrcMessage =
-        IrcMessage(command = "CHATHISTORY", params = listOf("AROUND", target, bound, limit.toString()))
+    fun around(
+        target: String,
+        bound: String,
+        limit: Int,
+    ): IrcMessage = IrcMessage(command = "CHATHISTORY", params = listOf("AROUND", target, bound, limit.toString()))
 
-    fun between(target: String, bound1: String, bound2: String, limit: Int): IrcMessage =
-        IrcMessage(command = "CHATHISTORY", params = listOf("BETWEEN", target, bound1, bound2, limit.toString()))
+    fun between(
+        target: String,
+        bound1: String,
+        bound2: String,
+        limit: Int,
+    ): IrcMessage = IrcMessage(command = "CHATHISTORY", params = listOf("BETWEEN", target, bound1, bound2, limit.toString()))
 
-    fun targets(bound1: String, bound2: String, limit: Int): IrcMessage =
-        IrcMessage(command = "CHATHISTORY", params = listOf("TARGETS", bound1, bound2, limit.toString()))
+    fun targets(
+        bound1: String,
+        bound2: String,
+        limit: Int,
+    ): IrcMessage = IrcMessage(command = "CHATHISTORY", params = listOf("TARGETS", bound1, bound2, limit.toString()))
 }

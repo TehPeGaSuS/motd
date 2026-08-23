@@ -1,9 +1,9 @@
 package io.github.trevarj.motd.ui.search
 
-import app.cash.turbine.ReceiveTurbine
-import app.cash.turbine.test
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import app.cash.turbine.ReceiveTurbine
+import app.cash.turbine.test
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LocalSearchResult
 import io.github.trevarj.motd.data.repo.SearchCoverage
@@ -23,7 +24,6 @@ import io.github.trevarj.motd.irc.client.IrcCommandException
 import io.github.trevarj.motd.irc.client.IrcTimeoutException
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.ext.SOJU_SEARCH_MAX_LIMIT
-import io.github.trevarj.motd.irc.ext.SearchRequest as IrcSearchRequest
 import io.github.trevarj.motd.irc.ext.SearchResultKind
 import io.github.trevarj.motd.irc.ext.SearchResultMessage
 import io.github.trevarj.motd.service.CertPrompt
@@ -42,7 +42,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
-import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.irc.ext.SearchRequest as IrcSearchRequest
 
 /**
  * Query pipeline: every logical query/scope key immediately clears stale rows and publishes
@@ -51,7 +51,6 @@ import io.github.trevarj.motd.data.prefs.PresenceMode
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SearchViewModelTest {
-
     /**
      * Await the first state matching [predicate]. Blank keys now emit a coverage frame of their
      * own, so tests settle on the key under test instead of counting emissions.
@@ -71,12 +70,23 @@ class SearchViewModelTest {
         connections: ConnectionManager = FakeConnectionManager(),
     ) = SearchViewModel(repo, buffers, connections)
 
-    private fun hit(bufferId: Long, text: String, sender: String = "alice") = SearchHit(
-        message = MessageEntity(
-            id = bufferId, bufferId = bufferId, serverTime = 1_000L,
-            sender = sender, kind = MessageKind.PRIVMSG, text = text, dedupKey = "k$bufferId",
-        ),
-        bufferDisplayName = "#kotlin", networkName = "Libera",
+    private fun hit(
+        bufferId: Long,
+        text: String,
+        sender: String = "alice",
+    ) = SearchHit(
+        message =
+            MessageEntity(
+                id = bufferId,
+                bufferId = bufferId,
+                serverTime = 1_000L,
+                sender = sender,
+                kind = MessageKind.PRIVMSG,
+                text = text,
+                dedupKey = "k$bufferId",
+            ),
+        bufferDisplayName = "#kotlin",
+        networkName = "Libera",
     )
 
     /** Counts search() invocations so we can assert the debounce collapses rapid keystrokes. */
@@ -86,7 +96,10 @@ class SearchViewModelTest {
         private val truncated: Boolean = false,
         private val coverage: SearchCoverage = SearchCoverage.DeviceOnly,
     ) : SearchRepository {
-        override fun search(query: String, bufferId: Long?): Flow<LocalSearchResult> {
+        override fun search(
+            query: String,
+            bufferId: Long?,
+        ): Flow<LocalSearchResult> {
             calls.incrementAndGet()
             return flowOf(LocalSearchResult(result, truncated))
         }
@@ -94,7 +107,10 @@ class SearchViewModelTest {
         override fun coverage(bufferId: Long?): Flow<SearchCoverage> = flowOf(coverage)
     }
 
-    private data class SearchRequest(val query: String, val bufferId: Long?)
+    private data class SearchRequest(
+        val query: String,
+        val bufferId: Long?,
+    )
 
     /** A keyed, replaying source lets tests deliver results after its collector was cancelled. */
     private class ControlledSearchRepository(
@@ -103,22 +119,30 @@ class SearchViewModelTest {
         private val flows = mutableMapOf<SearchRequest, MutableSharedFlow<LocalSearchResult>>()
         val calls = mutableListOf<SearchRequest>()
 
-        override fun search(query: String, bufferId: Long?): Flow<LocalSearchResult> {
+        override fun search(
+            query: String,
+            bufferId: Long?,
+        ): Flow<LocalSearchResult> {
             val request = SearchRequest(query, bufferId)
             calls += request
             return flowFor(request)
         }
 
-        override fun coverage(bufferId: Long?): Flow<SearchCoverage> =
-            flowOf(coverageByScope[bufferId] ?: SearchCoverage.DeviceOnly)
+        override fun coverage(bufferId: Long?): Flow<SearchCoverage> = flowOf(coverageByScope[bufferId] ?: SearchCoverage.DeviceOnly)
 
-        fun emit(query: String, bufferId: Long?, hits: List<SearchHit>, truncated: Boolean = false) {
+        fun emit(
+            query: String,
+            bufferId: Long?,
+            hits: List<SearchHit>,
+            truncated: Boolean = false,
+        ) {
             check(flowFor(SearchRequest(query, bufferId)).tryEmit(LocalSearchResult(hits, truncated)))
         }
 
-        private fun flowFor(request: SearchRequest) = flows.getOrPut(request) {
-            MutableSharedFlow(replay = 1)
-        }
+        private fun flowFor(request: SearchRequest) =
+            flows.getOrPut(request) {
+                MutableSharedFlow(replay = 1)
+            }
     }
 
     private fun buffer(
@@ -132,15 +156,37 @@ class SearchViewModelTest {
         type = type,
     )
 
-    private class FakeBufferRepository(initial: BufferEntity? = null) : BufferRepository {
+    private class FakeBufferRepository(
+        initial: BufferEntity? = null,
+    ) : BufferRepository {
         val buffers = MutableStateFlow(initial)
+
         override fun observeChatList(): Flow<List<ChatListRow>> = flowOf(emptyList())
+
         override fun observeBuffer(id: Long): Flow<BufferEntity?> = buffers
+
         override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = flowOf(emptyList())
-        override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
-        override suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression? = null
-        override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean = true
-        override suspend fun setPresenceModeOverride(id: Long, mode: PresenceMode?): Boolean = true
+
+        override suspend fun setPinned(
+            id: Long,
+            pinned: Boolean,
+        ) = Unit
+
+        override suspend fun setMuted(
+            id: Long,
+            muted: Boolean,
+        ): MuteBacklogSuppression? = null
+
+        override suspend fun setLayoutDensityOverride(
+            id: Long,
+            layout: LayoutDensity?,
+        ): Boolean = true
+
+        override suspend fun setPresenceModeOverride(
+            id: Long,
+            mode: PresenceMode?,
+        ): Boolean = true
+
         override suspend fun deleteBuffer(id: Long) = Unit
     }
 
@@ -173,7 +219,11 @@ class SearchViewModelTest {
             connectionStates.value = mapOf(++tick to IrcClientState.Connecting)
         }
 
-        override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 0
+        override suspend fun ensureQueryBuffer(
+            networkId: Long,
+            nick: String,
+        ): Long = 0
+
         override suspend fun ensureServerBuffer(networkId: Long): Long = 0
     }
 
@@ -194,8 +244,7 @@ class SearchViewModelTest {
     private fun serverViewModel(
         connections: FakeConnectionManager,
         buffers: FakeBufferRepository = FakeBufferRepository(buffer()),
-    ): SearchViewModel =
-        viewModel(FakeSearchRepository(emptyList()), buffers, connections).also { it.init(BUFFER_ID) }
+    ): SearchViewModel = viewModel(FakeSearchRepository(emptyList()), buffers, connections).also { it.init(BUFFER_ID) }
 
     /**
      * Settles on live availability, then enters SERVER scope with [query] typed.
@@ -215,229 +264,255 @@ class SearchViewModelTest {
     }
 
     @Test
-    fun serverChipRequiresAnAvailableClientAndBufferScope() = runTest {
-        val connections = FakeConnectionManager(available = true)
-        val buffers = FakeBufferRepository(buffer())
+    fun serverChipRequiresAnAvailableClientAndBufferScope() =
+        runTest {
+            val connections = FakeConnectionManager(available = true)
+            val buffers = FakeBufferRepository(buffer())
 
-        // No buffer scope at all: there is no conversation for the server to search.
-        val global = viewModel(FakeSearchRepository(emptyList()), buffers, connections)
-        global.init(null)
-        global.state.test {
-            val settled = awaitStateWhere { it.coverage != null }
-            assertTrue(!settled.hasBufferScope)
-            assertTrue("no buffer scope means no server chip", !settled.serverSearchAvailable)
-            cancelAndIgnoreRemainingEvents()
+            // No buffer scope at all: there is no conversation for the server to search.
+            val global = viewModel(FakeSearchRepository(emptyList()), buffers, connections)
+            global.init(null)
+            global.state.test {
+                val settled = awaitStateWhere { it.coverage != null }
+                assertTrue(!settled.hasBufferScope)
+                assertTrue("no buffer scope means no server chip", !settled.serverSearchAvailable)
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            val scoped = serverViewModel(connections, buffers)
+            scoped.state.test {
+                assertTrue(awaitStateWhere { it.serverSearchAvailable }.hasBufferScope)
+
+                // The per-network SERVER buffer is not a conversation either.
+                buffers.buffers.value = buffer(type = BufferType.SERVER)
+                assertTrue(!awaitStateWhere { !it.serverSearchAvailable }.serverSearchAvailable)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-
-        val scoped = serverViewModel(connections, buffers)
-        scoped.state.test {
-            assertTrue(awaitStateWhere { it.serverSearchAvailable }.hasBufferScope)
-
-            // The per-network SERVER buffer is not a conversation either.
-            buffers.buffers.value = buffer(type = BufferType.SERVER)
-            assertTrue(!awaitStateWhere { !it.serverSearchAvailable }.serverSearchAvailable)
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
 
     @Test
-    fun serverSubmitMapsSortsAndFlagsTruncation() = runTest {
-        val ascending = (1..100).map { i ->
-            serverHit("hit $i", serverTime = 1_000L + i, msgid = "m$i")
-        }
-        val connections = FakeConnectionManager(available = true, result = ascending)
-        val vm = serverViewModel(connections)
+    fun serverSubmitMapsSortsAndFlagsTruncation() =
+        runTest {
+            val ascending =
+                (1..100).map { i ->
+                    serverHit("hit $i", serverTime = 1_000L + i, msgid = "m$i")
+                }
+            val connections = FakeConnectionManager(available = true, result = ascending)
+            val vm = serverViewModel(connections)
 
-        vm.state.test {
-            enterServerScope(vm)
-            vm.onServerSearchSubmit()
-            val results = awaitStateWhere { it.server is ServerSearchState.Results }
-                .server as ServerSearchState.Results
+            vm.state.test {
+                enterServerScope(vm)
+                vm.onServerSearchSubmit()
+                val results =
+                    awaitStateWhere { it.server is ServerSearchState.Results }
+                        .server as ServerSearchState.Results
 
-            assertEquals(100, results.hits.size)
-            assertEquals("hit 100", results.hits.first().text)
-            assertEquals("hit 1", results.hits.last().text)
-            assertTrue("soju's 100-result cap must be disclosed", results.truncated)
-            assertEquals(BUFFER_ID, results.hits.first().bufferId)
-            cancelAndIgnoreRemainingEvents()
+                assertEquals(100, results.hits.size)
+                assertEquals("hit 100", results.hits.first().text)
+                assertEquals("hit 1", results.hits.last().text)
+                assertTrue("soju's 100-result cap must be disclosed", results.truncated)
+                assertEquals(BUFFER_ID, results.hits.first().bufferId)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun serverSubmitSendsParsedFromAndTextAttributes() = runTest {
-        val connections = FakeConnectionManager(available = true)
-        val vm = serverViewModel(connections)
+    fun serverSubmitSendsParsedFromAndTextAttributes() =
+        runTest {
+            val connections = FakeConnectionManager(available = true)
+            val vm = serverViewModel(connections)
 
-        vm.state.test {
-            enterServerScope(vm, query = "coroutine builder from:alice")
-            vm.onServerSearchSubmit()
-            awaitStateWhere { it.server is ServerSearchState.Results }
-            cancelAndIgnoreRemainingEvents()
+            vm.state.test {
+                enterServerScope(vm, query = "coroutine builder from:alice")
+                vm.onServerSearchSubmit()
+                awaitStateWhere { it.server is ServerSearchState.Results }
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            val request = connections.requests.single()
+            assertEquals("#kotlin", request.target)
+            assertEquals("coroutine builder", request.text)
+            assertEquals("alice", request.from)
+            assertEquals(SOJU_SEARCH_MAX_LIMIT, request.limit)
         }
-
-        val request = connections.requests.single()
-        assertEquals("#kotlin", request.target)
-        assertEquals("coroutine builder", request.text)
-        assertEquals("alice", request.from)
-        assertEquals(SOJU_SEARCH_MAX_LIMIT, request.limit)
-    }
 
     @Test
-    fun serverFailMapsToRejected() = runTest {
-        val connections = FakeConnectionManager(
-            available = true,
-            failure = IrcCommandException("SEARCH", "INVALID_PARAMS", "bad query"),
-        )
-        val vm = serverViewModel(connections)
+    fun serverFailMapsToRejected() =
+        runTest {
+            val connections =
+                FakeConnectionManager(
+                    available = true,
+                    failure = IrcCommandException("SEARCH", "INVALID_PARAMS", "bad query"),
+                )
+            val vm = serverViewModel(connections)
 
-        vm.state.test {
-            enterServerScope(vm)
-            vm.onServerSearchSubmit()
-            val failed = awaitStateWhere { it.server is ServerSearchState.Failed }
-                .server as ServerSearchState.Failed
-            assertEquals(ServerSearchError.REJECTED, failed.error)
-            cancelAndIgnoreRemainingEvents()
+            vm.state.test {
+                enterServerScope(vm)
+                vm.onServerSearchSubmit()
+                val failed =
+                    awaitStateWhere { it.server is ServerSearchState.Failed }
+                        .server as ServerSearchState.Failed
+                assertEquals(ServerSearchError.REJECTED, failed.error)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun serverTimeoutMapsToUnavailable() = runTest {
-        val connections = FakeConnectionManager(available = true, failure = IrcTimeoutException("motd-1"))
-        val vm = serverViewModel(connections)
+    fun serverTimeoutMapsToUnavailable() =
+        runTest {
+            val connections = FakeConnectionManager(available = true, failure = IrcTimeoutException("motd-1"))
+            val vm = serverViewModel(connections)
 
-        vm.state.test {
-            enterServerScope(vm)
-            vm.onServerSearchSubmit()
-            val failed = awaitStateWhere { it.server is ServerSearchState.Failed }
-                .server as ServerSearchState.Failed
-            assertEquals(ServerSearchError.UNAVAILABLE, failed.error)
-            cancelAndIgnoreRemainingEvents()
+            vm.state.test {
+                enterServerScope(vm)
+                vm.onServerSearchSubmit()
+                val failed =
+                    awaitStateWhere { it.server is ServerSearchState.Failed }
+                        .server as ServerSearchState.Failed
+                assertEquals(ServerSearchError.UNAVAILABLE, failed.error)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun nullClientMapsToUnavailable() = runTest {
-        // Availability was true when the chip rendered; the client vanished before the request.
-        val connections = FakeConnectionManager(available = true, result = null)
-        val vm = serverViewModel(connections)
+    fun nullClientMapsToUnavailable() =
+        runTest {
+            // Availability was true when the chip rendered; the client vanished before the request.
+            val connections = FakeConnectionManager(available = true, result = null)
+            val vm = serverViewModel(connections)
 
-        vm.state.test {
-            enterServerScope(vm)
-            vm.onServerSearchSubmit()
-            val failed = awaitStateWhere { it.server is ServerSearchState.Failed }
-                .server as ServerSearchState.Failed
-            assertEquals(ServerSearchError.UNAVAILABLE, failed.error)
-            cancelAndIgnoreRemainingEvents()
+            vm.state.test {
+                enterServerScope(vm)
+                vm.onServerSearchSubmit()
+                val failed =
+                    awaitStateWhere { it.server is ServerSearchState.Failed }
+                        .server as ServerSearchState.Failed
+                assertEquals(ServerSearchError.UNAVAILABLE, failed.error)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun editingTheQueryResetsServerResults() = runTest {
-        val connections = FakeConnectionManager(
-            available = true,
-            result = listOf(serverHit("stale", serverTime = 1_000, msgid = "m1")),
-        )
-        val vm = serverViewModel(connections)
+    fun editingTheQueryResetsServerResults() =
+        runTest {
+            val connections =
+                FakeConnectionManager(
+                    available = true,
+                    result = listOf(serverHit("stale", serverTime = 1_000, msgid = "m1")),
+                )
+            val vm = serverViewModel(connections)
 
-        vm.state.test {
-            enterServerScope(vm)
-            vm.onServerSearchSubmit()
-            awaitStateWhere { it.server is ServerSearchState.Results }
+            vm.state.test {
+                enterServerScope(vm)
+                vm.onServerSearchSubmit()
+                awaitStateWhere { it.server is ServerSearchState.Results }
 
-            vm.onQueryChange("coroutines")
-            // Results describe the previous query; keeping them would misattribute them.
-            awaitStateWhere { it.server is ServerSearchState.Idle }
-            assertEquals("typing must not fire a wire request", 1, connections.requests.size)
-            cancelAndIgnoreRemainingEvents()
+                vm.onQueryChange("coroutines")
+                // Results describe the previous query; keeping them would misattribute them.
+                awaitStateWhere { it.server is ServerSearchState.Idle }
+                assertEquals("typing must not fire a wire request", 1, connections.requests.size)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun leavingServerScopeResetsServerResults() = runTest {
-        val connections = FakeConnectionManager(
-            available = true,
-            result = listOf(serverHit("stale", serverTime = 1_000, msgid = "m1")),
-        )
-        val vm = serverViewModel(connections)
+    fun leavingServerScopeResetsServerResults() =
+        runTest {
+            val connections =
+                FakeConnectionManager(
+                    available = true,
+                    result = listOf(serverHit("stale", serverTime = 1_000, msgid = "m1")),
+                )
+            val vm = serverViewModel(connections)
 
-        vm.state.test {
-            enterServerScope(vm)
-            vm.onServerSearchSubmit()
-            awaitStateWhere { it.server is ServerSearchState.Results }
+            vm.state.test {
+                enterServerScope(vm)
+                vm.onServerSearchSubmit()
+                awaitStateWhere { it.server is ServerSearchState.Results }
 
-            vm.onScopeChange(SearchScope.CURRENT)
-            val local = awaitStateWhere { it.scope == SearchScope.CURRENT }
-            assertEquals(ServerSearchState.Idle, local.server)
-            cancelAndIgnoreRemainingEvents()
+                vm.onScopeChange(SearchScope.CURRENT)
+                val local = awaitStateWhere { it.scope == SearchScope.CURRENT }
+                assertEquals(ServerSearchState.Idle, local.server)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun availabilityLossWhileInServerScopeFallsBackToCurrent() = runTest {
-        val connections = FakeConnectionManager(
-            available = true,
-            result = listOf(serverHit("stale", serverTime = 1_000, msgid = "m1")),
-        )
-        val vm = serverViewModel(connections)
+    fun availabilityLossWhileInServerScopeFallsBackToCurrent() =
+        runTest {
+            val connections =
+                FakeConnectionManager(
+                    available = true,
+                    result = listOf(serverHit("stale", serverTime = 1_000, msgid = "m1")),
+                )
+            val vm = serverViewModel(connections)
 
-        vm.state.test {
-            enterServerScope(vm)
-            vm.onServerSearchSubmit()
-            awaitStateWhere { it.server is ServerSearchState.Results }
+            vm.state.test {
+                enterServerScope(vm)
+                vm.onServerSearchSubmit()
+                awaitStateWhere { it.server is ServerSearchState.Results }
 
-            connections.publishAvailability(false)
-            val fallen = awaitStateWhere { it.scope == SearchScope.CURRENT && !it.serverSearchAvailable }
-            assertEquals(ServerSearchState.Idle, fallen.server)
-            cancelAndIgnoreRemainingEvents()
+                connections.publishAvailability(false)
+                val fallen = awaitStateWhere { it.scope == SearchScope.CURRENT && !it.serverSearchAvailable }
+                assertEquals(ServerSearchState.Idle, fallen.server)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun hitsWithoutTimeOrMsgidAreDropped() = runTest {
-        val connections = FakeConnectionManager(
-            available = true,
-            result = listOf(
-                serverHit("jumpable", serverTime = 2_000, msgid = "m1"),
-                // Nothing to resolve a jump target from, so it is not a usable result.
-                serverHit("unjumpable", serverTime = null, msgid = null),
-            ),
-        )
-        val vm = serverViewModel(connections)
+    fun hitsWithoutTimeOrMsgidAreDropped() =
+        runTest {
+            val connections =
+                FakeConnectionManager(
+                    available = true,
+                    result =
+                        listOf(
+                            serverHit("jumpable", serverTime = 2_000, msgid = "m1"),
+                            // Nothing to resolve a jump target from, so it is not a usable result.
+                            serverHit("unjumpable", serverTime = null, msgid = null),
+                        ),
+                )
+            val vm = serverViewModel(connections)
 
-        vm.state.test {
-            enterServerScope(vm)
-            vm.onServerSearchSubmit()
-            val results = awaitStateWhere { it.server is ServerSearchState.Results }
-                .server as ServerSearchState.Results
-            assertEquals(listOf("jumpable"), results.hits.map { it.text })
-            assertTrue("a short page is not truncated", !results.truncated)
-            cancelAndIgnoreRemainingEvents()
+            vm.state.test {
+                enterServerScope(vm)
+                vm.onServerSearchSubmit()
+                val results =
+                    awaitStateWhere { it.server is ServerSearchState.Results }
+                        .server as ServerSearchState.Results
+                assertEquals(listOf("jumpable"), results.hits.map { it.text })
+                assertTrue("a short page is not truncated", !results.truncated)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun msgidOnlyHitsAreKeptWithZeroTime() = runTest {
-        val connections = FakeConnectionManager(
-            available = true,
-            result = listOf(
-                serverHit("no time tag", serverTime = null, msgid = "m-old"),
-                serverHit("timed", serverTime = 5_000, msgid = "m-new"),
-            ),
-        )
-        val vm = serverViewModel(connections)
+    fun msgidOnlyHitsAreKeptWithZeroTime() =
+        runTest {
+            val connections =
+                FakeConnectionManager(
+                    available = true,
+                    result =
+                        listOf(
+                            serverHit("no time tag", serverTime = null, msgid = "m-old"),
+                            serverHit("timed", serverTime = 5_000, msgid = "m-new"),
+                        ),
+                )
+            val vm = serverViewModel(connections)
 
-        vm.state.test {
-            enterServerScope(vm)
-            vm.onServerSearchSubmit()
-            val results = awaitStateWhere { it.server is ServerSearchState.Results }
-                .server as ServerSearchState.Results
-            // Newest-first ordering sinks the untimed hit to the bottom; it still jumps by msgid.
-            assertEquals(listOf("timed", "no time tag"), results.hits.map { it.text })
-            assertEquals(0L, results.hits.last().serverTime)
-            assertEquals("m-old", results.hits.last().msgid)
-            cancelAndIgnoreRemainingEvents()
+            vm.state.test {
+                enterServerScope(vm)
+                vm.onServerSearchSubmit()
+                val results =
+                    awaitStateWhere { it.server is ServerSearchState.Results }
+                        .server as ServerSearchState.Results
+                // Newest-first ordering sinks the untimed hit to the bottom; it still jumps by msgid.
+                assertEquals(listOf("timed", "no time tag"), results.hits.map { it.text })
+                assertEquals(0L, results.hits.last().serverTime)
+                assertEquals("m-old", results.hits.last().msgid)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     private companion object {
         const val BUFFER_ID = 7L
@@ -445,73 +520,76 @@ class SearchViewModelTest {
     }
 
     @Test
-    fun blank_query_emits_empty_results_without_hitting_the_repo() = runTest {
-        val repo = FakeSearchRepository(emptyList())
-        val vm = viewModel(repo)
+    fun blank_query_emits_empty_results_without_hitting_the_repo() =
+        runTest {
+            val repo = FakeSearchRepository(emptyList())
+            val vm = viewModel(repo)
 
-        vm.state.test {
-            awaitItem()
-            vm.onQueryChange("   ")
-            runCurrent()
-            // Settle on the key under test: a blank key emits a coverage frame of its own, and a
-            // StateFlow conflates, so neither the pristine initial value nor the frame that
-            // follows it is guaranteed to be observed as its own emission.
-            val blank = awaitStateWhere { it.rawQuery == "   " }
-            assertTrue("blank query yields no result groups", blank.groups.isEmpty())
-            assertEquals("blank query must not query the DB", 0, repo.calls.get())
-            cancelAndIgnoreRemainingEvents()
+            vm.state.test {
+                awaitItem()
+                vm.onQueryChange("   ")
+                runCurrent()
+                // Settle on the key under test: a blank key emits a coverage frame of its own, and a
+                // StateFlow conflates, so neither the pristine initial value nor the frame that
+                // follows it is guaranteed to be observed as its own emission.
+                val blank = awaitStateWhere { it.rawQuery == "   " }
+                assertTrue("blank query yields no result groups", blank.groups.isEmpty())
+                assertEquals("blank query must not query the DB", 0, repo.calls.get())
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun rapid_typing_is_debounced_into_a_single_db_query() = runTest {
-        val repo = FakeSearchRepository(listOf(hit(1, "coroutine builder")))
-        val vm = viewModel(repo)
+    fun rapid_typing_is_debounced_into_a_single_db_query() =
+        runTest {
+            val repo = FakeSearchRepository(listOf(hit(1, "coroutine builder")))
+            val vm = viewModel(repo)
 
-        vm.state.test {
-            awaitItem() // initial
+            vm.state.test {
+                awaitItem() // initial
 
-            // Simulate keystrokes faster than the debounce window. Each key is settled on rather
-            // than counted: a StateFlow conflates, so an intermediate keystroke's frame is not
-            // guaranteed to be observed on its own. What this test protects is the debounce —
-            // that no repository call happens until typing pauses — not the emission count.
-            vm.onQueryChange("c")
-            runCurrent()
-            awaitStateWhere { it.rawQuery == "c" }
-            advanceTimeBy(50)
-            vm.onQueryChange("co")
-            runCurrent()
-            awaitStateWhere { it.rawQuery == "co" }
-            advanceTimeBy(50)
-            vm.onQueryChange("cor")
-            runCurrent()
-            awaitStateWhere { it.rawQuery == "cor" }
-            advanceTimeBy(50)
-            vm.onQueryChange("coroutine")
-            runCurrent()
-            val loading = awaitStateWhere { it.rawQuery == "coroutine" }
-            assertTrue(loading.searching)
-            // Not yet past the debounce window: no query should have fired.
-            assertEquals("no DB hit before the typing pause", 0, repo.calls.get())
+                // Simulate keystrokes faster than the debounce window. Each key is settled on rather
+                // than counted: a StateFlow conflates, so an intermediate keystroke's frame is not
+                // guaranteed to be observed on its own. What this test protects is the debounce —
+                // that no repository call happens until typing pauses — not the emission count.
+                vm.onQueryChange("c")
+                runCurrent()
+                awaitStateWhere { it.rawQuery == "c" }
+                advanceTimeBy(50)
+                vm.onQueryChange("co")
+                runCurrent()
+                awaitStateWhere { it.rawQuery == "co" }
+                advanceTimeBy(50)
+                vm.onQueryChange("cor")
+                runCurrent()
+                awaitStateWhere { it.rawQuery == "cor" }
+                advanceTimeBy(50)
+                vm.onQueryChange("coroutine")
+                runCurrent()
+                val loading = awaitStateWhere { it.rawQuery == "coroutine" }
+                assertTrue(loading.searching)
+                // Not yet past the debounce window: no query should have fired.
+                assertEquals("no DB hit before the typing pause", 0, repo.calls.get())
 
-            // Past the debounce window: exactly one query fires and results arrive.
-            advanceTimeBy(300)
-            val results = awaitStateWhere { it.rawQuery == "coroutine" && it.groups.isNotEmpty() }
-            assertEquals("rapid typing collapses to one DB query", 1, repo.calls.get())
-            assertEquals("coroutine", results.rawQuery)
-            assertEquals(1, results.groups.size)
-            assertEquals(1L, results.groups.first().bufferId)
-            cancelAndIgnoreRemainingEvents()
+                // Past the debounce window: exactly one query fires and results arrive.
+                advanceTimeBy(300)
+                val results = awaitStateWhere { it.rawQuery == "coroutine" && it.groups.isNotEmpty() }
+                assertEquals("rapid typing collapses to one DB query", 1, repo.calls.get())
+                assertEquals("coroutine", results.rawQuery)
+                assertEquals(1, results.groups.size)
+                assertEquals(1L, results.groups.first().bufferId)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
     fun clear_resets_selection_and_composition() {
-        val editing = TextFieldValue(
-            text = "coroutine",
-            selection = TextRange(2, 7),
-            composition = TextRange(0, 9),
-        )
+        val editing =
+            TextFieldValue(
+                text = "coroutine",
+                selection = TextRange(2, 7),
+                composition = TextRange(0, 9),
+            )
 
         val cleared = clearedSearchText()
 
@@ -522,179 +600,217 @@ class SearchViewModelTest {
     }
 
     @Test
-    fun query_change_immediately_clears_old_results_and_ignores_late_results() = runTest {
-        val repo = ControlledSearchRepository()
-        repo.emit("alpha", null, listOf(hit(1, "alpha result")))
-        val vm = viewModel(repo)
+    fun query_change_immediately_clears_old_results_and_ignores_late_results() =
+        runTest {
+            val repo = ControlledSearchRepository()
+            repo.emit("alpha", null, listOf(hit(1, "alpha result")))
+            val vm = viewModel(repo)
 
-        vm.state.test {
-            awaitItem()
-            // Settle on the key under test rather than counting emissions: a StateFlow conflates,
-            // so the loading frame between a query change and its results is not guaranteed to be
-            // observed. What this test protects is the pairing of query and results, which holds
-            // whichever intermediate states survive.
-            vm.onQueryChange("alpha")
-            advanceTimeBy(250)
-            runCurrent()
-            val alphaResults = awaitStateWhere { it.rawQuery == "alpha" && it.groups.isNotEmpty() }
-            assertEquals(1, alphaResults.groups.size)
+            vm.state.test {
+                awaitItem()
+                // Settle on the key under test rather than counting emissions: a StateFlow conflates,
+                // so the loading frame between a query change and its results is not guaranteed to be
+                // observed. What this test protects is the pairing of query and results, which holds
+                // whichever intermediate states survive.
+                vm.onQueryChange("alpha")
+                advanceTimeBy(250)
+                runCurrent()
+                val alphaResults = awaitStateWhere { it.rawQuery == "alpha" && it.groups.isNotEmpty() }
+                assertEquals(1, alphaResults.groups.size)
 
-            // Changing the query drops the previous answer at once: no state may show the new
-            // query alongside the old query's hits.
-            vm.onQueryChange("beta")
-            runCurrent()
-            val betaLoading = awaitStateWhere { it.rawQuery == "beta" }
-            assertTrue(betaLoading.groups.isEmpty())
+                // Changing the query drops the previous answer at once: no state may show the new
+                // query alongside the old query's hits.
+                vm.onQueryChange("beta")
+                runCurrent()
+                val betaLoading = awaitStateWhere { it.rawQuery == "beta" }
+                assertTrue(betaLoading.groups.isEmpty())
 
-            // A late answer for the abandoned query must not surface at all.
-            repo.emit("alpha", null, listOf(hit(1, "late alpha result")))
-            runCurrent()
-            expectNoEvents()
+                // A late answer for the abandoned query must not surface at all.
+                repo.emit("alpha", null, listOf(hit(1, "late alpha result")))
+                runCurrent()
+                expectNoEvents()
 
-            advanceTimeBy(250)
-            runCurrent()
-            repo.emit("beta", null, listOf(hit(2, "beta result")))
-            runCurrent()
-            val betaResults = awaitStateWhere { it.rawQuery == "beta" && it.groups.isNotEmpty() }
-            assertTrue(!betaResults.searching)
-            assertEquals("beta result", betaResults.groups.single().hits.single().message.text)
-            cancelAndIgnoreRemainingEvents()
+                advanceTimeBy(250)
+                runCurrent()
+                repo.emit("beta", null, listOf(hit(2, "beta result")))
+                runCurrent()
+                val betaResults = awaitStateWhere { it.rawQuery == "beta" && it.groups.isNotEmpty() }
+                assertTrue(!betaResults.searching)
+                assertEquals(
+                    "beta result",
+                    betaResults.groups
+                        .single()
+                        .hits
+                        .single()
+                        .message.text,
+                )
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun scope_change_immediately_clears_old_results_and_ignores_late_scope_results() = runTest {
-        val repo = ControlledSearchRepository()
-        val vm = viewModel(repo)
+    fun scope_change_immediately_clears_old_results_and_ignores_late_scope_results() =
+        runTest {
+            val repo = ControlledSearchRepository()
+            val vm = viewModel(repo)
 
-        vm.state.test {
-            awaitItem()
-            vm.init(bufferId = 7L)
-            runCurrent()
-            // The blank state now also carries coverage, so settle on the key under test rather
-            // than counting frames.
-            awaitStateWhere { it.hasBufferScope && it.scope == SearchScope.CURRENT }
-            vm.onScopeChange(SearchScope.ALL)
-            runCurrent()
-            awaitStateWhere { it.scope == SearchScope.ALL } // blank, global scope
+            vm.state.test {
+                awaitItem()
+                vm.init(bufferId = 7L)
+                runCurrent()
+                // The blank state now also carries coverage, so settle on the key under test rather
+                // than counting frames.
+                awaitStateWhere { it.hasBufferScope && it.scope == SearchScope.CURRENT }
+                vm.onScopeChange(SearchScope.ALL)
+                runCurrent()
+                awaitStateWhere { it.scope == SearchScope.ALL } // blank, global scope
 
-            repo.emit("alpha", null, listOf(hit(1, "global alpha result")))
-            vm.onQueryChange("alpha")
-            runCurrent()
-            awaitItem() // global loading
-            advanceTimeBy(250)
-            runCurrent()
-            assertEquals("global alpha result", awaitItem().groups.single().hits.single().message.text)
+                repo.emit("alpha", null, listOf(hit(1, "global alpha result")))
+                vm.onQueryChange("alpha")
+                runCurrent()
+                awaitItem() // global loading
+                advanceTimeBy(250)
+                runCurrent()
+                assertEquals(
+                    "global alpha result",
+                    awaitItem()
+                        .groups
+                        .single()
+                        .hits
+                        .single()
+                        .message.text,
+                )
 
-            vm.onScopeChange(SearchScope.CURRENT)
-            runCurrent()
-            val currentLoading = awaitItem()
-            assertEquals(SearchScope.CURRENT, currentLoading.scope)
-            assertTrue(currentLoading.searching)
-            assertTrue(currentLoading.groups.isEmpty())
+                vm.onScopeChange(SearchScope.CURRENT)
+                runCurrent()
+                val currentLoading = awaitItem()
+                assertEquals(SearchScope.CURRENT, currentLoading.scope)
+                assertTrue(currentLoading.searching)
+                assertTrue(currentLoading.groups.isEmpty())
 
-            repo.emit("alpha", null, listOf(hit(1, "late global alpha result")))
-            runCurrent()
-            expectNoEvents()
+                repo.emit("alpha", null, listOf(hit(1, "late global alpha result")))
+                runCurrent()
+                expectNoEvents()
 
-            advanceTimeBy(250)
-            runCurrent()
-            repo.emit("alpha", 7L, listOf(hit(7, "current alpha result")))
-            runCurrent()
-            val currentResults = awaitItem()
-            assertEquals(SearchScope.CURRENT, currentResults.scope)
-            assertTrue(!currentResults.searching)
-            assertEquals("current alpha result", currentResults.groups.single().hits.single().message.text)
-            cancelAndIgnoreRemainingEvents()
+                advanceTimeBy(250)
+                runCurrent()
+                repo.emit("alpha", 7L, listOf(hit(7, "current alpha result")))
+                runCurrent()
+                val currentResults = awaitItem()
+                assertEquals(SearchScope.CURRENT, currentResults.scope)
+                assertTrue(!currentResults.searching)
+                assertEquals(
+                    "current alpha result",
+                    currentResults.groups
+                        .single()
+                        .hits
+                        .single()
+                        .message.text,
+                )
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun blank_state_discloses_coverage_before_the_first_keystroke() = runTest {
-        val repo = FakeSearchRepository(
-            emptyList(),
-            coverage = SearchCoverage.BufferPartial(openGaps = 2, historyComplete = false),
-        )
-        val vm = viewModel(repo)
+    fun blank_state_discloses_coverage_before_the_first_keystroke() =
+        runTest {
+            val repo =
+                FakeSearchRepository(
+                    emptyList(),
+                    coverage = SearchCoverage.BufferPartial(openGaps = 2, historyComplete = false),
+                )
+            val vm = viewModel(repo)
 
-        vm.state.test {
-            vm.init(bufferId = 7L)
-            runCurrent()
-            val blank = awaitStateWhere { it.hasBufferScope }
-            assertEquals(SearchCoverage.BufferPartial(2, false), blank.coverage)
-            assertTrue("no query ran", blank.groups.isEmpty())
-            assertEquals("the disclosure must not require a DB search", 0, repo.calls.get())
-            cancelAndIgnoreRemainingEvents()
+            vm.state.test {
+                vm.init(bufferId = 7L)
+                runCurrent()
+                val blank = awaitStateWhere { it.hasBufferScope }
+                assertEquals(SearchCoverage.BufferPartial(2, false), blank.coverage)
+                assertTrue("no query ran", blank.groups.isEmpty())
+                assertEquals("the disclosure must not require a DB search", 0, repo.calls.get())
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun results_carry_coverage_and_the_raw_page_truncation_flag() = runTest {
-        val repo = FakeSearchRepository(
-            listOf(hit(1, "coroutine builder")),
-            truncated = true,
-            coverage = SearchCoverage.BufferComplete,
-        )
-        val vm = viewModel(repo)
+    fun results_carry_coverage_and_the_raw_page_truncation_flag() =
+        runTest {
+            val repo =
+                FakeSearchRepository(
+                    listOf(hit(1, "coroutine builder")),
+                    truncated = true,
+                    coverage = SearchCoverage.BufferComplete,
+                )
+            val vm = viewModel(repo)
 
-        vm.state.test {
-            vm.onQueryChange("coroutine")
-            runCurrent()
-            advanceTimeBy(300)
-            val results = awaitStateWhere { it.groups.isNotEmpty() }
-            assertEquals(SearchCoverage.BufferComplete, results.coverage)
-            assertTrue("the DAO cap must surface in state", results.truncated)
-            cancelAndIgnoreRemainingEvents()
+            vm.state.test {
+                vm.onQueryChange("coroutine")
+                runCurrent()
+                advanceTimeBy(300)
+                val results = awaitStateWhere { it.groups.isNotEmpty() }
+                assertEquals(SearchCoverage.BufferComplete, results.coverage)
+                assertTrue("the DAO cap must surface in state", results.truncated)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun truncation_survives_the_client_side_from_filter() = runTest {
-        val repo = FakeSearchRepository(
-            listOf(hit(1, "coroutine builder", sender = "alice"), hit(2, "coroutines", sender = "bob")),
-            truncated = true,
-        )
-        val vm = viewModel(repo)
+    fun truncation_survives_the_client_side_from_filter() =
+        runTest {
+            val repo =
+                FakeSearchRepository(
+                    listOf(hit(1, "coroutine builder", sender = "alice"), hit(2, "coroutines", sender = "bob")),
+                    truncated = true,
+                )
+            val vm = viewModel(repo)
 
-        vm.state.test {
-            vm.onQueryChange("coroutine from:bob")
-            runCurrent()
-            advanceTimeBy(300)
-            val results = awaitStateWhere { it.groups.isNotEmpty() }
-            assertEquals("bob", results.groups.single().hits.single().message.sender)
-            assertTrue("filtering fewer rows does not un-truncate the page", results.truncated)
-            cancelAndIgnoreRemainingEvents()
+            vm.state.test {
+                vm.onQueryChange("coroutine from:bob")
+                runCurrent()
+                advanceTimeBy(300)
+                val results = awaitStateWhere { it.groups.isNotEmpty() }
+                assertEquals(
+                    "bob",
+                    results.groups
+                        .single()
+                        .hits
+                        .single()
+                        .message.sender,
+                )
+                assertTrue("filtering fewer rows does not un-truncate the page", results.truncated)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun clear_immediately_removes_results_and_ignores_late_results() = runTest {
-        val repo = ControlledSearchRepository()
-        repo.emit("alpha", null, listOf(hit(1, "alpha result")))
-        val vm = viewModel(repo)
+    fun clear_immediately_removes_results_and_ignores_late_results() =
+        runTest {
+            val repo = ControlledSearchRepository()
+            repo.emit("alpha", null, listOf(hit(1, "alpha result")))
+            val vm = viewModel(repo)
 
-        vm.state.test {
-            awaitItem()
-            // Settle on the keys under test rather than counting emissions: a StateFlow conflates,
-            // so neither the loading frame nor any intermediate between it and the results is
-            // guaranteed to be observed — or skipped — consistently.
-            vm.onQueryChange("alpha")
-            runCurrent()
-            advanceTimeBy(250)
-            runCurrent()
-            assertEquals(1, awaitStateWhere { it.groups.isNotEmpty() }.groups.size)
+            vm.state.test {
+                awaitItem()
+                // Settle on the keys under test rather than counting emissions: a StateFlow conflates,
+                // so neither the loading frame nor any intermediate between it and the results is
+                // guaranteed to be observed — or skipped — consistently.
+                vm.onQueryChange("alpha")
+                runCurrent()
+                advanceTimeBy(250)
+                runCurrent()
+                assertEquals(1, awaitStateWhere { it.groups.isNotEmpty() }.groups.size)
 
-            vm.onQueryChange("")
-            runCurrent()
-            assertEquals(
-                SearchUiState(coverage = SearchCoverage.DeviceOnly),
-                awaitStateWhere { it.groups.isEmpty() },
-            )
+                vm.onQueryChange("")
+                runCurrent()
+                assertEquals(
+                    SearchUiState(coverage = SearchCoverage.DeviceOnly),
+                    awaitStateWhere { it.groups.isEmpty() },
+                )
 
-            repo.emit("alpha", null, listOf(hit(1, "late alpha result")))
-            runCurrent()
-            expectNoEvents()
-            cancelAndIgnoreRemainingEvents()
+                repo.emit("alpha", null, listOf(hit(1, "late alpha result")))
+                runCurrent()
+                expectNoEvents()
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 }

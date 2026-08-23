@@ -1,14 +1,14 @@
 package io.github.trevarj.motd.gesture
 
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.down
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
-import androidx.activity.OnBackPressedDispatcher
-import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
-import androidx.compose.ui.test.down
 import androidx.compose.ui.test.up
 import io.github.trevarj.motd.gesture.radial.GESTURE_MENU_A11Y_DIALOG_TAG
 import io.github.trevarj.motd.gesture.radial.GESTURE_MENU_SCRIM_TAG
@@ -30,22 +30,25 @@ class GestureOrbUiTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private val menu = RadialEntry(
-        id = "root",
-        label = "Menu",
-        icon = GestureIcon.MENU,
-        children = listOf(
-            RadialEntry("jump", "Chats", GestureIcon.CHAT, action = GestureAction.OpenChatList),
-            RadialEntry(
-                id = "tools",
-                label = "Tools",
-                icon = GestureIcon.FOLDER,
-                children = listOf(
-                    RadialEntry("search", "Search", GestureIcon.SEARCH, action = GestureAction.OpenSearch),
+    private val menu =
+        RadialEntry(
+            id = "root",
+            label = "Menu",
+            icon = GestureIcon.MENU,
+            children =
+                listOf(
+                    RadialEntry("jump", "Chats", GestureIcon.CHAT, action = GestureAction.OpenChatList),
+                    RadialEntry(
+                        id = "tools",
+                        label = "Tools",
+                        icon = GestureIcon.FOLDER,
+                        children =
+                            listOf(
+                                RadialEntry("search", "Search", GestureIcon.SEARCH, action = GestureAction.OpenSearch),
+                            ),
+                    ),
                 ),
-            ),
-        ),
-    )
+        )
 
     private var backDispatcher: OnBackPressedDispatcher? = null
 

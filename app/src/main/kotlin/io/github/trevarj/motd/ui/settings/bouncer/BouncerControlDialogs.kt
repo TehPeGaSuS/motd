@@ -9,11 +9,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -58,8 +58,11 @@ fun NetworkEditorDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                if (creating) stringResource(R.string.bouncer_network_create_title)
-                else stringResource(R.string.bouncer_network_update_title, existingName),
+                if (creating) {
+                    stringResource(R.string.bouncer_network_create_title)
+                } else {
+                    stringResource(R.string.bouncer_network_update_title, existingName)
+                },
             )
         },
         text = {
@@ -68,8 +71,11 @@ fun NetworkEditorDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    if (creating) stringResource(R.string.bouncer_network_create_help)
-                    else stringResource(R.string.bouncer_network_update_help),
+                    if (creating) {
+                        stringResource(R.string.bouncer_network_create_help)
+                    } else {
+                        stringResource(R.string.bouncer_network_update_help)
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -101,9 +107,13 @@ fun NetworkEditorDialog(
                                         name = populated.second
                                         presetsExpanded = false
                                     },
-                                    modifier = Modifier.testTag(
-                                        "bouncer_network_preset_${choice.preset?.id?.name?.lowercase() ?: "custom"}",
-                                    ),
+                                    modifier =
+                                        Modifier.testTag(
+                                            "bouncer_network_preset_${choice.preset
+                                                ?.id
+                                                ?.name
+                                                ?.lowercase() ?: "custom"}",
+                                        ),
                                 )
                             }
                         }
@@ -156,11 +166,13 @@ fun NetworkEditorDialog(
                             autoAway = autoAway,
                             enabled = enabled,
                             password = password.takeIf(String::isNotEmpty),
-                            connectCommands = connectCommands.lineSequence()
-                                .map(String::trim)
-                                .filter(String::isNotBlank)
-                                .toList()
-                                .takeIf(List<String>::isNotEmpty),
+                            connectCommands =
+                                connectCommands
+                                    .lineSequence()
+                                    .map(String::trim)
+                                    .filter(String::isNotBlank)
+                                    .toList()
+                                    .takeIf(List<String>::isNotEmpty),
                         ),
                     )
                 },
@@ -283,7 +295,10 @@ fun UserUpdateDialog(
                 }
                 OutlinedTextField(
                     value = password,
-                    onValueChange = { password = it; if (it.isNotEmpty()) disablePassword = false },
+                    onValueChange = {
+                        password = it
+                        if (it.isNotEmpty()) disablePassword = false
+                    },
                     label = { Text(stringResource(R.string.onboarding_auth_soju_password)) },
                     visualTransformation = PasswordVisualTransformation(),
                     enabled = !disablePassword,
@@ -339,7 +354,10 @@ fun UserUpdateDialog(
 }
 
 @Composable
-fun TypedUserDeleteDialog(onDismiss: () -> Unit, onSubmit: (String) -> Unit) {
+fun TypedUserDeleteDialog(
+    onDismiss: () -> Unit,
+    onSubmit: (String) -> Unit,
+) {
     var username by remember { mutableStateOf("") }
     var confirmation by remember { mutableStateOf("") }
     AlertDialog(
@@ -421,13 +439,18 @@ fun TextCommandDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TriStateField(label: String, value: Boolean?, onValueChange: (Boolean?) -> Unit) {
+fun TriStateField(
+    label: String,
+    value: Boolean?,
+    onValueChange: (Boolean?) -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
-    val valueLabel = when (value) {
-        null -> stringResource(R.string.bouncer_keep_unchanged)
-        true -> stringResource(R.string.action_enable)
-        false -> stringResource(R.string.action_disable)
-    }
+    val valueLabel =
+        when (value) {
+            null -> stringResource(R.string.bouncer_keep_unchanged)
+            true -> stringResource(R.string.action_enable)
+            false -> stringResource(R.string.action_disable)
+        }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
         OutlinedTextField(
             value = valueLabel,
@@ -435,9 +458,10 @@ fun TriStateField(label: String, value: Boolean?, onValueChange: (Boolean?) -> U
             readOnly = true,
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                .fillMaxWidth(),
+            modifier =
+                Modifier
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                    .fillMaxWidth(),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             listOf<Boolean?>(null, true, false).forEach { option ->
@@ -451,7 +475,10 @@ fun TriStateField(label: String, value: Boolean?, onValueChange: (Boolean?) -> U
                             },
                         )
                     },
-                    onClick = { expanded = false; onValueChange(option) },
+                    onClick = {
+                        expanded = false
+                        onValueChange(option)
+                    },
                 )
             }
         }
@@ -459,7 +486,11 @@ fun TriStateField(label: String, value: Boolean?, onValueChange: (Boolean?) -> U
 }
 
 @Composable
-private fun FormField(value: String, onValueChange: (String) -> Unit, label: Int) {
+private fun FormField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: Int,
+) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
@@ -470,7 +501,11 @@ private fun FormField(value: String, onValueChange: (String) -> Unit, label: Int
 }
 
 @Composable
-private fun CheckboxRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun CheckboxRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked = checked, onCheckedChange = onCheckedChange)
         Text(label)

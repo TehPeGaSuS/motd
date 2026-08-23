@@ -14,7 +14,6 @@ import org.junit.Test
  * the glyph is that the only window the resolve can count on is the header's exit fade.
  */
 class ChatListSyncGlyphTest {
-
     @Test fun a_running_pass_waves_the_dots() {
         assertEquals(
             SyncBeat.SYNCING,

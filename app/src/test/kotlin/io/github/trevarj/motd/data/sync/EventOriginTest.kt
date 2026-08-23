@@ -39,21 +39,23 @@ class EventOriginTest {
         assertFalse(EventOrigin.PUSH.accepts(IrcEvent.Joined(context(), "alice", "#motd", null, null, false)))
     }
 
-    private fun chat() = IrcEvent.ChatMessage(
-        ctx = context(),
-        source = Prefix("alice"),
-        target = "#motd",
-        text = "hello",
-        kind = IrcEvent.ChatKind.PRIVMSG,
-        isSelf = false,
-        replyToMsgid = null,
-    )
+    private fun chat() =
+        IrcEvent.ChatMessage(
+            ctx = context(),
+            source = Prefix("alice"),
+            target = "#motd",
+            text = "hello",
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            isSelf = false,
+            replyToMsgid = null,
+        )
 
-    private fun context() = MessageContext(
-        msgid = "event",
-        serverTime = 1,
-        account = null,
-        batchId = null,
-        label = null,
-    )
+    private fun context() =
+        MessageContext(
+            msgid = "event",
+            serverTime = 1,
+            account = null,
+            batchId = null,
+            label = null,
+        )
 }

@@ -32,12 +32,13 @@ class SmartPresenceVisibilityTest {
     private val base = 1_700_000_000_000L
 
     @Before
-    fun setUp() = runTest {
-        db = inMemoryDb()
-        val networkId = db.networkDao().insert(network())
-        bufferId = db.bufferDao().insert(buffer(networkId, "#smart"))
-        otherBufferId = db.bufferDao().insert(buffer(networkId, "#other"))
-    }
+    fun setUp() =
+        runTest {
+            db = inMemoryDb()
+            val networkId = db.networkDao().insert(network())
+            bufferId = db.bufferDao().insert(buffer(networkId, "#smart"))
+            otherBufferId = db.bufferDao().insert(buffer(networkId, "#other"))
+        }
 
     @After
     fun tearDown() = db.close()
@@ -65,108 +66,119 @@ class SmartPresenceVisibilityTest {
     }
 
     private suspend fun visibleRows(mode: PresenceMode): List<MessageEntity> {
-        val source = db.messageDao().pagingSource(
-            messagePagingQuery(bufferId, MessageVisibilitySpec(presenceMode = mode)),
-        )
-        val page = source.load(
-            PagingSource.LoadParams.Refresh(null, 100, false),
-        ) as PagingSource.LoadResult.Page
+        val source =
+            db.messageDao().pagingSource(
+                messagePagingQuery(bufferId, MessageVisibilitySpec(presenceMode = mode)),
+            )
+        val page =
+            source.load(
+                PagingSource.LoadParams.Refresh(null, 100, false),
+            ) as PagingSource.LoadResult.Page
         return page.data
     }
 
-    private suspend fun visibleKinds(mode: PresenceMode): List<Pair<MessageKind, String>> =
-        visibleRows(mode).map { it.kind to it.sender }
+    private suspend fun visibleKinds(mode: PresenceMode): List<Pair<MessageKind, String>> = visibleRows(mode).map { it.kind to it.sender }
 
     @Test
-    fun `smart keeps presence rows for a user who spoke inside the window`() = runTest {
-        insert(MessageKind.PRIVMSG, "alice", 0)
-        insert(MessageKind.QUIT, "alice", SMART_PRESENCE_WINDOW_MS - 1)
+    fun `smart keeps presence rows for a user who spoke inside the window`() =
+        runTest {
+            insert(MessageKind.PRIVMSG, "alice", 0)
+            insert(MessageKind.QUIT, "alice", SMART_PRESENCE_WINDOW_MS - 1)
 
-        assertEquals(
-            listOf(MessageKind.QUIT to "alice", MessageKind.PRIVMSG to "alice"),
-            visibleKinds(PresenceMode.SMART),
-        )
-    }
-
-    @Test
-    fun `smart drops presence rows for a user who never spoke`() = runTest {
-        insert(MessageKind.PRIVMSG, "alice", 0)
-        insert(MessageKind.JOIN, "lurker", 1_000)
-        insert(MessageKind.PART, "lurker", 2_000)
-        insert(MessageKind.NICK, "lurker", 3_000)
-
-        assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.SMART))
-    }
+            assertEquals(
+                listOf(MessageKind.QUIT to "alice", MessageKind.PRIVMSG to "alice"),
+                visibleKinds(PresenceMode.SMART),
+            )
+        }
 
     @Test
-    fun `smart drops presence rows once the speech falls outside the window`() = runTest {
-        insert(MessageKind.PRIVMSG, "alice", 0)
-        insert(MessageKind.QUIT, "alice", SMART_PRESENCE_WINDOW_MS + 1)
+    fun `smart drops presence rows for a user who never spoke`() =
+        runTest {
+            insert(MessageKind.PRIVMSG, "alice", 0)
+            insert(MessageKind.JOIN, "lurker", 1_000)
+            insert(MessageKind.PART, "lurker", 2_000)
+            insert(MessageKind.NICK, "lurker", 3_000)
 
-        assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.SMART))
-    }
+            assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.SMART))
+        }
+
+    @Test
+    fun `smart drops presence rows once the speech falls outside the window`() =
+        runTest {
+            insert(MessageKind.PRIVMSG, "alice", 0)
+            insert(MessageKind.QUIT, "alice", SMART_PRESENCE_WINDOW_MS + 1)
+
+            assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.SMART))
+        }
 
     /** Backward-looking only: speaking after the event must not retroactively reveal it. */
     @Test
-    fun `smart ignores speech that happened after the presence row`() = runTest {
-        insert(MessageKind.JOIN, "alice", 0)
-        insert(MessageKind.PRIVMSG, "alice", 1_000)
+    fun `smart ignores speech that happened after the presence row`() =
+        runTest {
+            insert(MessageKind.JOIN, "alice", 0)
+            insert(MessageKind.PRIVMSG, "alice", 1_000)
 
-        assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.SMART))
-    }
-
-    @Test
-    fun `smart covers nick changes for a participating user`() = runTest {
-        insert(MessageKind.PRIVMSG, "alice", 0)
-        insert(MessageKind.NICK, "alice", 1_000)
-        insert(MessageKind.NICK, "quietguy", 2_000)
-
-        assertEquals(
-            listOf(MessageKind.NICK to "alice", MessageKind.PRIVMSG to "alice"),
-            visibleKinds(PresenceMode.SMART),
-        )
-    }
+            assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.SMART))
+        }
 
     @Test
-    fun `smart always keeps our own presence rows`() = runTest {
-        insert(MessageKind.JOIN, "me", 0, isSelf = true)
+    fun `smart covers nick changes for a participating user`() =
+        runTest {
+            insert(MessageKind.PRIVMSG, "alice", 0)
+            insert(MessageKind.NICK, "alice", 1_000)
+            insert(MessageKind.NICK, "quietguy", 2_000)
 
-        assertEquals(listOf(MessageKind.JOIN to "me"), visibleKinds(PresenceMode.SMART))
-    }
+            assertEquals(
+                listOf(MessageKind.NICK to "alice", MessageKind.PRIVMSG to "alice"),
+                visibleKinds(PresenceMode.SMART),
+            )
+        }
+
+    @Test
+    fun `smart always keeps our own presence rows`() =
+        runTest {
+            insert(MessageKind.JOIN, "me", 0, isSelf = true)
+
+            assertEquals(listOf(MessageKind.JOIN to "me"), visibleKinds(PresenceMode.SMART))
+        }
 
     /** Aggregates carry no single actor, so only HIDDEN may remove them. */
     @Test
-    fun `smart keeps netsplit and netjoin aggregates`() = runTest {
-        insert(MessageKind.NETSPLIT, "", 0)
-        insert(MessageKind.NETJOIN, "", 1_000)
+    fun `smart keeps netsplit and netjoin aggregates`() =
+        runTest {
+            insert(MessageKind.NETSPLIT, "", 0)
+            insert(MessageKind.NETJOIN, "", 1_000)
 
-        assertEquals(2, visibleRows(PresenceMode.SMART).size)
-        assertEquals(0, visibleRows(PresenceMode.HIDDEN).size)
-    }
-
-    @Test
-    fun `speech in another room does not reveal a presence row`() = runTest {
-        insert(MessageKind.PRIVMSG, "alice", 0, room = otherBufferId)
-        insert(MessageKind.QUIT, "alice", 1_000)
-
-        assertEquals(emptyList<Pair<MessageKind, String>>(), visibleKinds(PresenceMode.SMART))
-    }
+            assertEquals(2, visibleRows(PresenceMode.SMART).size)
+            assertEquals(0, visibleRows(PresenceMode.HIDDEN).size)
+        }
 
     @Test
-    fun `a presence row is not its own evidence of participation`() = runTest {
-        insert(MessageKind.JOIN, "alice", 0)
-        insert(MessageKind.PART, "alice", 1_000)
+    fun `speech in another room does not reveal a presence row`() =
+        runTest {
+            insert(MessageKind.PRIVMSG, "alice", 0, room = otherBufferId)
+            insert(MessageKind.QUIT, "alice", 1_000)
 
-        assertEquals(emptyList<Pair<MessageKind, String>>(), visibleKinds(PresenceMode.SMART))
-    }
+            assertEquals(emptyList<Pair<MessageKind, String>>(), visibleKinds(PresenceMode.SMART))
+        }
 
     @Test
-    fun `all shows every presence row and hidden removes them`() = runTest {
-        insert(MessageKind.PRIVMSG, "alice", 0)
-        insert(MessageKind.JOIN, "lurker", 1_000)
-        insert(MessageKind.NICK, "lurker", 2_000)
+    fun `a presence row is not its own evidence of participation`() =
+        runTest {
+            insert(MessageKind.JOIN, "alice", 0)
+            insert(MessageKind.PART, "alice", 1_000)
 
-        assertEquals(3, visibleRows(PresenceMode.ALL).size)
-        assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.HIDDEN))
-    }
+            assertEquals(emptyList<Pair<MessageKind, String>>(), visibleKinds(PresenceMode.SMART))
+        }
+
+    @Test
+    fun `all shows every presence row and hidden removes them`() =
+        runTest {
+            insert(MessageKind.PRIVMSG, "alice", 0)
+            insert(MessageKind.JOIN, "lurker", 1_000)
+            insert(MessageKind.NICK, "lurker", 2_000)
+
+            assertEquals(3, visibleRows(PresenceMode.ALL).size)
+            assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.HIDDEN))
+        }
 }

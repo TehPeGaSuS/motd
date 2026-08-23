@@ -8,9 +8,10 @@ import org.junit.Test
 
 class AudioModelsTest {
     @Test fun parsesAudioLinksByExtensionAndSkipsInlineCode() {
-        val attachments = parseAudioAttachments(
-            "listen https://cdn.example/a/show.mp3 and `https://cdn.example/a/hidden.opus` plus https://cdn.example/a/take.opus?dl=1",
-        )
+        val attachments =
+            parseAudioAttachments(
+                "listen https://cdn.example/a/show.mp3 and `https://cdn.example/a/hidden.opus` plus https://cdn.example/a/take.opus?dl=1",
+            )
 
         assertEquals(
             listOf("https://cdn.example/a/show.mp3", "https://cdn.example/a/take.opus?dl=1"),
@@ -21,9 +22,10 @@ class AudioModelsTest {
     }
 
     @Test fun parsesVoiceFallbackMetadata() {
-        val attachment = parseAudioAttachments(
-            "[voice encrypted 1:02 audio/ogg expires=72h] https://files.example/voice.motdvoice#motd-key=abc",
-        ).single()
+        val attachment =
+            parseAudioAttachments(
+                "[voice encrypted 1:02 audio/ogg expires=72h] https://files.example/voice.motdvoice#motd-key=abc",
+            ).single()
 
         assertTrue(attachment.voice)
         assertTrue(attachment.encrypted)
@@ -42,9 +44,10 @@ class AudioModelsTest {
     }
 
     @Test fun findsOnlyExtensionlessHttpsHeadCandidates() {
-        val candidates = extensionlessAudioCandidates(
-            "https://files.example/abc http://files.example/def https://files.example/a.mp3 https://files.example/path/",
-        )
+        val candidates =
+            extensionlessAudioCandidates(
+                "https://files.example/abc http://files.example/def https://files.example/a.mp3 https://files.example/path/",
+            )
 
         assertEquals(listOf("https://files.example/abc"), candidates)
         assertFalse(candidates.any { it.startsWith("http://") })

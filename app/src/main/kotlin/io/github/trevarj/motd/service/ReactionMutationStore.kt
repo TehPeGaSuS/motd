@@ -13,6 +13,7 @@ internal interface ReactionMutationStore {
     ): ReactionEntity?
 
     suspend fun upsert(reaction: ReactionEntity)
+
     suspend fun remove(reaction: ReactionEntity)
 }
 
@@ -47,14 +48,16 @@ internal fun reactionTagMessage(
     targetMsgid: String,
     emoji: String,
     kind: ReactionMutationKind,
-): IrcMessage = IrcMessage(
-    tags = mapOf(
-        (if (kind == ReactionMutationKind.REMOVE) "+draft/unreact" else "+draft/react") to emoji,
-        "+reply" to targetMsgid,
-    ),
-    command = "TAGMSG",
-    params = listOf(target),
-)
+): IrcMessage =
+    IrcMessage(
+        tags =
+            mapOf(
+                (if (kind == ReactionMutationKind.REMOVE) "+draft/unreact" else "+draft/react") to emoji,
+                "+reply" to targetMsgid,
+            ),
+        command = "TAGMSG",
+        params = listOf(target),
+    )
 
 /** Apply one optimistic mutation and restore exactly its prior local row if wire sending fails. */
 internal suspend fun mutateReaction(
@@ -63,13 +66,14 @@ internal suspend fun mutateReaction(
     reaction: ReactionEntity,
     send: suspend (ReactionMutationKind) -> Unit,
 ): ReactionMutationKind {
-    val kind = if (previous != null) {
-        store.remove(previous)
-        ReactionMutationKind.REMOVE
-    } else {
-        store.upsert(reaction)
-        ReactionMutationKind.ADD
-    }
+    val kind =
+        if (previous != null) {
+            store.remove(previous)
+            ReactionMutationKind.REMOVE
+        } else {
+            store.upsert(reaction)
+            ReactionMutationKind.ADD
+        }
     try {
         send(kind)
     } catch (failure: Throwable) {

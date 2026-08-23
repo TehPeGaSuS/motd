@@ -16,8 +16,10 @@ private const val GOLDEN_RATIO_CONJUGATE = 0.618033988749895
  * Deterministic per-nick color used for sender names and avatar backgrounds. Equivalent to the
  * CLASSIC hash palette with no theme context.
  */
-fun nickColor(nick: String, isDark: Boolean): Color =
-    paletteNickColor(nick, isDark, NickColorPalette.CLASSIC)
+fun nickColor(
+    nick: String,
+    isDark: Boolean,
+): Color = paletteNickColor(nick, isDark, NickColorPalette.CLASSIC)
 
 /**
  * Hash seed in 0..1, scattered by *multiplying* with the golden-ratio conjugate. Adjacent hashes
@@ -40,31 +42,62 @@ private fun nickHueSeed(nick: String): Double {
  * (200..280) HSL bands, so any two different bins stay clearly distinguishable; hash collisions
  * become exact shares rather than misleading near-misses.
  */
-internal val NICK_BIN_HUES = floatArrayOf(
-    0f, 16f, 32f, 48f, 66f, 85f, 110f, 140f, 170f, 195f, 220f, 248f, 275f, 297f, 318f, 340f,
-)
+internal val NICK_BIN_HUES =
+    floatArrayOf(
+        0f,
+        16f,
+        32f,
+        48f,
+        66f,
+        85f,
+        110f,
+        140f,
+        170f,
+        195f,
+        220f,
+        248f,
+        275f,
+        297f,
+        318f,
+        340f,
+    )
 internal const val NICK_BIN_COUNT = 32
 
-internal fun nickBin(nick: String): Int =
-    (nickHueSeed(nick) * NICK_BIN_COUNT).toInt().coerceIn(0, NICK_BIN_COUNT - 1)
+internal fun nickBin(nick: String): Int = (nickHueSeed(nick) * NICK_BIN_COUNT).toInt().coerceIn(0, NICK_BIN_COUNT - 1)
 
 /** Bold tier is saturated and mode-deep; soft tier is a clearly separated pastel of the same hue. */
-internal fun nickBinSaturation(palette: NickColorPalette, isDark: Boolean, bold: Boolean): Float =
+internal fun nickBinSaturation(
+    palette: NickColorPalette,
+    isDark: Boolean,
+    bold: Boolean,
+): Float =
     when (palette) {
         NickColorPalette.THEME,
-        NickColorPalette.CLASSIC -> if (isDark) (if (bold) 0.72f else 0.48f) else (if (bold) 0.75f else 0.55f)
+        NickColorPalette.CLASSIC,
+        -> if (isDark) (if (bold) 0.72f else 0.48f) else (if (bold) 0.75f else 0.55f)
+
         NickColorPalette.VIVID -> if (isDark) (if (bold) 0.85f else 0.62f) else (if (bold) 0.88f else 0.68f)
     }
 
-internal fun nickBinLightness(palette: NickColorPalette, isDark: Boolean, bold: Boolean): Float =
+internal fun nickBinLightness(
+    palette: NickColorPalette,
+    isDark: Boolean,
+    bold: Boolean,
+): Float =
     when (palette) {
         NickColorPalette.THEME,
-        NickColorPalette.CLASSIC -> if (isDark) (if (bold) 0.60f else 0.76f) else (if (bold) 0.38f else 0.52f)
+        NickColorPalette.CLASSIC,
+        -> if (isDark) (if (bold) 0.60f else 0.76f) else (if (bold) 0.38f else 0.52f)
+
         NickColorPalette.VIVID -> if (isDark) (if (bold) 0.56f else 0.72f) else (if (bold) 0.36f else 0.50f)
     }
 
 /** Bin identity for CLASSIC/VIVID: a fixed-table hue with the palette's saturation tier. */
-private fun binIdentity(nick: String, isDark: Boolean, palette: NickColorPalette): Color {
+private fun binIdentity(
+    nick: String,
+    isDark: Boolean,
+    palette: NickColorPalette,
+): Color {
     val bin = nickBin(nick)
     val bold = bin < NICK_BIN_HUES.size
     return hslColor(
@@ -85,7 +118,10 @@ private fun binIdentity(nick: String, isDark: Boolean, palette: NickColorPalette
  * budgets. Deriving the avatar from the finished text color -- which is what the hue-only sprite
  * ramp did -- discards the tier and collapses the whole app to one color per hue slot.
  */
-internal data class NickCoord(val hueSlot: Int, val tier: Int)
+internal data class NickCoord(
+    val hueSlot: Int,
+    val tier: Int,
+)
 
 internal const val NICK_HUE_SLOTS = 24
 internal const val NICK_TIER_COUNT = 3
@@ -125,10 +161,12 @@ internal data class ThemeCharacter(
 ) {
     companion object {
         /** Fallback for previews and un-provided contexts, which carry no accent list. */
-        fun neutral(isDark: Boolean): ThemeCharacter =
-            ThemeCharacter(if (isDark) 0.74f else 0.48f, 0.75f, 0f)
+        fun neutral(isDark: Boolean): ThemeCharacter = ThemeCharacter(if (isDark) 0.74f else 0.48f, 0.75f, 0f)
 
-        fun of(themeColors: List<Color>, isDark: Boolean): ThemeCharacter {
+        fun of(
+            themeColors: List<Color>,
+            isDark: Boolean,
+        ): ThemeCharacter {
             val accents = themeColors.distinct()
             if (accents.isEmpty()) return neutral(isDark)
             val lch = accents.map { it.toOklch() }
@@ -141,14 +179,20 @@ internal data class ThemeCharacter(
     }
 }
 
-private fun slotHue(character: ThemeCharacter, hueSlot: Int): Float =
-    (character.anchorHue + hueSlot * (360f / NICK_HUE_SLOTS)) % 360f
+private fun slotHue(
+    character: ThemeCharacter,
+    hueSlot: Int,
+): Float = (character.anchorHue + hueSlot * (360f / NICK_HUE_SLOTS)) % 360f
 
-private fun tierOffset(tier: Int, spread: Float): Float = when (tier) {
-    0 -> -spread
-    1 -> 0f
-    else -> spread
-}
+private fun tierOffset(
+    tier: Int,
+    spread: Float,
+): Float =
+    when (tier) {
+        0 -> -spread
+        1 -> 0f
+        else -> spread
+    }
 
 /**
  * Make an identity color readable by walking lightness toward the mode's contrast pole, re-fitting
@@ -181,7 +225,11 @@ internal fun contrastSafeIdentity(
 }
 
 /** Keep an existing color's hue and relative chroma, but make it readable. */
-private fun contrastSafe(color: Color, backgrounds: List<Color>, isDark: Boolean): Color {
+private fun contrastSafe(
+    color: Color,
+    backgrounds: List<Color>,
+    isDark: Boolean,
+): Color {
     if (backgrounds.isEmpty()) return color
     val lch = color.toOklch()
     return contrastSafeIdentity(lch.lightness, color.relativeChroma(), lch.hue, backgrounds, isDark)
@@ -208,20 +256,31 @@ class NickColorScheme(
     private val fillCache = java.util.concurrent.ConcurrentHashMap<String, Color>()
     private val textCache = java.util.concurrent.ConcurrentHashMap<String, Color>()
 
-    private fun fill(nick: String): Color = fillCache.getOrPut(nick) {
-        val override = overrides[normalizeNick(nick)]
-        if (override != null) hueFill(override, isDark, palette, themeColors)
-        else paletteNickFill(nick, isDark, palette, themeColors, identityPalette)
-    }
+    private fun fill(nick: String): Color =
+        fillCache.getOrPut(nick) {
+            val override = overrides[normalizeNick(nick)]
+            if (override != null) {
+                hueFill(override, isDark, palette, themeColors)
+            } else {
+                paletteNickFill(nick, isDark, palette, themeColors, identityPalette)
+            }
+        }
 
-    private fun text(nick: String): Color = textCache.getOrPut(nick) {
-        val override = overrides[normalizeNick(nick)]
-        if (override != null) hueColor(override, isDark, palette, themeColors, textBackgrounds)
-        else paletteNickColor(nick, isDark, palette, themeColors, textBackgrounds, identityPalette)
-    }
+    private fun text(nick: String): Color =
+        textCache.getOrPut(nick) {
+            val override = overrides[normalizeNick(nick)]
+            if (override != null) {
+                hueColor(override, isDark, palette, themeColors, textBackgrounds)
+            } else {
+                paletteNickColor(nick, isDark, palette, themeColors, textBackgrounds, identityPalette)
+            }
+        }
 
     /** Sender-name/reply-accent color; [fallback] when coloring is disabled. */
-    fun nick(nick: String, fallback: Color): Color = if (!enabled) fallback else text(nick)
+    fun nick(
+        nick: String,
+        fallback: Color,
+    ): Color = if (!enabled) fallback else text(nick)
 
     /** Avatar and channel-mark fill: override + palette always apply (never falls back to neutral). */
     fun avatar(name: String): Color = fill(name)
@@ -238,11 +297,12 @@ val LocalNickColors: ProvidableCompositionLocal<NickColorScheme> =
             palette = NickColorPalette.THEME,
             overrides = emptyMap(),
             isDark = false,
-            themeColors = listOf(
-                MotdLightScheme.primary,
-                MotdLightScheme.tertiary,
-                MotdLightScheme.secondary,
-            ),
+            themeColors =
+                listOf(
+                    MotdLightScheme.primary,
+                    MotdLightScheme.tertiary,
+                    MotdLightScheme.secondary,
+                ),
         )
     }
 
@@ -259,8 +319,11 @@ fun resolveNickColor(
 ): Color {
     if (!enabled) return fallback
     val override = overrides[normalizeNick(nick)]
-    return if (override != null) hueColor(override, isDark, palette, themeColors, backgrounds)
-    else paletteNickColor(nick, isDark, palette, themeColors, backgrounds)
+    return if (override != null) {
+        hueColor(override, isDark, palette, themeColors, backgrounds)
+    } else {
+        paletteNickColor(nick, isDark, palette, themeColors, backgrounds)
+    }
 }
 
 /**
@@ -288,8 +351,9 @@ fun paletteNickColor(
     val character = ThemeCharacter.of(themeColors, isDark)
     val coord = nickCoord(nick)
     return contrastSafeIdentity(
-        lightness = (character.lightness + tierOffset(coord.tier, NICK_TEXT_TIER_SPREAD))
-            .coerceIn(0.20f, 0.95f),
+        lightness =
+            (character.lightness + tierOffset(coord.tier, NICK_TEXT_TIER_SPREAD))
+                .coerceIn(0.20f, 0.95f),
         relativeChroma = maxOf(NICK_TEXT_CHROMA_FLOOR, character.relativeChroma),
         hue = slotHue(character, coord.hueSlot),
         backgrounds = backgrounds,
@@ -298,10 +362,15 @@ fun paletteNickColor(
 }
 
 /** The theme's own color for this name, or null when the theme publishes no palette. */
-private fun themeAccent(nick: String, identityPalette: List<Color>): Color? {
+private fun themeAccent(
+    nick: String,
+    identityPalette: List<Color>,
+): Color? {
     if (identityPalette.isEmpty()) return null
-    val index = (nickHueSeed(nick) * identityPalette.size).toInt()
-        .coerceIn(0, identityPalette.lastIndex)
+    val index =
+        (nickHueSeed(nick) * identityPalette.size)
+            .toInt()
+            .coerceIn(0, identityPalette.lastIndex)
     return identityPalette[index]
 }
 
@@ -324,8 +393,9 @@ fun paletteNickFill(
     val character = ThemeCharacter.of(themeColors, isDark)
     val coord = nickCoord(nick)
     return oklchColorAt(
-        lightness = (NICK_FILL_LIGHTNESS + tierOffset(coord.tier, NICK_FILL_TIER_SPREAD))
-            .coerceIn(0.20f, 0.90f),
+        lightness =
+            (NICK_FILL_LIGHTNESS + tierOffset(coord.tier, NICK_FILL_TIER_SPREAD))
+                .coerceIn(0.20f, 0.90f),
         relativeChroma = maxOf(NICK_FILL_CHROMA_FLOOR, character.relativeChroma),
         hue = slotHue(character, coord.hueSlot),
     )
@@ -377,17 +447,29 @@ fun hueFill(
 }
 
 // Continuous saturation/lightness for manual hue overrides on the fixed-table palettes.
-private fun paletteSaturation(palette: NickColorPalette, isDark: Boolean): Float = when (palette) {
-    NickColorPalette.THEME,
-    NickColorPalette.CLASSIC -> if (isDark) 0.55f else 0.65f
-    NickColorPalette.VIVID -> if (isDark) 0.80f else 0.85f
-}
+private fun paletteSaturation(
+    palette: NickColorPalette,
+    isDark: Boolean,
+): Float =
+    when (palette) {
+        NickColorPalette.THEME,
+        NickColorPalette.CLASSIC,
+        -> if (isDark) 0.55f else 0.65f
 
-private fun paletteLightness(palette: NickColorPalette, isDark: Boolean): Float = when (palette) {
-    NickColorPalette.THEME,
-    NickColorPalette.CLASSIC -> if (isDark) 0.68f else 0.42f
-    NickColorPalette.VIVID -> if (isDark) 0.62f else 0.38f
-}
+        NickColorPalette.VIVID -> if (isDark) 0.80f else 0.85f
+    }
+
+private fun paletteLightness(
+    palette: NickColorPalette,
+    isDark: Boolean,
+): Float =
+    when (palette) {
+        NickColorPalette.THEME,
+        NickColorPalette.CLASSIC,
+        -> if (isDark) 0.68f else 0.42f
+
+        NickColorPalette.VIVID -> if (isDark) 0.62f else 0.38f
+    }
 
 /**
  * Pixel-art ramp for a fill color: its own lightness stepped down and up at constant hue. Nothing
@@ -395,7 +477,11 @@ private fun paletteLightness(palette: NickColorPalette, isDark: Boolean): Float 
  * Shared by the Compose sprite, the channel badge, and the notification bitmap so all three agree.
  */
 @Immutable
-internal data class IdentityRamp(val shade: Color, val mid: Color, val highlight: Color)
+internal data class IdentityRamp(
+    val shade: Color,
+    val mid: Color,
+    val highlight: Color,
+)
 
 internal fun identityRamp(fill: Color): IdentityRamp {
     val lch = fill.toOklch()
@@ -407,18 +493,23 @@ internal fun identityRamp(fill: Color): IdentityRamp {
 }
 
 /** HSL -> RGB Color (h in degrees, s/l in 0..1). */
-internal fun hslColor(h: Float, s: Float, l: Float): Color {
+internal fun hslColor(
+    h: Float,
+    s: Float,
+    l: Float,
+): Color {
     val c = (1f - abs(2f * l - 1f)) * s
     val hp = h / 60f
     val x = c * (1f - abs(hp % 2f - 1f))
-    val (r1, g1, b1) = when {
-        hp < 1f -> Triple(c, x, 0f)
-        hp < 2f -> Triple(x, c, 0f)
-        hp < 3f -> Triple(0f, c, x)
-        hp < 4f -> Triple(0f, x, c)
-        hp < 5f -> Triple(x, 0f, c)
-        else -> Triple(c, 0f, x)
-    }
+    val (r1, g1, b1) =
+        when {
+            hp < 1f -> Triple(c, x, 0f)
+            hp < 2f -> Triple(x, c, 0f)
+            hp < 3f -> Triple(0f, c, x)
+            hp < 4f -> Triple(0f, x, c)
+            hp < 5f -> Triple(x, 0f, c)
+            else -> Triple(c, 0f, x)
+        }
     val m = l - c / 2f
     return Color(r1 + m, g1 + m, b1 + m)
 }

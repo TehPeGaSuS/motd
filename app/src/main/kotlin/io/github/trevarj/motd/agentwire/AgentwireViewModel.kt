@@ -22,8 +22,6 @@ import io.github.trevarj.motd.irc.client.canSendClientTag
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.nav.ChatRoute
-import java.util.UUID
-import javax.inject.Inject
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,561 +37,685 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.util.UUID
+import javax.inject.Inject
 
 private const val AGENTWIRE_INITIAL_HISTORY_SIZE = 20
 private const val AGENTWIRE_HISTORY_PAGE_SIZE = 50
 
 @HiltViewModel
-class AgentwireViewModel @Inject constructor(
-    savedStateHandle: SavedStateHandle,
-    private val prefs: AgentwirePrefs,
-    private val buffers: BufferRepository,
-    private val connections: ConnectionManager,
-    private val diagnostics: DiagnosticLogger,
-    clock: AppClock,
-) : ViewModel() {
-    private val route = savedStateHandle.toRoute<ChatRoute>()
-    private val instance = UUID.randomUUID().toString()
-    private val session = AgentwireSessionOrchestrator()
-    private val budget = AgentwireSyncBudget(clock)
-    private val _state = MutableStateFlow(AgentwireUiState())
-    val state: StateFlow<AgentwireUiState> = _state.asStateFlow()
-    private var sessionJob: Job? = null
-    private var syncJob: Job? = null
-    private var client: IrcClient? = null
-    private var startedOnce = false
-    private var sendFailureStage = "transport"
-    private var sendErrorClass: String? = null
-    private var untrustedRecorded = false
-    private var joinTarget: Pair<Long, String>? = null
-    private val autoReviewConfirmedSessions = HashSet<String>()
+class AgentwireViewModel
+    @Inject
+    constructor(
+        savedStateHandle: SavedStateHandle,
+        private val prefs: AgentwirePrefs,
+        private val buffers: BufferRepository,
+        private val connections: ConnectionManager,
+        private val diagnostics: DiagnosticLogger,
+        clock: AppClock,
+    ) : ViewModel() {
+        private val route = savedStateHandle.toRoute<ChatRoute>()
+        private val instance = UUID.randomUUID().toString()
+        private val session = AgentwireSessionOrchestrator()
+        private val budget = AgentwireSyncBudget(clock)
+        private val _state = MutableStateFlow(AgentwireUiState())
+        val state: StateFlow<AgentwireUiState> = _state.asStateFlow()
+        private var sessionJob: Job? = null
+        private var syncJob: Job? = null
+        private var client: IrcClient? = null
+        private var startedOnce = false
+        private var sendFailureStage = "transport"
+        private var sendErrorClass: String? = null
+        private var untrustedRecorded = false
+        private var joinTarget: Pair<Long, String>? = null
+        private val autoReviewConfirmedSessions = HashSet<String>()
 
-    init {
-        viewModelScope.launch {
-            combine(
-                prefs.enabled,
-                buffers.observeBuffer(route.bufferId),
-                connections.connectionStates,
-            ) { enabled, buffer, states -> Triple(enabled, buffer, buffer?.let { states[it.networkId] }) }
-                .collect { (enabled, buffer, connection) ->
-                    val parse = buffer?.topic?.let(::parseAgentwireTopicResult)
-                    val topic = (parse as? AgentwireTopicParse.Valid)?.topic
-                    // Only a marker that is present and broken is reportable. A channel with no
-                    // marker is an ordinary channel, not a failure, and must stay silent.
-                    val defect = (parse as? AgentwireTopicParse.Invalid)?.takeIf { enabled }
-                    val ready = connection as? IrcClientState.Ready
-                    val missing = ready?.let {
-                        agentwireMissingCaps(it.caps) + if (canSendClientTag(it.caps, it.isupport, AGENTWIRE_TAG)) {
-                            emptySet()
-                        } else {
-                            setOf("CLIENTTAGDENY:$AGENTWIRE_TAG")
-                        }
-                    }.orEmpty()
-                    val gate = when {
-                        !enabled || buffer?.type != BufferType.CHANNEL -> AgentwireGate.ORDINARY
-                        defect != null -> AgentwireGate.INVALID_TOPIC
-                        topic == null -> AgentwireGate.ORDINARY
-                        ready != null && missing.isNotEmpty() -> AgentwireGate.BLOCKED
-                        else -> AgentwireGate.ACTIVE
-                    }
-                    // Every gate transition is recorded, because the two outcomes that render as
-                    // an ordinary channel leave no other trace of having been attempted.
-                    if (gate != _state.value.gate) {
-                        diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "gate") {
-                            buildMap {
-                                put("channel_fp", diagnostics.fingerprint(buffer?.displayName))
-                                put("gate", gate.name.lowercase())
-                                defect?.let {
-                                    put("topic_defect", it.defect.name.lowercase())
-                                    if (it.fields.isNotEmpty()) put("topic_fields", it.fields.joinToString(","))
+        init {
+            viewModelScope.launch {
+                combine(
+                    prefs.enabled,
+                    buffers.observeBuffer(route.bufferId),
+                    connections.connectionStates,
+                ) { enabled, buffer, states -> Triple(enabled, buffer, buffer?.let { states[it.networkId] }) }
+                    .collect { (enabled, buffer, connection) ->
+                        val parse = buffer?.topic?.let(::parseAgentwireTopicResult)
+                        val topic = (parse as? AgentwireTopicParse.Valid)?.topic
+                        // Only a marker that is present and broken is reportable. A channel with no
+                        // marker is an ordinary channel, not a failure, and must stay silent.
+                        val defect = (parse as? AgentwireTopicParse.Invalid)?.takeIf { enabled }
+                        val ready = connection as? IrcClientState.Ready
+                        val missing =
+                            ready
+                                ?.let {
+                                    agentwireMissingCaps(it.caps) +
+                                        if (canSendClientTag(it.caps, it.isupport, AGENTWIRE_TAG)) {
+                                            emptySet()
+                                        } else {
+                                            setOf("CLIENTTAGDENY:$AGENTWIRE_TAG")
+                                        }
+                                }.orEmpty()
+                        val gate =
+                            when {
+                                !enabled || buffer?.type != BufferType.CHANNEL -> AgentwireGate.ORDINARY
+                                defect != null -> AgentwireGate.INVALID_TOPIC
+                                topic == null -> AgentwireGate.ORDINARY
+                                ready != null && missing.isNotEmpty() -> AgentwireGate.BLOCKED
+                                else -> AgentwireGate.ACTIVE
+                            }
+                        // Every gate transition is recorded, because the two outcomes that render as
+                        // an ordinary channel leave no other trace of having been attempted.
+                        if (gate != _state.value.gate) {
+                            diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "gate") {
+                                buildMap {
+                                    put("channel_fp", diagnostics.fingerprint(buffer?.displayName))
+                                    put("gate", gate.name.lowercase())
+                                    defect?.let {
+                                        put("topic_defect", it.defect.name.lowercase())
+                                        if (it.fields.isNotEmpty()) put("topic_fields", it.fields.joinToString(","))
+                                    }
+                                    // A usable marker the user cannot see because the lab is off is
+                                    // the last silent outcome; naming it makes "nothing happened"
+                                    // answerable from a diagnostic export alone.
+                                    if (!enabled && parse is AgentwireTopicParse.Valid) put("lab_disabled", true)
                                 }
-                                // A usable marker the user cannot see because the lab is off is
-                                // the last silent outcome; naming it makes "nothing happened"
-                                // answerable from a diagnostic export alone.
-                                if (!enabled && parse is AgentwireTopicParse.Valid) put("lab_disabled", true)
+                            }
+                        }
+                        val identityChanged =
+                            _state.value.channel != buffer?.displayName.orEmpty() ||
+                                _state.value.controllerAccount != topic?.account ||
+                                _state.value.backendAccount != topic?.agentAccount
+                        _state.update {
+                            it.copy(
+                                gate = gate,
+                                channel = buffer?.displayName.orEmpty(),
+                                title = topic?.title ?: buffer?.displayName ?: "Agentwire",
+                                controllerAccount = topic?.account,
+                                backendAccount = topic?.agentAccount,
+                                backend = topic?.backend,
+                                topicDefect = defect,
+                                missingCaps = missing,
+                                connected = ready != null,
+                            )
+                        }
+                        joinTarget = buffer?.let { it.networkId to it.name }
+                        val nextClient = buffer?.let { connections.clientFor(it.networkId) }
+                        when {
+                            gate != AgentwireGate.ACTIVE || ready == null -> {
+                                stopSession(disconnected = client != null)
+                                _state.update { it.copy(sync = AgentwireSyncState.Idle) }
+                            }
+
+                            // Nothing the agent sends can reach a channel we are not in, so start no
+                            // session and send nothing until the membership exists.
+                            buffer?.joined != true -> {
+                                stopSession(disconnected = client != null)
+                                _state.update { it.copy(sync = AgentwireSyncState.NotJoined) }
+                            }
+
+                            nextClient == null -> {
+                                Unit
+                            }
+
+                            // A new client instance or a new agent identity always re-arms a full
+                            // budget; anything else leaves a terminal failure sticky.
+                            nextClient !== client || identityChanged -> {
+                                startSession(nextClient, syncTrigger(identityChanged))
+                            }
+
+                            else -> {
+                                Unit
                             }
                         }
                     }
-                    val identityChanged = _state.value.channel != buffer?.displayName.orEmpty() ||
-                        _state.value.controllerAccount != topic?.account ||
-                        _state.value.backendAccount != topic?.agentAccount
-                    _state.update {
-                        it.copy(
-                            gate = gate,
-                            channel = buffer?.displayName.orEmpty(),
-                            title = topic?.title ?: buffer?.displayName ?: "Agentwire",
-                            controllerAccount = topic?.account,
-                            backendAccount = topic?.agentAccount,
-                            backend = topic?.backend,
-                            topicDefect = defect,
-                            missingCaps = missing,
-                            connected = ready != null,
-                        )
-                    }
-                    joinTarget = buffer?.let { it.networkId to it.name }
-                    val nextClient = buffer?.let { connections.clientFor(it.networkId) }
-                    when {
-                        gate != AgentwireGate.ACTIVE || ready == null -> {
-                            stopSession(disconnected = client != null)
-                            _state.update { it.copy(sync = AgentwireSyncState.Idle) }
-                        }
-                        // Nothing the agent sends can reach a channel we are not in, so start no
-                        // session and send nothing until the membership exists.
-                        buffer?.joined != true -> {
-                            stopSession(disconnected = client != null)
-                            _state.update { it.copy(sync = AgentwireSyncState.NotJoined) }
-                        }
-                        nextClient == null -> Unit
-                        // A new client instance or a new agent identity always re-arms a full
-                        // budget; anything else leaves a terminal failure sticky.
-                        nextClient !== client || identityChanged -> startSession(nextClient, syncTrigger(identityChanged))
-                        else -> Unit
-                    }
+            }
+        }
+
+        fun viewTranscript() = _state.update { it.copy(transcriptOverride = true) }
+
+        fun returnToHarness() = _state.update { it.copy(transcriptOverride = false) }
+
+        fun clearError() = _state.update { it.copy(error = null) }
+
+        /**
+         * Joins the channel the agent publishes through. Delegated through [ConnectionManager]: the
+         * ViewModel never talks to a connection directly. The combine collector starts the session on
+         * its own once the join is confirmed.
+         */
+        fun joinAgentwireChannel() {
+            val (networkId, channel) = joinTarget ?: return
+            viewModelScope.launch {
+                runCatching { connections.joinChannel(networkId, channel) }.onFailure { failure ->
+                    _state.update { it.copy(error = failure.message ?: "Unable to join $channel") }
+                }
+            }
+        }
+
+        /** User-visible re-entry into sync: re-arms a full budget over the live client. */
+        fun retrySync() {
+            val active = client
+            if (active == null) {
+                // Nothing to talk to yet; the gate collector re-arms once the connection returns.
+                _state.update { it.copy(sync = AgentwireSyncState.Idle) }
+            } else {
+                startSession(active, AgentwireSyncTrigger.RETRY)
+            }
+        }
+
+        fun submit(content: String) {
+            if (content.isBlank()) return
+            val kind = if (_state.value.busy && _state.value.settings["delivery"] == "steer") "turn.steer" else "turn.prompt"
+            val data = buildJsonObject { put("content", content) }
+            val localId = UUID.randomUUID().toString()
+            _state.update { state ->
+                state.copy(
+                    timeline =
+                        state.timeline +
+                            AgentwireTimelineItem(
+                                localId,
+                                "user.prompt",
+                                System.currentTimeMillis(),
+                                state.activeSid,
+                                state.currentTid,
+                                if (kind == "turn.steer") "Steer" else "You",
+                                content,
+                                backendItemId = localId,
+                            ),
+                )
+            }
+            sendAction(kind, data = data, sid = _state.value.activeSid, id = localId)
+        }
+
+        fun cancelTurn() = sendAction("turn.cancel", sid = _state.value.activeSid, tid = _state.value.currentTid)
+
+        fun clearQueue() = sendAction("queue.clear", sid = _state.value.activeSid)
+
+        fun editQueue(
+            iid: String,
+            content: String,
+        ) = sendAction(
+            "queue.edit",
+            data = buildJsonObject { put("content", content) },
+            sid = _state.value.activeSid,
+            iid = iid,
+        )
+
+        fun moveQueue(
+            iid: String,
+            position: Int,
+        ) = sendAction(
+            "queue.move",
+            data = buildJsonObject { put("position", position) },
+            sid = _state.value.activeSid,
+            iid = iid,
+        )
+
+        fun deleteQueue(iid: String) = sendAction("queue.delete", sid = _state.value.activeSid, iid = iid)
+
+        fun listWorkspaces(parent: String? = null) =
+            sendAction(
+                "workspace.list.request",
+                data = parent?.let { buildJsonObject { put("parent", it) } },
+            )
+
+        fun listSessions(
+            cwd: String? = null,
+            cursor: String? = null,
+            live: Boolean = cwd == null,
+        ) = sendAction(
+            "session.list.request",
+            data =
+                buildJsonObject {
+                    put("scope", if (live) "live" else "workspace")
+                    cwd?.let { put("cwd", it) }
+                    cursor?.let { put("cursor", it) }
+                },
+        )
+
+        fun refreshSessionBrowser() {
+            _state.update {
+                it.copy(
+                    workspaceChildren = emptyMap(),
+                    liveSessions = emptyList(),
+                    workspaceSessions = emptyMap(),
+                    loadedSessionDirectories = emptySet(),
+                )
+            }
+            listWorkspaces()
+            listSessions(live = true)
+        }
+
+        fun expandWorkspace(
+            path: String,
+            hasChildren: Boolean = true,
+        ) {
+            if (hasChildren) listWorkspaces(path)
+            listSessions(path, live = false)
+        }
+
+        fun createSession(cwd: String) = sendAction("session.create", buildJsonObject { put("cwd", cwd) })
+
+        fun attachSession(
+            sid: String,
+            cwd: String? = null,
+        ) = sendAction(
+            "session.attach",
+            cwd?.let { buildJsonObject { put("cwd", it) } },
+            sid = sid,
+        )
+
+        fun detachSession() = sendAction("session.detach", sid = _state.value.activeSid)
+
+        fun renameSession(
+            sid: String,
+            title: String,
+        ) = sendAction(
+            "session.rename",
+            buildJsonObject { put("title", title) },
+            sid = sid,
+        )
+
+        fun forkSession(sid: String) = sendAction("session.fork", sid = sid)
+
+        fun archiveSession(
+            sid: String,
+            archived: Boolean,
+        ) = sendAction(
+            if (archived) "session.archive" else "session.unarchive",
+            sid = sid,
+        )
+
+        fun updateSettings(values: Map<String, String>) =
+            sendAction(
+                "settings.update",
+                JsonObject(values.mapValues { JsonPrimitive(it.value) }),
+                sid = _state.value.activeSid,
+            )
+
+        fun enableAutoReview() {
+            _state.value.activeSid?.let(autoReviewConfirmedSessions::add)
+            _state.update { it.copy(autoReviewConfirmed = true) }
+            updateSettings(mapOf("approvalReviewer" to "auto_review"))
+        }
+
+        fun disableAutoReview() {
+            _state.value.activeSid?.let(autoReviewConfirmedSessions::remove)
+            _state.update { it.copy(autoReviewConfirmed = false) }
+            updateSettings(mapOf("approvalReviewer" to "manual"))
+        }
+
+        fun respondApproval(
+            rid: String,
+            allow: Boolean,
+        ) = sendAction(
+            "request.respond",
+            buildJsonObject { put("allow", allow) },
+            sid = _state.value.activeSid,
+            rid = rid,
+        )
+
+        fun respondQuestions(
+            rid: String,
+            answers: List<JsonElement>,
+        ) = sendAction(
+            "request.respond",
+            buildJsonObject { put("answers", JsonArray(answers)) },
+            sid = _state.value.activeSid,
+            rid = rid,
+        )
+
+        fun skipRequest(rid: String) = sendAction("request.skip", sid = _state.value.activeSid, rid = rid)
+
+        fun loadOlderHistory() {
+            viewModelScope.launch { requestHistory(initial = false) }
+        }
+
+        private fun syncTrigger(identityChanged: Boolean): AgentwireSyncTrigger =
+            when {
+                _state.value.sync is AgentwireSyncState.NotJoined -> AgentwireSyncTrigger.REJOIN
+                !startedOnce -> AgentwireSyncTrigger.OPEN
+                identityChanged -> AgentwireSyncTrigger.IDENTITY
+                else -> AgentwireSyncTrigger.OPEN
+            }
+
+        private fun startSession(
+            next: IrcClient,
+            trigger: AgentwireSyncTrigger,
+        ) {
+            stopSession(disconnected = client != null)
+            client = next
+            startedOnce = true
+            session.reset()
+            // Only a user-visible entry anchors the deadline; internal resyncs reuse it.
+            budget.anchor()
+            untrustedRecorded = false
+            recordSyncStarted(trigger)
+            _state.value =
+                session
+                    .beginSync(_state.value)
+                    .copy(sync = AgentwireSyncState.Syncing(attempt = 0, startedAtMs = budget.startedAtMs))
+            sessionJob =
+                viewModelScope.launch {
+                    launch { next.sequencedEvents.collect(::ingest) }
+                    // Let the hot-flow collector attach before sync.request is emitted.
+                    delay(1)
+                    startSyncRetry()
                 }
         }
-    }
 
-    fun viewTranscript() = _state.update { it.copy(transcriptOverride = true) }
-    fun returnToHarness() = _state.update { it.copy(transcriptOverride = false) }
-    fun clearError() = _state.update { it.copy(error = null) }
+        private fun startSyncRetry() {
+            syncJob?.cancel()
+            syncJob =
+                viewModelScope.launch {
+                    session.retryUntilReady(
+                        budget = budget,
+                        isReady = { _state.value.sync !is AgentwireSyncState.Syncing },
+                        issue = ::sendSyncRequest,
+                        onAttempt = { attempt ->
+                            _state.update {
+                                if (it.sync is AgentwireSyncState.Syncing) {
+                                    it.copy(sync = AgentwireSyncState.Syncing(attempt, budget.startedAtMs))
+                                } else {
+                                    it
+                                }
+                            }
+                        },
+                        onTimeout = {
+                            failSync(AgentwireSyncFailure.Timeout(budget.attempts, session.ignoreCounters()))
+                        },
+                        onSendFailed = {
+                            failSync(AgentwireSyncFailure.SendFailed(sendFailureDetail(sendFailureStage)))
+                        },
+                    )
+                }
+        }
 
-    /**
-     * Joins the channel the agent publishes through. Delegated through [ConnectionManager]: the
-     * ViewModel never talks to a connection directly. The combine collector starts the session on
-     * its own once the join is confirmed.
-     */
-    fun joinAgentwireChannel() {
-        val (networkId, channel) = joinTarget ?: return
-        viewModelScope.launch {
-            runCatching { connections.joinChannel(networkId, channel) }.onFailure { failure ->
-                _state.update { it.copy(error = failure.message ?: "Unable to join $channel") }
+        private suspend fun sendSyncRequest(id: String): Boolean {
+            sendErrorClass = null
+            val sent = sendActionInternal("sync.request", id = id) != null
+            if (!sent) {
+                sendFailureStage = syncSendStage()
+                diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "send_failed") {
+                    mapOf(
+                        "channel_fp" to diagnostics.fingerprint(_state.value.channel),
+                        "stage" to sendFailureStage,
+                        "error_class" to (sendErrorClass ?: "none"),
+                    )
+                }
+            }
+            return sent
+        }
+
+        /** Classifies why the write never reached the wire, for both the copy and the journal. */
+        private fun syncSendStage(): String {
+            val ready = client?.state?.value as? IrcClientState.Ready ?: return "not_ready"
+            return when {
+                agentwireMissingCaps(ready.caps).isNotEmpty() -> "caps"
+                !canSendClientTag(ready.caps, ready.isupport, AGENTWIRE_TAG) -> "client_tag"
+                else -> "transport"
             }
         }
-    }
 
-    /** User-visible re-entry into sync: re-arms a full budget over the live client. */
-    fun retrySync() {
-        val active = client
-        if (active == null) {
-            // Nothing to talk to yet; the gate collector re-arms once the connection returns.
-            _state.update { it.copy(sync = AgentwireSyncState.Idle) }
-        } else {
-            startSession(active, AgentwireSyncTrigger.RETRY)
+        /**
+         * Records the terminal phase. Called from inside the retry job, which returns immediately
+         * afterwards, so it must not cancel that job from underneath itself.
+         */
+        private fun failSync(failure: AgentwireSyncFailure) {
+            recordSyncFailed(failure)
+            _state.update { it.copy(sync = AgentwireSyncState.Failed(failure)) }
         }
-    }
 
-    fun submit(content: String) {
-        if (content.isBlank()) return
-        val kind = if (_state.value.busy && _state.value.settings["delivery"] == "steer") "turn.steer" else "turn.prompt"
-        val data = buildJsonObject { put("content", content) }
-        val localId = UUID.randomUUID().toString()
-        _state.update { state ->
-            state.copy(timeline = state.timeline + AgentwireTimelineItem(
-                localId, "user.prompt", System.currentTimeMillis(), state.activeSid, state.currentTid,
-                if (kind == "turn.steer") "Steer" else "You", content,
-                backendItemId = localId,
-            ))
+        private fun recordSyncStarted(trigger: AgentwireSyncTrigger) {
+            diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "sync_started") {
+                mapOf(
+                    "channel_fp" to diagnostics.fingerprint(_state.value.channel),
+                    "attempt" to budget.attempts + 1,
+                    "trigger" to trigger.wireName,
+                )
+            }
         }
-        sendAction(kind, data = data, sid = _state.value.activeSid, id = localId)
-    }
 
-    fun cancelTurn() = sendAction("turn.cancel", sid = _state.value.activeSid, tid = _state.value.currentTid)
-    fun clearQueue() = sendAction("queue.clear", sid = _state.value.activeSid)
-    fun editQueue(iid: String, content: String) = sendAction(
-        "queue.edit", data = buildJsonObject { put("content", content) }, sid = _state.value.activeSid, iid = iid,
-    )
-    fun moveQueue(iid: String, position: Int) = sendAction(
-        "queue.move", data = buildJsonObject { put("position", position) }, sid = _state.value.activeSid, iid = iid,
-    )
-    fun deleteQueue(iid: String) = sendAction("queue.delete", sid = _state.value.activeSid, iid = iid)
-    fun listWorkspaces(parent: String? = null) = sendAction(
-        "workspace.list.request", data = parent?.let { buildJsonObject { put("parent", it) } },
-    )
-    fun listSessions(
-        cwd: String? = null,
-        cursor: String? = null,
-        live: Boolean = cwd == null,
-    ) = sendAction(
-        "session.list.request", data = buildJsonObject {
-            put("scope", if (live) "live" else "workspace")
-            cwd?.let { put("cwd", it) }
-            cursor?.let { put("cursor", it) }
-        },
-    )
-    fun refreshSessionBrowser() {
-        _state.update {
-            it.copy(
-                workspaceChildren = emptyMap(),
-                liveSessions = emptyList(),
-                workspaceSessions = emptyMap(),
-                loadedSessionDirectories = emptySet(),
-            )
+        private fun recordSyncCompleted() {
+            diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "sync_completed") {
+                mapOf(
+                    "channel_fp" to diagnostics.fingerprint(_state.value.channel),
+                    "attempts" to budget.attempts,
+                    "elapsed_ms" to budget.elapsedMs(),
+                )
+            }
         }
-        listWorkspaces()
-        listSessions(live = true)
-    }
-    fun expandWorkspace(path: String, hasChildren: Boolean = true) {
-        if (hasChildren) listWorkspaces(path)
-        listSessions(path, live = false)
-    }
-    fun createSession(cwd: String) = sendAction("session.create", buildJsonObject { put("cwd", cwd) })
-    fun attachSession(sid: String, cwd: String? = null) = sendAction(
-        "session.attach", cwd?.let { buildJsonObject { put("cwd", it) } }, sid = sid,
-    )
-    fun detachSession() = sendAction("session.detach", sid = _state.value.activeSid)
-    fun renameSession(sid: String, title: String) = sendAction(
-        "session.rename", buildJsonObject { put("title", title) }, sid = sid,
-    )
-    fun forkSession(sid: String) = sendAction("session.fork", sid = sid)
-    fun archiveSession(sid: String, archived: Boolean) = sendAction(
-        if (archived) "session.archive" else "session.unarchive", sid = sid,
-    )
-    fun updateSettings(values: Map<String, String>) = sendAction(
-        "settings.update", JsonObject(values.mapValues { JsonPrimitive(it.value) }), sid = _state.value.activeSid,
-    )
-    fun enableAutoReview() {
-        _state.value.activeSid?.let(autoReviewConfirmedSessions::add)
-        _state.update { it.copy(autoReviewConfirmed = true) }
-        updateSettings(mapOf("approvalReviewer" to "auto_review"))
-    }
-    fun disableAutoReview() {
-        _state.value.activeSid?.let(autoReviewConfirmedSessions::remove)
-        _state.update { it.copy(autoReviewConfirmed = false) }
-        updateSettings(mapOf("approvalReviewer" to "manual"))
-    }
-    fun respondApproval(rid: String, allow: Boolean) = sendAction(
-        "request.respond", buildJsonObject { put("allow", allow) }, sid = _state.value.activeSid, rid = rid,
-    )
-    fun respondQuestions(rid: String, answers: List<JsonElement>) = sendAction(
-        "request.respond", buildJsonObject { put("answers", JsonArray(answers)) }, sid = _state.value.activeSid, rid = rid,
-    )
-    fun skipRequest(rid: String) = sendAction("request.skip", sid = _state.value.activeSid, rid = rid)
-    fun loadOlderHistory() {
-        viewModelScope.launch { requestHistory(initial = false) }
-    }
 
-    private fun syncTrigger(identityChanged: Boolean): AgentwireSyncTrigger = when {
-        _state.value.sync is AgentwireSyncState.NotJoined -> AgentwireSyncTrigger.REJOIN
-        !startedOnce -> AgentwireSyncTrigger.OPEN
-        identityChanged -> AgentwireSyncTrigger.IDENTITY
-        else -> AgentwireSyncTrigger.OPEN
-    }
-
-    private fun startSession(next: IrcClient, trigger: AgentwireSyncTrigger) {
-        stopSession(disconnected = client != null)
-        client = next
-        startedOnce = true
-        session.reset()
-        // Only a user-visible entry anchors the deadline; internal resyncs reuse it.
-        budget.anchor()
-        untrustedRecorded = false
-        recordSyncStarted(trigger)
-        _state.value = session.beginSync(_state.value)
-            .copy(sync = AgentwireSyncState.Syncing(attempt = 0, startedAtMs = budget.startedAtMs))
-        sessionJob = viewModelScope.launch {
-            launch { next.sequencedEvents.collect(::ingest) }
-            // Let the hot-flow collector attach before sync.request is emitted.
-            delay(1)
-            startSyncRetry()
+        private fun recordSyncFailed(failure: AgentwireSyncFailure) {
+            diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "sync_failed") {
+                // `reason` is a redacted field name in the journal, hence `end_reason`/`detail_class`.
+                buildMap<String, Any?> {
+                    put("channel_fp", diagnostics.fingerprint(_state.value.channel))
+                    put("end_reason", failure.endReason())
+                    put("attempts", budget.attempts)
+                    put("elapsed_ms", budget.elapsedMs())
+                    put("detail_class", detailClass(failure))
+                    // One field per non-zero ignore counter: the evidence for a silent handshake.
+                    putAll(session.ignoreCounters().diagnosticFields())
+                }
+            }
         }
-    }
 
-    private fun startSyncRetry() {
-        syncJob?.cancel()
-        syncJob = viewModelScope.launch {
-            session.retryUntilReady(
-                budget = budget,
-                isReady = { _state.value.sync !is AgentwireSyncState.Syncing },
-                issue = ::sendSyncRequest,
-                onAttempt = { attempt ->
-                    _state.update {
-                        if (it.sync is AgentwireSyncState.Syncing) {
-                            it.copy(sync = AgentwireSyncState.Syncing(attempt, budget.startedAtMs))
-                        } else {
-                            it
-                        }
+        /** Once per handshake: the account is fingerprinted, and the running tally lands in sync_failed. */
+        private fun recordUntrustedEvents(account: String) {
+            if (untrustedRecorded) return
+            untrustedRecorded = true
+            diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "untrusted_events") {
+                mapOf(
+                    "channel_fp" to diagnostics.fingerprint(_state.value.channel),
+                    "account_fp" to diagnostics.fingerprint(account),
+                    "count" to (session.ignoreCounters().counts[IgnoreReason.UNTRUSTED_ACCOUNT] ?: 1),
+                )
+            }
+        }
+
+        /** Never the message itself: only how the handshake ended. */
+        private fun detailClass(failure: AgentwireSyncFailure): String =
+            when (failure) {
+                is AgentwireSyncFailure.Timeout -> "no_reply"
+                is AgentwireSyncFailure.Rejected -> "bridge_reply"
+                is AgentwireSyncFailure.ProtocolMismatch -> "envelope_validation"
+                is AgentwireSyncFailure.SendFailed -> sendFailureStage
+            }
+
+        /** Ends the retry job from outside it, after a definitive wire answer. */
+        private fun stopSyncRetry() {
+            syncJob?.cancel()
+            syncJob = null
+        }
+
+        private fun stopSession(disconnected: Boolean) {
+            sessionJob?.cancel()
+            sessionJob = null
+            syncJob?.cancel()
+            syncJob = null
+            client = null
+            session.reset()
+            if (disconnected) {
+                val uncertain =
+                    _state.value.actionStatus.mapValues { (_, status) ->
+                        if (status == "sent" || status == "accepted") "outcome unknown" else status
                     }
-                },
-                onTimeout = {
-                    failSync(AgentwireSyncFailure.Timeout(budget.attempts, session.ignoreCounters()))
-                },
-                onSendFailed = {
-                    failSync(AgentwireSyncFailure.SendFailed(sendFailureDetail(sendFailureStage)))
-                },
-            )
+                _state.update { it.copy(epoch = null, botAccount = null, actionStatus = uncertain) }
+            }
         }
-    }
 
-    private suspend fun sendSyncRequest(id: String): Boolean {
-        sendErrorClass = null
-        val sent = sendActionInternal("sync.request", id = id) != null
-        if (!sent) {
-            sendFailureStage = syncSendStage()
-            diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "send_failed") {
-                mapOf(
-                    "channel_fp" to diagnostics.fingerprint(_state.value.channel),
-                    "stage" to sendFailureStage,
-                    "error_class" to (sendErrorClass ?: "none"),
+        private suspend fun ingest(event: SequencedIrcEvent) {
+            val result = session.ingest(_state.value, event)
+            if (result is AgentwireDeliveryCoordinator.Result.Rejected) {
+                result.untrustedAccount?.let(::recordUntrustedEvents)
+                _state.value = result.state
+                return
+            }
+            if (result is AgentwireDeliveryCoordinator.Result.SyncRejected) {
+                // A definitive wire-level "no" ends the attempt now; retrying an unacknowledged
+                // request would only reproduce the same answer.
+                stopSyncRetry()
+                _state.value = result.state
+                failSync(AgentwireSyncFailure.Rejected(result.detail))
+                return
+            }
+            if (result is AgentwireDeliveryCoordinator.Result.ProtocolMismatch) {
+                stopSyncRetry()
+                _state.value = result.state
+                failSync(AgentwireSyncFailure.ProtocolMismatch(result.detail))
+                return
+            }
+            if (result is AgentwireDeliveryCoordinator.Result.ResyncRequired) {
+                // Deliberately no budget.anchor(): an internal restart must not extend the deadline.
+                _state.value =
+                    result.state
+                        .copy(sync = AgentwireSyncState.Syncing(budget.attempts, budget.startedAtMs))
+                untrustedRecorded = false
+                diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "resync") {
+                    mapOf(
+                        "channel_fp" to diagnostics.fingerprint(_state.value.channel),
+                        "trigger" to result.cause.wireName,
+                        "sequence_delta" to result.sequenceDelta,
+                    )
+                }
+                recordSyncStarted(
+                    when (result.cause) {
+                        AgentwireResyncCause.GAP -> AgentwireSyncTrigger.RESYNC_GAP
+                        AgentwireResyncCause.FRAGMENT_EXPIRY -> AgentwireSyncTrigger.RESYNC_FRAGMENT
+                    },
                 )
+                startSyncRetry()
+                return
+            }
+            if (result !is AgentwireDeliveryCoordinator.Result.Updated) return
+            val envelope = result.envelope
+            val previousSid = _state.value.activeSid
+            _state.value =
+                if (result.syncCompleted) {
+                    stopSyncRetry()
+                    recordSyncCompleted()
+                    result.state.copy(sync = AgentwireSyncState.Ready)
+                } else {
+                    result.state
+                }
+            if (envelope.kind == "session.page") {
+                val next = envelope.data?.string("next")
+                if (next != null) {
+                    val cwd = envelope.data?.string("cwd")
+                    val live = envelope.data?.string("scope") == "live" || cwd == null
+                    listSessions(cwd, next, live)
+                }
+            }
+            val activeSid = _state.value.activeSid
+            _state.update {
+                it.copy(autoReviewConfirmed = activeSid != null && activeSid in autoReviewConfirmedSessions)
+            }
+            val current = _state.value
+            if (
+                current.activeSid != null &&
+                (current.activeSid != previousSid || (result.syncCompleted && current.historySid == null))
+            ) {
+                requestHistory(initial = true)
             }
         }
-        return sent
-    }
 
-    /** Classifies why the write never reached the wire, for both the copy and the journal. */
-    private fun syncSendStage(): String {
-        val ready = client?.state?.value as? IrcClientState.Ready ?: return "not_ready"
-        return when {
-            agentwireMissingCaps(ready.caps).isNotEmpty() -> "caps"
-            !canSendClientTag(ready.caps, ready.isupport, AGENTWIRE_TAG) -> "client_tag"
-            else -> "transport"
-        }
-    }
-
-    /**
-     * Records the terminal phase. Called from inside the retry job, which returns immediately
-     * afterwards, so it must not cancel that job from underneath itself.
-     */
-    private fun failSync(failure: AgentwireSyncFailure) {
-        recordSyncFailed(failure)
-        _state.update { it.copy(sync = AgentwireSyncState.Failed(failure)) }
-    }
-
-    private fun recordSyncStarted(trigger: AgentwireSyncTrigger) {
-        diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "sync_started") {
-            mapOf(
-                "channel_fp" to diagnostics.fingerprint(_state.value.channel),
-                "attempt" to budget.attempts + 1,
-                "trigger" to trigger.wireName,
-            )
-        }
-    }
-
-    private fun recordSyncCompleted() {
-        diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "sync_completed") {
-            mapOf(
-                "channel_fp" to diagnostics.fingerprint(_state.value.channel),
-                "attempts" to budget.attempts,
-                "elapsed_ms" to budget.elapsedMs(),
-            )
-        }
-    }
-
-    private fun recordSyncFailed(failure: AgentwireSyncFailure) {
-        diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "sync_failed") {
-            // `reason` is a redacted field name in the journal, hence `end_reason`/`detail_class`.
-            buildMap<String, Any?> {
-                put("channel_fp", diagnostics.fingerprint(_state.value.channel))
-                put("end_reason", failure.endReason())
-                put("attempts", budget.attempts)
-                put("elapsed_ms", budget.elapsedMs())
-                put("detail_class", detailClass(failure))
-                // One field per non-zero ignore counter: the evidence for a silent handshake.
-                putAll(session.ignoreCounters().diagnosticFields())
-            }
-        }
-    }
-
-    /** Once per handshake: the account is fingerprinted, and the running tally lands in sync_failed. */
-    private fun recordUntrustedEvents(account: String) {
-        if (untrustedRecorded) return
-        untrustedRecorded = true
-        diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "untrusted_events") {
-            mapOf(
-                "channel_fp" to diagnostics.fingerprint(_state.value.channel),
-                "account_fp" to diagnostics.fingerprint(account),
-                "count" to (session.ignoreCounters().counts[IgnoreReason.UNTRUSTED_ACCOUNT] ?: 1),
-            )
-        }
-    }
-
-    /** Never the message itself: only how the handshake ended. */
-    private fun detailClass(failure: AgentwireSyncFailure): String = when (failure) {
-        is AgentwireSyncFailure.Timeout -> "no_reply"
-        is AgentwireSyncFailure.Rejected -> "bridge_reply"
-        is AgentwireSyncFailure.ProtocolMismatch -> "envelope_validation"
-        is AgentwireSyncFailure.SendFailed -> sendFailureStage
-    }
-
-    /** Ends the retry job from outside it, after a definitive wire answer. */
-    private fun stopSyncRetry() {
-        syncJob?.cancel()
-        syncJob = null
-    }
-
-    private fun stopSession(disconnected: Boolean) {
-        sessionJob?.cancel()
-        sessionJob = null
-        syncJob?.cancel()
-        syncJob = null
-        client = null
-        session.reset()
-        if (disconnected) {
-            val uncertain = _state.value.actionStatus.mapValues { (_, status) ->
-                if (status == "sent" || status == "accepted") "outcome unknown" else status
-            }
-            _state.update { it.copy(epoch = null, botAccount = null, actionStatus = uncertain) }
-        }
-    }
-
-    private suspend fun ingest(event: SequencedIrcEvent) {
-        val result = session.ingest(_state.value, event)
-        if (result is AgentwireDeliveryCoordinator.Result.Rejected) {
-            result.untrustedAccount?.let(::recordUntrustedEvents)
-            _state.value = result.state
-            return
-        }
-        if (result is AgentwireDeliveryCoordinator.Result.SyncRejected) {
-            // A definitive wire-level "no" ends the attempt now; retrying an unacknowledged
-            // request would only reproduce the same answer.
-            stopSyncRetry()
-            _state.value = result.state
-            failSync(AgentwireSyncFailure.Rejected(result.detail))
-            return
-        }
-        if (result is AgentwireDeliveryCoordinator.Result.ProtocolMismatch) {
-            stopSyncRetry()
-            _state.value = result.state
-            failSync(AgentwireSyncFailure.ProtocolMismatch(result.detail))
-            return
-        }
-        if (result is AgentwireDeliveryCoordinator.Result.ResyncRequired) {
-            // Deliberately no budget.anchor(): an internal restart must not extend the deadline.
-            _state.value = result.state
-                .copy(sync = AgentwireSyncState.Syncing(budget.attempts, budget.startedAtMs))
-            untrustedRecorded = false
-            diagnostics.record(AGENTWIRE_DIAGNOSTIC_COMPONENT, "resync") {
-                mapOf(
-                    "channel_fp" to diagnostics.fingerprint(_state.value.channel),
-                    "trigger" to result.cause.wireName,
-                    "sequence_delta" to result.sequenceDelta,
-                )
-            }
-            recordSyncStarted(
-                when (result.cause) {
-                    AgentwireResyncCause.GAP -> AgentwireSyncTrigger.RESYNC_GAP
-                    AgentwireResyncCause.FRAGMENT_EXPIRY -> AgentwireSyncTrigger.RESYNC_FRAGMENT
-                },
-            )
-            startSyncRetry()
-            return
-        }
-        if (result !is AgentwireDeliveryCoordinator.Result.Updated) return
-        val envelope = result.envelope
-        val previousSid = _state.value.activeSid
-        _state.value = if (result.syncCompleted) {
-            stopSyncRetry()
-            recordSyncCompleted()
-            result.state.copy(sync = AgentwireSyncState.Ready)
-        } else {
-            result.state
-        }
-        if (envelope.kind == "session.page") {
-            val next = envelope.data?.string("next")
-            if (next != null) {
-                val cwd = envelope.data?.string("cwd")
-                val live = envelope.data?.string("scope") == "live" || cwd == null
-                listSessions(cwd, next, live)
-            }
-        }
-        val activeSid = _state.value.activeSid
-        _state.update {
-            it.copy(autoReviewConfirmed = activeSid != null && activeSid in autoReviewConfirmedSessions)
-        }
-        val current = _state.value
-        if (
-            current.activeSid != null &&
-            (current.activeSid != previousSid || (result.syncCompleted && current.historySid == null))
-        ) {
-            requestHistory(initial = true)
-        }
-    }
-
-    private suspend fun requestHistory(initial: Boolean) {
-        val current = _state.value
-        val sid = current.activeSid ?: return
-        if (current.historyRequestId != null || current.historyLoading) return
-        if (!initial && !current.olderHistoryAvailable) return
-        val requestId = UUID.randomUUID().toString()
-        _state.update { state ->
-            if (state.activeSid != sid) {
-                state
-            } else {
-                state.copy(
-                    historyLoading = true,
-                    historyRequestId = requestId,
-                    historySid = sid,
-                    historyStaged = emptyList(),
-                )
-            }
-        }
-        val data = buildJsonObject {
-            if (!initial) {
-                current.historyCursor?.let { put("cursor", it) }
-                current.historyBeforeAt?.let { put("beforeAt", it) }
-            }
-            put("limit", if (initial) AGENTWIRE_INITIAL_HISTORY_SIZE else AGENTWIRE_HISTORY_PAGE_SIZE)
-        }
-        val sent = sendActionInternal(
-            "history.request",
-            data,
-            sid = sid,
-            id = requestId,
-        )
-        if (sent == null) {
+        private suspend fun requestHistory(initial: Boolean) {
+            val current = _state.value
+            val sid = current.activeSid ?: return
+            if (current.historyRequestId != null || current.historyLoading) return
+            if (!initial && !current.olderHistoryAvailable) return
+            val requestId = UUID.randomUUID().toString()
             _state.update { state ->
-                if (state.historyRequestId == requestId) {
+                if (state.activeSid != sid) {
+                    state
+                } else {
                     state.copy(
-                        historyLoading = false,
-                        historyRequestId = null,
+                        historyLoading = true,
+                        historyRequestId = requestId,
+                        historySid = sid,
                         historyStaged = emptyList(),
                     )
-                } else {
-                    state
+                }
+            }
+            val data =
+                buildJsonObject {
+                    if (!initial) {
+                        current.historyCursor?.let { put("cursor", it) }
+                        current.historyBeforeAt?.let { put("beforeAt", it) }
+                    }
+                    put("limit", if (initial) AGENTWIRE_INITIAL_HISTORY_SIZE else AGENTWIRE_HISTORY_PAGE_SIZE)
+                }
+            val sent =
+                sendActionInternal(
+                    "history.request",
+                    data,
+                    sid = sid,
+                    id = requestId,
+                )
+            if (sent == null) {
+                _state.update { state ->
+                    if (state.historyRequestId == requestId) {
+                        state.copy(
+                            historyLoading = false,
+                            historyRequestId = null,
+                            historyStaged = emptyList(),
+                        )
+                    } else {
+                        state
+                    }
                 }
             }
         }
-    }
 
-    private fun sendAction(
-        kind: String,
-        data: JsonObject? = null,
-        sid: String? = null,
-        tid: String? = null,
-        iid: String? = null,
-        rid: String? = null,
-        id: String = UUID.randomUUID().toString(),
-    ) {
-        viewModelScope.launch { sendActionInternal(kind, data, sid, tid, iid, rid, id) }
-    }
+        private fun sendAction(
+            kind: String,
+            data: JsonObject? = null,
+            sid: String? = null,
+            tid: String? = null,
+            iid: String? = null,
+            rid: String? = null,
+            id: String = UUID.randomUUID().toString(),
+        ) {
+            viewModelScope.launch { sendActionInternal(kind, data, sid, tid, iid, rid, id) }
+        }
 
-    private suspend fun sendActionInternal(
-        kind: String,
-        data: JsonObject? = null,
-        sid: String? = null,
-        tid: String? = null,
-        iid: String? = null,
-        rid: String? = null,
-        id: String = UUID.randomUUID().toString(),
-    ): String? {
-        val current = _state.value
-        if (kind != "sync.request" && kind !in current.actions) return null
-        val activeClient = client ?: return null
-        val envelope = AgentwireEnvelope(
-            kind = kind, type = "action", id = id, at = System.currentTimeMillis(), instance = instance,
-            epoch = if (kind == "sync.request") null else current.epoch ?: return null,
-            device = prefs.deviceId(), sid = sid, tid = tid, iid = iid, rid = rid, data = data,
-        )
-        val sent = runCatching {
-            activeClient.sendAgentwire(current.channel, envelope, envelope.readablePreview())
-        }.getOrElse {
-            _state.update { state -> state.copy(error = it.message ?: "Unable to send Agentwire action") }
-            sendErrorClass = it::class.java.simpleName
-            false
+        private suspend fun sendActionInternal(
+            kind: String,
+            data: JsonObject? = null,
+            sid: String? = null,
+            tid: String? = null,
+            iid: String? = null,
+            rid: String? = null,
+            id: String = UUID.randomUUID().toString(),
+        ): String? {
+            val current = _state.value
+            if (kind != "sync.request" && kind !in current.actions) return null
+            val activeClient = client ?: return null
+            val envelope =
+                AgentwireEnvelope(
+                    kind = kind,
+                    type = "action",
+                    id = id,
+                    at = System.currentTimeMillis(),
+                    instance = instance,
+                    epoch = if (kind == "sync.request") null else current.epoch ?: return null,
+                    device = prefs.deviceId(),
+                    sid = sid,
+                    tid = tid,
+                    iid = iid,
+                    rid = rid,
+                    data = data,
+                )
+            val sent =
+                runCatching {
+                    activeClient.sendAgentwire(current.channel, envelope, envelope.readablePreview())
+                }.getOrElse {
+                    _state.update { state -> state.copy(error = it.message ?: "Unable to send Agentwire action") }
+                    sendErrorClass = it::class.java.simpleName
+                    false
+                }
+            if (sent && kind != "sync.request") {
+                _state.update { it.copy(actionStatus = it.actionStatus + (id to "sent")) }
+            }
+            return id.takeIf { sent }
         }
-        if (sent && kind != "sync.request") {
-            _state.update { it.copy(actionStatus = it.actionStatus + (id to "sent")) }
-        }
-        return id.takeIf { sent }
     }
-}

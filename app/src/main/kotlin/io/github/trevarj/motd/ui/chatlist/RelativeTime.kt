@@ -16,7 +16,11 @@ import java.util.concurrent.TimeUnit
  * [is24Hour] only affects the same-day branch; defaults to true so existing callers/tests are
  * unaffected. It is independent of whether message timestamps are shown in the chat itself.
  */
-fun relativeChatTime(timeMs: Long, nowMs: Long = System.currentTimeMillis(), is24Hour: Boolean = true): String {
+fun relativeChatTime(
+    timeMs: Long,
+    nowMs: Long = System.currentTimeMillis(),
+    is24Hour: Boolean = true,
+): String {
     val delta = nowMs - timeMs
     if (delta < TimeUnit.MINUTES.toMillis(1)) return "now"
     if (delta < TimeUnit.HOURS.toMillis(1)) {
@@ -26,8 +30,9 @@ fun relativeChatTime(timeMs: Long, nowMs: Long = System.currentTimeMillis(), is2
     val now = Calendar.getInstance().apply { timeInMillis = nowMs }
     val then = Calendar.getInstance().apply { timeInMillis = timeMs }
 
-    val sameDay = now.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
-        now.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
+    val sameDay =
+        now.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
+            now.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
     if (sameDay) {
         return if (is24Hour) {
             String.format(
@@ -60,9 +65,10 @@ fun relativeChatTime(timeMs: Long, nowMs: Long = System.currentTimeMillis(), is2
     return dayMonth(then)
 }
 
-private fun dayMonth(cal: Calendar): String = String.format(
-    Locale.getDefault(),
-    "%02d/%02d",
-    cal.get(Calendar.DAY_OF_MONTH),
-    cal.get(Calendar.MONTH) + 1,
-)
+private fun dayMonth(cal: Calendar): String =
+    String.format(
+        Locale.getDefault(),
+        "%02d/%02d",
+        cal.get(Calendar.DAY_OF_MONTH),
+        cal.get(Calendar.MONTH) + 1,
+    )

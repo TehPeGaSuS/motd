@@ -66,32 +66,33 @@ enum class GestureIcon {
 
 /** Vector for a menu slice. Lives apart from the enum so pure model tests never touch Compose. */
 val GestureIcon.vector: ImageVector
-    get() = when (this) {
-        GestureIcon.UNKNOWN -> Icons.Outlined.QuestionMark
-        GestureIcon.MENU -> Icons.Outlined.Apps
-        GestureIcon.FOLDER -> Icons.Outlined.Folder
-        GestureIcon.CHAT -> Icons.Outlined.Forum
-        GestureIcon.PIN -> Icons.Outlined.PushPin
-        GestureIcon.STAR -> Icons.Outlined.Star
-        GestureIcon.UNREAD -> Icons.Outlined.MarkChatUnread
-        GestureIcon.MARK_READ -> Icons.Outlined.MarkChatRead
-        GestureIcon.PEOPLE -> Icons.Outlined.People
-        GestureIcon.PERSON -> Icons.Outlined.Person
-        GestureIcon.MENTION -> Icons.Outlined.AlternateEmail
-        GestureIcon.SEARCH -> Icons.Outlined.Search
-        GestureIcon.INFO -> Icons.Outlined.Info
-        GestureIcon.BOLT -> Icons.Outlined.Bolt
-        GestureIcon.AWAY -> Icons.Outlined.Bedtime
-        GestureIcon.NETWORK -> Icons.Outlined.Lan
-        GestureIcon.GLOBE -> Icons.Outlined.Public
-        GestureIcon.ATTACH -> Icons.Outlined.AttachFile
-        GestureIcon.LIGHT_MODE -> Icons.Outlined.LightMode
-        GestureIcon.DARK_MODE -> Icons.Outlined.DarkMode
-        GestureIcon.REFRESH -> Icons.Outlined.Refresh
-        GestureIcon.POWER -> Icons.Outlined.PowerSettingsNew
-        GestureIcon.LINK -> Icons.Outlined.Link
-        GestureIcon.MORE -> Icons.Outlined.MoreHoriz
-    }
+    get() =
+        when (this) {
+            GestureIcon.UNKNOWN -> Icons.Outlined.QuestionMark
+            GestureIcon.MENU -> Icons.Outlined.Apps
+            GestureIcon.FOLDER -> Icons.Outlined.Folder
+            GestureIcon.CHAT -> Icons.Outlined.Forum
+            GestureIcon.PIN -> Icons.Outlined.PushPin
+            GestureIcon.STAR -> Icons.Outlined.Star
+            GestureIcon.UNREAD -> Icons.Outlined.MarkChatUnread
+            GestureIcon.MARK_READ -> Icons.Outlined.MarkChatRead
+            GestureIcon.PEOPLE -> Icons.Outlined.People
+            GestureIcon.PERSON -> Icons.Outlined.Person
+            GestureIcon.MENTION -> Icons.Outlined.AlternateEmail
+            GestureIcon.SEARCH -> Icons.Outlined.Search
+            GestureIcon.INFO -> Icons.Outlined.Info
+            GestureIcon.BOLT -> Icons.Outlined.Bolt
+            GestureIcon.AWAY -> Icons.Outlined.Bedtime
+            GestureIcon.NETWORK -> Icons.Outlined.Lan
+            GestureIcon.GLOBE -> Icons.Outlined.Public
+            GestureIcon.ATTACH -> Icons.Outlined.AttachFile
+            GestureIcon.LIGHT_MODE -> Icons.Outlined.LightMode
+            GestureIcon.DARK_MODE -> Icons.Outlined.DarkMode
+            GestureIcon.REFRESH -> Icons.Outlined.Refresh
+            GestureIcon.POWER -> Icons.Outlined.PowerSettingsNew
+            GestureIcon.LINK -> Icons.Outlined.Link
+            GestureIcon.MORE -> Icons.Outlined.MoreHoriz
+        }
 
 /** Unknown icon names decode to [GestureIcon.UNKNOWN] instead of failing the whole menu. */
 object GestureIconSerializer : FallbackEnumSerializer<GestureIcon>(

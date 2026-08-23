@@ -12,9 +12,10 @@ class EventMapperDccTest {
 
     @Test
     fun `dcc send with quoted filename maps to typed offer`() {
-        val event = mapper.map(
-            IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC SEND \"photo set.jpg\" 3232235777 49152 1048576\u0001"),
-        ) as IrcEvent.DccSend
+        val event =
+            mapper.map(
+                IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC SEND \"photo set.jpg\" 3232235777 49152 1048576\u0001"),
+            ) as IrcEvent.DccSend
 
         assertEquals("alice", event.source.nick)
         assertEquals("me", event.target)
@@ -29,9 +30,10 @@ class EventMapperDccTest {
 
     @Test
     fun `dcc ssend accepts ipv6 literal and passive token`() {
-        val event = mapper.map(
-            IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC SSEND archive.tar [2001:db8::1] 0 4096 token-7\u0001"),
-        ) as IrcEvent.DccSend
+        val event =
+            mapper.map(
+                IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC SSEND archive.tar [2001:db8::1] 0 4096 token-7\u0001"),
+            ) as IrcEvent.DccSend
 
         assertEquals(IrcEvent.DccFileProtocol.SSEND, event.offer.protocol)
         assertEquals("[2001:db8::1]", event.offer.endpoint.address)
@@ -43,12 +45,14 @@ class EventMapperDccTest {
 
     @Test
     fun `dcc resume and accept map to typed requests`() {
-        val resume = mapper.map(
-            IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC RESUME \"big file.bin\" 49152 65536 token-7\u0001"),
-        ) as IrcEvent.DccResume
-        val accept = mapper.map(
-            IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC ACCEPT \"big file.bin\" 49152 65536 token-7\u0001"),
-        ) as IrcEvent.DccAccept
+        val resume =
+            mapper.map(
+                IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC RESUME \"big file.bin\" 49152 65536 token-7\u0001"),
+            ) as IrcEvent.DccResume
+        val accept =
+            mapper.map(
+                IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC ACCEPT \"big file.bin\" 49152 65536 token-7\u0001"),
+            ) as IrcEvent.DccAccept
 
         assertEquals("big file.bin", resume.request.filename)
         assertEquals(49_152, resume.request.port)
@@ -62,9 +66,10 @@ class EventMapperDccTest {
 
     @Test
     fun `unknown dcc command stays visible as unsupported dcc`() {
-        val event = mapper.map(
-            IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC VOICE chat 192.0.2.10 5000\u0001"),
-        ) as IrcEvent.UnsupportedDcc
+        val event =
+            mapper.map(
+                IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC VOICE chat 192.0.2.10 5000\u0001"),
+            ) as IrcEvent.UnsupportedDcc
 
         assertEquals("VOICE", event.command)
         assertEquals(IrcEvent.DccUnsupportedReason.UNKNOWN_COMMAND, event.reason)
@@ -73,9 +78,10 @@ class EventMapperDccTest {
 
     @Test
     fun `malformed dcc command stays visible as unsupported dcc`() {
-        val event = mapper.map(
-            IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC SEND \"unterminated 192.0.2.10 5000\u0001"),
-        ) as IrcEvent.UnsupportedDcc
+        val event =
+            mapper.map(
+                IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC SEND \"unterminated 192.0.2.10 5000\u0001"),
+            ) as IrcEvent.UnsupportedDcc
 
         assertEquals(null, event.command)
         assertEquals(IrcEvent.DccUnsupportedReason.MALFORMED, event.reason)
@@ -83,9 +89,10 @@ class EventMapperDccTest {
 
     @Test
     fun `passive dcc without token is malformed`() {
-        val event = mapper.map(
-            IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC SEND file.bin 192.0.2.10 0 100\u0001"),
-        ) as IrcEvent.UnsupportedDcc
+        val event =
+            mapper.map(
+                IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC SEND file.bin 192.0.2.10 0 100\u0001"),
+            ) as IrcEvent.UnsupportedDcc
 
         assertEquals("SEND", event.command)
         assertEquals(IrcEvent.DccUnsupportedReason.MALFORMED, event.reason)
@@ -93,9 +100,10 @@ class EventMapperDccTest {
 
     @Test
     fun `invalid ipv6 literal is malformed`() {
-        val event = mapper.map(
-            IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC SEND file.bin bad::address 5000 100\u0001"),
-        ) as IrcEvent.UnsupportedDcc
+        val event =
+            mapper.map(
+                IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001DCC SEND file.bin bad::address 5000 100\u0001"),
+            ) as IrcEvent.UnsupportedDcc
 
         assertEquals("SEND", event.command)
         assertEquals(IrcEvent.DccUnsupportedReason.MALFORMED, event.reason)
@@ -103,9 +111,10 @@ class EventMapperDccTest {
 
     @Test
     fun `non dcc ctcp is still ignored`() {
-        val event = mapper.map(
-            IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001PING 123\u0001"),
-        )
+        val event =
+            mapper.map(
+                IrcMessage.parse(":alice!u@h PRIVMSG me :\u0001PING 123\u0001"),
+            )
 
         assertTrue(event == null)
     }

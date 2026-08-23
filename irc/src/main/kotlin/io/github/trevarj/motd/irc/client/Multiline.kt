@@ -8,7 +8,10 @@ data class MultilineLimits(
 )
 
 sealed interface MultilineSendPlan {
-    data class Single(val message: IrcMessage) : MultilineSendPlan
+    data class Single(
+        val message: IrcMessage,
+    ) : MultilineSendPlan
+
     data class Batch(
         val ref: String,
         val opening: IrcMessage,
@@ -18,24 +21,27 @@ sealed interface MultilineSendPlan {
 }
 
 internal fun multilineLimits(caps: Set<String>): MultilineLimits? {
-    val value = caps.firstNotNullOfOrNull { cap ->
-        cap.takeIf { it == MULTILINE_CAP || it.startsWith("$MULTILINE_CAP=") }
-            ?.substringAfter('=', missingDelimiterValue = "")
-    } ?: return null
+    val value =
+        caps.firstNotNullOfOrNull { cap ->
+            cap
+                .takeIf { it == MULTILINE_CAP || it.startsWith("$MULTILINE_CAP=") }
+                ?.substringAfter('=', missingDelimiterValue = "")
+        } ?: return null
     if (value.isEmpty()) return null
     val tokens = value.split(',').filter(String::isNotEmpty)
-    val pairs = tokens.mapNotNull { token ->
-        val key = token.substringBefore('=')
-        val rawValue = token.substringAfter('=', missingDelimiterValue = "")
-        key.takeIf(String::isNotEmpty)?.let { it to rawValue }
-    }.toMap()
+    val pairs =
+        tokens
+            .mapNotNull { token ->
+                val key = token.substringBefore('=')
+                val rawValue = token.substringAfter('=', missingDelimiterValue = "")
+                key.takeIf(String::isNotEmpty)?.let { it to rawValue }
+            }.toMap()
     val maxBytes = pairs["max-bytes"]?.toIntOrNull()?.takeIf { it > 0 } ?: return null
     val maxLines = pairs["max-lines"]?.toIntOrNull()?.takeIf { it > 0 }
     return MultilineLimits(maxBytes, maxLines)
 }
 
-internal fun normalizeMultilineText(text: String): String =
-    text.replace("\r\n", "\n").replace('\r', '\n')
+internal fun normalizeMultilineText(text: String): String = text.replace("\r\n", "\n").replace('\r', '\n')
 
 internal fun needsMultiline(text: String): Boolean = normalizeMultilineText(text).contains('\n')
 
@@ -49,11 +55,12 @@ internal fun planChatMessage(
     forceLegacy: Boolean = false,
     protocolTags: Map<String, String> = emptyMap(),
 ): MultilineSendPlan? {
-    val baseTags = buildMap {
-        putAll(protocolTags)
-        if (replyToMsgid != null) put("+reply", replyToMsgid)
-        if (label != null) put("label", label)
-    }
+    val baseTags =
+        buildMap {
+            putAll(protocolTags)
+            if (replyToMsgid != null) put("+reply", replyToMsgid)
+            if (label != null) put("label", label)
+        }
     val normalized = normalizeMultilineText(text)
     val needsBatch = normalized.contains('\n') || normalized.toByteArray(Charsets.UTF_8).size > maxComponentBytes
     if (forceLegacy || multilineLimits == null || !needsBatch) {
@@ -66,17 +73,18 @@ internal fun planChatMessage(
     val combinedBytes = normalized.toByteArray(Charsets.UTF_8).size
     if (combinedBytes > multilineLimits.maxBytes) return null
 
-    val components = buildList {
-        for (line in normalized.split('\n')) {
-            if (line.isEmpty()) {
-                add(LineFragment(text = "", concat = false))
-            } else {
-                splitUtf8PreservingWhitespace(line, maxComponentBytes).forEachIndexed { index, fragment ->
-                    add(LineFragment(text = fragment, concat = index > 0))
+    val components =
+        buildList {
+            for (line in normalized.split('\n')) {
+                if (line.isEmpty()) {
+                    add(LineFragment(text = "", concat = false))
+                } else {
+                    splitUtf8PreservingWhitespace(line, maxComponentBytes).forEachIndexed { index, fragment ->
+                        add(LineFragment(text = fragment, concat = index > 0))
+                    }
                 }
             }
         }
-    }
     if (components.isEmpty() || components.all { it.text.isEmpty() }) return null
     multilineLimits.maxLines?.let { limit ->
         if (components.size > limit) return null
@@ -84,18 +92,21 @@ internal fun planChatMessage(
 
     val ref = label ?: "motd-${System.currentTimeMillis()}"
     if (!ref.all { it.isLetterOrDigit() || it == '-' }) return null
-    val opening = IrcMessage(
-        tags = baseTags,
-        command = "BATCH",
-        params = listOf("+$ref", MULTILINE_CAP, target),
-    )
-    val wireComponents = components.map { fragment ->
-        val tags = buildMap {
-            put("batch", ref)
-            if (fragment.concat) put(MULTILINE_CONCAT_TAG, "")
+    val opening =
+        IrcMessage(
+            tags = baseTags,
+            command = "BATCH",
+            params = listOf("+$ref", MULTILINE_CAP, target),
+        )
+    val wireComponents =
+        components.map { fragment ->
+            val tags =
+                buildMap {
+                    put("batch", ref)
+                    if (fragment.concat) put(MULTILINE_CONCAT_TAG, "")
+                }
+            IrcMessage(tags = tags, command = "PRIVMSG", params = listOf(target, fragment.text))
         }
-        IrcMessage(tags = tags, command = "PRIVMSG", params = listOf(target, fragment.text))
-    }
     return MultilineSendPlan.Batch(
         ref = ref,
         opening = opening,
@@ -104,7 +115,10 @@ internal fun planChatMessage(
     )
 }
 
-internal fun splitUtf8PreservingWhitespace(text: String, maxBytes: Int): List<String> {
+internal fun splitUtf8PreservingWhitespace(
+    text: String,
+    maxBytes: Int,
+): List<String> {
     require(maxBytes > 0) { "maxBytes must be positive" }
     if (text.toByteArray(Charsets.UTF_8).size <= maxBytes) return listOf(text)
 
@@ -139,9 +153,10 @@ private data class LineFragment(
 internal const val MULTILINE_CAP = "draft/multiline"
 internal const val MULTILINE_CONCAT_TAG = "draft/multiline-concat"
 
-internal val MULTILINE_REJECTION_CODES = setOf(
-    "MULTILINE_MAX_BYTES",
-    "MULTILINE_MAX_LINES",
-    "MULTILINE_INVALID_TARGET",
-    "MULTILINE_INVALID",
-)
+internal val MULTILINE_REJECTION_CODES =
+    setOf(
+        "MULTILINE_MAX_BYTES",
+        "MULTILINE_MAX_LINES",
+        "MULTILINE_INVALID_TARGET",
+        "MULTILINE_INVALID",
+    )

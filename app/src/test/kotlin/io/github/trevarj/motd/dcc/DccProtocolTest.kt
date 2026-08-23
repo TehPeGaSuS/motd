@@ -2,22 +2,23 @@ package io.github.trevarj.motd.dcc
 
 import io.github.trevarj.motd.data.db.DccAddressKind
 import io.github.trevarj.motd.data.db.DccTransferProtocol
-import java.net.InetAddress
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.net.InetAddress
 
 class DccProtocolTest {
     @Test fun `send ctcp quotes filenames with spaces`() {
-        val ctcp = dccSendCtcp(
-            DccOutgoingOffer(
-                protocol = DccTransferProtocol.SEND,
-                filename = "two words.txt",
-                address = "3232235777",
-                port = 5000,
-                sizeBytes = 42,
-                token = "tok",
-            ),
-        )
+        val ctcp =
+            dccSendCtcp(
+                DccOutgoingOffer(
+                    protocol = DccTransferProtocol.SEND,
+                    filename = "two words.txt",
+                    address = "3232235777",
+                    port = 5000,
+                    sizeBytes = 42,
+                    token = "tok",
+                ),
+            )
 
         assertEquals("\u0001DCC SEND \"two words.txt\" 3232235777 5000 42 tok\u0001", ctcp)
     }

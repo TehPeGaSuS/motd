@@ -42,7 +42,9 @@ import io.github.trevarj.motd.R
  * same mask from the exact same rules.
  */
 @Stable
-class BanTargetState(preselectedNick: String?) {
+class BanTargetState(
+    preselectedNick: String?,
+) {
     var nick by mutableStateOf(preselectedNick)
     var scope by mutableStateOf(BanScope.NICK)
     var customMask by mutableStateOf("")
@@ -52,8 +54,7 @@ class BanTargetState(preselectedNick: String?) {
 }
 
 @Composable
-fun rememberBanTargetState(preselectedNick: String? = null): BanTargetState =
-    remember(preselectedNick) { BanTargetState(preselectedNick) }
+fun rememberBanTargetState(preselectedNick: String? = null): BanTargetState = remember(preselectedNick) { BanTargetState(preselectedNick) }
 
 /**
  * Who to ban and how wide the ban reaches. Stateless apart from the dropdown's expansion: the
@@ -92,10 +93,11 @@ fun BanTargetPicker(
                 trailingIcon = {
                     if (!locked) ExposedDropdownMenuDefaults.TrailingIcon(membersExpanded)
                 },
-                modifier = Modifier
-                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                    .fillMaxWidth()
-                    .testTag("${tagPrefix}_member_dropdown"),
+                modifier =
+                    Modifier
+                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                        .fillMaxWidth()
+                        .testTag("${tagPrefix}_member_dropdown"),
             )
             ExposedDropdownMenu(
                 expanded = membersExpanded && !locked,
@@ -126,11 +128,12 @@ fun BanTargetPicker(
             onSelect = { state.scope = BanScope.HOST },
             title = stringResource(R.string.channelinfo_ban_scope_host),
             // Never offer an address ban we cannot spell out; say why it is unavailable instead.
-            description = when {
-                resolvedHost != null -> stringResource(R.string.channelinfo_ban_scope_host_desc)
-                hostLoading -> stringResource(R.string.channelinfo_ban_scope_host_loading)
-                else -> stringResource(R.string.channelinfo_ban_scope_host_unknown)
-            },
+            description =
+                when {
+                    resolvedHost != null -> stringResource(R.string.channelinfo_ban_scope_host_desc)
+                    hostLoading -> stringResource(R.string.channelinfo_ban_scope_host_loading)
+                    else -> stringResource(R.string.channelinfo_ban_scope_host_unknown)
+                },
             enabled = resolvedHost != null,
             tag = "${tagPrefix}_scope_host",
         )
@@ -190,9 +193,10 @@ fun BanTargetDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         // A dialog is its own Compose window and needs its own testTagsAsResourceId opt-in.
-        modifier = Modifier
-            .semantics { testTagsAsResourceId = true }
-            .testTag(dialogTag),
+        modifier =
+            Modifier
+                .semantics { testTagsAsResourceId = true }
+                .testTag(dialogTag),
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -260,22 +264,24 @@ private fun ScopeOption(
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .selectable(selected = selected, enabled = enabled, onClick = onSelect)
-            .padding(vertical = 2.dp)
-            .testTag(tag),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .selectable(selected = selected, enabled = enabled, onClick = onSelect)
+                .padding(vertical = 2.dp)
+                .testTag(tag),
     ) {
         RadioButton(selected = selected, onClick = onSelect, enabled = enabled)
         Column(modifier = Modifier.padding(start = 4.dp)) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (enabled) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                color =
+                    if (enabled) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
             )
             Text(
                 text = description,

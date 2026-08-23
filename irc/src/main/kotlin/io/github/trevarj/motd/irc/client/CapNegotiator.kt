@@ -6,51 +6,54 @@ package io.github.trevarj.motd.irc.client
  * handles at runtime.
  */
 internal object CapTiers {
-    val TIER1 = setOf(
-        "sasl",
-        "cap-notify",
-        "message-tags",
-        "server-time",
-        "znc.in/server-time-iso",
-        "batch",
-        "labeled-response",
-        "echo-message",
-    )
+    val TIER1 =
+        setOf(
+            "sasl",
+            "cap-notify",
+            "message-tags",
+            "server-time",
+            "znc.in/server-time-iso",
+            "batch",
+            "labeled-response",
+            "echo-message",
+        )
 
-    val TIER2 = setOf(
-        "multi-prefix",
-        "away-notify",
-        "account-notify",
-        "account-tag",
-        "extended-join",
-        "chghost",
-        "setname",
-        "userhost-in-names",
-        "invite-notify",
-        "no-implicit-names",
-        "draft/no-implicit-names",
-        "soju.im/no-implicit-names",
-        "extended-monitor",
-        "draft/extended-monitor",
-        "sts",
-    )
+    val TIER2 =
+        setOf(
+            "multi-prefix",
+            "away-notify",
+            "account-notify",
+            "account-tag",
+            "extended-join",
+            "chghost",
+            "setname",
+            "userhost-in-names",
+            "invite-notify",
+            "no-implicit-names",
+            "draft/no-implicit-names",
+            "soju.im/no-implicit-names",
+            "extended-monitor",
+            "draft/extended-monitor",
+            "sts",
+        )
 
-    val TIER3 = setOf(
-        "draft/chathistory",
-        "draft/event-playback",
-        "draft/read-marker",
-        "soju.im/read",
-        "draft/metadata-2",
-        "standard-replies",
-        "draft/relaymsg",
-        "draft/pre-away",
-        "draft/channel-rename",
-        "soju.im/bouncer-networks",
-        "soju.im/bouncer-networks-notify",
-        "soju.im/webpush",
-        "soju.im/search",
-        MULTILINE_CAP,
-    )
+    val TIER3 =
+        setOf(
+            "draft/chathistory",
+            "draft/event-playback",
+            "draft/read-marker",
+            "soju.im/read",
+            "draft/metadata-2",
+            "standard-replies",
+            "draft/relaymsg",
+            "draft/pre-away",
+            "draft/channel-rename",
+            "soju.im/bouncer-networks",
+            "soju.im/bouncer-networks-notify",
+            "soju.im/webpush",
+            "soju.im/search",
+            MULTILINE_CAP,
+        )
 
     val ALL: Set<String> = TIER1 + TIER2 + TIER3
 }
@@ -62,7 +65,10 @@ internal object CapTiers {
  *.
  */
 internal object CapNegotiator {
-    fun requestSet(advertised: Set<String>, extraCaps: Set<String>): Set<String> {
+    fun requestSet(
+        advertised: Set<String>,
+        extraCaps: Set<String>,
+    ): Set<String> {
         val wanted = CapTiers.ALL + extraCaps
         var req = wanted.filter { it in advertised }.toMutableSet()
         // event-playback only makes sense alongside chathistory.
@@ -97,20 +103,28 @@ internal object CapNegotiator {
     }
 
     /** Preserve an already-selected no-implicit-names alias for this connection generation. */
-    fun runtimeRequestSet(newCaps: Set<String>, ackedCaps: Set<String>, extraCaps: Set<String>): Set<String> {
+    fun runtimeRequestSet(
+        newCaps: Set<String>,
+        ackedCaps: Set<String>,
+        extraCaps: Set<String>,
+    ): Set<String> {
         val ackedNames = ackedCaps.mapTo(HashSet()) { it.substringBefore('=') }
-        val heldAliases = buildSet {
-            if (preferredNoImplicitNames(ackedNames) != null) addAll(NO_IMPLICIT_NAMES_ALIASES)
-            if (preferredExtendedMonitor(ackedNames) != null) addAll(EXTENDED_MONITOR_ALIASES)
-            if (preferredReadMarker(ackedNames) != null) addAll(READ_MARKER_ALIASES)
-            if (preferredServerTime(ackedNames) != null) addAll(SERVER_TIME_ALIASES)
-        }
+        val heldAliases =
+            buildSet {
+                if (preferredNoImplicitNames(ackedNames) != null) addAll(NO_IMPLICIT_NAMES_ALIASES)
+                if (preferredExtendedMonitor(ackedNames) != null) addAll(EXTENDED_MONITOR_ALIASES)
+                if (preferredReadMarker(ackedNames) != null) addAll(READ_MARKER_ALIASES)
+                if (preferredServerTime(ackedNames) != null) addAll(SERVER_TIME_ALIASES)
+            }
         val advertised = (newCaps - heldAliases) + ackedNames
         return requestSet(advertised, extraCaps) - ackedNames
     }
 
     /** Split caps into space-joined batches whose payload stays within [limit] bytes. */
-    fun batches(caps: Collection<String>, limit: Int = 400): List<String> {
+    fun batches(
+        caps: Collection<String>,
+        limit: Int = 400,
+    ): List<String> {
         val out = mutableListOf<String>()
         val sb = StringBuilder()
         for (cap in caps) {
@@ -127,11 +141,12 @@ internal object CapNegotiator {
     }
 }
 
-val NO_IMPLICIT_NAMES_ALIASES: List<String> = listOf(
-    "no-implicit-names",
-    "draft/no-implicit-names",
-    "soju.im/no-implicit-names",
-)
+val NO_IMPLICIT_NAMES_ALIASES: List<String> =
+    listOf(
+        "no-implicit-names",
+        "draft/no-implicit-names",
+        "soju.im/no-implicit-names",
+    )
 
 fun preferredNoImplicitNames(caps: Set<String>): String? {
     val names = caps.mapTo(HashSet()) { it.substringBefore('=') }

@@ -26,28 +26,31 @@ class Migration9To10Test {
     fun migration_preservesNetworkSecrets_andResetsAllIrcDerivedState() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(9) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL(CREATE_NETWORKS)
-                        db.execSQL(CREATE_BUFFERS)
-                        db.execSQL("CREATE TABLE messages(id INTEGER PRIMARY KEY, bufferId INTEGER)")
-                        db.execSQL("CREATE TABLE messages_fts(text TEXT)")
-                        db.execSQL("CREATE TABLE reactions(id INTEGER PRIMARY KEY)")
-                        db.execSQL("CREATE TABLE members(bufferId INTEGER, nick TEXT)")
-                        db.execSQL("CREATE TABLE users(networkId INTEGER, nick TEXT)")
-                    }
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(9) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL(CREATE_NETWORKS)
+                                db.execSQL(CREATE_BUFFERS)
+                                db.execSQL("CREATE TABLE messages(id INTEGER PRIMARY KEY, bufferId INTEGER)")
+                                db.execSQL("CREATE TABLE messages_fts(text TEXT)")
+                                db.execSQL("CREATE TABLE reactions(id INTEGER PRIMARY KEY)")
+                                db.execSQL("CREATE TABLE members(bufferId INTEGER, nick TEXT)")
+                                db.execSQL("CREATE TABLE users(networkId INTEGER, nick TEXT)")
+                            }
 
-                    override fun onUpgrade(
-                        db: SupportSQLiteDatabase,
-                        oldVersion: Int,
-                        newVersion: Int,
-                    ) = Unit
-                })
-                .build(),
-        )
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL(
             """INSERT INTO networks(
@@ -70,22 +73,23 @@ class Migration9To10Test {
 
         MIGRATION_9_10.migrate(db)
 
-        db.query(
-            """SELECT saslUser, saslPassword, serverPassword, clientCertAlias, wsUrl,
+        db
+            .query(
+                """SELECT saslUser, saslPassword, serverPassword, clientCertAlias, wsUrl,
                       obfsMode, proxyHost, proxyPort, obfsLink
                FROM networks WHERE id = 7""",
-        ).use { cursor ->
-            assertTrue(cursor.moveToFirst())
-            assertEquals("sasl-user", cursor.getString(0))
-            assertEquals("sasl-secret", cursor.getString(1))
-            assertEquals("server-secret", cursor.getString(2))
-            assertEquals("cert", cursor.getString(3))
-            assertEquals("wss://irc.example", cursor.getString(4))
-            assertEquals("SOCKS5", cursor.getString(5))
-            assertEquals("127.0.0.1", cursor.getString(6))
-            assertEquals(9050, cursor.getInt(7))
-            assertEquals("vless://secret", cursor.getString(8))
-        }
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("sasl-user", cursor.getString(0))
+                assertEquals("sasl-secret", cursor.getString(1))
+                assertEquals("server-secret", cursor.getString(2))
+                assertEquals("cert", cursor.getString(3))
+                assertEquals("wss://irc.example", cursor.getString(4))
+                assertEquals("SOCKS5", cursor.getString(5))
+                assertEquals("127.0.0.1", cursor.getString(6))
+                assertEquals(9050, cursor.getInt(7))
+                assertEquals("vless://secret", cursor.getString(8))
+            }
         listOf(
             "buffers",
             "messages",
@@ -105,12 +109,13 @@ class Migration9To10Test {
                 assertEquals("$table must reset", 0, cursor.getInt(0))
             }
         }
-        db.query(
-            "SELECT COUNT(*) FROM app_state WHERE `key` = 'v10_notification_reset'",
-        ).use { cursor ->
-            assertTrue(cursor.moveToFirst())
-            assertEquals(1, cursor.getInt(0))
-        }
+        db
+            .query(
+                "SELECT COUNT(*) FROM app_state WHERE `key` = 'v10_notification_reset'",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1, cursor.getInt(0))
+            }
     }
 
     private companion object {

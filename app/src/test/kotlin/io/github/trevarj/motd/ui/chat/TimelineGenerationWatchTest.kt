@@ -13,9 +13,11 @@ import org.junit.Test
  * mislabelled makes the instrument worse than nothing.
  */
 class TimelineGenerationWatchTest {
-
-    private fun window(itemCount: Int, placeholdersBefore: Int, ids: List<Long>) =
-        TimelineWindow(itemCount, placeholdersBefore, ids)
+    private fun window(
+        itemCount: Int,
+        placeholdersBefore: Int,
+        ids: List<Long>,
+    ) = TimelineWindow(itemCount, placeholdersBefore, ids)
 
     @Test
     fun windowBoundsDescribeTheLoadedRunInPresentationIndices() {
@@ -64,16 +66,17 @@ class TimelineGenerationWatchTest {
         val previous = window(itemCount = 260, placeholdersBefore = 0, ids = (0L..259L).toList())
         val current = window(itemCount = 310, placeholdersBefore = 100, ids = (100L..249L).toList())
 
-        val fields = timelineGenerationFields(
-            generation = 7,
-            previous = previous,
-            current = current,
-            before = TimelineViewportAnchor(index = 40, offset = 12, key = 40L),
-            after = TimelineViewportAnchor(index = 40, offset = 0, key = null),
-            settled = true,
-            scrolling = false,
-            following = false,
-        )
+        val fields =
+            timelineGenerationFields(
+                generation = 7,
+                previous = previous,
+                current = current,
+                before = TimelineViewportAnchor(index = 40, offset = 12, key = 40L),
+                after = TimelineViewportAnchor(index = 40, offset = 0, key = null),
+                settled = true,
+                scrolling = false,
+                following = false,
+            )
 
         assertEquals(7L, fields["generation"])
         assertEquals(310, fields["item_count"])
@@ -102,16 +105,17 @@ class TimelineGenerationWatchTest {
         // Fifty newer rows arrived, so every retained row moved fifty slots older.
         val current = window(itemCount = 310, placeholdersBefore = 0, ids = (1000L..1049L).toList() + (0L..259L).toList())
 
-        val fields = timelineGenerationFields(
-            generation = 2,
-            previous = previous,
-            current = current,
-            before = TimelineViewportAnchor(index = 40, offset = 12, key = 40L),
-            after = TimelineViewportAnchor(index = 90, offset = 12, key = 40L),
-            settled = true,
-            scrolling = false,
-            following = false,
-        )
+        val fields =
+            timelineGenerationFields(
+                generation = 2,
+                previous = previous,
+                current = current,
+                before = TimelineViewportAnchor(index = 40, offset = 12, key = 40L),
+                after = TimelineViewportAnchor(index = 90, offset = 12, key = 40L),
+                settled = true,
+                scrolling = false,
+                following = false,
+            )
 
         assertEquals("loaded", fields["anchor_fate"])
         assertEquals("where the anchor row now is", 90, fields["anchor_index"])
@@ -122,16 +126,17 @@ class TimelineGenerationWatchTest {
     fun noPriorPresentationReportsSentinelsRatherThanFabricatedHistory() {
         val current = window(itemCount = 50, placeholdersBefore = 0, ids = (0L..49L).toList())
 
-        val fields = timelineGenerationFields(
-            generation = 1,
-            previous = null,
-            current = current,
-            before = TimelineViewportAnchor(index = 0, offset = 0, key = null),
-            after = TimelineViewportAnchor(index = 0, offset = 0, key = 0L),
-            settled = false,
-            scrolling = false,
-            following = true,
-        )
+        val fields =
+            timelineGenerationFields(
+                generation = 1,
+                previous = null,
+                current = current,
+                before = TimelineViewportAnchor(index = 0, offset = 0, key = null),
+                after = TimelineViewportAnchor(index = 0, offset = 0, key = 0L),
+                settled = false,
+                scrolling = false,
+                following = true,
+            )
 
         assertEquals(-1, fields["prev_item_count"])
         assertEquals(-1, fields["prev_loaded_count"])
@@ -147,24 +152,26 @@ class TimelineGenerationWatchTest {
      */
     @Test
     fun everyWatchFieldSurvivesTheJournalsRedaction() {
-        val fields = timelineGenerationFields(
-            generation = 3,
-            previous = window(itemCount = 10, placeholdersBefore = 0, ids = (0L..9L).toList()),
-            current = window(itemCount = 10, placeholdersBefore = 0, ids = (0L..9L).toList()),
-            before = TimelineViewportAnchor(index = 1, offset = 2, key = 1L),
-            after = TimelineViewportAnchor(index = 1, offset = 2, key = 1L),
-            settled = true,
-            scrolling = false,
-            following = false,
-        )
+        val fields =
+            timelineGenerationFields(
+                generation = 3,
+                previous = window(itemCount = 10, placeholdersBefore = 0, ids = (0L..9L).toList()),
+                current = window(itemCount = 10, placeholdersBefore = 0, ids = (0L..9L).toList()),
+                before = TimelineViewportAnchor(index = 1, offset = 2, key = 1L),
+                after = TimelineViewportAnchor(index = 1, offset = 2, key = 1L),
+                settled = true,
+                scrolling = false,
+                following = false,
+            )
 
-        val line = formatDiagnosticLine(
-            timestamp = "1970-01-01T00:00:00Z",
-            sequence = 1,
-            component = "chat_timeline",
-            event = "generation_presented",
-            fields = fields,
-        )
+        val line =
+            formatDiagnosticLine(
+                timestamp = "1970-01-01T00:00:00Z",
+                sequence = 1,
+                component = "chat_timeline",
+                event = "generation_presented",
+                fields = fields,
+            )
 
         assertFalse("no watch field may be redacted", line.contains("[omitted]"))
         fields.keys.forEach { key ->

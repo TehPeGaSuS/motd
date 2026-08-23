@@ -17,39 +17,46 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class IrcClientConfigurationFailureTest {
-
-    private fun TestScope.clientScope(): CoroutineScope =
-        CoroutineScope(backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler))
+    private fun TestScope.clientScope(): CoroutineScope = CoroutineScope(backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler))
 
     @Test
-    fun `transport configuration failure is fatal without opening a network connection`() = runTest {
-        var connectCalls = 0
-        val noNetworkTransport = object : IrcTransport {
-            override suspend fun connect() {
-                connectCalls++
-                throw TransportConfigurationException("SOCKS5 proxy host is required")
-            }
+    fun `transport configuration failure is fatal without opening a network connection`() =
+        runTest {
+            var connectCalls = 0
+            val noNetworkTransport =
+                object : IrcTransport {
+                    override suspend fun connect() {
+                        connectCalls++
+                        throw TransportConfigurationException("SOCKS5 proxy host is required")
+                    }
 
-            override val incoming = emptyFlow<String>()
-            override suspend fun send(line: String) = Unit
-            override suspend fun close() = Unit
+                    override val incoming = emptyFlow<String>()
+
+                    override suspend fun send(line: String) = Unit
+
+                    override suspend fun close() = Unit
+                }
+            val factory = TransportFactory { _, _, _, _, _ -> noNetworkTransport }
+            val client =
+                IrcClient(
+                    IrcClientConfig(
+                        host = "irc.example.org",
+                        port = 6697,
+                        tls = true,
+                        nick = "motd",
+                        username = "motd",
+                        realname = "motd User",
+                    ),
+                    factory,
+                    clientScope(),
+                )
+
+            client.start()
+            runCurrent()
+
+            val state = client.state.value as IrcClientState.Failed
+            assertTrue(state.fatal)
+            assertEquals("connect failed: SOCKS5 proxy host is required", state.reason)
+            assertEquals(1, connectCalls)
         }
-        val factory = TransportFactory { _, _, _, _, _ -> noNetworkTransport }
-        val client = IrcClient(
-            IrcClientConfig(
-                host = "irc.example.org", port = 6697, tls = true,
-                nick = "motd", username = "motd", realname = "motd User",
-            ),
-            factory,
-            clientScope(),
-        )
-
-        client.start()
-        runCurrent()
-
-        val state = client.state.value as IrcClientState.Failed
-        assertTrue(state.fatal)
-        assertEquals("connect failed: SOCKS5 proxy host is required", state.reason)
-        assertEquals(1, connectCalls)
-    }
 }

@@ -15,11 +15,17 @@ internal class TypingOutbox(
     private val now: () -> Long = { System.currentTimeMillis() },
 ) {
     // target -> last send time for the currently-throttled state.
-    private data class Window(val state: String, val sentAt: Long)
+    private data class Window(
+        val state: String,
+        val sentAt: Long,
+    )
 
     private val windows = HashMap<String, Window>()
 
-    fun shouldSend(target: String, state: String): Boolean {
+    fun shouldSend(
+        target: String,
+        state: String,
+    ): Boolean {
         if (state == "done") {
             // Always send; reset throttle so the next "active" isn't suppressed.
             windows.remove(target)

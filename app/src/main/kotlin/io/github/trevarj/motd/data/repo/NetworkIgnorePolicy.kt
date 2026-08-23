@@ -10,30 +10,37 @@ data class IgnoreMask(
     val host: String,
 )
 
-fun normalizeIgnorePattern(raw: String): Result<String> = runCatching {
-    val trimmed = raw.trim()
-    require(trimmed.isNotEmpty()) { "Ignore mask is required" }
-    require(trimmed.none { it == '\r' || it == '\n' }) { "Ignore mask cannot contain line breaks" }
-    when {
-        '!' in trimmed -> trimmed
-        '@' in trimmed -> "*!$trimmed"
-        else -> "$trimmed!*@*"
+fun normalizeIgnorePattern(raw: String): Result<String> =
+    runCatching {
+        val trimmed = raw.trim()
+        require(trimmed.isNotEmpty()) { "Ignore mask is required" }
+        require(trimmed.none { it == '\r' || it == '\n' }) { "Ignore mask cannot contain line breaks" }
+        when {
+            '!' in trimmed -> trimmed
+            '@' in trimmed -> "*!$trimmed"
+            else -> "$trimmed!*@*"
+        }
     }
-}
 
 fun parseIgnoreMask(pattern: String): IgnoreMask? {
     val bang = pattern.indexOf('!')
     val at = pattern.indexOf('@', startIndex = (bang + 1).coerceAtLeast(0))
     return when {
-        bang > 0 && at > bang + 1 && at < pattern.lastIndex ->
+        bang > 0 && at > bang + 1 && at < pattern.lastIndex -> {
             IgnoreMask(
                 nick = pattern.substring(0, bang),
                 user = pattern.substring(bang + 1, at),
                 host = pattern.substring(at + 1),
             )
-        bang < 0 && at > 0 && at < pattern.lastIndex ->
+        }
+
+        bang < 0 && at > 0 && at < pattern.lastIndex -> {
             IgnoreMask(nick = "*", user = pattern.substring(0, at), host = pattern.substring(at + 1))
-        else -> null
+        }
+
+        else -> {
+            null
+        }
     }
 }
 
@@ -41,11 +48,15 @@ fun ignoredBy(
     ignores: List<NetworkIgnoreEntity>,
     source: Prefix,
     identityRules: IrcIdentityRules,
-): Boolean = ignores.any { ignore ->
-    ignore.enabled && parseIgnoreMask(ignore.pattern)?.matches(source, identityRules) == true
-}
+): Boolean =
+    ignores.any { ignore ->
+        ignore.enabled && parseIgnoreMask(ignore.pattern)?.matches(source, identityRules) == true
+    }
 
-private fun IgnoreMask.matches(source: Prefix, identityRules: IrcIdentityRules): Boolean {
+private fun IgnoreMask.matches(
+    source: Prefix,
+    identityRules: IrcIdentityRules,
+): Boolean {
     val normalizedMaskNick = identityRules.normalize(nick)
     val normalizedSourceNick = identityRules.normalize(source.nick)
     return globMatches(normalizedMaskNick, normalizedSourceNick) &&
@@ -53,7 +64,10 @@ private fun IgnoreMask.matches(source: Prefix, identityRules: IrcIdentityRules):
         globMatches(host.lowercase(), (source.host ?: "").lowercase())
 }
 
-private fun globMatches(pattern: String, value: String): Boolean {
+private fun globMatches(
+    pattern: String,
+    value: String,
+): Boolean {
     var patternIndex = 0
     var valueIndex = 0
     var starIndex = -1
@@ -65,17 +79,22 @@ private fun globMatches(pattern: String, value: String): Boolean {
                 patternIndex++
                 valueIndex++
             }
+
             patternIndex < pattern.length && pattern[patternIndex] == '*' -> {
                 starIndex = patternIndex
                 matchIndex = valueIndex
                 patternIndex++
             }
+
             starIndex >= 0 -> {
                 patternIndex = starIndex + 1
                 matchIndex++
                 valueIndex = matchIndex
             }
-            else -> return false
+
+            else -> {
+                return false
+            }
         }
     }
     while (patternIndex < pattern.length && pattern[patternIndex] == '*') patternIndex++

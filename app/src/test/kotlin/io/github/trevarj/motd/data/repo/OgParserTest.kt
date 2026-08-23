@@ -12,14 +12,15 @@ class OgParserTest {
 
     @Test
     fun extractsAllOgTags_doubleQuotes() {
-        val html = """
+        val html =
+            """
             <html><head>
             <meta property="og:title" content="The Title">
             <meta property="og:description" content="A description here">
             <meta property="og:image" content="https://example.com/img.png">
             <meta property="og:site_name" content="Example Site">
             </head></html>
-        """.trimIndent()
+            """.trimIndent()
 
         val p = LinkPreviewRepositoryImpl.parseOgTags(url, html)!!
         assertEquals("The Title", p.title)
@@ -62,13 +63,14 @@ class OgParserTest {
 
     @Test
     fun video_pages_use_a_playable_thumbnail_card() {
-        val preview = LinkPreviewRepositoryImpl.parseOgTags(
-            "https://www.youtube.com/watch?v=abc123",
-            """
+        val preview =
+            LinkPreviewRepositoryImpl.parseOgTags(
+                "https://www.youtube.com/watch?v=abc123",
+                """
                 <meta property="og:title" content="Demo video">
                 <meta property="og:image" content="https://i.ytimg.com/vi/abc123/hqdefault.jpg">
-            """.trimIndent(),
-        )!!
+                """.trimIndent(),
+            )!!
 
         assertEquals("Demo video", preview.title)
         assertEquals("https://i.ytimg.com/vi/abc123/hqdefault.jpg", preview.imageUrl)
@@ -81,13 +83,14 @@ class OgParserTest {
         assertTrue(LinkPreviewRepositoryImpl.isPopularVideoUrl("https://www.vimeo.com/12345"))
         assertFalse(LinkPreviewRepositoryImpl.isPopularVideoUrl("https://youtube.com.example.test/watch"))
 
-        val preview = LinkPreviewRepositoryImpl.parseOgTags(
-            url,
-            """
+        val preview =
+            LinkPreviewRepositoryImpl.parseOgTags(
+                url,
+                """
                 <meta property="og:type" content="video.other">
                 <meta property="og:video" content="https://cdn.example.com/clip.mp4">
-            """.trimIndent(),
-        )!!
+                """.trimIndent(),
+            )!!
         assertEquals(LinkPreviewKind.VIDEO, preview.kind)
     }
 
@@ -134,7 +137,8 @@ class OgParserTest {
 
     @Test
     fun parsesWikipediaSummaryIntoRicherArticlePreview() {
-        val summary = """
+        val summary =
+            """
             {
               "title": "Alan Turing",
               "description": "English computer scientist",
@@ -146,12 +150,13 @@ class OgParserTest {
               },
               "ignored": true
             }
-        """.trimIndent()
+            """.trimIndent()
 
-        val preview = LinkPreviewRepositoryImpl.parseWikipediaSummary(
-            "https://en.wikipedia.org/wiki/Alan_Turing",
-            summary,
-        )!!
+        val preview =
+            LinkPreviewRepositoryImpl.parseWikipediaSummary(
+                "https://en.wikipedia.org/wiki/Alan_Turing",
+                summary,
+            )!!
 
         assertEquals("Alan Turing", preview.title)
         assertEquals(
@@ -165,10 +170,11 @@ class OgParserTest {
 
     @Test
     fun wikipediaSummary_ignoresUnsafeThumbnailAndMalformedJson() {
-        val preview = LinkPreviewRepositoryImpl.parseWikipediaSummary(
-            url,
-            """{"title":"Safe","thumbnail":{"source":"file:///tmp/private"}}""",
-        )!!
+        val preview =
+            LinkPreviewRepositoryImpl.parseWikipediaSummary(
+                url,
+                """{"title":"Safe","thumbnail":{"source":"file:///tmp/private"}}""",
+            )!!
         assertEquals("Safe", preview.title)
         assertNull(preview.imageUrl)
         assertNull(LinkPreviewRepositoryImpl.parseWikipediaSummary(url, "not json"))
@@ -177,19 +183,21 @@ class OgParserTest {
 
     @Test
     fun site_name_is_the_fetched_host_never_the_self_declared_brand() {
-        val preview = LinkPreviewRepositoryImpl.parseOgTags(
-            "https://evil.example/login",
-            """<meta property="og:title" content="Sign in"><meta property="og:site_name" content="GitHub">""",
-        )!!
+        val preview =
+            LinkPreviewRepositoryImpl.parseOgTags(
+                "https://evil.example/login",
+                """<meta property="og:title" content="Sign in"><meta property="og:site_name" content="GitHub">""",
+            )!!
         assertEquals("evil.example", preview.siteName)
     }
 
     @Test
     fun og_fields_are_sanitized_and_capped() {
         val spoofedTitle = "paypal.com\u202Emoc.live\u0000"
-        val html = "<meta property=\"og:title\" content=\"$spoofedTitle\">" +
-            // Kept inside the 64 KB head-scan window; oversized fields are covered separately.
-            "<meta property=\"og:description\" content=\"" + "a".repeat(10_000) + "\">"
+        val html =
+            "<meta property=\"og:title\" content=\"$spoofedTitle\">" +
+                // Kept inside the 64 KB head-scan window; oversized fields are covered separately.
+                "<meta property=\"og:description\" content=\"" + "a".repeat(10_000) + "\">"
         val preview = LinkPreviewRepositoryImpl.parseOgTags(url, html)!!
 
         // RTL-override FORMAT and CONTROL code points are stripped, exactly as the TEXT path does.
@@ -201,16 +209,18 @@ class OgParserTest {
     @Test
     fun og_image_requires_an_http_scheme() {
         for (bad in listOf("file:///etc/passwd", "content://media/external/images/1", "javascript:alert(1)")) {
-            val preview = LinkPreviewRepositoryImpl.parseOgTags(
-                url,
-                """<meta property="og:title" content="t"><meta property="og:image" content="$bad">""",
-            )!!
+            val preview =
+                LinkPreviewRepositoryImpl.parseOgTags(
+                    url,
+                    """<meta property="og:title" content="t"><meta property="og:image" content="$bad">""",
+                )!!
             assertNull(preview.imageUrl)
         }
-        val ok = LinkPreviewRepositoryImpl.parseOgTags(
-            url,
-            """<meta property="og:image" content="https://example.com/i.png">""",
-        )!!
+        val ok =
+            LinkPreviewRepositoryImpl.parseOgTags(
+                url,
+                """<meta property="og:image" content="https://example.com/i.png">""",
+            )!!
         assertEquals("https://example.com/i.png", ok.imageUrl)
     }
 
@@ -247,10 +257,11 @@ class OgParserTest {
 
     @Test
     fun wikipediaSummary_fallsBackToShortDescriptionWhenExtractIsMissing() {
-        val preview = LinkPreviewRepositoryImpl.parseWikipediaSummary(
-            url,
-            """{"title":"Alan Turing","description":"English computer scientist"}""",
-        )!!
+        val preview =
+            LinkPreviewRepositoryImpl.parseWikipediaSummary(
+                url,
+                """{"title":"Alan Turing","description":"English computer scientist"}""",
+            )!!
         assertEquals("English computer scientist", preview.description)
     }
 }

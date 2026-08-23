@@ -30,7 +30,8 @@ class FoolCollapseUiTest {
             }
         }
 
-        compose.onNodeWithTag("chat_fool_collapse_msgid-1")
+        compose
+            .onNodeWithTag("chat_fool_collapse_msgid-1")
             .assertWidthIsEqualTo(240.dp)
             .performTouchInput {
                 click(Offset(with(compose.density) { 240.dp.toPx() - 2f }, with(compose.density) { 12.dp.toPx() }))

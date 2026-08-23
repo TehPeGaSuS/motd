@@ -17,8 +17,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.State
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -103,9 +103,10 @@ fun EmptyState(
     ghostRows: Boolean = false,
 ) {
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(32.dp),
+        modifier =
+            modifier
+                .fillMaxSize()
+                .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -167,7 +168,10 @@ fun EmptyState(
  * alpha and paint offset move, so an empty state inside a list never reflows as the caption lands.
  */
 @Composable
-private fun CaptionReveal(revealed: Boolean, content: @Composable () -> Unit) {
+private fun CaptionReveal(
+    revealed: Boolean,
+    content: @Composable () -> Unit,
+) {
     val reveal by animateFloatAsState(
         targetValue = if (revealed) 1f else 0f,
         animationSpec = tween(durationMillis = EmptyStateGhostRows.CaptionFadeMs),
@@ -175,15 +179,16 @@ private fun CaptionReveal(revealed: Boolean, content: @Composable () -> Unit) {
     )
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .alpha(reveal)
-            .layout { measurable, constraints ->
-                val placeable = measurable.measure(constraints)
-                layout(placeable.width, placeable.height) {
-                    // Paint offset only: the reported height is the settled one.
-                    placeable.placeRelative(0, ((1f - reveal) * 12.dp.toPx()).toInt())
-                }
-            },
+        modifier =
+            Modifier
+                .alpha(reveal)
+                .layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints)
+                    layout(placeable.width, placeable.height) {
+                        // Paint offset only: the reported height is the settled one.
+                        placeable.placeRelative(0, ((1f - reveal) * 12.dp.toPx()).toInt())
+                    }
+                },
         content = { content() },
     )
 }
@@ -211,16 +216,18 @@ private class GhostRowsPlayback(
 private fun rememberGhostRowsPlayback(): GhostRowsPlayback {
     val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.ghost_rows))
     val motionEnabled = LocalLottieMotionEnabled.current
-    val animation = animateLottieCompositionAsState(
-        composition = composition,
-        isPlaying = motionEnabled,
-        iterations = 1,
-    )
-    val captionCue = remember(animation, motionEnabled) {
-        derivedStateOf {
-            !motionEnabled || animation.value >= EmptyStateGhostRows.CaptionRevealProgress
+    val animation =
+        animateLottieCompositionAsState(
+            composition = composition,
+            isPlaying = motionEnabled,
+            iterations = 1,
+        )
+    val captionCue =
+        remember(animation, motionEnabled) {
+            derivedStateOf {
+                !motionEnabled || animation.value >= EmptyStateGhostRows.CaptionRevealProgress
+            }
         }
-    }
     return remember(composition, animation, motionEnabled, captionCue) {
         GhostRowsPlayback(
             composition = composition,
@@ -241,30 +248,32 @@ private fun rememberGhostRowsPlayback(): GhostRowsPlayback {
 @Composable
 private fun GhostRows(playback: GhostRowsPlayback) {
     val skeletonColor = MaterialTheme.colorScheme.surfaceContainerHighest.toArgb()
-    val dynamicProperties = remember(skeletonColor) {
-        // Built directly rather than through rememberLottieDynamicProperty, which keys on the
-        // vararg keypath array's identity and so re-resolves every keypath on every pass.
-        LottieDynamicProperties(
-            listOf(
-                lottieFillColor(skeletonColor, KeyPath("ghost_row_1", "**")),
-                lottieFillColor(skeletonColor, KeyPath("ghost_row_2", "**")),
-                lottieFillColor(skeletonColor, KeyPath("ghost_row_3", "**")),
-            ),
-        )
-    }
+    val dynamicProperties =
+        remember(skeletonColor) {
+            // Built directly rather than through rememberLottieDynamicProperty, which keys on the
+            // vararg keypath array's identity and so re-resolves every keypath on every pass.
+            LottieDynamicProperties(
+                listOf(
+                    lottieFillColor(skeletonColor, KeyPath("ghost_row_1", "**")),
+                    lottieFillColor(skeletonColor, KeyPath("ghost_row_2", "**")),
+                    lottieFillColor(skeletonColor, KeyPath("ghost_row_3", "**")),
+                ),
+            )
+        }
     LottieAnimation(
         composition = playback.composition,
         progress = playback.progress,
         dynamicProperties = dynamicProperties,
         contentScale = ContentScale.Fit,
-        modifier = Modifier
-            // widthIn first: it has to narrow the incoming constraint before fillMaxWidth expands
-            // to it. The other order pins the width to the parent and the cap never applies, which
-            // stretches a 240dp illustration across a tablet.
-            .widthIn(max = EmptyStateGhostRows.MaxWidth)
-            .fillMaxWidth()
-            .aspectRatio(EmptyStateGhostRows.AspectRatio)
-            .testTag("empty_state_ghost_rows"),
+        modifier =
+            Modifier
+                // widthIn first: it has to narrow the incoming constraint before fillMaxWidth expands
+                // to it. The other order pins the width to the parent and the cap never applies, which
+                // stretches a 240dp illustration across a tablet.
+                .widthIn(max = EmptyStateGhostRows.MaxWidth)
+                .fillMaxWidth()
+                .aspectRatio(EmptyStateGhostRows.AspectRatio)
+                .testTag("empty_state_ghost_rows"),
     )
 }
 

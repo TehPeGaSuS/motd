@@ -4,9 +4,16 @@ import android.icu.lang.UCharacter
 import android.icu.lang.UProperty
 import java.util.Locale
 
-data class EmojiPage(val icon: String, val label: String, val emojis: List<String>)
+data class EmojiPage(
+    val icon: String,
+    val label: String,
+    val emojis: List<String>,
+)
 
-data class EmojiSearchEntry(val emoji: String, val name: String)
+data class EmojiSearchEntry(
+    val emoji: String,
+    val name: String,
+)
 
 /**
  * Build the catalog from Android's own Unicode emoji properties. This follows the Unicode version
@@ -20,8 +27,9 @@ fun systemEmojiPages(labels: List<String>): List<EmojiPage> {
         for (codePoint in range) {
             if (!UCharacter.hasBinaryProperty(codePoint, UProperty.EMOJI)) continue
             if (UCharacter.hasBinaryProperty(codePoint, UProperty.EMOJI_MODIFIER) || codePoint in 0x1F1E6..0x1F1FF) continue
-            val glyph = String(Character.toChars(codePoint)) +
-                if (UCharacter.hasBinaryProperty(codePoint, UProperty.EMOJI_PRESENTATION)) "" else "\uFE0F"
+            val glyph =
+                String(Character.toChars(codePoint)) +
+                    if (UCharacter.hasBinaryProperty(codePoint, UProperty.EMOJI_PRESENTATION)) "" else "\uFE0F"
             val bucket = emojiBucket(codePoint)
             buckets[bucket] += glyph
             if (UCharacter.hasBinaryProperty(codePoint, UProperty.EMOJI_MODIFIER_BASE)) {
@@ -32,9 +40,10 @@ fun systemEmojiPages(labels: List<String>): List<EmojiPage> {
 
     // Keycaps and every ISO country flag are Emoji sequences rather than single Emoji code points.
     buckets[6] += listOf("#️⃣", "*️⃣") + ('0'..'9').map { "$it\uFE0F\u20E3" }
-    val flags = Locale.getISOCountries().sorted().map { country ->
-        country.map { letter -> String(Character.toChars(0x1F1E6 + (letter - 'A'))) }.joinToString("")
-    }
+    val flags =
+        Locale.getISOCountries().sorted().map { country ->
+            country.map { letter -> String(Character.toChars(0x1F1E6 + (letter - 'A'))) }.joinToString("")
+        }
 
     val icons = listOf("😀", "🐻", "🍜", "⚽", "🚀", "💡", "❤️")
     return buckets.mapIndexed { index, emojis ->
@@ -47,18 +56,22 @@ fun systemEmojiPages(labels: List<String>): List<EmojiPage> {
 /** Search labels derived from the device Unicode database, so completion tracks OS emoji support. */
 fun systemEmojiSearchEntries(): List<EmojiSearchEntry> {
     val pages = systemEmojiPages(List(8) { "" })
-    val countryNames = Locale.getISOCountries().associate { country ->
-        val flag = country.map { letter ->
-            String(Character.toChars(0x1F1E6 + (letter - 'A')))
-        }.joinToString("")
-        flag to Locale("", country).displayCountry
-    }
+    val countryNames =
+        Locale.getISOCountries().associate { country ->
+            val flag =
+                country
+                    .map { letter ->
+                        String(Character.toChars(0x1F1E6 + (letter - 'A')))
+                    }.joinToString("")
+            flag to Locale("", country).displayCountry
+        }
     return pages.flatMap { it.emojis }.distinct().mapNotNull { emoji ->
-        val name = when {
-            countryNames[emoji] != null -> "${countryNames.getValue(emoji)} flag"
-            emoji.endsWith("\u20E3") -> "${emoji.first()} keycap"
-            else -> UCharacter.getName(emoji.codePointAt(0))
-        }?.let(::canonicalEmojiName) ?: return@mapNotNull null
+        val name =
+            when {
+                countryNames[emoji] != null -> "${countryNames.getValue(emoji)} flag"
+                emoji.endsWith("\u20E3") -> "${emoji.first()} keycap"
+                else -> UCharacter.getName(emoji.codePointAt(0))
+            }?.let(::canonicalEmojiName) ?: return@mapNotNull null
         EmojiSearchEntry(emoji, name)
     }
 }
@@ -76,29 +89,29 @@ fun searchSystemEmojis(
     val normalizedNeedle = needleTokens.joinToString("_")
     val compactNeedle = normalizedNeedle.replace("_", "")
 
-    return entries.asSequence()
+    return entries
+        .asSequence()
         .mapIndexedNotNull { index, entry ->
             val name = canonicalEmojiName(entry.name)
             val tokens = name.split('_').map(::canonicalEmojiSearchToken)
             val normalizedName = tokens.joinToString("_")
-            val match = emojiNameMatch(
-                normalizedName = normalizedName,
-                nameTokens = tokens,
-                needle = normalizedNeedle,
-                needleTokens = needleTokens,
-                compactNeedle = compactNeedle,
-            ) ?: return@mapIndexedNotNull null
+            val match =
+                emojiNameMatch(
+                    normalizedName = normalizedName,
+                    nameTokens = tokens,
+                    needle = normalizedNeedle,
+                    needleTokens = needleTokens,
+                    compactNeedle = compactNeedle,
+                ) ?: return@mapIndexedNotNull null
             EmojiSearchMatch(entry, match, index)
-        }
-        .sortedWith(
+        }.sortedWith(
             compareBy<EmojiSearchMatch> { it.score.kind }
                 .thenBy { it.score.wordIndex }
                 .thenBy { it.score.characterIndex }
                 .thenBy { it.score.gap }
                 .thenBy { it.entry.name }
                 .thenBy { it.originalIndex },
-        )
-        .map { it.entry }
+        ).map { it.entry }
         .take(limit)
         .toList()
 }
@@ -136,19 +149,20 @@ private fun emojiNameMatch(
         return EmojiMatchScore(kind = 1, wordIndex = 0, characterIndex = 0, gap = 0)
     }
 
-    val tokenPrefix = nameTokens.indices.firstNotNullOfOrNull { start ->
-        if (start + needleTokens.size > nameTokens.size) return@firstNotNullOfOrNull null
-        if (needleTokens.indices.all { offset -> nameTokens[start + offset].startsWith(needleTokens[offset]) }) {
-            EmojiMatchScore(
-                kind = 2,
-                wordIndex = start,
-                characterIndex = nameTokens.take(start).sumOf { it.length + 1 },
-                gap = 0,
-            )
-        } else {
-            null
+    val tokenPrefix =
+        nameTokens.indices.firstNotNullOfOrNull { start ->
+            if (start + needleTokens.size > nameTokens.size) return@firstNotNullOfOrNull null
+            if (needleTokens.indices.all { offset -> nameTokens[start + offset].startsWith(needleTokens[offset]) }) {
+                EmojiMatchScore(
+                    kind = 2,
+                    wordIndex = start,
+                    characterIndex = nameTokens.take(start).sumOf { it.length + 1 },
+                    gap = 0,
+                )
+            } else {
+                null
+            }
         }
-    }
     if (tokenPrefix != null) return tokenPrefix
 
     if (needle.length >= 2) {
@@ -171,7 +185,10 @@ private fun emojiNameMatch(
     )
 }
 
-private fun compactSubsequenceMatch(name: String, needle: String): Pair<Int, Int>? {
+private fun compactSubsequenceMatch(
+    name: String,
+    needle: String,
+): Pair<Int, Int>? {
     var needleIndex = 0
     var firstMatch = -1
     var lastMatch = -1
@@ -186,7 +203,10 @@ private fun compactSubsequenceMatch(name: String, needle: String): Pair<Int, Int
     return firstMatch to (lastMatch - firstMatch + 1 - needle.length)
 }
 
-private fun tokenIndexAtCompactOffset(tokens: List<String>, offset: Int): Int {
+private fun tokenIndexAtCompactOffset(
+    tokens: List<String>,
+    offset: Int,
+): Int {
     var remaining = offset
     tokens.forEachIndexed { index, token ->
         if (remaining < token.length) return index
@@ -195,10 +215,11 @@ private fun tokenIndexAtCompactOffset(tokens: List<String>, offset: Int): Int {
     return tokens.lastIndex.coerceAtLeast(0)
 }
 
-private fun canonicalEmojiSearchToken(value: String): String = when (val token = value.lowercase(Locale.ROOT)) {
-    "smiling" -> "smile"
-    else -> token
-}
+private fun canonicalEmojiSearchToken(value: String): String =
+    when (val token = value.lowercase(Locale.ROOT)) {
+        "smiling" -> "smile"
+        else -> token
+    }
 
 /** Convert Unicode labels and user queries to the same lower-case snake_case representation. */
 private fun canonicalEmojiName(value: String): String {
@@ -228,13 +249,26 @@ private fun peopleEmojiOrder(emoji: String): Int {
     } * 0x110000 + codePoint
 }
 
-private fun emojiBucket(codePoint: Int): Int = when {
-    codePoint in 0x1F600..0x1F64F || codePoint in 0x1F900..0x1F9FF ||
-        codePoint in 0x1FA70..0x1FAFF || codePoint in 0x1F440..0x1F487 -> 0 // people
-    codePoint in 0x1F32D..0x1F37F -> 2 // food
-    codePoint in 0x1F3A0..0x1F3FF -> 3 // activity
-    codePoint in 0x1F300..0x1F43F -> 1 // nature
-    codePoint in 0x1F680..0x1F6FF -> 4 // travel
-    codePoint in 0x1F4A0..0x1F5FF || codePoint in 0x1F700..0x1F8FF -> 5 // objects
-    else -> 6 // symbols
-}
+private fun emojiBucket(codePoint: Int): Int =
+    when {
+        codePoint in 0x1F600..0x1F64F || codePoint in 0x1F900..0x1F9FF ||
+            codePoint in 0x1FA70..0x1FAFF || codePoint in 0x1F440..0x1F487 -> 0
+
+        // people
+        codePoint in 0x1F32D..0x1F37F -> 2
+
+        // food
+        codePoint in 0x1F3A0..0x1F3FF -> 3
+
+        // activity
+        codePoint in 0x1F300..0x1F43F -> 1
+
+        // nature
+        codePoint in 0x1F680..0x1F6FF -> 4
+
+        // travel
+        codePoint in 0x1F4A0..0x1F5FF || codePoint in 0x1F700..0x1F8FF -> 5
+
+        // objects
+        else -> 6 // symbols
+    }

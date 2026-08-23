@@ -32,13 +32,20 @@ class E2eFailureArtifactRule(
         runCatching { diagnostics().setEnabled(true) }
     }
 
-    override fun failed(e: Throwable, description: Description) {
+    override fun failed(
+        e: Throwable,
+        description: Description,
+    ) {
         failure = e
         capture()
     }
 
     override fun finished(description: Description) {
-        try { if (failure != null) capture() } finally { holder.close() }
+        try {
+            if (failure != null) capture()
+        } finally {
+            holder.close()
+        }
     }
 
     /**
@@ -74,16 +81,25 @@ class E2eFailureArtifactRule(
     }
 
     private fun diagnostics(): DiagnosticLogger {
-        val app = InstrumentationRegistry.getInstrumentation().targetContext
-            .applicationContext as MotdApplication
-        return EntryPointAccessors.fromApplication(app, RequiredE2eEntryPoint::class.java)
+        val app =
+            InstrumentationRegistry
+                .getInstrumentation()
+                .targetContext
+                .applicationContext as MotdApplication
+        return EntryPointAccessors
+            .fromApplication(app, RequiredE2eEntryPoint::class.java)
             .diagnostics()
     }
 
-    private fun safeName(): String = (description?.className.orEmpty() + "_" + description?.methodName.orEmpty())
-        .replace(Regex("[^A-Za-z0-9_.-]"), "_")
+    private fun safeName(): String =
+        (description?.className.orEmpty() + "_" + description?.methodName.orEmpty())
+            .replace(Regex("[^A-Za-z0-9_.-]"), "_")
 
-    private fun writeOutput(path: String, content: String, append: Boolean = false) {
+    private fun writeOutput(
+        path: String,
+        content: String,
+        append: Boolean = false,
+    ) {
         PlatformTestStorageRegistry.getInstance().openOutputFile(path, append).bufferedWriter().use {
             it.write(content)
         }
@@ -92,13 +108,18 @@ class E2eFailureArtifactRule(
 
 class ScenarioHolder {
     var scenario: ActivityScenario<MainActivity>? = null
-    fun launch() { scenario = ActivityScenario.launch(MainActivity::class.java) }
+
+    fun launch() {
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+    }
+
     fun close() {
         val owned = scenario ?: return
         scenario = null
-        val finishRequested = runCatching {
-            owned.onActivity { it.finishAndRemoveTask() }
-        }.isSuccess
+        val finishRequested =
+            runCatching {
+                owned.onActivity { it.finishAndRemoveTask() }
+            }.isSuccess
         if (finishRequested) {
             // ActivityScenario's monitor can remain RESUMED after recreate even though the current
             // activity accepted a terminal finish request. Waiting for idle is sufficient cleanup;

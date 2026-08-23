@@ -39,9 +39,10 @@ class WhoxTest {
 
     @Test fun `mapper parses canonical row placeholders and completion`() {
         val mapper = EventMapper({ "motd" }, { Isupport() }, now = { 1L })
-        val row = mapper.map(
-            IrcMessage.parse(":srv 354 motd 7 ~user cloak.example Nick 0 H@ :Real Name"),
-        ) as IrcEvent.WhoxRow
+        val row =
+            mapper.map(
+                IrcMessage.parse(":srv 354 motd 7 ~user cloak.example Nick 0 H@ :Real Name"),
+            ) as IrcEvent.WhoxRow
         assertEquals(7, row.token)
         assertEquals("~user", row.username)
         assertEquals("cloak.example", row.host)
@@ -54,9 +55,10 @@ class WhoxTest {
 
     @Test fun `partial row keeps safely positioned identity fields`() {
         val mapper = EventMapper({ "motd" }, { Isupport() }, now = { 1L })
-        val row = mapper.map(
-            IrcMessage.parse(":srv 354 motd 8 ~user cloak.example Nick"),
-        ) as IrcEvent.WhoxRow
+        val row =
+            mapper.map(
+                IrcMessage.parse(":srv 354 motd 8 ~user cloak.example Nick"),
+            ) as IrcEvent.WhoxRow
 
         assertEquals("~user", row.username)
         assertEquals("cloak.example", row.host)
@@ -66,89 +68,93 @@ class WhoxTest {
         assertEquals(null, row.realname)
     }
 
-    @Test fun `same normalized mask coalesces and concurrent masks keep tokens separate`() = runTest {
-        val transport = FakeTransport()
-        val client = registeredWhox(transport)
+    @Test fun `same normalized mask coalesces and concurrent masks keep tokens separate`() =
+        runTest {
+            val transport = FakeTransport()
+            val client = registeredWhox(transport)
 
-        val first = async { client.whox("#Room") }
-        val duplicate = async { client.whox("#room") }
-        val other = async { client.whox("#other") }
-        runCurrent()
-        val commands = transport.sent.filter { it.startsWith("WHO ") }
-        assertEquals(2, commands.size)
-        val roomToken = commands.first { it.startsWith("WHO #Room ") }.substringAfterLast(',').toInt()
-        val otherToken = commands.first { it.startsWith("WHO #other ") }.substringAfterLast(',').toInt()
-        assertTrue(roomToken in 0..999)
-        assertTrue(otherToken in 0..999)
-        assertTrue(roomToken != otherToken)
+            val first = async { client.whox("#Room") }
+            val duplicate = async { client.whox("#room") }
+            val other = async { client.whox("#other") }
+            runCurrent()
+            val commands = transport.sent.filter { it.startsWith("WHO ") }
+            assertEquals(2, commands.size)
+            val roomToken = commands.first { it.startsWith("WHO #Room ") }.substringAfterLast(',').toInt()
+            val otherToken = commands.first { it.startsWith("WHO #other ") }.substringAfterLast(',').toInt()
+            assertTrue(roomToken in 0..999)
+            assertTrue(otherToken in 0..999)
+            assertTrue(roomToken != otherToken)
 
-        transport.feed(":srv 354 motd $otherToken u h Other acct H :Other Real")
-        transport.feed(":srv 315 motd #other :End")
-        transport.feed(":srv 354 motd $roomToken u h Nick * G :Room Real")
-        transport.feed(":srv 315 motd #ROOM :End")
-        runCurrent()
+            transport.feed(":srv 354 motd $otherToken u h Other acct H :Other Real")
+            transport.feed(":srv 315 motd #other :End")
+            transport.feed(":srv 354 motd $roomToken u h Nick * G :Room Real")
+            transport.feed(":srv 315 motd #ROOM :End")
+            runCurrent()
 
-        assertEquals(listOf("Nick"), first.await().rows.map { it.nick })
-        assertEquals(first.await(), duplicate.await())
-        assertEquals(listOf("Other"), other.await().rows.map { it.nick })
-        assertTrue(first.await().completed)
-    }
+            assertEquals(listOf("Nick"), first.await().rows.map { it.nick })
+            assertEquals(first.await(), duplicate.await())
+            assertEquals(listOf("Other"), other.await().rows.map { it.nick })
+            assertTrue(first.await().completed)
+        }
 
-    @Test fun `unsupported server returns incomplete without wire command`() = runTest {
-        val transport = FakeTransport()
-        val client = registeredWhox(transport, advertiseWhox = false)
-        val before = transport.sent.size
-        val result = client.whox("#room")
-        assertFalse(result.completed)
-        assertTrue(result.rows.isEmpty())
-        assertEquals(before, transport.sent.size)
-    }
+    @Test fun `unsupported server returns incomplete without wire command`() =
+        runTest {
+            val transport = FakeTransport()
+            val client = registeredWhox(transport, advertiseWhox = false)
+            val before = transport.sent.size
+            val result = client.whox("#room")
+            assertFalse(result.completed)
+            assertTrue(result.rows.isEmpty())
+            assertEquals(before, transport.sent.size)
+        }
 
-    @Test fun `timeout returns partial rows as non authoritative and permits retry`() = runTest {
-        val transport = FakeTransport()
-        val client = registeredWhox(transport)
+    @Test fun `timeout returns partial rows as non authoritative and permits retry`() =
+        runTest {
+            val transport = FakeTransport()
+            val client = registeredWhox(transport)
 
-        val first = async { client.whox("#room") }
-        runCurrent()
-        val token = transport.sent.last { it.startsWith("WHO #room ") }.substringAfterLast(',')
-        transport.feed(":srv 354 motd $token u h Nick acct H :Partial")
-        runCurrent()
-        advanceTimeBy(15_001)
-        runCurrent()
+            val first = async { client.whox("#room") }
+            runCurrent()
+            val token = transport.sent.last { it.startsWith("WHO #room ") }.substringAfterLast(',')
+            transport.feed(":srv 354 motd $token u h Nick acct H :Partial")
+            runCurrent()
+            advanceTimeBy(15_001)
+            runCurrent()
 
-        assertFalse(first.await().completed)
-        assertEquals(listOf("Nick"), first.await().rows.map { it.nick })
+            assertFalse(first.await().completed)
+            assertEquals(listOf("Nick"), first.await().rows.map { it.nick })
 
-        val retry = async { client.whox("#room") }
-        runCurrent()
-        assertEquals(2, transport.sent.count { it.startsWith("WHO #room ") })
-        retry.cancel()
-    }
+            val retry = async { client.whox("#room") }
+            runCurrent()
+            assertEquals(2, transport.sent.count { it.startsWith("WHO #room ") })
+            retry.cancel()
+        }
 
-    @Test fun `disconnect cancels an in flight generation`() = runTest {
-        val transport = FakeTransport()
-        val client = registeredWhox(transport)
-        val request = async { client.whox("#room") }
-        runCurrent()
+    @Test fun `disconnect cancels an in flight generation`() =
+        runTest {
+            val transport = FakeTransport()
+            val client = registeredWhox(transport)
+            val request = async { client.whox("#room") }
+            runCurrent()
 
-        client.stop()
-        runCurrent()
+            client.stop()
+            runCurrent()
 
-        assertTrue(request.isCancelled)
-    }
+            assertTrue(request.isCancelled)
+        }
 
-    private fun TestScope.clientScope(): CoroutineScope =
-        CoroutineScope(backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler))
+    private fun TestScope.clientScope(): CoroutineScope = CoroutineScope(backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler))
 
     private suspend fun TestScope.registeredWhox(
         transport: FakeTransport,
         advertiseWhox: Boolean = true,
     ): IrcClient {
-        val client = IrcClient(
-            IrcClientConfig("irc.example", 6697, true, "motd", "motd", "motd"),
-            transport.factory(),
-            clientScope(),
-        )
+        val client =
+            IrcClient(
+                IrcClientConfig("irc.example", 6697, true, "motd", "motd", "motd"),
+                transport.factory(),
+                clientScope(),
+            )
         client.start()
         runCurrent()
         transport.feed(":srv CAP * LS :message-tags")

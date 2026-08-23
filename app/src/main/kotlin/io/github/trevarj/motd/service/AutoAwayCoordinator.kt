@@ -8,9 +8,6 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcClientState
-import java.util.concurrent.atomic.AtomicBoolean
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -19,6 +16,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /** The three preferences that drive auto-away, isolated so unrelated settings edits cannot rearm it. */
 internal data class AutoAwayConfig(
@@ -27,8 +27,7 @@ internal data class AutoAwayConfig(
     val message: String,
 )
 
-internal fun autoAwayConfig(settings: Settings): AutoAwayConfig =
-    AutoAwayConfig(settings.autoAwayEnabled, settings.autoAwayMinutes, settings.autoAwayMessage)
+internal fun autoAwayConfig(settings: Settings): AutoAwayConfig = AutoAwayConfig(settings.autoAwayEnabled, settings.autoAwayMinutes, settings.autoAwayMessage)
 
 /**
  * Marks the user away on every connected network once the app has been backgrounded long enough,
@@ -138,7 +137,10 @@ class AutoAwayCoordinator private constructor(
      * A write that never reaches the wire simply leaves the network un-marked: [selfAwayStates]
      * moves on server confirmation only, so a failure cannot desync auto-back.
      */
-    private suspend fun writeAway(networkId: Long, message: String?) {
+    private suspend fun writeAway(
+        networkId: Long,
+        message: String?,
+    ) {
         try {
             connections.setAway(networkId, message)
         } catch (cancelled: CancellationException) {
@@ -156,13 +158,14 @@ class AutoAwayCoordinator private constructor(
             scope: CoroutineScope,
             defaultMessage: () -> String,
             diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
-        ): AutoAwayCoordinator = AutoAwayCoordinator(
-            connections = connections,
-            settingsRepository = settingsRepository,
-            visibility = visibility,
-            diagnostics = diagnostics,
-            scope = scope,
-            defaultMessage = defaultMessage,
-        )
+        ): AutoAwayCoordinator =
+            AutoAwayCoordinator(
+                connections = connections,
+                settingsRepository = settingsRepository,
+                visibility = visibility,
+                diagnostics = diagnostics,
+                scope = scope,
+                defaultMessage = defaultMessage,
+            )
     }
 }

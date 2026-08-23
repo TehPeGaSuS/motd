@@ -13,21 +13,41 @@ import org.junit.Test
  * testing style matching [ActorRebuildTest].
  */
 class ReadyStateDiagnosticFieldsTest {
-
     /** The cap set a real released soju (0.10.x) advertises, values included. */
-    private val sojuReleaseCaps = setOf(
-        "draft/pre-away", "draft/no-implicit-names", "cap-notify", "soju.im/search",
-        "message-tags", "batch", "draft/chathistory", "extended-join", "draft/message-redaction",
-        "invite-notify", "soju.im/no-implicit-names", "sasl=PLAIN", "multi-prefix",
-        "soju.im/account-required", "account-notify", "chghost", "server-time",
-        "draft/metadata-2=before-connect", "account-tag", "away-notify", "soju.im/webpush",
-        "draft/read-marker", "soju.im/bouncer-networks", "soju.im/read",
-        "soju.im/bouncer-networks-notify", "extended-monitor", "setname", "echo-message",
-        "draft/extended-monitor",
-    )
+    private val sojuReleaseCaps =
+        setOf(
+            "draft/pre-away",
+            "draft/no-implicit-names",
+            "cap-notify",
+            "soju.im/search",
+            "message-tags",
+            "batch",
+            "draft/chathistory",
+            "extended-join",
+            "draft/message-redaction",
+            "invite-notify",
+            "soju.im/no-implicit-names",
+            "sasl=PLAIN",
+            "multi-prefix",
+            "soju.im/account-required",
+            "account-notify",
+            "chghost",
+            "server-time",
+            "draft/metadata-2=before-connect",
+            "account-tag",
+            "away-notify",
+            "soju.im/webpush",
+            "draft/read-marker",
+            "soju.im/bouncer-networks",
+            "soju.im/read",
+            "soju.im/bouncer-networks-notify",
+            "extended-monitor",
+            "setname",
+            "echo-message",
+            "draft/extended-monitor",
+        )
 
-    private fun ready(caps: Set<String>) =
-        IrcClientState.Ready(nick = "motd", caps = caps, isupport = emptyMap())
+    private fun ready(caps: Set<String>) = IrcClientState.Ready(nick = "motd", caps = caps, isupport = emptyMap())
 
     @Test
     fun `released soju caps derive search gates the clipped caps field loses`() {
@@ -45,9 +65,10 @@ class ReadyStateDiagnosticFieldsTest {
     @Test
     fun `cap names are compared with values stripped`() {
         // A valued advertisement still counts, matching IrcClient.hasCap().
-        val fields = readyStateDiagnosticFields(
-            ready(setOf("soju.im/search=v2", "draft/chathistory=limit-100")),
-        )
+        val fields =
+            readyStateDiagnosticFields(
+                ready(setOf("soju.im/search=v2", "draft/chathistory=limit-100")),
+            )
         assertEquals(true, fields["cap_soju_search"])
         assertEquals(true, fields["cap_chathistory"])
     }

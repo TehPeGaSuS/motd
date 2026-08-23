@@ -49,14 +49,15 @@ data class SearchResultMessage(
 internal object SearchCommands {
     fun search(req: SearchRequest): IrcMessage {
         require(req.target.isNotBlank()) { "SEARCH requires a target" }
-        val attributes = buildList {
-            add("in" to req.target)
-            req.text?.takeIf { it.isNotBlank() }?.let { add("text" to it) }
-            req.from?.takeIf { it.isNotBlank() }?.let { add("from" to it) }
-            req.after?.let { add("after" to ChatHistorySelectors.isoTimestamp(it)) }
-            req.before?.let { add("before" to ChatHistorySelectors.isoTimestamp(it)) }
-            add("limit" to req.limit.coerceIn(1, SOJU_SEARCH_MAX_LIMIT).toString())
-        }.joinToString(";") { (key, value) -> "$key=${IrcMessage.escapeTagValue(value)}" }
+        val attributes =
+            buildList {
+                add("in" to req.target)
+                req.text?.takeIf { it.isNotBlank() }?.let { add("text" to it) }
+                req.from?.takeIf { it.isNotBlank() }?.let { add("from" to it) }
+                req.after?.let { add("after" to ChatHistorySelectors.isoTimestamp(it)) }
+                req.before?.let { add("before" to ChatHistorySelectors.isoTimestamp(it)) }
+                add("limit" to req.limit.coerceIn(1, SOJU_SEARCH_MAX_LIMIT).toString())
+            }.joinToString(";") { (key, value) -> "$key=${IrcMessage.escapeTagValue(value)}" }
         return IrcMessage(command = "SEARCH", params = listOf(attributes))
     }
 }
@@ -76,6 +77,7 @@ internal fun parseSearchResult(message: IrcMessage): SearchResultMessage? {
                 text = inner.removePrefix("ACTION ")
                 kind = SearchResultKind.ACTION
             }
+
             inner == "ACTION" -> {
                 text = ""
                 kind = SearchResultKind.ACTION
@@ -87,9 +89,10 @@ internal fun parseSearchResult(message: IrcMessage): SearchResultMessage? {
         sender = sender,
         text = text,
         kind = kind,
-        serverTime = message.tags["time"]?.let { encoded ->
-            runCatching { Instant.parse(encoded).toEpochMilli() }.getOrNull()
-        },
+        serverTime =
+            message.tags["time"]?.let { encoded ->
+                runCatching { Instant.parse(encoded).toEpochMilli() }.getOrNull()
+            },
         msgid = message.tags["msgid"]?.takeIf(String::isNotEmpty),
     )
 }

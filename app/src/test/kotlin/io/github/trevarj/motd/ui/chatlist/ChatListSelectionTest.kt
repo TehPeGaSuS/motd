@@ -6,10 +6,23 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ChatListSelectionTest {
-    private fun row(id: Long, pinned: Boolean = false, muted: Boolean = false) = ChatListRow(
-        bufferId = id, networkId = 1, networkName = "network", displayName = "row$id",
-        type = BufferType.QUERY, pinned = pinned, muted = muted, lastMessageText = null,
-        lastMessageSender = null, lastMessageTime = null, unreadCount = 0, mentionCount = 0,
+    private fun row(
+        id: Long,
+        pinned: Boolean = false,
+        muted: Boolean = false,
+    ) = ChatListRow(
+        bufferId = id,
+        networkId = 1,
+        networkName = "network",
+        displayName = "row$id",
+        type = BufferType.QUERY,
+        pinned = pinned,
+        muted = muted,
+        lastMessageText = null,
+        lastMessageSender = null,
+        lastMessageTime = null,
+        unreadCount = 0,
+        mentionCount = 0,
     )
 
     @Test fun selection_prunes_and_resolves_in_visible_order() {

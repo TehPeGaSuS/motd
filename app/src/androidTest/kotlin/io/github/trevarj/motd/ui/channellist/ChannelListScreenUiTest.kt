@@ -3,9 +3,9 @@ package io.github.trevarj.motd.ui.channellist
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -28,11 +28,12 @@ class ChannelListScreenUiTest {
         compose.setContent {
             MotdTheme {
                 ChannelListContent(
-                    state = ChannelListUiState(
-                        networkId = 2,
-                        initialized = true,
-                        connState = IrcClientState.Ready("trev", emptySet(), emptyMap()),
-                    ),
+                    state =
+                        ChannelListUiState(
+                            networkId = 2,
+                            initialized = true,
+                            connState = IrcClientState.Ready("trev", emptySet(), emptyMap()),
+                        ),
                     onBack = {},
                     onQueryChange = {},
                     onSearch = { submittedQuery = it },
@@ -50,13 +51,15 @@ class ChannelListScreenUiTest {
 
     @Test
     fun loadingEmptyAndErrorStates_keepTheSubmittedQueryForRetry() {
-        var state by mutableStateOf(ChannelListUiState(
-            networkId = 2,
-            initialized = true,
-            connState = IrcClientState.Ready("trev", emptySet(), emptyMap()),
-            query = "bitcoin",
-            loading = true,
-        ))
+        var state by mutableStateOf(
+            ChannelListUiState(
+                networkId = 2,
+                initialized = true,
+                connState = IrcClientState.Ready("trev", emptySet(), emptyMap()),
+                query = "bitcoin",
+                loading = true,
+            ),
+        )
         var submittedQuery: String? = null
         compose.setContent {
             MotdTheme {
@@ -86,19 +89,21 @@ class ChannelListScreenUiTest {
         compose.setContent {
             MotdTheme {
                 ChannelListContent(
-                    state = ChannelListUiState(
-                        networkId = 2,
-                        initialized = true,
-                        connState = IrcClientState.Ready("trev", emptySet(), emptyMap()),
-                        loaded = true,
-                        listings = listOf(
-                            ChannelListing("#open", 30, "Open fixture"),
-                            ChannelListing("#pending", 20, "Pending fixture"),
-                            ChannelListing("#joined", 10, "Joined fixture"),
+                    state =
+                        ChannelListUiState(
+                            networkId = 2,
+                            initialized = true,
+                            connState = IrcClientState.Ready("trev", emptySet(), emptyMap()),
+                            loaded = true,
+                            listings =
+                                listOf(
+                                    ChannelListing("#open", 30, "Open fixture"),
+                                    ChannelListing("#pending", 20, "Pending fixture"),
+                                    ChannelListing("#joined", 10, "Joined fixture"),
+                                ),
+                            pendingChannels = setOf("#pending"),
+                            joinedChannels = setOf("#joined"),
                         ),
-                        pendingChannels = setOf("#pending"),
-                        joinedChannels = setOf("#joined"),
-                    ),
                     onBack = {},
                     onQueryChange = {},
                     onSearch = {},

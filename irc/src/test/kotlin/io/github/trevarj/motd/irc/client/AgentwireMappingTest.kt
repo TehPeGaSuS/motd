@@ -25,14 +25,15 @@ class AgentwireMappingTest {
 
     @Test
     fun `multiline plan keeps protocol tag only on opening batch`() {
-        val plan = planChatMessage(
-            target = "#agents",
-            text = "first\nsecond",
-            replyToMsgid = null,
-            label = null,
-            multilineLimits = MultilineLimits(maxBytes = 4096, maxLines = 10),
-            protocolTags = mapOf(AGENTWIRE_TAG to "payload"),
-        ) as MultilineSendPlan.Batch
+        val plan =
+            planChatMessage(
+                target = "#agents",
+                text = "first\nsecond",
+                replyToMsgid = null,
+                label = null,
+                multilineLimits = MultilineLimits(maxBytes = 4096, maxLines = 10),
+                protocolTags = mapOf(AGENTWIRE_TAG to "payload"),
+            ) as MultilineSendPlan.Batch
 
         assertEquals("payload", plan.opening.tags[AGENTWIRE_TAG])
         assertTrue(plan.components.all { AGENTWIRE_TAG !in it.tags })

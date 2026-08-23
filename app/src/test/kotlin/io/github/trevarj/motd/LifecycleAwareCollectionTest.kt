@@ -22,35 +22,38 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class LifecycleAwareCollectionTest {
     @Test
-    fun `screen collection stops and resumes with lifecycle`() = runTest {
-        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        try {
-            val owner = TestOwner()
-            val source = MutableStateFlow(0)
-            val values = mutableListOf<Int>()
-            val collection = launch {
-                source.flowWithLifecycle(owner.lifecycle, Lifecycle.State.STARTED)
-                    .collect(values::add)
+    fun `screen collection stops and resumes with lifecycle`() =
+        runTest {
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            try {
+                val owner = TestOwner()
+                val source = MutableStateFlow(0)
+                val values = mutableListOf<Int>()
+                val collection =
+                    launch {
+                        source
+                            .flowWithLifecycle(owner.lifecycle, Lifecycle.State.STARTED)
+                            .collect(values::add)
+                    }
+
+                owner.registry.currentState = Lifecycle.State.STARTED
+                runCurrent()
+                source.emit(1)
+                runCurrent()
+
+                owner.registry.currentState = Lifecycle.State.CREATED
+                runCurrent()
+                source.emit(2)
+                runCurrent()
+
+                owner.registry.currentState = Lifecycle.State.STARTED
+                runCurrent()
+                assertEquals(listOf(0, 1, 2), values)
+                collection.cancel()
+            } finally {
+                Dispatchers.resetMain()
             }
-
-            owner.registry.currentState = Lifecycle.State.STARTED
-            runCurrent()
-            source.emit(1)
-            runCurrent()
-
-            owner.registry.currentState = Lifecycle.State.CREATED
-            runCurrent()
-            source.emit(2)
-            runCurrent()
-
-            owner.registry.currentState = Lifecycle.State.STARTED
-            runCurrent()
-            assertEquals(listOf(0, 1, 2), values)
-            collection.cancel()
-        } finally {
-            Dispatchers.resetMain()
         }
-    }
 
     private class TestOwner : LifecycleOwner {
         val registry = LifecycleRegistry(this)

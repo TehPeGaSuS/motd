@@ -6,7 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TypingOutboxTest {
-
     @Test
     fun `active is throttled to one per window per target`() {
         var clock = 0L

@@ -8,7 +8,9 @@ import org.junit.Assert.assertSame
 import org.junit.Test
 
 class ReactionMutationStoreTest {
-    private class FakeStore(initial: ReactionEntity? = null) : ReactionMutationStore {
+    private class FakeStore(
+        initial: ReactionEntity? = null,
+    ) : ReactionMutationStore {
         val rows = mutableListOf<ReactionEntity>().apply { initial?.let { add(it) } }
         val row: ReactionEntity? get() = rows.singleOrNull()
 
@@ -17,10 +19,11 @@ class ReactionMutationStoreTest {
             targetMsgid: String,
             actorKeys: List<String>,
             emoji: String,
-        ): ReactionEntity? = rows.firstOrNull {
-            it.bufferId == bufferId && it.targetMsgid == targetMsgid &&
-                it.actorKey in actorKeys && it.emoji == emoji
-        }
+        ): ReactionEntity? =
+            rows.firstOrNull {
+                it.bufferId == bufferId && it.targetMsgid == targetMsgid &&
+                    it.actorKey in actorKeys && it.emoji == emoji
+            }
 
         override suspend fun upsert(reaction: ReactionEntity) {
             remove(reaction)
@@ -35,27 +38,30 @@ class ReactionMutationStoreTest {
         }
     }
 
-    private fun reaction(emoji: String = "👍") = ReactionEntity(
-        bufferId = 1,
-        targetMsgid = "m1",
-        actorKey = "nick:me",
-        sender = "me",
-        emoji = emoji,
-        serverTime = 10,
-    )
+    private fun reaction(emoji: String = "👍") =
+        ReactionEntity(
+            bufferId = 1,
+            targetMsgid = "m1",
+            actorKey = "nick:me",
+            sender = "me",
+            emoji = emoji,
+            serverTime = 10,
+        )
 
     @Test
-    fun `add is optimistic before wire send`() = runTest {
-        val store = FakeStore()
-        val added = reaction()
+    fun `add is optimistic before wire send`() =
+        runTest {
+            val store = FakeStore()
+            val added = reaction()
 
-        val kind = mutateReaction(store, null, added) {
+            val kind =
+                mutateReaction(store, null, added) {
+                    assertSame(added, store.row)
+                }
+
+            assertEquals(ReactionMutationKind.ADD, kind)
             assertSame(added, store.row)
         }
-
-        assertEquals(ReactionMutationKind.ADD, kind)
-        assertSame(added, store.row)
-    }
 
     @Test
     fun `reaction mutation serializer uses ratified reply reference`() {
@@ -70,41 +76,46 @@ class ReactionMutationStoreTest {
     }
 
     @Test
-    fun `owned reaction toggles off before wire send`() = runTest {
-        val previous = reaction()
-        val store = FakeStore(previous)
+    fun `owned reaction toggles off before wire send`() =
+        runTest {
+            val previous = reaction()
+            val store = FakeStore(previous)
 
-        val kind = mutateReaction(store, previous, reaction()) {
+            val kind =
+                mutateReaction(store, previous, reaction()) {
+                    assertNull(store.row)
+                }
+
+            assertEquals(ReactionMutationKind.REMOVE, kind)
             assertNull(store.row)
         }
 
-        assertEquals(ReactionMutationKind.REMOVE, kind)
-        assertNull(store.row)
-    }
+    @Test
+    fun `failed add and remove restore exactly the prior state`() =
+        runTest {
+            val addStore = FakeStore()
+            val addFailure = IllegalStateException("send failed")
+            runCatching { mutateReaction(addStore, null, reaction()) { throw addFailure } }
+            assertNull(addStore.row)
+
+            val previous = reaction()
+            val removeStore = FakeStore(previous)
+            val observed =
+                runCatching {
+                    mutateReaction(removeStore, previous, reaction()) { throw addFailure }
+                }.exceptionOrNull()
+            assertSame(addFailure, observed)
+            assertSame(previous, removeStore.row)
+        }
 
     @Test
-    fun `failed add and remove restore exactly the prior state`() = runTest {
-        val addStore = FakeStore()
-        val addFailure = IllegalStateException("send failed")
-        runCatching { mutateReaction(addStore, null, reaction()) { throw addFailure } }
-        assertNull(addStore.row)
+    fun `adding another emoji retains the actors existing emoji`() =
+        runTest {
+            val existing = reaction("❤️")
+            val store = FakeStore(existing)
 
-        val previous = reaction()
-        val removeStore = FakeStore(previous)
-        val observed = runCatching {
-            mutateReaction(removeStore, previous, reaction()) { throw addFailure }
-        }.exceptionOrNull()
-        assertSame(addFailure, observed)
-        assertSame(previous, removeStore.row)
-    }
+            mutateReaction(store, previous = null, reaction("👍")) { }
 
-    @Test
-    fun `adding another emoji retains the actors existing emoji`() = runTest {
-        val existing = reaction("❤️")
-        val store = FakeStore(existing)
-
-        mutateReaction(store, previous = null, reaction("👍")) { }
-
-        assertEquals(setOf("❤️", "👍"), store.rows.map { it.emoji }.toSet())
-    }
+            assertEquals(setOf("❤️", "👍"), store.rows.map { it.emoji }.toSet())
+        }
 }

@@ -40,21 +40,37 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @TypeConverters(Converters::class)
 abstract class MotdDatabase : RoomDatabase() {
     abstract fun networkDao(): NetworkDao
+
     abstract fun networkIdentityDao(): NetworkIdentityDao
+
     abstract fun networkIgnoreDao(): NetworkIgnoreDao
+
     abstract fun bufferDao(): BufferDao
+
     abstract fun messageDao(): MessageDao
+
     abstract fun composerDraftDao(): ComposerDraftDao
+
     abstract fun memberDao(): MemberDao
+
     abstract fun reactionDao(): ReactionDao
+
     abstract fun userDao(): UserDao
+
     abstract fun dccTransferDao(): DccTransferDao
+
     abstract fun canonicalTimelineDao(): CanonicalTimelineDao
+
     abstract fun roomAliasDao(): RoomAliasDao
+
     abstract fun historyCursorDao(): HistoryCursorDao
+
     abstract fun historyBackfillCursorDao(): HistoryBackfillCursorDao
+
     abstract fun historyGapDao(): HistoryGapDao
+
     abstract fun connectionGenerationDao(): ConnectionGenerationDao
+
     abstract fun appStateDao(): AppStateDao
 }
 
@@ -63,11 +79,12 @@ abstract class MotdDatabase : RoomDatabase() {
  * transport. Non-destructive additive change: TEXT, nullable, no default, so all
  * existing rows keep `wsUrl = NULL` (TCP/TLS) and every message/buffer/history row is preserved.
  */
-val MIGRATION_1_2 = object : Migration(1, 2) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE networks ADD COLUMN wsUrl TEXT")
+val MIGRATION_1_2 =
+    object : Migration(1, 2) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE networks ADD COLUMN wsUrl TEXT")
+        }
     }
-}
 
 /**
  * v2 -> v3: add the UNIQUE(bufferId, msgid) index on `messages` so a self message can never surface
@@ -77,44 +94,47 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
  * NULL msgids are untouched: SQLite treats them as distinct, so still-pending / msgid-less rows keep
  * coexisting. Room's FTS sync triggers cascade the dropped rows out of messages_fts automatically.
  */
-val MIGRATION_2_3 = object : Migration(2, 3) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL(
-            """DELETE FROM messages WHERE msgid IS NOT NULL AND id NOT IN (
+val MIGRATION_2_3 =
+    object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """DELETE FROM messages WHERE msgid IS NOT NULL AND id NOT IN (
                  SELECT MIN(id) FROM messages WHERE msgid IS NOT NULL GROUP BY bufferId, msgid
                )""",
-        )
-        db.execSQL(
-            "CREATE UNIQUE INDEX IF NOT EXISTS index_messages_bufferId_msgid ON messages(bufferId, msgid)",
-        )
+            )
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS index_messages_bufferId_msgid ON messages(bufferId, msgid)",
+            )
+        }
     }
-}
 
 /**
  * v3 -> v4: add the nullable SOCKS5/Tor transport settings on `networks`. Existing rows remain
  * direct connections until the user explicitly enables an obfuscation mode.
  */
-val MIGRATION_3_4 = object : Migration(3, 4) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.addNetworkColumnsIfMissing(
-            "obfsMode" to "TEXT",
-            "proxyHost" to "TEXT",
-            "proxyPort" to "INTEGER",
-        )
+val MIGRATION_3_4 =
+    object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.addNetworkColumnsIfMissing(
+                "obfsMode" to "TEXT",
+                "proxyHost" to "TEXT",
+                "proxyPort" to "INTEGER",
+            )
+        }
     }
-}
 
 /**
  * v4 -> v5: add the nullable VLESS+REALITY share link. The embedded core owns its loopback SOCKS
  * endpoint, so this deliberately remains separate from the user-editable proxy host and port.
  */
-val MIGRATION_4_5 = object : Migration(4, 5) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        // An unreleased development build used schema version 3 for this column. MIGRATION_3_4
-        // leaves it intact when upgrading that database, so this must be safe in both paths.
-        db.addNetworkColumnsIfMissing("obfsLink" to "TEXT")
+val MIGRATION_4_5 =
+    object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // An unreleased development build used schema version 3 for this column. MIGRATION_3_4
+            // leaves it intact when upgrading that database, so this must be safe in both paths.
+            db.addNetworkColumnsIfMissing("obfsLink" to "TEXT")
+        }
     }
-}
 
 /**
  * v5 -> v6: add versioned typed-event persistence for invitations and collapsed network batches.
@@ -125,48 +145,52 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
  * Downgrading a development database still follows DbModule's explicitly destructive dev-only
  * policy; released databases only move forward through this additive migration.
  */
-val MIGRATION_5_6 = object : Migration(5, 6) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE messages ADD COLUMN eventKey TEXT")
-        db.execSQL("ALTER TABLE messages ADD COLUMN eventPayload TEXT")
-        db.execSQL("ALTER TABLE messages ADD COLUMN inviteState TEXT")
-        db.execSQL("ALTER TABLE users ADD COLUMN username TEXT")
-        db.execSQL(
-            "CREATE UNIQUE INDEX IF NOT EXISTS index_messages_bufferId_eventKey " +
-                "ON messages(bufferId, eventKey)",
-        )
+val MIGRATION_5_6 =
+    object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN eventKey TEXT")
+            db.execSQL("ALTER TABLE messages ADD COLUMN eventPayload TEXT")
+            db.execSQL("ALTER TABLE messages ADD COLUMN inviteState TEXT")
+            db.execSQL("ALTER TABLE users ADD COLUMN username TEXT")
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS index_messages_bufferId_eventKey " +
+                    "ON messages(bufferId, eventKey)",
+            )
+        }
     }
-}
 
 /**
  * v6 -> v7: add a nullable IRC server password. Existing connections continue without PASS;
  * the value is deliberately separate from SASL credentials because IRC servers may require both.
  */
-val MIGRATION_6_7 = object : Migration(6, 7) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE networks ADD COLUMN serverPassword TEXT")
+val MIGRATION_6_7 =
+    object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE networks ADD COLUMN serverPassword TEXT")
+        }
     }
-}
 
 /**
  * v7 -> v8: add a local-only unread floor for muted buffers. It lets unmute discard the locally
  * accumulated backlog without advancing the IRC/bouncer read marker stored in readMarkerTime.
  */
-val MIGRATION_7_8 = object : Migration(7, 8) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE buffers ADD COLUMN localUnreadFloorTime INTEGER")
+val MIGRATION_7_8 =
+    object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN localUnreadFloorTime INTEGER")
+        }
     }
-}
 
 /**
  * v8 -> v9: persist a local-only pending CHANNEL close. Nullable rows retain the existing
  * immediate-delete semantics for QUERY/SERVER buffers and channels that have already completed.
  */
-val MIGRATION_8_9 = object : Migration(8, 9) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE buffers ADD COLUMN pendingCloseAt INTEGER")
+val MIGRATION_8_9 =
+    object : Migration(8, 9) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN pendingCloseAt INTEGER")
+        }
     }
-}
 
 /**
  * v9 -> v10 intentionally resets all IRC-derived state while preserving the complete networks
@@ -174,19 +198,20 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
  * cannot be migrated without carrying its ambiguities into the canonical graph, so rooms, events,
  * aliases, observations, cursors, reactions, members, and cached users start clean.
  */
-val MIGRATION_9_10 = object : Migration(9, 10) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("DROP TABLE IF EXISTS messages_fts")
-        db.execSQL("DROP TABLE IF EXISTS messages")
-        db.execSQL("DROP TABLE IF EXISTS reactions")
-        db.execSQL("DROP TABLE IF EXISTS members")
-        db.execSQL("DROP TABLE IF EXISTS users")
-        db.execSQL("DROP TABLE IF EXISTS network_history_cursors")
-        db.execSQL("DROP TABLE IF EXISTS connection_generations")
-        db.execSQL("DROP TABLE IF EXISTS buffers")
+val MIGRATION_9_10 =
+    object : Migration(9, 10) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS messages_fts")
+            db.execSQL("DROP TABLE IF EXISTS messages")
+            db.execSQL("DROP TABLE IF EXISTS reactions")
+            db.execSQL("DROP TABLE IF EXISTS members")
+            db.execSQL("DROP TABLE IF EXISTS users")
+            db.execSQL("DROP TABLE IF EXISTS network_history_cursors")
+            db.execSQL("DROP TABLE IF EXISTS connection_generations")
+            db.execSQL("DROP TABLE IF EXISTS buffers")
 
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `buffers` (
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `buffers` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 `networkId` INTEGER NOT NULL,
                 `name` TEXT NOT NULL,
@@ -207,11 +232,11 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
                 `redirectToRoomId` INTEGER,
                 FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
-        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_buffers_networkId_name` ON `buffers` (`networkId`, `name`)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_buffers_redirectToRoomId` ON `buffers` (`redirectToRoomId`)")
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `room_aliases` (
+            )
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_buffers_networkId_name` ON `buffers` (`networkId`, `name`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_buffers_redirectToRoomId` ON `buffers` (`redirectToRoomId`)")
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `room_aliases` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 `networkId` INTEGER NOT NULL,
                 `namespace` TEXT NOT NULL,
@@ -221,11 +246,11 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
                 FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
                 FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
-        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_room_aliases_networkId_namespace_value` ON `room_aliases` (`networkId`, `namespace`, `value`)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_room_aliases_roomId` ON `room_aliases` (`roomId`)")
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `messages` (
+            )
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_room_aliases_networkId_namespace_value` ON `room_aliases` (`networkId`, `namespace`, `value`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_room_aliases_roomId` ON `room_aliases` (`roomId`)")
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `messages` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 `bufferId` INTEGER NOT NULL,
                 `msgid` TEXT,
@@ -252,16 +277,16 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
                 `soundHandled` INTEGER NOT NULL,
                 FOREIGN KEY(`bufferId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_messages_bufferId_serverTime_id` ON `messages` (`bufferId`, `serverTime`, `id`)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_messages_replyToEventId` ON `messages` (`replyToEventId`)")
-        db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS `messages_fts` USING FTS4(`text` TEXT NOT NULL, `sender` TEXT NOT NULL, content=`messages`)")
-        db.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_BEFORE_UPDATE BEFORE UPDATE ON `messages` BEGIN DELETE FROM `messages_fts` WHERE `docid`=OLD.`id`; END")
-        db.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_BEFORE_DELETE BEFORE DELETE ON `messages` BEGIN DELETE FROM `messages_fts` WHERE `docid`=OLD.`id`; END")
-        db.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_AFTER_UPDATE AFTER UPDATE ON `messages` BEGIN INSERT INTO `messages_fts`(`docid`, `text`, `sender`) VALUES (NEW.`id`, NEW.`text`, NEW.`sender`); END")
-        db.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_AFTER_INSERT AFTER INSERT ON `messages` BEGIN INSERT INTO `messages_fts`(`docid`, `text`, `sender`) VALUES (NEW.`id`, NEW.`text`, NEW.`sender`); END")
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `event_aliases` (
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_messages_bufferId_serverTime_id` ON `messages` (`bufferId`, `serverTime`, `id`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_messages_replyToEventId` ON `messages` (`replyToEventId`)")
+            db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS `messages_fts` USING FTS4(`text` TEXT NOT NULL, `sender` TEXT NOT NULL, content=`messages`)")
+            db.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_BEFORE_UPDATE BEFORE UPDATE ON `messages` BEGIN DELETE FROM `messages_fts` WHERE `docid`=OLD.`id`; END")
+            db.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_BEFORE_DELETE BEFORE DELETE ON `messages` BEGIN DELETE FROM `messages_fts` WHERE `docid`=OLD.`id`; END")
+            db.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_AFTER_UPDATE AFTER UPDATE ON `messages` BEGIN INSERT INTO `messages_fts`(`docid`, `text`, `sender`) VALUES (NEW.`id`, NEW.`text`, NEW.`sender`); END")
+            db.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_AFTER_INSERT AFTER INSERT ON `messages` BEGIN INSERT INTO `messages_fts`(`docid`, `text`, `sender`) VALUES (NEW.`id`, NEW.`text`, NEW.`sender`); END")
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `event_aliases` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 `networkId` INTEGER NOT NULL,
                 `namespace` TEXT NOT NULL,
@@ -270,20 +295,20 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
                 FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
                 FOREIGN KEY(`timelineEventId`) REFERENCES `messages`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
-        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_event_aliases_networkId_namespace_value` ON `event_aliases` (`networkId`, `namespace`, `value`)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_event_aliases_timelineEventId` ON `event_aliases` (`timelineEventId`)")
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `event_redirects` (
+            )
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_event_aliases_networkId_namespace_value` ON `event_aliases` (`networkId`, `namespace`, `value`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_event_aliases_timelineEventId` ON `event_aliases` (`timelineEventId`)")
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `event_redirects` (
                 `losingEventId` INTEGER NOT NULL,
                 `canonicalEventId` INTEGER NOT NULL,
                 PRIMARY KEY(`losingEventId`),
                 FOREIGN KEY(`canonicalEventId`) REFERENCES `messages`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_event_redirects_canonicalEventId` ON `event_redirects` (`canonicalEventId`)")
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `event_observations` (
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_event_redirects_canonicalEventId` ON `event_redirects` (`canonicalEventId`)")
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `event_observations` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 `networkId` INTEGER NOT NULL,
                 `timelineEventId` INTEGER NOT NULL,
@@ -298,11 +323,11 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
                 FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
                 FOREIGN KEY(`timelineEventId`) REFERENCES `messages`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_event_observations_timelineEventId` ON `event_observations` (`timelineEventId`)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_event_observations_networkId_receiveOrder` ON `event_observations` (`networkId`, `receiveOrder`)")
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `history_cursors` (
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_event_observations_timelineEventId` ON `event_observations` (`timelineEventId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_event_observations_networkId_receiveOrder` ON `event_observations` (`networkId`, `receiveOrder`)")
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `history_cursors` (
                 `roomId` INTEGER NOT NULL,
                 `newestMsgid` TEXT,
                 `newestServerTime` INTEGER,
@@ -312,29 +337,29 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
                 PRIMARY KEY(`roomId`),
                 FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `network_history_cursors` (
+            )
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `network_history_cursors` (
                 `networkId` INTEGER NOT NULL,
                 `lastSuccessfulSync` INTEGER NOT NULL,
                 PRIMARY KEY(`networkId`),
                 FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `connection_generations` (
+            )
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `connection_generations` (
                 `networkId` INTEGER NOT NULL,
                 `generation` INTEGER NOT NULL,
                 PRIMARY KEY(`networkId`),
                 FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
-        db.execSQL(
-            "CREATE TABLE IF NOT EXISTS `app_state` (`key` TEXT NOT NULL, PRIMARY KEY(`key`))",
-        )
-        db.execSQL("INSERT OR REPLACE INTO `app_state`(`key`) VALUES ('v10_notification_reset')")
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `reactions` (
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `app_state` (`key` TEXT NOT NULL, PRIMARY KEY(`key`))",
+            )
+            db.execSQL("INSERT OR REPLACE INTO `app_state`(`key`) VALUES ('v10_notification_reset')")
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `reactions` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 `bufferId` INTEGER NOT NULL,
                 `targetMsgid` TEXT NOT NULL,
@@ -343,12 +368,12 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
                 `serverTime` INTEGER NOT NULL,
                 `targetEventId` INTEGER
             )""",
-        )
-        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_reactions_bufferId_targetMsgid_sender` ON `reactions` (`bufferId`, `targetMsgid`, `sender`)")
-        db.execSQL("CREATE TABLE IF NOT EXISTS `users` (`networkId` INTEGER NOT NULL, `nick` TEXT NOT NULL, `username` TEXT, `account` TEXT, `away` INTEGER NOT NULL, `hostmask` TEXT, `realname` TEXT, PRIMARY KEY(`networkId`, `nick`))")
-        db.execSQL("CREATE TABLE IF NOT EXISTS `members` (`bufferId` INTEGER NOT NULL, `nick` TEXT NOT NULL, `prefixes` TEXT NOT NULL, PRIMARY KEY(`bufferId`, `nick`))")
+            )
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_reactions_bufferId_targetMsgid_sender` ON `reactions` (`bufferId`, `targetMsgid`, `sender`)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS `users` (`networkId` INTEGER NOT NULL, `nick` TEXT NOT NULL, `username` TEXT, `account` TEXT, `away` INTEGER NOT NULL, `hostmask` TEXT, `realname` TEXT, PRIMARY KEY(`networkId`, `nick`))")
+            db.execSQL("CREATE TABLE IF NOT EXISTS `members` (`bufferId` INTEGER NOT NULL, `nick` TEXT NOT NULL, `prefixes` TEXT NOT NULL, PRIMARY KEY(`bufferId`, `nick`))")
+        }
     }
-}
 
 /**
  * v10 -> v11 preserves timeline/history rows, quarantines device-clock network cursors, and resets
@@ -356,25 +381,26 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
  * use the v10 RFC1459-folded nick and did not retain account tags. If folding causes a unique-key
  * collision, the lowest id keeps the canonical key and later rows receive deterministic suffixes.
  */
-val MIGRATION_10_11 = object : Migration(10, 11) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL(
-            "ALTER TABLE network_history_cursors ADD COLUMN " +
-                "serverDerived INTEGER NOT NULL DEFAULT 0",
-        )
-        // v10 completion was inferred from response shape and must be proven again under v11.
-        db.execSQL("UPDATE buffers SET historyComplete = 0")
-        db.execSQL("UPDATE history_cursors SET historyComplete = 0")
-        db.execSQL(
-            "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_msgid` " +
-                "ON `messages` (`bufferId`, `msgid`)",
-        )
-        db.execSQL(
-            "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_replyToMsgid_replyToEventId` " +
-                "ON `messages` (`bufferId`, `replyToMsgid`, `replyToEventId`)",
-        )
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `reactions_v11` (
+val MIGRATION_10_11 =
+    object : Migration(10, 11) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "ALTER TABLE network_history_cursors ADD COLUMN " +
+                    "serverDerived INTEGER NOT NULL DEFAULT 0",
+            )
+            // v10 completion was inferred from response shape and must be proven again under v11.
+            db.execSQL("UPDATE buffers SET historyComplete = 0")
+            db.execSQL("UPDATE history_cursors SET historyComplete = 0")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_msgid` " +
+                    "ON `messages` (`bufferId`, `msgid`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_replyToMsgid_replyToEventId` " +
+                    "ON `messages` (`bufferId`, `replyToMsgid`, `replyToEventId`)",
+            )
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `reactions_v11` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 `bufferId` INTEGER NOT NULL,
                 `targetMsgid` TEXT NOT NULL,
@@ -384,14 +410,14 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
                 `serverTime` INTEGER NOT NULL,
                 `targetEventId` INTEGER
             )""",
-        )
-        db.execSQL(
-            """CREATE UNIQUE INDEX IF NOT EXISTS
+            )
+            db.execSQL(
+                """CREATE UNIQUE INDEX IF NOT EXISTS
                `index_reactions_bufferId_targetMsgid_actorKey_emoji`
                ON `reactions_v11` (`bufferId`, `targetMsgid`, `actorKey`, `emoji`)""",
-        )
-        db.execSQL(
-            """WITH migrated AS (
+            )
+            db.execSQL(
+                """WITH migrated AS (
                    SELECT r.*,
                        'nick:' || ${legacyReactionNormalizedSender("r.sender")} AS migratedActorKey
                    FROM reactions r
@@ -402,9 +428,9 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
                SELECT id, bufferId, targetMsgid, migratedActorKey, sender, emoji, serverTime,
                       targetEventId
                FROM migrated ORDER BY id""",
-        )
-        db.execSQL(
-            """WITH migrated AS (
+            )
+            db.execSQL(
+                """WITH migrated AS (
                    SELECT r.*,
                        'nick:' || ${legacyReactionNormalizedSender("r.sender")} AS migratedActorKey
                    FROM reactions r
@@ -418,34 +444,35 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
                FROM migrated
                WHERE NOT EXISTS (SELECT 1 FROM reactions_v11 n WHERE n.id = migrated.id)
                ORDER BY id""",
-        )
-        db.execSQL("DROP TABLE reactions")
-        db.execSQL("ALTER TABLE reactions_v11 RENAME TO reactions")
-        db.execSQL(
-            "CREATE INDEX IF NOT EXISTS `index_reactions_bufferId_targetMsgid_targetEventId` " +
-                "ON `reactions` (`bufferId`, `targetMsgid`, `targetEventId`)",
-        )
+            )
+            db.execSQL("DROP TABLE reactions")
+            db.execSQL("ALTER TABLE reactions_v11 RENAME TO reactions")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_reactions_bufferId_targetMsgid_targetEventId` " +
+                    "ON `reactions` (`bufferId`, `targetMsgid`, `targetEventId`)",
+            )
+        }
     }
-}
 
 /**
  * v11 -> v12 adds durable composer state and separates exact local read position from the remote
  * IRC read marker. Existing marker values seed the nearest retained timeline tuple, preserving the
  * old unread floor without treating future local pending timestamps as valid MARKREAD values.
  */
-val MIGRATION_11_12 = object : Migration(11, 12) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE buffers ADD COLUMN localReadAnchorTime INTEGER")
-        db.execSQL("ALTER TABLE buffers ADD COLUMN localReadAnchorEventId INTEGER")
-        db.execSQL(
-            """CREATE TEMP TABLE migration_11_12_read_anchors(
+val MIGRATION_11_12 =
+    object : Migration(11, 12) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN localReadAnchorTime INTEGER")
+            db.execSQL("ALTER TABLE buffers ADD COLUMN localReadAnchorEventId INTEGER")
+            db.execSQL(
+                """CREATE TEMP TABLE migration_11_12_read_anchors(
                    bufferId INTEGER PRIMARY KEY NOT NULL,
                    serverTime INTEGER NOT NULL,
                    eventId INTEGER NOT NULL
                )""",
-        )
-        db.execSQL(
-            """INSERT INTO migration_11_12_read_anchors(bufferId, serverTime, eventId)
+            )
+            db.execSQL(
+                """INSERT INTO migration_11_12_read_anchors(bufferId, serverTime, eventId)
                SELECT b.id, m.serverTime, m.id
                FROM buffers b
                JOIN messages m ON m.id = (
@@ -457,9 +484,9 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
                    ORDER BY candidate.serverTime DESC, candidate.id DESC LIMIT 1
                )
                WHERE b.readMarkerTime IS NOT NULL""",
-        )
-        db.execSQL(
-            """UPDATE buffers SET
+            )
+            db.execSQL(
+                """UPDATE buffers SET
                    readMarkerTime = (
                        SELECT serverTime FROM migration_11_12_read_anchors
                        WHERE bufferId = buffers.id
@@ -473,10 +500,10 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
                        WHERE bufferId = buffers.id
                    )
                WHERE readMarkerTime IS NOT NULL""",
-        )
-        db.execSQL("DROP TABLE migration_11_12_read_anchors")
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `composer_drafts` (
+            )
+            db.execSQL("DROP TABLE migration_11_12_read_anchors")
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `composer_drafts` (
                 `roomId` INTEGER NOT NULL,
                 `text` TEXT NOT NULL,
                 `replyToEventId` INTEGER,
@@ -484,27 +511,28 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
                 PRIMARY KEY(`roomId`),
                 FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
-        db.execSQL(
-            "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_pendingLabel` " +
-                "ON `messages` (`bufferId`, `pendingLabel`)",
-        )
-        // v11 scoped LABEL aliases as "generation<NUL>label". Preserve raw aliases for rows that
-        // can still receive an echo after upgrade; v12 labels are globally unique opaque values.
-        db.execSQL(
-            """INSERT OR IGNORE INTO event_aliases(networkId, namespace, value, timelineEventId)
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_pendingLabel` " +
+                    "ON `messages` (`bufferId`, `pendingLabel`)",
+            )
+            // v11 scoped LABEL aliases as "generation<NUL>label". Preserve raw aliases for rows that
+            // can still receive an echo after upgrade; v12 labels are globally unique opaque values.
+            db.execSQL(
+                """INSERT OR IGNORE INTO event_aliases(networkId, namespace, value, timelineEventId)
                SELECT b.networkId, 'LABEL', CAST(m.pendingLabel AS BLOB), m.id
                FROM messages m JOIN buffers b ON b.id = m.bufferId
                WHERE m.pendingLabel IS NOT NULL AND m.msgid IS NULL AND m.failed = 0""",
-        )
+            )
+        }
     }
-}
 
 /** v12 -> v13 persists identity-related ISUPPORT and the current session nick. */
-val MIGRATION_12_13 = object : Migration(12, 13) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `network_identity` (
+val MIGRATION_12_13 =
+    object : Migration(12, 13) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `network_identity` (
                 `networkId` INTEGER NOT NULL,
                 `caseMapping` TEXT,
                 `chanTypes` TEXT,
@@ -513,72 +541,78 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
                 FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`)
                     ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
+            )
+        }
     }
-}
 
 /**
  * v13 -> v14 adds a local dismissed-query shell, an immutable discarded-history boundary, and
  * exact msgid tombstones for ambiguous timestamp ties. Existing rooms and timeline rows survive.
  */
-val MIGRATION_13_14 = object : Migration(13, 14) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE buffers ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0")
-        db.execSQL("ALTER TABLE buffers ADD COLUMN historyDiscardedThroughMsgid TEXT")
-        db.execSQL("ALTER TABLE buffers ADD COLUMN historyDiscardedThroughTime INTEGER")
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `discarded_message_ids` (
+val MIGRATION_13_14 =
+    object : Migration(13, 14) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE buffers ADD COLUMN historyDiscardedThroughMsgid TEXT")
+            db.execSQL("ALTER TABLE buffers ADD COLUMN historyDiscardedThroughTime INTEGER")
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `discarded_message_ids` (
                 `roomId` INTEGER NOT NULL,
                 `msgid` TEXT NOT NULL,
                 PRIMARY KEY(`roomId`, `msgid`),
                 FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`)
                     ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
+            )
+        }
     }
-}
 
 /** v14 -> v15: nullable per-conversation message-layout override; null inherits global layout. */
-val MIGRATION_14_15 = object : Migration(14, 15) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE buffers ADD COLUMN layoutDensityOverride TEXT")
+val MIGRATION_14_15 =
+    object : Migration(14, 15) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN layoutDensityOverride TEXT")
+        }
     }
-}
 
 /** v15 -> v16: archive is a non-destructive local chat-list visibility flag. */
-val MIGRATION_15_16 = object : Migration(15, 16) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE buffers ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+val MIGRATION_15_16 =
+    object : Migration(15, 16) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+        }
     }
-}
 
 /** v16 -> v17: nullable per-network initial away message for IRCv3 pre-away or post-001 fallback. */
-val MIGRATION_16_17 = object : Migration(16, 17) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE networks ADD COLUMN initialAwayMessage TEXT")
+val MIGRATION_16_17 =
+    object : Migration(16, 17) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE networks ADD COLUMN initialAwayMessage TEXT")
+        }
     }
-}
 
 /**
  * v17 -> v18 records unresolved credentials after importing a credentials-excluded configuration.
  * The connection layer already observes `autoConnect`; imports set it false until the user repairs
  * the missing credential fields, then restore the saved desired value.
  */
-val MIGRATION_17_18 = object : Migration(17, 18) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE networks ADD COLUMN pendingCredentialRequirements TEXT")
-        db.execSQL("ALTER TABLE networks ADD COLUMN restoreAutoConnect INTEGER NOT NULL DEFAULT 0")
+val MIGRATION_17_18 =
+    object : Migration(17, 18) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE networks ADD COLUMN pendingCredentialRequirements TEXT")
+            db.execSQL("ALTER TABLE networks ADD COLUMN restoreAutoConnect INTEGER NOT NULL DEFAULT 0")
+        }
     }
-}
 
 /**
  * v18 -> v19: add per-network ignore masks. Existing networks start with no ignores; deletes cascade
  * so removing a network also removes its local privacy rules.
  */
-val MIGRATION_18_19 = object : Migration(18, 19) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `network_ignores` (
+val MIGRATION_18_19 =
+    object : Migration(18, 19) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `network_ignores` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 `networkId` INTEGER NOT NULL,
                 `pattern` TEXT NOT NULL,
@@ -586,23 +620,24 @@ val MIGRATION_18_19 = object : Migration(18, 19) {
                 `createdAt` INTEGER NOT NULL,
                 FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
-        db.execSQL(
-            "CREATE UNIQUE INDEX IF NOT EXISTS `index_network_ignores_networkId_pattern` " +
-                "ON `network_ignores` (`networkId`, `pattern`)",
-        )
+            )
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_network_ignores_networkId_pattern` " +
+                    "ON `network_ignores` (`networkId`, `pattern`)",
+            )
+        }
     }
-}
 
 /**
  * v19 -> v20 adds durable DCC transfer and direct-chat session state. Timeline rows still own the
  * user-visible history; these tables track offer/session progress and retain history after a row is
  * deleted.
  */
-val MIGRATION_19_20 = object : Migration(19, 20) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `dcc_transfers` (
+val MIGRATION_19_20 =
+    object : Migration(19, 20) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `dcc_transfers` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 `networkId` INTEGER NOT NULL,
                 `timelineEventId` INTEGER,
@@ -631,47 +666,49 @@ val MIGRATION_19_20 = object : Migration(19, 20) {
                 FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
                 FOREIGN KEY(`timelineEventId`) REFERENCES `messages`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL
             )""",
-        )
-        db.execSQL(
-            "CREATE UNIQUE INDEX IF NOT EXISTS `index_dcc_transfers_networkId_offerKey` " +
-                "ON `dcc_transfers` (`networkId`, `offerKey`)",
-        )
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_dcc_transfers_networkId_peerNick` ON `dcc_transfers` (`networkId`, `peerNick`)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_dcc_transfers_timelineEventId` ON `dcc_transfers` (`timelineEventId`)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_dcc_transfers_state_updatedAt` ON `dcc_transfers` (`state`, `updatedAt`)")
+            )
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_dcc_transfers_networkId_offerKey` " +
+                    "ON `dcc_transfers` (`networkId`, `offerKey`)",
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_dcc_transfers_networkId_peerNick` ON `dcc_transfers` (`networkId`, `peerNick`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_dcc_transfers_timelineEventId` ON `dcc_transfers` (`timelineEventId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_dcc_transfers_state_updatedAt` ON `dcc_transfers` (`state`, `updatedAt`)")
+        }
     }
-}
 
 /**
  * v20 -> v21 separates stable timeline ordering and temporal provenance from the local primary
  * key. Existing rows retain their exact visible order; completed playback can subsequently
  * reconcile provisional equal-time ordering without rewriting canonical event ids.
  */
-val MIGRATION_20_21 = object : Migration(20, 21) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE messages ADD COLUMN timelineOrder INTEGER NOT NULL DEFAULT 0")
-        db.execSQL("ALTER TABLE messages ADD COLUMN timelineOrderConfirmed INTEGER NOT NULL DEFAULT 0")
-        db.execSQL("ALTER TABLE messages ADD COLUMN timeProvenance TEXT NOT NULL DEFAULT 'LOCAL_CLOCK'")
-        db.execSQL("UPDATE messages SET timelineOrder = id")
-        db.execSQL(
-            "UPDATE messages SET timeProvenance = CASE " +
-                "WHEN serverTimeAuthoritative = 1 THEN 'SERVER_TAG' ELSE 'LOCAL_CLOCK' END",
-        )
-        db.execSQL(
-            "CREATE INDEX IF NOT EXISTS index_messages_bufferId_serverTime_timelineOrder " +
-                "ON messages(bufferId, serverTime, timelineOrder)",
-        )
+val MIGRATION_20_21 =
+    object : Migration(20, 21) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN timelineOrder INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE messages ADD COLUMN timelineOrderConfirmed INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE messages ADD COLUMN timeProvenance TEXT NOT NULL DEFAULT 'LOCAL_CLOCK'")
+            db.execSQL("UPDATE messages SET timelineOrder = id")
+            db.execSQL(
+                "UPDATE messages SET timeProvenance = CASE " +
+                    "WHEN serverTimeAuthoritative = 1 THEN 'SERVER_TAG' ELSE 'LOCAL_CLOCK' END",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_messages_bufferId_serverTime_timelineOrder " +
+                    "ON messages(bufferId, serverTime, timelineOrder)",
+            )
+        }
     }
-}
 
 /**
  * v21 -> v22 records unresolved intervals between independently fetched history windows. Existing
  * v21 timelines were published as complete extents, so migration creates no speculative gaps.
  */
-val MIGRATION_21_22 = object : Migration(21, 22) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `history_gaps` (
+val MIGRATION_21_22 =
+    object : Migration(21, 22) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `history_gaps` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 `roomId` INTEGER NOT NULL,
                 `olderMsgid` TEXT,
@@ -685,17 +722,17 @@ val MIGRATION_21_22 = object : Migration(21, 22) {
                 `newerTimelineOrder` INTEGER,
                 FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
-        )
-        db.execSQL(
-            "CREATE INDEX IF NOT EXISTS `index_history_gaps_roomId_olderServerTime` " +
-                "ON `history_gaps` (`roomId`, `olderServerTime`)",
-        )
-        db.execSQL(
-            "CREATE INDEX IF NOT EXISTS `index_history_gaps_roomId_newerServerTime` " +
-                "ON `history_gaps` (`roomId`, `newerServerTime`)",
-        )
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_history_gaps_roomId_olderServerTime` " +
+                    "ON `history_gaps` (`roomId`, `olderServerTime`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_history_gaps_roomId_newerServerTime` " +
+                    "ON `history_gaps` (`roomId`, `newerServerTime`)",
+            )
+        }
     }
-}
 
 /**
  * v22 -> v23 repairs legacy `recoverable = 0` poison on `history_gaps`. Builds before commit
@@ -707,11 +744,12 @@ val MIGRATION_21_22 = object : Migration(21, 22) {
  * self-healing: re-probing a truly empty interval fetches 0 rows, proves it empty, and re-marks it
  * unrecoverable under the new rule, while a wrongly-poisoned interval is finally allowed to page.
  */
-val MIGRATION_22_23 = object : Migration(22, 23) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("UPDATE history_gaps SET recoverable = 1 WHERE recoverable = 0")
+val MIGRATION_22_23 =
+    object : Migration(22, 23) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("UPDATE history_gaps SET recoverable = 1 WHERE recoverable = 0")
+        }
     }
-}
 
 /**
  * v23 -> v24 turns the drawer's network order into stored, user-owned state. `networks.ordering`
@@ -722,33 +760,34 @@ val MIGRATION_22_23 = object : Migration(22, 23) {
  * sequential positions. Nothing is deleted and no row moves: after the migration `ORDER BY ordering,
  * id` reproduces the pre-migration list exactly, and a user who never reorders sees no change.
  */
-val MIGRATION_23_24 = object : Migration(23, 24) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        // Rank into a temp table first. A correlated UPDATE reading the table it rewrites would
-        // count against its own partially applied writes and produce duplicate positions.
-        db.execSQL(
-            """CREATE TEMP TABLE migration_23_24_network_order(
+val MIGRATION_23_24 =
+    object : Migration(23, 24) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Rank into a temp table first. A correlated UPDATE reading the table it rewrites would
+            // count against its own partially applied writes and produce duplicate positions.
+            db.execSQL(
+                """CREATE TEMP TABLE migration_23_24_network_order(
                    id INTEGER PRIMARY KEY NOT NULL,
                    position INTEGER NOT NULL
                )""",
-        )
-        db.execSQL(
-            """INSERT INTO migration_23_24_network_order(id, position)
+            )
+            db.execSQL(
+                """INSERT INTO migration_23_24_network_order(id, position)
                SELECT n.id, (
                    SELECT COUNT(*) FROM networks other
                    WHERE other.ordering < n.ordering
                       OR (other.ordering = n.ordering AND other.id < n.id)
                ) FROM networks n""",
-        )
-        // Every networks row has exactly one ranked entry, so no row can be left with a NULL.
-        db.execSQL(
-            """UPDATE networks SET ordering = (
+            )
+            // Every networks row has exactly one ranked entry, so no row can be left with a NULL.
+            db.execSQL(
+                """UPDATE networks SET ordering = (
                    SELECT position FROM migration_23_24_network_order WHERE id = networks.id
                )""",
-        )
-        db.execSQL("DROP TABLE migration_23_24_network_order")
+            )
+            db.execSQL("DROP TABLE migration_23_24_network_order")
+        }
     }
-}
 
 /**
  * v24 -> v25: add the durable resume cursor for the paced background TARGETS backfill (initial
@@ -756,10 +795,11 @@ val MIGRATION_23_24 = object : Migration(23, 24) {
  * Additive table; existing networks without a row simply have no backfill scheduled until their
  * first post-upgrade initial sync seeds one.
  */
-val MIGRATION_24_25 = object : Migration(24, 25) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL(
-            """CREATE TABLE IF NOT EXISTS `history_backfill_cursors` (
+val MIGRATION_24_25 =
+    object : Migration(24, 25) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS `history_backfill_cursors` (
                    `networkId` INTEGER NOT NULL,
                    `upperBound` INTEGER NOT NULL,
                    `complete` INTEGER NOT NULL DEFAULT 0,
@@ -767,23 +807,24 @@ val MIGRATION_24_25 = object : Migration(24, 25) {
                    FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`)
                        ON UPDATE NO ACTION ON DELETE CASCADE
                )""",
-        )
+            )
+        }
     }
-}
 
 /**
  * v25 -> v26: nullable per-conversation presence-event override (null inherits the global mode),
  * plus the actor-leading message index the smart presence filter seeks on.
  */
-val MIGRATION_25_26 = object : Migration(25, 26) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE buffers ADD COLUMN presenceModeOverride TEXT")
-        db.execSQL(
-            "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_normalizedActor_serverTime` " +
-                "ON `messages` (`bufferId`, `normalizedActor`, `serverTime`)",
-        )
+val MIGRATION_25_26 =
+    object : Migration(25, 26) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN presenceModeOverride TEXT")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_normalizedActor_serverTime` " +
+                    "ON `messages` (`bufferId`, `normalizedActor`, `serverTime`)",
+            )
+        }
     }
-}
 
 /**
  * v26 -> v27 keeps the schema and clears start-of-history claims so they are proven again.
@@ -795,12 +836,13 @@ val MIGRATION_25_26 = object : Migration(25, 26) {
  * The claim is cheap to re-earn: the next time a reader reaches the bottom of a genuinely complete
  * room, one BEFORE comes back empty and marks it again.
  */
-val MIGRATION_26_27 = object : Migration(26, 27) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("UPDATE buffers SET historyComplete = 0")
-        db.execSQL("UPDATE history_cursors SET historyComplete = 0")
+val MIGRATION_26_27 =
+    object : Migration(26, 27) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("UPDATE buffers SET historyComplete = 0")
+            db.execSQL("UPDATE history_cursors SET historyComplete = 0")
+        }
     }
-}
 
 /**
  * v27 -> v28 adds `buffers.advertisedLatestTime`, the newest activity CHATHISTORY TARGETS has
@@ -810,30 +852,33 @@ val MIGRATION_26_27 = object : Migration(26, 27) {
  * NULL contributes nothing to the chat-list activity sort and raises no advertised-unread cue. The
  * first discovery pass after the upgrade fills in whatever the server currently advertises.
  */
-val MIGRATION_27_28 = object : Migration(27, 28) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE buffers ADD COLUMN advertisedLatestTime INTEGER")
+val MIGRATION_27_28 =
+    object : Migration(27, 28) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN advertisedLatestTime INTEGER")
+        }
     }
-}
 
 /** v28 -> v29 adds optional NickServ fallback settings; existing networks remain disabled. */
-val MIGRATION_28_29 = object : Migration(28, 29) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE networks ADD COLUMN nickServPassword TEXT")
-        db.execSQL("ALTER TABLE networks ADD COLUMN nickServIdentifySyntax TEXT")
-        db.execSQL(
-            "ALTER TABLE networks ADD COLUMN nickServRecoveryEnabled INTEGER NOT NULL DEFAULT 0",
-        )
-        db.execSQL("ALTER TABLE networks ADD COLUMN nickServRecoverySequence TEXT")
+val MIGRATION_28_29 =
+    object : Migration(28, 29) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE networks ADD COLUMN nickServPassword TEXT")
+            db.execSQL("ALTER TABLE networks ADD COLUMN nickServIdentifySyntax TEXT")
+            db.execSQL(
+                "ALTER TABLE networks ADD COLUMN nickServRecoveryEnabled INTEGER NOT NULL DEFAULT 0",
+            )
+            db.execSQL("ALTER TABLE networks ADD COLUMN nickServRecoverySequence TEXT")
+        }
     }
-}
 
 /** v29 -> v30 adds local per-conversation avatars; existing rooms inherit generated/shared avatars. */
-val MIGRATION_29_30 = object : Migration(29, 30) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE buffers ADD COLUMN avatarOverrideModel TEXT")
+val MIGRATION_29_30 =
+    object : Migration(29, 30) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN avatarOverrideModel TEXT")
+        }
     }
-}
 
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
@@ -846,48 +891,49 @@ val MIGRATION_29_30 = object : Migration(29, 30) {
  * Declared after every `MIGRATION_*` val on purpose — top-level properties initialize in file order,
  * so an earlier declaration would capture nulls.
  */
-val ALL_MIGRATIONS: Array<Migration> = arrayOf(
-    MIGRATION_1_2,
-    MIGRATION_2_3,
-    MIGRATION_3_4,
-    MIGRATION_4_5,
-    MIGRATION_5_6,
-    MIGRATION_6_7,
-    MIGRATION_7_8,
-    MIGRATION_8_9,
-    MIGRATION_9_10,
-    MIGRATION_10_11,
-    MIGRATION_11_12,
-    MIGRATION_12_13,
-    MIGRATION_13_14,
-    MIGRATION_14_15,
-    MIGRATION_15_16,
-    MIGRATION_16_17,
-    MIGRATION_17_18,
-    MIGRATION_18_19,
-    MIGRATION_19_20,
-    MIGRATION_20_21,
-    MIGRATION_21_22,
-    MIGRATION_22_23,
-    MIGRATION_23_24,
-    MIGRATION_24_25,
-    MIGRATION_25_26,
-    MIGRATION_26_27,
-    MIGRATION_27_28,
-    MIGRATION_28_29,
-    MIGRATION_29_30,
-)
+val ALL_MIGRATIONS: Array<Migration> =
+    arrayOf(
+        MIGRATION_1_2,
+        MIGRATION_2_3,
+        MIGRATION_3_4,
+        MIGRATION_4_5,
+        MIGRATION_5_6,
+        MIGRATION_6_7,
+        MIGRATION_7_8,
+        MIGRATION_8_9,
+        MIGRATION_9_10,
+        MIGRATION_10_11,
+        MIGRATION_11_12,
+        MIGRATION_12_13,
+        MIGRATION_13_14,
+        MIGRATION_14_15,
+        MIGRATION_15_16,
+        MIGRATION_16_17,
+        MIGRATION_17_18,
+        MIGRATION_18_19,
+        MIGRATION_19_20,
+        MIGRATION_20_21,
+        MIGRATION_21_22,
+        MIGRATION_22_23,
+        MIGRATION_23_24,
+        MIGRATION_24_25,
+        MIGRATION_25_26,
+        MIGRATION_26_27,
+        MIGRATION_27_28,
+        MIGRATION_28_29,
+        MIGRATION_29_30,
+    )
 
-private fun legacyReactionNormalizedSender(column: String): String =
-    "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"
+private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"
 
 private fun SupportSQLiteDatabase.addNetworkColumnsIfMissing(vararg columns: Pair<String, String>) {
-    val existing = buildSet {
-        query("PRAGMA table_info(`networks`)").use { cursor ->
-            val nameColumn = cursor.getColumnIndexOrThrow("name")
-            while (cursor.moveToNext()) add(cursor.getString(nameColumn))
+    val existing =
+        buildSet {
+            query("PRAGMA table_info(`networks`)").use { cursor ->
+                val nameColumn = cursor.getColumnIndexOrThrow("name")
+                while (cursor.moveToNext()) add(cursor.getString(nameColumn))
+            }
         }
-    }
     columns.forEach { (name, type) ->
         if (name !in existing) execSQL("ALTER TABLE networks ADD COLUMN $name $type")
     }

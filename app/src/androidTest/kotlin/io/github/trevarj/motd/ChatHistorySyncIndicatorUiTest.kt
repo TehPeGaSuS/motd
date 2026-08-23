@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
@@ -17,8 +19,6 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_PARTIAL_CHIP_TAG
@@ -194,7 +194,8 @@ class ChatHistorySyncIndicatorUiTest {
         // A failure is not progress: the title cue is gone, the pill carries the whole message.
         compose.onAllNodesWithTag(CHAT_TITLE_SYNC_SPINNER_TAG).assertCountEquals(0)
         compose.onAllNodesWithTag(CHAT_HISTORY_PARTIAL_CHIP_TAG).assertCountEquals(0)
-        compose.onNodeWithTag(CHAT_HISTORY_SYNC_RETRY_TAG)
+        compose
+            .onNodeWithTag(CHAT_HISTORY_SYNC_RETRY_TAG)
             .assertHeightIsAtLeast(48.dp)
             .performClick()
         assertEquals(1, syncRetries)

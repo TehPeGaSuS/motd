@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -40,7 +41,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,8 +61,11 @@ fun ChatWallpaperPicker(
         headlineContent = { Text(stringResource(R.string.settings_wallpaper)) },
         supportingContent = {
             Text(
-                if (current.preset == ChatWallpaperPreset.NONE) wallpaperLabel(current.preset)
-                else "${wallpaperLabel(current.preset)} · ${current.intensity}%",
+                if (current.preset == ChatWallpaperPreset.NONE) {
+                    wallpaperLabel(current.preset)
+                } else {
+                    "${wallpaperLabel(current.preset)} · ${current.intensity}%"
+                },
             )
         },
         leadingContent = { Icon(Icons.Outlined.Image, contentDescription = null) },
@@ -73,7 +76,10 @@ fun ChatWallpaperPicker(
         WallpaperEditorSheet(
             current = current,
             onDismiss = { showEditor = false },
-            onApply = { onApply(it); showEditor = false },
+            onApply = {
+                onApply(it)
+                showEditor = false
+            },
         )
     }
 }
@@ -132,7 +138,10 @@ private fun WallpaperEditorSheet(
 }
 
 @Composable
-private fun WallpaperPreview(selection: WallpaperSelection, modifier: Modifier = Modifier) {
+private fun WallpaperPreview(
+    selection: WallpaperSelection,
+    modifier: Modifier = Modifier,
+) {
     val shape = RoundedCornerShape(22.dp)
     Box(modifier.clip(shape).background(MaterialTheme.colorScheme.background)) {
         ChatWallpaperBackground(selection, Modifier.matchParentSize())
@@ -167,7 +176,14 @@ private fun WallpaperCard(
         Modifier.selectable(selected = selected, role = Role.RadioButton, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.fillMaxWidth().height(84.dp).clip(shape).background(MaterialTheme.colorScheme.background).border(if (selected) 3.dp else 1.dp, border, shape)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(84.dp)
+                .clip(shape)
+                .background(MaterialTheme.colorScheme.background)
+                .border(if (selected) 3.dp else 1.dp, border, shape),
+        ) {
             ChatWallpaperBackground(WallpaperSelection(preset, intensity), Modifier.matchParentSize())
             if (selected) {
                 Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(bottomStart = 10.dp), modifier = Modifier.align(Alignment.TopEnd)) {
@@ -183,25 +199,27 @@ private fun WallpaperCard(
 }
 
 @Composable
-private fun wallpaperLabel(preset: ChatWallpaperPreset): String = stringResource(
-    when (preset) {
-        ChatWallpaperPreset.NONE -> R.string.settings_wallpaper_none
-        ChatWallpaperPreset.CHATTER -> R.string.settings_wallpaper_chatter
-        ChatWallpaperPreset.CHANNELS -> R.string.settings_wallpaper_channels
-        ChatWallpaperPreset.TERMINAL -> R.string.settings_wallpaper_terminal
-        ChatWallpaperPreset.RELAY -> R.string.settings_wallpaper_relay
-        ChatWallpaperPreset.SIGNALS -> R.string.settings_wallpaper_signals
-        ChatWallpaperPreset.PIXELS -> R.string.settings_wallpaper_pixels
-    },
-)
+private fun wallpaperLabel(preset: ChatWallpaperPreset): String =
+    stringResource(
+        when (preset) {
+            ChatWallpaperPreset.NONE -> R.string.settings_wallpaper_none
+            ChatWallpaperPreset.CHATTER -> R.string.settings_wallpaper_chatter
+            ChatWallpaperPreset.CHANNELS -> R.string.settings_wallpaper_channels
+            ChatWallpaperPreset.TERMINAL -> R.string.settings_wallpaper_terminal
+            ChatWallpaperPreset.RELAY -> R.string.settings_wallpaper_relay
+            ChatWallpaperPreset.SIGNALS -> R.string.settings_wallpaper_signals
+            ChatWallpaperPreset.PIXELS -> R.string.settings_wallpaper_pixels
+        },
+    )
 
 @Composable
-private fun wallpaperDescription(preset: ChatWallpaperPreset): String? = when (preset) {
-    ChatWallpaperPreset.NONE -> null
-    ChatWallpaperPreset.CHATTER -> stringResource(R.string.settings_wallpaper_chatter_desc)
-    ChatWallpaperPreset.CHANNELS -> stringResource(R.string.settings_wallpaper_channels_desc)
-    ChatWallpaperPreset.TERMINAL -> stringResource(R.string.settings_wallpaper_terminal_desc)
-    ChatWallpaperPreset.RELAY -> stringResource(R.string.settings_wallpaper_relay_desc)
-    ChatWallpaperPreset.SIGNALS -> stringResource(R.string.settings_wallpaper_signals_desc)
-    ChatWallpaperPreset.PIXELS -> stringResource(R.string.settings_wallpaper_pixels_desc)
-}
+private fun wallpaperDescription(preset: ChatWallpaperPreset): String? =
+    when (preset) {
+        ChatWallpaperPreset.NONE -> null
+        ChatWallpaperPreset.CHATTER -> stringResource(R.string.settings_wallpaper_chatter_desc)
+        ChatWallpaperPreset.CHANNELS -> stringResource(R.string.settings_wallpaper_channels_desc)
+        ChatWallpaperPreset.TERMINAL -> stringResource(R.string.settings_wallpaper_terminal_desc)
+        ChatWallpaperPreset.RELAY -> stringResource(R.string.settings_wallpaper_relay_desc)
+        ChatWallpaperPreset.SIGNALS -> stringResource(R.string.settings_wallpaper_signals_desc)
+        ChatWallpaperPreset.PIXELS -> stringResource(R.string.settings_wallpaper_pixels_desc)
+    }

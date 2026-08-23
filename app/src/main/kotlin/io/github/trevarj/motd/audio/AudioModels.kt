@@ -7,34 +7,37 @@ import io.github.trevarj.motd.ui.chat.trimUrl
 import java.net.URI
 import java.util.Locale
 
-private val AUDIO_EXTENSIONS = setOf(
-    "mp3",
-    "opus",
-    "ogg",
-    "oga",
-    "m4a",
-    "aac",
-    "wav",
-    "flac",
-    "webm",
-)
+private val AUDIO_EXTENSIONS =
+    setOf(
+        "mp3",
+        "opus",
+        "ogg",
+        "oga",
+        "m4a",
+        "aac",
+        "wav",
+        "flac",
+        "webm",
+    )
 
-private val AUDIO_MIME_BY_EXTENSION = mapOf(
-    "mp3" to "audio/mpeg",
-    "opus" to "audio/ogg",
-    "ogg" to "audio/ogg",
-    "oga" to "audio/ogg",
-    "m4a" to "audio/mp4",
-    "aac" to "audio/aac",
-    "wav" to "audio/wav",
-    "flac" to "audio/flac",
-    "webm" to "audio/webm",
-)
+private val AUDIO_MIME_BY_EXTENSION =
+    mapOf(
+        "mp3" to "audio/mpeg",
+        "opus" to "audio/ogg",
+        "ogg" to "audio/ogg",
+        "oga" to "audio/ogg",
+        "m4a" to "audio/mp4",
+        "aac" to "audio/aac",
+        "wav" to "audio/wav",
+        "flac" to "audio/flac",
+        "webm" to "audio/webm",
+    )
 
-private val VOICE_FALLBACK = Regex(
-    """\[voice( encrypted)?\s+([0-9]+(?::[0-9]{2}){0,2})\s+([^\]\s]+)(?:\s+expires=([^\]\s]+))?]\s+(https?://[^\s<>]+)""",
-    RegexOption.IGNORE_CASE,
-)
+private val VOICE_FALLBACK =
+    Regex(
+        """\[voice( encrypted)?\s+([0-9]+(?::[0-9]{2}){0,2})\s+([^\]\s]+)(?:\s+expires=([^\]\s]+))?]\s+(https?://[^\s<>]+)""",
+        RegexOption.IGNORE_CASE,
+    )
 
 data class AudioAttachment(
     val url: String,
@@ -81,10 +84,12 @@ fun parseAudioAttachments(text: String): List<AudioAttachment> {
     return attachments.values.toList()
 }
 
-fun extensionlessAudioCandidates(text: String): List<String> =
-    extractUrls(text).filter(::isExtensionlessHttpsAudioCandidate)
+fun extensionlessAudioCandidates(text: String): List<String> = extractUrls(text).filter(::isExtensionlessHttpsAudioCandidate)
 
-fun displayTextForAudioMessage(text: String, attachments: List<AudioAttachment>): String {
+fun displayTextForAudioMessage(
+    text: String,
+    attachments: List<AudioAttachment>,
+): String {
     if (attachments.size != 1 || !attachments.first().voice) return text
     for (segment in parseInlineCode(text)) {
         if (segment !is InlineTextSegment.Plain) return text
@@ -92,14 +97,15 @@ fun displayTextForAudioMessage(text: String, attachments: List<AudioAttachment>)
     return if (VOICE_FALLBACK.matches(text.trim())) "" else text
 }
 
-fun AudioMetadata.toAttachment(voice: Boolean = false): AudioAttachment = AudioAttachment(
-    url = url,
-    mimeType = mimeType,
-    sizeBytes = sizeBytes,
-    durationMs = durationMs,
-    voice = voice,
-    discoveredByHead = true,
-)
+fun AudioMetadata.toAttachment(voice: Boolean = false): AudioAttachment =
+    AudioAttachment(
+        url = url,
+        mimeType = mimeType,
+        sizeBytes = sizeBytes,
+        durationMs = durationMs,
+        voice = voice,
+        discoveredByHead = true,
+    )
 
 fun isImmediateAudioUrl(url: String): Boolean = audioExtension(url) in AUDIO_EXTENSIONS
 
@@ -135,36 +141,40 @@ fun formatAudioDuration(durationMs: Long?): String =
 internal fun parseAudioDuration(value: String): Long? {
     val parts = value.split(':').mapNotNull { it.toLongOrNull() }
     if (parts.isEmpty() || parts.size > 3) return null
-    val seconds = when (parts.size) {
-        1 -> parts[0]
-        2 -> parts[0] * 60 + parts[1]
-        else -> parts[0] * 3600 + parts[1] * 60 + parts[2]
-    }
+    val seconds =
+        when (parts.size) {
+            1 -> parts[0]
+            2 -> parts[0] * 60 + parts[1]
+            else -> parts[0] * 3600 + parts[1] * 60 + parts[2]
+        }
     return seconds.takeIf { it >= 0 }?.let { it * 1000 }
 }
 
 private fun parseVoiceFallbacks(text: String): List<AudioAttachment> =
-    VOICE_FALLBACK.findAll(text).mapNotNull { match ->
-        val encrypted = match.groupValues[1].isNotBlank()
-        val duration = parseAudioDuration(match.groupValues[2])
-        val mime = match.groupValues[3].takeIf { it.contains('/') }
-        val expiry = match.groupValues[4].takeIf(String::isNotBlank)
-        val url = trimUrl(match.groupValues[5])
-        AudioAttachment(
-            url = url,
-            displayUrl = url,
-            title = "Voice message",
-            mimeType = mime ?: audioMimeTypeForUrl(url),
-            durationMs = duration,
-            voice = true,
-            encrypted = encrypted,
-            expiry = expiry,
-        )
-    }.toList()
+    VOICE_FALLBACK
+        .findAll(text)
+        .mapNotNull { match ->
+            val encrypted = match.groupValues[1].isNotBlank()
+            val duration = parseAudioDuration(match.groupValues[2])
+            val mime = match.groupValues[3].takeIf { it.contains('/') }
+            val expiry = match.groupValues[4].takeIf(String::isNotBlank)
+            val url = trimUrl(match.groupValues[5])
+            AudioAttachment(
+                url = url,
+                displayUrl = url,
+                title = "Voice message",
+                mimeType = mime ?: audioMimeTypeForUrl(url),
+                durationMs = duration,
+                voice = true,
+                encrypted = encrypted,
+                expiry = expiry,
+            )
+        }.toList()
 
 private fun audioExtension(url: String): String {
-    val path = runCatching { URI(url).path.orEmpty() }.getOrElse {
-        url.substringBefore('?').substringBefore('#')
-    }
+    val path =
+        runCatching { URI(url).path.orEmpty() }.getOrElse {
+            url.substringBefore('?').substringBefore('#')
+        }
     return path.substringAfterLast('.', "").lowercase(Locale.ROOT)
 }

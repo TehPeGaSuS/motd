@@ -6,7 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ModeCatalogTest {
-
     @Test fun chanmodes_splits_into_four_groups() {
         val catalog = ModeCatalog.from(mapOf("CHANMODES" to "beI,k,l,imnpstn"))
         assertEquals("beI".toSet(), catalog.listModes)
@@ -80,8 +79,11 @@ class ModeCatalogTest {
         val catalog = ModeCatalog.from(mapOf("PREFIX" to "(qaohv)~&@%+"))
         assertEquals(
             listOf(
-                PrefixRole('q', '~'), PrefixRole('a', '&'), PrefixRole('o', '@'),
-                PrefixRole('h', '%'), PrefixRole('v', '+'),
+                PrefixRole('q', '~'),
+                PrefixRole('a', '&'),
+                PrefixRole('o', '@'),
+                PrefixRole('h', '%'),
+                PrefixRole('v', '+'),
             ),
             catalog.prefixRoles,
         )

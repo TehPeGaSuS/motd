@@ -35,16 +35,17 @@ internal class PingWatchdog(
     fun start() {
         stop()
         dead.set(false)
-        job = scope.launch {
-            while (isActive) {
-                val genAtStart = generation.get()
-                delay(idleBeforePing)
-                if (generation.get() != genAtStart) continue // inbound arrived; restart idle window.
+        job =
+            scope.launch {
+                while (isActive) {
+                    val genAtStart = generation.get()
+                    delay(idleBeforePing)
+                    if (generation.get() != genAtStart) continue // inbound arrived; restart idle window.
 
-                // Idle threshold reached: probe.
-                if (!probe(pingGrace)) return@launch
+                    // Idle threshold reached: probe.
+                    if (!probe(pingGrace)) return@launch
+                }
             }
-        }
     }
 
     fun onInbound() {
@@ -60,22 +61,23 @@ internal class PingWatchdog(
      *
      * Returns true when inbound traffic arrived during the grace period. A timed-out probe invokes
      * [onDead] exactly once for this watchdog run, just like the periodic watchdog path.
-    */
-    suspend fun probe(graceMs: Long = pingGrace): Boolean = probeMutex.withLock {
-        require(graceMs > 0) { "probe grace must be positive" }
-        runCatching { sendPing("motd-${System.currentTimeMillis()}") }
-        // Match the periodic watchdog: traffic that arrived before the probe was written does
-        // not satisfy this probe's grace window.
-        val genAtPing = generation.get()
-        delay(graceMs)
-        if (generation.get() != genAtPing) return@withLock true
+     */
+    suspend fun probe(graceMs: Long = pingGrace): Boolean =
+        probeMutex.withLock {
+            require(graceMs > 0) { "probe grace must be positive" }
+            runCatching { sendPing("motd-${System.currentTimeMillis()}") }
+            // Match the periodic watchdog: traffic that arrived before the probe was written does
+            // not satisfy this probe's grace window.
+            val genAtPing = generation.get()
+            delay(graceMs)
+            if (generation.get() != genAtPing) return@withLock true
 
-        if (dead.compareAndSet(false, true)) {
-            // No inbound line during the grace window -> dead.
-            onDead()
+            if (dead.compareAndSet(false, true)) {
+                // No inbound line during the grace window -> dead.
+                onDead()
+            }
+            false
         }
-        false
-    }
 
     fun stop() {
         job?.cancel()

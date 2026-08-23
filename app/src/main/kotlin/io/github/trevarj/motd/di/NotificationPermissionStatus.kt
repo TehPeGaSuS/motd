@@ -8,20 +8,22 @@ import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /** Durable record that the one automatic notification request has been launched. */
 interface NotificationPermissionRequestHistory {
     fun wasLaunched(): Boolean
+
     fun markLaunched()
 }
 
-private class SharedPreferencesNotificationPermissionRequestHistory(context: Context) :
-    NotificationPermissionRequestHistory {
+private class SharedPreferencesNotificationPermissionRequestHistory(
+    context: Context,
+) : NotificationPermissionRequestHistory {
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
     override fun wasLaunched(): Boolean = preferences.getBoolean(REQUEST_LAUNCHED, false)
@@ -51,7 +53,9 @@ class NotificationPermissionStatus(
     private val requestHistory: NotificationPermissionRequestHistory,
 ) {
     @Inject
-    constructor(@ApplicationContext context: Context) : this(
+    constructor(
+        @ApplicationContext context: Context,
+    ) : this(
         apiLevel = { Build.VERSION.SDK_INT },
         isGrantedBySystem = {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -91,8 +95,7 @@ class NotificationPermissionStatus(
         requestHistory.markLaunched()
     }
 
-    private fun readGranted(): Boolean =
-        apiLevel() < Build.VERSION_CODES.TIRAMISU || isGrantedBySystem()
+    private fun readGranted(): Boolean = apiLevel() < Build.VERSION_CODES.TIRAMISU || isGrantedBySystem()
 }
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)

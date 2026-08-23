@@ -67,7 +67,8 @@ class LottieAssetsTest {
 
     /** Keypaths resolve against a drawable, which is where the runtime applies them too. */
     private fun LottieComposition.resolves(vararg keyPath: String) =
-        LottieDrawable().apply { composition = this@resolves }
+        LottieDrawable()
+            .apply { composition = this@resolves }
             .resolveKeyPath(KeyPath(*keyPath))
             .isNotEmpty()
 
@@ -128,8 +129,7 @@ class LottieAssetsTest {
     }
 
     /** Asserts a layer that is meant to be invisible at this frame painted nothing at all. */
-    private fun IntArray.assertAbsent(vararg inks: Int) =
-        inks.forEach { ink -> assertEquals(0, count { it == ink }) }
+    private fun IntArray.assertAbsent(vararg inks: Int) = inks.forEach { ink -> assertEquals(0, count { it == ink }) }
 
     @Test fun `every asset shares the 60fps timebase`() {
         listOf(
@@ -224,22 +224,23 @@ class LottieAssetsTest {
     @Test fun `every recolor a call site builds resolves to an Int`() {
         // The round-1 crash in one assertion: anything but an Int here is a ClassCastException on
         // the asset's first draw, on a device, with no unit test in the way.
-        val properties = listOf(
-            // MessageBubble's two morph endings.
-            lottieStrokeColor(ARGB, KeyPath("clock", "**")),
-            lottieStrokeColor(ARGB, KeyPath("check", "**")),
-            lottieStrokeColor(ARGB, KeyPath("cross", "**")),
-            // ConnectionBanner.
-            lottieStrokeColor(ARGB, KeyPath("arc", "**")),
-            // ChatListSyncHeader: dots are fills, the check is a stroke.
-            lottieFillColor(ARGB, KeyPath("dots", "**")),
-            // EmptyState's ghost rows.
-            lottieFillColor(ARGB, KeyPath("ghost_row_1", "**")),
-            lottieFillColor(ARGB, KeyPath("ghost_row_2", "**")),
-            lottieFillColor(ARGB, KeyPath("ghost_row_3", "**")),
-            // ReactionRow's sparks.
-            lottieFillColor(ARGB, KeyPath("burst", "**")),
-        )
+        val properties =
+            listOf(
+                // MessageBubble's two morph endings.
+                lottieStrokeColor(ARGB, KeyPath("clock", "**")),
+                lottieStrokeColor(ARGB, KeyPath("check", "**")),
+                lottieStrokeColor(ARGB, KeyPath("cross", "**")),
+                // ConnectionBanner.
+                lottieStrokeColor(ARGB, KeyPath("arc", "**")),
+                // ChatListSyncHeader: dots are fills, the check is a stroke.
+                lottieFillColor(ARGB, KeyPath("dots", "**")),
+                // EmptyState's ghost rows.
+                lottieFillColor(ARGB, KeyPath("ghost_row_1", "**")),
+                lottieFillColor(ARGB, KeyPath("ghost_row_2", "**")),
+                lottieFillColor(ARGB, KeyPath("ghost_row_3", "**")),
+                // ReactionRow's sparks.
+                lottieFillColor(ARGB, KeyPath("burst", "**")),
+            )
 
         properties.forEach { property ->
             val value = property.resolvedValue()
@@ -261,16 +262,16 @@ class LottieAssetsTest {
         )
     }
 
-    private fun LottieDynamicProperty<*>.property(): Any? =
-        LottieDynamicProperty::class.java.getMethod("getProperty\$lottie_compose_release").invoke(this)
+    private fun LottieDynamicProperty<*>.property(): Any? = LottieDynamicProperty::class.java.getMethod("getProperty\$lottie_compose_release").invoke(this)
 
     // --- rendered recolors: keypath, property constant and value, checked in one assertion ---
 
     @Test fun `the delivery morph paints the clock then the check`() {
-        val properties = listOf(
-            lottieStrokeColor(INK_A, KeyPath("clock", "**")),
-            lottieStrokeColor(INK_B, KeyPath("check", "**")),
-        )
+        val properties =
+            listOf(
+                lottieStrokeColor(INK_A, KeyPath("clock", "**")),
+                lottieStrokeColor(INK_B, KeyPath("check", "**")),
+            )
 
         render(R.raw.status_delivered, frame = 0, properties = properties).run {
             assertPainted(INK_A)
@@ -283,10 +284,11 @@ class LottieAssetsTest {
     }
 
     @Test fun `the failure morph paints the clock then the cross`() {
-        val properties = listOf(
-            lottieStrokeColor(INK_A, KeyPath("clock", "**")),
-            lottieStrokeColor(INK_B, KeyPath("cross", "**")),
-        )
+        val properties =
+            listOf(
+                lottieStrokeColor(INK_A, KeyPath("clock", "**")),
+                lottieStrokeColor(INK_B, KeyPath("cross", "**")),
+            )
 
         render(R.raw.status_failed, frame = 0, properties = properties).run {
             assertPainted(INK_A)
@@ -299,10 +301,11 @@ class LottieAssetsTest {
     }
 
     @Test fun `the connection banner paints the arc then the check`() {
-        val properties = listOf(
-            lottieStrokeColor(INK_A, KeyPath("arc", "**")),
-            lottieStrokeColor(INK_B, KeyPath("check", "**")),
-        )
+        val properties =
+            listOf(
+                lottieStrokeColor(INK_A, KeyPath("arc", "**")),
+                lottieStrokeColor(INK_B, KeyPath("check", "**")),
+            )
 
         render(R.raw.connection_state, frame = ConnectionStateFrames.ConnectingFirst, properties = properties).run {
             assertPainted(INK_A)
@@ -318,10 +321,11 @@ class LottieAssetsTest {
     @Test fun `the sync header paints filled dots then a stroked check`() {
         // The one asset in the set that mixes both helpers: swapping them renders grey and nothing
         // else would notice.
-        val properties = listOf(
-            lottieFillColor(INK_A, KeyPath("dots", "**")),
-            lottieStrokeColor(INK_B, KeyPath("check", "**")),
-        )
+        val properties =
+            listOf(
+                lottieFillColor(INK_A, KeyPath("dots", "**")),
+                lottieStrokeColor(INK_B, KeyPath("check", "**")),
+            )
 
         render(R.raw.sync_state, frame = SyncStateFrames.SyncingFirst, properties = properties).run {
             assertPainted(INK_A)
@@ -341,11 +345,12 @@ class LottieAssetsTest {
             // One frame short of `op`, which is the last frame Lottie will draw and the one the
             // animations-off snap parks on: every row must be fully opaque there.
             frame = EmptyStateGhostRows.TotalFrames - 1,
-            properties = listOf(
-                lottieFillColor(INK_A, KeyPath("ghost_row_1", "**")),
-                lottieFillColor(INK_B, KeyPath("ghost_row_2", "**")),
-                lottieFillColor(INK_C, KeyPath("ghost_row_3", "**")),
-            ),
+            properties =
+                listOf(
+                    lottieFillColor(INK_A, KeyPath("ghost_row_1", "**")),
+                    lottieFillColor(INK_B, KeyPath("ghost_row_2", "**")),
+                    lottieFillColor(INK_C, KeyPath("ghost_row_3", "**")),
+                ),
         ).assertPainted(INK_A, INK_B, INK_C)
     }
 

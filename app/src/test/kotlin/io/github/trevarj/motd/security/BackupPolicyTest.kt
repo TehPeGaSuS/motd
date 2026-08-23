@@ -41,7 +41,10 @@ class BackupPolicyTest {
         assertSensitiveStoresExcluded(exclusions, "device-transfer")
     }
 
-    private fun assertSensitiveStoresExcluded(exclusions: Set<Exclusion>, section: String) {
+    private fun assertSensitiveStoresExcluded(
+        exclusions: Set<Exclusion>,
+        section: String,
+    ) {
         setOf(
             Exclusion(section, "database", "."),
             Exclusion(section, "file", "datastore/"),
@@ -50,7 +53,9 @@ class BackupPolicyTest {
         ).forEach { expected -> assertTrue("Missing backup exclusion: $expected", expected in exclusions) }
     }
 
-    private fun exclusionsIn(@XmlRes resource: Int): Set<Exclusion> {
+    private fun exclusionsIn(
+        @XmlRes resource: Int,
+    ): Set<Exclusion> {
         val parser = context.resources.getXml(resource)
         val exclusions = mutableSetOf<Exclusion>()
         var section = ""
@@ -58,12 +63,18 @@ class BackupPolicyTest {
             while (parser.eventType != XmlPullParser.END_DOCUMENT) {
                 if (parser.eventType == XmlPullParser.START_TAG) {
                     when (parser.name) {
-                        "full-backup-content", "cloud-backup", "device-transfer" -> section = parser.name
-                        "exclude" -> exclusions += Exclusion(
-                            section = section,
-                            domain = parser.getAttributeValue(null, "domain"),
-                            path = parser.getAttributeValue(null, "path"),
-                        )
+                        "full-backup-content", "cloud-backup", "device-transfer" -> {
+                            section = parser.name
+                        }
+
+                        "exclude" -> {
+                            exclusions +=
+                                Exclusion(
+                                    section = section,
+                                    domain = parser.getAttributeValue(null, "domain"),
+                                    path = parser.getAttributeValue(null, "path"),
+                                )
+                        }
                     }
                 }
                 parser.next()
@@ -74,5 +85,9 @@ class BackupPolicyTest {
         return exclusions
     }
 
-    private data class Exclusion(val section: String, val domain: String, val path: String)
+    private data class Exclusion(
+        val section: String,
+        val domain: String,
+        val path: String,
+    )
 }

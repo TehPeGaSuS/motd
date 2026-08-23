@@ -19,8 +19,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -48,7 +48,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,6 +65,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.bouncer.BouncerKind
 import io.github.trevarj.motd.bouncer.SojuLoginForm
@@ -182,8 +182,12 @@ fun NetworkSettingsContent(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
             Column(
-                modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp).verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 720.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 SettingsGroup { StatusCard(state.connState, onConnect, onDisconnect) }
@@ -202,7 +206,9 @@ fun NetworkSettingsContent(
                         ListItem(
                             headlineContent = { Text(stringResource(R.string.network_settings_managed_by, state.parentName.orEmpty())) },
                             supportingContent = { Text(stringResource(R.string.network_settings_managed_by_desc)) },
-                            colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
+                            colors =
+                                androidx.compose.material3.ListItemDefaults
+                                    .colors(containerColor = Color.Transparent),
                         )
                         InitialAwayField(state, onInitialAwayMessageChange)
                     }
@@ -277,9 +283,11 @@ fun NetworkSettingsContent(
                                     },
                                 )
                             },
-                            isError = state.avatarPublishError || (
-                                state.avatarInput.isNotBlank() &&
-                                    io.github.trevarj.motd.avatar.validateAvatarUrl(state.avatarInput) == null
+                            isError =
+                                state.avatarPublishError || (
+                                    state.avatarInput.isNotBlank() &&
+                                        io.github.trevarj.motd.avatar
+                                            .validateAvatarUrl(state.avatarInput) == null
                                 ),
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().testTag("network_avatar_url"),
@@ -287,8 +295,10 @@ fun NetworkSettingsContent(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = onPublishAvatar,
-                                enabled = state.avatarPublishingAvailable &&
-                                    io.github.trevarj.motd.avatar.validateAvatarUrl(state.avatarInput) != null,
+                                enabled =
+                                    state.avatarPublishingAvailable &&
+                                        io.github.trevarj.motd.avatar
+                                            .validateAvatarUrl(state.avatarInput) != null,
                             ) { Text(stringResource(R.string.network_settings_avatar_publish)) }
                             TextButton(onClick = onClearAvatar) {
                                 Text(stringResource(R.string.network_settings_avatar_clear))
@@ -306,23 +316,35 @@ fun NetworkSettingsContent(
                         ListItem(
                             headlineContent = { Text(stringResource(R.string.network_settings_bouncer_networks)) },
                             supportingContent = { Text(stringResource(R.string.network_settings_bouncer_networks_desc)) },
-                            modifier = Modifier.testTag("network_settings_bouncer_networks")
-                                .clickable { onOpenBouncerNetworks() },
-                            colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
+                            modifier =
+                                Modifier
+                                    .testTag("network_settings_bouncer_networks")
+                                    .clickable { onOpenBouncerNetworks() },
+                            colors =
+                                androidx.compose.material3.ListItemDefaults
+                                    .colors(containerColor = Color.Transparent),
                         )
                     }
                     ListItem(
                         headlineContent = { Text(stringResource(R.string.network_settings_server_messages)) },
-                        modifier = Modifier.testTag("network_settings_server_messages")
-                            .clickable { onOpenServerMessages() },
-                        colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier =
+                            Modifier
+                                .testTag("network_settings_server_messages")
+                                .clickable { onOpenServerMessages() },
+                        colors =
+                            androidx.compose.material3.ListItemDefaults
+                                .colors(containerColor = Color.Transparent),
                     )
                     ListItem(
                         headlineContent = { Text(stringResource(R.string.network_settings_network_tools)) },
                         supportingContent = { Text(stringResource(R.string.network_settings_network_tools_desc)) },
-                        modifier = Modifier.testTag("network_settings_network_tools")
-                            .clickable { onOpenNetworkTools() },
-                        colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier =
+                            Modifier
+                                .testTag("network_settings_network_tools")
+                                .clickable { onOpenNetworkTools() },
+                        colors =
+                            androidx.compose.material3.ListItemDefaults
+                                .colors(containerColor = Color.Transparent),
                     )
                 }
                 SettingsGroup(title = stringResource(R.string.network_settings_danger_section)) {
@@ -341,14 +363,20 @@ fun NetworkSettingsContent(
             title = { Text(stringResource(R.string.network_settings_unsaved_title)) },
             text = { Text(stringResource(R.string.network_settings_unsaved_message)) },
             confirmButton = {
-                TextButton(onClick = { showDiscardConfirm = false; onSave() }, enabled = state.isValid) {
+                TextButton(onClick = {
+                    showDiscardConfirm = false
+                    onSave()
+                }, enabled = state.isValid) {
                     Text(stringResource(R.string.network_settings_save))
                 }
             },
             dismissButton = {
                 Row {
                     TextButton(onClick = { showDiscardConfirm = false }) { Text(stringResource(R.string.network_settings_keep_editing)) }
-                    TextButton(onClick = { showDiscardConfirm = false; onBack() }) {
+                    TextButton(onClick = {
+                        showDiscardConfirm = false
+                        onBack()
+                    }) {
                         Text(stringResource(R.string.network_settings_discard), color = MaterialTheme.colorScheme.error)
                     }
                 }
@@ -361,16 +389,21 @@ fun NetworkSettingsContent(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text(stringResource(R.string.network_settings_delete_confirm_title)) },
             text = {
-                Text(stringResource(
-                    if (state.entity?.role == NetworkRole.BOUNCER_ROOT) {
-                        R.string.network_settings_delete_bouncer_confirm_message
-                    } else {
-                        R.string.network_settings_delete_confirm_message
-                    },
-                ))
+                Text(
+                    stringResource(
+                        if (state.entity?.role == NetworkRole.BOUNCER_ROOT) {
+                            R.string.network_settings_delete_bouncer_confirm_message
+                        } else {
+                            R.string.network_settings_delete_confirm_message
+                        },
+                    ),
+                )
             },
             confirmButton = {
-                TextButton(onClick = { showDeleteConfirm = false; onDelete() }) {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    onDelete()
+                }) {
                     Text(stringResource(R.string.action_delete))
                 }
             },
@@ -437,45 +470,54 @@ private fun StatusCard(
             // Single stable handle; the label varies Connect/Disconnect/Reconnect by state.
             val connButton = Modifier.testTag("network_settings_conn_button")
             when (connState) {
-                is IrcClientState.Disconnected ->
+                is IrcClientState.Disconnected -> {
                     FilledTonalButton(onClick = onConnect, modifier = connButton) {
                         Text(stringResource(R.string.network_settings_status_connect))
                     }
-                is IrcClientState.Failed ->
+                }
+
+                is IrcClientState.Failed -> {
                     FilledTonalButton(onClick = onConnect, modifier = connButton) {
                         Text(stringResource(R.string.network_settings_status_reconnect))
                     }
-                else ->
+                }
+
+                else -> {
                     FilledTonalButton(onClick = onDisconnect, modifier = connButton) {
                         Text(stringResource(R.string.network_settings_status_disconnect))
                     }
+                }
             }
         },
     )
 }
 
 @Composable
-private fun statusLabel(connState: IrcClientState): String = when (connState) {
-    is IrcClientState.Ready -> stringResource(R.string.network_settings_status_ready, connState.nick)
-    IrcClientState.Connecting -> stringResource(R.string.network_settings_status_connecting)
-    IrcClientState.Registering -> stringResource(R.string.network_settings_status_registering)
-    IrcClientState.Disconnected -> stringResource(R.string.network_settings_status_disconnected)
-    is IrcClientState.Failed -> stringResource(R.string.network_settings_status_failed, connState.reason)
-}
+private fun statusLabel(connState: IrcClientState): String =
+    when (connState) {
+        is IrcClientState.Ready -> stringResource(R.string.network_settings_status_ready, connState.nick)
+        IrcClientState.Connecting -> stringResource(R.string.network_settings_status_connecting)
+        IrcClientState.Registering -> stringResource(R.string.network_settings_status_registering)
+        IrcClientState.Disconnected -> stringResource(R.string.network_settings_status_disconnected)
+        is IrcClientState.Failed -> stringResource(R.string.network_settings_status_failed, connState.reason)
+    }
 
 @Composable
 private fun statusColor(connState: IrcClientState): Color {
     val semanticColors = LocalMotdSemanticColors.current
     return when (connState) {
-    is IrcClientState.Ready -> semanticColors.success
-    IrcClientState.Connecting, IrcClientState.Registering -> semanticColors.warning
-    is IrcClientState.Failed -> MaterialTheme.colorScheme.error
-    IrcClientState.Disconnected -> MaterialTheme.colorScheme.outlineVariant
+        is IrcClientState.Ready -> semanticColors.success
+        IrcClientState.Connecting, IrcClientState.Registering -> semanticColors.warning
+        is IrcClientState.Failed -> MaterialTheme.colorScheme.error
+        IrcClientState.Disconnected -> MaterialTheme.colorScheme.outlineVariant
     }
 }
 
 @Composable
-private fun AutoConnectRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun AutoConnectRow(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -507,10 +549,11 @@ private fun InitialAwayField(
         },
         isError = error != null,
         singleLine = true,
-        keyboardOptions = KeyboardOptions(
-            capitalization = KeyboardCapitalization.Sentences,
-            imeAction = ImeAction.Done,
-        ),
+        keyboardOptions =
+            KeyboardOptions(
+                capitalization = KeyboardCapitalization.Sentences,
+                imeAction = ImeAction.Done,
+            ),
         modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("network_initial_away"),
     )
 }
@@ -534,11 +577,12 @@ private fun ObfuscationSection(
     var expanded by rememberSaveable { mutableStateOf(mode == ObfsMode.EMBEDDED_REALITY && vlessLinkValidationError(obfsLink) != null) }
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded }
-                .padding(horizontal = 16.dp, vertical = 14.dp)
-                .testTag("network_obfs_header"),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
+                    .testTag("network_obfs_header"),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -548,17 +592,20 @@ private fun ObfuscationSection(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (!expanded) Text(
-                    stringResource(R.string.network_settings_tap_configure),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                if (!expanded) {
+                    Text(
+                        stringResource(R.string.network_settings_tap_configure),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
             Icon(
                 imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                contentDescription = stringResource(
-                    if (expanded) R.string.network_settings_collapse else R.string.network_settings_expand,
-                ),
+                contentDescription =
+                    stringResource(
+                        if (expanded) R.string.network_settings_collapse else R.string.network_settings_expand,
+                    ),
             )
         }
         AnimatedVisibility(
@@ -583,74 +630,87 @@ private fun ObfuscationSection(
                 // expanded section doesn't jolt.
                 Column(Modifier.animateContentSize(animationSpec = MotdMotion.contentSize)) {
                     when (mode) {
-            ObfsMode.TOR -> Text(
-                stringResource(R.string.network_settings_obfs_tor_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            ObfsMode.SOCKS5 -> Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedTextField(
-                    value = proxyHost,
-                    onValueChange = onProxyHostChange,
-                    label = { Text(stringResource(R.string.network_settings_obfs_proxy_host)) },
-                    placeholder = { Text("127.0.0.1") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        autoCorrectEnabled = false,
-                        imeAction = ImeAction.Next,
-                    ),
-                    modifier = Modifier.fillMaxWidth().testTag("network_obfs_host"),
-                )
-                OutlinedTextField(
-                    value = proxyPort,
-                    onValueChange = onProxyPortChange,
-                    label = { Text(stringResource(R.string.network_settings_obfs_proxy_port)) },
-                    placeholder = { Text("1080") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                    modifier = Modifier.fillMaxWidth().testTag("network_obfs_port"),
-                )
-                Text(
-                    stringResource(R.string.network_settings_obfs_dns_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            ObfsMode.EMBEDDED_REALITY -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "The VLESS URI's host and port are the public tunnel ingress on your VPS. " +
-                        "The Server host and port fields below remain the bouncer destination " +
-                        "inside that tunnel (for example Docker soju:6697), not the VPS IP.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    stringResource(R.string.network_settings_obfs_reality_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = obfsLink,
-                    onValueChange = onObfsLinkChange,
-                    label = { Text(stringResource(R.string.network_settings_obfs_reality_link)) },
-                    placeholder = { Text("vless://uuid@host:443?type=tcp&security=reality&…") },
-                    singleLine = false,
-                    isError = vlessLinkValidationError(obfsLink) != null,
-                    supportingText = {
-                        vlessLinkValidationError(obfsLink)?.let { Text(it) }
-                    },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        capitalization = KeyboardCapitalization.None,
-                        autoCorrectEnabled = false,
-                    ),
-                    modifier = Modifier.fillMaxWidth().testTag("network_obfs_link"),
-                )
-            }
-            ObfsMode.NONE -> Unit
+                        ObfsMode.TOR -> {
+                            Text(
+                                stringResource(R.string.network_settings_obfs_tor_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
+                        ObfsMode.SOCKS5 -> {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                OutlinedTextField(
+                                    value = proxyHost,
+                                    onValueChange = onProxyHostChange,
+                                    label = { Text(stringResource(R.string.network_settings_obfs_proxy_host)) },
+                                    placeholder = { Text("127.0.0.1") },
+                                    singleLine = true,
+                                    keyboardOptions =
+                                        KeyboardOptions(
+                                            keyboardType = KeyboardType.Uri,
+                                            autoCorrectEnabled = false,
+                                            imeAction = ImeAction.Next,
+                                        ),
+                                    modifier = Modifier.fillMaxWidth().testTag("network_obfs_host"),
+                                )
+                                OutlinedTextField(
+                                    value = proxyPort,
+                                    onValueChange = onProxyPortChange,
+                                    label = { Text(stringResource(R.string.network_settings_obfs_proxy_port)) },
+                                    placeholder = { Text("1080") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                                    modifier = Modifier.fillMaxWidth().testTag("network_obfs_port"),
+                                )
+                                Text(
+                                    stringResource(R.string.network_settings_obfs_dns_note),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+
+                        ObfsMode.EMBEDDED_REALITY -> {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    "The VLESS URI's host and port are the public tunnel ingress on your VPS. " +
+                                        "The Server host and port fields below remain the bouncer destination " +
+                                        "inside that tunnel (for example Docker soju:6697), not the VPS IP.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    stringResource(R.string.network_settings_obfs_reality_desc),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                OutlinedTextField(
+                                    value = obfsLink,
+                                    onValueChange = onObfsLinkChange,
+                                    label = { Text(stringResource(R.string.network_settings_obfs_reality_link)) },
+                                    placeholder = { Text("vless://uuid@host:443?type=tcp&security=reality&…") },
+                                    singleLine = false,
+                                    isError = vlessLinkValidationError(obfsLink) != null,
+                                    supportingText = {
+                                        vlessLinkValidationError(obfsLink)?.let { Text(it) }
+                                    },
+                                    keyboardOptions =
+                                        KeyboardOptions(
+                                            keyboardType = KeyboardType.Uri,
+                                            capitalization = KeyboardCapitalization.None,
+                                            autoCorrectEnabled = false,
+                                        ),
+                                    modifier = Modifier.fillMaxWidth().testTag("network_obfs_link"),
+                                )
+                            }
+                        }
+
+                        ObfsMode.NONE -> {
+                            Unit
+                        }
                     }
                 }
             }
@@ -659,13 +719,20 @@ private fun ObfuscationSection(
 }
 
 @Composable
-private fun TransportSection(wsUrl: String, onWsUrlChange: (String) -> Unit) {
+private fun TransportSection(
+    wsUrl: String,
+    onWsUrlChange: (String) -> Unit,
+) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     var websocketSelected by rememberSaveable { mutableStateOf(wsUrl.isNotBlank()) }
     Column(Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }
-                .padding(horizontal = 16.dp, vertical = 14.dp).testTag("network_transport_header"),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
+                    .testTag("network_transport_header"),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -678,11 +745,13 @@ private fun TransportSection(wsUrl: String, onWsUrlChange: (String) -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (!expanded) Text(
-                    stringResource(R.string.network_settings_tap_configure),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                if (!expanded) {
+                    Text(
+                        stringResource(R.string.network_settings_tap_configure),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
             Icon(
                 if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
@@ -700,7 +769,10 @@ private fun TransportSection(wsUrl: String, onWsUrlChange: (String) -> Unit) {
                     subtitle = stringResource(R.string.network_settings_transport_tcp_desc),
                     selected = !websocketSelected,
                     enabled = true,
-                    onClick = { websocketSelected = false; onWsUrlChange("") },
+                    onClick = {
+                        websocketSelected = false
+                        onWsUrlChange("")
+                    },
                 )
                 RadioRow(
                     label = stringResource(R.string.network_settings_transport_websocket),
@@ -732,14 +804,15 @@ private fun TransportSection(wsUrl: String, onWsUrlChange: (String) -> Unit) {
 }
 
 @Composable
-private fun obfsModeLabel(mode: ObfsMode): String = stringResource(
-    when (mode) {
-        ObfsMode.NONE -> R.string.network_settings_obfs_mode_none
-        ObfsMode.SOCKS5 -> R.string.network_settings_obfs_mode_socks5
-        ObfsMode.TOR -> R.string.network_settings_obfs_mode_tor
-        ObfsMode.EMBEDDED_REALITY -> R.string.network_settings_obfs_mode_reality
-    },
-)
+private fun obfsModeLabel(mode: ObfsMode): String =
+    stringResource(
+        when (mode) {
+            ObfsMode.NONE -> R.string.network_settings_obfs_mode_none
+            ObfsMode.SOCKS5 -> R.string.network_settings_obfs_mode_socks5
+            ObfsMode.TOR -> R.string.network_settings_obfs_mode_tor
+            ObfsMode.EMBEDDED_REALITY -> R.string.network_settings_obfs_mode_reality
+        },
+    )
 
 @Composable
 private fun ObfsOption(
@@ -749,11 +822,14 @@ private fun ObfsOption(
     onSelect: (ObfsMode) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().selectable(
-            selected = mode == selected,
-            role = androidx.compose.ui.semantics.Role.RadioButton,
-            onClick = { onSelect(mode) },
-        ).padding(vertical = 2.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .selectable(
+                    selected = mode == selected,
+                    role = androidx.compose.ui.semantics.Role.RadioButton,
+                    onClick = { onSelect(mode) },
+                ).padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = mode == selected, onClick = null)
@@ -766,12 +842,17 @@ private fun ObfsOption(
 private fun NetworkSettingsContentPreview() {
     MotdTheme {
         NetworkSettingsContent(
-            state = NetworkSettingsUiState(
-                loaded = true,
-                server = ServerForm(host = "irc.libera.chat", port = "6697", nick = "me"),
-                auth = AuthForm(mode = AuthMode.PLAIN, saslUser = "me", saslPassword = "secret"),
-            ),
-            onBack = {}, onServerChange = {}, onAuthChange = {}, onSave = {}, onDelete = {},
+            state =
+                NetworkSettingsUiState(
+                    loaded = true,
+                    server = ServerForm(host = "irc.libera.chat", port = "6697", nick = "me"),
+                    auth = AuthForm(mode = AuthMode.PLAIN, saslUser = "me", saslPassword = "secret"),
+                ),
+            onBack = {},
+            onServerChange = {},
+            onAuthChange = {},
+            onSave = {},
+            onDelete = {},
         )
     }
 }

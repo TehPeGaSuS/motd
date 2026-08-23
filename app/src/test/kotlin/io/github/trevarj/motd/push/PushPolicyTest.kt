@@ -8,7 +8,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PushPolicyTest {
-    private fun network(id: Long, role: NetworkRole, autoConnect: Boolean = true) = NetworkEntity(
+    private fun network(
+        id: Long,
+        role: NetworkRole,
+        autoConnect: Boolean = true,
+    ) = NetworkEntity(
         id = id,
         name = "network-$id",
         role = role,
@@ -23,11 +27,12 @@ class PushPolicyTest {
     @Test
     fun endpoint_change_invalidates_verified_health() {
         val first = "https://push.example/first"
-        val health = NetworkPushHealth(
-            endpointFingerprint = fingerprintEndpoint(first),
-            capability = PushCapability.SUPPORTED,
-            registrationState = PushRegistrationState.ACTIVE,
-        )
+        val health =
+            NetworkPushHealth(
+                endpointFingerprint = fingerprintEndpoint(first),
+                capability = PushCapability.SUPPORTED,
+                registrationState = PushRegistrationState.ACTIVE,
+            )
 
         assertTrue(health.protects(first))
         assertFalse(health.protects("https://push.example/second"))
@@ -40,24 +45,28 @@ class PushPolicyTest {
         val verified = network(2, NetworkRole.BOUNCER_CHILD)
         val unsupported = network(3, NetworkRole.DIRECT)
         val endpoint = "https://push.example/verified"
-        val health = mapOf(
-            2L to NetworkPushHealth(
-                endpointFingerprint = fingerprintEndpoint(endpoint),
-                capability = PushCapability.SUPPORTED,
-                registrationState = PushRegistrationState.ACTIVE,
-            ),
-            3L to NetworkPushHealth(
-                capability = PushCapability.UNSUPPORTED,
-                registrationState = PushRegistrationState.FALLBACK,
-            ),
-        )
+        val health =
+            mapOf(
+                2L to
+                    NetworkPushHealth(
+                        endpointFingerprint = fingerprintEndpoint(endpoint),
+                        capability = PushCapability.SUPPORTED,
+                        registrationState = PushRegistrationState.ACTIVE,
+                    ),
+                3L to
+                    NetworkPushHealth(
+                        capability = PushCapability.UNSUPPORTED,
+                        registrationState = PushRegistrationState.FALLBACK,
+                    ),
+            )
 
-        val suspended = pushSuspendedNetworkIds(
-            networks = listOf(root, verified, unsupported),
-            wantedIds = setOf(1L, 2L, 3L),
-            endpoints = mapOf(2L to endpoint),
-            health = health,
-        )
+        val suspended =
+            pushSuspendedNetworkIds(
+                networks = listOf(root, verified, unsupported),
+                wantedIds = setOf(1L, 2L, 3L),
+                endpoints = mapOf(2L to endpoint),
+                health = health,
+            )
 
         assertEquals(setOf(1L, 2L), suspended)
         assertEquals(
@@ -68,11 +77,12 @@ class PushPolicyTest {
 
     @Test
     fun root_is_never_a_unifiedpush_instance() {
-        val networks = listOf(
-            network(1, NetworkRole.BOUNCER_ROOT),
-            network(2, NetworkRole.BOUNCER_CHILD),
-            network(3, NetworkRole.DIRECT, autoConnect = false),
-        )
+        val networks =
+            listOf(
+                network(1, NetworkRole.BOUNCER_ROOT),
+                network(2, NetworkRole.BOUNCER_CHILD),
+                network(3, NetworkRole.DIRECT, autoConnect = false),
+            )
         assertEquals(setOf(2L), pushEligibleNetworkIds(networks))
     }
 }

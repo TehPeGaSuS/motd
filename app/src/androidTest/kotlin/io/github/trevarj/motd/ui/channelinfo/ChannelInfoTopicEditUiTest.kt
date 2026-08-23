@@ -82,9 +82,10 @@ class ChannelInfoTopicEditUiTest {
         compose.setContent {
             MotdTheme {
                 ChannelInfoContent(
-                    state = ChannelInfoUiState(
-                        buffer = BufferEntity(1, 1, "#internal-alias", "#room", BufferType.CHANNEL),
-                    ),
+                    state =
+                        ChannelInfoUiState(
+                            buffer = BufferEntity(1, 1, "#internal-alias", "#room", BufferType.CHANNEL),
+                        ),
                     onBack = {},
                     onSetPinned = {},
                     onSetMuted = {},
@@ -113,19 +114,24 @@ class ChannelInfoTopicEditUiTest {
     }
 
     @androidx.compose.runtime.Composable
-    private fun TopicContent(mutation: TopicMutationState, onSetTopic: (String) -> Unit) {
+    private fun TopicContent(
+        mutation: TopicMutationState,
+        onSetTopic: (String) -> Unit,
+    ) {
         MotdTheme {
             ChannelInfoContent(
-                state = ChannelInfoUiState(
-                    buffer = BufferEntity(
-                        id = 1,
-                        networkId = 1,
-                        name = "#internal-alias",
-                        displayName = "#room",
-                        type = BufferType.CHANNEL,
-                        topic = "original topic",
+                state =
+                    ChannelInfoUiState(
+                        buffer =
+                            BufferEntity(
+                                id = 1,
+                                networkId = 1,
+                                name = "#internal-alias",
+                                displayName = "#room",
+                                type = BufferType.CHANNEL,
+                                topic = "original topic",
+                            ),
                     ),
-                ),
                 onBack = {},
                 onSetPinned = {},
                 onSetMuted = {},

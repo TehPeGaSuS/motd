@@ -3,8 +3,13 @@ package io.github.trevarj.motd.ui.chat
 sealed interface InlineTextSegment {
     val text: String
 
-    data class Plain(override val text: String) : InlineTextSegment
-    data class Code(override val text: String) : InlineTextSegment
+    data class Plain(
+        override val text: String,
+    ) : InlineTextSegment
+
+    data class Code(
+        override val text: String,
+    ) : InlineTextSegment
 }
 
 /**
@@ -40,8 +45,7 @@ fun parseInlineCode(text: String): List<InlineTextSegment> {
     return result.ifEmpty { listOf(InlineTextSegment.Plain(text)) }
 }
 
-private fun String.isSingleBacktick(index: Int): Boolean =
-    this[index] == '`' && getOrNull(index - 1) != '`' && getOrNull(index + 1) != '`'
+private fun String.isSingleBacktick(index: Int): Boolean = this[index] == '`' && getOrNull(index - 1) != '`' && getOrNull(index + 1) != '`'
 
 private fun MutableList<InlineTextSegment>.addPlain(text: String) {
     if (text.isEmpty()) return

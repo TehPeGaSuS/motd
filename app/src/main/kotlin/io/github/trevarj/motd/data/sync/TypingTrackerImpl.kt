@@ -1,10 +1,8 @@
 package io.github.trevarj.motd.data.sync
 
-import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.di.ApplicationScope
-import javax.inject.Inject
-import javax.inject.Singleton
+import io.github.trevarj.motd.service.TypingTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -14,6 +12,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
  * In-memory typing state (not persisted). Written by [EventProcessor] on TAGMSG(+typing),
@@ -27,68 +27,82 @@ import kotlinx.coroutines.launch
  * re-emits, so the indicator clears on its own.
  */
 @Singleton
-class TypingTrackerImpl @Inject constructor(
-    @ApplicationScope private val scope: CoroutineScope,
-    private val clock: AppClock,
-) : TypingTracker {
-    /** Convenience for small JVM tests; production always receives process-owned dependencies. */
-    constructor() : this(
-        CoroutineScope(SupervisorJob() + Dispatchers.Default),
-        AppClock(System::currentTimeMillis),
-    )
-    private data class Entry(val nick: String, val expiresAt: Long)
+class TypingTrackerImpl
+    @Inject
+    constructor(
+        @ApplicationScope private val scope: CoroutineScope,
+        private val clock: AppClock,
+    ) : TypingTracker {
+        /** Convenience for small JVM tests; production always receives process-owned dependencies. */
+        constructor() : this(
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            AppClock(System::currentTimeMillis),
+        )
 
-    private val flows = HashMap<Long, MutableStateFlow<List<String>>>()
-    private val entries = HashMap<Long, MutableList<Entry>>()
-    private val lock = Any()
+        private data class Entry(
+            val nick: String,
+            val expiresAt: Long,
+        )
 
-    // At most one pending sweep per buffer (the soonest expiry); replaced when a new one is sooner.
-    private val sweeps = HashMap<Long, Job>()
+        private val flows = HashMap<Long, MutableStateFlow<List<String>>>()
+        private val entries = HashMap<Long, MutableList<Entry>>()
+        private val lock = Any()
 
-    override fun typingNicks(bufferId: Long): StateFlow<List<String>> =
-        synchronized(lock) { flowFor(bufferId).asStateFlow() }
+        // At most one pending sweep per buffer (the soonest expiry); replaced when a new one is sooner.
+        private val sweeps = HashMap<Long, Job>()
 
-    /** Apply a typing state ("active" | "paused" | "done") for [nick] in [bufferId]. */
-    fun onTyping(bufferId: Long, nick: String, state: String, now: Long = clock.nowMillis()) {
-        synchronized(lock) {
-            val list = entries.getOrPut(bufferId) { mutableListOf() }
-            list.removeAll { it.nick == nick || it.expiresAt <= now }
-            if (state == "active" || state == "paused") {
-                list.add(Entry(nick, now + ACTIVE_TTL_MS))
+        override fun typingNicks(bufferId: Long): StateFlow<List<String>> = synchronized(lock) { flowFor(bufferId).asStateFlow() }
+
+        /** Apply a typing state ("active" | "paused" | "done") for [nick] in [bufferId]. */
+        fun onTyping(
+            bufferId: Long,
+            nick: String,
+            state: String,
+            now: Long = clock.nowMillis(),
+        ) {
+            synchronized(lock) {
+                val list = entries.getOrPut(bufferId) { mutableListOf() }
+                list.removeAll { it.nick == nick || it.expiresAt <= now }
+                if (state == "active" || state == "paused") {
+                    list.add(Entry(nick, now + ACTIVE_TTL_MS))
+                }
+                flowFor(bufferId).value = list.map { it.nick }
+                scheduleSweep(bufferId, list, now)
             }
-            flowFor(bufferId).value = list.map { it.nick }
-            scheduleSweep(bufferId, list, now)
+        }
+
+        /** (Re)arm the sweep for [bufferId] to fire at the soonest remaining expiry. */
+        private fun scheduleSweep(
+            bufferId: Long,
+            list: List<Entry>,
+            now: Long,
+        ) {
+            sweeps.remove(bufferId)?.cancel()
+            val next = list.minOfOrNull { it.expiresAt } ?: return
+            val delayMs = (next - now).coerceAtLeast(0)
+            sweeps[bufferId] =
+                scope.launch {
+                    delay(delayMs)
+                    sweep(bufferId)
+                }
+        }
+
+        /** Drop expired entries for [bufferId], re-emit, and re-arm for the next expiry if any. */
+        private fun sweep(bufferId: Long) {
+            synchronized(lock) {
+                val list = entries[bufferId] ?: return
+                val now = clock.nowMillis()
+                val before = list.size
+                list.removeAll { it.expiresAt <= now }
+                if (list.size != before) flowFor(bufferId).value = list.map { it.nick }
+                sweeps.remove(bufferId)
+                if (list.isNotEmpty()) scheduleSweep(bufferId, list, now)
+            }
+        }
+
+        private fun flowFor(bufferId: Long): MutableStateFlow<List<String>> = flows.getOrPut(bufferId) { MutableStateFlow(emptyList()) }
+
+        private companion object {
+            const val ACTIVE_TTL_MS = 6_000L
         }
     }
-
-    /** (Re)arm the sweep for [bufferId] to fire at the soonest remaining expiry. */
-    private fun scheduleSweep(bufferId: Long, list: List<Entry>, now: Long) {
-        sweeps.remove(bufferId)?.cancel()
-        val next = list.minOfOrNull { it.expiresAt } ?: return
-        val delayMs = (next - now).coerceAtLeast(0)
-        sweeps[bufferId] = scope.launch {
-            delay(delayMs)
-            sweep(bufferId)
-        }
-    }
-
-    /** Drop expired entries for [bufferId], re-emit, and re-arm for the next expiry if any. */
-    private fun sweep(bufferId: Long) {
-        synchronized(lock) {
-            val list = entries[bufferId] ?: return
-            val now = clock.nowMillis()
-            val before = list.size
-            list.removeAll { it.expiresAt <= now }
-            if (list.size != before) flowFor(bufferId).value = list.map { it.nick }
-            sweeps.remove(bufferId)
-            if (list.isNotEmpty()) scheduleSweep(bufferId, list, now)
-        }
-    }
-
-    private fun flowFor(bufferId: Long): MutableStateFlow<List<String>> =
-        flows.getOrPut(bufferId) { MutableStateFlow(emptyList()) }
-
-    private companion object {
-        const val ACTIVE_TTL_MS = 6_000L
-    }
-}

@@ -26,44 +26,47 @@ class Migration11To12Test {
     fun `migration derives reconnect anchor from authoritative chat and preserves all rows`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(11) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL(
-                            "CREATE TABLE buffers(" +
-                                "id INTEGER PRIMARY KEY, networkId INTEGER NOT NULL, readMarkerTime INTEGER)",
-                        )
-                        db.execSQL(
-                            """CREATE TABLE messages(
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(11) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL(
+                                    "CREATE TABLE buffers(" +
+                                        "id INTEGER PRIMARY KEY, networkId INTEGER NOT NULL, readMarkerTime INTEGER)",
+                                )
+                                db.execSQL(
+                                    """CREATE TABLE messages(
                                 id INTEGER PRIMARY KEY, bufferId INTEGER NOT NULL,
                                 serverTime INTEGER NOT NULL, pendingLabel TEXT, text TEXT NOT NULL,
                                 msgid TEXT, failed INTEGER NOT NULL, kind TEXT NOT NULL,
                                 serverTimeAuthoritative INTEGER NOT NULL
                             )""",
-                        )
-                        db.execSQL(
-                            """CREATE TABLE event_aliases(
+                                )
+                                db.execSQL(
+                                    """CREATE TABLE event_aliases(
                                 id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                                 networkId INTEGER NOT NULL, namespace TEXT NOT NULL,
                                 value BLOB NOT NULL, timelineEventId INTEGER NOT NULL
                             )""",
-                        )
-                        db.execSQL(
-                            "CREATE UNIQUE INDEX index_event_aliases_networkId_namespace_value " +
-                                "ON event_aliases(networkId, namespace, value)",
-                        )
-                    }
+                                )
+                                db.execSQL(
+                                    "CREATE UNIQUE INDEX index_event_aliases_networkId_namespace_value " +
+                                        "ON event_aliases(networkId, namespace, value)",
+                                )
+                            }
 
-                    override fun onUpgrade(
-                        db: SupportSQLiteDatabase,
-                        oldVersion: Int,
-                        newVersion: Int,
-                    ) = Unit
-                })
-                .build(),
-        )
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL(
             "INSERT INTO buffers(id, networkId, readMarkerTime) VALUES " +
@@ -90,23 +93,25 @@ class Migration11To12Test {
 
         MIGRATION_11_12.migrate(db)
 
-        db.query(
-            "SELECT readMarkerTime, localReadAnchorTime, localReadAnchorEventId FROM buffers WHERE id = 1",
-        ).use { cursor ->
-            assertTrue(cursor.moveToFirst())
-            assertEquals(1000L, cursor.getLong(0))
-            assertEquals(1000L, cursor.getLong(1))
-            assertEquals(7L, cursor.getLong(2))
-        }
-        db.query(
-            "SELECT readMarkerTime, localReadAnchorTime, localReadAnchorEventId " +
-                "FROM buffers WHERE id = 2",
-        ).use { cursor ->
-            assertTrue(cursor.moveToFirst())
-            assertTrue(cursor.isNull(0))
-            assertTrue(cursor.isNull(1))
-            assertTrue(cursor.isNull(2))
-        }
+        db
+            .query(
+                "SELECT readMarkerTime, localReadAnchorTime, localReadAnchorEventId FROM buffers WHERE id = 1",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1000L, cursor.getLong(0))
+                assertEquals(1000L, cursor.getLong(1))
+                assertEquals(7L, cursor.getLong(2))
+            }
+        db
+            .query(
+                "SELECT readMarkerTime, localReadAnchorTime, localReadAnchorEventId " +
+                    "FROM buffers WHERE id = 2",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.isNull(0))
+                assertTrue(cursor.isNull(1))
+                assertTrue(cursor.isNull(2))
+            }
         db.query("SELECT COUNT(*) FROM messages").use { cursor ->
             assertTrue(cursor.moveToFirst())
             assertEquals(3, cursor.getInt(0))
@@ -116,14 +121,15 @@ class Migration11To12Test {
             val names = buildSet { while (cursor.moveToNext()) add(cursor.getString(name)) }
             assertTrue("index_messages_bufferId_pendingLabel" in names)
         }
-        db.query(
-            "SELECT timelineEventId FROM event_aliases " +
-                "WHERE networkId = 42 AND namespace = 'LABEL' " +
-                "AND value = CAST('motd-upgrade-attempt' AS BLOB)",
-        ).use { cursor ->
-            assertTrue(cursor.moveToFirst())
-            assertEquals(8L, cursor.getLong(0))
-        }
+        db
+            .query(
+                "SELECT timelineEventId FROM event_aliases " +
+                    "WHERE networkId = 42 AND namespace = 'LABEL' " +
+                    "AND value = CAST('motd-upgrade-attempt' AS BLOB)",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(8L, cursor.getLong(0))
+            }
         db.query("SELECT COUNT(*) FROM event_aliases WHERE timelineEventId = 8").use { cursor ->
             assertTrue(cursor.moveToFirst())
             assertEquals(2, cursor.getInt(0))
@@ -132,7 +138,8 @@ class Migration11To12Test {
             "INSERT INTO composer_drafts(roomId, text, replyToEventId, updatedAt) " +
                 "VALUES (1, 'draft', 999, 1234)",
         )
-        db.query("SELECT text, replyToEventId, updatedAt FROM composer_drafts WHERE roomId = 1")
+        db
+            .query("SELECT text, replyToEventId, updatedAt FROM composer_drafts WHERE roomId = 1")
             .use { cursor ->
                 assertTrue(cursor.moveToFirst())
                 assertEquals("draft", cursor.getString(0))

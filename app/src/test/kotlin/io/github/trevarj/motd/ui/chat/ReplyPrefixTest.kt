@@ -7,7 +7,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ReplyPrefixTest {
-
     @Test
     fun `prefix is visible in an empty reply draft`() {
         val out = prependReplyPrefix(TextFieldValue(""), "alice")
@@ -33,12 +32,13 @@ class ReplyPrefixTest {
 
     @Test
     fun `reply gesture adds configured prefix in a channel`() {
-        val out = composerTextForReply(
-            value = TextFieldValue("hello", selection = TextRange(5)),
-            sender = "alice",
-            bufferType = BufferType.CHANNEL,
-            visibleReplyPrefix = true,
-        )
+        val out =
+            composerTextForReply(
+                value = TextFieldValue("hello", selection = TextRange(5)),
+                sender = "alice",
+                bufferType = BufferType.CHANNEL,
+                visibleReplyPrefix = true,
+            )
 
         assertEquals("alice: hello", out.text)
         assertEquals(TextRange(12), out.selection)

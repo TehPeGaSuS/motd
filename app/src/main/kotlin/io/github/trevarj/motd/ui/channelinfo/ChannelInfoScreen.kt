@@ -41,30 +41,30 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
-import androidx.compose.ui.res.pluralStringResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.avatar.ConversationAvatarOutcome
 import io.github.trevarj.motd.data.db.BufferEntity
@@ -78,8 +78,8 @@ import io.github.trevarj.motd.ui.chat.NickActionSheet
 import io.github.trevarj.motd.ui.chat.lagTone
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AvatarEditorSheet
-import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
+import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -123,19 +123,40 @@ fun ChannelInfoScreen(
         var seq = 0L
         viewModel.toolEvents.collect { toolFeedback = ++seq to it }
     }
-    val toolMessage = when (val event = toolFeedback?.second) {
-        null -> null
-        ChannelToolEvent.NotConnected -> stringResource(R.string.channelinfo_tool_not_connected)
-        is ChannelToolEvent.Sent -> when (event.summary) {
-            ChannelToolSummary.MODE -> stringResource(R.string.channelinfo_tool_sent_mode)
-            ChannelToolSummary.INVITE ->
-                stringResource(R.string.channelinfo_tool_sent_invite, event.arg.orEmpty())
-            ChannelToolSummary.BAN ->
-                stringResource(R.string.channelinfo_tool_sent_ban, event.arg.orEmpty())
-            ChannelToolSummary.UNBAN -> stringResource(R.string.channelinfo_tool_sent_unban)
-            ChannelToolSummary.EXCEPTION -> stringResource(R.string.channelinfo_tool_sent_exception)
+    val toolMessage =
+        when (val event = toolFeedback?.second) {
+            null -> {
+                null
+            }
+
+            ChannelToolEvent.NotConnected -> {
+                stringResource(R.string.channelinfo_tool_not_connected)
+            }
+
+            is ChannelToolEvent.Sent -> {
+                when (event.summary) {
+                    ChannelToolSummary.MODE -> {
+                        stringResource(R.string.channelinfo_tool_sent_mode)
+                    }
+
+                    ChannelToolSummary.INVITE -> {
+                        stringResource(R.string.channelinfo_tool_sent_invite, event.arg.orEmpty())
+                    }
+
+                    ChannelToolSummary.BAN -> {
+                        stringResource(R.string.channelinfo_tool_sent_ban, event.arg.orEmpty())
+                    }
+
+                    ChannelToolSummary.UNBAN -> {
+                        stringResource(R.string.channelinfo_tool_sent_unban)
+                    }
+
+                    ChannelToolSummary.EXCEPTION -> {
+                        stringResource(R.string.channelinfo_tool_sent_exception)
+                    }
+                }
+            }
         }
-    }
     LaunchedEffect(toolFeedback?.first) {
         snackbarHostState.showSnackbar(toolMessage ?: return@LaunchedEffect)
     }
@@ -242,14 +263,23 @@ fun ChannelInfoScreen(
             whois = sheet.details,
             presence = sheet.presence,
             onDismiss = viewModel::dismissNickSheet,
-            onMessage = { viewModel.dismissNickSheet(); viewModel.messageMember(sheet.nick, onOpenBuffer) },
-            onMention = { viewModel.dismissNickSheet(); viewModel.mentionMember(sheet.nick, onDone = onBack) },
+            onMessage = {
+                viewModel.dismissNickSheet()
+                viewModel.messageMember(sheet.nick, onOpenBuffer)
+            },
+            onMention = {
+                viewModel.dismissNickSheet()
+                viewModel.mentionMember(sheet.nick, onDone = onBack)
+            },
             onToggleFriend = { viewModel.toggleFriend(sheet.nick) },
             onToggleFool = { viewModel.toggleFool(sheet.nick) },
             onIgnoreNetwork = { viewModel.ignoreNickOnNetwork(sheet.nick) },
             onOp = { grant -> viewModel.setMemberMode(sheet.nick, 'o', grant) },
             onVoice = { grant -> viewModel.setMemberMode(sheet.nick, 'v', grant) },
-            onKick = { reason -> viewModel.dismissNickSheet(); viewModel.kick(sheet.nick, reason) },
+            onKick = { reason ->
+                viewModel.dismissNickSheet()
+                viewModel.kick(sheet.nick, reason)
+            },
             onBan = { mask, alsoKick ->
                 viewModel.dismissNickSheet()
                 viewModel.banWithMask(sheet.nick, mask, alsoKick)
@@ -351,11 +381,12 @@ fun ChannelInfoContent(
                     // The deferred gate is intentional; only the insert is softened. The rows it
                     // shoves ease via placement-only animateItem below.
                     Box(
-                        modifier = Modifier.animateItem(
-                            fadeInSpec = MotdMotion.fadeIn,
-                            placementSpec = MotdMotion.rowPlacement,
-                            fadeOutSpec = MotdMotion.microFadeOut,
-                        ),
+                        modifier =
+                            Modifier.animateItem(
+                                fadeInSpec = MotdMotion.fadeIn,
+                                placementSpec = MotdMotion.rowPlacement,
+                                fadeOutSpec = MotdMotion.microFadeOut,
+                            ),
                     ) {
                         ChannelControlsSection(
                             catalog = state.modeCatalog,
@@ -377,7 +408,10 @@ fun ChannelInfoContent(
             item(key = "search-field") {
                 OutlinedTextField(
                     value = queryText,
-                    onValueChange = { queryText = it; onQueryChange(it.text) },
+                    onValueChange = {
+                        queryText = it
+                        onQueryChange(it.text)
+                    },
                     singleLine = true,
                     placeholder = { Text(stringResource(R.string.channelinfo_member_search_hint)) },
                     leadingIcon = {
@@ -405,11 +439,12 @@ fun ChannelInfoContent(
                     keyboardActions = KeyboardActions(onSearch = { /* in-memory filter; nothing to fetch */ }),
                     // Placement-only: eases the shove when the channel-tools item lands above,
                     // without gaining appearance fades.
-                    modifier = Modifier
-                        .animateItem(fadeInSpec = null, fadeOutSpec = null, placementSpec = MotdMotion.rowPlacement)
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .testTag("channelinfo_member_search_field"),
+                    modifier =
+                        Modifier
+                            .animateItem(fadeInSpec = null, fadeOutSpec = null, placementSpec = MotdMotion.rowPlacement)
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .testTag("channelinfo_member_search_field"),
                 )
             }
             val searchResults = state.searchResults
@@ -432,11 +467,12 @@ fun ChannelInfoContent(
                             onClick = { onMemberClick(member.nick) },
                             // Placement-only, fades explicitly nulled: per-keystroke filtering
                             // must never gain appearance animations.
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = null,
-                                fadeOutSpec = null,
-                                placementSpec = MotdMotion.rowPlacement,
-                            ),
+                            modifier =
+                                Modifier.animateItem(
+                                    fadeInSpec = null,
+                                    fadeOutSpec = null,
+                                    placementSpec = MotdMotion.rowPlacement,
+                                ),
                         )
                     }
                 }
@@ -450,9 +486,10 @@ fun ChannelInfoContent(
                             fontWeight = FontWeight.SemiBold,
                             // Headers move with their rows but never fade: their identity is the
                             // section, not the membership.
-                            modifier = Modifier
-                                .animateItem(fadeInSpec = null, fadeOutSpec = null, placementSpec = MotdMotion.rowPlacement)
-                                .padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+                            modifier =
+                                Modifier
+                                    .animateItem(fadeInSpec = null, fadeOutSpec = null, placementSpec = MotdMotion.rowPlacement)
+                                    .padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
                         )
                     }
                     items(section.members, key = { "${section.prefix}-${it.nick}" }) { member ->
@@ -463,11 +500,12 @@ fun ChannelInfoContent(
                             onClick = { onMemberClick(member.nick) },
                             // Keys are stable per section, so joins fade in, parts fade out, and a
                             // prefix change (key moves sections) reads as fade-out + fade-in.
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = MotdMotion.microFadeIn,
-                                placementSpec = MotdMotion.rowPlacement,
-                                fadeOutSpec = MotdMotion.microFadeOut,
-                            ),
+                            modifier =
+                                Modifier.animateItem(
+                                    fadeInSpec = MotdMotion.microFadeIn,
+                                    placementSpec = MotdMotion.rowPlacement,
+                                    fadeOutSpec = MotdMotion.microFadeOut,
+                                ),
                         )
                     }
                 }
@@ -485,13 +523,13 @@ fun ChannelInfoContent(
                         // animateItem lives on the dimming Box so the expand/collapse fade covers
                         // the whole dimmed row.
                         Box(
-                            modifier = Modifier
-                                .animateItem(
-                                    fadeInSpec = MotdMotion.microFadeIn,
-                                    placementSpec = MotdMotion.rowPlacement,
-                                    fadeOutSpec = MotdMotion.microFadeOut,
-                                )
-                                .alpha(0.55f),
+                            modifier =
+                                Modifier
+                                    .animateItem(
+                                        fadeInSpec = MotdMotion.microFadeIn,
+                                        placementSpec = MotdMotion.rowPlacement,
+                                        fadeOutSpec = MotdMotion.microFadeOut,
+                                    ).alpha(0.55f),
                         ) {
                             MemberRow(
                                 member = member,
@@ -514,9 +552,10 @@ fun ChannelInfoContent(
             // An AlertDialog is its own Compose window, so the Activity root's
             // testTagsAsResourceId does not reach it and every tag inside this dialog is invisible
             // to uiautomator. Opt the dialog window in the same way the root does.
-            modifier = Modifier
-                .semantics { testTagsAsResourceId = true }
-                .testTag("channelinfo_leave_dialog"),
+            modifier =
+                Modifier
+                    .semantics { testTagsAsResourceId = true }
+                    .testTag("channelinfo_leave_dialog"),
             title = { Text(stringResource(R.string.channelinfo_leave_confirm_title)) },
             text = {
                 Column {
@@ -526,9 +565,10 @@ fun ChannelInfoContent(
                             text = stringResource(R.string.channelinfo_leave_failed),
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier
-                                .padding(top = 8.dp)
-                                .testTag("channelinfo_leave_error"),
+                            modifier =
+                                Modifier
+                                    .padding(top = 8.dp)
+                                    .testTag("channelinfo_leave_error"),
                         )
                     }
                 }
@@ -584,9 +624,10 @@ internal fun TopicEditDialog(
         onDismissRequest = { if (!submitting) onDismiss() },
         // Same as the leave dialog: a separate Compose window needs its own opt-in, otherwise
         // channelinfo_topic_edit_text and _save never appear as resource ids in a uiautomator dump.
-        modifier = Modifier
-            .semantics { testTagsAsResourceId = true }
-            .testTag("channelinfo_topic_edit_dialog"),
+        modifier =
+            Modifier
+                .semantics { testTagsAsResourceId = true }
+                .testTag("channelinfo_topic_edit_dialog"),
         title = { Text(stringResource(R.string.channelinfo_topic_edit_title)) },
         text = {
             Column {
@@ -604,9 +645,10 @@ internal fun TopicEditDialog(
                         text = stringResource(R.string.channelinfo_topic_edit_failed),
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier
-                            .padding(top = 8.dp)
-                            .testTag("channelinfo_topic_edit_error"),
+                        modifier =
+                            Modifier
+                                .padding(top = 8.dp)
+                                .testTag("channelinfo_topic_edit_error"),
                     )
                 }
             }
@@ -629,12 +671,17 @@ internal fun TopicEditDialog(
 }
 
 @Composable
-private fun FoolsSectionHeader(count: Int, expanded: Boolean, onToggle: () -> Unit) {
+private fun FoolsSectionHeader(
+    count: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onToggle)
-            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle)
+                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -712,12 +759,13 @@ private fun ChannelHeader(
                 }
             }
         }
-        val rosterText = when {
-            memberCount != null -> pluralStringResource(R.plurals.channelinfo_members, memberCount, memberCount)
-            hasStaleMembers -> stringResource(R.string.channelinfo_members_stale)
-            rosterState == RosterLoadState.FAILED -> stringResource(R.string.channelinfo_members_failed)
-            else -> stringResource(R.string.channelinfo_members_loading)
-        }
+        val rosterText =
+            when {
+                memberCount != null -> pluralStringResource(R.plurals.channelinfo_members, memberCount, memberCount)
+                hasStaleMembers -> stringResource(R.string.channelinfo_members_stale)
+                rosterState == RosterLoadState.FAILED -> stringResource(R.string.channelinfo_members_failed)
+                else -> stringResource(R.string.channelinfo_members_loading)
+            }
         Text(
             text = rosterText,
             style = MaterialTheme.typography.labelMedium,
@@ -811,23 +859,25 @@ private fun MemberRow(
     ListItem(
         headlineContent = { Text(member.prefixes.take(1) + member.nick) },
         // Dropping the whole slot (rather than an empty one) lets the nick start at the content edge.
-        leadingContent = if (avatarsHidden()) {
-            null
-        } else {
-            { Avatar(name = member.nick, size = 36.dp, networkId = networkId) }
-        },
-        trailingContent = if (isFriend) {
-            {
-                Icon(
-                    imageVector = Icons.Filled.Star,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            }
-        } else {
-            null
-        },
+        leadingContent =
+            if (avatarsHidden()) {
+                null
+            } else {
+                { Avatar(name = member.nick, size = 36.dp, networkId = networkId) }
+            },
+        trailingContent =
+            if (isFriend) {
+                {
+                    Icon(
+                        imageVector = Icons.Filled.Star,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            } else {
+                null
+            },
         // Per-member handle so the harness selects a specific member row.
         modifier = modifier.testTag("channelinfo_member_${member.nick}").clickable(onClick = onClick),
     )
@@ -838,25 +888,36 @@ private fun MemberRow(
 private fun ChannelInfoContentPreview() {
     MotdTheme {
         ChannelInfoContent(
-            state = ChannelInfoUiState(
-                buffer = BufferEntity(
-                    id = 1, networkId = 1, name = "#kotlin", displayName = "#kotlin",
-                    type = BufferType.CHANNEL, topic = "Kotlin discussion — be nice",
-                    pinned = true, muted = false,
+            state =
+                ChannelInfoUiState(
+                    buffer =
+                        BufferEntity(
+                            id = 1,
+                            networkId = 1,
+                            name = "#kotlin",
+                            displayName = "#kotlin",
+                            type = BufferType.CHANNEL,
+                            topic = "Kotlin discussion — be nice",
+                            pinned = true,
+                            muted = false,
+                        ),
+                    sections =
+                        sectionMembers(
+                            listOf(
+                                MemberEntity(1, "owner", "~"),
+                                MemberEntity(1, "op", "@"),
+                                MemberEntity(1, "voiced", "+"),
+                                MemberEntity(1, "alice", ""),
+                                MemberEntity(1, "bob", ""),
+                            ),
+                        ),
+                    memberCount = 5,
+                    rosterState = RosterLoadState.LOADED,
                 ),
-                sections = sectionMembers(
-                    listOf(
-                        MemberEntity(1, "owner", "~"),
-                        MemberEntity(1, "op", "@"),
-                        MemberEntity(1, "voiced", "+"),
-                        MemberEntity(1, "alice", ""),
-                        MemberEntity(1, "bob", ""),
-                    ),
-                ),
-                memberCount = 5,
-                rosterState = RosterLoadState.LOADED,
-            ),
-            onBack = {}, onSetPinned = {}, onSetMuted = {}, onLeave = {},
+            onBack = {},
+            onSetPinned = {},
+            onSetMuted = {},
+            onLeave = {},
             onQueryChange = {},
         )
     }
@@ -873,24 +934,27 @@ private fun LagReadout(
     modifier: Modifier = Modifier,
 ) {
     val tone = lagTone(lagMs)
-    val dotColor = when (tone) {
-        LagTone.GOOD -> MaterialTheme.colorScheme.primary
-        LagTone.DEGRADED -> MaterialTheme.colorScheme.tertiary
-        LagTone.BAD -> MaterialTheme.colorScheme.error
-    }
+    val dotColor =
+        when (tone) {
+            LagTone.GOOD -> MaterialTheme.colorScheme.primary
+            LagTone.DEGRADED -> MaterialTheme.colorScheme.tertiary
+            LagTone.BAD -> MaterialTheme.colorScheme.error
+        }
     val description = stringResource(R.string.chat_lag_content_description, lagMs)
     Row(
-        modifier = modifier.semantics(mergeDescendants = true) {
-            contentDescription = description
-        },
+        modifier =
+            modifier.semantics(mergeDescendants = true) {
+                contentDescription = description
+            },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(androidx.compose.foundation.shape.CircleShape)
-                .background(dotColor),
+            modifier =
+                Modifier
+                    .size(8.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(dotColor),
         )
         Text(
             text = stringResource(R.string.chat_lag_ms, lagMs),

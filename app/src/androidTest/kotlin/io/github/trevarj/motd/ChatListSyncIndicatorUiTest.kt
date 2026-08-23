@@ -51,8 +51,10 @@ class ChatListSyncIndicatorUiTest {
         compose.onNodeWithTag("chatlist_row_sync_waiting", useUnmergedTree = true).assertIsDisplayed()
         assertEquals(
             0,
-            compose.onAllNodesWithTag("chatlist_row_sync_queued", useUnmergedTree = true)
-                .fetchSemanticsNodes().size,
+            compose
+                .onAllNodesWithTag("chatlist_row_sync_queued", useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .size,
         )
     }
 
@@ -94,7 +96,10 @@ class ChatListSyncIndicatorUiTest {
         }
     }
 
-    private fun setRow(indicator: ChatListSyncIndicator, unreadCount: Int = 0) {
+    private fun setRow(
+        indicator: ChatListSyncIndicator,
+        unreadCount: Int = 0,
+    ) {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 ChatListRowItem(
@@ -108,18 +113,19 @@ class ChatListSyncIndicatorUiTest {
         }
     }
 
-    private fun queryRow(unreadCount: Int = 0) = ChatListRow(
-        bufferId = 1,
-        networkId = 1,
-        networkName = "Libera",
-        displayName = "alice",
-        type = BufferType.QUERY,
-        pinned = false,
-        muted = false,
-        lastMessageText = "hello",
-        lastMessageSender = "alice",
-        lastMessageTime = 1L,
-        unreadCount = unreadCount,
-        mentionCount = 0,
-    )
+    private fun queryRow(unreadCount: Int = 0) =
+        ChatListRow(
+            bufferId = 1,
+            networkId = 1,
+            networkName = "Libera",
+            displayName = "alice",
+            type = BufferType.QUERY,
+            pinned = false,
+            muted = false,
+            lastMessageText = "hello",
+            lastMessageSender = "alice",
+            lastMessageTime = 1L,
+            unreadCount = unreadCount,
+            mentionCount = 0,
+        )
 }

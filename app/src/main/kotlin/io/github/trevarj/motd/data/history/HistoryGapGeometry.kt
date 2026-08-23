@@ -20,7 +20,6 @@ import javax.inject.Inject
  * role determines the sentinel; the edge itself never picks one.
  */
 sealed interface GapEdgeAnchor {
-
     /**
      * Where this edge sits when it marks the CUT between two retained rows: the position a seam is
      * drawn at, taken from a gap's newer edge. Named for the inclusive lower window boundary it used
@@ -37,8 +36,11 @@ sealed interface GapEdgeAnchor {
      * `(serverTime, eventId, timelineOrder)` tuple the gap recorded when it was written. No
      * ambiguity remains, so every role sees the same anchor.
      */
-    data class Exact(val anchor: TimelineAnchor) : GapEdgeAnchor {
+    data class Exact(
+        val anchor: TimelineAnchor,
+    ) : GapEdgeAnchor {
         override fun asInclusiveLowerBound(): TimelineAnchor = anchor
+
         override fun asFocusNewerPosition(): TimelineAnchor = anchor
     }
 
@@ -53,7 +55,9 @@ sealed interface GapEdgeAnchor {
      * decide. A pure `TimelineAnchor(Long.MAX_VALUE, ...)` would instead dominate (or be dominated
      * by) the entire timeline and change behavior everywhere.
      */
-    data class TimeOnly(val serverTime: Long) : GapEdgeAnchor {
+    data class TimeOnly(
+        val serverTime: Long,
+    ) : GapEdgeAnchor {
         // The cut is INCLUSIVE at the anchor: rows at or newer than it sit above the seam. An
         // unknown edge cannot say where inside its equal-time cohort the gap falls, so it claims as
         // little as possible and sits BELOW the whole cohort, leaving every equal-time row on the
@@ -98,49 +102,61 @@ data class ResolvedGap(
  * and finally the timestamp alone. Only the last rung is ambiguous; the first three all produce
  * [GapEdgeAnchor.Exact] and are role-independent.
  */
-class GapAnchorResolver @Inject constructor(private val messageDao: MessageDao) {
+class GapAnchorResolver
+    @Inject
+    constructor(
+        private val messageDao: MessageDao,
+    ) {
+        suspend fun resolve(
+            roomId: Long,
+            gaps: List<HistoryGapEntity>,
+        ): List<ResolvedGap> =
+            gaps.map { gap ->
+                ResolvedGap(
+                    gap = gap,
+                    older =
+                        resolveEdge(
+                            roomId,
+                            gap.olderMsgid,
+                            gap.olderServerTime,
+                            gap.olderEventId,
+                            gap.olderTimelineOrder,
+                        ),
+                    newer =
+                        resolveEdge(
+                            roomId,
+                            gap.newerMsgid,
+                            gap.newerServerTime,
+                            gap.newerEventId,
+                            gap.newerTimelineOrder,
+                        ),
+                )
+            }
 
-    suspend fun resolve(roomId: Long, gaps: List<HistoryGapEntity>): List<ResolvedGap> =
-        gaps.map { gap ->
-            ResolvedGap(
-                gap = gap,
-                older = resolveEdge(
-                    roomId,
-                    gap.olderMsgid,
-                    gap.olderServerTime,
-                    gap.olderEventId,
-                    gap.olderTimelineOrder,
-                ),
-                newer = resolveEdge(
-                    roomId,
-                    gap.newerMsgid,
-                    gap.newerServerTime,
-                    gap.newerEventId,
-                    gap.newerTimelineOrder,
-                ),
-            )
-        }
-
-    private suspend fun resolveEdge(
-        roomId: Long,
-        msgid: String?,
-        serverTime: Long,
-        eventId: Long?,
-        timelineOrder: Long?,
-    ): GapEdgeAnchor = msgid?.let { messageDao.byMsgid(roomId, it) }
-        ?.let { GapEdgeAnchor.Exact(TimelineAnchor(it.serverTime, it.id, it.timelineOrder)) }
-        ?: eventId?.let { id ->
-            messageDao.byCanonicalId(id)?.takeIf { it.bufferId == roomId }
+        private suspend fun resolveEdge(
+            roomId: Long,
+            msgid: String?,
+            serverTime: Long,
+            eventId: Long?,
+            timelineOrder: Long?,
+        ): GapEdgeAnchor =
+            msgid
+                ?.let { messageDao.byMsgid(roomId, it) }
                 ?.let { GapEdgeAnchor.Exact(TimelineAnchor(it.serverTime, it.id, it.timelineOrder)) }
-        }
-        // The gap's own recorded tuple. The row may be gone, but the position it occupied is exact,
-        // so this is still an unambiguous anchor rather than a fallback.
-        ?: eventId?.let {
-            GapEdgeAnchor.Exact(TimelineAnchor(serverTime, it, timelineOrder ?: it))
-        }
-        // Reached only when the edge carries no resolvable msgid and no eventId at all.
-        ?: GapEdgeAnchor.TimeOnly(serverTime)
-}
+                ?: eventId?.let { id ->
+                    messageDao
+                        .byCanonicalId(id)
+                        ?.takeIf { it.bufferId == roomId }
+                        ?.let { GapEdgeAnchor.Exact(TimelineAnchor(it.serverTime, it.id, it.timelineOrder)) }
+                }
+                // The gap's own recorded tuple. The row may be gone, but the position it occupied is exact,
+                // so this is still an unambiguous anchor rather than a fallback.
+                ?: eventId?.let {
+                    GapEdgeAnchor.Exact(TimelineAnchor(serverTime, it, timelineOrder ?: it))
+                }
+                // Reached only when the edge carries no resolvable msgid and no eventId at all.
+                ?: GapEdgeAnchor.TimeOnly(serverTime)
+    }
 
 /**
  * The gap a hands-free (autopilot) fill should work on, or null when the room has none.
@@ -168,5 +184,6 @@ class GapAnchorResolver @Inject constructor(private val messageDao: MessageDao) 
  * interior seam. Interior seams belong to `HistoryGapFillCoordinator`, driven by a divider tap or by
  * the autopilot that calls this.
  */
-fun newestPageableGap(gaps: List<ResolvedGap>): ResolvedGap? = gaps
-    .maxByOrNull { it.newer.asFocusNewerPosition() }
+fun newestPageableGap(gaps: List<ResolvedGap>): ResolvedGap? =
+    gaps
+        .maxByOrNull { it.newer.asFocusNewerPosition() }

@@ -17,14 +17,17 @@ internal enum class EventOrigin(
         get() = this == HISTORY || this == REPLAY
 
     /** Push delivery has a deliberately narrow persistence surface. */
-    fun accepts(event: IrcEvent): Boolean = this != PUSH || when (event) {
-        is IrcEvent.ChatMessage,
-        is IrcEvent.TagMessage,
-        is IrcEvent.Invited,
-        is IrcEvent.DccSend,
-        is IrcEvent.UnsupportedDcc,
-        is IrcEvent.Raw,
-        -> true
-        else -> false
-    }
+    fun accepts(event: IrcEvent): Boolean =
+        this != PUSH ||
+            when (event) {
+                is IrcEvent.ChatMessage,
+                is IrcEvent.TagMessage,
+                is IrcEvent.Invited,
+                is IrcEvent.DccSend,
+                is IrcEvent.UnsupportedDcc,
+                is IrcEvent.Raw,
+                -> true
+
+                else -> false
+            }
 }

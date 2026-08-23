@@ -1,9 +1,9 @@
 package io.github.trevarj.motd.ui.chatlist
 
-import java.util.Calendar
-import java.util.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.util.Calendar
+import java.util.TimeZone
 
 class RelativeTimeTest {
     // Fixed "now" so same-day/older-day branches are deterministic regardless of the run's clock.
@@ -57,7 +57,13 @@ class RelativeTimeTest {
         assertEquals("2:32 PM", relativeChatTime(then, now, is24Hour = false))
     }
 
-    private fun calendarAt(year: Int, month: Int, day: Int, hour: Int, minute: Int): Calendar =
+    private fun calendarAt(
+        year: Int,
+        month: Int,
+        day: Int,
+        hour: Int,
+        minute: Int,
+    ): Calendar =
         Calendar.getInstance(TimeZone.getDefault()).apply {
             clear()
             set(year, month, day, hour, minute, 0)

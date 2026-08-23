@@ -26,15 +26,16 @@ class MotionTest {
     @Test
     fun `chat back duration is finite and independent of travel distance`() {
         val zeroVelocity = AnimationVector2D(0f, 0f)
-        val durations = listOf(IntOffset(60, 0), IntOffset(1080, 0), IntOffset(4320, 0)).map { start ->
-            TargetBasedAnimation(
-                MotdMotion.chatBackSpatial,
-                IntOffset.VectorConverter,
-                start,
-                IntOffset.Zero,
-                zeroVelocity,
-            ).durationNanos
-        }
+        val durations =
+            listOf(IntOffset(60, 0), IntOffset(1080, 0), IntOffset(4320, 0)).map { start ->
+                TargetBasedAnimation(
+                    MotdMotion.chatBackSpatial,
+                    IntOffset.VectorConverter,
+                    start,
+                    IntOffset.Zero,
+                    zeroVelocity,
+                ).durationNanos
+            }
 
         assertTrue(durations.all { it == MotdMotion.ChatBackDurationMs * 1_000_000L })
     }
@@ -43,16 +44,18 @@ class MotionTest {
     fun `content size grows smoothly without overshoot`() {
         val start = IntSize(width = 320, height = 72)
         val target = IntSize(width = 320, height = 184)
-        val animation = TargetBasedAnimation(
-            MotdMotion.contentSize,
-            IntSize.VectorConverter,
-            start,
-            target,
-            AnimationVector2D(0f, 0f),
-        )
-        val samples = (0..100).map { step ->
-            animation.getValueFromNanos(animation.durationNanos * step / 100)
-        }
+        val animation =
+            TargetBasedAnimation(
+                MotdMotion.contentSize,
+                IntSize.VectorConverter,
+                start,
+                target,
+                AnimationVector2D(0f, 0f),
+            )
+        val samples =
+            (0..100).map { step ->
+                animation.getValueFromNanos(animation.durationNanos * step / 100)
+            }
 
         assertTrue(samples.all { it.width == start.width })
         assertTrue(samples.any { it.height > start.height && it.height < target.height })

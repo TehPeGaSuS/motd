@@ -1,17 +1,19 @@
 package io.github.trevarj.motd.audio
 
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import javax.inject.Inject
+import javax.inject.Singleton
 
 @Singleton
-class AudioActivityTracker @Inject constructor() {
-    private val _recording = MutableStateFlow(false)
-    val recording: StateFlow<Boolean> = _recording.asStateFlow()
+class AudioActivityTracker
+    @Inject
+    constructor() {
+        private val _recording = MutableStateFlow(false)
+        val recording: StateFlow<Boolean> = _recording.asStateFlow()
 
-    fun setRecording(active: Boolean) {
-        _recording.value = active
+        fun setRecording(active: Boolean) {
+            _recording.value = active
+        }
     }
-}

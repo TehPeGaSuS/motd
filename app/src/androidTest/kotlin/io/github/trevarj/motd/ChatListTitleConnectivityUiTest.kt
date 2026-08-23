@@ -33,7 +33,8 @@ class ChatListTitleConnectivityUiTest {
             }
         }
 
-        compose.onNode(hasTestTag(CHAT_LIST_TITLE_CONNECTING_TAG), useUnmergedTree = true)
+        compose
+            .onNode(hasTestTag(CHAT_LIST_TITLE_CONNECTING_TAG), useUnmergedTree = true)
             .assertIsDisplayed()
             .assertContentDescriptionEquals("Connecting")
     }
@@ -48,8 +49,10 @@ class ChatListTitleConnectivityUiTest {
 
         assertEquals(
             0,
-            compose.onAllNodesWithTag(CHAT_LIST_TITLE_CONNECTING_TAG, useUnmergedTree = true)
-                .fetchSemanticsNodes().size,
+            compose
+                .onAllNodesWithTag(CHAT_LIST_TITLE_CONNECTING_TAG, useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .size,
         )
     }
 
@@ -72,13 +75,15 @@ class ChatListTitleConnectivityUiTest {
         }
 
         // The cue is additive: the app-name title stays, the spinner trails it inside the bar.
-        compose.onNode(
-            hasText("motd") and hasAnyAncestor(hasTestTag("chatlist_top_app_bar")),
-            useUnmergedTree = true,
-        ).assertIsDisplayed()
-        compose.onNode(
-            hasTestTag(CHAT_LIST_TITLE_CONNECTING_TAG) and hasAnyAncestor(hasTestTag("chatlist_top_app_bar")),
-            useUnmergedTree = true,
-        ).assertIsDisplayed()
+        compose
+            .onNode(
+                hasText("motd") and hasAnyAncestor(hasTestTag("chatlist_top_app_bar")),
+                useUnmergedTree = true,
+            ).assertIsDisplayed()
+        compose
+            .onNode(
+                hasTestTag(CHAT_LIST_TITLE_CONNECTING_TAG) and hasAnyAncestor(hasTestTag("chatlist_top_app_bar")),
+                useUnmergedTree = true,
+            ).assertIsDisplayed()
     }
 }

@@ -9,7 +9,6 @@ import org.junit.Test
 
 /** spacingFor token mapping + the avatar-column invariant. */
 class SpacingTest {
-
     @Test
     fun compact_tokens() {
         val s = spacingFor(LayoutDensity.COMPACT)

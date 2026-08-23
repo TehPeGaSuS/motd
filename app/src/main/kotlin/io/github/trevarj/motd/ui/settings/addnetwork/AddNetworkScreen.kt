@@ -20,8 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -37,7 +37,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -45,6 +44,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.bouncer.BouncerKind
 import io.github.trevarj.motd.bouncer.SojuLoginForm
@@ -131,8 +131,12 @@ fun AddNetworkContent(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = androidx.compose.ui.Alignment.TopCenter) {
             Column(
-                modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp).verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 720.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 // The type group and the preset picker share one Column child so the collapsed
@@ -196,14 +200,22 @@ fun AddNetworkContent(
                 ) { Text(stringResource(R.string.add_network_connect_save)) }
 
                 when (state.phase) {
-                    AddNetworkPhase.TESTING -> TestingRow(state.connState)
-                    AddNetworkPhase.FAILED -> FailedSection(
-                        error = state.error,
-                        onEditForm = onEditForm,
-                        onSaveAnyway = onSaveAnyway,
-                        onRetry = onRetry,
-                    )
-                    AddNetworkPhase.FORM -> Unit
+                    AddNetworkPhase.TESTING -> {
+                        TestingRow(state.connState)
+                    }
+
+                    AddNetworkPhase.FAILED -> {
+                        FailedSection(
+                            error = state.error,
+                            onEditForm = onEditForm,
+                            onSaveAnyway = onSaveAnyway,
+                            onRetry = onRetry,
+                        )
+                    }
+
+                    AddNetworkPhase.FORM -> {
+                        Unit
+                    }
                 }
             }
         }
@@ -245,11 +257,12 @@ internal fun NetworkPresetPicker(
             val endpoint = "${preset.host}:${preset.port} · TLS"
             RadioRow(
                 label = preset.displayName,
-                subtitle = if (preset.id == NetworkPresetId.LIBERA) {
-                    "$endpoint · ${stringResource(R.string.add_network_preset_libera_motd)}"
-                } else {
-                    endpoint
-                },
+                subtitle =
+                    if (preset.id == NetworkPresetId.LIBERA) {
+                        "$endpoint · ${stringResource(R.string.add_network_preset_libera_motd)}"
+                    } else {
+                        endpoint
+                    },
                 selected = selected == preset.id,
                 enabled = true,
                 onClick = { onSelect(preset.id) },
@@ -275,10 +288,11 @@ private fun KindSelector(
     enabled: Boolean,
     onSetKind: (ConnectionChoice) -> Unit,
 ) {
-    val options = listOf(
-        ConnectionChoice.NETWORK to R.string.add_network_kind_network,
-        ConnectionChoice.BOUNCER to R.string.add_network_kind_bouncer,
-    )
+    val options =
+        listOf(
+            ConnectionChoice.NETWORK to R.string.add_network_kind_network,
+            ConnectionChoice.BOUNCER to R.string.add_network_kind_bouncer,
+        )
     SingleChoiceSegmentedButtonRow(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
@@ -303,10 +317,11 @@ private fun BouncerKindSelector(
     enabled: Boolean,
     onSetKind: (BouncerKind) -> Unit,
 ) {
-    val options = listOf(
-        BouncerKind.SOJU to R.string.bouncer_kind_soju,
-        BouncerKind.ZNC to R.string.bouncer_kind_znc,
-    )
+    val options =
+        listOf(
+            BouncerKind.SOJU to R.string.bouncer_kind_soju,
+            BouncerKind.ZNC to R.string.bouncer_kind_znc,
+        )
     SingleChoiceSegmentedButtonRow(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
@@ -332,13 +347,14 @@ private fun TestingRow(connState: IrcClientState?) {
 }
 
 @Composable
-private fun connStateLabel(connState: IrcClientState?): String = when (connState) {
-    is IrcClientState.Ready -> stringResource(R.string.network_settings_status_ready, connState.nick)
-    IrcClientState.Connecting, null -> stringResource(R.string.network_settings_status_connecting)
-    IrcClientState.Registering -> stringResource(R.string.network_settings_status_registering)
-    IrcClientState.Disconnected -> stringResource(R.string.network_settings_status_disconnected)
-    is IrcClientState.Failed -> stringResource(R.string.network_settings_status_failed, connState.reason)
-}
+private fun connStateLabel(connState: IrcClientState?): String =
+    when (connState) {
+        is IrcClientState.Ready -> stringResource(R.string.network_settings_status_ready, connState.nick)
+        IrcClientState.Connecting, null -> stringResource(R.string.network_settings_status_connecting)
+        IrcClientState.Registering -> stringResource(R.string.network_settings_status_registering)
+        IrcClientState.Disconnected -> stringResource(R.string.network_settings_status_disconnected)
+        is IrcClientState.Failed -> stringResource(R.string.network_settings_status_failed, connState.reason)
+    }
 
 @Composable
 private fun FailedSection(
@@ -375,13 +391,25 @@ private fun FailedSection(
 private fun AddNetworkFormPreview() {
     MotdTheme {
         AddNetworkContent(
-            state = AddNetworkUiState(
-                server = ServerForm(host = "irc.libera.chat", port = "6697", nick = "me"),
-            ),
-            onBack = {}, onSetKind = {}, onSetBouncerKind = {}, onSelectPreset = {},
-            onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {},
-            onSubmit = {}, onRetry = {}, onSaveAnyway = {}, onEditForm = {}, onAbandon = {},
-            onConfirmPlaintext = {}, onDismissPlaintext = {},
+            state =
+                AddNetworkUiState(
+                    server = ServerForm(host = "irc.libera.chat", port = "6697", nick = "me"),
+                ),
+            onBack = {},
+            onSetKind = {},
+            onSetBouncerKind = {},
+            onSelectPreset = {},
+            onServerChange = {},
+            onAuthChange = {},
+            onSojuLoginChange = {},
+            onZncLoginChange = {},
+            onSubmit = {},
+            onRetry = {},
+            onSaveAnyway = {},
+            onEditForm = {},
+            onAbandon = {},
+            onConfirmPlaintext = {},
+            onDismissPlaintext = {},
         )
     }
 }
@@ -391,15 +419,27 @@ private fun AddNetworkFormPreview() {
 private fun AddNetworkFailedPreview() {
     MotdTheme {
         AddNetworkContent(
-            state = AddNetworkUiState(
-                server = ServerForm(host = "irc.libera.chat", port = "6697", nick = "me"),
-                phase = AddNetworkPhase.FAILED,
-                error = "SASL authentication failed",
-            ),
-            onBack = {}, onSetKind = {}, onSetBouncerKind = {}, onSelectPreset = {},
-            onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {},
-            onSubmit = {}, onRetry = {}, onSaveAnyway = {}, onEditForm = {}, onAbandon = {},
-            onConfirmPlaintext = {}, onDismissPlaintext = {},
+            state =
+                AddNetworkUiState(
+                    server = ServerForm(host = "irc.libera.chat", port = "6697", nick = "me"),
+                    phase = AddNetworkPhase.FAILED,
+                    error = "SASL authentication failed",
+                ),
+            onBack = {},
+            onSetKind = {},
+            onSetBouncerKind = {},
+            onSelectPreset = {},
+            onServerChange = {},
+            onAuthChange = {},
+            onSojuLoginChange = {},
+            onZncLoginChange = {},
+            onSubmit = {},
+            onRetry = {},
+            onSaveAnyway = {},
+            onEditForm = {},
+            onAbandon = {},
+            onConfirmPlaintext = {},
+            onDismissPlaintext = {},
         )
     }
 }

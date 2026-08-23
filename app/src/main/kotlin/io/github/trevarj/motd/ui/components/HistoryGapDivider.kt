@@ -87,14 +87,15 @@ fun HistoryGapDivider(
     modifier: Modifier = Modifier,
 ) {
     val interactive = state != HistoryGapState.Unrecoverable
-    val label = stringResource(
-        when (state) {
-            HistoryGapState.Failed -> R.string.chat_history_gap_failed
-            HistoryGapState.Loading -> R.string.chat_history_gap_loading
-            HistoryGapState.Idle -> R.string.chat_history_gap_load
-            HistoryGapState.Unrecoverable -> R.string.chat_history_gap_unavailable
-        },
-    )
+    val label =
+        stringResource(
+            when (state) {
+                HistoryGapState.Failed -> R.string.chat_history_gap_failed
+                HistoryGapState.Loading -> R.string.chat_history_gap_loading
+                HistoryGapState.Idle -> R.string.chat_history_gap_load
+                HistoryGapState.Unrecoverable -> R.string.chat_history_gap_unavailable
+            },
+        )
     val retryAction = stringResource(R.string.chat_history_gap_retry_action)
     val loadAction = stringResource(R.string.chat_history_gap_load_action)
 
@@ -103,47 +104,57 @@ fun HistoryGapDivider(
     val tag = if (interactive) CHAT_GAP_DIVIDER_TAG else CHAT_GAP_DIVIDER_UNRECOVERABLE_TAG
     // Failed and Idle are the two tappable shapes, so both reserve a 48 dp touch target. A loading
     // seam is a progress statement, not a control, so it stays as slim as the permanent one.
-    val sizing = when (state) {
-        HistoryGapState.Failed, HistoryGapState.Idle -> Modifier.heightIn(min = 48.dp)
-        HistoryGapState.Loading, HistoryGapState.Unrecoverable -> Modifier
-    }
-    val interaction = when (state) {
-        // The only two controls the timeline offers: a retry after something broke, or a plain tap
-        // to start loading a seam nothing is currently fetching.
-        HistoryGapState.Failed -> Modifier
-            .semantics {
-                role = Role.Button
-                contentDescription = label
+    val sizing =
+        when (state) {
+            HistoryGapState.Failed, HistoryGapState.Idle -> Modifier.heightIn(min = 48.dp)
+            HistoryGapState.Loading, HistoryGapState.Unrecoverable -> Modifier
+        }
+    val interaction =
+        when (state) {
+            // The only two controls the timeline offers: a retry after something broke, or a plain tap
+            // to start loading a seam nothing is currently fetching.
+            HistoryGapState.Failed -> {
+                Modifier
+                    .semantics {
+                        role = Role.Button
+                        contentDescription = label
+                    }.clickable(onClickLabel = retryAction, onClick = onLoad)
             }
-            .clickable(onClickLabel = retryAction, onClick = onLoad)
-        HistoryGapState.Idle -> Modifier
-            .semantics {
-                role = Role.Button
-                contentDescription = label
+
+            HistoryGapState.Idle -> {
+                Modifier
+                    .semantics {
+                        role = Role.Button
+                        contentDescription = label
+                    }.clickable(onClickLabel = loadAction, onClick = onLoad)
             }
-            .clickable(onClickLabel = loadAction, onClick = onLoad)
-        // Merged into a single non-clickable node. Announcing a Button here would advertise an
-        // action that does not exist: history is already loading, and a tap could only duplicate it.
-        HistoryGapState.Loading,
-        HistoryGapState.Unrecoverable,
-        -> Modifier.semantics(mergeDescendants = true) { contentDescription = label }
-    }
+
+            // Merged into a single non-clickable node. Announcing a Button here would advertise an
+            // action that does not exist: history is already loading, and a tap could only duplicate it.
+            HistoryGapState.Loading,
+            HistoryGapState.Unrecoverable,
+            -> {
+                Modifier.semantics(mergeDescendants = true) { contentDescription = label }
+            }
+        }
     // Inner variant tag, distinct from the shared root tag above: it names WHICH tappable/spinning
     // shape composed, discoverable only via the unmerged semantics tree since the root tag already
     // merges these nodes for accessibility.
-    val innerTag = when (state) {
-        HistoryGapState.Failed -> CHAT_GAP_DIVIDER_FAILED_TAG
-        HistoryGapState.Idle -> CHAT_GAP_DIVIDER_IDLE_TAG
-        HistoryGapState.Loading, HistoryGapState.Unrecoverable -> null
-    }
+    val innerTag =
+        when (state) {
+            HistoryGapState.Failed -> CHAT_GAP_DIVIDER_FAILED_TAG
+            HistoryGapState.Idle -> CHAT_GAP_DIVIDER_IDLE_TAG
+            HistoryGapState.Loading, HistoryGapState.Unrecoverable -> null
+        }
 
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag(tag)
-            .then(sizing)
-            .then(interaction)
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .testTag(tag)
+                .then(sizing)
+                .then(interaction)
+                .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         HorizontalDivider(
@@ -153,9 +164,11 @@ fun HistoryGapDivider(
         )
         if (state == HistoryGapState.Loading) {
             CircularProgressIndicator(
-                modifier = Modifier.padding(start = 12.dp)
-                    .size(12.dp)
-                    .testTag(CHAT_GAP_DIVIDER_LOADING_TAG),
+                modifier =
+                    Modifier
+                        .padding(start = 12.dp)
+                        .size(12.dp)
+                        .testTag(CHAT_GAP_DIVIDER_LOADING_TAG),
                 strokeWidth = 1.5.dp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -165,8 +178,10 @@ fun HistoryGapDivider(
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 8.dp)
-                .then(if (innerTag != null) Modifier.testTag(innerTag) else Modifier),
+            modifier =
+                Modifier
+                    .padding(horizontal = 8.dp)
+                    .then(if (innerTag != null) Modifier.testTag(innerTag) else Modifier),
         )
         HorizontalDivider(
             modifier = Modifier.weight(1f).clearAndSetSemantics {},

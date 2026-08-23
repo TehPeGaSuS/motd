@@ -5,7 +5,6 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class NickInputTest {
-
     @Test
     fun trims_surrounding_whitespace() {
         assertEquals("alice", sanitizeNickInput("  alice  "))

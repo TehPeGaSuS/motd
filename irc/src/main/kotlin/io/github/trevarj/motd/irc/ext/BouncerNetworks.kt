@@ -4,18 +4,14 @@ import io.github.trevarj.motd.irc.proto.IrcMessage
 
 /** Builds soju `BOUNCER` command lines (soju.im/bouncer-networks). */
 internal object BouncerCommands {
-    fun listNetworks(): IrcMessage =
-        IrcMessage(command = "BOUNCER", params = listOf("LISTNETWORKS"))
+    fun listNetworks(): IrcMessage = IrcMessage(command = "BOUNCER", params = listOf("LISTNETWORKS"))
 
-    fun addNetwork(attrs: Map<String, String>): IrcMessage =
-        IrcMessage(command = "BOUNCER", params = listOf("ADDNETWORK", renderAttrString(attrs)))
+    fun addNetwork(attrs: Map<String, String>): IrcMessage = IrcMessage(command = "BOUNCER", params = listOf("ADDNETWORK", renderAttrString(attrs)))
 
-    fun deleteNetwork(netId: String): IrcMessage =
-        IrcMessage(command = "BOUNCER", params = listOf("DELNETWORK", netId))
+    fun deleteNetwork(netId: String): IrcMessage = IrcMessage(command = "BOUNCER", params = listOf("DELNETWORK", netId))
 
     /** BOUNCER BIND <netid> — sent during registration before CAP END. */
-    fun bind(netId: String): IrcMessage =
-        IrcMessage(command = "BOUNCER", params = listOf("BIND", netId))
+    fun bind(netId: String): IrcMessage = IrcMessage(command = "BOUNCER", params = listOf("BIND", netId))
 
     /**
      * Parse a `BOUNCER NETWORK <netid> <attrs>` line from a LISTNETWORKS batch into

@@ -1,7 +1,6 @@
 package io.github.trevarj.motd.agentwire
 
 import io.github.trevarj.motd.irc.agentwire.AgentwireEnvelope
-import java.util.UUID
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -12,14 +11,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.UUID
 
 class AgentwireReducerTest {
-
     @Test
     fun `legacy added file payload is normalized as a unified diff`() {
-        val diff = normalizeAgentwireDiff(
-            "{'type': 'add'} /tmp/hello-world.sh\n#!/bin/sh\n\necho \"hello world\"",
-        )
+        val diff =
+            normalizeAgentwireDiff(
+                "{'type': 'add'} /tmp/hello-world.sh\n#!/bin/sh\n\necho \"hello world\"",
+            )
 
         assertEquals(
             "diff --git a/tmp/hello-world.sh b/tmp/hello-world.sh\n" +
@@ -39,33 +39,78 @@ class AgentwireReducerTest {
 
         assertEquals(diff, normalizeAgentwireDiff(diff))
     }
+
     @Test
     fun `bootstrap snapshots establish binding settings queue and advertised actions`() {
         val reducer = AgentwireReducer()
         var state = AgentwireUiState()
-        state = reducer.reduce(state, event("agent.hello", epoch = "epoch-1", data = buildJsonObject {
-            put("epoch", "epoch-1")
-            put("backend", "codex")
-            put("actions", JsonArray(listOf(JsonPrimitive("turn.prompt"), JsonPrimitive("history.request"))))
-            put("settings", JsonArray(listOf(JsonPrimitive("delivery"), JsonPrimitive("model"))))
-            put("settingOptions", buildJsonObject {
-                put("model", JsonArray(listOf(buildJsonObject {
-                    put("value", "gpt-test")
-                    put("label", "GPT Test")
-                    put("efforts", JsonArray(listOf(JsonPrimitive("low"), JsonPrimitive("high"))))
-                    put("defaultEffort", "high")
-                    put("default", true)
-                })))
-            })
-        }))
-        state = reducer.reduce(state, event("channel.snapshot", sid = "s1", data = buildJsonObject {
-            put("binding", buildJsonObject { put("sid", "s1"); put("cwd", "/work") })
-            put("busy", true)
-            put("tid", "t1")
-            put("queue", JsonArray(listOf(buildJsonObject {
-                put("iid", "q1"); put("sid", "s1"); put("position", 0); put("content", "later")
-            })))
-        }))
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "agent.hello",
+                    epoch = "epoch-1",
+                    data =
+                        buildJsonObject {
+                            put("epoch", "epoch-1")
+                            put("backend", "codex")
+                            put("actions", JsonArray(listOf(JsonPrimitive("turn.prompt"), JsonPrimitive("history.request"))))
+                            put("settings", JsonArray(listOf(JsonPrimitive("delivery"), JsonPrimitive("model"))))
+                            put(
+                                "settingOptions",
+                                buildJsonObject {
+                                    put(
+                                        "model",
+                                        JsonArray(
+                                            listOf(
+                                                buildJsonObject {
+                                                    put("value", "gpt-test")
+                                                    put("label", "GPT Test")
+                                                    put("efforts", JsonArray(listOf(JsonPrimitive("low"), JsonPrimitive("high"))))
+                                                    put("defaultEffort", "high")
+                                                    put("default", true)
+                                                },
+                                            ),
+                                        ),
+                                    )
+                                },
+                            )
+                        },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "channel.snapshot",
+                    sid = "s1",
+                    data =
+                        buildJsonObject {
+                            put(
+                                "binding",
+                                buildJsonObject {
+                                    put("sid", "s1")
+                                    put("cwd", "/work")
+                                },
+                            )
+                            put("busy", true)
+                            put("tid", "t1")
+                            put(
+                                "queue",
+                                JsonArray(
+                                    listOf(
+                                        buildJsonObject {
+                                            put("iid", "q1")
+                                            put("sid", "s1")
+                                            put("position", 0)
+                                            put("content", "later")
+                                        },
+                                    ),
+                                ),
+                            )
+                        },
+                ),
+            )
 
         assertEquals("epoch-1", state.epoch)
         assertEquals("s1", state.activeSid)
@@ -82,18 +127,52 @@ class AgentwireReducerTest {
     @Test
     fun `session pages merge for a workspace hierarchy`() {
         val reducer = AgentwireReducer()
-        var state = reducer.reduce(AgentwireUiState(), event("session.page", data = buildJsonObject {
-            put("cwd", "/work/one")
-            put("items", JsonArray(listOf(buildJsonObject {
-                put("sid", "s1"); put("cwd", "/work/one"); put("title", "One")
-            })))
-        }))
-        state = reducer.reduce(state, event("session.page", data = buildJsonObject {
-            put("cwd", "/work/two")
-            put("items", JsonArray(listOf(buildJsonObject {
-                put("sid", "s2"); put("cwd", "/work/two"); put("title", "Two")
-            })))
-        }))
+        var state =
+            reducer.reduce(
+                AgentwireUiState(),
+                event(
+                    "session.page",
+                    data =
+                        buildJsonObject {
+                            put("cwd", "/work/one")
+                            put(
+                                "items",
+                                JsonArray(
+                                    listOf(
+                                        buildJsonObject {
+                                            put("sid", "s1")
+                                            put("cwd", "/work/one")
+                                            put("title", "One")
+                                        },
+                                    ),
+                                ),
+                            )
+                        },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "session.page",
+                    data =
+                        buildJsonObject {
+                            put("cwd", "/work/two")
+                            put(
+                                "items",
+                                JsonArray(
+                                    listOf(
+                                        buildJsonObject {
+                                            put("sid", "s2")
+                                            put("cwd", "/work/two")
+                                            put("title", "Two")
+                                        },
+                                    ),
+                                ),
+                            )
+                        },
+                ),
+            )
 
         assertEquals(listOf("s1"), state.workspaceSessions.getValue("/work/one").map(AgentwireListItem::id))
         assertEquals(listOf("s2"), state.workspaceSessions.getValue("/work/two").map(AgentwireListItem::id))
@@ -102,24 +181,28 @@ class AgentwireReducerTest {
 
     @Test
     fun `session runtime status is distinct from the attached binding`() {
-        val running = AgentwireListItem(
-            id = "running",
-            title = "Running",
-            raw = buildJsonObject { put("busy", true) },
-        )
-        val waiting = AgentwireListItem(
-            id = "waiting",
-            title = "Waiting",
-            raw = buildJsonObject {
-                put("busy", true)
-                put("flags", JsonArray(listOf(JsonPrimitive("waitingOnApproval"))))
-            },
-        )
-        val idle = AgentwireListItem(
-            id = "idle",
-            title = "Idle",
-            raw = buildJsonObject { put("busy", false) },
-        )
+        val running =
+            AgentwireListItem(
+                id = "running",
+                title = "Running",
+                raw = buildJsonObject { put("busy", true) },
+            )
+        val waiting =
+            AgentwireListItem(
+                id = "waiting",
+                title = "Waiting",
+                raw =
+                    buildJsonObject {
+                        put("busy", true)
+                        put("flags", JsonArray(listOf(JsonPrimitive("waitingOnApproval"))))
+                    },
+            )
+        val idle =
+            AgentwireListItem(
+                id = "idle",
+                title = "Idle",
+                raw = buildJsonObject { put("busy", false) },
+            )
 
         assertEquals("Running", agentwireSessionRuntimeStatus(running))
         assertEquals("Waiting", agentwireSessionRuntimeStatus(waiting))
@@ -129,19 +212,53 @@ class AgentwireReducerTest {
     @Test
     fun `continued session pages append within the same directory`() {
         val reducer = AgentwireReducer()
-        var state = reducer.reduce(AgentwireUiState(), event("session.page", data = buildJsonObject {
-            put("cwd", "/work")
-            put("items", JsonArray(listOf(buildJsonObject {
-                put("sid", "s1"); put("cwd", "/work"); put("title", "One")
-            })))
-        }))
-        state = reducer.reduce(state, event("session.page", data = buildJsonObject {
-            put("cwd", "/work")
-            put("cursor", "100")
-            put("items", JsonArray(listOf(buildJsonObject {
-                put("sid", "s2"); put("cwd", "/work"); put("title", "Two")
-            })))
-        }))
+        var state =
+            reducer.reduce(
+                AgentwireUiState(),
+                event(
+                    "session.page",
+                    data =
+                        buildJsonObject {
+                            put("cwd", "/work")
+                            put(
+                                "items",
+                                JsonArray(
+                                    listOf(
+                                        buildJsonObject {
+                                            put("sid", "s1")
+                                            put("cwd", "/work")
+                                            put("title", "One")
+                                        },
+                                    ),
+                                ),
+                            )
+                        },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "session.page",
+                    data =
+                        buildJsonObject {
+                            put("cwd", "/work")
+                            put("cursor", "100")
+                            put(
+                                "items",
+                                JsonArray(
+                                    listOf(
+                                        buildJsonObject {
+                                            put("sid", "s2")
+                                            put("cwd", "/work")
+                                            put("title", "Two")
+                                        },
+                                    ),
+                                ),
+                            )
+                        },
+                ),
+            )
 
         assertEquals(
             listOf("s1", "s2"),
@@ -152,25 +269,53 @@ class AgentwireReducerTest {
     @Test
     fun `live session pages stay separate from workspace pages`() {
         val reducer = AgentwireReducer()
-        var state = reducer.reduce(
-            AgentwireUiState(),
-            event("session.page", data = buildJsonObject {
-                put("scope", "live")
-                put("items", JsonArray(listOf(buildJsonObject {
-                    put("sid", "live"); put("cwd", "/work"); put("title", "Desktop TUI")
-                })))
-            }),
-        )
-        state = reducer.reduce(
-            state,
-            event("session.page", data = buildJsonObject {
-                put("scope", "workspace")
-                put("cwd", "/work")
-                put("items", JsonArray(listOf(buildJsonObject {
-                    put("sid", "stored"); put("cwd", "/work"); put("title", "Stored")
-                })))
-            }),
-        )
+        var state =
+            reducer.reduce(
+                AgentwireUiState(),
+                event(
+                    "session.page",
+                    data =
+                        buildJsonObject {
+                            put("scope", "live")
+                            put(
+                                "items",
+                                JsonArray(
+                                    listOf(
+                                        buildJsonObject {
+                                            put("sid", "live")
+                                            put("cwd", "/work")
+                                            put("title", "Desktop TUI")
+                                        },
+                                    ),
+                                ),
+                            )
+                        },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "session.page",
+                    data =
+                        buildJsonObject {
+                            put("scope", "workspace")
+                            put("cwd", "/work")
+                            put(
+                                "items",
+                                JsonArray(
+                                    listOf(
+                                        buildJsonObject {
+                                            put("sid", "stored")
+                                            put("cwd", "/work")
+                                            put("title", "Stored")
+                                        },
+                                    ),
+                                ),
+                            )
+                        },
+                ),
+            )
 
         assertEquals(listOf("live"), state.liveSessions.map(AgentwireListItem::id))
         assertEquals(
@@ -182,20 +327,66 @@ class AgentwireReducerTest {
     @Test
     fun `workspace pages retain lazy directory hierarchy`() {
         val reducer = AgentwireReducer()
-        var state = reducer.reduce(AgentwireUiState(), event("workspace.page", data = buildJsonObject {
-            put("items", JsonArray(listOf(buildJsonObject {
-                put("path", "/work"); put("name", "work"); put("hasChildren", true)
-            })))
-        }))
-        state = reducer.reduce(state, event("workspace.page", data = buildJsonObject {
-            put("parent", "/work")
-            put("items", JsonArray(listOf(buildJsonObject {
-                put("path", "/work/project"); put("name", "project"); put("hasChildren", false)
-            })))
-        }))
+        var state =
+            reducer.reduce(
+                AgentwireUiState(),
+                event(
+                    "workspace.page",
+                    data =
+                        buildJsonObject {
+                            put(
+                                "items",
+                                JsonArray(
+                                    listOf(
+                                        buildJsonObject {
+                                            put("path", "/work")
+                                            put("name", "work")
+                                            put("hasChildren", true)
+                                        },
+                                    ),
+                                ),
+                            )
+                        },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "workspace.page",
+                    data =
+                        buildJsonObject {
+                            put("parent", "/work")
+                            put(
+                                "items",
+                                JsonArray(
+                                    listOf(
+                                        buildJsonObject {
+                                            put("path", "/work/project")
+                                            put("name", "project")
+                                            put("hasChildren", false)
+                                        },
+                                    ),
+                                ),
+                            )
+                        },
+                ),
+            )
 
-        assertEquals("/work", state.workspaceChildren.getValue("").single().id)
-        assertEquals("/work/project", state.workspaceChildren.getValue("/work").single().id)
+        assertEquals(
+            "/work",
+            state.workspaceChildren
+                .getValue("")
+                .single()
+                .id,
+        )
+        assertEquals(
+            "/work/project",
+            state.workspaceChildren
+                .getValue("/work")
+                .single()
+                .id,
+        )
     }
 
     @Test
@@ -206,19 +397,28 @@ class AgentwireReducerTest {
         state = reducer.reduce(state, event("queue.item.updated", iid = "q1", rev = 1, data = queue("q1", "old", 0)))
         assertEquals("new", state.queue.single().content)
 
-        state = reducer.reduce(state, event("queue.snapshot", data = buildJsonObject {
-            put("items", JsonArray(listOf(queue("q2", "snapshot", 0))))
-        }))
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "queue.snapshot",
+                    data =
+                        buildJsonObject {
+                            put("items", JsonArray(listOf(queue("q2", "snapshot", 0))))
+                        },
+                ),
+            )
         assertEquals(listOf("q2"), state.queue.map(AgentwireQueueItem::iid))
     }
 
     @Test
     fun `binding detach clears the active session`() {
         val reducer = AgentwireReducer()
-        val state = reducer.reduce(
-            AgentwireUiState(activeSid = "s1", cwd = "/work", busy = true, currentTid = "t1"),
-            event("binding.changed", data = buildJsonObject { put("sid", JsonNull) }),
-        )
+        val state =
+            reducer.reduce(
+                AgentwireUiState(activeSid = "s1", cwd = "/work", busy = true, currentTid = "t1"),
+                event("binding.changed", data = buildJsonObject { put("sid", JsonNull) }),
+            )
 
         assertEquals(null, state.activeSid)
         assertEquals(null, state.cwd)
@@ -229,38 +429,50 @@ class AgentwireReducerTest {
     @Test
     fun `binding switch clears old activity and restores recent session outputs`() {
         val reducer = AgentwireReducer()
-        var state = AgentwireUiState(
-            activeSid = "old",
-            cwd = "/work/old",
-            busy = true,
-            currentTid = "old-turn",
-            timeline = listOf(
-                AgentwireTimelineItem(
-                    "old-output", "assistant.completed", 1, "old", "old-turn",
-                    "Assistant", "Old session output",
-                ),
-            ),
-            actionStatus = mapOf("old-output" to "succeeded"),
-            historyLoading = true,
-            historyPage = "old-page",
-            historyBeforeAt = 1,
-            olderHistoryAvailable = true,
-        )
+        var state =
+            AgentwireUiState(
+                activeSid = "old",
+                cwd = "/work/old",
+                busy = true,
+                currentTid = "old-turn",
+                timeline =
+                    listOf(
+                        AgentwireTimelineItem(
+                            "old-output",
+                            "assistant.completed",
+                            1,
+                            "old",
+                            "old-turn",
+                            "Assistant",
+                            "Old session output",
+                        ),
+                    ),
+                actionStatus = mapOf("old-output" to "succeeded"),
+                historyLoading = true,
+                historyPage = "old-page",
+                historyBeforeAt = 1,
+                olderHistoryAvailable = true,
+            )
 
-        state = reducer.reduce(
-            state,
-            event(
-                "binding.changed",
-                sid = "new",
-                data = buildJsonObject {
-                    put("previousSid", "old")
-                    put("session", buildJsonObject {
-                        put("sid", "new")
-                        put("cwd", "/work/new")
-                    })
-                },
-            ),
-        )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "binding.changed",
+                    sid = "new",
+                    data =
+                        buildJsonObject {
+                            put("previousSid", "old")
+                            put(
+                                "session",
+                                buildJsonObject {
+                                    put("sid", "new")
+                                    put("cwd", "/work/new")
+                                },
+                            )
+                        },
+                ),
+            )
 
         assertEquals("new", state.activeSid)
         assertEquals("/work/new", state.cwd)
@@ -270,45 +482,60 @@ class AgentwireReducerTest {
         assertFalse(state.olderHistoryAvailable)
         assertEquals(null, state.historyBeforeAt)
 
-        state = reducer.reduce(
-            state,
-            event(
-                "session.snapshot",
-                sid = "new",
-                tid = "new-turn",
-                data = buildJsonObject {
-                    put("busy", true)
-                    put("status", "running")
-                    put("recentOutputs", JsonArray(listOf(
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "session.snapshot",
+                    sid = "new",
+                    tid = "new-turn",
+                    data =
                         buildJsonObject {
-                            put("iid", "recent-1")
-                            put("tid", "prior-turn")
-                            put("phase", "final")
-                            put("content", "First recovered output")
+                            put("busy", true)
+                            put("status", "running")
+                            put(
+                                "recentOutputs",
+                                JsonArray(
+                                    listOf(
+                                        buildJsonObject {
+                                            put("iid", "recent-1")
+                                            put("tid", "prior-turn")
+                                            put("phase", "final")
+                                            put("content", "First recovered output")
+                                        },
+                                        buildJsonObject {
+                                            put("iid", "recent-2")
+                                            put("tid", "new-turn")
+                                            put("phase", "commentary")
+                                            put("content", "Current recovered update")
+                                        },
+                                    ),
+                                ),
+                            )
+                            put(
+                                "recentActivity",
+                                JsonArray(
+                                    listOf(
+                                        buildJsonObject {
+                                            put("kind", "tool.started")
+                                            put("iid", "tool-1")
+                                            put("tid", "new-turn")
+                                            put(
+                                                "data",
+                                                buildJsonObject {
+                                                    put("id", "tool-1")
+                                                    put("kind", "shell")
+                                                    put("label", "\$ git status --short")
+                                                    put("input", "git status --short")
+                                                },
+                                            )
+                                        },
+                                    ),
+                                ),
+                            )
                         },
-                        buildJsonObject {
-                            put("iid", "recent-2")
-                            put("tid", "new-turn")
-                            put("phase", "commentary")
-                            put("content", "Current recovered update")
-                        },
-                    )))
-                    put("recentActivity", JsonArray(listOf(
-                        buildJsonObject {
-                            put("kind", "tool.started")
-                            put("iid", "tool-1")
-                            put("tid", "new-turn")
-                            put("data", buildJsonObject {
-                                put("id", "tool-1")
-                                put("kind", "shell")
-                                put("label", "\$ git status --short")
-                                put("input", "git status --short")
-                            })
-                        },
-                    )))
-                },
-            ),
-        )
+                ),
+            )
 
         assertTrue(state.busy)
         assertEquals("new-turn", state.currentTid)
@@ -324,18 +551,20 @@ class AgentwireReducerTest {
     @Test
     fun `empty restored session snapshot shows current status`() {
         val reducer = AgentwireReducer()
-        val state = reducer.reduce(
-            AgentwireUiState(activeSid = "s1"),
-            event(
-                "session.snapshot",
-                sid = "s1",
-                data = buildJsonObject {
-                    put("busy", false)
-                    put("status", "ready")
-                    put("recentOutputs", JsonArray(emptyList()))
-                },
-            ),
-        )
+        val state =
+            reducer.reduce(
+                AgentwireUiState(activeSid = "s1"),
+                event(
+                    "session.snapshot",
+                    sid = "s1",
+                    data =
+                        buildJsonObject {
+                            put("busy", false)
+                            put("status", "ready")
+                            put("recentOutputs", JsonArray(emptyList()))
+                        },
+                ),
+            )
 
         assertEquals("Session", state.timeline.single().title)
         assertEquals("Session is ready for a prompt.", state.timeline.single().body)
@@ -346,44 +575,48 @@ class AgentwireReducerTest {
     fun `history for another session is rejected without poisoning later replay`() {
         val reducer = AgentwireReducer()
         val requestId = UUID.randomUUID().toString()
-        var state = AgentwireUiState(
-            activeSid = "live",
-            cwd = "/work/live",
-            busy = false,
-            settings = mapOf("model" to "current"),
-            historyLoading = true,
-            historyRequestId = requestId,
-            historySid = "live",
-        )
+        var state =
+            AgentwireUiState(
+                activeSid = "live",
+                cwd = "/work/live",
+                busy = false,
+                settings = mapOf("model" to "current"),
+                historyLoading = true,
+                historyRequestId = requestId,
+                historySid = "live",
+            )
         val replayId = UUID.randomUUID().toString()
-        val old = event(
-            "assistant.completed",
-            sid = "old",
-            tid = "t1",
-            iid = "answer",
-            reply = requestId,
-            history = true,
-            data = buildJsonObject { put("content", "Wrong session") },
-        ).copy(id = replayId)
+        val old =
+            event(
+                "assistant.completed",
+                sid = "old",
+                tid = "t1",
+                iid = "answer",
+                reply = requestId,
+                history = true,
+                data = buildJsonObject { put("content", "Wrong session") },
+            ).copy(id = replayId)
         state = reducer.reduce(state, old)
 
         assertTrue(state.timeline.isEmpty())
         assertTrue(state.historyStaged.isEmpty())
 
-        val current = old.copy(
-            sid = "live",
-            data = buildJsonObject { put("content", "Correct session") },
-        )
-        state = reducer.reduce(state, current)
-        state = reducer.reduce(
-            state,
-            event(
-                "history.end",
+        val current =
+            old.copy(
                 sid = "live",
-                reply = requestId,
-                data = buildJsonObject { put("count", 1) },
-            ),
-        )
+                data = buildJsonObject { put("content", "Correct session") },
+            )
+        state = reducer.reduce(state, current)
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "history.end",
+                    sid = "live",
+                    reply = requestId,
+                    data = buildJsonObject { put("count", 1) },
+                ),
+            )
 
         assertEquals("live", state.activeSid)
         assertEquals("/work/live", state.cwd)
@@ -397,34 +630,36 @@ class AgentwireReducerTest {
     fun `a short nonempty history page remains pageable until an empty page`() {
         val reducer = AgentwireReducer()
         val firstRequest = UUID.randomUUID().toString()
-        var state = reducer.reduce(
-            AgentwireUiState(
-                activeSid = "s1",
-                historyLoading = true,
-                historyRequestId = firstRequest,
-                historySid = "s1",
-            ),
-            event(
-                "history.end",
-                sid = "s1",
-                reply = firstRequest,
-                data = buildJsonObject { put("count", 1) },
-            ),
-        )
+        var state =
+            reducer.reduce(
+                AgentwireUiState(
+                    activeSid = "s1",
+                    historyLoading = true,
+                    historyRequestId = firstRequest,
+                    historySid = "s1",
+                ),
+                event(
+                    "history.end",
+                    sid = "s1",
+                    reply = firstRequest,
+                    data = buildJsonObject { put("count", 1) },
+                ),
+            )
 
         assertFalse(state.historyLoading)
         assertTrue(state.olderHistoryAvailable)
 
         val secondRequest = UUID.randomUUID().toString()
-        state = reducer.reduce(
-            state.copy(historyLoading = true, historyRequestId = secondRequest),
-            event(
-                "history.end",
-                sid = "s1",
-                reply = secondRequest,
-                data = buildJsonObject { put("count", 0) },
-            ),
-        )
+        state =
+            reducer.reduce(
+                state.copy(historyLoading = true, historyRequestId = secondRequest),
+                event(
+                    "history.end",
+                    sid = "s1",
+                    reply = secondRequest,
+                    data = buildJsonObject { put("count", 0) },
+                ),
+            )
         assertFalse(state.historyLoading)
         assertFalse(state.olderHistoryAvailable)
     }
@@ -433,24 +668,26 @@ class AgentwireReducerTest {
     fun `late history reply after a binding switch is ignored`() {
         val reducer = AgentwireReducer()
         val requestId = UUID.randomUUID().toString()
-        var state = AgentwireUiState(
-            activeSid = "old",
-            historyRequestId = requestId,
-            historySid = "old",
-            historyLoading = true,
-        )
+        var state =
+            AgentwireUiState(
+                activeSid = "old",
+                historyRequestId = requestId,
+                historySid = "old",
+                historyLoading = true,
+            )
         state = reducer.reduce(state, event("binding.changed", sid = "new"))
-        state = reducer.reduce(
-            state,
-            event(
-                "assistant.completed",
-                sid = "old",
-                tid = "t1",
-                reply = requestId,
-                history = true,
-                data = buildJsonObject { put("content", "Late") },
-            ),
-        )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "assistant.completed",
+                    sid = "old",
+                    tid = "t1",
+                    reply = requestId,
+                    history = true,
+                    data = buildJsonObject { put("content", "Late") },
+                ),
+            )
 
         assertEquals("new", state.activeSid)
         assertTrue(state.timeline.isEmpty())
@@ -461,41 +698,56 @@ class AgentwireReducerTest {
     fun `history preserves multiple assistant items in one turn and deduplicates snapshot`() {
         val reducer = AgentwireReducer()
         val requestId = UUID.randomUUID().toString()
-        var state = AgentwireUiState(
-            activeSid = "s1",
-            timeline = listOf(
-                AgentwireTimelineItem(
-                    "restored", "assistant.completed", 10, "s1", "t1", "Assistant", "Second",
-                    historical = true, backendItemId = "a2",
-                ),
-            ),
-            historyLoading = true,
-            historyRequestId = requestId,
-            historySid = "s1",
-        )
+        var state =
+            AgentwireUiState(
+                activeSid = "s1",
+                timeline =
+                    listOf(
+                        AgentwireTimelineItem(
+                            "restored",
+                            "assistant.completed",
+                            10,
+                            "s1",
+                            "t1",
+                            "Assistant",
+                            "Second",
+                            historical = true,
+                            backendItemId = "a2",
+                        ),
+                    ),
+                historyLoading = true,
+                historyRequestId = requestId,
+                historySid = "s1",
+            )
         listOf("a1" to "First", "a2" to "Second").forEach { (iid, content) ->
-            state = reducer.reduce(
+            state =
+                reducer.reduce(
+                    state,
+                    event(
+                        "assistant.completed",
+                        sid = "s1",
+                        tid = "t1",
+                        iid = iid,
+                        reply = requestId,
+                        history = true,
+                        data = buildJsonObject { put("content", content) },
+                    ),
+                )
+        }
+        state =
+            reducer.reduce(
                 state,
                 event(
-                    "assistant.completed",
+                    "history.end",
                     sid = "s1",
-                    tid = "t1",
-                    iid = iid,
                     reply = requestId,
-                    history = true,
-                    data = buildJsonObject { put("content", content) },
+                    data =
+                        buildJsonObject {
+                            put("count", 2)
+                            put("next", "older")
+                        },
                 ),
             )
-        }
-        state = reducer.reduce(
-            state,
-            event(
-                "history.end",
-                sid = "s1",
-                reply = requestId,
-                data = buildJsonObject { put("count", 2); put("next", "older") },
-            ),
-        )
 
         assertEquals(listOf("First", "Second"), state.timeline.map { it.body })
         assertEquals("older", state.historyCursor)
@@ -506,27 +758,29 @@ class AgentwireReducerTest {
     fun `echoed user prompt replaces its optimistic local row`() {
         val reducer = AgentwireReducer()
         val actionId = UUID.randomUUID().toString()
-        val local = AgentwireTimelineItem(
-            actionId,
-            "user.prompt",
-            1,
-            "s1",
-            null,
-            "You",
-            "hello",
-            backendItemId = actionId,
-        )
-
-        val state = reducer.reduce(
-            AgentwireUiState(activeSid = "s1", timeline = listOf(local)),
-            event(
+        val local =
+            AgentwireTimelineItem(
+                actionId,
                 "user.prompt",
-                sid = "s1",
-                tid = "t1",
-                iid = actionId,
-                data = buildJsonObject { put("content", "hello") },
-            ),
-        )
+                1,
+                "s1",
+                null,
+                "You",
+                "hello",
+                backendItemId = actionId,
+            )
+
+        val state =
+            reducer.reduce(
+                AgentwireUiState(activeSid = "s1", timeline = listOf(local)),
+                event(
+                    "user.prompt",
+                    sid = "s1",
+                    tid = "t1",
+                    iid = actionId,
+                    data = buildJsonObject { put("content", "hello") },
+                ),
+            )
 
         assertEquals(1, state.timeline.size)
         assertEquals("t1", state.timeline.single().tid)
@@ -546,22 +800,55 @@ class AgentwireReducerTest {
     fun `turn assistant plan tool usage and request families reduce into harness state`() {
         val reducer = AgentwireReducer()
         var state = AgentwireUiState(activeSid = "s1")
-        val kinds = listOf(
-            "turn.started", "assistant.delta", "assistant.completed", "plan.updated", "tool.started",
-            "tool.updated", "tool.completed", "usage.updated", "approval.review.started",
-            "approval.review.completed", "turn.completed",
-        )
+        val kinds =
+            listOf(
+                "turn.started",
+                "assistant.delta",
+                "assistant.completed",
+                "plan.updated",
+                "tool.started",
+                "tool.updated",
+                "tool.completed",
+                "usage.updated",
+                "approval.review.started",
+                "approval.review.completed",
+                "turn.completed",
+            )
         kinds.forEach { kind ->
-            state = reducer.reduce(state, event(kind, sid = "s1", tid = "t1", iid = "i1", data = buildJsonObject {
-                put("content", if (kind == "assistant.delta") "part" else "final")
-                put("summary", "summary")
-                put("kind", "shell")
-                put("success", true)
-            }))
+            state =
+                reducer.reduce(
+                    state,
+                    event(
+                        kind,
+                        sid = "s1",
+                        tid = "t1",
+                        iid = "i1",
+                        data =
+                            buildJsonObject {
+                                put("content", if (kind == "assistant.delta") "part" else "final")
+                                put("summary", "summary")
+                                put("kind", "shell")
+                                put("success", true)
+                            },
+                    ),
+                )
         }
-        state = reducer.reduce(state, event("request.opened", sid = "s1", rid = "r1", data = buildJsonObject {
-            put("type", "approval"); put("summary", "Run command"); put("redacted", false); put("inactive", false)
-        }))
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "request.opened",
+                    sid = "s1",
+                    rid = "r1",
+                    data =
+                        buildJsonObject {
+                            put("type", "approval")
+                            put("summary", "Run command")
+                            put("redacted", false)
+                            put("inactive", false)
+                        },
+                ),
+            )
 
         assertFalse(state.busy)
         assertTrue(state.timeline.any { it.kind == "assistant.completed" && it.body == "final" })
@@ -575,38 +862,42 @@ class AgentwireReducerTest {
     @Test
     fun `tool lifecycle is one labeled card with a compact output preview`() {
         val reducer = AgentwireReducer()
-        var state = reducer.reduce(
-            AgentwireUiState(),
-            event(
-                "tool.started",
-                tid = "t1",
-                iid = "i1",
-                data = buildJsonObject {
-                    put("id", "i1")
-                    put("kind", "shell")
-                    put("label", "$ git status --short")
-                    put("input", "git status --short")
-                },
-            ),
-        )
-        state = reducer.reduce(
-            state,
-            event(
-                "tool.completed",
-                tid = "t1",
-                iid = "i1",
-                data = buildJsonObject {
-                    put("id", "i1")
-                    put("kind", "shell")
-                    put("label", "$ git status --short")
-                    put("input", "git status --short")
-                    put("output", "M src/agentwire/bridge.py")
-                    put("status", "completed")
-                    put("exitCode", 0)
-                    put("success", true)
-                },
-            ),
-        )
+        var state =
+            reducer.reduce(
+                AgentwireUiState(),
+                event(
+                    "tool.started",
+                    tid = "t1",
+                    iid = "i1",
+                    data =
+                        buildJsonObject {
+                            put("id", "i1")
+                            put("kind", "shell")
+                            put("label", "$ git status --short")
+                            put("input", "git status --short")
+                        },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "tool.completed",
+                    tid = "t1",
+                    iid = "i1",
+                    data =
+                        buildJsonObject {
+                            put("id", "i1")
+                            put("kind", "shell")
+                            put("label", "$ git status --short")
+                            put("input", "git status --short")
+                            put("output", "M src/agentwire/bridge.py")
+                            put("status", "completed")
+                            put("exitCode", 0)
+                            put("success", true)
+                        },
+                ),
+            )
 
         val tool = state.timeline.single()
         assertEquals("tool.completed", tool.kind)
@@ -619,38 +910,42 @@ class AgentwireReducerTest {
     @Test
     fun `plan updates replace the card and stop animating when complete`() {
         val reducer = AgentwireReducer()
-        var state = reducer.reduce(
-            AgentwireUiState(),
-            event(
-                "plan.updated",
-                tid = "t1",
-                data = buildJsonObject {
-                    put("summary", "Implement the reducer")
-                    put("running", true)
-                    put("status", "inProgress")
-                    put("completedSteps", 1)
-                    put("totalSteps", 2)
-                },
-            ),
-        )
+        var state =
+            reducer.reduce(
+                AgentwireUiState(),
+                event(
+                    "plan.updated",
+                    tid = "t1",
+                    data =
+                        buildJsonObject {
+                            put("summary", "Implement the reducer")
+                            put("running", true)
+                            put("status", "inProgress")
+                            put("completedSteps", 1)
+                            put("totalSteps", 2)
+                        },
+                ),
+            )
 
         assertTrue(state.timeline.single().running)
         assertEquals("Implement the reducer\n\n1 of 2 steps complete", state.timeline.single().body)
 
-        state = reducer.reduce(
-            state,
-            event(
-                "plan.updated",
-                tid = "t1",
-                data = buildJsonObject {
-                    put("summary", "Plan completed")
-                    put("running", false)
-                    put("status", "completed")
-                    put("completedSteps", 2)
-                    put("totalSteps", 2)
-                },
-            ),
-        )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "plan.updated",
+                    tid = "t1",
+                    data =
+                        buildJsonObject {
+                            put("summary", "Plan completed")
+                            put("running", false)
+                            put("status", "completed")
+                            put("completedSteps", 2)
+                            put("totalSteps", 2)
+                        },
+                ),
+            )
 
         assertEquals(1, state.timeline.size)
         assertFalse(state.timeline.single().running)
@@ -660,17 +955,19 @@ class AgentwireReducerTest {
     @Test
     fun `turn completion stops a plan when the backend omits its final update`() {
         val reducer = AgentwireReducer()
-        var state = reducer.reduce(
-            AgentwireUiState(),
-            event(
-                "plan.updated",
-                tid = "t1",
-                data = buildJsonObject {
-                    put("summary", "Run validation")
-                    put("running", true)
-                },
-            ),
-        )
+        var state =
+            reducer.reduce(
+                AgentwireUiState(),
+                event(
+                    "plan.updated",
+                    tid = "t1",
+                    data =
+                        buildJsonObject {
+                            put("summary", "Run validation")
+                            put("running", true)
+                        },
+                ),
+            )
 
         state = reducer.reduce(state, event("turn.completed", tid = "t1"))
 
@@ -694,19 +991,21 @@ class AgentwireReducerTest {
     fun `claude backend hello advertises delivery only and offers no model picker`() {
         val reducer = AgentwireReducer()
 
-        val state = reducer.reduce(
-            AgentwireUiState(),
-            event(
-                "agent.hello",
-                epoch = "epoch-example",
-                data = buildJsonObject {
-                    put("protocol", "agentwire-irc-v1")
-                    put("backend", "claude")
-                    put("epoch", "epoch-example")
-                    put("settings", JsonArray(listOf(JsonPrimitive("delivery"))))
-                },
-            ),
-        )
+        val state =
+            reducer.reduce(
+                AgentwireUiState(),
+                event(
+                    "agent.hello",
+                    epoch = "epoch-example",
+                    data =
+                        buildJsonObject {
+                            put("protocol", "agentwire-irc-v1")
+                            put("backend", "claude")
+                            put("epoch", "epoch-example")
+                            put("settings", JsonArray(listOf(JsonPrimitive("delivery"))))
+                        },
+                ),
+            )
 
         assertEquals("claude", state.backend)
         assertEquals(setOf("delivery"), state.supportedSettings)
@@ -719,52 +1018,106 @@ class AgentwireReducerTest {
         var state: AgentwireUiState = AgentwireUiState(activeSid = "s1")
 
         state = reducer.reduce(state, event("turn.started", sid = "s1", tid = "t1"))
-        state = reducer.reduce(
-            state,
-            event("user.prompt", sid = "s1", tid = "t1", iid = "p1", data = buildJsonObject {
-                put("content", "why does the test fail?")
-            }),
-        )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "user.prompt",
+                    sid = "s1",
+                    tid = "t1",
+                    iid = "p1",
+                    data =
+                        buildJsonObject {
+                            put("content", "why does the test fail?")
+                        },
+                ),
+            )
         // Text emitted next to a tool call arrives as progress carrying the assistant message id.
-        state = reducer.reduce(
-            state,
-            event("plan.updated", sid = "s1", tid = "t1", iid = "msg_1", data = buildJsonObject {
-                put("summary", "Checking the failing test first.")
-            }),
-        )
-        state = reducer.reduce(
-            state,
-            event("tool.started", sid = "s1", tid = "t1", iid = "toolu_1", data = buildJsonObject {
-                put("kind", "shell"); put("id", "toolu_1")
-                put("label", "$ pytest -q"); put("input", "pytest -q")
-            }),
-        )
-        state = reducer.reduce(
-            state,
-            event("tool.completed", sid = "s1", tid = "t1", iid = "toolu_1", data = buildJsonObject {
-                put("kind", "shell"); put("id", "toolu_1"); put("success", true)
-                put("label", "$ pytest -q"); put("input", "pytest -q")
-                put("output", "1 failed"); put("status", "completed")
-            }),
-        )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "plan.updated",
+                    sid = "s1",
+                    tid = "t1",
+                    iid = "msg_1",
+                    data =
+                        buildJsonObject {
+                            put("summary", "Checking the failing test first.")
+                        },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "tool.started",
+                    sid = "s1",
+                    tid = "t1",
+                    iid = "toolu_1",
+                    data =
+                        buildJsonObject {
+                            put("kind", "shell")
+                            put("id", "toolu_1")
+                            put("label", "$ pytest -q")
+                            put("input", "pytest -q")
+                        },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "tool.completed",
+                    sid = "s1",
+                    tid = "t1",
+                    iid = "toolu_1",
+                    data =
+                        buildJsonObject {
+                            put("kind", "shell")
+                            put("id", "toolu_1")
+                            put("success", true)
+                            put("label", "$ pytest -q")
+                            put("input", "pytest -q")
+                            put("output", "1 failed")
+                            put("status", "completed")
+                        },
+                ),
+            )
         // TodoWrite plan updates carry no iid, so successive writes replace one plan card.
         listOf(1 to true, 2 to false).forEach { (completed, running) ->
-            state = reducer.reduce(
-                state,
-                event("plan.updated", sid = "s1", tid = "t1", data = buildJsonObject {
-                    put("summary", if (running) "plan: Fixing it" else "Plan completed")
-                    put("plan", true); put("running", running)
-                    put("status", if (running) "inProgress" else "completed")
-                    put("completedSteps", completed); put("totalSteps", 2)
-                }),
-            )
+            state =
+                reducer.reduce(
+                    state,
+                    event(
+                        "plan.updated",
+                        sid = "s1",
+                        tid = "t1",
+                        data =
+                            buildJsonObject {
+                                put("summary", if (running) "plan: Fixing it" else "Plan completed")
+                                put("plan", true)
+                                put("running", running)
+                                put("status", if (running) "inProgress" else "completed")
+                                put("completedSteps", completed)
+                                put("totalSteps", 2)
+                            },
+                    ),
+                )
         }
-        state = reducer.reduce(
-            state,
-            event("assistant.completed", sid = "s1", tid = "t1", data = buildJsonObject {
-                put("content", "The assertion is inverted.")
-            }),
-        )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "assistant.completed",
+                    sid = "s1",
+                    tid = "t1",
+                    data =
+                        buildJsonObject {
+                            put("content", "The assertion is inverted.")
+                        },
+                ),
+            )
         state = reducer.reduce(state, event("turn.completed", sid = "s1", tid = "t1"))
 
         assertFalse(state.busy)
@@ -789,8 +1142,15 @@ class AgentwireReducerTest {
         assertEquals("The assertion is inverted.", state.timeline.single { it.kind == "assistant.completed" }.body)
     }
 
-    private fun queue(id: String, content: String, position: Int) = buildJsonObject {
-        put("iid", id); put("content", content); put("position", position); put("sid", "s1")
+    private fun queue(
+        id: String,
+        content: String,
+        position: Int,
+    ) = buildJsonObject {
+        put("iid", id)
+        put("content", content)
+        put("position", position)
+        put("sid", "s1")
     }
 
     @Test
@@ -799,32 +1159,64 @@ class AgentwireReducerTest {
         var state: AgentwireUiState = AgentwireUiState(activeSid = "s1")
 
         state = reducer.reduce(state, event("turn.started", sid = "s1", tid = "t1"))
-        state = reducer.reduce(
-            state,
-            event("assistant.delta", sid = "s1", tid = "t1", iid = "msg_1", data = buildJsonObject {
-                put("content", "Reading ")
-            }),
-        )
-        state = reducer.reduce(
-            state,
-            event("assistant.delta", sid = "s1", tid = "t1", iid = "msg_1", data = buildJsonObject {
-                put("content", "the test.")
-            }),
-        )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "assistant.delta",
+                    sid = "s1",
+                    tid = "t1",
+                    iid = "msg_1",
+                    data =
+                        buildJsonObject {
+                            put("content", "Reading ")
+                        },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "assistant.delta",
+                    sid = "s1",
+                    tid = "t1",
+                    iid = "msg_1",
+                    data =
+                        buildJsonObject {
+                            put("content", "the test.")
+                        },
+                ),
+            )
         // A tool call splits the turn; what follows is a second assistant message, not more of
         // the first. Keying deltas on the turn alone would append it to "Reading the test."
-        state = reducer.reduce(
-            state,
-            event("tool.completed", sid = "s1", tid = "t1", iid = "call_1", data = buildJsonObject {
-                put("label", "file read")
-            }),
-        )
-        state = reducer.reduce(
-            state,
-            event("assistant.delta", sid = "s1", tid = "t1", iid = "msg_2", data = buildJsonObject {
-                put("content", "The assertion is inverted.")
-            }),
-        )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "tool.completed",
+                    sid = "s1",
+                    tid = "t1",
+                    iid = "call_1",
+                    data =
+                        buildJsonObject {
+                            put("label", "file read")
+                        },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "assistant.delta",
+                    sid = "s1",
+                    tid = "t1",
+                    iid = "msg_2",
+                    data =
+                        buildJsonObject {
+                            put("content", "The assertion is inverted.")
+                        },
+                ),
+            )
 
         val assistants = state.timeline.filter { it.kind.startsWith("assistant.") }
         assertEquals(2, assistants.size)
@@ -844,7 +1236,19 @@ class AgentwireReducerTest {
         epoch: String = "epoch",
         data: kotlinx.serialization.json.JsonObject? = null,
     ) = AgentwireEnvelope(
-        kind, "event", UUID.randomUUID().toString(), 1, "bridge", epoch, sid = sid,
-        tid = tid, iid = iid, rid = rid, rev = rev, reply = reply, history = history, data = data,
+        kind,
+        "event",
+        UUID.randomUUID().toString(),
+        1,
+        "bridge",
+        epoch,
+        sid = sid,
+        tid = tid,
+        iid = iid,
+        rid = rid,
+        rev = rev,
+        reply = reply,
+        history = history,
+        data = data,
     )
 }

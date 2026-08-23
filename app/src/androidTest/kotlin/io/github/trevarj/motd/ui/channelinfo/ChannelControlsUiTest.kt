@@ -50,9 +50,10 @@ class ChannelControlsUiTest {
     fun exceptionRowsAppearWhenTheCatalogAdvertisesThem() {
         compose.setContent {
             Controls(
-                catalog = ModeCatalog.from(
-                    mapOf("CHANMODES" to "beI,k,l,imnst", "EXCEPTS" to "", "INVEX" to ""),
-                ),
+                catalog =
+                    ModeCatalog.from(
+                        mapOf("CHANMODES" to "beI,k,l,imnst", "EXCEPTS" to "", "INVEX" to ""),
+                    ),
             )
         }
 
@@ -99,16 +100,20 @@ class ChannelControlsUiTest {
     }
 
     @Composable
-    private fun Controls(catalog: ModeCatalog?, onSetLimit: (Int?) -> Unit = {}) {
+    private fun Controls(
+        catalog: ModeCatalog?,
+        onSetLimit: (Int?) -> Unit = {},
+    ) {
         MotdTheme {
             ChannelInfoContent(
-                state = ChannelInfoUiState(
-                    buffer = BufferEntity(1, 1, "#room", "#room", BufferType.CHANNEL),
-                    sections = sectionMembers(members),
-                    canModerate = true,
-                    connected = true,
-                    modeCatalog = catalog,
-                ),
+                state =
+                    ChannelInfoUiState(
+                        buffer = BufferEntity(1, 1, "#room", "#room", BufferType.CHANNEL),
+                        sections = sectionMembers(members),
+                        canModerate = true,
+                        connected = true,
+                        modeCatalog = catalog,
+                    ),
                 onBack = {},
                 onSetPinned = {},
                 onSetMuted = {},

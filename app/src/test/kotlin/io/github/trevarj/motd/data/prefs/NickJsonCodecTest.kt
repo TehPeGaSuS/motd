@@ -8,7 +8,6 @@ import org.junit.Test
 
 /** Round-4 nick-set / hue-override JSON codecs + normalizeNick (pure, no DataStore). */
 class NickJsonCodecTest {
-
     @Test
     fun nickSet_roundTrips() {
         val set = setOf("alice", "bob", "carol")

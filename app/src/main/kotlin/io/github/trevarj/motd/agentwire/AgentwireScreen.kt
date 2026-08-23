@@ -78,9 +78,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -104,15 +104,24 @@ fun AgentwireGateScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     when {
-        state.gate == AgentwireGate.LOADING -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 48.dp))
+        state.gate == AgentwireGate.LOADING -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 48.dp))
+            }
         }
-        state.gate == AgentwireGate.ORDINARY || state.transcriptOverride -> ordinaryChat()
-        else -> AgentwireScreen(state, viewModel, onBack, showBack)
+
+        state.gate == AgentwireGate.ORDINARY || state.transcriptOverride -> {
+            ordinaryChat()
+        }
+
+        else -> {
+            AgentwireScreen(state, viewModel, onBack, showBack)
+        }
     }
 }
 
 private enum class AgentwireSheet { STATUS, QUEUE, QUESTION }
+
 private enum class AgentwireStatusTab { BROWSE, SETTINGS }
 
 private data class AgentwireWorkspaceRow(
@@ -137,30 +146,34 @@ private fun workspaceRows(
     query: String,
 ): List<AgentwireWorkspaceRow> {
     val roots = children[""].orEmpty().mapTo(HashSet(), AgentwireListItem::id)
+
     fun visit(
         parent: String,
         depth: Int,
         ancestors: Set<String>,
         branch: String,
-    ): List<AgentwireWorkspaceRow> = buildList {
-        children[parent].orEmpty().forEach { directory ->
-            val treeKey = "$branch>${directory.id}"
-            val isExpanded = query.isNotBlank() || (expanded[directory.id] ?: (directory.id in roots))
-            val descendants = if (isExpanded && directory.id !in ancestors) {
-                visit(directory.id, depth + 1, ancestors + directory.id, treeKey)
-            } else {
-                emptyList()
-            }
-            val directMatch = directory.title.contains(query, true) || directory.id.contains(query, true)
-            val sessionMatch = sessions.any { session ->
-                session.subtitle == directory.id && (session.title.contains(query, true) || session.id.contains(query, true))
-            }
-            if (query.isBlank() || directMatch || sessionMatch || descendants.isNotEmpty()) {
-                add(AgentwireWorkspaceRow(directory, depth, treeKey))
-                addAll(descendants)
+    ): List<AgentwireWorkspaceRow> =
+        buildList {
+            children[parent].orEmpty().forEach { directory ->
+                val treeKey = "$branch>${directory.id}"
+                val isExpanded = query.isNotBlank() || (expanded[directory.id] ?: (directory.id in roots))
+                val descendants =
+                    if (isExpanded && directory.id !in ancestors) {
+                        visit(directory.id, depth + 1, ancestors + directory.id, treeKey)
+                    } else {
+                        emptyList()
+                    }
+                val directMatch = directory.title.contains(query, true) || directory.id.contains(query, true)
+                val sessionMatch =
+                    sessions.any { session ->
+                        session.subtitle == directory.id && (session.title.contains(query, true) || session.id.contains(query, true))
+                    }
+                if (query.isBlank() || directMatch || sessionMatch || descendants.isNotEmpty()) {
+                    add(AgentwireWorkspaceRow(directory, depth, treeKey))
+                    addAll(descendants)
+                }
             }
         }
-    }
     return visit("", 0, emptySet(), "root")
 }
 
@@ -250,8 +263,10 @@ private fun AgentwireScreen(
                         }
                     },
                     navigationIcon = {
-                        if (showBack) IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        if (showBack) {
+                            IconButton(onClick = onBack) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            }
                         }
                     },
                     actions = {
@@ -261,7 +276,10 @@ private fun AgentwireScreen(
                         DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
                             DropdownMenuItem(
                                 text = { Text("View IRC transcript") },
-                                onClick = { overflow = false; viewModel.viewTranscript() },
+                                onClick = {
+                                    overflow = false
+                                    viewModel.viewTranscript()
+                                },
                             )
                         }
                     },
@@ -273,11 +291,12 @@ private fun AgentwireScreen(
         // Match the regular chat layout: consume overlapping navigation and animated IME
         // insets around the whole content column so the composer remains above the keyboard.
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .navigationBarsPadding()
-                .imePadding(),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .navigationBarsPadding()
+                    .imePadding(),
         ) {
             if (state.gate == AgentwireGate.INVALID_TOPIC) {
                 AgentwireInvalidTopic(state)
@@ -292,55 +311,80 @@ private fun AgentwireScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             when (val sync = state.sync) {
-                                is AgentwireSyncState.Syncing -> item {
-                                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                                is AgentwireSyncState.Syncing -> {
+                                    item {
+                                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                                    }
                                 }
-                                is AgentwireSyncState.Failed -> item {
-                                    AgentwireSyncFailureCard(
-                                        sync = sync,
-                                        channel = state.channel,
-                                        onRetry = viewModel::retrySync,
-                                    )
+
+                                is AgentwireSyncState.Failed -> {
+                                    item {
+                                        AgentwireSyncFailureCard(
+                                            sync = sync,
+                                            channel = state.channel,
+                                            onRetry = viewModel::retrySync,
+                                        )
+                                    }
                                 }
-                                is AgentwireSyncState.NotJoined -> item {
-                                    AgentwireNotJoinedCard(state.channel, viewModel::joinAgentwireChannel)
+
+                                is AgentwireSyncState.NotJoined -> {
+                                    item {
+                                        AgentwireNotJoinedCard(state.channel, viewModel::joinAgentwireChannel)
+                                    }
                                 }
-                                else -> Unit
+
+                                else -> {
+                                    Unit
+                                }
                             }
-                            if (!state.connected && state.timeline.isEmpty()) item {
-                                Card(Modifier.fillMaxWidth().padding(16.dp)) {
-                                    Column(Modifier.padding(16.dp)) {
-                                        Text("Agentwire is offline", style = MaterialTheme.typography.titleMedium)
-                                        Text("Structured state will be rebuilt after reconnecting.")
-                                        TextButton(onClick = viewModel::viewTranscript) { Text("View IRC transcript") }
+                            if (!state.connected && state.timeline.isEmpty()) {
+                                item {
+                                    Card(Modifier.fillMaxWidth().padding(16.dp)) {
+                                        Column(Modifier.padding(16.dp)) {
+                                            Text("Agentwire is offline", style = MaterialTheme.typography.titleMedium)
+                                            Text("Structured state will be rebuilt after reconnecting.")
+                                            TextButton(onClick = viewModel::viewTranscript) { Text("View IRC transcript") }
+                                        }
                                     }
                                 }
                             }
-                            if (state.error != null) item {
-                                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(state.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                                    TextButton(onClick = viewModel::clearError) { Text("Dismiss") }
+                            if (state.error != null) {
+                                item {
+                                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(state.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                                        TextButton(onClick = viewModel::clearError) { Text("Dismiss") }
+                                    }
                                 }
                             }
-                            if (state.historyLoading || state.olderHistoryAvailable) item {
-                                TextButton(
-                                    onClick = viewModel::loadOlderHistory,
-                                    enabled = !state.historyLoading,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text(if (state.historyLoading) "Loading history…" else "Load older history")
+                            if (state.historyLoading || state.olderHistoryAvailable) {
+                                item {
+                                    TextButton(
+                                        onClick = viewModel::loadOlderHistory,
+                                        enabled = !state.historyLoading,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(if (state.historyLoading) "Loading history…" else "Load older history")
+                                    }
                                 }
                             }
                             items(rows, key = AgentwireDisplayRow::key) { row ->
                                 when (row) {
-                                    is AgentwireDisplayRow.Card -> AgentwireTimelineCard(
-                                        item = row.item,
-                                        actionStatus = state.actionStatus[row.item.id],
-                                        expandedOverride = expandedKeys[row.key],
-                                        onToggleExpanded = { expandedKeys[row.key] = it },
-                                    )
-                                    is AgentwireDisplayRow.Tool -> AgentwireToolCard(row.item, row.key, expandedKeys)
-                                    is AgentwireDisplayRow.ToolRun -> AgentwireToolRunCard(row, expandedKeys)
+                                    is AgentwireDisplayRow.Card -> {
+                                        AgentwireTimelineCard(
+                                            item = row.item,
+                                            actionStatus = state.actionStatus[row.item.id],
+                                            expandedOverride = expandedKeys[row.key],
+                                            onToggleExpanded = { expandedKeys[row.key] = it },
+                                        )
+                                    }
+
+                                    is AgentwireDisplayRow.Tool -> {
+                                        AgentwireToolCard(row.item, row.key, expandedKeys)
+                                    }
+
+                                    is AgentwireDisplayRow.ToolRun -> {
+                                        AgentwireToolRunCard(row, expandedKeys)
+                                    }
                                 }
                             }
                             items(state.requests, key = AgentwireRequest::rid) { request ->
@@ -349,16 +393,18 @@ private fun AgentwireScreen(
                                     sheet = AgentwireSheet.QUESTION
                                 }
                             }
-                            if (state.queue.isNotEmpty()) item {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.secondaryContainer,
-                                    modifier = Modifier.fillMaxWidth().clickable { sheet = AgentwireSheet.QUEUE },
-                                ) {
-                                    Text(
-                                        "${state.queue.size} queued  •  tap to edit",
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                        style = MaterialTheme.typography.labelLarge,
-                                    )
+                            if (state.queue.isNotEmpty()) {
+                                item {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.secondaryContainer,
+                                        modifier = Modifier.fillMaxWidth().clickable { sheet = AgentwireSheet.QUEUE },
+                                    ) {
+                                        Text(
+                                            "${state.queue.size} queued  •  tap to edit",
+                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                            style = MaterialTheme.typography.labelLarge,
+                                        )
+                                    }
                                 }
                             }
                             item { Spacer(Modifier.height(8.dp)) }
@@ -390,29 +436,63 @@ private fun AgentwireScreen(
     }
 
     when (sheet) {
-        AgentwireSheet.STATUS -> AgentwireStatusSheet(state, viewModel) { sheet = null }
-        AgentwireSheet.QUEUE -> AgentwireQueueSheet(state, viewModel) { sheet = null }
-        AgentwireSheet.QUESTION -> state.requests.firstOrNull { it.rid == questionRequestId }?.let {
-            AgentwireQuestionSheet(it, viewModel) { sheet = null }
+        AgentwireSheet.STATUS -> {
+            AgentwireStatusSheet(state, viewModel) { sheet = null }
         }
-        null -> Unit
+
+        AgentwireSheet.QUEUE -> {
+            AgentwireQueueSheet(state, viewModel) { sheet = null }
+        }
+
+        AgentwireSheet.QUESTION -> {
+            state.requests.firstOrNull { it.rid == questionRequestId }?.let {
+                AgentwireQuestionSheet(it, viewModel) { sheet = null }
+            }
+        }
+
+        null -> {
+            Unit
+        }
     }
 }
 
 @SuppressLint("HardcodedText")
 @Composable
-private fun AgentwireStatusStrip(state: AgentwireUiState, onClick: () -> Unit) {
+private fun AgentwireStatusStrip(
+    state: AgentwireUiState,
+    onClick: () -> Unit,
+) {
     val sync = state.sync
-    val status = when {
-        !state.connected -> "offline"
-        sync is AgentwireSyncState.NotJoined -> "not joined"
-        sync is AgentwireSyncState.Syncing ->
-            if (sync.attempt >= 3) "syncing… (attempt ${sync.attempt})" else "syncing…"
-        sync is AgentwireSyncState.Failed -> "sync failed"
-        state.busy -> "running"
-        state.activeSid == null -> "detached"
-        else -> "ready"
-    }
+    val status =
+        when {
+            !state.connected -> {
+                "offline"
+            }
+
+            sync is AgentwireSyncState.NotJoined -> {
+                "not joined"
+            }
+
+            sync is AgentwireSyncState.Syncing -> {
+                if (sync.attempt >= 3) "syncing… (attempt ${sync.attempt})" else "syncing…"
+            }
+
+            sync is AgentwireSyncState.Failed -> {
+                "sync failed"
+            }
+
+            state.busy -> {
+                "running"
+            }
+
+            state.activeSid == null -> {
+                "detached"
+            }
+
+            else -> {
+                "ready"
+            }
+        }
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).testTag("agentwire_status_strip"),
@@ -446,27 +526,31 @@ internal fun AgentwireSyncFailureCard(
     when (val failure = sync.failure) {
         is AgentwireSyncFailure.Timeout -> {
             title = "Agent sync timed out"
-            body = buildString {
-                append(
-                    "No response from the agent after 30 seconds. The bridge may be offline, it " +
-                        "may not accept this channel's topic, or the channel may not be delivering " +
-                        "events to you.",
-                )
-                if (failure.counters.total > 0) {
-                    append(" While syncing, ${failure.counters.total} agent event(s) arrived but ")
-                    append("were ignored — open diagnostics for details.")
+            body =
+                buildString {
+                    append(
+                        "No response from the agent after 30 seconds. The bridge may be offline, it " +
+                            "may not accept this channel's topic, or the channel may not be delivering " +
+                            "events to you.",
+                    )
+                    if (failure.counters.total > 0) {
+                        append(" While syncing, ${failure.counters.total} agent event(s) arrived but ")
+                        append("were ignored — open diagnostics for details.")
+                    }
                 }
-            }
         }
+
         is AgentwireSyncFailure.Rejected -> {
             title = "Agent sync rejected"
             body = "The bridge rejected the sync request: ${failure.detail}"
         }
+
         is AgentwireSyncFailure.ProtocolMismatch -> {
             title = "Incompatible agent messages"
             body = "The agent's replies failed protocol validation: ${failure.detail}. Update motd " +
                 "and the bridge so both speak Agentwire v1 the same way."
         }
+
         is AgentwireSyncFailure.SendFailed -> {
             title = "Cannot reach the channel"
             body = "Sending the sync request failed: ${failure.detail}"
@@ -484,8 +568,9 @@ internal fun AgentwireNotJoinedCard(
     modifier: Modifier = Modifier,
 ) = AgentwireSyncFailureBody(
     title = "Not in this channel",
-    body = "Agent events flow through $channel, but you are not joined to it, so nothing the " +
-        "agent sends can reach you.",
+    body =
+        "Agent events flow through $channel, but you are not joined to it, so nothing the " +
+            "agent sends can reach you.",
     action = "Join and sync",
     onAction = onJoin,
     modifier = modifier,
@@ -514,19 +599,30 @@ private fun AgentwireSyncFailureBody(
 /** Names the one defect keeping a marked channel from activating, and the shape that would fix it. */
 @SuppressLint("HardcodedText")
 @Composable
-internal fun AgentwireInvalidTopic(state: AgentwireUiState, modifier: Modifier = Modifier) {
+internal fun AgentwireInvalidTopic(
+    state: AgentwireUiState,
+    modifier: Modifier = Modifier,
+) {
     val defect = state.topicDefect ?: return
     val named = defect.fields.joinToString(", ")
-    val explanation = when (defect.defect) {
-        AgentwireTopicDefect.MISSING_FIELD ->
-            "The topic does not set ${defect.fields.joinToString(", ") { "$it=" }}."
-        AgentwireTopicDefect.MALFORMED_PARAMETER ->
-            "One of the topic's parameters is not a key=value pair."
-        AgentwireTopicDefect.DUPLICATE_PARAMETER ->
-            "The topic sets $named more than once."
-        AgentwireTopicDefect.INVALID_ENCODING ->
-            "The value of $named is not valid percent-encoded UTF-8."
-    }
+    val explanation =
+        when (defect.defect) {
+            AgentwireTopicDefect.MISSING_FIELD -> {
+                "The topic does not set ${defect.fields.joinToString(", ") { "$it=" }}."
+            }
+
+            AgentwireTopicDefect.MALFORMED_PARAMETER -> {
+                "One of the topic's parameters is not a key=value pair."
+            }
+
+            AgentwireTopicDefect.DUPLICATE_PARAMETER -> {
+                "The topic sets $named more than once."
+            }
+
+            AgentwireTopicDefect.INVALID_ENCODING -> {
+                "The value of $named is not valid percent-encoded UTF-8."
+            }
+        }
     Column(
         modifier
             .fillMaxSize()
@@ -572,7 +668,10 @@ internal fun AgentwireInvalidTopic(state: AgentwireUiState, modifier: Modifier =
 
 @SuppressLint("HardcodedText")
 @Composable
-private fun AgentwireBlocked(state: AgentwireUiState, modifier: Modifier = Modifier) {
+private fun AgentwireBlocked(
+    state: AgentwireUiState,
+    modifier: Modifier = Modifier,
+) {
     Column(modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
         Text("Agentwire unavailable", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(8.dp))
@@ -636,21 +735,29 @@ private fun AgentwireTimelineCard(
     val expanded = expandedOverride ?: (item.running || item.kind == "assistant.completed")
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (item.kind == "user.prompt") MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
+        colors =
+            CardDefaults.cardColors(
+                containerColor =
+                    if (item.kind == "user.prompt") {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerLow
+                    },
+            ),
     ) {
         Column(
             Modifier
                 .fillMaxWidth()
                 .then(
-                    if (collapsible) Modifier.semantics {
-                        role = Role.Button
-                        stateDescription = if (expanded) "Expanded" else "Collapsed"
-                    } else Modifier,
-                )
-                .clickable(enabled = collapsible) { onToggleExpanded(!expanded) }
+                    if (collapsible) {
+                        Modifier.semantics {
+                            role = Role.Button
+                            stateDescription = if (expanded) "Expanded" else "Collapsed"
+                        }
+                    } else {
+                        Modifier
+                    },
+                ).clickable(enabled = collapsible) { onToggleExpanded(!expanded) }
                 .padding(12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -662,11 +769,12 @@ private fun AgentwireTimelineCard(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                val metadata = listOfNotNull(
-                    actionStatus,
-                    if (item.historical) "history" else null,
-                    agentwireTimestamp(item.at),
-                ).joinToString(" • ")
+                val metadata =
+                    listOfNotNull(
+                        actionStatus,
+                        if (item.historical) "history" else null,
+                        agentwireTimestamp(item.at),
+                    ).joinToString(" • ")
                 if (metadata.isNotEmpty()) {
                     Text(
                         metadata,
@@ -720,13 +828,17 @@ private fun AgentwireTimelineFab(
 @Composable
 private fun AgentwireToolStatusGlyph(item: AgentwireTimelineItem) {
     when {
-        item.running -> CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+        item.running -> {
+            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+        }
+
         else -> {
-            val (glyph, color) = when (item.success) {
-                true -> "✓" to MaterialTheme.colorScheme.tertiary
-                false -> "✗" to MaterialTheme.colorScheme.error
-                null -> "·" to MaterialTheme.colorScheme.onSurfaceVariant
-            }
+            val (glyph, color) =
+                when (item.success) {
+                    true -> "✓" to MaterialTheme.colorScheme.tertiary
+                    false -> "✗" to MaterialTheme.colorScheme.error
+                    null -> "·" to MaterialTheme.colorScheme.onSurfaceVariant
+                }
             Text(glyph, style = MaterialTheme.typography.labelLarge, fontFamily = FontFamily.Monospace, color = color)
         }
     }
@@ -747,8 +859,7 @@ private fun AgentwireToolRow(
             .semantics {
                 role = Role.Button
                 stateDescription = if (expanded) "Expanded" else "Collapsed"
-            }
-            .clickable { expandedKeys[rowKey] = !expanded }
+            }.clickable { expandedKeys[rowKey] = !expanded }
             .padding(vertical = 4.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -815,8 +926,7 @@ private fun AgentwireToolRunCard(
                     .semantics {
                         role = Role.Button
                         stateDescription = if (expanded) "Expanded" else "Collapsed"
-                    }
-                    .clickable { expandedKeys[run.key] = !expanded }
+                    }.clickable { expandedKeys[run.key] = !expanded }
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -862,10 +972,11 @@ private fun AgentwireToolBody(
     val command = item.data.string("input")
     val output = item.data.string("output")
     val diff = item.data.string("diff")
-    val status = listOfNotNull(
-        item.data.string("status"),
-        item.data.int("exitCode")?.let { "exit $it" },
-    ).joinToString(" · ").ifBlank { null }
+    val status =
+        listOfNotNull(
+            item.data.string("status"),
+            item.data.int("exitCode")?.let { "exit $it" },
+        ).joinToString(" · ").ifBlank { null }
 
     Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         command?.let { ToolTextSection("Command", it, "$rowKey#command", expandedKeys) }
@@ -886,7 +997,10 @@ private fun AgentwireToolBody(
 
 /** Centered tap target for revealing/hiding the truncated middle of long content. */
 @Composable
-private fun HiddenLinesMarker(label: String, onClick: () -> Unit) {
+private fun HiddenLinesMarker(
+    label: String,
+    onClick: () -> Unit,
+) {
     Text(
         label,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp),
@@ -956,25 +1070,27 @@ internal fun normalizeAgentwireDiff(diff: String): String {
     if (content.isEmpty()) return headers
     if (kind == "update") return "$headers\n$content"
     val contentLines = content.lines()
-    val hunk = if (kind == "add") {
-        "@@ -0,0 +1,${contentLines.size} @@"
-    } else {
-        "@@ -1,${contentLines.size} +0,0 @@"
-    }
+    val hunk =
+        if (kind == "add") {
+            "@@ -0,0 +1,${contentLines.size} @@"
+        } else {
+            "@@ -1,${contentLines.size} +0,0 @@"
+        }
     val prefix = if (kind == "add") "+" else "-"
     return "$headers\n$hunk\n${contentLines.joinToString("\n") { "$prefix$it" }}"
 }
 
-private fun diffLineKind(line: String): DiffLineKind = when {
-    line.startsWith("diff --git ") || line.startsWith("index ") -> DiffLineKind.HEADER
-    line.startsWith("@@") -> DiffLineKind.HUNK
-    line.startsWith("+++") -> DiffLineKind.ADDED
-    line.startsWith("---") -> DiffLineKind.REMOVED
-    line.startsWith('+') -> DiffLineKind.ADDED
-    line.startsWith('-') -> DiffLineKind.REMOVED
-    line.startsWith("\\ No newline") -> DiffLineKind.META
-    else -> DiffLineKind.CONTEXT
-}
+private fun diffLineKind(line: String): DiffLineKind =
+    when {
+        line.startsWith("diff --git ") || line.startsWith("index ") -> DiffLineKind.HEADER
+        line.startsWith("@@") -> DiffLineKind.HUNK
+        line.startsWith("+++") -> DiffLineKind.ADDED
+        line.startsWith("---") -> DiffLineKind.REMOVED
+        line.startsWith('+') -> DiffLineKind.ADDED
+        line.startsWith('-') -> DiffLineKind.REMOVED
+        line.startsWith("\\ No newline") -> DiffLineKind.META
+        else -> DiffLineKind.CONTEXT
+    }
 
 @SuppressLint("HardcodedText")
 @Composable
@@ -1015,39 +1131,46 @@ private fun AgentwireGitDiff(
 }
 
 @Composable
-private fun AgentwireDiffLines(lines: List<String>, scroll: ScrollState) {
+private fun AgentwireDiffLines(
+    lines: List<String>,
+    scroll: ScrollState,
+) {
     SelectionContainer {
         Column(Modifier.horizontalScroll(scroll)) {
             lines.forEach { line ->
                 val kind = diffLineKind(line)
-                val background = when (kind) {
-                    DiffLineKind.ADDED -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f)
-                    DiffLineKind.REMOVED -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
-                    DiffLineKind.HUNK -> MaterialTheme.colorScheme.secondaryContainer
-                    DiffLineKind.HEADER -> MaterialTheme.colorScheme.surfaceVariant
-                    else -> MaterialTheme.colorScheme.surfaceContainerHighest
-                }
-                val color = when (kind) {
-                    DiffLineKind.ADDED -> MaterialTheme.colorScheme.onTertiaryContainer
-                    DiffLineKind.REMOVED -> MaterialTheme.colorScheme.onErrorContainer
-                    DiffLineKind.HUNK -> MaterialTheme.colorScheme.onSecondaryContainer
-                    DiffLineKind.META -> MaterialTheme.colorScheme.onSurfaceVariant
-                    else -> MaterialTheme.colorScheme.onSurface
-                }
+                val background =
+                    when (kind) {
+                        DiffLineKind.ADDED -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f)
+                        DiffLineKind.REMOVED -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
+                        DiffLineKind.HUNK -> MaterialTheme.colorScheme.secondaryContainer
+                        DiffLineKind.HEADER -> MaterialTheme.colorScheme.surfaceVariant
+                        else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                    }
+                val color =
+                    when (kind) {
+                        DiffLineKind.ADDED -> MaterialTheme.colorScheme.onTertiaryContainer
+                        DiffLineKind.REMOVED -> MaterialTheme.colorScheme.onErrorContainer
+                        DiffLineKind.HUNK -> MaterialTheme.colorScheme.onSecondaryContainer
+                        DiffLineKind.META -> MaterialTheme.colorScheme.onSurfaceVariant
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
                 Text(
                     text = line.ifEmpty { " " },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(background)
-                        .padding(horizontal = 8.dp, vertical = 1.dp),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .background(background)
+                            .padding(horizontal = 8.dp, vertical = 1.dp),
                     color = color,
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
-                    fontWeight = if (kind == DiffLineKind.HEADER || kind == DiffLineKind.HUNK) {
-                        FontWeight.SemiBold
-                    } else {
-                        FontWeight.Normal
-                    },
+                    fontWeight =
+                        if (kind == DiffLineKind.HEADER || kind == DiffLineKind.HUNK) {
+                            FontWeight.SemiBold
+                        } else {
+                            FontWeight.Normal
+                        },
                     softWrap = false,
                 )
             }
@@ -1100,7 +1223,11 @@ private fun AgentwireRequestCard(
 @SuppressLint("HardcodedText")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AgentwireQueueSheet(state: AgentwireUiState, viewModel: AgentwireViewModel, dismiss: () -> Unit) {
+private fun AgentwireQueueSheet(
+    state: AgentwireUiState,
+    viewModel: AgentwireViewModel,
+    dismiss: () -> Unit,
+) {
     ModalBottomSheet(onDismissRequest = dismiss) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -1131,7 +1258,11 @@ private fun AgentwireQueueSheet(state: AgentwireUiState, viewModel: AgentwireVie
 @SuppressLint("HardcodedText")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AgentwireQuestionSheet(request: AgentwireRequest, viewModel: AgentwireViewModel, dismiss: () -> Unit) {
+private fun AgentwireQuestionSheet(
+    request: AgentwireRequest,
+    viewModel: AgentwireViewModel,
+    dismiss: () -> Unit,
+) {
     val answers = remember(request.rid) { mutableStateMapOf<String, Set<String>>() }
     val customAnswers = remember(request.rid) { mutableStateMapOf<String, String>() }
     ModalBottomSheet(onDismissRequest = dismiss) {
@@ -1147,11 +1278,12 @@ private fun AgentwireQuestionSheet(request: AgentwireRequest, viewModel: Agentwi
                         selected = selected,
                         onClick = {
                             val current = answers[question.id].orEmpty()
-                            answers[question.id] = if (question.multiple) {
-                                if (option in current) current - option else current + option
-                            } else {
-                                setOf(option)
-                            }
+                            answers[question.id] =
+                                if (question.multiple) {
+                                    if (option in current) current - option else current + option
+                                } else {
+                                    setOf(option)
+                                }
                         },
                         label = { Text(option) },
                     )
@@ -1165,13 +1297,17 @@ private fun AgentwireQuestionSheet(request: AgentwireRequest, viewModel: Agentwi
                 }
             }
             Button(onClick = {
-                viewModel.respondQuestions(request.rid, request.questions.map { question ->
-                    val values = buildList {
-                        addAll(answers[question.id].orEmpty())
-                        customAnswers[question.id]?.takeIf(String::isNotBlank)?.let(::add)
-                    }
-                    kotlinx.serialization.json.JsonArray(values.map(::JsonPrimitive))
-                })
+                viewModel.respondQuestions(
+                    request.rid,
+                    request.questions.map { question ->
+                        val values =
+                            buildList {
+                                addAll(answers[question.id].orEmpty())
+                                customAnswers[question.id]?.takeIf(String::isNotBlank)?.let(::add)
+                            }
+                        kotlinx.serialization.json.JsonArray(values.map(::JsonPrimitive))
+                    },
+                )
                 dismiss()
             }) { Text("Submit answers") }
             Spacer(Modifier.height(24.dp))
@@ -1182,13 +1318,21 @@ private fun AgentwireQuestionSheet(request: AgentwireRequest, viewModel: Agentwi
 @SuppressLint("HardcodedText")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireViewModel, dismiss: () -> Unit) {
+private fun AgentwireStatusSheet(
+    state: AgentwireUiState,
+    viewModel: AgentwireViewModel,
+    dismiss: () -> Unit,
+) {
     var tab by remember { mutableStateOf(AgentwireStatusTab.BROWSE) }
     var search by remember { mutableStateOf("") }
     val expandedDirectories = remember { mutableStateMapOf<String, Boolean>() }
-    val initialModel = state.settings["model"]?.takeIf(String::isNotBlank)
-        ?: state.modelOptions.firstOrNull { it.default }?.value
-        ?: state.modelOptions.firstOrNull()?.value.orEmpty()
+    val initialModel =
+        state.settings["model"]?.takeIf(String::isNotBlank)
+            ?: state.modelOptions.firstOrNull { it.default }?.value
+            ?: state.modelOptions
+                .firstOrNull()
+                ?.value
+                .orEmpty()
     var model by remember(state.settings["model"], state.modelOptions) { mutableStateOf(initialModel) }
     val initialOption = state.modelOptions.firstOrNull { it.value == model }
     var effort by remember(state.settings["effort"], initialOption) {
@@ -1258,12 +1402,13 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
                 }
                 item {
                     AgentwireLiveSessions(
-                        sessions = state.liveSessions.filter { session ->
-                            search.isBlank() ||
-                                session.title.contains(search, true) ||
-                                session.id.contains(search, true) ||
-                                session.subtitle?.contains(search, true) == true
-                        },
+                        sessions =
+                            state.liveSessions.filter { session ->
+                                search.isBlank() ||
+                                    session.title.contains(search, true) ||
+                                    session.id.contains(search, true) ||
+                                    session.subtitle?.contains(search, true) == true
+                            },
                         activeSid = state.activeSid,
                         actions = state.actions,
                         onAttach = { sid, cwd ->
@@ -1275,12 +1420,17 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
                         onArchive = viewModel::archiveSession,
                     )
                 }
-                if (rows.isEmpty()) item {
-                    Text(
-                        if (search.isBlank()) "No project directories advertised by the bridge"
-                        else "No matching projects",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                if (rows.isEmpty()) {
+                    item {
+                        Text(
+                            if (search.isBlank()) {
+                                "No project directories advertised by the bridge"
+                            } else {
+                                "No matching projects"
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 rows.forEach { row ->
                     val directory = row.item
@@ -1288,19 +1438,20 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
                     item(key = "directory:${row.treeKey}") {
                         Surface(
                             color = if (directory.id == state.cwd) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-                            modifier = Modifier.fillMaxWidth().padding(start = (row.depth * 14).dp).clickable {
-                                expandedDirectories[directory.id] = !expanded
-                                if (!expanded && (
-                                        directory.id !in state.workspaceChildren ||
-                                            directory.id !in state.loadedSessionDirectories
-                                    )
-                                ) {
-                                    viewModel.expandWorkspace(
-                                        directory.id,
-                                        directory.raw.bool("hasChildren") ?: true,
-                                    )
-                                }
-                            },
+                            modifier =
+                                Modifier.fillMaxWidth().padding(start = (row.depth * 14).dp).clickable {
+                                    expandedDirectories[directory.id] = !expanded
+                                    if (!expanded && (
+                                            directory.id !in state.workspaceChildren ||
+                                                directory.id !in state.loadedSessionDirectories
+                                        )
+                                    ) {
+                                        viewModel.expandWorkspace(
+                                            directory.id,
+                                            directory.raw.bool("hasChildren") ?: true,
+                                        )
+                                    }
+                                },
                         ) {
                             Row(Modifier.padding(start = 10.dp, end = 4.dp, top = 7.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (expanded) "▾" else "▸", fontFamily = FontFamily.Monospace)
@@ -1310,16 +1461,20 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
                                     Text(directory.id, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                                 TextButton(
-                                    onClick = { viewModel.createSession(directory.id); dismiss() },
+                                    onClick = {
+                                        viewModel.createSession(directory.id)
+                                        dismiss()
+                                    },
                                     enabled = "session.create" in state.actions,
                                 ) { Text("Start") }
                             }
                         }
                     }
                     if (expanded) {
-                        val matchingSessions = state.workspaceSessions[directory.id].orEmpty().filter { session ->
-                            search.isBlank() || session.title.contains(search, true) || session.id.contains(search, true)
-                        }
+                        val matchingSessions =
+                            state.workspaceSessions[directory.id].orEmpty().filter { session ->
+                                search.isBlank() || session.title.contains(search, true) || session.id.contains(search, true)
+                            }
                         items(matchingSessions, key = { "session:${row.treeKey}:${it.id}" }) { session ->
                             Box(Modifier.padding(start = ((row.depth + 1) * 14).dp)) {
                                 AgentwireSessionRow(
@@ -1374,7 +1529,12 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
                             DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
                                 state.modelOptions.forEach { option ->
                                     DropdownMenuItem(
-                                        text = { Column { Text(option.label); if (option.label != option.value) Text(option.value, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace) } },
+                                        text = {
+                                            Column {
+                                                Text(option.label)
+                                                if (option.label != option.value) Text(option.value, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+                                            }
+                                        },
                                         onClick = {
                                             model = option.value
                                             effort = option.defaultEffort?.takeIf { it in option.efforts } ?: option.efforts.firstOrNull().orEmpty()
@@ -1427,12 +1587,16 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
                 }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { viewModel.updateSettings(buildMap {
-                            if (supportsModels && model.isNotBlank()) put("model", model)
-                            if (supportsModels && effort.isNotBlank()) put("effort", effort)
-                            if ("delivery" in state.supportedSettings) put("delivery", delivery)
-                            if ("collaboration" in state.supportedSettings && model.isNotBlank()) put("collaboration", collaboration)
-                        }) }, enabled = state.activeSid != null) { Text("Apply settings") }
+                        Button(onClick = {
+                            viewModel.updateSettings(
+                                buildMap {
+                                    if (supportsModels && model.isNotBlank()) put("model", model)
+                                    if (supportsModels && effort.isNotBlank()) put("effort", effort)
+                                    if ("delivery" in state.supportedSettings) put("delivery", delivery)
+                                    if ("collaboration" in state.supportedSettings && model.isNotBlank()) put("collaboration", collaboration)
+                                },
+                            )
+                        }, enabled = state.activeSid != null) { Text("Apply settings") }
                         if ("approvalReviewer" in state.supportedSettings) {
                             if (state.settings["approvalReviewer"] == "auto_review") {
                                 OutlinedButton(onClick = viewModel::disableAutoReview, enabled = state.activeSid != null) {
@@ -1440,8 +1604,11 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
                                 }
                             } else {
                                 OutlinedButton(onClick = {
-                                    if (state.autoReviewConfirmed) viewModel.enableAutoReview()
-                                    else confirmAutoReview = true
+                                    if (state.autoReviewConfirmed) {
+                                        viewModel.enableAutoReview()
+                                    } else {
+                                        confirmAutoReview = true
+                                    }
                                 }, enabled = state.activeSid != null) { Text("Enable auto-review") }
                             }
                         }
@@ -1451,13 +1618,20 @@ private fun AgentwireStatusSheet(state: AgentwireUiState, viewModel: AgentwireVi
             item { Spacer(Modifier.height(24.dp)) }
         }
     }
-    if (confirmAutoReview) AlertDialog(
-        onDismissRequest = { confirmAutoReview = false },
-        title = { Text("Enable auto-review for this session?") },
-        text = { Text("Interactive approval policy and sandbox restrictions remain in effect. Auto-review does not mean never ask.") },
-        confirmButton = { TextButton(onClick = { viewModel.enableAutoReview(); confirmAutoReview = false }) { Text("Enable") } },
-        dismissButton = { TextButton(onClick = { confirmAutoReview = false }) { Text("Cancel") } },
-    )
+    if (confirmAutoReview) {
+        AlertDialog(
+            onDismissRequest = { confirmAutoReview = false },
+            title = { Text("Enable auto-review for this session?") },
+            text = { Text("Interactive approval policy and sandbox restrictions remain in effect. Auto-review does not mean never ask.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.enableAutoReview()
+                    confirmAutoReview = false
+                }) { Text("Enable") }
+            },
+            dismissButton = { TextButton(onClick = { confirmAutoReview = false }) { Text("Cancel") } },
+        )
+    }
 }
 
 @SuppressLint("HardcodedText")
@@ -1514,14 +1688,20 @@ private fun AgentwireSessionRow(
     val runtimeStatus = agentwireSessionRuntimeStatus(session)
     val tuiAttached = session.raw.bool("tuiAttached") == true
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp)
-            .testTag("agentwire_session_${session.id}"),
-        colors = CardDefaults.cardColors(
-            containerColor = if (active) MaterialTheme.colorScheme.secondaryContainer
-            else MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 2.dp)
+                .testTag("agentwire_session_${session.id}"),
+        colors =
+            CardDefaults.cardColors(
+                containerColor =
+                    if (active) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerLow
+                    },
+            ),
     ) {
         Column {
             Row(
@@ -1545,19 +1725,21 @@ private fun AgentwireSessionRow(
                     TextButton(onClick = { onAttach(session.id, session.subtitle) }) { Text("Attach") }
                 }
             }
-            if (expanded) Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-                if ("session.rename" in actions) {
-                    OutlinedTextField(title, { title = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Session title") })
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (expanded) {
+                Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
                     if ("session.rename" in actions) {
-                        TextButton(onClick = { onRename(session.id, title) }, enabled = title.isNotBlank() && title != session.title) { Text("Rename") }
+                        OutlinedTextField(title, { title = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Session title") })
                     }
-                    if ("session.fork" in actions) TextButton(onClick = { onFork(session.id) }) { Text("Fork") }
-                    if (archived && "session.unarchive" in actions) {
-                        TextButton(onClick = { onArchive(session.id, false) }) { Text("Unarchive") }
-                    } else if (!archived && "session.archive" in actions) {
-                        TextButton(onClick = { onArchive(session.id, true) }) { Text("Archive") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if ("session.rename" in actions) {
+                            TextButton(onClick = { onRename(session.id, title) }, enabled = title.isNotBlank() && title != session.title) { Text("Rename") }
+                        }
+                        if ("session.fork" in actions) TextButton(onClick = { onFork(session.id) }) { Text("Fork") }
+                        if (archived && "session.unarchive" in actions) {
+                            TextButton(onClick = { onArchive(session.id, false) }) { Text("Unarchive") }
+                        } else if (!archived && "session.archive" in actions) {
+                            TextButton(onClick = { onArchive(session.id, true) }) { Text("Archive") }
+                        }
                     }
                 }
             }

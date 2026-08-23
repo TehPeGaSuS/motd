@@ -30,15 +30,23 @@ class Migration25To26Test {
     fun migrationAddsInheritedPresenceOverrideAndTheActorIndexWithoutLosingRows() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(25) {
-                    override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion25(db)
-                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
-                })
-                .build(),
-        )
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(25) {
+                            override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion25(db)
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL(
             """INSERT INTO networks(id, name, role, host, port, tls, nick, username, realname,
@@ -70,13 +78,14 @@ class Migration25To26Test {
             assertTrue(cursor.moveToFirst())
             assertEquals(1, cursor.getInt(0))
         }
-        db.query(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = " +
-                "'index_messages_bufferId_normalizedActor_serverTime'",
-        ).use { cursor ->
-            assertTrue(cursor.moveToFirst())
-            assertEquals(1, cursor.getInt(0))
-        }
+        db
+            .query(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = " +
+                    "'index_messages_bufferId_normalizedActor_serverTime'",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1, cursor.getInt(0))
+            }
         db.execSQL("UPDATE buffers SET presenceModeOverride = 'HIDDEN' WHERE id = 1")
         db.query("SELECT presenceModeOverride FROM buffers WHERE id = 1").use { cursor ->
             assertTrue(cursor.moveToFirst())
@@ -86,16 +95,23 @@ class Migration25To26Test {
 
     private fun createExportedVersion25(db: SupportSQLiteDatabase) {
         val resource = "${MotdDatabase::class.java.canonicalName}/25.json"
-        val schema = checkNotNull(javaClass.classLoader?.getResourceAsStream(resource))
-            .bufferedReader().use { Json.parseToJsonElement(it.readText()).jsonObject }
+        val schema =
+            checkNotNull(javaClass.classLoader?.getResourceAsStream(resource))
+                .bufferedReader()
+                .use { Json.parseToJsonElement(it.readText()).jsonObject }
         val database = schema.getValue("database").jsonObject
         database.getValue("entities").jsonArray.forEach { element ->
             val entity = element.jsonObject
             val tableName = entity.getValue("tableName").jsonPrimitive.content
+
             fun executeTemplate(sql: String) = db.execSQL(sql.replace("\${TABLE_NAME}", tableName))
             executeTemplate(entity.getValue("createSql").jsonPrimitive.content)
             entity["indices"]?.jsonArray.orEmpty().forEach { index ->
-                executeTemplate(index.jsonObject.getValue("createSql").jsonPrimitive.content)
+                executeTemplate(
+                    index.jsonObject
+                        .getValue("createSql")
+                        .jsonPrimitive.content,
+                )
             }
             entity["contentSyncTriggers"]?.jsonArray.orEmpty().forEach { trigger ->
                 db.execSQL(trigger.jsonPrimitive.content)

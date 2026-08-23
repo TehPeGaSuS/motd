@@ -18,7 +18,6 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatListTitleConnectivityTest {
-
     private val ready = IrcClientState.Ready("me", emptySet(), emptyMap())
 
     // --- snapshot derivation -------------------------------------------------------------------
@@ -40,11 +39,12 @@ class ChatListTitleConnectivityTest {
     fun one_reconnecting_network_shows_even_while_others_are_ready() {
         // The bouncer cold-start window: roots Ready, children still dialing. The status
         // notification deliberately hides this behind "Connected to N"; the title cue must not.
-        val states = mapOf(
-            4L to ready,
-            9L to ready,
-            5L to IrcClientState.Connecting,
-        )
+        val states =
+            mapOf(
+                4L to ready,
+                9L to ready,
+                5L to IrcClientState.Connecting,
+            )
 
         assertTrue(titleConnectingSnapshot(states))
     }
@@ -61,11 +61,12 @@ class ChatListTitleConnectivityTest {
 
     @Test
     fun scope_ids_follow_the_same_rule_as_row_scoping() {
-        val networks = listOf(
-            net(1, role = NetworkRole.BOUNCER_ROOT),
-            net(2, role = NetworkRole.BOUNCER_CHILD, parentId = 1),
-            net(3),
-        )
+        val networks =
+            listOf(
+                net(1, role = NetworkRole.BOUNCER_ROOT),
+                net(2, role = NetworkRole.BOUNCER_CHILD, parentId = 1),
+                net(3),
+            )
 
         assertNull(scopeNetworkIds(null, networks))
         // A root's scope covers its children, so a dialing child shows under the root's name.
@@ -132,54 +133,63 @@ class ChatListTitleConnectivityTest {
     // --- driver --------------------------------------------------------------------------------
 
     @Test
-    fun a_300ms_flap_produces_no_visible_emission_at_all() = runTest {
-        val snapshots = MutableStateFlow(false)
-        val seen = mutableListOf<Boolean>()
-        backgroundScope.launch {
-            snapshots.presentTitleConnecting { testScheduler.currentTime }.toList(seen)
+    fun a_300ms_flap_produces_no_visible_emission_at_all() =
+        runTest {
+            val snapshots = MutableStateFlow(false)
+            val seen = mutableListOf<Boolean>()
+            backgroundScope.launch {
+                snapshots.presentTitleConnecting { testScheduler.currentTime }.toList(seen)
+            }
+            runCurrent()
+            assertEquals(listOf(false), seen)
+
+            snapshots.value = true
+            advanceTimeBy(300L)
+            snapshots.value = false
+            advanceTimeBy(SYNC_CHROME_APPEARANCE_DELAY_MS + SYNC_CHROME_MIN_VISIBLE_MS)
+
+            assertEquals(listOf(false), seen)
         }
-        runCurrent()
-        assertEquals(listOf(false), seen)
-
-        snapshots.value = true
-        advanceTimeBy(300L)
-        snapshots.value = false
-        advanceTimeBy(SYNC_CHROME_APPEARANCE_DELAY_MS + SYNC_CHROME_MIN_VISIBLE_MS)
-
-        assertEquals(listOf(false), seen)
-    }
 
     @Test
-    fun the_driver_resolves_its_own_deadlines_without_further_connection_emissions() = runTest {
-        val snapshots = MutableStateFlow(false)
-        val seen = mutableListOf<Boolean>()
-        backgroundScope.launch {
-            snapshots.presentTitleConnecting { testScheduler.currentTime }.toList(seen)
+    fun the_driver_resolves_its_own_deadlines_without_further_connection_emissions() =
+        runTest {
+            val snapshots = MutableStateFlow(false)
+            val seen = mutableListOf<Boolean>()
+            backgroundScope.launch {
+                snapshots.presentTitleConnecting { testScheduler.currentTime }.toList(seen)
+            }
+            runCurrent()
+
+            snapshots.value = true
+            runCurrent()
+            assertEquals(listOf(false), seen)
+
+            // No new connection emission here: the appearance timer is the driver's own.
+            advanceTimeBy(SYNC_CHROME_APPEARANCE_DELAY_MS + 1)
+            assertEquals(listOf(false, true), seen)
+
+            snapshots.value = false
+            runCurrent()
+            assertEquals(listOf(false, true), seen)
+
+            advanceTimeBy(SYNC_CHROME_MIN_VISIBLE_MS + 1)
+            assertEquals(listOf(false, true, false), seen)
         }
-        runCurrent()
-
-        snapshots.value = true
-        runCurrent()
-        assertEquals(listOf(false), seen)
-
-        // No new connection emission here: the appearance timer is the driver's own.
-        advanceTimeBy(SYNC_CHROME_APPEARANCE_DELAY_MS + 1)
-        assertEquals(listOf(false, true), seen)
-
-        snapshots.value = false
-        runCurrent()
-        assertEquals(listOf(false, true), seen)
-
-        advanceTimeBy(SYNC_CHROME_MIN_VISIBLE_MS + 1)
-        assertEquals(listOf(false, true, false), seen)
-    }
 
     private fun net(
         id: Long,
         role: NetworkRole = NetworkRole.DIRECT,
         parentId: Long? = null,
     ) = NetworkEntity(
-        id = id, name = "net$id", role = role, parentId = parentId,
-        host = "h", port = 6697, nick = "me", username = "me", realname = "Me",
+        id = id,
+        name = "net$id",
+        role = role,
+        parentId = parentId,
+        host = "h",
+        port = 6697,
+        nick = "me",
+        username = "me",
+        realname = "Me",
     )
 }

@@ -3,7 +3,9 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.data.db.InviteState
 import kotlinx.coroutines.CancellationException
 
-internal class InviteJoinFailure(val userReason: String) : Exception(userReason)
+internal class InviteJoinFailure(
+    val userReason: String,
+) : Exception(userReason)
 
 /** Durable CAS -> bounded readiness -> state recheck -> one wire write. */
 internal suspend fun performInviteJoin(
@@ -14,8 +16,9 @@ internal suspend fun performInviteJoin(
     sendJoin: suspend () -> Unit,
     fail: suspend (String) -> Unit,
 ) {
-    val fromState = initialState?.takeIf { it == InviteState.PENDING || it == InviteState.FAILED }
-        ?: return
+    val fromState =
+        initialState?.takeIf { it == InviteState.PENDING || it == InviteState.FAILED }
+            ?: return
     if (!claim(fromState)) return
     try {
         if (!awaitReady()) {

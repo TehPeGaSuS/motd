@@ -104,11 +104,9 @@ internal fun channelJoinOutcome(
     return ChannelJoinOutcome.Rejected(networkId, channel, reason)
 }
 
-internal fun rosterStateAfterNames(explicitRefreshInFlight: Boolean): RosterLoadState =
-    if (explicitRefreshInFlight) RosterLoadState.LOADING else RosterLoadState.LOADED
+internal fun rosterStateAfterNames(explicitRefreshInFlight: Boolean): RosterLoadState = if (explicitRefreshInFlight) RosterLoadState.LOADING else RosterLoadState.LOADED
 
-internal fun rosterStateAfterExplicitRefresh(completed: Boolean): RosterLoadState =
-    if (completed) RosterLoadState.LOADED else RosterLoadState.FAILED
+internal fun rosterStateAfterExplicitRefresh(completed: Boolean): RosterLoadState = if (completed) RosterLoadState.LOADED else RosterLoadState.FAILED
 
 data class ConnectionActivitySnapshot(
     val states: Map<Long, IrcClientState> = emptyMap(),
@@ -299,8 +297,7 @@ interface ConnectionManager {
      * it on the seam is also what lets a lightweight fake model "history is negotiated and ready"
      * without standing up a transport and driving a full registration.
      */
-    fun historyAvailabilityFor(networkId: Long): HistoryAvailability =
-        clientFor(networkId)?.historyAvailability ?: HistoryAvailability.NegotiatingOrOffline
+    fun historyAvailabilityFor(networkId: Long): HistoryAvailability = clientFor(networkId)?.historyAvailability ?: HistoryAvailability.NegotiatingOrOffline
 
     /**
      * Run one server-side SEARCH, or return null when the network has no live client.

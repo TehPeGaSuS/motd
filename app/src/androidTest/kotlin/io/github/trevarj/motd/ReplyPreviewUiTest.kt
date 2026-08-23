@@ -24,18 +24,20 @@ class ReplyPreviewUiTest {
             MotdTheme(dynamicColor = false) {
                 ReplyMiniBubble(
                     reply = ReplyPreviewData(sender = "alice", text = "original"),
-                    nickColors = NickColorScheme(
-                        enabled = true,
-                        palette = NickColorPalette.THEME,
-                        overrides = emptyMap(),
-                        isDark = false,
-                    ),
+                    nickColors =
+                        NickColorScheme(
+                            enabled = true,
+                            palette = NickColorPalette.THEME,
+                            overrides = emptyMap(),
+                            isDark = false,
+                        ),
                     onClick = { clicks++ },
                 )
             }
         }
 
-        compose.onNodeWithTag("chat_reply_preview")
+        compose
+            .onNodeWithTag("chat_reply_preview")
             .assertHasClickAction()
             .performClick()
 

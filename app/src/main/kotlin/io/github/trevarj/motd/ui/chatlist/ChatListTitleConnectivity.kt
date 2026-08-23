@@ -36,10 +36,11 @@ import kotlinx.coroutines.flow.transformLatest
 internal fun titleConnectingSnapshot(
     states: Map<Long, IrcClientState>,
     scopeIds: Set<Long>? = null,
-): Boolean = states.any { (networkId, state) ->
-    (scopeIds == null || networkId in scopeIds) &&
-        (state is IrcClientState.Connecting || state is IrcClientState.Registering)
-}
+): Boolean =
+    states.any { (networkId, state) ->
+        (scopeIds == null || networkId in scopeIds) &&
+            (state is IrcClientState.Connecting || state is IrcClientState.Registering)
+    }
 
 /**
  * Anti-flash windows for the title cue, in exactly [SyncChromePresenter]'s shape and on its
@@ -63,7 +64,10 @@ internal class TitleConnectingPresenter {
     private var activeSinceMs: Long? = null
     private var shownSinceMs: Long? = null
 
-    fun resolve(connecting: Boolean, nowMs: Long): Boolean {
+    fun resolve(
+        connecting: Boolean,
+        nowMs: Long,
+    ): Boolean {
         candidate = connecting
         if (!connecting) {
             activeSinceMs = null
@@ -88,11 +92,12 @@ internal class TitleConnectingPresenter {
      * Wall-clock instant at which [resolve] could answer differently for the last snapshot, or
      * null when the presented state already agrees with it and no timer is pending.
      */
-    fun nextDeadlineMs(nowMs: Long): Long? = when {
-        candidate && !presented -> activeSinceMs?.plus(SYNC_CHROME_APPEARANCE_DELAY_MS)
-        !candidate && presented -> shownSinceMs?.plus(SYNC_CHROME_MIN_VISIBLE_MS)
-        else -> null
-    }?.takeIf { it > nowMs }
+    fun nextDeadlineMs(nowMs: Long): Long? =
+        when {
+            candidate && !presented -> activeSinceMs?.plus(SYNC_CHROME_APPEARANCE_DELAY_MS)
+            !candidate && presented -> shownSinceMs?.plus(SYNC_CHROME_MIN_VISIBLE_MS)
+            else -> null
+        }?.takeIf { it > nowMs }
 }
 
 /**
@@ -102,15 +107,16 @@ internal class TitleConnectingPresenter {
  * arrives. A fresh presenter per collection keeps the windows scoped to the subscription.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-internal fun Flow<Boolean>.presentTitleConnecting(nowMs: () -> Long): Flow<Boolean> = flow {
-    val presenter = TitleConnectingPresenter()
-    emitAll(
-        transformLatest { snapshot ->
-            while (true) {
-                emit(presenter.resolve(snapshot, nowMs()))
-                val deadline = presenter.nextDeadlineMs(nowMs()) ?: break
-                delay((deadline - nowMs()).coerceAtLeast(0L))
-            }
-        }.distinctUntilChanged(),
-    )
-}
+internal fun Flow<Boolean>.presentTitleConnecting(nowMs: () -> Long): Flow<Boolean> =
+    flow {
+        val presenter = TitleConnectingPresenter()
+        emitAll(
+            transformLatest { snapshot ->
+                while (true) {
+                    emit(presenter.resolve(snapshot, nowMs()))
+                    val deadline = presenter.nextDeadlineMs(nowMs()) ?: break
+                    delay((deadline - nowMs()).coerceAtLeast(0L))
+                }
+            }.distinctUntilChanged(),
+        )
+    }

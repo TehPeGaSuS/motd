@@ -37,7 +37,6 @@ import org.robolectric.Shadows.shadowOf
  */
 @RunWith(RobolectricTestRunner::class)
 class MessageNotificationIdCollisionTest {
-
     private lateinit var db: MotdDatabase
     private lateinit var repo: DataStoreSettingsRepository
     private lateinit var notifications: MotdNotifications
@@ -50,30 +49,42 @@ class MessageNotificationIdCollisionTest {
         get() = shadowOf(context.getSystemService(NotificationManager::class.java))
 
     @Before
-    fun setUp() = runTest {
-        db = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
-            .allowMainThreadQueries()
-            .build()
-        networkId = db.networkDao().insert(
-            NetworkEntity(
-                name = "libera", role = NetworkRole.DIRECT, host = "irc.libera.chat",
-                port = 6697, nick = "me", username = "me", realname = "Me",
-            ),
-        )
-        // Force the buffer id that collides with the status notification id.
-        bufferId = db.bufferDao().insert(
-            BufferEntity(
-                id = IrcForegroundService.STATUS_ID.toLong(),
-                networkId = networkId, name = "troll", displayName = "troll",
-                type = BufferType.QUERY,
-            ),
-        )
-        assertEquals(IrcForegroundService.STATUS_ID.toLong(), bufferId)
-        shadowOf(context as android.app.Application)
-            .grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
-        repo = DataStoreSettingsRepository(context)
-        notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
-    }
+    fun setUp() =
+        runTest {
+            db =
+                Room
+                    .inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
+                    .allowMainThreadQueries()
+                    .build()
+            networkId =
+                db.networkDao().insert(
+                    NetworkEntity(
+                        name = "libera",
+                        role = NetworkRole.DIRECT,
+                        host = "irc.libera.chat",
+                        port = 6697,
+                        nick = "me",
+                        username = "me",
+                        realname = "Me",
+                    ),
+                )
+            // Force the buffer id that collides with the status notification id.
+            bufferId =
+                db.bufferDao().insert(
+                    BufferEntity(
+                        id = IrcForegroundService.STATUS_ID.toLong(),
+                        networkId = networkId,
+                        name = "troll",
+                        displayName = "troll",
+                        type = BufferType.QUERY,
+                    ),
+                )
+            assertEquals(IrcForegroundService.STATUS_ID.toLong(), bufferId)
+            shadowOf(context as android.app.Application)
+                .grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+            repo = DataStoreSettingsRepository(context)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+        }
 
     @After
     fun tearDown() {
@@ -81,15 +92,16 @@ class MessageNotificationIdCollisionTest {
         db.close()
     }
 
-    private fun chat(text: String) = IrcEvent.ChatMessage(
-        ctx = MessageContext(msgid = null, serverTime = 1_000, account = null, batchId = null, label = null),
-        kind = IrcEvent.ChatKind.PRIVMSG,
-        source = Prefix("troll"),
-        target = "me",
-        text = text,
-        isSelf = false,
-        replyToMsgid = null,
-    )
+    private fun chat(text: String) =
+        IrcEvent.ChatMessage(
+            ctx = MessageContext(msgid = null, serverTime = 1_000, account = null, batchId = null, label = null),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("troll"),
+            target = "me",
+            text = text,
+            isSelf = false,
+            replyToMsgid = null,
+        )
 
     private fun postStatusNotification() {
         NotificationManagerCompat.from(context).notify(
@@ -98,10 +110,14 @@ class MessageNotificationIdCollisionTest {
         )
     }
 
-    private fun post(id: Int, channelId: String) {
+    private fun post(
+        id: Int,
+        channelId: String,
+    ) {
         NotificationManagerCompat.from(context).notify(
             id,
-            NotificationCompat.Builder(context, channelId)
+            NotificationCompat
+                .Builder(context, channelId)
                 .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
                 .setContentTitle("legacy")
                 .build(),
@@ -109,41 +125,50 @@ class MessageNotificationIdCollisionTest {
     }
 
     @Test
-    fun messageNotificationDoesNotReplaceOrCancelTheStatusNotification() = runTest {
-        postStatusNotification()
-        val delivered = chat("hey")
-        val eventId = db.messageDao().insertAll(
-            listOf(
-                MessageEntity(
-                    bufferId = bufferId,
-                    msgid = "collision",
-                    serverTime = delivered.ctx.serverTime,
-                    sender = "troll",
-                    kind = MessageKind.PRIVMSG,
-                    text = delivered.text,
-                    dedupKey = "collision",
-                ),
-            ),
-        ).single()
+    fun messageNotificationDoesNotReplaceOrCancelTheStatusNotification() =
+        runTest {
+            postStatusNotification()
+            val delivered = chat("hey")
+            val eventId =
+                db
+                    .messageDao()
+                    .insertAll(
+                        listOf(
+                            MessageEntity(
+                                bufferId = bufferId,
+                                msgid = "collision",
+                                serverTime = delivered.ctx.serverTime,
+                                sender = "troll",
+                                kind = MessageKind.PRIVMSG,
+                                text = delivered.text,
+                                dedupKey = "collision",
+                            ),
+                        ),
+                    ).single()
 
-        notifications.onCanonicalIncoming(
-            networkId, bufferId, BufferType.QUERY, false, eventId, delivered,
-        )
+            notifications.onCanonicalIncoming(
+                networkId,
+                bufferId,
+                BufferType.QUERY,
+                false,
+                eventId,
+                delivered,
+            )
 
-        assertEquals(
-            setOf(IrcForegroundService.STATUS_ID, MotdNotifications.messageNotificationId(bufferId)),
-            shadowManager.activeNotifications.map { it.id }.toSet(),
-        )
-        val status = shadowManager.activeNotifications.single { it.id == IrcForegroundService.STATUS_ID }
-        assertEquals(MotdNotifications.CHANNEL_STATUS, status.notification.channelId)
+            assertEquals(
+                setOf(IrcForegroundService.STATUS_ID, MotdNotifications.messageNotificationId(bufferId)),
+                shadowManager.activeNotifications.map { it.id }.toSet(),
+            )
+            val status = shadowManager.activeNotifications.single { it.id == IrcForegroundService.STATUS_ID }
+            assertEquals(MotdNotifications.CHANNEL_STATUS, status.notification.channelId)
 
-        // Reading the conversation clears only the message notification.
-        notifications.onRead(bufferId, TimelineAnchor(delivered.ctx.serverTime, eventId))
-        assertEquals(
-            listOf(IrcForegroundService.STATUS_ID),
-            shadowManager.activeNotifications.map { it.id },
-        )
-    }
+            // Reading the conversation clears only the message notification.
+            notifications.onRead(bufferId, TimelineAnchor(delivered.ctx.serverTime, eventId))
+            assertEquals(
+                listOf(IrcForegroundService.STATUS_ID),
+                shadowManager.activeNotifications.map { it.id },
+            )
+        }
 
     @Test
     fun legacySweepRetiresRawIdMessageNotificationsAndSparesEverythingElse() {

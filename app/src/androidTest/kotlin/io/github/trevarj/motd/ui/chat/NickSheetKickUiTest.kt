@@ -33,7 +33,10 @@ class NickSheetKickUiTest {
                     onToggleFool = {},
                     onOp = {},
                     onVoice = {},
-                    onKick = { kicks += 1; reason = it },
+                    onKick = {
+                        kicks += 1
+                        reason = it
+                    },
                     onBan = { _, _ -> },
                 )
             }

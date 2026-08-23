@@ -10,12 +10,16 @@ package io.github.trevarj.motd.gesture
  */
 sealed interface GestureNavRequest {
     /** [bufferId] is already canonical: durable room redirects are resolved before publishing. */
-    data class OpenChat(val bufferId: Long) : GestureNavRequest
+    data class OpenChat(
+        val bufferId: Long,
+    ) : GestureNavRequest
 
     data object OpenSearch : GestureNavRequest
 
     /** Channel info for a canonical [bufferId]. */
-    data class OpenChannelInfo(val bufferId: Long) : GestureNavRequest
+    data class OpenChannelInfo(
+        val bufferId: Long,
+    ) : GestureNavRequest
 
     data object OpenChatList : GestureNavRequest
 }

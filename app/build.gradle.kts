@@ -1,6 +1,3 @@
-import java.security.MessageDigest
-import java.util.Properties
-import java.util.zip.ZipFile
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
@@ -8,6 +5,9 @@ import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.bundling.Zip
+import java.security.MessageDigest
+import java.util.Properties
+import java.util.zip.ZipFile
 
 plugins {
     alias(libs.plugins.android.application)
@@ -32,16 +32,20 @@ if (providers.gradleProperty("motdComposeMetrics").map(String::toBoolean).getOrE
 }
 
 val libboxSourceBuild = providers.gradleProperty("motdLibboxSource").orNull?.toBoolean() ?: false
-val libboxAar = providers.gradleProperty("motdLibboxAar").orNull?.let(::file)
-    ?: file("libs/libbox.aar")
-val libboxManifest = providers.gradleProperty("motdLibboxManifest").orNull?.let(::file)
-    ?: file("libs/libbox-v1.13.12.manifest")
-val libboxNdkVersion = rootProject.file("third_party/sing-box/source.lock")
-    .readLines()
-    .singleOrNull { it.startsWith("ANDROID_NDK_VERSION=") }
-    ?.substringAfter('=')
-    ?.takeIf(String::isNotBlank)
-    ?: error("third_party/sing-box/source.lock must pin ANDROID_NDK_VERSION")
+val libboxAar =
+    providers.gradleProperty("motdLibboxAar").orNull?.let(::file)
+        ?: file("libs/libbox.aar")
+val libboxManifest =
+    providers.gradleProperty("motdLibboxManifest").orNull?.let(::file)
+        ?: file("libs/libbox-v1.13.12.manifest")
+val libboxNdkVersion =
+    rootProject
+        .file("third_party/sing-box/source.lock")
+        .readLines()
+        .singleOrNull { it.startsWith("ANDROID_NDK_VERSION=") }
+        ?.substringAfter('=')
+        ?.takeIf(String::isNotBlank)
+        ?: error("third_party/sing-box/source.lock must pin ANDROID_NDK_VERSION")
 
 // The release/debug APKs ship the pinned arm64 native core. Hermetic UI tests exercise plain IRC
 // on an x86_64 emulator, so derive an AAR that retains the generated Java API but omits JNI. This
@@ -57,10 +61,15 @@ val libboxE2eAar by tasks.registering(Zip::class) {
 
 abstract class VerifyLibboxArtifact : DefaultTask() {
     @get:InputFile abstract val aar: RegularFileProperty
+
     @get:InputFile abstract val manifest: RegularFileProperty
+
     @get:Input abstract val expectedVersion: Property<String>
+
     @get:Input abstract val expectedNdkVersion: Property<String>
+
     @get:Input abstract val expectedSha256: Property<String>
+
     @get:Input abstract val enforcePinnedSha256: Property<Boolean>
 
     @TaskAction
@@ -69,7 +78,14 @@ abstract class VerifyLibboxArtifact : DefaultTask() {
         check(manifest.get().asFile.isFile) {
             "libbox manifest does not exist: ${manifest.get().asFile}"
         }
-        val values = Properties().also { manifest.get().asFile.inputStream().use(it::load) }
+        val values =
+            Properties().also {
+                manifest
+                    .get()
+                    .asFile
+                    .inputStream()
+                    .use(it::load)
+            }
         check(values.getProperty("sing-box-version") == expectedVersion.get()) {
             "libbox manifest version must be ${expectedVersion.get()}"
         }
@@ -98,11 +114,14 @@ abstract class VerifyLibboxArtifact : DefaultTask() {
             }
         }
         ZipFile(aar.get().asFile).use { archive ->
-            val nativeEntries = archive.entries().asSequence()
-                .map { it.name }
-                .filter { it.startsWith("jni/") && !it.endsWith("/") }
-                .sorted()
-                .toList()
+            val nativeEntries =
+                archive
+                    .entries()
+                    .asSequence()
+                    .map { it.name }
+                    .filter { it.startsWith("jni/") && !it.endsWith("/") }
+                    .sorted()
+                    .toList()
             check(nativeEntries == listOf("jni/arm64-v8a/libbox.so")) {
                 "libbox AAR must contain only jni/arm64-v8a/libbox.so, found $nativeEntries"
             }
@@ -110,20 +129,24 @@ abstract class VerifyLibboxArtifact : DefaultTask() {
     }
 }
 
-fun quotedBuildConfigValue(value: String): String =
-    "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+fun quotedBuildConfigValue(value: String): String = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
-val configuredVersionName = System.getenv("MOTD_VERSION_NAME")
-    ?.takeIf(String::isNotBlank)
-    ?: providers.gradleProperty("motdVersionName").orNull?.takeIf(String::isNotBlank)
-    ?: "0.10.2"
-val configuredVersionCode = System.getenv("MOTD_VERSION_CODE")?.toIntOrNull()
-    ?: providers.gradleProperty("motdVersionCode").orNull?.toIntOrNull()
-    ?: 10002
-val sourceCommit = System.getenv("MOTD_SOURCE_COMMIT")
-    ?.takeIf(String::isNotBlank)
-    ?: providers.gradleProperty("motdSourceCommit").orNull?.takeIf(String::isNotBlank)
-    ?: "unknown"
+val configuredVersionName =
+    System
+        .getenv("MOTD_VERSION_NAME")
+        ?.takeIf(String::isNotBlank)
+        ?: providers.gradleProperty("motdVersionName").orNull?.takeIf(String::isNotBlank)
+        ?: "0.10.2"
+val configuredVersionCode =
+    System.getenv("MOTD_VERSION_CODE")?.toIntOrNull()
+        ?: providers.gradleProperty("motdVersionCode").orNull?.toIntOrNull()
+        ?: 10002
+val sourceCommit =
+    System
+        .getenv("MOTD_SOURCE_COMMIT")
+        ?.takeIf(String::isNotBlank)
+        ?: providers.gradleProperty("motdSourceCommit").orNull?.takeIf(String::isNotBlank)
+        ?: "unknown"
 
 android {
     namespace = "io.github.trevarj.motd"
@@ -173,7 +196,7 @@ android {
             ndk { abiFilters += "arm64-v8a" }
         }
         release {
-            isMinifyEnabled = false      // deliberate: zero R8 risk in v1
+            isMinifyEnabled = false // deliberate: zero R8 risk in v1
             if (keystorePath != null) signingConfig = signingConfigs.getByName("release")
             ndk { abiFilters += "arm64-v8a" }
         }
@@ -194,7 +217,7 @@ android {
     }
     testBuildType = "e2e"
     testOptions {
-        unitTests { isIncludeAndroidResources = true }  // Robolectric
+        unitTests { isIncludeAndroidResources = true } // Robolectric
         execution = "ANDROIDX_TEST_ORCHESTRATOR"
         managedDevices {
             localDevices {

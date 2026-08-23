@@ -24,8 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
@@ -80,7 +80,9 @@ const val GESTURE_EDITOR_ACTION_SHEET_TAG = "gesture_editor_action_sheet"
 const val GESTURE_EDITOR_PROVIDER_SHEET_TAG = "gesture_editor_provider_sheet"
 
 fun gestureEditorRowTag(nodeId: String): String = "gesture_editor_row_$nodeId"
+
 fun gestureEditorOverflowTag(nodeId: String): String = "gesture_editor_overflow_$nodeId"
+
 fun gestureEditorViolationTag(nodeId: String): String = "gesture_editor_violation_$nodeId"
 
 /** Everything the row list can ask the ViewModel to do. */
@@ -115,20 +117,21 @@ fun GestureMenuEditorScreen(
     GestureMenuEditorContent(
         state = state,
         onBack = onBack,
-        callbacks = GestureEditorCallbacks(
-            onRename = viewModel::rename,
-            onIcon = viewModel::setIcon,
-            onMoveUp = viewModel::moveUp,
-            onMoveDown = viewModel::moveDown,
-            onIndent = viewModel::indent,
-            onOutdent = viewModel::outdent,
-            onDelete = viewModel::delete,
-            onAddChild = viewModel::addChild,
-            onBindAction = viewModel::bindAction,
-            onSetProvider = viewModel::setProvider,
-            onReset = viewModel::resetToDefault,
-            onSave = viewModel::save,
-        ),
+        callbacks =
+            GestureEditorCallbacks(
+                onRename = viewModel::rename,
+                onIcon = viewModel::setIcon,
+                onMoveUp = viewModel::moveUp,
+                onMoveDown = viewModel::moveDown,
+                onIndent = viewModel::indent,
+                onOutdent = viewModel::outdent,
+                onDelete = viewModel::delete,
+                onAddChild = viewModel::addChild,
+                onBindAction = viewModel::bindAction,
+                onSetProvider = viewModel::setProvider,
+                onReset = viewModel::resetToDefault,
+                onSave = viewModel::save,
+            ),
     )
 }
 
@@ -293,17 +296,19 @@ fun GestureMenuEditorContent(
 /** One line saying why saving is off, so the disabled tick is never a mystery. */
 @Composable
 private fun EditorBanner(state: GestureEditorUiState) {
-    val message = when {
-        state.violations.isNotEmpty() -> stringResource(R.string.gesture_editor_invalid)
-        state.dirty -> stringResource(R.string.gesture_editor_unsaved)
-        else -> null
-    } ?: return
+    val message =
+        when {
+            state.violations.isNotEmpty() -> stringResource(R.string.gesture_editor_invalid)
+            state.dirty -> stringResource(R.string.gesture_editor_unsaved)
+            else -> null
+        } ?: return
     Surface(
-        color = if (state.violations.isNotEmpty()) {
-            MaterialTheme.colorScheme.errorContainer
-        } else {
-            MaterialTheme.colorScheme.secondaryContainer
-        },
+        color =
+            if (state.violations.isNotEmpty()) {
+                MaterialTheme.colorScheme.errorContainer
+            } else {
+                MaterialTheme.colorScheme.secondaryContainer
+            },
         modifier = Modifier.fillMaxWidth().testTag("gesture_editor_banner"),
     ) {
         Text(
@@ -326,10 +331,11 @@ private fun GestureEditorRowItem(
     val node = row.node
     val bindable = node is GestureNode.Leaf || node is GestureNode.Provider
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag(gestureEditorRowTag(node.id))
-            .padding(start = (row.depth * 20).dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag(gestureEditorRowTag(node.id))
+                .padding(start = (row.depth * 20).dp),
     ) {
         ListItem(
             leadingContent = { Icon(node.icon.vector, contentDescription = null) },
@@ -337,9 +343,10 @@ private fun GestureEditorRowItem(
             supportingContent = { Text(nodeSummary(node)) },
             trailingContent = { RowOverflow(row, callbacks, onRename, onPickIcon, onDelete) },
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(if (bindable) Modifier.clickable(onClick = onOpenBinding) else Modifier),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .then(if (bindable) Modifier.clickable(onClick = onOpenBinding) else Modifier),
         )
         if (row.violations.isNotEmpty()) {
             ViolationChips(row.violations, node.id)
@@ -349,12 +356,16 @@ private fun GestureEditorRowItem(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ViolationChips(violations: List<GestureMenuViolation>, nodeId: String) {
+private fun ViolationChips(
+    violations: List<GestureMenuViolation>,
+    nodeId: String,
+) {
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier
-            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
-            .testTag(gestureEditorViolationTag(nodeId)),
+        modifier =
+            Modifier
+                .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                .testTag(gestureEditorViolationTag(nodeId)),
     ) {
         violations.forEach { violation ->
             AssistChip(onClick = {}, label = { Text(violationText(violation)) })
@@ -372,6 +383,7 @@ private fun RowOverflow(
 ) {
     var open by remember { mutableStateOf(false) }
     val id = row.node.id
+
     fun run(action: () -> Unit) {
         action()
         open = false
@@ -476,37 +488,57 @@ private fun ActionBindingSheet(
             }
             draft.family.params.forEach { param ->
                 when (param) {
-                    GestureActionParam.CHAT -> ChatPicker(chats, draft.bufferId) {
-                        draft = draft.copy(bufferId = it)
+                    GestureActionParam.CHAT -> {
+                        ChatPicker(chats, draft.bufferId) {
+                            draft = draft.copy(bufferId = it)
+                        }
                     }
-                    GestureActionParam.NETWORK -> NetworkPicker(networks, draft.networkId) {
-                        draft = draft.copy(networkId = it)
+
+                    GestureActionParam.NETWORK -> {
+                        NetworkPicker(networks, draft.networkId) {
+                            draft = draft.copy(networkId = it)
+                        }
                     }
-                    GestureActionParam.NICK -> SheetField(
-                        label = stringResource(R.string.gesture_editor_field_nick),
-                        value = draft.text,
-                        tag = "gesture_editor_field_nick",
-                    ) { draft = draft.copy(text = it) }
-                    GestureActionParam.TEXT -> SheetField(
-                        label = stringResource(R.string.gesture_editor_field_text),
-                        value = draft.text,
-                        tag = "gesture_editor_field_text",
-                    ) { draft = draft.copy(text = it) }
-                    GestureActionParam.CHANNEL -> SheetField(
-                        label = stringResource(R.string.gesture_editor_field_channel),
-                        value = draft.text,
-                        tag = "gesture_editor_field_channel",
-                    ) { draft = draft.copy(text = it) }
-                    GestureActionParam.KEY -> SheetField(
-                        label = stringResource(R.string.gesture_editor_field_key),
-                        value = draft.secondary,
-                        tag = "gesture_editor_field_key",
-                    ) { draft = draft.copy(secondary = it) }
-                    GestureActionParam.AWAY_MESSAGE -> SheetField(
-                        label = stringResource(R.string.gesture_editor_field_away),
-                        value = draft.text,
-                        tag = "gesture_editor_field_away",
-                    ) { draft = draft.copy(text = it) }
+
+                    GestureActionParam.NICK -> {
+                        SheetField(
+                            label = stringResource(R.string.gesture_editor_field_nick),
+                            value = draft.text,
+                            tag = "gesture_editor_field_nick",
+                        ) { draft = draft.copy(text = it) }
+                    }
+
+                    GestureActionParam.TEXT -> {
+                        SheetField(
+                            label = stringResource(R.string.gesture_editor_field_text),
+                            value = draft.text,
+                            tag = "gesture_editor_field_text",
+                        ) { draft = draft.copy(text = it) }
+                    }
+
+                    GestureActionParam.CHANNEL -> {
+                        SheetField(
+                            label = stringResource(R.string.gesture_editor_field_channel),
+                            value = draft.text,
+                            tag = "gesture_editor_field_channel",
+                        ) { draft = draft.copy(text = it) }
+                    }
+
+                    GestureActionParam.KEY -> {
+                        SheetField(
+                            label = stringResource(R.string.gesture_editor_field_key),
+                            value = draft.secondary,
+                            tag = "gesture_editor_field_key",
+                        ) { draft = draft.copy(secondary = it) }
+                    }
+
+                    GestureActionParam.AWAY_MESSAGE -> {
+                        SheetField(
+                            label = stringResource(R.string.gesture_editor_field_away),
+                            value = draft.text,
+                            tag = "gesture_editor_field_away",
+                        ) { draft = draft.copy(text = it) }
+                    }
                 }
             }
             SheetActions(
@@ -586,7 +618,11 @@ private fun ProviderSheet(
 }
 
 @Composable
-private fun ChatPicker(chats: List<GestureChatChoice>, selected: Long?, onSelect: (Long) -> Unit) {
+private fun ChatPicker(
+    chats: List<GestureChatChoice>,
+    selected: Long?,
+    onSelect: (Long) -> Unit,
+) {
     SheetSubtitle(stringResource(R.string.gesture_editor_chat_picker))
     if (chats.isEmpty()) {
         SheetEmpty(stringResource(R.string.gesture_editor_no_chats))
@@ -606,7 +642,11 @@ private fun ChatPicker(chats: List<GestureChatChoice>, selected: Long?, onSelect
 }
 
 @Composable
-private fun NetworkPicker(networks: List<GestureNetworkChoice>, selected: Long?, onSelect: (Long) -> Unit) {
+private fun NetworkPicker(
+    networks: List<GestureNetworkChoice>,
+    selected: Long?,
+    onSelect: (Long) -> Unit,
+) {
     SheetSubtitle(stringResource(R.string.gesture_editor_network_picker))
     if (networks.isEmpty()) {
         SheetEmpty(stringResource(R.string.gesture_editor_no_networks))
@@ -666,14 +706,20 @@ private fun SheetOption(
         supportingContent = supporting?.let { text -> { Text(text) } },
         trailingContent = { RadioButton(selected = selected, onClick = null) },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier
-            .testTag(tag)
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick),
+        modifier =
+            Modifier
+                .testTag(tag)
+                .selectable(selected = selected, role = Role.RadioButton, onClick = onClick),
     )
 }
 
 @Composable
-private fun SheetField(label: String, value: String, tag: String, onValueChange: (String) -> Unit) {
+private fun SheetField(
+    label: String,
+    value: String,
+    tag: String,
+    onValueChange: (String) -> Unit,
+) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
@@ -684,7 +730,12 @@ private fun SheetField(label: String, value: String, tag: String, onValueChange:
 }
 
 @Composable
-private fun SheetActions(enabled: Boolean, saveTag: String, onSave: () -> Unit, onDismiss: () -> Unit) {
+private fun SheetActions(
+    enabled: Boolean,
+    saveTag: String,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.End,
@@ -733,7 +784,11 @@ private fun TextFieldDialog(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun IconPickerDialog(current: GestureIcon, onPick: (GestureIcon) -> Unit, onDismiss: () -> Unit) {
+private fun IconPickerDialog(
+    current: GestureIcon,
+    onPick: (GestureIcon) -> Unit,
+    onDismiss: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.gesture_editor_icon)) },
@@ -746,11 +801,12 @@ private fun IconPickerDialog(current: GestureIcon, onPick: (GestureIcon) -> Unit
                 GestureIcon.entries.filter { it != GestureIcon.UNKNOWN }.forEach { icon ->
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = if (icon == current) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            Color.Transparent
-                        },
+                        color =
+                            if (icon == current) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                Color.Transparent
+                            },
                         modifier = Modifier.testTag("gesture_editor_icon_${icon.name.lowercase()}"),
                     ) {
                         IconButton(onClick = { onPick(icon) }) {
@@ -771,77 +827,99 @@ private fun IconPickerDialog(current: GestureIcon, onPick: (GestureIcon) -> Unit
 
 /** An unknown node has no label of its own worth showing: its text belongs to the build that wrote it. */
 @Composable
-private fun nodeTitle(node: GestureNode): String =
-    if (node is GestureNode.Unknown) stringResource(R.string.gesture_editor_unknown) else node.label
+private fun nodeTitle(node: GestureNode): String = if (node is GestureNode.Unknown) stringResource(R.string.gesture_editor_unknown) else node.label
 
 @Composable
-private fun nodeSummary(node: GestureNode): String = when (node) {
-    is GestureNode.Submenu -> pluralStringResource(
-        R.plurals.gesture_editor_child_count,
-        node.children.size,
-        node.children.size,
-    )
-    is GestureNode.Leaf -> if (node.action is GestureAction.Unknown) {
-        stringResource(R.string.gesture_editor_unknown_action)
-    } else {
-        stringResource(actionFamilyLabel(gestureActionDraft(node.action).family))
+private fun nodeSummary(node: GestureNode): String =
+    when (node) {
+        is GestureNode.Submenu -> {
+            pluralStringResource(
+                R.plurals.gesture_editor_child_count,
+                node.children.size,
+                node.children.size,
+            )
+        }
+
+        is GestureNode.Leaf -> {
+            if (node.action is GestureAction.Unknown) {
+                stringResource(R.string.gesture_editor_unknown_action)
+            } else {
+                stringResource(actionFamilyLabel(gestureActionDraft(node.action).family))
+            }
+        }
+
+        is GestureNode.Provider -> {
+            val source = stringResource(providerKindLabel(node.kind))
+            val entries = stringResource(R.string.gesture_editor_provider_limit, node.clampedLimit)
+            "$source · $entries"
+        }
+
+        is GestureNode.Unknown -> {
+            stringResource(R.string.gesture_editor_unknown_action)
+        }
     }
-    is GestureNode.Provider -> {
-        val source = stringResource(providerKindLabel(node.kind))
-        val entries = stringResource(R.string.gesture_editor_provider_limit, node.clampedLimit)
-        "$source · $entries"
-    }
-    is GestureNode.Unknown -> stringResource(R.string.gesture_editor_unknown_action)
-}
 
 @Composable
-private fun violationText(violation: GestureMenuViolation): String = when (violation) {
-    is GestureMenuViolation.RingOverflow ->
-        stringResource(R.string.gesture_editor_violation_ring, violation.slices, MAX_RING_SLICES)
-    is GestureMenuViolation.TooDeep ->
-        stringResource(R.string.gesture_editor_violation_depth, violation.ring)
-    is GestureMenuViolation.BlankLabel -> stringResource(R.string.gesture_editor_violation_label)
-    is GestureMenuViolation.DuplicateId -> stringResource(R.string.gesture_editor_violation_duplicate)
-}
+private fun violationText(violation: GestureMenuViolation): String =
+    when (violation) {
+        is GestureMenuViolation.RingOverflow -> {
+            stringResource(R.string.gesture_editor_violation_ring, violation.slices, MAX_RING_SLICES)
+        }
+
+        is GestureMenuViolation.TooDeep -> {
+            stringResource(R.string.gesture_editor_violation_depth, violation.ring)
+        }
+
+        is GestureMenuViolation.BlankLabel -> {
+            stringResource(R.string.gesture_editor_violation_label)
+        }
+
+        is GestureMenuViolation.DuplicateId -> {
+            stringResource(R.string.gesture_editor_violation_duplicate)
+        }
+    }
 
 @StringRes
-internal fun actionFamilyLabel(family: GestureActionFamily): Int = when (family) {
-    GestureActionFamily.OPEN_CHAT -> R.string.gesture_action_open_chat
-    GestureActionFamily.OPEN_CHAT_LIST -> R.string.gesture_action_open_chat_list
-    GestureActionFamily.NEXT_UNREAD -> R.string.gesture_action_next_unread
-    GestureActionFamily.MARK_ALL_READ -> R.string.gesture_action_mark_all_read
-    GestureActionFamily.OPEN_SEARCH -> R.string.gesture_action_open_search
-    GestureActionFamily.CHANNEL_INFO_CURRENT -> R.string.gesture_action_channel_info
-    GestureActionFamily.ATTACH_CURRENT -> R.string.gesture_action_attach
-    GestureActionFamily.INSERT_MENTION -> R.string.gesture_action_insert_mention
-    GestureActionFamily.INSERT_SNIPPET -> R.string.gesture_action_insert_snippet
-    GestureActionFamily.START_QUERY -> R.string.gesture_action_start_query
-    GestureActionFamily.JOIN_CHANNEL -> R.string.gesture_action_join_channel
-    GestureActionFamily.TOGGLE_AWAY -> R.string.gesture_action_toggle_away
-    GestureActionFamily.TOGGLE_THEME -> R.string.gesture_action_toggle_theme
-    GestureActionFamily.RECONNECT_NETWORK -> R.string.gesture_action_reconnect
-    GestureActionFamily.DISCONNECT_NETWORK -> R.string.gesture_action_disconnect
-}
+internal fun actionFamilyLabel(family: GestureActionFamily): Int =
+    when (family) {
+        GestureActionFamily.OPEN_CHAT -> R.string.gesture_action_open_chat
+        GestureActionFamily.OPEN_CHAT_LIST -> R.string.gesture_action_open_chat_list
+        GestureActionFamily.NEXT_UNREAD -> R.string.gesture_action_next_unread
+        GestureActionFamily.MARK_ALL_READ -> R.string.gesture_action_mark_all_read
+        GestureActionFamily.OPEN_SEARCH -> R.string.gesture_action_open_search
+        GestureActionFamily.CHANNEL_INFO_CURRENT -> R.string.gesture_action_channel_info
+        GestureActionFamily.ATTACH_CURRENT -> R.string.gesture_action_attach
+        GestureActionFamily.INSERT_MENTION -> R.string.gesture_action_insert_mention
+        GestureActionFamily.INSERT_SNIPPET -> R.string.gesture_action_insert_snippet
+        GestureActionFamily.START_QUERY -> R.string.gesture_action_start_query
+        GestureActionFamily.JOIN_CHANNEL -> R.string.gesture_action_join_channel
+        GestureActionFamily.TOGGLE_AWAY -> R.string.gesture_action_toggle_away
+        GestureActionFamily.TOGGLE_THEME -> R.string.gesture_action_toggle_theme
+        GestureActionFamily.RECONNECT_NETWORK -> R.string.gesture_action_reconnect
+        GestureActionFamily.DISCONNECT_NETWORK -> R.string.gesture_action_disconnect
+    }
 
 @StringRes
-internal fun providerKindLabel(kind: GestureProviderKind): Int = when (kind) {
-    GestureProviderKind.PINNED_CHATS -> R.string.gesture_provider_pinned
-    GestureProviderKind.UNREAD_CHATS -> R.string.gesture_provider_unread
-    GestureProviderKind.RECENT_DMS -> R.string.gesture_provider_recent_dms
-    GestureProviderKind.FRIENDS -> R.string.gesture_provider_friends
-    GestureProviderKind.NETWORKS -> R.string.gesture_provider_networks
-    GestureProviderKind.UNKNOWN -> R.string.gesture_provider_unknown
-}
+internal fun providerKindLabel(kind: GestureProviderKind): Int =
+    when (kind) {
+        GestureProviderKind.PINNED_CHATS -> R.string.gesture_provider_pinned
+        GestureProviderKind.UNREAD_CHATS -> R.string.gesture_provider_unread
+        GestureProviderKind.RECENT_DMS -> R.string.gesture_provider_recent_dms
+        GestureProviderKind.FRIENDS -> R.string.gesture_provider_friends
+        GestureProviderKind.NETWORKS -> R.string.gesture_provider_networks
+        GestureProviderKind.UNKNOWN -> R.string.gesture_provider_unknown
+    }
 
 @Preview
 @Composable
 private fun GestureMenuEditorPreview() {
     MotdTheme {
         GestureMenuEditorContent(
-            state = GestureEditorUiState(
-                loaded = true,
-                rows = gestureEditorRows(defaultGestureMenu()),
-            ),
+            state =
+                GestureEditorUiState(
+                    loaded = true,
+                    rows = gestureEditorRows(defaultGestureMenu()),
+                ),
             onBack = {},
             callbacks = GestureEditorCallbacks(),
         )

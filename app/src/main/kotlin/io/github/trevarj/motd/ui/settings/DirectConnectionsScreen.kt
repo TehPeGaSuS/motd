@@ -25,11 +25,11 @@ import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.DccTransferProtocol
 import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.dcc.DccTransferController
-import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @Composable
 fun DirectConnectionsScreen(
@@ -90,15 +90,17 @@ private fun DirectConnectionTransferRow(
     transfer: DccTransferEntity,
     onRemove: (Long) -> Unit,
 ) {
-    val direction = if (transfer.direction == DccDirection.INCOMING) {
-        stringResource(R.string.dcc_direction_incoming)
-    } else {
-        stringResource(R.string.dcc_direction_outgoing)
-    }
-    val protocol = when (transfer.protocol) {
-        DccTransferProtocol.SEND -> "SEND"
-        DccTransferProtocol.SSEND -> "SSEND"
-    }
+    val direction =
+        if (transfer.direction == DccDirection.INCOMING) {
+            stringResource(R.string.dcc_direction_incoming)
+        } else {
+            stringResource(R.string.dcc_direction_outgoing)
+        }
+    val protocol =
+        when (transfer.protocol) {
+            DccTransferProtocol.SEND -> "SEND"
+            DccTransferProtocol.SSEND -> "SSEND"
+        }
     ListItem(
         headlineContent = { Text(transfer.displayFilename) },
         supportingContent = {
@@ -116,21 +118,26 @@ private fun DirectConnectionTransferRow(
 }
 
 @HiltViewModel
-class DirectConnectionsViewModel @Inject constructor(
-    private val controller: DccTransferController,
-) : ViewModel() {
-    val transfers: StateFlow<List<DccTransferEntity>> = controller.observeAll()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+class DirectConnectionsViewModel
+    @Inject
+    constructor(
+        private val controller: DccTransferController,
+    ) : ViewModel() {
+        val transfers: StateFlow<List<DccTransferEntity>> =
+            controller
+                .observeAll()
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun remove(transferId: Long) {
-        viewModelScope.launch { controller.removeRecord(transferId) }
+        fun remove(transferId: Long) {
+            viewModelScope.launch { controller.removeRecord(transferId) }
+        }
     }
-}
 
-private val TERMINAL_TRANSFER_STATES = setOf(
-    DccTransferState.COMPLETED,
-    DccTransferState.FAILED,
-    DccTransferState.REJECTED,
-    DccTransferState.EXPIRED,
-    DccTransferState.REMOVED,
-)
+private val TERMINAL_TRANSFER_STATES =
+    setOf(
+        DccTransferState.COMPLETED,
+        DccTransferState.FAILED,
+        DccTransferState.REJECTED,
+        DccTransferState.EXPIRED,
+        DccTransferState.REMOVED,
+    )

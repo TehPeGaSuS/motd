@@ -11,7 +11,6 @@ import org.junit.Test
  * check leaks onto other people's lines.
  */
 class MessageStatusTest {
-
     @Test fun self_confirmed_is_sent() {
         assertEquals(MsgStatus.SENT, messageStatus(isSelf = true, pending = false, failed = false))
     }
@@ -46,7 +45,6 @@ class MessageStatusTest {
  * timeline does not flicker when a page of already-settled rows scrolls in.
  */
 class StatusMorphTest {
-
     @Test fun pending_to_sent_draws_the_check() {
         assertEquals(StatusMorph.DELIVERED, statusMorph(MsgStatus.PENDING, MsgStatus.SENT))
     }

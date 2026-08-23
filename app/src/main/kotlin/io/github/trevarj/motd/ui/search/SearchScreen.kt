@@ -36,7 +36,6 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +56,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -126,17 +126,18 @@ fun SearchContent(
     }
     // The ViewModel publishes a new key immediately, but Compose may render this local edit one
     // frame before the collected state advances. Never let that frame show old rows or highlights.
-    val visibleState = if (text.text == state.rawQuery) {
-        state
-    } else {
-        state.copy(
-            rawQuery = text.text,
-            groups = emptyList(),
-            // The cap belongs to the results being dropped for this frame, not to the new query.
-            truncated = false,
-            searching = !isEmptySearchQuery(text.text),
-        )
-    }
+    val visibleState =
+        if (text.text == state.rawQuery) {
+            state
+        } else {
+            state.copy(
+                rawQuery = text.text,
+                groups = emptyList(),
+                // The cap belongs to the results being dropped for this frame, not to the new query.
+                truncated = false,
+                searching = !isEmptySearchQuery(text.text),
+            )
+        }
 
     Scaffold(
         topBar = {
@@ -149,11 +150,15 @@ fun SearchContent(
                 title = {
                     TextField(
                         value = text,
-                        onValueChange = { text = it; onQueryChange(it.text) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(focusRequester)
-                            .testTag("search_field"),
+                        onValueChange = {
+                            text = it
+                            onQueryChange(it.text)
+                        },
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .focusRequester(focusRequester)
+                                .testTag("search_field"),
                         placeholder = { Text(stringResource(R.string.search_hint)) },
                         trailingIcon = {
                             // The slot stays mounted so the clear affordance fades with the
@@ -180,17 +185,19 @@ fun SearchContent(
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         // The wire round trip is submit-driven only; local search stays debounced.
-                        keyboardActions = KeyboardActions(
-                            onSearch = {
-                                if (visibleState.scope == SearchScope.SERVER) onServerSearchSubmit()
-                            },
-                        ),
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
-                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                        ),
+                        keyboardActions =
+                            KeyboardActions(
+                                onSearch = {
+                                    if (visibleState.scope == SearchScope.SERVER) onServerSearchSubmit()
+                                },
+                            ),
+                        colors =
+                            TextFieldDefaults.colors(
+                                focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                                unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            ),
                     )
                 },
             )
@@ -199,9 +206,10 @@ fun SearchContent(
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (visibleState.hasBufferScope) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     FilterChip(
@@ -230,9 +238,10 @@ fun SearchContent(
                     text = stringResource(notice),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .testTag("search_coverage_notice"),
+                    modifier =
+                        Modifier
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .testTag("search_coverage_notice"),
                 )
             }
 
@@ -245,40 +254,51 @@ fun SearchContent(
                 modifier = Modifier.fillMaxSize(),
             ) { pane ->
                 when (pane) {
-                    SearchPane.SERVER -> ServerSearchSection(
-                        server = visibleState.server,
-                        query = parseSearchQuery(visibleState.rawQuery).text,
-                        onRetry = onServerSearchSubmit,
-                        onOpenHit = onOpenServerHit,
-                    )
+                    SearchPane.SERVER -> {
+                        ServerSearchSection(
+                            server = visibleState.server,
+                            query = parseSearchQuery(visibleState.rawQuery).text,
+                            onRetry = onServerSearchSubmit,
+                            onOpenHit = onOpenServerHit,
+                        )
+                    }
 
-                    SearchPane.PROMPT -> EmptyState(
-                        icon = Icons.Outlined.SearchOff,
-                        title = stringResource(R.string.search_prompt_title),
-                        message = stringResource(R.string.search_prompt_message),
-                    )
+                    SearchPane.PROMPT -> {
+                        EmptyState(
+                            icon = Icons.Outlined.SearchOff,
+                            title = stringResource(R.string.search_prompt_title),
+                            message = stringResource(R.string.search_prompt_message),
+                        )
+                    }
 
-                    SearchPane.SEARCHING -> LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("search_loading"),
-                    )
+                    SearchPane.SEARCHING -> {
+                        LinearProgressIndicator(
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .testTag("search_loading"),
+                        )
+                    }
 
-                    SearchPane.NO_RESULTS -> EmptyState(
-                        icon = Icons.Outlined.SearchOff,
-                        title = stringResource(R.string.search_empty_title),
-                        message = stringResource(emptyMessage(visibleState)),
-                        // A result list with nothing in it, like the chat list's own empty state.
-                        // Prompt and error panes keep the icon: they are not empty lists.
-                        ghostRows = true,
-                    )
+                    SearchPane.NO_RESULTS -> {
+                        EmptyState(
+                            icon = Icons.Outlined.SearchOff,
+                            title = stringResource(R.string.search_empty_title),
+                            message = stringResource(emptyMessage(visibleState)),
+                            // A result list with nothing in it, like the chat list's own empty state.
+                            // Prompt and error panes keep the icon: they are not empty lists.
+                            ghostRows = true,
+                        )
+                    }
 
-                    SearchPane.RESULTS -> SearchResults(
-                        groups = visibleState.groups,
-                        query = parseSearchQuery(visibleState.rawQuery).text,
-                        truncated = visibleState.truncated,
-                        onOpenHit = onOpenHit,
-                    )
+                    SearchPane.RESULTS -> {
+                        SearchResults(
+                            groups = visibleState.groups,
+                            query = parseSearchQuery(visibleState.rawQuery).text,
+                            truncated = visibleState.truncated,
+                            onOpenHit = onOpenHit,
+                        )
+                    }
                 }
             }
         }
@@ -292,13 +312,14 @@ internal fun clearedSearchText(): TextFieldValue = TextFieldValue("")
 private enum class SearchPane { SERVER, PROMPT, SEARCHING, NO_RESULTS, RESULTS }
 
 /** Same precedence as the pane branches themselves; the crossfade keys on this. */
-private fun searchPane(state: SearchUiState): SearchPane = when {
-    state.scope == SearchScope.SERVER -> SearchPane.SERVER
-    state.rawQuery.isBlank() -> SearchPane.PROMPT
-    state.searching -> SearchPane.SEARCHING
-    state.groups.isEmpty() -> SearchPane.NO_RESULTS
-    else -> SearchPane.RESULTS
-}
+private fun searchPane(state: SearchUiState): SearchPane =
+    when {
+        state.scope == SearchScope.SERVER -> SearchPane.SERVER
+        state.rawQuery.isBlank() -> SearchPane.PROMPT
+        state.searching -> SearchPane.SEARCHING
+        state.groups.isEmpty() -> SearchPane.NO_RESULTS
+        else -> SearchPane.RESULTS
+    }
 
 /**
  * The standing disclosure about what was searched, or null when the scope needs no caveat.
@@ -308,21 +329,26 @@ private fun searchPane(state: SearchUiState): SearchPane = when {
  * not-yet-loaded state never reads as a completeness promise.
  */
 @StringRes
-private fun coverageNotice(state: SearchUiState): Int? = when {
-    // The server scope searches a different corpus and states its own caveat with its results.
-    state.scope == SearchScope.SERVER -> null
-    state.scope == SearchScope.ALL -> R.string.search_coverage_all
-    state.coverage is SearchCoverage.BufferComplete -> null
-    else -> R.string.search_coverage_partial
-}
+private fun coverageNotice(state: SearchUiState): Int? =
+    when {
+        // The server scope searches a different corpus and states its own caveat with its results.
+        state.scope == SearchScope.SERVER -> null
+
+        state.scope == SearchScope.ALL -> R.string.search_coverage_all
+
+        state.coverage is SearchCoverage.BufferComplete -> null
+
+        else -> R.string.search_coverage_partial
+    }
 
 /** Empty-result copy that names the corpus that was actually searched. */
 @StringRes
-private fun emptyMessage(state: SearchUiState): Int = when {
-    state.scope == SearchScope.ALL -> R.string.search_empty_message_all
-    state.coverage is SearchCoverage.BufferComplete -> R.string.search_empty_message_buffer_complete
-    else -> R.string.search_empty_message_buffer_partial
-}
+private fun emptyMessage(state: SearchUiState): Int =
+    when {
+        state.scope == SearchScope.ALL -> R.string.search_empty_message_all
+        state.coverage is SearchCoverage.BufferComplete -> R.string.search_empty_message_buffer_complete
+        else -> R.string.search_empty_message_buffer_partial
+    }
 
 @Composable
 private fun SearchResults(
@@ -352,9 +378,10 @@ private fun SearchResults(
                     text = stringResource(R.string.search_truncated),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .testTag("search_truncated_footer"),
+                    modifier =
+                        Modifier
+                            .padding(16.dp)
+                            .testTag("search_truncated_footer"),
                 )
             }
         }
@@ -362,7 +389,11 @@ private fun SearchResults(
 }
 
 @Composable
-private fun SearchHitRow(hit: SearchHit, query: String, onClick: () -> Unit) = SearchRow(
+private fun SearchHitRow(
+    hit: SearchHit,
+    query: String,
+    onClick: () -> Unit,
+) = SearchRow(
     sender = hit.message.sender,
     text = hit.message.text,
     serverTime = hit.message.serverTime,
@@ -373,7 +404,11 @@ private fun SearchHitRow(hit: SearchHit, query: String, onClick: () -> Unit) = S
 )
 
 @Composable
-private fun ServerHitRow(hit: ServerHitUi, query: String, onClick: () -> Unit) = SearchRow(
+private fun ServerHitRow(
+    hit: ServerHitUi,
+    query: String,
+    onClick: () -> Unit,
+) = SearchRow(
     sender = hit.sender,
     text = hit.text,
     serverTime = hit.serverTime,
@@ -400,11 +435,12 @@ private fun SearchRow(
     val is24HourDevice = remember(context) { DateFormat.is24HourFormat(context) }
     val is24Hour = resolveIs24Hour(LocalTimestampConfig.current.format, is24HourDevice)
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag(tag)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag(tag)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -440,73 +476,86 @@ private fun ServerSearchSection(
     onOpenHit: (ServerHitUi) -> Unit,
 ) {
     when (server) {
-        ServerSearchState.Idle -> EmptyState(
-            icon = Icons.Outlined.SearchOff,
-            title = stringResource(R.string.search_server_prompt_title),
-            message = stringResource(R.string.search_server_prompt_message),
-        )
-
-        ServerSearchState.Searching -> LinearProgressIndicator(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("search_loading"),
-        )
-
-        is ServerSearchState.Failed -> Column(modifier = Modifier.fillMaxWidth()) {
+        ServerSearchState.Idle -> {
             EmptyState(
                 icon = Icons.Outlined.SearchOff,
-                title = stringResource(R.string.search_server_error_title),
-                message = stringResource(
-                    when (server.error) {
-                        ServerSearchError.REJECTED -> R.string.search_server_error_rejected
-                        ServerSearchError.UNAVAILABLE -> R.string.search_server_error_unavailable
-                    },
-                ),
+                title = stringResource(R.string.search_server_prompt_title),
+                message = stringResource(R.string.search_server_prompt_message),
             )
-            TextButton(
-                onClick = onRetry,
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .testTag("search_server_retry"),
-            ) {
-                Text(stringResource(R.string.search_server_retry))
+        }
+
+        ServerSearchState.Searching -> {
+            LinearProgressIndicator(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag("search_loading"),
+            )
+        }
+
+        is ServerSearchState.Failed -> {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                EmptyState(
+                    icon = Icons.Outlined.SearchOff,
+                    title = stringResource(R.string.search_server_error_title),
+                    message =
+                        stringResource(
+                            when (server.error) {
+                                ServerSearchError.REJECTED -> R.string.search_server_error_rejected
+                                ServerSearchError.UNAVAILABLE -> R.string.search_server_error_unavailable
+                            },
+                        ),
+                )
+                TextButton(
+                    onClick = onRetry,
+                    modifier =
+                        Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .testTag("search_server_retry"),
+                ) {
+                    Text(stringResource(R.string.search_server_retry))
+                }
             }
         }
 
-        is ServerSearchState.Results -> if (server.hits.isEmpty()) {
-            EmptyState(
-                icon = Icons.Outlined.SearchOff,
-                title = stringResource(R.string.search_server_empty_title),
-                message = stringResource(R.string.search_server_empty_message),
-                ghostRows = true,
-            )
-        } else {
-            Text(
-                text = stringResource(R.string.search_server_notice),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .testTag("search_coverage_notice"),
-            )
-            LazyColumn(modifier = Modifier.fillMaxSize().testTag("search_results")) {
-                itemsIndexed(
-                    server.hits,
-                    // Msgid-less hits share a timestamp only by accident; the index keeps keys unique.
-                    key = { index, hit -> hit.msgid ?: "t-${hit.serverTime}-$index" },
-                ) { _, hit ->
-                    ServerHitRow(hit = hit, query = query, onClick = { onOpenHit(hit) })
-                }
-                if (server.truncated) {
-                    item(key = "truncated_footer") {
-                        Text(
-                            text = stringResource(R.string.search_server_truncated),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .padding(16.dp)
-                                .testTag("search_truncated_footer"),
-                        )
+        is ServerSearchState.Results -> {
+            if (server.hits.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Outlined.SearchOff,
+                    title = stringResource(R.string.search_server_empty_title),
+                    message = stringResource(R.string.search_server_empty_message),
+                    ghostRows = true,
+                )
+            } else {
+                Text(
+                    text = stringResource(R.string.search_server_notice),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier =
+                        Modifier
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .testTag("search_coverage_notice"),
+                )
+                LazyColumn(modifier = Modifier.fillMaxSize().testTag("search_results")) {
+                    itemsIndexed(
+                        server.hits,
+                        // Msgid-less hits share a timestamp only by accident; the index keeps keys unique.
+                        key = { index, hit -> hit.msgid ?: "t-${hit.serverTime}-$index" },
+                    ) { _, hit ->
+                        ServerHitRow(hit = hit, query = query, onClick = { onOpenHit(hit) })
+                    }
+                    if (server.truncated) {
+                        item(key = "truncated_footer") {
+                            Text(
+                                text = stringResource(R.string.search_server_truncated),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier =
+                                    Modifier
+                                        .padding(16.dp)
+                                        .testTag("search_truncated_footer"),
+                            )
+                        }
                     }
                 }
             }
@@ -515,7 +564,10 @@ private fun ServerSearchSection(
 }
 
 /** Bold every case-insensitive occurrence of [query]'s terms in [text]. */
-private fun highlightSnippet(text: String, query: String): AnnotatedString {
+private fun highlightSnippet(
+    text: String,
+    query: String,
+): AnnotatedString {
     val terms = query.split(Regex("\\s+")).map { it.trim() }.filter { it.length >= 2 }
     if (terms.isEmpty()) return AnnotatedString(text)
     return androidx.compose.ui.text.buildAnnotatedString {
@@ -537,27 +589,41 @@ private fun highlightSnippet(text: String, query: String): AnnotatedString {
 private fun SearchContentPreview() {
     MotdTheme {
         SearchContent(
-            state = SearchUiState(
-                rawQuery = "coroutine",
-                hasBufferScope = true,
-                scope = SearchScope.ALL,
-                groups = listOf(
-                    SearchGroup(
-                        bufferId = 1, bufferDisplayName = "#kotlin", networkName = "Libera",
-                        hits = listOf(
-                            SearchHit(
-                                message = MessageEntity(
-                                    id = 1, bufferId = 1, serverTime = System.currentTimeMillis() - 60_000,
-                                    sender = "alice", kind = MessageKind.PRIVMSG,
-                                    text = "the new coroutine builder is great", dedupKey = "a",
-                                ),
-                                bufferDisplayName = "#kotlin", networkName = "Libera",
+            state =
+                SearchUiState(
+                    rawQuery = "coroutine",
+                    hasBufferScope = true,
+                    scope = SearchScope.ALL,
+                    groups =
+                        listOf(
+                            SearchGroup(
+                                bufferId = 1,
+                                bufferDisplayName = "#kotlin",
+                                networkName = "Libera",
+                                hits =
+                                    listOf(
+                                        SearchHit(
+                                            message =
+                                                MessageEntity(
+                                                    id = 1,
+                                                    bufferId = 1,
+                                                    serverTime = System.currentTimeMillis() - 60_000,
+                                                    sender = "alice",
+                                                    kind = MessageKind.PRIVMSG,
+                                                    text = "the new coroutine builder is great",
+                                                    dedupKey = "a",
+                                                ),
+                                            bufferDisplayName = "#kotlin",
+                                            networkName = "Libera",
+                                        ),
+                                    ),
                             ),
                         ),
-                    ),
                 ),
-            ),
-            onQueryChange = {}, onScopeChange = {}, onBack = {}, onOpenHit = {},
+            onQueryChange = {},
+            onScopeChange = {},
+            onBack = {},
+            onOpenHit = {},
         )
     }
 }
@@ -568,7 +634,10 @@ private fun SearchEmptyPreview() {
     MotdTheme {
         SearchContent(
             state = SearchUiState(rawQuery = "", hasBufferScope = false),
-            onQueryChange = {}, onScopeChange = {}, onBack = {}, onOpenHit = {},
+            onQueryChange = {},
+            onScopeChange = {},
+            onBack = {},
+            onOpenHit = {},
         )
     }
 }

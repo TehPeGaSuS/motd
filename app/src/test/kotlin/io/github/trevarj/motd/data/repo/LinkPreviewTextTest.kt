@@ -28,11 +28,12 @@ class LinkPreviewTextTest {
     }
 
     @Test fun file_preview_uses_the_filename_and_declared_media_type() {
-        val preview = LinkPreviewRepositoryImpl.filePreview(
-            url = "https://example.test/downloads/report.pdf",
-            contentType = "application/pdf; charset=binary",
-            kind = LinkPreviewKind.FILE,
-        )
+        val preview =
+            LinkPreviewRepositoryImpl.filePreview(
+                url = "https://example.test/downloads/report.pdf",
+                contentType = "application/pdf; charset=binary",
+                kind = LinkPreviewKind.FILE,
+            )
 
         assertEquals("report.pdf", preview.title)
         assertEquals("application/pdf", preview.description)

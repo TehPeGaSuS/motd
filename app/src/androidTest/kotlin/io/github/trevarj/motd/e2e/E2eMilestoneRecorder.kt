@@ -6,7 +6,10 @@ import java.util.concurrent.CopyOnWriteArrayList
 class E2eMilestoneRecorder {
     private val entries = CopyOnWriteArrayList<String>()
 
-    fun record(event: String, detail: String = "") {
+    fun record(
+        event: String,
+        detail: String = "",
+    ) {
         require(event.matches(Regex("[a-z0-9_]+")))
         entries += "{\"event\":\"$event\",\"detail\":\"${detail.replace(Regex("[^a-zA-Z0-9_=,.-]"), "_")}\"}"
     }

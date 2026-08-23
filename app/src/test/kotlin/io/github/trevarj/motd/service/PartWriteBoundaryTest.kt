@@ -22,70 +22,77 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PartWriteBoundaryTest {
+    @Test
+    fun `missing buffer or client is not accepted`() =
+        runTest {
+            assertFalse(writeChannelPartIfReady(null, null, null))
+            assertFalse(
+                writeChannelPartIfReady(
+                    BufferEntity(1, 1, "#room", "#room", BufferType.CHANNEL),
+                    null,
+                    null,
+                ),
+            )
+        }
 
     @Test
-    fun `missing buffer or client is not accepted`() = runTest {
-        assertFalse(writeChannelPartIfReady(null, null, null))
-        assertFalse(
-            writeChannelPartIfReady(
-                BufferEntity(1, 1, "#room", "#room", BufferType.CHANNEL),
-                null,
-                null,
-            ),
-        )
-    }
+    fun `non-ready client is not accepted`() =
+        runTest {
+            val transport = RecordingTransport()
+            val client =
+                IrcClient(
+                    IrcClientConfig("irc.example", 6697, true, "me", "me", "Me"),
+                    TransportFactory { _, _, _, _, _ -> transport },
+                    CoroutineScope(SupervisorJob() + coroutineContext),
+                )
+
+            assertFalse(
+                writeChannelPartIfReady(
+                    BufferEntity(1, 1, "#room", "#room", BufferType.CHANNEL),
+                    null,
+                    client,
+                ),
+            )
+        }
 
     @Test
-    fun `non-ready client is not accepted`() = runTest {
-        val transport = RecordingTransport()
-        val client = IrcClient(
-            IrcClientConfig("irc.example", 6697, true, "me", "me", "Me"),
-            TransportFactory { _, _, _, _, _ -> transport },
-            CoroutineScope(SupervisorJob() + coroutineContext),
-        )
-
-        assertFalse(
-            writeChannelPartIfReady(
-                BufferEntity(1, 1, "#room", "#room", BufferType.CHANNEL),
-                null,
-                client,
-            ),
-        )
-    }
+    fun `false write and write exception are not accepted by the boundary`() =
+        runTest {
+            val buffer = BufferEntity(1, 1, "#room", "#room", BufferType.CHANNEL)
+            assertFalse(attemptChannelPartWrite(buffer, null) { false })
+            val failure = IllegalStateException("socket closed")
+            val thrown =
+                runCatching {
+                    attemptChannelPartWrite(buffer, null) { throw failure }
+                }.exceptionOrNull()
+            assertEquals(failure, thrown)
+        }
 
     @Test
-    fun `false write and write exception are not accepted by the boundary`() = runTest {
-        val buffer = BufferEntity(1, 1, "#room", "#room", BufferType.CHANNEL)
-        assertFalse(attemptChannelPartWrite(buffer, null) { false })
-        val failure = IllegalStateException("socket closed")
-        val thrown = runCatching {
-            attemptChannelPartWrite(buffer, null) { throw failure }
-        }.exceptionOrNull()
-        assertEquals(failure, thrown)
-    }
+    fun `accepted write uses the IRC target and does not require a server echo`() =
+        runTest {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val buffer =
+                BufferEntity(
+                    id = 1,
+                    networkId = 1,
+                    name = "#internal-alias",
+                    displayName = "#room",
+                    type = BufferType.CHANNEL,
+                )
 
-    @Test
-    fun `accepted write uses the IRC target and does not require a server echo`() = runTest {
-        val transport = RecordingTransport()
-        val client = readyClient(transport)
-        val buffer = BufferEntity(
-            id = 1,
-            networkId = 1,
-            name = "#internal-alias",
-            displayName = "#room",
-            type = BufferType.CHANNEL,
-        )
-
-        assertTrue(writeChannelPartIfReady(buffer, null, client))
-        assertEquals("PART #room", transport.sent.last())
-    }
+            assertTrue(writeChannelPartIfReady(buffer, null, client))
+            assertEquals("PART #room", transport.sent.last())
+        }
 
     private suspend fun TestScope.readyClient(transport: RecordingTransport): IrcClient {
-        val client = IrcClient(
-            IrcClientConfig("irc.example", 6697, true, "me", "me", "Me"),
-            TransportFactory { _, _, _, _, _ -> transport },
-            CoroutineScope(SupervisorJob() + coroutineContext),
-        )
+        val client =
+            IrcClient(
+                IrcClientConfig("irc.example", 6697, true, "me", "me", "Me"),
+                TransportFactory { _, _, _, _, _ -> transport },
+                CoroutineScope(SupervisorJob() + coroutineContext),
+            )
         client.start()
         runCurrent()
         val caps = "batch message-tags server-time"
@@ -104,9 +111,19 @@ class PartWriteBoundaryTest {
         val sent = mutableListOf<String>()
 
         override suspend fun connect() = Unit
+
         override val incoming = inbound.consumeAsFlow()
-        override suspend fun send(line: String) { sent += line }
-        override suspend fun close() { inbound.close() }
-        suspend fun feed(line: String) { inbound.send(line) }
+
+        override suspend fun send(line: String) {
+            sent += line
+        }
+
+        override suspend fun close() {
+            inbound.close()
+        }
+
+        suspend fun feed(line: String) {
+            inbound.send(line)
+        }
     }
 }

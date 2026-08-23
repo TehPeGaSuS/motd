@@ -59,6 +59,7 @@ import io.github.trevarj.motd.ui.theme.lottieStrokeColor
  * A11y: only the static label is a polite live region, so TalkBack announces "syncing history" once
  * per episode. The changing count lives in a sibling node and therefore never re-announces.
  */
+
 /** The transition key: content within a kind updates in place, only kind changes animate. */
 internal enum class SyncHeaderKind { HIDDEN, WAITING, SYNCING }
 
@@ -67,11 +68,12 @@ fun ChatListSyncHeader(
     chrome: ChatListSyncChrome,
     modifier: Modifier = Modifier,
 ) {
-    val kind = when (chrome) {
-        ChatListSyncChrome.Hidden -> SyncHeaderKind.HIDDEN
-        is ChatListSyncChrome.Waiting -> SyncHeaderKind.WAITING
-        is ChatListSyncChrome.Syncing -> SyncHeaderKind.SYNCING
-    }
+    val kind =
+        when (chrome) {
+            ChatListSyncChrome.Hidden -> SyncHeaderKind.HIDDEN
+            is ChatListSyncChrome.Waiting -> SyncHeaderKind.WAITING
+            is ChatListSyncChrome.Syncing -> SyncHeaderKind.SYNCING
+        }
     // The exiting SYNCING content keeps composing after chrome has moved on; hold the last Syncing
     // value so it renders real counts through the transition instead of collapsing to nothing.
     var lastSyncing by remember { mutableStateOf<ChatListSyncChrome.Syncing?>(null) }
@@ -81,24 +83,36 @@ fun ChatListSyncHeader(
     // and an animatable living inside it would restart the wave on each one. The composition is
     // loaded once here and handed down, rather than resolved again inside the glyph.
     val glyphComposition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.sync_state))
-    val glyphProgress = rememberSyncGlyphProgress(
-        composition = glyphComposition,
-        beat = syncGlyphBeat(kind, rememberLatestVisible(kind)),
-    )
+    val glyphProgress =
+        rememberSyncGlyphProgress(
+            composition = glyphComposition,
+            beat = syncGlyphBeat(kind, rememberLatestVisible(kind)),
+        )
     AnimatedContent(
         targetState = kind,
         transitionSpec = {
-            val contentTransform = when {
-                initialState == SyncHeaderKind.HIDDEN ->
-                    (fadeIn(MotdMotion.fadeIn) +
-                        expandVertically(animationSpec = MotdMotion.contentSize)) togetherWith
-                        ExitTransition.None
-                targetState == SyncHeaderKind.HIDDEN ->
-                    EnterTransition.None togetherWith
-                        (fadeOut(MotdMotion.fadeOut) +
-                            shrinkVertically(animationSpec = MotdMotion.contentSize))
-                else -> fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
-            }
+            val contentTransform =
+                when {
+                    initialState == SyncHeaderKind.HIDDEN -> {
+                        (
+                            fadeIn(MotdMotion.fadeIn) +
+                                expandVertically(animationSpec = MotdMotion.contentSize)
+                        ) togetherWith
+                            ExitTransition.None
+                    }
+
+                    targetState == SyncHeaderKind.HIDDEN -> {
+                        EnterTransition.None togetherWith
+                            (
+                                fadeOut(MotdMotion.fadeOut) +
+                                    shrinkVertically(animationSpec = MotdMotion.contentSize)
+                            )
+                    }
+
+                    else -> {
+                        fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
+                    }
+                }
             // expand/shrink already own the hidden <-> content size change. Disable
             // AnimatedContent's default SizeTransform so the same height is not animated twice.
             contentTransform.using(null)
@@ -107,47 +121,56 @@ fun ChatListSyncHeader(
         label = "chatlist_sync_header",
     ) { current ->
         when (current) {
-            SyncHeaderKind.HIDDEN -> Unit
-            SyncHeaderKind.WAITING -> SyncHeaderSurface {
-                SyncHeaderLabel(
-                    label = stringResource(R.string.chatlist_sync_header_waiting),
-                    tag = "chatlist_sync_header_waiting",
-                )
+            SyncHeaderKind.HIDDEN -> {
+                Unit
             }
+
+            SyncHeaderKind.WAITING -> {
+                SyncHeaderSurface {
+                    SyncHeaderLabel(
+                        label = stringResource(R.string.chatlist_sync_header_waiting),
+                        tag = "chatlist_sync_header_waiting",
+                    )
+                }
+            }
+
             SyncHeaderKind.SYNCING -> {
                 val syncing = (chrome as? ChatListSyncChrome.Syncing) ?: lastSyncing
-                if (syncing != null) SyncHeaderSurface {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        SyncStateGlyph(glyphComposition, glyphProgress)
-                        SyncHeaderLabel(
-                            label = stringResource(R.string.chatlist_sync_header_syncing),
-                            tag = "chatlist_sync_header_label",
+                if (syncing != null) {
+                    SyncHeaderSurface {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            SyncStateGlyph(glyphComposition, glyphProgress)
+                            SyncHeaderLabel(
+                                label = stringResource(R.string.chatlist_sync_header_syncing),
+                                tag = "chatlist_sync_header_label",
+                            )
+                            Text(
+                                text = stringResource(R.string.chatlist_sync_header_count, syncing.done, syncing.total),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.testTag("chatlist_sync_header_count"),
+                            )
+                        }
+                        // Targets can be discovered mid-pass, so the fraction can move backwards; animating it
+                        // keeps that from reading as a glitch.
+                        val fraction by animateFloatAsState(
+                            targetValue = if (syncing.total > 0) (syncing.done.toFloat() / syncing.total).coerceIn(0f, 1f) else 0f,
+                            animationSpec = MotdMotion.fadeIn,
+                            label = "chatlist_sync_header_progress",
                         )
-                        Text(
-                            text = stringResource(R.string.chatlist_sync_header_count, syncing.done, syncing.total),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.testTag("chatlist_sync_header_count"),
+                        LinearProgressIndicator(
+                            progress = { fraction },
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(2.dp)
+                                    .testTag("chatlist_sync_header_progress"),
                         )
                     }
-                    // Targets can be discovered mid-pass, so the fraction can move backwards; animating it
-                    // keeps that from reading as a glitch.
-                    val fraction by animateFloatAsState(
-                        targetValue = if (syncing.total > 0) (syncing.done.toFloat() / syncing.total).coerceIn(0f, 1f) else 0f,
-                        animationSpec = MotdMotion.fadeIn,
-                        label = "chatlist_sync_header_progress",
-                    )
-                    LinearProgressIndicator(
-                        progress = { fraction },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(2.dp)
-                            .testTag("chatlist_sync_header_progress"),
-                    )
                 }
             }
         }
@@ -175,13 +198,13 @@ internal object SyncStateFrames {
     val syncingProgress: Float = SyncingFirst.toFloat() / Total
     val resolvedProgress: Float = (ResolveLast - 1).toFloat() / Total
 
-    fun clipSpec(beat: SyncBeat?): LottieClipSpec = when (beat) {
-        SyncBeat.RESOLVE -> LottieClipSpec.Frame(ResolveFirst, ResolveLast, maxInclusive = false)
-        else -> LottieClipSpec.Frame(SyncingFirst, SyncingLast, maxInclusive = false)
-    }
+    fun clipSpec(beat: SyncBeat?): LottieClipSpec =
+        when (beat) {
+            SyncBeat.RESOLVE -> LottieClipSpec.Frame(ResolveFirst, ResolveLast, maxInclusive = false)
+            else -> LottieClipSpec.Frame(SyncingFirst, SyncingLast, maxInclusive = false)
+        }
 
-    fun settledProgress(beat: SyncBeat?): Float =
-        if (beat == SyncBeat.RESOLVE) resolvedProgress else syncingProgress
+    fun settledProgress(beat: SyncBeat?): Float = if (beat == SyncBeat.RESOLVE) resolvedProgress else syncingProgress
 }
 
 /**
@@ -197,11 +220,15 @@ internal object SyncStateFrames {
  * moment it settles, so the only window this beat can count on is the exit fade -- which is what
  * [SyncStateFrames] is sized against, and why nothing here holds the header open.
  */
-internal fun syncGlyphBeat(kind: SyncHeaderKind, lastVisible: SyncHeaderKind?): SyncBeat? = when {
-    kind == SyncHeaderKind.SYNCING -> SyncBeat.SYNCING
-    kind == SyncHeaderKind.HIDDEN && lastVisible == SyncHeaderKind.SYNCING -> SyncBeat.RESOLVE
-    else -> null
-}
+internal fun syncGlyphBeat(
+    kind: SyncHeaderKind,
+    lastVisible: SyncHeaderKind?,
+): SyncBeat? =
+    when {
+        kind == SyncHeaderKind.SYNCING -> SyncBeat.SYNCING
+        kind == SyncHeaderKind.HIDDEN && lastVisible == SyncHeaderKind.SYNCING -> SyncBeat.RESOLVE
+        else -> null
+    }
 
 /** Holds the most recent non-hidden [kind], mirroring what AnimatedContent keeps through its exit. */
 @Composable
@@ -220,14 +247,18 @@ private fun rememberLatestVisible(kind: SyncHeaderKind): SyncHeaderKind? {
  * animation, so the settled-buffer counter ticking up never restarts it.
  */
 @Composable
-private fun rememberSyncGlyphProgress(composition: LottieComposition?, beat: SyncBeat?): () -> Float {
+private fun rememberSyncGlyphProgress(
+    composition: LottieComposition?,
+    beat: SyncBeat?,
+): () -> Float {
     val motionEnabled = LocalLottieMotionEnabled.current
-    val animation = animateLottieCompositionAsState(
-        composition = composition,
-        isPlaying = motionEnabled && beat != null,
-        iterations = if (beat == SyncBeat.SYNCING) LottieConstants.IterateForever else 1,
-        clipSpec = SyncStateFrames.clipSpec(beat),
-    )
+    val animation =
+        animateLottieCompositionAsState(
+            composition = composition,
+            isPlaying = motionEnabled && beat != null,
+            iterations = if (beat == SyncBeat.SYNCING) LottieConstants.IterateForever else 1,
+            clipSpec = SyncStateFrames.clipSpec(beat),
+        )
     val settled = SyncStateFrames.settledProgress(beat)
     return remember(animation, motionEnabled, settled) {
         { if (motionEnabled) animation.value else settled }
@@ -240,27 +271,32 @@ private fun rememberSyncGlyphProgress(composition: LottieComposition?, beat: Syn
  * fills and the check is a stroke, so the two typed helpers are not interchangeable here.
  */
 @Composable
-private fun SyncStateGlyph(composition: LottieComposition?, progress: () -> Float) {
+private fun SyncStateGlyph(
+    composition: LottieComposition?,
+    progress: () -> Float,
+) {
     val dotColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
     val checkColor = MaterialTheme.colorScheme.primary.toArgb()
-    val dynamicProperties = remember(dotColor, checkColor) {
-        // Built directly rather than through rememberLottieDynamicProperty, which keys on the
-        // vararg keypath array's identity and so rebuilds (and re-resolves keypaths) every pass.
-        // The dots keep the header's own label ink; the check earns the theme accent.
-        LottieDynamicProperties(
-            listOf(
-                lottieFillColor(dotColor, KeyPath("dots", "**")),
-                lottieStrokeColor(checkColor, KeyPath("check", "**")),
-            ),
-        )
-    }
+    val dynamicProperties =
+        remember(dotColor, checkColor) {
+            // Built directly rather than through rememberLottieDynamicProperty, which keys on the
+            // vararg keypath array's identity and so rebuilds (and re-resolves keypaths) every pass.
+            // The dots keep the header's own label ink; the check earns the theme accent.
+            LottieDynamicProperties(
+                listOf(
+                    lottieFillColor(dotColor, KeyPath("dots", "**")),
+                    lottieStrokeColor(checkColor, KeyPath("check", "**")),
+                ),
+            )
+        }
     LottieAnimation(
         composition = composition,
         progress = progress,
         dynamicProperties = dynamicProperties,
-        modifier = Modifier
-            .size(12.dp)
-            .testTag("chatlist_sync_header_glyph"),
+        modifier =
+            Modifier
+                .size(12.dp)
+                .testTag("chatlist_sync_header_glyph"),
     )
 }
 
@@ -271,9 +307,10 @@ private fun SyncHeaderSurface(
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag("chatlist_sync_header"),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .testTag("chatlist_sync_header"),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
@@ -285,14 +322,18 @@ private fun SyncHeaderSurface(
 }
 
 @Composable
-private fun SyncHeaderLabel(label: String, tag: String) {
+private fun SyncHeaderLabel(
+    label: String,
+    tag: String,
+) {
     Text(
         text = label,
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier
-            .testTag(tag)
-            .semantics { liveRegion = LiveRegionMode.Polite },
+        modifier =
+            Modifier
+                .testTag(tag)
+                .semantics { liveRegion = LiveRegionMode.Polite },
     )
 }
 

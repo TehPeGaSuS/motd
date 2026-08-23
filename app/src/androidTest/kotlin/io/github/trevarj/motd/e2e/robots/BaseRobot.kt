@@ -1,12 +1,13 @@
 package io.github.trevarj.motd.e2e.robots
 
-import androidx.compose.ui.test.junit4.ComposeTestRule
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -16,7 +17,6 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
-import androidx.compose.ui.semantics.SemanticsProperties
 
 /**
  * Minimum spacing between the bounded `performScrollToNode` sweeps a container wait is allowed to
@@ -24,19 +24,26 @@ import androidx.compose.ui.semantics.SemanticsProperties
  */
 private const val CONTAINER_SWEEP_INTERVAL_MS = 5_000L
 
-internal open class BaseRobot(protected val compose: ComposeTestRule) {
-    fun isPresent(tag: String): Boolean =
-        compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+internal open class BaseRobot(
+    protected val compose: ComposeTestRule,
+) {
+    fun isPresent(tag: String): Boolean = compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
 
     // 30s, not 10s: on cold 2-core CI runners the first composition of a screen can outlast 10s
     // (the onboarding SERVER→AUTH page did exactly that), and a journey that would have passed in
     // second 11 is a flake, not a signal. Genuine failures still surface well inside the job budget.
-    fun awaitTag(tag: String, timeoutMs: Long = 30_000) {
+    fun awaitTag(
+        tag: String,
+        timeoutMs: Long = 30_000,
+    ) {
         compose.waitUntil(timeoutMs) { isPresent(tag) }
     }
 
     /** The inverse wait, for transient nodes that leave the composition when their state clears. */
-    fun awaitTagGone(tag: String, timeoutMs: Long = 30_000) {
+    fun awaitTagGone(
+        tag: String,
+        timeoutMs: Long = 30_000,
+    ) {
         compose.waitUntil(timeoutMs) { !isPresent(tag) }
     }
 
@@ -52,10 +59,14 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
         compose.onNodeWithTag(tag, useUnmergedTree = true).performClick()
     }
 
-    fun turnOnPrefix(prefix: String, timeoutMs: Long = 30_000) {
-        val matcher = SemanticsMatcher("test tag starts with '$prefix'") { node ->
-            node.config.getOrElse(SemanticsProperties.TestTag) { "" }.startsWith(prefix)
-        }
+    fun turnOnPrefix(
+        prefix: String,
+        timeoutMs: Long = 30_000,
+    ) {
+        val matcher =
+            SemanticsMatcher("test tag starts with '$prefix'") { node ->
+                node.config.getOrElse(SemanticsProperties.TestTag) { "" }.startsWith(prefix)
+            }
         compose.waitUntil(timeoutMs) {
             compose.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
@@ -71,13 +82,18 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
 
     fun scrollToAndClick(tag: String) {
         awaitTag(tag)
-        compose.onNodeWithTag(tag, useUnmergedTree = true)
+        compose
+            .onNodeWithTag(tag, useUnmergedTree = true)
             .performScrollTo()
             .assertIsDisplayed()
             .performClick()
     }
 
-    fun swipeUntilTag(containerTag: String, itemTag: String, timeoutMs: Long = 10_000) {
+    fun swipeUntilTag(
+        containerTag: String,
+        itemTag: String,
+        timeoutMs: Long = 10_000,
+    ) {
         awaitTag(containerTag)
         compose.waitUntil(timeoutMs) {
             if (isPresent(itemTag)) {
@@ -89,7 +105,10 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
         }
     }
 
-    fun replace(tag: String, value: String) {
+    fun replace(
+        tag: String,
+        value: String,
+    ) {
         awaitTag(tag)
         compose.onNodeWithTag(tag, useUnmergedTree = true).performTextReplacement(value)
     }
@@ -99,16 +118,22 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
         compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
     }
 
-    fun scrollContainerTo(containerTag: String, itemTag: String, timeoutMs: Long = 10_000) =
-        scrollContainerTo(containerTag, hasTestTag(itemTag), timeoutMs)
+    fun scrollContainerTo(
+        containerTag: String,
+        itemTag: String,
+        timeoutMs: Long = 10_000,
+    ) = scrollContainerTo(containerTag, hasTestTag(itemTag), timeoutMs)
 
     /** The container itself, addressed the same way every scroll helper here addresses it. */
-    protected fun container(containerTag: String) =
-        compose.onNodeWithTag(containerTag, useUnmergedTree = true)
+    protected fun container(containerTag: String) = compose.onNodeWithTag(containerTag, useUnmergedTree = true)
 
     /** True once [containerTag] has actually composed a descendant matching [matcher]. */
-    fun containerHasNode(containerTag: String, matcher: SemanticsMatcher): Boolean =
-        compose.onAllNodes(matcher and hasAnyAncestor(hasTestTag(containerTag)), useUnmergedTree = true)
+    fun containerHasNode(
+        containerTag: String,
+        matcher: SemanticsMatcher,
+    ): Boolean =
+        compose
+            .onAllNodes(matcher and hasAnyAncestor(hasTestTag(containerTag)), useUnmergedTree = true)
             .fetchSemanticsNodes()
             .isNotEmpty()
 
@@ -124,7 +149,11 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
      * so the wait can outlive any budget no matter how large. Poll on composition instead, and
      * rate-limit the sweeps so a failing wait touches that boundary a bounded number of times.
      */
-    fun scrollContainerTo(containerTag: String, matcher: SemanticsMatcher, timeoutMs: Long = 10_000) {
+    fun scrollContainerTo(
+        containerTag: String,
+        matcher: SemanticsMatcher,
+        timeoutMs: Long = 10_000,
+    ) {
         awaitTag(containerTag)
         var nextSweepAt = 0L
         compose.waitUntil("'$containerTag' scrolled to ${matcher.description}", timeoutMs) {
@@ -154,6 +183,8 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
      *
      * Returns true when the container scrolled to [key], false when the row is not loaded yet.
      */
-    fun tryScrollContainerToKey(containerTag: String, key: Any): Boolean =
-        runCatching { container(containerTag).performScrollToKey(key) }.isSuccess
+    fun tryScrollContainerToKey(
+        containerTag: String,
+        key: Any,
+    ): Boolean = runCatching { container(containerTag).performScrollToKey(key) }.isSuccess
 }

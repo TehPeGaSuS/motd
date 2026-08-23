@@ -21,10 +21,11 @@ class FixtureIrcClient private constructor(
         private val sequence = AtomicInteger()
 
         fun connect(args: FixtureArgs): FixtureIrcClient {
-            val socket = Socket().apply {
-                connect(InetSocketAddress(args.host, args.ergoPort), 5_000)
-                soTimeout = 500
-            }
+            val socket =
+                Socket().apply {
+                    connect(InetSocketAddress(args.host, args.ergoPort), 5_000)
+                    soTimeout = 500
+                }
             return FixtureIrcClient(
                 socket,
                 BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8)),
@@ -41,7 +42,10 @@ class FixtureIrcClient private constructor(
         }
     }
 
-    fun sendMessage(target: String, text: String) {
+    fun sendMessage(
+        target: String,
+        text: String,
+    ) {
         require('\r' !in text && '\n' !in text)
         send("PRIVMSG $target :$text")
     }
@@ -66,15 +70,20 @@ class FixtureIrcClient private constructor(
         writer.flush()
     }
 
-    private fun await(label: String, timeoutMs: Long = 15_000, predicate: (String) -> Boolean): String {
+    private fun await(
+        label: String,
+        timeoutMs: Long = 15_000,
+        predicate: (String) -> Boolean,
+    ): String {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
         val tail = ArrayDeque<String>()
         while (System.nanoTime() < deadline) {
-            val line = try {
-                reader.readLine()
-            } catch (_: SocketTimeoutException) {
-                continue
-            } ?: error("Ergo closed while waiting for $label")
+            val line =
+                try {
+                    reader.readLine()
+                } catch (_: SocketTimeoutException) {
+                    continue
+                } ?: error("Ergo closed while waiting for $label")
             if (line.startsWith("PING ")) send("PONG ${line.substringAfter(' ')}")
             if (tail.size == 12) tail.removeFirst()
             tail.addLast(line)

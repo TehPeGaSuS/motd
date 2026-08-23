@@ -15,8 +15,8 @@ import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.CompletableDeferred
-import me.saket.telephoto.zoomable.ZoomableImageState
 import me.saket.telephoto.zoomable.ZoomSpec
+import me.saket.telephoto.zoomable.ZoomableImageState
 import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.rememberZoomableState
 import org.junit.Assert.assertEquals
@@ -30,17 +30,20 @@ class ImageViewerGestureUiTest {
     @get:Rule val compose = createComposeRule()
 
     /** Coil decodes an in-memory bitmap without touching the network, so no fixture server. */
-    private fun bitmap(width: Int, height: Int): Bitmap =
-        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.RED) }
+    private fun bitmap(
+        width: Int,
+        height: Int,
+    ): Bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.RED) }
 
     @Test fun zoomed_wide_image_cannot_pan_into_its_vertical_letterbox() {
         // Built once: a fresh bitmap per composition would restart the image request every frame.
         val wideImage = bitmap(400, 100)
         lateinit var state: ZoomableImageState
         compose.setContent {
-            state = rememberZoomableImageState(
-                rememberZoomableState(ZoomSpec(maxZoomFactor = MAX_IMAGE_SCALE)),
-            )
+            state =
+                rememberZoomableImageState(
+                    rememberZoomableState(ZoomSpec(maxZoomFactor = MAX_IMAGE_SCALE)),
+                )
             MotdTheme(dynamicColor = false) {
                 Box(Modifier.size(200.dp, 400.dp)) {
                     ImageViewerContent(
@@ -103,7 +106,8 @@ class ImageViewerGestureUiTest {
     }
 
     private fun currentTransform(): ImageViewerTransform =
-        compose.onNodeWithTag(IMAGE_VIEWER_IMAGE_TAG)
+        compose
+            .onNodeWithTag(IMAGE_VIEWER_IMAGE_TAG)
             .fetchSemanticsNode()
             .config[ImageViewerTransformKey]
 
@@ -131,11 +135,13 @@ class ImageViewerGestureUiTest {
         compose.onNodeWithTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG).assertDoesNotExist()
         compose.runOnIdle { firstResult.complete(ImageSaveFeedback.FAILED) }
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        compose.onNodeWithTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG)
+        compose
+            .onNodeWithTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG)
             .assertTextEquals(context.getString(io.github.trevarj.motd.R.string.image_viewer_save_failed))
 
         compose.onNodeWithTag(IMAGE_VIEWER_SAVE_BUTTON_TAG).performClick()
-        compose.onNodeWithTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG)
+        compose
+            .onNodeWithTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG)
             .assertTextEquals(context.getString(io.github.trevarj.motd.R.string.image_viewer_saved))
         assertEquals(2, saveCalls)
     }

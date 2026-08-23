@@ -26,36 +26,62 @@ class Migration3To4Test {
     @Test fun `migration adds proxy columns and preserves existing row`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context).name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(3) {
-                    override fun onCreate(db: SupportSQLiteDatabase) = db.execSQL(CREATE_NETWORKS_V3)
-                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
-                }).build(),
-        )
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(3) {
+                            override fun onCreate(db: SupportSQLiteDatabase) = db.execSQL(CREATE_NETWORKS_V3)
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                old: Int,
+                                new: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL(INSERT_NETWORK_V3)
         MIGRATION_3_4.migrate(db)
         db.query("SELECT name, obfsMode, proxyHost, proxyPort FROM networks WHERE id = 1").use { c ->
-            assertTrue(c.moveToFirst()); assertEquals("libera", c.getString(0))
-            assertNull(c.getString(1)); assertNull(c.getString(2)); assertTrue(c.isNull(3))
+            assertTrue(c.moveToFirst())
+            assertEquals("libera", c.getString(0))
+            assertNull(c.getString(1))
+            assertNull(c.getString(2))
+            assertTrue(c.isNull(3))
         }
         db.execSQL("UPDATE networks SET obfsMode = 'SOCKS5', proxyHost = '127.0.0.1', proxyPort = 1080 WHERE id = 1")
         db.query("SELECT obfsMode, proxyHost, proxyPort FROM networks WHERE id = 1").use { c ->
-            assertTrue(c.moveToFirst()); assertEquals("SOCKS5", c.getString(0)); assertEquals("127.0.0.1", c.getString(1)); assertEquals(1080, c.getInt(2))
+            assertTrue(c.moveToFirst())
+            assertEquals("SOCKS5", c.getString(0))
+            assertEquals("127.0.0.1", c.getString(1))
+            assertEquals(1080, c.getInt(2))
         }
     }
 
     @Test fun `migration repairs unreleased v3 reality schema then v4 to v5 remains valid`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context).name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(3) {
-                    override fun onCreate(db: SupportSQLiteDatabase) = db.execSQL(CREATE_NETWORKS_LEGACY_REALITY_V3)
-                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
-                }).build(),
-        )
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(3) {
+                            override fun onCreate(db: SupportSQLiteDatabase) = db.execSQL(CREATE_NETWORKS_LEGACY_REALITY_V3)
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                old: Int,
+                                new: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL(INSERT_NETWORK_LEGACY_REALITY_V3)
 
@@ -64,7 +90,9 @@ class Migration3To4Test {
 
         db.query("SELECT obfsMode, proxyHost, proxyPort, obfsLink FROM networks WHERE id = 1").use { c ->
             assertTrue(c.moveToFirst())
-            assertNull(c.getString(0)); assertNull(c.getString(1)); assertTrue(c.isNull(2))
+            assertNull(c.getString(0))
+            assertNull(c.getString(1))
+            assertTrue(c.isNull(2))
             assertEquals("vless://legacy@example.test:443?security=reality", c.getString(3))
         }
     }

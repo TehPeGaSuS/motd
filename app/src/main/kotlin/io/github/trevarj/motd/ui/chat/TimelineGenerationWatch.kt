@@ -68,12 +68,16 @@ internal enum class TimelineAnchorFate {
     PLACEHOLDER,
 }
 
-internal fun timelineAnchorFate(key: Long?, current: TimelineWindow): TimelineAnchorFate = when {
-    key == null -> TimelineAnchorFate.NO_ANCHOR
-    current.itemCount == 0 -> TimelineAnchorFate.EMPTY
-    current.indexOf(key) >= 0 -> TimelineAnchorFate.LOADED
-    else -> TimelineAnchorFate.PLACEHOLDER
-}
+internal fun timelineAnchorFate(
+    key: Long?,
+    current: TimelineWindow,
+): TimelineAnchorFate =
+    when {
+        key == null -> TimelineAnchorFate.NO_ANCHOR
+        current.itemCount == 0 -> TimelineAnchorFate.EMPTY
+        current.indexOf(key) >= 0 -> TimelineAnchorFate.LOADED
+        else -> TimelineAnchorFate.PLACEHOLDER
+    }
 
 /**
  * The journal payload for one presentation transition.
@@ -104,46 +108,47 @@ internal fun timelineGenerationFields(
     settled: Boolean,
     scrolling: Boolean,
     following: Boolean,
-): Map<String, Any?> = mapOf(
-    "generation" to generation,
-    "item_count" to current.itemCount,
-    "placeholders_before" to current.placeholdersBefore,
-    "loaded_count" to current.loadedCount,
-    "loaded_first_index" to current.loadedFirstIndex,
-    "loaded_last_index" to current.loadedLastIndex,
-    "prev_item_count" to (previous?.itemCount ?: -1),
-    "prev_placeholders_before" to (previous?.placeholdersBefore ?: -1),
-    "prev_loaded_count" to (previous?.loadedCount ?: -1),
-    "prev_loaded_first_index" to (previous?.loadedFirstIndex ?: -1),
-    "prev_loaded_last_index" to (previous?.loadedLastIndex ?: -1),
-    "before_index" to before.index,
-    "before_offset" to before.offset,
-    "before_key" to (before.key ?: -1L),
-    "after_index" to after.index,
-    "after_offset" to after.offset,
-    "after_key" to (after.key ?: -1L),
-    "anchor_fate" to timelineAnchorFate(before.key, current).name.lowercase(),
-    "anchor_index" to (before.key?.let(current::indexOf) ?: -1),
-    "anchor_drift" to (after.index - before.index),
-    "settled" to settled,
-    "scrolling" to scrolling,
-    "following" to following,
-)
+): Map<String, Any?> =
+    mapOf(
+        "generation" to generation,
+        "item_count" to current.itemCount,
+        "placeholders_before" to current.placeholdersBefore,
+        "loaded_count" to current.loadedCount,
+        "loaded_first_index" to current.loadedFirstIndex,
+        "loaded_last_index" to current.loadedLastIndex,
+        "prev_item_count" to (previous?.itemCount ?: -1),
+        "prev_placeholders_before" to (previous?.placeholdersBefore ?: -1),
+        "prev_loaded_count" to (previous?.loadedCount ?: -1),
+        "prev_loaded_first_index" to (previous?.loadedFirstIndex ?: -1),
+        "prev_loaded_last_index" to (previous?.loadedLastIndex ?: -1),
+        "before_index" to before.index,
+        "before_offset" to before.offset,
+        "before_key" to (before.key ?: -1L),
+        "after_index" to after.index,
+        "after_offset" to after.offset,
+        "after_key" to (after.key ?: -1L),
+        "anchor_fate" to timelineAnchorFate(before.key, current).name.lowercase(),
+        "anchor_index" to (before.key?.let(current::indexOf) ?: -1),
+        "anchor_drift" to (after.index - before.index),
+        "settled" to settled,
+        "scrolling" to scrolling,
+        "following" to following,
+    )
 
 /**
  * Renders a timeline journal payload for the logcat trace, which takes one flat string. Shared by
  * the generation watch and the viewport pin so the two read identically in an exported log.
  */
-internal fun formatTimelineGenerationFields(fields: Map<String, Any?>): String =
-    fields.entries.joinToString(" ") { (key, value) -> "$key=$value" }
+internal fun formatTimelineGenerationFields(fields: Map<String, Any?>): String = fields.entries.joinToString(" ") { (key, value) -> "$key=$value" }
 
 /**
  * Reads one Paging presentation into the pure model.
  *
  * `items` is the loaded window only, so no placeholder is ever dereferenced here.
  */
-internal fun ItemSnapshotList<MessageEntity>.toTimelineWindow(): TimelineWindow = TimelineWindow(
-    itemCount = size,
-    placeholdersBefore = placeholdersBefore,
-    loadedIds = items.map(MessageEntity::id),
-)
+internal fun ItemSnapshotList<MessageEntity>.toTimelineWindow(): TimelineWindow =
+    TimelineWindow(
+        itemCount = size,
+        placeholdersBefore = placeholdersBefore,
+        loadedIds = items.map(MessageEntity::id),
+    )

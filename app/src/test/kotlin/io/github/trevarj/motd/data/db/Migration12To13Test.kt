@@ -30,15 +30,23 @@ class Migration12To13Test {
     fun `migration preserves network room message aliases reactions and roster rows`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(12) {
-                    override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion12(db)
-                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
-                })
-                .build(),
-        )
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(12) {
+                            override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion12(db)
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL(
             """INSERT INTO networks(
@@ -93,7 +101,8 @@ class Migration12To13Test {
             "INSERT INTO network_identity(networkId, caseMapping, chanTypes, selfNick) " +
                 "VALUES (1, NULL, '', NULL)",
         )
-        db.query("SELECT caseMapping, chanTypes, selfNick FROM network_identity WHERE networkId = 1")
+        db
+            .query("SELECT caseMapping, chanTypes, selfNick FROM network_identity WHERE networkId = 1")
             .use { cursor ->
                 assertTrue(cursor.moveToFirst())
                 assertTrue(cursor.isNull(0))
@@ -104,18 +113,25 @@ class Migration12To13Test {
 
     private fun createExportedVersion12(db: SupportSQLiteDatabase) {
         val resource = "${MotdDatabase::class.java.canonicalName}/12.json"
-        val schema = checkNotNull(javaClass.classLoader?.getResourceAsStream(resource))
-            .bufferedReader().use { Json.parseToJsonElement(it.readText()).jsonObject }
+        val schema =
+            checkNotNull(javaClass.classLoader?.getResourceAsStream(resource))
+                .bufferedReader()
+                .use { Json.parseToJsonElement(it.readText()).jsonObject }
         val database = schema.getValue("database").jsonObject
         database.getValue("entities").jsonArray.forEach { element ->
             val entity = element.jsonObject
             val tableName = entity.getValue("tableName").jsonPrimitive.content
+
             fun executeTemplate(sql: String) {
                 db.execSQL(sql.replace("\${TABLE_NAME}", tableName))
             }
             executeTemplate(entity.getValue("createSql").jsonPrimitive.content)
             entity["indices"]?.jsonArray.orEmpty().forEach { index ->
-                executeTemplate(index.jsonObject.getValue("createSql").jsonPrimitive.content)
+                executeTemplate(
+                    index.jsonObject
+                        .getValue("createSql")
+                        .jsonPrimitive.content,
+                )
             }
             entity["contentSyncTriggers"]?.jsonArray.orEmpty().forEach { trigger ->
                 db.execSQL(trigger.jsonPrimitive.content)

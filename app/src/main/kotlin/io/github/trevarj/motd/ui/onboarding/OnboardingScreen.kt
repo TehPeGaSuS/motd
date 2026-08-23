@@ -48,17 +48,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -70,6 +69,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.LottieDynamicProperties
@@ -88,9 +88,9 @@ import io.github.trevarj.motd.ui.settings.PasswordField
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetPicker
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
-import io.github.trevarj.motd.ui.theme.lottieStrokeColor
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.lottieStrokeColor
 
 /** Stateful entry: wires the ViewModel; the wizard is a single route with an internal pager. */
 @Composable
@@ -165,27 +165,42 @@ fun OnboardingContent(
             userScrollEnabled = false,
         ) { page ->
             when (steps[page]) {
-                OnboardingStep.WELCOME -> WelcomePage()
-                OnboardingStep.CHOICE ->
+                OnboardingStep.WELCOME -> {
+                    WelcomePage()
+                }
+
+                OnboardingStep.CHOICE -> {
                     ChoicePage(state, onChoose, onChooseBouncerKind, onSelectPreset)
-                OnboardingStep.SERVER -> ServerPage(state, onServerChange, onAuthChange, authOnly = false)
-                OnboardingStep.AUTH ->
+                }
+
+                OnboardingStep.SERVER -> {
+                    ServerPage(state, onServerChange, onAuthChange, authOnly = false)
+                }
+
+                OnboardingStep.AUTH -> {
                     if (state.isBouncer) {
                         BouncerAuthPage(state, onSojuLoginChange, onZncLoginChange)
                     } else {
                         // Direct path AUTH step: mechanism picker only (server fields live on step 3).
                         ServerPage(state, onServerChange, onAuthChange, authOnly = true)
                     }
-                OnboardingStep.CONNECT -> ConnectPage(
-                    state,
-                    onRetry,
-                    onRetryBouncerDiscovery,
-                    onToggleBouncer,
-                    onBouncerAddDraftChange,
-                    onAddBouncer,
-                    onSelectHistoryDepth,
-                )
-                OnboardingStep.FINISH -> FinishPage()
+                }
+
+                OnboardingStep.CONNECT -> {
+                    ConnectPage(
+                        state,
+                        onRetry,
+                        onRetryBouncerDiscovery,
+                        onToggleBouncer,
+                        onBouncerAddDraftChange,
+                        onAddBouncer,
+                        onSelectHistoryDepth,
+                    )
+                }
+
+                OnboardingStep.FINISH -> {
+                    FinishPage()
+                }
             }
         }
         WizardBar(
@@ -245,14 +260,22 @@ private fun WizardBar(
         // Single stable handle for the forward button whose label varies (Get started/Next/Finish).
         val forwardTag = Modifier.testTag("onboarding_forward_button")
         when (state.step) {
-            OnboardingStep.WELCOME -> Button(onClick = onNext, modifier = forwardTag) {
-                Text(stringResource(R.string.onboarding_get_started))
+            OnboardingStep.WELCOME -> {
+                Button(onClick = onNext, modifier = forwardTag) {
+                    Text(stringResource(R.string.onboarding_get_started))
+                }
             }
-            OnboardingStep.FINISH -> Button(onClick = onFinish, modifier = forwardTag) {
-                Text(stringResource(R.string.onboarding_finish))
+
+            OnboardingStep.FINISH -> {
+                Button(onClick = onFinish, modifier = forwardTag) {
+                    Text(stringResource(R.string.onboarding_finish))
+                }
             }
-            else -> Button(onClick = onNext, enabled = state.canAdvance, modifier = forwardTag) {
-                Text(stringResource(R.string.onboarding_next))
+
+            else -> {
+                Button(onClick = onNext, enabled = state.canAdvance, modifier = forwardTag) {
+                    Text(stringResource(R.string.onboarding_next))
+                }
             }
         }
     }
@@ -316,15 +339,16 @@ private fun WelcomeHeroMark() {
     // Keyed on the boolean, not the frame value, so the effect is not relaunched every frame.
     LaunchedEffect(progress >= 1f) { if (progress >= 1f) played = true }
     val strokeColor = MaterialTheme.colorScheme.onSurface.toArgb()
-    val dynamicProperties = remember(strokeColor) {
-        // Every stroke is the same ink the static lockup was tinted with. Built directly rather
-        // than through rememberLottieDynamicProperty, which keys on the vararg array's identity.
-        LottieDynamicProperties(
-            listOf(
-                lottieStrokeColor(strokeColor, KeyPath("**")),
-            ),
-        )
-    }
+    val dynamicProperties =
+        remember(strokeColor) {
+            // Every stroke is the same ink the static lockup was tinted with. Built directly rather
+            // than through rememberLottieDynamicProperty, which keys on the vararg array's identity.
+            LottieDynamicProperties(
+                listOf(
+                    lottieStrokeColor(strokeColor, KeyPath("**")),
+                ),
+            )
+        }
     LottieAnimation(
         composition = composition,
         progress = { if (played || !motionEnabled) 1f else progress },
@@ -362,10 +386,12 @@ private fun ChoicePage(
             )
             AnimatedVisibility(
                 visible = state.isBouncer,
-                enter = fadeIn(MotdMotion.fadeIn) +
-                    expandVertically(animationSpec = MotdMotion.contentSize),
-                exit = fadeOut(MotdMotion.microFadeOut) +
-                    shrinkVertically(animationSpec = MotdMotion.contentSize),
+                enter =
+                    fadeIn(MotdMotion.fadeIn) +
+                        expandVertically(animationSpec = MotdMotion.contentSize),
+                exit =
+                    fadeOut(MotdMotion.microFadeOut) +
+                        shrinkVertically(animationSpec = MotdMotion.contentSize),
             ) {
                 Row(
                     modifier = Modifier.padding(top = 16.dp),
@@ -398,10 +424,12 @@ private fun ChoicePage(
             )
             AnimatedVisibility(
                 visible = state.choice == ConnectionChoice.NETWORK,
-                enter = fadeIn(MotdMotion.fadeIn) +
-                    expandVertically(animationSpec = MotdMotion.contentSize),
-                exit = fadeOut(MotdMotion.microFadeOut) +
-                    shrinkVertically(animationSpec = MotdMotion.contentSize),
+                enter =
+                    fadeIn(MotdMotion.fadeIn) +
+                        expandVertically(animationSpec = MotdMotion.contentSize),
+                exit =
+                    fadeOut(MotdMotion.microFadeOut) +
+                        shrinkVertically(animationSpec = MotdMotion.contentSize),
             ) {
                 Box(Modifier.padding(top = 16.dp)) {
                     NetworkPresetPicker(
@@ -423,16 +451,21 @@ private fun ChoiceCard(
     modifier: Modifier = Modifier,
 ) {
     Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .then(
-                if (selected) Modifier.border(
-                    2.dp,
-                    MaterialTheme.colorScheme.primary,
-                    RoundedCornerShape(12.dp),
-                ) else Modifier,
-            ),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .then(
+                    if (selected) {
+                        Modifier.border(
+                            2.dp,
+                            MaterialTheme.colorScheme.primary,
+                            RoundedCornerShape(12.dp),
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
     ) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -535,19 +568,21 @@ private fun ConnectPage(
         StateIndicator(state.connState)
         state.stateLog.forEach { s ->
             // Annotate a Failed entry with its own reason so a diagnosis is possible even mid-loop.
-            val label = if (s is IrcClientState.Failed) {
-                "Failed: ${s.reason}"
-            } else {
-                s::class.simpleName.orEmpty()
-            }
+            val label =
+                if (s is IrcClientState.Failed) {
+                    "Failed: ${s.reason}"
+                } else {
+                    s::class.simpleName.orEmpty()
+                }
             Text(
                 "• $label",
                 style = MaterialTheme.typography.bodySmall,
-                color = if (s is IrcClientState.Failed) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                color =
+                    if (s is IrcClientState.Failed) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
             )
         }
         // The connection retries, so `connState` may already be back to Connecting after a failure;
@@ -590,33 +625,40 @@ private fun StateIndicator(connState: IrcClientState?) {
     ) {
         // House fade so the icon swaps at the same tempo as the sibling label below.
         AnimatedContent(
-            targetState = when (connState) {
-                is IrcClientState.Ready -> StateIndicatorKind.READY
-                is IrcClientState.Failed -> StateIndicatorKind.FAILED
-                else -> StateIndicatorKind.BUSY
-            },
+            targetState =
+                when (connState) {
+                    is IrcClientState.Ready -> StateIndicatorKind.READY
+                    is IrcClientState.Failed -> StateIndicatorKind.FAILED
+                    else -> StateIndicatorKind.BUSY
+                },
             transitionSpec = {
                 fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
             },
             label = "connState",
         ) { kind ->
             when (kind) {
-                StateIndicatorKind.READY ->
+                StateIndicatorKind.READY -> {
                     Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                StateIndicatorKind.FAILED ->
+                }
+
+                StateIndicatorKind.FAILED -> {
                     Icon(Icons.Filled.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                StateIndicatorKind.BUSY ->
+                }
+
+                StateIndicatorKind.BUSY -> {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                }
             }
         }
         AnimatedContent(
-            targetState = when (connState) {
-                is IrcClientState.Ready -> "Connected as ${connState.nick}"
-                is IrcClientState.Failed -> "Failed"
-                IrcClientState.Registering -> "Registering…"
-                IrcClientState.Connecting -> "Connecting…"
-                else -> "Starting…"
-            },
+            targetState =
+                when (connState) {
+                    is IrcClientState.Ready -> "Connected as ${connState.nick}"
+                    is IrcClientState.Failed -> "Failed"
+                    IrcClientState.Registering -> "Registering…"
+                    IrcClientState.Connecting -> "Connecting…"
+                    else -> "Starting…"
+                },
             transitionSpec = {
                 fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
             },
@@ -646,17 +688,20 @@ private fun BouncerNetworksSection(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     when (val discovery = state.bouncerDiscovery) {
-        is BouncerDiscoveryState.Loading -> Row(
-            modifier = Modifier.testTag("onboarding_bouncer_discovery_loading"),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(18.dp).testTag("onboarding_bouncer_discovery_progress"),
-                strokeWidth = 2.dp,
-            )
-            Text(stringResource(R.string.onboarding_bouncer_discovery_loading), style = MaterialTheme.typography.bodySmall)
+        is BouncerDiscoveryState.Loading -> {
+            Row(
+                modifier = Modifier.testTag("onboarding_bouncer_discovery_loading"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp).testTag("onboarding_bouncer_discovery_progress"),
+                    strokeWidth = 2.dp,
+                )
+                Text(stringResource(R.string.onboarding_bouncer_discovery_loading), style = MaterialTheme.typography.bodySmall)
+            }
         }
+
         is BouncerDiscoveryState.Failed -> {
             Text(
                 bouncerErrorMessage(discovery.error),
@@ -669,19 +714,26 @@ private fun BouncerNetworksSection(
                 modifier = Modifier.testTag("onboarding_bouncer_discovery_retry"),
             ) { Text(stringResource(R.string.onboarding_bouncer_discovery_retry)) }
         }
-        is BouncerDiscoveryState.Loaded -> OutlinedButton(
-            onClick = onRetryDiscovery,
-            modifier = Modifier.testTag("onboarding_bouncer_discovery_refresh"),
-        ) { Text(stringResource(R.string.onboarding_bouncer_discovery_refresh)) }
-        null -> Unit
+
+        is BouncerDiscoveryState.Loaded -> {
+            OutlinedButton(
+                onClick = onRetryDiscovery,
+                modifier = Modifier.testTag("onboarding_bouncer_discovery_refresh"),
+            ) { Text(stringResource(R.string.onboarding_bouncer_discovery_refresh)) }
+        }
+
+        null -> {
+            Unit
+        }
     }
     Column(Modifier.selectableGroup()) {
         state.bouncerNetworks.forEach { row ->
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("onboarding_bouncer_row_${row.netId}")
-                    .padding(vertical = 8.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag("onboarding_bouncer_row_${row.netId}")
+                        .padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(row.name, modifier = Modifier.weight(1f))
@@ -727,11 +779,14 @@ private fun BouncerNetworksSection(
         enabled = state.bouncerAddDraft.isValid && !adding,
         modifier = Modifier.testTag("onboarding_bouncer_add_submit"),
     ) {
-        if (adding) CircularProgressIndicator(
-            modifier = Modifier.size(18.dp).testTag("onboarding_bouncer_add_progress"),
-            strokeWidth = 2.dp,
-        )
-        else Text(stringResource(R.string.onboarding_connect_add_network))
+        if (adding) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp).testTag("onboarding_bouncer_add_progress"),
+                strokeWidth = 2.dp,
+            )
+        } else {
+            Text(stringResource(R.string.onboarding_connect_add_network))
+        }
     }
 
     HistorySyncDepthSection(selected = state.historySyncDepth, onSelect = onSelectHistoryDepth)
@@ -759,15 +814,15 @@ private fun HistorySyncDepthSection(
     Column(Modifier.selectableGroup()) {
         HistorySyncDepth.entries.forEach { depth ->
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .selectable(
-                        selected = depth == selected,
-                        onClick = { onSelect(depth) },
-                        role = Role.RadioButton,
-                    )
-                    .testTag("onboarding_history_depth_${depth.name.lowercase()}")
-                    .padding(vertical = 8.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = depth == selected,
+                            onClick = { onSelect(depth) },
+                            role = Role.RadioButton,
+                        ).testTag("onboarding_history_depth_${depth.name.lowercase()}")
+                        .padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -779,27 +834,37 @@ private fun HistorySyncDepthSection(
 }
 
 @Composable
-private fun historySyncDepthLabel(depth: HistorySyncDepth): String = when (depth) {
-    HistorySyncDepth.WEEK -> stringResource(R.string.onboarding_history_depth_week)
-    HistorySyncDepth.MONTH -> stringResource(R.string.onboarding_history_depth_month)
-    HistorySyncDepth.QUARTER -> stringResource(R.string.onboarding_history_depth_quarter)
-    HistorySyncDepth.EVERYTHING -> stringResource(R.string.onboarding_history_depth_everything)
-}
+private fun historySyncDepthLabel(depth: HistorySyncDepth): String =
+    when (depth) {
+        HistorySyncDepth.WEEK -> stringResource(R.string.onboarding_history_depth_week)
+        HistorySyncDepth.MONTH -> stringResource(R.string.onboarding_history_depth_month)
+        HistorySyncDepth.QUARTER -> stringResource(R.string.onboarding_history_depth_quarter)
+        HistorySyncDepth.EVERYTHING -> stringResource(R.string.onboarding_history_depth_everything)
+    }
 
 @Composable
-private fun bouncerErrorMessage(error: BouncerOperationError): String = when (error) {
-    BouncerOperationError.ConnectionLost -> stringResource(R.string.onboarding_bouncer_connection_lost)
-    is BouncerOperationError.ServerRejected -> if (error.detail.isBlank()) {
-        stringResource(R.string.onboarding_bouncer_server_rejected_generic)
-    } else {
-        stringResource(R.string.onboarding_bouncer_server_rejected, error.detail)
+private fun bouncerErrorMessage(error: BouncerOperationError): String =
+    when (error) {
+        BouncerOperationError.ConnectionLost -> {
+            stringResource(R.string.onboarding_bouncer_connection_lost)
+        }
+
+        is BouncerOperationError.ServerRejected -> {
+            if (error.detail.isBlank()) {
+                stringResource(R.string.onboarding_bouncer_server_rejected_generic)
+            } else {
+                stringResource(R.string.onboarding_bouncer_server_rejected, error.detail)
+            }
+        }
+
+        is BouncerOperationError.Unexpected -> {
+            if (error.detail.isBlank()) {
+                stringResource(R.string.onboarding_bouncer_request_failed)
+            } else {
+                error.detail
+            }
+        }
     }
-    is BouncerOperationError.Unexpected -> if (error.detail.isBlank()) {
-        stringResource(R.string.onboarding_bouncer_request_failed)
-    } else {
-        error.detail
-    }
-}
 
 @Composable
 private fun FinishPage() {
@@ -836,10 +901,25 @@ private fun OnboardingChoicePreview() {
         Surface {
             OnboardingContent(
                 state = OnboardingState(step = OnboardingStep.CHOICE, choice = ConnectionChoice.NETWORK),
-                onNext = {}, onBack = {}, onSkip = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
-                onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
-                onRetryBouncerDiscovery = {}, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onSelectHistoryDepth = {}, onFinish = {},
-                onConfirmPlaintext = {}, onDismissPlaintext = {},
+                onNext = {},
+                onBack = {},
+                onSkip = {},
+                onChoose = {},
+                onChooseBouncerKind = {},
+                onSelectPreset = {},
+                onServerChange = {},
+                onAuthChange = {},
+                onSojuLoginChange = {},
+                onZncLoginChange = {},
+                onRetry = {},
+                onRetryBouncerDiscovery = {},
+                onToggleBouncer = {},
+                onBouncerAddDraftChange = {},
+                onAddBouncer = {},
+                onSelectHistoryDepth = {},
+                onFinish = {},
+                onConfirmPlaintext = {},
+                onDismissPlaintext = {},
             )
         }
     }
@@ -851,22 +931,39 @@ private fun OnboardingConnectPreview() {
     MotdTheme {
         Surface {
             OnboardingContent(
-                state = OnboardingState(
-                    step = OnboardingStep.CONNECT,
-                    choice = ConnectionChoice.BOUNCER,
-                    connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
-                    stateLog = listOf(IrcClientState.Connecting, IrcClientState.Registering),
-                    bouncerDiscovery = BouncerDiscoveryState.Loaded(
-                        listOf(
-                            BouncerNetworkRow("1", "Libera", selected = true),
-                            BouncerNetworkRow("2", "OFTC", selected = false),
-                        ),
+                state =
+                    OnboardingState(
+                        step = OnboardingStep.CONNECT,
+                        choice = ConnectionChoice.BOUNCER,
+                        connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
+                        stateLog = listOf(IrcClientState.Connecting, IrcClientState.Registering),
+                        bouncerDiscovery =
+                            BouncerDiscoveryState.Loaded(
+                                listOf(
+                                    BouncerNetworkRow("1", "Libera", selected = true),
+                                    BouncerNetworkRow("2", "OFTC", selected = false),
+                                ),
+                            ),
                     ),
-                ),
-                onNext = {}, onBack = {}, onSkip = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
-                onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
-                onRetryBouncerDiscovery = {}, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onSelectHistoryDepth = {}, onFinish = {},
-                onConfirmPlaintext = {}, onDismissPlaintext = {},
+                onNext = {},
+                onBack = {},
+                onSkip = {},
+                onChoose = {},
+                onChooseBouncerKind = {},
+                onSelectPreset = {},
+                onServerChange = {},
+                onAuthChange = {},
+                onSojuLoginChange = {},
+                onZncLoginChange = {},
+                onRetry = {},
+                onRetryBouncerDiscovery = {},
+                onToggleBouncer = {},
+                onBouncerAddDraftChange = {},
+                onAddBouncer = {},
+                onSelectHistoryDepth = {},
+                onFinish = {},
+                onConfirmPlaintext = {},
+                onDismissPlaintext = {},
             )
         }
     }

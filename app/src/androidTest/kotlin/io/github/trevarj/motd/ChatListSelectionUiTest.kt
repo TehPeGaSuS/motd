@@ -13,13 +13,13 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
 import io.github.trevarj.motd.data.db.BufferType
@@ -27,14 +27,14 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.ui.chatlist.ArchiveAccessibilityAnnouncement
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
-import io.github.trevarj.motd.ui.chatlist.ChatListState
 import io.github.trevarj.motd.ui.chatlist.ChatListInvitation
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
-import io.github.trevarj.motd.ui.chatlist.ArchiveAccessibilityAnnouncement
+import io.github.trevarj.motd.ui.chatlist.ChatListState
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import org.junit.Rule
 import org.junit.Assert.assertEquals
+import org.junit.Rule
 import org.junit.Test
 
 class ChatListSelectionUiTest {
@@ -47,41 +47,51 @@ class ChatListSelectionUiTest {
             }
         }
 
-        compose.onNodeWithTag("chatlist_row_1")
+        compose
+            .onNodeWithTag("chatlist_row_1")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
     }
 
     @Test fun invitation_folder_hides_after_all_are_handled_until_another_arrives() {
         val first = invitation(11, "#one")
         val second = invitation(12, "#two")
-        val state = mutableStateOf(
-            ChatListState(
-                rows = listOf(row()),
-                invitations = listOf(first, second),
-                networks = listOf(network()),
-                loading = false,
-            ),
-        )
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    rows = listOf(row()),
+                    invitations = listOf(first, second),
+                    networks = listOf(network()),
+                    loading = false,
+                ),
+            )
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 ChatListContent(
                     state = state.value,
-                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
-                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
-                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
+                    onOpenBuffer = {},
+                    onOpenSettings = {},
+                    onOpenSearch = {},
+                    onSetPinned = { _, _ -> },
+                    onSetMuted = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
                     onAcceptInvitation = { id ->
-                        state.value = state.value.copy(
-                            invitations = state.value.invitations.map {
-                                if (it.messageId == id) it.copy(state = InviteState.JOINED) else it
-                            },
-                        )
+                        state.value =
+                            state.value.copy(
+                                invitations =
+                                    state.value.invitations.map {
+                                        if (it.messageId == id) it.copy(state = InviteState.JOINED) else it
+                                    },
+                            )
                     },
                     onIgnoreInvitation = { id ->
-                        state.value = state.value.copy(
-                            invitations = state.value.invitations.map {
-                                if (it.messageId == id) it.copy(state = InviteState.DISMISSED) else it
-                            },
-                        )
+                        state.value =
+                            state.value.copy(
+                                invitations =
+                                    state.value.invitations.map {
+                                        if (it.messageId == id) it.copy(state = InviteState.DISMISSED) else it
+                                    },
+                            )
                     },
                 )
             }
@@ -92,9 +102,11 @@ class ChatListSelectionUiTest {
         compose.onNodeWithTag("chatlist_invitation_join_11").performClick()
         compose.onNodeWithTag("chatlist_invitation_ignore_12").performClick()
 
-        compose.onNodeWithTag("chatlist_invitation_11")
+        compose
+            .onNodeWithTag("chatlist_invitation_11")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Joined"))
-        compose.onNodeWithTag("chatlist_invitation_12")
+        compose
+            .onNodeWithTag("chatlist_invitation_12")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Ignored"))
         assertEquals(0, compose.onAllNodesWithTag("chatlist_invitation_join_11").fetchSemanticsNodes().size)
         assertEquals(0, compose.onAllNodesWithTag("chatlist_invitation_ignore_12").fetchSemanticsNodes().size)
@@ -103,9 +115,10 @@ class ChatListSelectionUiTest {
         assertEquals(0, compose.onAllNodesWithTag("chatlist_invitations_folder").fetchSemanticsNodes().size)
 
         compose.runOnIdle {
-            state.value = state.value.copy(
-                invitations = state.value.invitations + invitation(13, "#three"),
-            )
+            state.value =
+                state.value.copy(
+                    invitations = state.value.invitations + invitation(13, "#three"),
+                )
         }
         compose.onNodeWithTag("chatlist_invitations_folder").assertIsDisplayed()
     }
@@ -115,9 +128,13 @@ class ChatListSelectionUiTest {
             MotdTheme(dynamicColor = false) {
                 ChatListContent(
                     state = ChatListState(rows = listOf(row().copy(displayName = "fool")), fools = setOf("fool"), loading = false),
-                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
-                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
-                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
+                    onOpenBuffer = {},
+                    onOpenSettings = {},
+                    onOpenSearch = {},
+                    onSetPinned = { _, _ -> },
+                    onSetMuted = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
                 )
             }
         }
@@ -137,37 +154,47 @@ class ChatListSelectionUiTest {
             MotdTheme(dynamicColor = false) {
                 ChatListContent(
                     state = ChatListState(loading = false),
-                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
-                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
-                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
+                    onOpenBuffer = {},
+                    onOpenSettings = {},
+                    onOpenSearch = {},
+                    onSetPinned = { _, _ -> },
+                    onSetMuted = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
                 )
             }
         }
 
         // Scope to the title bar: the drawer brand header now renders the same "motd" wordmark, so
         // an unscoped match finds two nodes. The title bar is the one these tests mean to assert.
-        compose.onNode(
-            hasText("motd") and hasAnyAncestor(hasTestTag("chatlist_top_app_bar")),
-            useUnmergedTree = true,
-        ).assertIsDisplayed()
+        compose
+            .onNode(
+                hasText("motd") and hasAnyAncestor(hasTestTag("chatlist_top_app_bar")),
+                useUnmergedTree = true,
+            ).assertIsDisplayed()
         assertEquals(0, compose.onAllNodesWithText("/motd").fetchSemanticsNodes().size)
     }
 
     @Test fun empty_archive_uses_archive_specific_copy_without_connection_prompt() {
-        val state = mutableStateOf(
-            ChatListState(
-                archivedRows = listOf(row().copy(archived = true)),
-                networks = listOf(network()),
-                loading = false,
-            ),
-        )
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    archivedRows = listOf(row().copy(archived = true)),
+                    networks = listOf(network()),
+                    loading = false,
+                ),
+            )
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 ChatListContent(
                     state = state.value,
-                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
-                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
-                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
+                    onOpenBuffer = {},
+                    onOpenSettings = {},
+                    onOpenSearch = {},
+                    onSetPinned = { _, _ -> },
+                    onSetMuted = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
                 )
             }
         }
@@ -178,8 +205,10 @@ class ChatListSelectionUiTest {
         compose.onNodeWithText("No archived chats yet").assertIsDisplayed()
         assertEquals(
             0,
-            compose.onAllNodesWithText("Connect to a network to start chatting.")
-                .fetchSemanticsNodes().size,
+            compose
+                .onAllNodesWithText("Connect to a network to start chatting.")
+                .fetchSemanticsNodes()
+                .size,
         )
     }
 
@@ -189,10 +218,14 @@ class ChatListSelectionUiTest {
             MotdTheme(dynamicColor = false) {
                 ChatListContent(
                     state = ChatListState(rows = listOf(row()), loading = false),
-                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
-                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
+                    onOpenBuffer = {},
+                    onOpenSettings = {},
+                    onOpenSearch = {},
+                    onSetPinned = { _, _ -> },
+                    onSetMuted = { _, _ -> },
                     onSetArchived = { ids, archived -> archiveCalls += ids.toList() to archived },
-                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
                 )
             }
         }
@@ -213,18 +246,23 @@ class ChatListSelectionUiTest {
             MotdTheme(dynamicColor = false) {
                 ChatListContent(
                     state = state.value,
-                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
-                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
+                    onOpenBuffer = {},
+                    onOpenSettings = {},
+                    onOpenSearch = {},
+                    onSetPinned = { _, _ -> },
+                    onSetMuted = { _, _ -> },
                     onSetArchived = { ids, archivedFlag ->
                         if (ids == listOf(active.bufferId)) {
-                            state.value = if (archivedFlag) {
-                                state.value.copy(rows = listOf(remaining), archivedRows = listOf(archived))
-                            } else {
-                                state.value.copy(rows = listOf(active, remaining), archivedRows = emptyList())
-                            }
+                            state.value =
+                                if (archivedFlag) {
+                                    state.value.copy(rows = listOf(remaining), archivedRows = listOf(archived))
+                                } else {
+                                    state.value.copy(rows = listOf(active, remaining), archivedRows = emptyList())
+                                }
                         }
                     },
-                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
                 )
             }
         }
@@ -244,10 +282,11 @@ class ChatListSelectionUiTest {
 
         // Scope to the title bar: the drawer brand header now renders the same "motd" wordmark, so
         // an unscoped match finds two nodes. The title bar is the one these tests mean to assert.
-        compose.onNode(
-            hasText("motd") and hasAnyAncestor(hasTestTag("chatlist_top_app_bar")),
-            useUnmergedTree = true,
-        ).assertIsDisplayed()
+        compose
+            .onNode(
+                hasText("motd") and hasAnyAncestor(hasTestTag("chatlist_top_app_bar")),
+                useUnmergedTree = true,
+            ).assertIsDisplayed()
         compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
     }
 
@@ -260,21 +299,28 @@ class ChatListSelectionUiTest {
             MotdTheme(dynamicColor = false) {
                 ChatListContent(
                     state = state.value,
-                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
-                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
+                    onOpenBuffer = {},
+                    onOpenSettings = {},
+                    onOpenSearch = {},
+                    onSetPinned = { _, _ -> },
+                    onSetMuted = { _, _ -> },
                     onSetArchived = { ids, archivedFlag ->
                         if (ids == listOf(archived.bufferId) && !archivedFlag) {
                             state.value = state.value.copy(rows = listOf(restored, active), archivedRows = emptyList())
                         }
                     },
-                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
                 )
             }
         }
 
-        val revealAction = compose.onNodeWithTag("chatlist_archive_pull_target")
-            .fetchSemanticsNode().config[SemanticsActions.CustomActions]
-            .single { it.label == "Reveal archived chats" }
+        val revealAction =
+            compose
+                .onNodeWithTag("chatlist_archive_pull_target")
+                .fetchSemanticsNode()
+                .config[SemanticsActions.CustomActions]
+                .single { it.label == "Reveal archived chats" }
         compose.runOnIdle { assertEquals(true, revealAction.action()) }
         compose.onNodeWithText("Archived Chats (1)").performTouchInput { click() }
         compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeLeft() }
@@ -285,10 +331,11 @@ class ChatListSelectionUiTest {
 
         // Scope to the title bar: the drawer brand header now renders the same "motd" wordmark, so
         // an unscoped match finds two nodes. The title bar is the one these tests mean to assert.
-        compose.onNode(
-            hasText("motd") and hasAnyAncestor(hasTestTag("chatlist_top_app_bar")),
-            useUnmergedTree = true,
-        ).assertIsDisplayed()
+        compose
+            .onNode(
+                hasText("motd") and hasAnyAncestor(hasTestTag("chatlist_top_app_bar")),
+                useUnmergedTree = true,
+            ).assertIsDisplayed()
         compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
         assertEquals(0, compose.onAllNodesWithText("No archived chats yet").fetchSemanticsNodes().size)
     }
@@ -299,10 +346,14 @@ class ChatListSelectionUiTest {
             MotdTheme(dynamicColor = false) {
                 ChatListContent(
                     state = ChatListState(rows = listOf(row()), loading = false),
-                    onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
-                    onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
+                    onOpenBuffer = {},
+                    onOpenSettings = {},
+                    onOpenSearch = {},
+                    onSetPinned = { _, _ -> },
+                    onSetMuted = { _, _ -> },
                     onSetArchived = { ids, archived -> archiveCalls += ids.toList() to archived },
-                    onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
                 )
             }
         }
@@ -323,22 +374,37 @@ class ChatListSelectionUiTest {
         }
 
         compose.runOnIdle { announcement.value = "Archived chats revealed" }
-        compose.onNodeWithTag("chatlist_archive_announcement")
+        compose
+            .onNodeWithTag("chatlist_archive_announcement")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
             .assertTextEquals("Archived chats revealed")
 
         compose.runOnIdle { announcement.value = "Archived chats hidden" }
-        compose.onNodeWithTag("chatlist_archive_announcement")
+        compose
+            .onNodeWithTag("chatlist_archive_announcement")
             .assertTextEquals("Archived chats hidden")
     }
 
-    private fun row() = ChatListRow(
-        bufferId = 1, networkId = 1, networkName = "network", displayName = "alice",
-        type = BufferType.QUERY, pinned = false, muted = false, lastMessageText = "hello",
-        lastMessageSender = "alice", lastMessageTime = 1, unreadCount = 0, mentionCount = 0,
-    )
+    private fun row() =
+        ChatListRow(
+            bufferId = 1,
+            networkId = 1,
+            networkName = "network",
+            displayName = "alice",
+            type = BufferType.QUERY,
+            pinned = false,
+            muted = false,
+            lastMessageText = "hello",
+            lastMessageSender = "alice",
+            lastMessageTime = 1,
+            unreadCount = 0,
+            mentionCount = 0,
+        )
 
-    private fun invitation(id: Long, channel: String) = ChatListInvitation(
+    private fun invitation(
+        id: Long,
+        channel: String,
+    ) = ChatListInvitation(
         messageId = id,
         bufferId = id + 100,
         networkId = 1,
@@ -350,14 +416,15 @@ class ChatListSelectionUiTest {
         serverTime = id,
     )
 
-    private fun network() = NetworkEntity(
-        id = 1,
-        name = "network",
-        role = NetworkRole.DIRECT,
-        host = "irc.example.test",
-        port = 6697,
-        nick = "me",
-        username = "me",
-        realname = "Me",
-    )
+    private fun network() =
+        NetworkEntity(
+            id = 1,
+            name = "network",
+            role = NetworkRole.DIRECT,
+            host = "irc.example.test",
+            port = 6697,
+            nick = "me",
+            username = "me",
+            realname = "Me",
+        )
 }

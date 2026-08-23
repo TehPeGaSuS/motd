@@ -19,29 +19,36 @@ private const val TEXT_CONTRAST = 4.5
 private const val NON_TEXT_CONTRAST = 3.0
 internal const val BUBBLE_CONTAINER_CONTRAST = 1.30
 
-private val MotdLightRaw = lightColorScheme(
-    primary = MotdTeal,
-    secondary = MotdOrchid,
-    tertiary = MotdCoral,
-)
+private val MotdLightRaw =
+    lightColorScheme(
+        primary = MotdTeal,
+        secondary = MotdOrchid,
+        tertiary = MotdCoral,
+    )
 
-private val MotdDarkRaw = darkColorScheme(
-    primary = MotdTeal,
-    secondary = MotdOrchid,
-    tertiary = MotdCoral,
-)
+private val MotdDarkRaw =
+    darkColorScheme(
+        primary = MotdTeal,
+        secondary = MotdOrchid,
+        tertiary = MotdCoral,
+    )
 
 internal val MotdLightScheme: ColorScheme = accessibleColorScheme(MotdLightRaw, dark = false)
 internal val MotdDarkScheme: ColorScheme = accessibleColorScheme(MotdDarkRaw, dark = true)
 
-internal fun contrastRatio(a: Color, b: Color): Double {
+internal fun contrastRatio(
+    a: Color,
+    b: Color,
+): Double {
     val lighter = max(a.luminance(), b.luminance()).toDouble()
     val darker = min(a.luminance(), b.luminance()).toDouble()
     return (lighter + 0.05) / (darker + 0.05)
 }
 
-private fun minimumContrast(foreground: Color, backgrounds: List<Color>): Double =
-    backgrounds.minOf { contrastRatio(foreground, it) }
+private fun minimumContrast(
+    foreground: Color,
+    backgrounds: List<Color>,
+): Double = backgrounds.minOf { contrastRatio(foreground, it) }
 
 /** Move only the tone toward black or white, choosing the smallest contrast-safe change. */
 internal fun ensureContrast(
@@ -51,8 +58,9 @@ internal fun ensureContrast(
 ): Color {
     if (backgrounds.isEmpty() || minimumContrast(foreground, backgrounds) >= minimum) return foreground
 
-    val targets = listOf(Color.Black, Color.White)
-        .filter { minimumContrast(it, backgrounds) >= minimum }
+    val targets =
+        listOf(Color.Black, Color.White)
+            .filter { minimumContrast(it, backgrounds) >= minimum }
     if (targets.isEmpty()) {
         return listOf(Color.Black, Color.White).maxBy { minimumContrast(it, backgrounds) }
     }
@@ -64,8 +72,11 @@ internal fun ensureContrast(
         var high = 1f
         repeat(24) {
             val mid = (low + high) / 2f
-            if (minimumContrast(lerp(foreground, target, mid), backgrounds) >= minimum) high = mid
-            else low = mid
+            if (minimumContrast(lerp(foreground, target, mid), backgrounds) >= minimum) {
+                high = mid
+            } else {
+                low = mid
+            }
         }
         if (high < bestAmount) {
             bestAmount = high
@@ -76,8 +87,11 @@ internal fun ensureContrast(
 }
 
 internal fun bestOnColor(background: Color): Color =
-    if (contrastRatio(Color.White, background) >= contrastRatio(Color.Black, background)) Color.White
-    else Color.Black
+    if (contrastRatio(Color.White, background) >= contrastRatio(Color.Black, background)) {
+        Color.White
+    } else {
+        Color.Black
+    }
 
 /** Preserve hue where possible while making a filled surface visibly distinct from the canvas. */
 private fun ensureContainerContrast(
@@ -92,50 +106,78 @@ private fun ensureContainerContrast(
     var high = 1f
     repeat(24) {
         val mid = (low + high) / 2f
-        if (contrastRatio(lerp(container, target, mid), background) >= minimum) high = mid
-        else low = mid
+        if (contrastRatio(lerp(container, target, mid), background) >= minimum) {
+            high = mid
+        } else {
+            low = mid
+        }
     }
     return lerp(container, target, high)
 }
 
-internal fun accessibleColorScheme(raw: ColorScheme, dark: Boolean): ColorScheme {
-    val surfaceContainerLow = ensureContainerContrast(
-        raw.surfaceContainerLow, raw.background, dark, 1.08,
-    )
-    val surfaceContainer = ensureContainerContrast(
-        raw.surfaceContainer, raw.background, dark, 1.16,
-    )
-    val surfaceContainerHigh = ensureContainerContrast(
-        raw.surfaceContainerHigh, raw.background, dark, BUBBLE_CONTAINER_CONTRAST,
-    )
-    val surfaceContainerHighest = ensureContainerContrast(
-        raw.surfaceContainerHighest, raw.background, dark, 1.45,
-    )
-    val surfaceVariant = ensureContainerContrast(
-        raw.surfaceVariant, raw.background, dark, BUBBLE_CONTAINER_CONTRAST,
-    )
-    val neutralSurfaces = listOf(
-        raw.background,
-        raw.surface,
-        raw.surfaceContainerLowest,
-        surfaceContainerLow,
-        surfaceContainer,
-        surfaceContainerHigh,
-        surfaceContainerHighest,
-        surfaceVariant,
-    )
+internal fun accessibleColorScheme(
+    raw: ColorScheme,
+    dark: Boolean,
+): ColorScheme {
+    val surfaceContainerLow =
+        ensureContainerContrast(
+            raw.surfaceContainerLow,
+            raw.background,
+            dark,
+            1.08,
+        )
+    val surfaceContainer =
+        ensureContainerContrast(
+            raw.surfaceContainer,
+            raw.background,
+            dark,
+            1.16,
+        )
+    val surfaceContainerHigh =
+        ensureContainerContrast(
+            raw.surfaceContainerHigh,
+            raw.background,
+            dark,
+            BUBBLE_CONTAINER_CONTRAST,
+        )
+    val surfaceContainerHighest =
+        ensureContainerContrast(
+            raw.surfaceContainerHighest,
+            raw.background,
+            dark,
+            1.45,
+        )
+    val surfaceVariant =
+        ensureContainerContrast(
+            raw.surfaceVariant,
+            raw.background,
+            dark,
+            BUBBLE_CONTAINER_CONTRAST,
+        )
+    val neutralSurfaces =
+        listOf(
+            raw.background,
+            raw.surface,
+            raw.surfaceContainerLowest,
+            surfaceContainerLow,
+            surfaceContainer,
+            surfaceContainerHigh,
+            surfaceContainerHighest,
+            surfaceVariant,
+        )
     val onSurface = ensureContrast(raw.onSurface, neutralSurfaces)
     val onSurfaceVariant = ensureContrast(raw.onSurfaceVariant, neutralSurfaces)
     val primary = ensureContrast(raw.primary, neutralSurfaces)
     val secondary = ensureContrast(raw.secondary, neutralSurfaces)
     val tertiary = ensureContrast(raw.tertiary, neutralSurfaces)
 
-    fun container(accent: Color): Color = ensureContainerContrast(
-        lerp(raw.background, accent, if (dark) 0.22f else 0.16f),
-        raw.background,
-        dark,
-        BUBBLE_CONTAINER_CONTRAST,
-    )
+    fun container(accent: Color): Color =
+        ensureContainerContrast(
+            lerp(raw.background, accent, if (dark) 0.22f else 0.16f),
+            raw.background,
+            dark,
+            BUBBLE_CONTAINER_CONTRAST,
+        )
     val primaryContainer = container(raw.primary)
     val secondaryContainer = container(raw.secondary)
     val tertiaryContainer = container(raw.tertiary)
@@ -227,7 +269,10 @@ private val FixedSchemes: Map<ColorThemePreset, ColorScheme> by lazy {
 
 internal fun fixedThemeScheme(theme: ColorThemePreset): ColorScheme? = FixedSchemes[theme]
 
-private data class Hsl(val hue: Float, val saturation: Float)
+private data class Hsl(
+    val hue: Float,
+    val saturation: Float,
+)
 
 private fun Color.hslIdentity(): Hsl {
     val maximum = max(red, max(green, blue))
@@ -236,11 +281,12 @@ private fun Color.hslIdentity(): Hsl {
     val lightness = (maximum + minimum) / 2f
     if (delta == 0f) return Hsl(0f, 0f)
     val saturation = delta / (1f - abs(2f * lightness - 1f))
-    val hue = when (maximum) {
-        red -> 60f * (((green - blue) / delta) % 6f)
-        green -> 60f * (((blue - red) / delta) + 2f)
-        else -> 60f * (((red - green) / delta) + 4f)
-    }.let { if (it < 0f) it + 360f else it }
+    val hue =
+        when (maximum) {
+            red -> 60f * (((green - blue) / delta) % 6f)
+            green -> 60f * (((blue - red) / delta) + 2f)
+            else -> 60f * (((red - green) / delta) + 4f)
+        }.let { if (it < 0f) it + 360f else it }
     return Hsl(hue, saturation)
 }
 
@@ -248,15 +294,24 @@ private fun Color.hslIdentity(): Hsl {
 internal fun ColorScheme.withTrueBlackSurfaces(): ColorScheme {
     val identity = surfaceContainerHighest.hslIdentity()
     val saturation = identity.saturation.coerceAtMost(0.18f)
+
     fun layer(lightness: Float) = hslColor(identity.hue, saturation, lightness)
     val low = layer(0.05f)
     val container = layer(0.085f)
-    val high = ensureContainerContrast(
-        layer(0.14f), Color.Black, dark = true, minimum = BUBBLE_CONTAINER_CONTRAST,
-    )
-    val highest = ensureContainerContrast(
-        layer(0.18f), Color.Black, dark = true, minimum = 1.45,
-    )
+    val high =
+        ensureContainerContrast(
+            layer(0.14f),
+            Color.Black,
+            dark = true,
+            minimum = BUBBLE_CONTAINER_CONTRAST,
+        )
+    val highest =
+        ensureContainerContrast(
+            layer(0.18f),
+            Color.Black,
+            dark = true,
+            minimum = 1.45,
+        )
     return copy(
         background = Color.Black,
         surface = Color.Black,
@@ -283,28 +338,34 @@ data class MotdSemanticColors(
     val onWarningContainer: Color,
 )
 
-private val DefaultSemanticColors = MotdSemanticColors(
-    success = Color(0xFF147D3F),
-    onSuccess = Color.White,
-    successContainer = Color(0xFFD7F7DF),
-    onSuccessContainer = Color(0xFF082713),
-    warning = Color(0xFF8A4F00),
-    onWarning = Color.White,
-    warningContainer = Color(0xFFFFDDB5),
-    onWarningContainer = Color(0xFF2C1600),
-)
+private val DefaultSemanticColors =
+    MotdSemanticColors(
+        success = Color(0xFF147D3F),
+        onSuccess = Color.White,
+        successContainer = Color(0xFFD7F7DF),
+        onSuccessContainer = Color(0xFF082713),
+        warning = Color(0xFF8A4F00),
+        onWarning = Color.White,
+        warningContainer = Color(0xFFFFDDB5),
+        onWarningContainer = Color(0xFF2C1600),
+    )
 
 val LocalMotdSemanticColors: ProvidableCompositionLocal<MotdSemanticColors> =
     staticCompositionLocalOf { DefaultSemanticColors }
 
-internal fun semanticColors(scheme: ColorScheme, dark: Boolean): MotdSemanticColors {
-    val surfaces = listOf(
-        scheme.background,
-        scheme.surface,
-        scheme.surfaceContainerLow,
-        scheme.surfaceContainerHigh,
-        scheme.surfaceContainerHighest,
-    )
+internal fun semanticColors(
+    scheme: ColorScheme,
+    dark: Boolean,
+): MotdSemanticColors {
+    val surfaces =
+        listOf(
+            scheme.background,
+            scheme.surface,
+            scheme.surfaceContainerLow,
+            scheme.surfaceContainerHigh,
+            scheme.surfaceContainerHighest,
+        )
+
     fun family(seed: Color): Pair<Color, Color> {
         val role = ensureContrast(seed, surfaces)
         val container = lerp(scheme.background, seed, if (dark) 0.22f else 0.16f)
@@ -333,6 +394,7 @@ internal fun contrastSafeOverlay(
     minimum: Double = TEXT_CONTRAST,
 ): Color {
     val requested = requestedAlpha.coerceIn(0f, 1f)
+
     fun composite(alpha: Float) = overlay.copy(alpha = alpha).compositeOver(base)
     if (foregrounds.all { contrastRatio(it, composite(requested)) >= minimum }) {
         return overlay.copy(alpha = requested)

@@ -2,9 +2,9 @@ package io.github.trevarj.motd.push
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import org.unifiedpush.android.connector.UnifiedPush
 import javax.inject.Inject
 import javax.inject.Singleton
-import org.unifiedpush.android.connector.UnifiedPush
 
 /**
  * Testable seam over the static UnifiedPush connector API.
@@ -13,9 +13,13 @@ import org.unifiedpush.android.connector.UnifiedPush
  */
 interface UnifiedPushApi {
     fun getDistributors(): List<String>
+
     fun getAckDistributor(): String?
+
     fun saveDistributor(distributor: String)
+
     fun registerApp(instance: String)
+
     fun unregisterApp(instance: String)
 }
 
@@ -31,12 +35,18 @@ interface UnifiedPushApi {
  * All calls take the application context; the instance string is `networkId.toString()`.
  */
 @Singleton
-class UnifiedPushApiImpl @Inject constructor(
-    @ApplicationContext private val context: Context,
-) : UnifiedPushApi {
-    override fun getDistributors(): List<String> = UnifiedPush.getDistributors(context)
-    override fun getAckDistributor(): String? = UnifiedPush.getAckDistributor(context)
-    override fun saveDistributor(distributor: String) = UnifiedPush.saveDistributor(context, distributor)
-    override fun registerApp(instance: String) = UnifiedPush.register(context, instance)
-    override fun unregisterApp(instance: String) = UnifiedPush.unregister(context, instance)
-}
+class UnifiedPushApiImpl
+    @Inject
+    constructor(
+        @ApplicationContext private val context: Context,
+    ) : UnifiedPushApi {
+        override fun getDistributors(): List<String> = UnifiedPush.getDistributors(context)
+
+        override fun getAckDistributor(): String? = UnifiedPush.getAckDistributor(context)
+
+        override fun saveDistributor(distributor: String) = UnifiedPush.saveDistributor(context, distributor)
+
+        override fun registerApp(instance: String) = UnifiedPush.register(context, instance)
+
+        override fun unregisterApp(instance: String) = UnifiedPush.unregister(context, instance)
+    }

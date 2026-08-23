@@ -31,7 +31,10 @@ class ChatJumpResolver(
     ) -> Boolean,
 ) {
     sealed interface Result {
-        data class Resolved(val target: ChatPositionTarget) : Result
+        data class Resolved(
+            val target: ChatPositionTarget,
+        ) : Result
+
         data object NotFound : Result
     }
 
@@ -102,10 +105,11 @@ private fun io.github.trevarj.motd.data.db.MessageEntity.toPositionTarget(
     index: Int,
     expectedMsgid: String?,
     highlightMsgid: String?,
-): ChatPositionTarget = ChatPositionTarget(
-    index = index,
-    expectedEventId = id,
-    expectedMsgid = expectedMsgid,
-    serverTime = serverTime,
-    highlightMsgid = highlightMsgid,
-)
+): ChatPositionTarget =
+    ChatPositionTarget(
+        index = index,
+        expectedEventId = id,
+        expectedMsgid = expectedMsgid,
+        serverTime = serverTime,
+        highlightMsgid = highlightMsgid,
+    )

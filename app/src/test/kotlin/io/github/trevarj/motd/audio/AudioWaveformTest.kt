@@ -25,10 +25,11 @@ class AudioWaveformTest {
     @Test
     fun `voice fallback carries waveform beside encryption key`() {
         val waveform = AudioWaveform.fromAmplitudes(List(96) { index -> index * 300 })
-        val url = appendAudioWaveform(
-            "https://files.example/voice.motdvoice#motd-key=secret",
-            waveform,
-        )
+        val url =
+            appendAudioWaveform(
+                "https://files.example/voice.motdvoice#motd-key=secret",
+                waveform,
+            )
 
         val attachment = parseAudioAttachments("[voice encrypted 0:12 audio/ogg] $url").single()
 
@@ -39,9 +40,10 @@ class AudioWaveformTest {
 
     @Test
     fun `legacy voice config upgrades missing quality fields`() {
-        val config = Json.decodeFromString<VoiceConfig>(
-            """{"encryptionDefault":true,"rememberedDestination":null}""",
-        )
+        val config =
+            Json.decodeFromString<VoiceConfig>(
+                """{"encryptionDefault":true,"rememberedDestination":null}""",
+            )
 
         assertTrue(config.encryptionDefault)
         assertEquals(VoiceRecordingQuality.BALANCED, config.quality)

@@ -50,10 +50,11 @@ internal fun InlineMediaPreview(
             model = url,
             contentDescription = null,
             contentScale = ContentScale.FillWidth,
-            modifier = modifier.combinedClickable(
-                onClick = { onImageClick(url) },
-                onLongClick = onLongPress,
-            ),
+            modifier =
+                modifier.combinedClickable(
+                    onClick = { onImageClick(url) },
+                    onLongClick = onLongPress,
+                ),
         )
     }
 }
@@ -67,13 +68,14 @@ private fun InlineVideoPreview(
     var playing by rememberSaveable(url) { mutableStateOf(false) }
     if (playing) {
         val context = LocalContext.current
-        val player = remember(url) {
-            ExoPlayer.Builder(context).build().apply {
-                setMediaItem(MediaItem.fromUri(url))
-                prepare()
-                play()
+        val player =
+            remember(url) {
+                ExoPlayer.Builder(context).build().apply {
+                    setMediaItem(MediaItem.fromUri(url))
+                    prepare()
+                    play()
+                }
             }
-        }
         DisposableEffect(player) {
             onDispose(player::release)
         }
@@ -89,20 +91,23 @@ private fun InlineVideoPreview(
         )
     } else {
         val context = LocalContext.current
-        val frame = remember(url) {
-            ImageRequest.Builder(context)
-                .data(url)
-                .videoFrameMillis(0)
-                .build()
-        }
+        val frame =
+            remember(url) {
+                ImageRequest
+                    .Builder(context)
+                    .data(url)
+                    .videoFrameMillis(0)
+                    .build()
+            }
         Box(
             contentAlignment = Alignment.Center,
-            modifier = modifier
-                .testTag("inline_video_preview")
-                .combinedClickable(
-                    onClick = { playing = true },
-                    onLongClick = onLongPress,
-                ),
+            modifier =
+                modifier
+                    .testTag("inline_video_preview")
+                    .combinedClickable(
+                        onClick = { playing = true },
+                        onLongClick = onLongPress,
+                    ),
         ) {
             AsyncImage(
                 model = frame,

@@ -20,6 +20,7 @@ enum class NetworkRole { DIRECT, BOUNCER_ROOT, BOUNCER_CHILD }
  * loopback SOCKS5 endpoint to the transport.
  */
 enum class ObfsMode { NONE, SOCKS5, TOR, EMBEDDED_REALITY }
+
 enum class BufferType { CHANNEL, QUERY, SERVER }
 typealias RoomId = Long
 typealias TimelineEventId = Long
@@ -40,22 +41,52 @@ data class TimelineAnchor(
 }
 
 enum class RoomAliasNamespace { CHANNEL, ACCOUNT, VERIFIED_NICK, PROVISIONAL_NICK, LEGACY_NAME }
+
 enum class EventAliasNamespace { MSGID, LABEL, EXACT_FINGERPRINT, BATCH_POSITION, TYPED_EVENT }
+
 enum class ObservationOrigin { LIVE, PUSH, HISTORY, LOCAL_SEND }
+
 enum class TimeProvenance { SERVER_TAG, LOCAL_CLOCK, UNKNOWN }
+
 enum class MessageKind {
-    PRIVMSG, NOTICE, ACTION, JOIN, PART, QUIT, KICK, NICK, MODE, TOPIC, ERROR, SERVER_INFO,
-    INVITE, NETSPLIT, NETJOIN, DCC_TRANSFER, DCC_UNSUPPORTED,
+    PRIVMSG,
+    NOTICE,
+    ACTION,
+    JOIN,
+    PART,
+    QUIT,
+    KICK,
+    NICK,
+    MODE,
+    TOPIC,
+    ERROR,
+    SERVER_INFO,
+    INVITE,
+    NETSPLIT,
+    NETJOIN,
+    DCC_TRANSFER,
+    DCC_UNSUPPORTED,
 }
 
 /** Durable state for an invitation timeline event. Null for every non-invitation message. */
 enum class InviteState { PENDING, JOINING, JOINED, DISMISSED, FAILED, HISTORICAL }
 
 enum class DccDirection { INCOMING, OUTGOING }
+
 enum class DccTransferProtocol { SEND, SSEND }
+
 enum class DccAddressKind { IPV4_INTEGER, IPV4_DOTTED, IPV6_LITERAL }
+
 enum class DccTransferState {
-    OFFERED, ACCEPTING, ACTIVE, PARTIAL, COMPLETED, FAILED, REJECTED, EXPIRED, REMOVED,
+    OFFERED,
+    ACCEPTING,
+    ACTIVE,
+    PARTIAL,
+    COMPLETED,
+    FAILED,
+    REJECTED,
+    EXPIRED,
+    REMOVED,
 }
 
 @Entity(tableName = "networks")
@@ -63,12 +94,17 @@ data class NetworkEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val role: NetworkRole,
-    val parentId: Long? = null,          // BOUNCER_CHILD -> its BOUNCER_ROOT row
+    val parentId: Long? = null, // BOUNCER_CHILD -> its BOUNCER_ROOT row
     val bouncerNetId: String? = null,
-    val host: String, val port: Int, val tls: Boolean = true,
-    val nick: String, val username: String, val realname: String,
-    val saslMechanism: String = "NONE",  // SaslMechanism.name
-    val saslUser: String? = null, val saslPassword: String? = null,
+    val host: String,
+    val port: Int,
+    val tls: Boolean = true,
+    val nick: String,
+    val username: String,
+    val realname: String,
+    val saslMechanism: String = "NONE", // SaslMechanism.name
+    val saslUser: String? = null,
+    val saslPassword: String? = null,
     /** Optional IRC PASS value. Kept separate because servers may require PASS with or without SASL. */
     val serverPassword: String? = null,
     /** Optional NickServ fallback for direct connections without SASL. */
@@ -113,12 +149,14 @@ data class NetworkEntity(
 /** Latest identity-related ISUPPORT values advertised by one network. */
 @Entity(
     tableName = "network_identity",
-    foreignKeys = [ForeignKey(
-        entity = NetworkEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["networkId"],
-        onDelete = ForeignKey.CASCADE,
-    )],
+    foreignKeys = [
+        ForeignKey(
+            entity = NetworkEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["networkId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
 )
 data class NetworkIdentityEntity(
     @PrimaryKey val networkId: Long,
@@ -138,12 +176,14 @@ val NetworkIdentityEntity.identityRules: IrcIdentityRules
     indices = [
         Index(value = ["networkId", "pattern"], unique = true),
     ],
-    foreignKeys = [ForeignKey(
-        entity = NetworkEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["networkId"],
-        onDelete = ForeignKey.CASCADE,
-    )],
+    foreignKeys = [
+        ForeignKey(
+            entity = NetworkEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["networkId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
 )
 data class NetworkIgnoreEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -159,26 +199,32 @@ data class NetworkIgnoreEntity(
         Index(value = ["networkId", "name"], unique = true),
         Index(value = ["redirectToRoomId"]),
     ],
-    foreignKeys = [ForeignKey(
-        entity = NetworkEntity::class, parentColumns = ["id"],
-        childColumns = ["networkId"], onDelete = ForeignKey.CASCADE
-    )]
+    foreignKeys = [
+        ForeignKey(
+            entity = NetworkEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["networkId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
 )
 data class RoomEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val networkId: Long,
-    val name: String,                    // case-normalized
+    val name: String, // case-normalized
     val displayName: String,
     val type: BufferType,
-    val topic: String? = null, val topicSetBy: String? = null,
+    val topic: String? = null,
+    val topicSetBy: String? = null,
     val joined: Boolean = false,
     /** Incremented only by explicit self PART/KICK, so reconnect JOIN replay stays in one cycle. */
     val membershipCycle: Long = 0,
-    val pinned: Boolean = false, val muted: Boolean = false,
+    val pinned: Boolean = false,
+    val muted: Boolean = false,
     /** Hidden from the active chat list without altering membership, history, or read state. */
     val archived: Boolean = false,
     val ordering: Int = 0,
-    val readMarkerTime: Long? = null,    // last known remote draft/read-marker timestamp
+    val readMarkerTime: Long? = null, // last known remote draft/read-marker timestamp
     val localReadAnchorTime: Long? = null,
     val localReadAnchorEventId: TimelineEventId? = null,
     val localUnreadFloorTime: Long? = null, // local-only mute backlog floor; never synced
@@ -231,12 +277,14 @@ typealias BufferEntity = RoomEntity
 @Entity(
     tableName = "discarded_message_ids",
     primaryKeys = ["roomId", "msgid"],
-    foreignKeys = [ForeignKey(
-        entity = RoomEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["roomId"],
-        onDelete = ForeignKey.CASCADE,
-    )],
+    foreignKeys = [
+        ForeignKey(
+            entity = RoomEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["roomId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
 )
 data class DiscardedMessageIdEntity(
     val roomId: RoomId,
@@ -290,10 +338,14 @@ data class RoomAliasEntity(
         // without an actor-leading index that lookup degrades to a serverTime range scan per row.
         Index(value = ["bufferId", "normalizedActor", "serverTime"]),
     ],
-    foreignKeys = [ForeignKey(
-        entity = BufferEntity::class, parentColumns = ["id"],
-        childColumns = ["bufferId"], onDelete = ForeignKey.CASCADE
-    )]
+    foreignKeys = [
+        ForeignKey(
+            entity = BufferEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["bufferId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
 )
 data class TimelineEventEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -306,26 +358,27 @@ data class TimelineEventEntity(
     val kind: MessageKind,
     val text: String,
     val isSelf: Boolean = false,
-    val hasMention: Boolean = false,     // computed at insert by EventProcessor
+    val hasMention: Boolean = false, // computed at insert by EventProcessor
     val replyToMsgid: String? = null,
     val replyToEventId: TimelineEventId? = null,
-    val pendingLabel: String? = null,    // set while awaiting echo; null once confirmed
-    val failed: Boolean = false,         // echo timeout -> retry UI
+    val pendingLabel: String? = null, // set while awaiting echo; null once confirmed
+    val failed: Boolean = false, // echo timeout -> retry UI
     /** Diagnostic compatibility value. Identity is enforced only by event_aliases. */
     val dedupKey: String,
-    val eventKey: String? = null,        // stable identity for INVITE/NETSPLIT/NETJOIN
-    val eventPayload: String? = null,    // versioned, defensively decoded typed-event payload
+    val eventKey: String? = null, // stable identity for INVITE/NETSPLIT/NETJOIN
+    val eventPayload: String? = null, // versioned, defensively decoded typed-event payload
     val inviteState: InviteState? = null,
     val serverTimeAuthoritative: Boolean = true,
     /** Stable presentation tie-break independent of first local insertion id. */
     val timelineOrder: Long = id,
     /** Once a completed playback establishes relative order, later conflicts cannot oscillate it. */
     val timelineOrderConfirmed: Boolean = false,
-    val timeProvenance: TimeProvenance = if (serverTimeAuthoritative) {
-        TimeProvenance.SERVER_TAG
-    } else {
-        TimeProvenance.LOCAL_CLOCK
-    },
+    val timeProvenance: TimeProvenance =
+        if (serverTimeAuthoritative) {
+            TimeProvenance.SERVER_TAG
+        } else {
+            TimeProvenance.LOCAL_CLOCK
+        },
     val notificationHandled: Boolean = false,
     /** Durable two-phase notification claim; reset on startup before database-backed recovery. */
     val notificationClaimed: Boolean = false,
@@ -390,18 +443,23 @@ data class DccTransferEntity(
 
 @Fts4(contentEntity = TimelineEventEntity::class)
 @Entity(tableName = "messages_fts")
-data class TimelineEventFtsEntity(val text: String, val sender: String)
+data class TimelineEventFtsEntity(
+    val text: String,
+    val sender: String,
+)
 
 typealias MessageFtsEntity = TimelineEventFtsEntity
 
 @Entity(
     tableName = "composer_drafts",
-    foreignKeys = [ForeignKey(
-        entity = RoomEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["roomId"],
-        onDelete = ForeignKey.CASCADE,
-    )],
+    foreignKeys = [
+        ForeignKey(
+            entity = RoomEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["roomId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
 )
 data class ComposerDraftEntity(
     @PrimaryKey val roomId: RoomId,
@@ -445,12 +503,14 @@ data class EventAliasEntity(
 @Entity(
     tableName = "event_redirects",
     indices = [Index(value = ["canonicalEventId"])],
-    foreignKeys = [ForeignKey(
-        entity = TimelineEventEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["canonicalEventId"],
-        onDelete = ForeignKey.CASCADE,
-    )],
+    foreignKeys = [
+        ForeignKey(
+            entity = TimelineEventEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["canonicalEventId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
 )
 data class EventRedirectEntity(
     @PrimaryKey val losingEventId: TimelineEventId,
@@ -494,12 +554,14 @@ data class EventObservationEntity(
 
 @Entity(
     tableName = "history_cursors",
-    foreignKeys = [ForeignKey(
-        entity = RoomEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["roomId"],
-        onDelete = ForeignKey.CASCADE,
-    )],
+    foreignKeys = [
+        ForeignKey(
+            entity = RoomEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["roomId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
 )
 data class HistoryCursorEntity(
     @PrimaryKey val roomId: RoomId,
@@ -521,12 +583,14 @@ data class HistoryCursorEntity(
         Index(value = ["roomId", "olderServerTime"]),
         Index(value = ["roomId", "newerServerTime"]),
     ],
-    foreignKeys = [ForeignKey(
-        entity = RoomEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["roomId"],
-        onDelete = ForeignKey.CASCADE,
-    )],
+    foreignKeys = [
+        ForeignKey(
+            entity = RoomEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["roomId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
 )
 data class HistoryGapEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -547,12 +611,14 @@ data class HistoryGapEntity(
 /** Whole-network discovery watermark, colocated with the canonical room/history graph. */
 @Entity(
     tableName = "network_history_cursors",
-    foreignKeys = [ForeignKey(
-        entity = NetworkEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["networkId"],
-        onDelete = ForeignKey.CASCADE,
-    )],
+    foreignKeys = [
+        ForeignKey(
+            entity = NetworkEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["networkId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
 )
 data class NetworkHistoryCursorEntity(
     @PrimaryKey val networkId: Long,
@@ -568,12 +634,14 @@ data class NetworkHistoryCursorEntity(
  */
 @Entity(
     tableName = "history_backfill_cursors",
-    foreignKeys = [ForeignKey(
-        entity = NetworkEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["networkId"],
-        onDelete = ForeignKey.CASCADE,
-    )],
+    foreignKeys = [
+        ForeignKey(
+            entity = NetworkEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["networkId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
 )
 data class HistoryBackfillCursorEntity(
     @PrimaryKey val networkId: Long,
@@ -585,12 +653,14 @@ data class HistoryBackfillCursorEntity(
 /** Monotonic process-independent connection identity used to scope outgoing label aliases. */
 @Entity(
     tableName = "connection_generations",
-    foreignKeys = [ForeignKey(
-        entity = NetworkEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["networkId"],
-        onDelete = ForeignKey.CASCADE,
-    )],
+    foreignKeys = [
+        ForeignKey(
+            entity = NetworkEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["networkId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
 )
 data class ConnectionGenerationEntity(
     @PrimaryKey val networkId: Long,
@@ -612,22 +682,31 @@ data class AppStateEntity(
 )
 data class ReactionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val bufferId: Long, val targetMsgid: String,
+    val bufferId: Long,
+    val targetMsgid: String,
     /** Account identity when advertised, otherwise an IRC-casemapped nick identity. */
     val actorKey: String,
     /** Display spelling retained independently from [actorKey]. */
     val sender: String,
-    val emoji: String, val serverTime: Long,
+    val emoji: String,
+    val serverTime: Long,
     val targetEventId: TimelineEventId? = null,
 )
 
 @Entity(tableName = "users", primaryKeys = ["networkId", "nick"])
 data class UserEntity(
-    val networkId: Long, val nick: String,
+    val networkId: Long,
+    val nick: String,
     val username: String? = null,
-    val account: String? = null, val away: Boolean = false,
-    val hostmask: String? = null, val realname: String? = null,
+    val account: String? = null,
+    val away: Boolean = false,
+    val hostmask: String? = null,
+    val realname: String? = null,
 )
 
 @Entity(tableName = "members", primaryKeys = ["bufferId", "nick"])
-data class MemberEntity(val bufferId: Long, val nick: String, val prefixes: String = "")
+data class MemberEntity(
+    val bufferId: Long,
+    val nick: String,
+    val prefixes: String = "",
+)

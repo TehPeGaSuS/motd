@@ -3,26 +3,26 @@ package io.github.trevarj.motd.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import io.github.trevarj.motd.data.db.NetworkEntity
-import io.github.trevarj.motd.data.db.NetworkRole
-import io.github.trevarj.motd.data.db.ObfsMode
-import io.github.trevarj.motd.bouncer.ZncLoginForm
-import io.github.trevarj.motd.bouncer.parseZncLogin
-import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
-import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
-import io.github.trevarj.motd.data.repo.NetworkRepository
-import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
-import io.github.trevarj.motd.obfs.VlessLink
-import io.github.trevarj.motd.irc.event.IrcClientState
-import io.github.trevarj.motd.irc.proto.IrcMessage
-import io.github.trevarj.motd.service.ConnectionManager
-import io.github.trevarj.motd.service.liberaEndpointChanged
-import io.github.trevarj.motd.ui.onboarding.AuthForm
-import io.github.trevarj.motd.ui.onboarding.ServerForm
 import io.github.trevarj.motd.avatar.AvatarController
 import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.avatar.SelfAvatarSetting
 import io.github.trevarj.motd.avatar.validateAvatarUrl
+import io.github.trevarj.motd.bouncer.ZncLoginForm
+import io.github.trevarj.motd.bouncer.parseZncLogin
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.ObfsMode
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
+import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.obfs.VlessLink
+import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.liberaEndpointChanged
+import io.github.trevarj.motd.ui.onboarding.AuthForm
+import io.github.trevarj.motd.ui.onboarding.ServerForm
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,7 +52,7 @@ data class NetworkSettingsUiState(
     // Round 5: live status + autoConnect editing.
     val connState: IrcClientState = IrcClientState.Disconnected,
     val autoConnect: Boolean = true,
-    val parentName: String? = null,   // root name for a BOUNCER_CHILD's "Managed by" row
+    val parentName: String? = null, // root name for a BOUNCER_CHILD's "Managed by" row
     /** A bouncer transport/login change can invalidate all locally imported child mirrors. */
     val pendingBouncerIdentityChange: BouncerIdentityChange? = null,
     val selfAvatar: SelfAvatarSetting = SelfAvatarSetting.Unmanaged,
@@ -67,27 +67,35 @@ data class NetworkSettingsUiState(
         return displayName.trim().ifBlank { current.name } != current.name ||
             wsUrl.trim().ifBlank { null } != current.wsUrl?.trim()?.ifBlank { null } ||
             obfsMode != (current.obfsMode ?: ObfsMode.NONE) ||
-            (obfsMode == ObfsMode.SOCKS5 && (
-                proxyHost.trim().ifBlank { null } != current.proxyHost?.trim()?.ifBlank { null } ||
-                    proxyPort.toIntOrNull() != current.proxyPort
-                )) ||
-            (obfsMode == ObfsMode.EMBEDDED_REALITY &&
-                obfsLink.trim().ifBlank { null } != current.obfsLink?.trim()?.ifBlank { null }) ||
+            (
+                obfsMode == ObfsMode.SOCKS5 && (
+                    proxyHost.trim().ifBlank { null } != current.proxyHost?.trim()?.ifBlank { null } ||
+                        proxyPort.toIntOrNull() != current.proxyPort
+                )
+            ) ||
+            (
+                obfsMode == ObfsMode.EMBEDDED_REALITY &&
+                    obfsLink.trim().ifBlank { null } != current.obfsLink?.trim()?.ifBlank { null }
+            ) ||
             server != current.toServerForm() ||
             initialAwayMessage.trim().ifBlank { null } != current.initialAwayMessage?.trim()?.ifBlank { null } ||
-            (if (isZnc) zncLogin != parseZncLogin(current.saslUser.orEmpty(), current.saslPassword.orEmpty())
-            else auth != current.toAuthForm()) || autoConnect != current.autoConnect
+            (
+                if (isZnc) {
+                    zncLogin != parseZncLogin(current.saslUser.orEmpty(), current.saslPassword.orEmpty())
+                } else {
+                    auth != current.toAuthForm()
+                }
+            ) || autoConnect != current.autoConnect
     }
     val initialAwayValid: Boolean get() = initialAwayValidationError(initialAwayMessage) == null
-    val isValid: Boolean get() = server.isValid && (if (isZnc) zncLogin.isValid else auth.isValid) &&
-        vlessLinkError == null && initialAwayValid
+    val isValid: Boolean get() =
+        server.isValid && (if (isZnc) zncLogin.isValid else auth.isValid) &&
+            vlessLinkError == null && initialAwayValid
     val canSave: Boolean get() = isValid && hasUnsavedChanges
 }
 
 /** User-safe validation copy for the VLESS field; never echoes a potentially sensitive URI. */
-internal fun vlessLinkValidationError(link: String): String? {
-    return VlessLink.parse(link).exceptionOrNull()?.message
-}
+internal fun vlessLinkValidationError(link: String): String? = VlessLink.parse(link).exceptionOrNull()?.message
 
 internal fun initialAwayValidationError(message: String): String? {
     val trimmed = message.trim()
@@ -99,7 +107,9 @@ internal fun initialAwayValidationError(message: String): String? {
 }
 
 /** Details displayed before changing the endpoint/credentials a bouncer's child mirrors inherit. */
-data class BouncerIdentityChange(val localMirrorCount: Int)
+data class BouncerIdentityChange(
+    val localMirrorCount: Int,
+)
 
 /**
  * Whether two bouncer-root rows address the same inherited child transport/login identity.
@@ -109,7 +119,10 @@ data class BouncerIdentityChange(val localMirrorCount: Int)
  * to a different bouncer account. Host comparison follows DNS semantics and treats incidental
  * whitespace in optional text fields as non-semantic.
  */
-internal fun bouncerIdentityChanged(before: NetworkEntity, after: NetworkEntity): Boolean =
+internal fun bouncerIdentityChanged(
+    before: NetworkEntity,
+    after: NetworkEntity,
+): Boolean =
     normalizeBouncerHost(before.host) != normalizeBouncerHost(after.host) ||
         before.port != after.port ||
         before.tls != after.tls ||
@@ -119,167 +132,214 @@ internal fun bouncerIdentityChanged(before: NetworkEntity, after: NetworkEntity)
         before.clientCertAlias.normalizedOptional() != after.clientCertAlias.normalizedOptional()
 
 private fun normalizeBouncerHost(host: String): String = host.trim().trimEnd('.').lowercase()
+
 private fun String?.normalizedOptional(): String? = this?.trim()?.ifBlank { null }
 
 @HiltViewModel
-class NetworkSettingsViewModel @Inject constructor(
-    private val networkRepository: NetworkRepository,
-    private val connectionManager: ConnectionManager,
-    private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
-    private val avatarPrefs: AvatarPrefs,
-    private val avatarController: AvatarController,
-    private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
-) : ViewModel() {
+class NetworkSettingsViewModel
+    @Inject
+    constructor(
+        private val networkRepository: NetworkRepository,
+        private val connectionManager: ConnectionManager,
+        private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
+        private val avatarPrefs: AvatarPrefs,
+        private val avatarController: AvatarController,
+        private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
+    ) : ViewModel() {
+        private val _state = MutableStateFlow(NetworkSettingsUiState())
+        val state: StateFlow<NetworkSettingsUiState> = _state.asStateFlow()
 
-    private val _state = MutableStateFlow(NetworkSettingsUiState())
-    val state: StateFlow<NetworkSettingsUiState> = _state.asStateFlow()
+        private var networkId: Long = 0
+        private var pendingBouncerUpdate: NetworkEntity? = null
 
-    private var networkId: Long = 0
-    private var pendingBouncerUpdate: NetworkEntity? = null
-
-    fun init(networkId: Long) {
-        if (_state.value.loaded) return
-        this.networkId = networkId
-        viewModelScope.launch {
-            val n = networkRepository.networkById(networkId)
-            val isZnc = networkId in bouncerKindPrefs.zncNetworkIds.first()
-            val parentName = n?.parentId?.let { networkRepository.networkById(it)?.name }
-            _state.update { current ->
-                current.copy(
-                    loaded = true,
-                    entity = n,
-                    displayName = n?.name.orEmpty(),
-                    wsUrl = n?.wsUrl.orEmpty(),
-                    obfsMode = n?.obfsMode ?: ObfsMode.NONE,
-                    proxyHost = n?.proxyHost.orEmpty(),
-                    proxyPort = n?.proxyPort?.toString().orEmpty(),
-                    obfsLink = n?.obfsLink.orEmpty(),
-                    server = n?.toServerForm() ?: ServerForm(),
-                    auth = n?.toAuthForm() ?: AuthForm(),
-                    initialAwayMessage = n?.initialAwayMessage.orEmpty(),
-                    isZnc = isZnc,
-                    zncLogin = n?.takeIf { isZnc }?.let {
-                        parseZncLogin(it.saslUser.orEmpty(), it.saslPassword.orEmpty())
-                    } ?: ZncLoginForm(),
-                    autoConnect = n?.autoConnect ?: true,
-                    parentName = parentName,
-                )
+        fun init(networkId: Long) {
+            if (_state.value.loaded) return
+            this.networkId = networkId
+            viewModelScope.launch {
+                val n = networkRepository.networkById(networkId)
+                val isZnc = networkId in bouncerKindPrefs.zncNetworkIds.first()
+                val parentName = n?.parentId?.let { networkRepository.networkById(it)?.name }
+                _state.update { current ->
+                    current.copy(
+                        loaded = true,
+                        entity = n,
+                        displayName = n?.name.orEmpty(),
+                        wsUrl = n?.wsUrl.orEmpty(),
+                        obfsMode = n?.obfsMode ?: ObfsMode.NONE,
+                        proxyHost = n?.proxyHost.orEmpty(),
+                        proxyPort = n?.proxyPort?.toString().orEmpty(),
+                        obfsLink = n?.obfsLink.orEmpty(),
+                        server = n?.toServerForm() ?: ServerForm(),
+                        auth = n?.toAuthForm() ?: AuthForm(),
+                        initialAwayMessage = n?.initialAwayMessage.orEmpty(),
+                        isZnc = isZnc,
+                        zncLogin =
+                            n?.takeIf { isZnc }?.let {
+                                parseZncLogin(it.saslUser.orEmpty(), it.saslPassword.orEmpty())
+                            } ?: ZncLoginForm(),
+                        autoConnect = n?.autoConnect ?: true,
+                        parentName = parentName,
+                    )
+                }
+            }
+            // Mirror this network's live connection state into the status header.
+            viewModelScope.launch {
+                connectionManager.connectionStates.collect { states ->
+                    _state.value =
+                        _state.value.copy(
+                            connState = states[networkId] ?: IrcClientState.Disconnected,
+                            avatarPublishingAvailable = avatarController.publishingAvailable(networkId),
+                        )
+                }
+            }
+            viewModelScope.launch {
+                avatarPrefs.selfSetting(networkId).collect { setting ->
+                    _state.value =
+                        _state.value.copy(
+                            selfAvatar = setting,
+                            avatarInput = (setting as? SelfAvatarSetting.Set)?.url.orEmpty(),
+                        )
+                }
             }
         }
-        // Mirror this network's live connection state into the status header.
-        viewModelScope.launch {
-            connectionManager.connectionStates.collect { states ->
-                _state.value = _state.value.copy(
-                    connState = states[networkId] ?: IrcClientState.Disconnected,
-                    avatarPublishingAvailable = avatarController.publishingAvailable(networkId),
+
+        fun editServer(server: ServerForm) {
+            _state.value = _state.value.copy(server = server)
+        }
+
+        fun editAuth(auth: AuthForm) {
+            _state.value = _state.value.copy(auth = auth)
+        }
+
+        fun editZncLogin(login: ZncLoginForm) {
+            _state.value = _state.value.copy(zncLogin = login)
+        }
+
+        fun editDisplayName(name: String) {
+            _state.value = _state.value.copy(displayName = name)
+        }
+
+        fun editWsUrl(url: String) {
+            _state.value = _state.value.copy(wsUrl = url)
+        }
+
+        fun editInitialAwayMessage(message: String) {
+            _state.value = _state.value.copy(initialAwayMessage = message)
+        }
+
+        fun editObfsMode(mode: ObfsMode) {
+            _state.value = _state.value.copy(obfsMode = mode)
+        }
+
+        fun editProxyHost(host: String) {
+            _state.value = _state.value.copy(proxyHost = host)
+        }
+
+        fun editProxyPort(port: String) {
+            _state.value = _state.value.copy(proxyPort = port.filter(Char::isDigit))
+        }
+
+        fun editObfsLink(link: String) {
+            _state.value = _state.value.copy(obfsLink = link)
+        }
+
+        /** "Route via Tor (Orbot)" shortcut: pin SOCKS5 at 127.0.0.1:9050. */
+        fun useTorShortcut() {
+            _state.value =
+                _state.value.copy(
+                    obfsMode = ObfsMode.TOR,
+                    proxyHost = "127.0.0.1",
+                    proxyPort = "9050",
                 )
+        }
+
+        fun connect() = viewModelScope.launch { connectionManager.connect(networkId) }
+
+        fun disconnect() = viewModelScope.launch { connectionManager.disconnect(networkId) }
+
+        /** Auto-connect is staged with the rest of the form so the labeled Save action is coherent. */
+        fun setAutoConnect(enabled: Boolean) {
+            _state.value = _state.value.copy(autoConnect = enabled)
+        }
+
+        fun editAvatarUrl(url: String) {
+            _state.value = _state.value.copy(avatarInput = url, avatarPublishError = false)
+        }
+
+        fun publishAvatar() =
+            viewModelScope.launch {
+                val value = _state.value.avatarInput
+                val published =
+                    validateAvatarUrl(value) != null &&
+                        _state.value.avatarPublishingAvailable &&
+                        avatarController.setSelfAvatar(networkId, value)
+                _state.value = _state.value.copy(avatarPublishError = !published)
             }
-        }
-        viewModelScope.launch {
-            avatarPrefs.selfSetting(networkId).collect { setting ->
-                _state.value = _state.value.copy(
-                    selfAvatar = setting,
-                    avatarInput = (setting as? SelfAvatarSetting.Set)?.url.orEmpty(),
-                )
+
+        fun clearPublishedAvatar() =
+            viewModelScope.launch {
+                avatarController.setSelfAvatar(networkId, null)
+                _state.value = _state.value.copy(avatarPublishError = false)
             }
-        }
-    }
 
-    fun editServer(server: ServerForm) { _state.value = _state.value.copy(server = server) }
-    fun editAuth(auth: AuthForm) { _state.value = _state.value.copy(auth = auth) }
-    fun editZncLogin(login: ZncLoginForm) { _state.value = _state.value.copy(zncLogin = login) }
-    fun editDisplayName(name: String) { _state.value = _state.value.copy(displayName = name) }
-    fun editWsUrl(url: String) { _state.value = _state.value.copy(wsUrl = url) }
-    fun editInitialAwayMessage(message: String) { _state.value = _state.value.copy(initialAwayMessage = message) }
+        fun stopManagingAvatar() =
+            viewModelScope.launch {
+                avatarController.stopManagingSelfAvatar(networkId)
+            }
 
-    fun editObfsMode(mode: ObfsMode) { _state.value = _state.value.copy(obfsMode = mode) }
-    fun editProxyHost(host: String) { _state.value = _state.value.copy(proxyHost = host) }
-    fun editProxyPort(port: String) {
-        _state.value = _state.value.copy(proxyPort = port.filter(Char::isDigit))
-    }
-    fun editObfsLink(link: String) { _state.value = _state.value.copy(obfsLink = link) }
+        fun openServerBuffer(onOpen: (Long) -> Unit) =
+            viewModelScope.launch {
+                onOpen(connectionManager.ensureServerBuffer(networkId))
+            }
 
-    /** "Route via Tor (Orbot)" shortcut: pin SOCKS5 at 127.0.0.1:9050. */
-    fun useTorShortcut() {
-        _state.value = _state.value.copy(
-            obfsMode = ObfsMode.TOR,
-            proxyHost = "127.0.0.1",
-            proxyPort = "9050",
-        )
-    }
+        fun save(onDone: () -> Unit) =
+            viewModelScope.launch {
+                val current = _state.value.entity ?: return@launch
+                val updated = updatedNetwork(current)
+                val children =
+                    if (current.role == NetworkRole.BOUNCER_ROOT && bouncerIdentityChanged(current, updated)) {
+                        networkRepository.childrenOf(current.id)
+                    } else {
+                        emptyList()
+                    }
+                if (children.isNotEmpty()) {
+                    pendingBouncerUpdate = updated
+                    _state.value =
+                        _state.value.copy(
+                            pendingBouncerIdentityChange = BouncerIdentityChange(children.size),
+                        )
+                } else {
+                    if (liberaEndpointChanged(current, updated)) {
+                        presetEnrollmentPrefs.revokeLiberaEligibility(current.id)
+                    }
+                    networkRepository.updateNetwork(updated)
+                    onDone()
+                }
+            }
 
-    fun connect() = viewModelScope.launch { connectionManager.connect(networkId) }
-    fun disconnect() = viewModelScope.launch { connectionManager.disconnect(networkId) }
-
-    /** Auto-connect is staged with the rest of the form so the labeled Save action is coherent. */
-    fun setAutoConnect(enabled: Boolean) { _state.value = _state.value.copy(autoConnect = enabled) }
-
-    fun editAvatarUrl(url: String) {
-        _state.value = _state.value.copy(avatarInput = url, avatarPublishError = false)
-    }
-
-    fun publishAvatar() = viewModelScope.launch {
-        val value = _state.value.avatarInput
-        val published = validateAvatarUrl(value) != null &&
-            _state.value.avatarPublishingAvailable &&
-            avatarController.setSelfAvatar(networkId, value)
-        _state.value = _state.value.copy(avatarPublishError = !published)
-    }
-
-    fun clearPublishedAvatar() = viewModelScope.launch {
-        avatarController.setSelfAvatar(networkId, null)
-        _state.value = _state.value.copy(avatarPublishError = false)
-    }
-
-    fun stopManagingAvatar() = viewModelScope.launch {
-        avatarController.stopManagingSelfAvatar(networkId)
-    }
-
-    fun openServerBuffer(onOpen: (Long) -> Unit) = viewModelScope.launch {
-        onOpen(connectionManager.ensureServerBuffer(networkId))
-    }
-
-    fun save(onDone: () -> Unit) = viewModelScope.launch {
-        val current = _state.value.entity ?: return@launch
-        val updated = updatedNetwork(current)
-        val children = if (current.role == NetworkRole.BOUNCER_ROOT && bouncerIdentityChanged(current, updated)) {
-            networkRepository.childrenOf(current.id)
-        } else {
-            emptyList()
-        }
-        if (children.isNotEmpty()) {
-            pendingBouncerUpdate = updated
-            _state.value = _state.value.copy(
-                pendingBouncerIdentityChange = BouncerIdentityChange(children.size),
+        /** Keep child mirrors only when the user explicitly accepts their inherited identity change. */
+        fun keepLocalMirrors(onDone: () -> Unit) =
+            resolveBouncerIdentityChange(
+                removeLocalMirrors = false,
+                onDone = onDone,
             )
-        } else {
-            if (liberaEndpointChanged(current, updated)) {
-                presetEnrollmentPrefs.revokeLiberaEligibility(current.id)
-            }
-            networkRepository.updateNetwork(updated)
-            onDone()
+
+        /** Remove only local child mirrors/history; this never deletes bouncer-side networks. */
+        fun removeLocalMirrors(onDone: () -> Unit) =
+            resolveBouncerIdentityChange(
+                removeLocalMirrors = true,
+                onDone = onDone,
+            )
+
+        fun cancelBouncerIdentityChange() {
+            pendingBouncerUpdate = null
+            _state.value = _state.value.copy(pendingBouncerIdentityChange = null)
         }
-    }
 
-    /** Keep child mirrors only when the user explicitly accepts their inherited identity change. */
-    fun keepLocalMirrors(onDone: () -> Unit) = resolveBouncerIdentityChange(
-        removeLocalMirrors = false,
-        onDone = onDone,
-    )
-
-    /** Remove only local child mirrors/history; this never deletes bouncer-side networks. */
-    fun removeLocalMirrors(onDone: () -> Unit) = resolveBouncerIdentityChange(
-        removeLocalMirrors = true,
-        onDone = onDone,
-    )
-
-    fun cancelBouncerIdentityChange() {
-        pendingBouncerUpdate = null
-        _state.value = _state.value.copy(pendingBouncerIdentityChange = null)
-    }
-
-    private fun resolveBouncerIdentityChange(removeLocalMirrors: Boolean, onDone: () -> Unit) =
-        viewModelScope.launch {
+        private fun resolveBouncerIdentityChange(
+            removeLocalMirrors: Boolean,
+            onDone: () -> Unit,
+        ) = viewModelScope.launch {
             val updated = pendingBouncerUpdate ?: return@launch
             // Write the root first. Deleting a local child cascades only through its local Room
             // rows; it does not issue a bouncer-side network deletion command.
@@ -293,63 +353,76 @@ class NetworkSettingsViewModel @Inject constructor(
                 }
             }
             pendingBouncerUpdate = null
-            _state.value = _state.value.copy(
-                entity = updated,
-                pendingBouncerIdentityChange = null,
-            )
+            _state.value =
+                _state.value.copy(
+                    entity = updated,
+                    pendingBouncerIdentityChange = null,
+                )
             onDone()
         }
 
-    private fun updatedNetwork(current: NetworkEntity): NetworkEntity {
-        val state = _state.value
-        val server = if (state.isZnc) {
-            state.server.copy(username = state.zncLogin.username.trim(), realname = state.server.nick.trim())
-        } else {
-            state.server
-        }
-        val auth = if (state.isZnc) state.zncLogin.toAuthForm() else state.auth
-        return buildNetworkEntity(
-            server = server,
-            auth = auth,
-            role = current.role,
-            id = current.id,
-            // A blank alias falls back to the existing name (never persist an empty display name).
-            name = _state.value.displayName.trim().ifBlank { current.name },
-            parentId = current.parentId,
-            bouncerNetId = current.bouncerNetId,
-            // Blank clears the WSS override, reverting to the default TCP/TLS transport.
-            wsUrl = _state.value.wsUrl.trim().ifBlank { null },
-            // Obfuscation/proxy.
-            obfsMode = _state.value.obfsMode,
-            proxyHost = _state.value.proxyHost,
-            proxyPort = _state.value.proxyPort.toIntOrNull(),
-            obfsLink = _state.value.obfsLink,
-            // Persist the current autoConnect value alongside the form fields.
-        ).copy(
-            autoConnect = _state.value.autoConnect,
-            initialAwayMessage = _state.value.initialAwayMessage.trim().ifBlank { null },
-        )
-    }
-
-    fun delete(onDone: () -> Unit) = viewModelScope.launch {
-        _state.value.entity?.let { network ->
-            // A root owns local bouncer mirrors outside Room's foreign-key graph. Stop children
-            // before the root, then clear every local identity before the repository atomically
-            // removes the whole tree and its buffers/history.
-            val localTree = (
-                if (network.role == NetworkRole.BOUNCER_ROOT) {
-                    networkRepository.childrenOf(network.id).sortedBy { it.id }
+        private fun updatedNetwork(current: NetworkEntity): NetworkEntity {
+            val state = _state.value
+            val server =
+                if (state.isZnc) {
+                    state.server.copy(username = state.zncLogin.username.trim(), realname = state.server.nick.trim())
                 } else {
-                    emptyList()
+                    state.server
                 }
-            ) + network
-            localTree.forEach { connectionManager.disconnect(it.id) }
-            localTree.forEach {
-                presetEnrollmentPrefs.revokeLiberaEligibility(it.id)
-                avatarController.clearNetworkState(it.id)
-            }
-            networkRepository.deleteNetwork(network.id)
+            val auth = if (state.isZnc) state.zncLogin.toAuthForm() else state.auth
+            return buildNetworkEntity(
+                server = server,
+                auth = auth,
+                role = current.role,
+                id = current.id,
+                // A blank alias falls back to the existing name (never persist an empty display name).
+                name =
+                    _state.value.displayName
+                        .trim()
+                        .ifBlank { current.name },
+                parentId = current.parentId,
+                bouncerNetId = current.bouncerNetId,
+                // Blank clears the WSS override, reverting to the default TCP/TLS transport.
+                wsUrl =
+                    _state.value.wsUrl
+                        .trim()
+                        .ifBlank { null },
+                // Obfuscation/proxy.
+                obfsMode = _state.value.obfsMode,
+                proxyHost = _state.value.proxyHost,
+                proxyPort = _state.value.proxyPort.toIntOrNull(),
+                obfsLink = _state.value.obfsLink,
+                // Persist the current autoConnect value alongside the form fields.
+            ).copy(
+                autoConnect = _state.value.autoConnect,
+                initialAwayMessage =
+                    _state.value.initialAwayMessage
+                        .trim()
+                        .ifBlank { null },
+            )
         }
-        onDone()
+
+        fun delete(onDone: () -> Unit) =
+            viewModelScope.launch {
+                _state.value.entity?.let { network ->
+                    // A root owns local bouncer mirrors outside Room's foreign-key graph. Stop children
+                    // before the root, then clear every local identity before the repository atomically
+                    // removes the whole tree and its buffers/history.
+                    val localTree =
+                        (
+                            if (network.role == NetworkRole.BOUNCER_ROOT) {
+                                networkRepository.childrenOf(network.id).sortedBy { it.id }
+                            } else {
+                                emptyList()
+                            }
+                        ) + network
+                    localTree.forEach { connectionManager.disconnect(it.id) }
+                    localTree.forEach {
+                        presetEnrollmentPrefs.revokeLiberaEligibility(it.id)
+                        avatarController.clearNetworkState(it.id)
+                    }
+                    networkRepository.deleteNetwork(network.id)
+                }
+                onDone()
+            }
     }
-}

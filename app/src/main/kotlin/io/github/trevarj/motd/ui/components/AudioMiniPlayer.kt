@@ -71,20 +71,23 @@ fun AudioMiniPlayer(
     var showDetails by remember(state.activeId) { mutableStateOf(false) }
     val duration = state.durationMs ?: attachment.durationMs
     val played = duration?.takeIf { it > 0 }?.let { state.positionMs.toFloat() / it } ?: 0f
-    val buffered = state.loadingFraction
-        ?: duration?.takeIf { it > 0 }?.let { state.bufferedMs.toFloat() / it }
-        ?: 0f
+    val buffered =
+        state.loadingFraction
+            ?: duration?.takeIf { it > 0 }?.let { state.bufferedMs.toFloat() / it }
+            ?: 0f
     val originLabel = state.origin?.contextLabel(state.networkName, includeNetwork)
-    val context = if (attachment.voice) {
-        originLabel ?: attachment.title
-    } else {
-        listOfNotNull(attachment.title, originLabel).joinToString(" · ")
-    }
-    val status = if (state.error != null) {
-        "Couldn’t play"
-    } else {
-        "${formatAudioDuration(state.positionMs)} / ${formatAudioDuration(duration)}"
-    }
+    val context =
+        if (attachment.voice) {
+            originLabel ?: attachment.title
+        } else {
+            listOfNotNull(attachment.title, originLabel).joinToString(" · ")
+        }
+    val status =
+        if (state.error != null) {
+            "Couldn’t play"
+        } else {
+            "${formatAudioDuration(state.positionMs)} / ${formatAudioDuration(duration)}"
+        }
 
     Surface(
         modifier = modifier.fillMaxWidth().height(MINI_PLAYER_HEIGHT).testTag("audio_mini_player"),
@@ -96,45 +99,58 @@ fun AudioMiniPlayer(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(
-                onClick = when {
-                    state.loading -> onCancelLoading
-                    state.error != null -> onRetry
-                    else -> onToggle
-                },
-                modifier = Modifier.size(30.dp).testTag(
+                onClick =
                     when {
-                        state.loading -> "audio_mini_cancel_loading"
-                        state.error != null -> "audio_mini_retry"
-                        else -> "audio_mini_toggle"
+                        state.loading -> onCancelLoading
+                        state.error != null -> onRetry
+                        else -> onToggle
                     },
-                ),
+                modifier =
+                    Modifier.size(30.dp).testTag(
+                        when {
+                            state.loading -> "audio_mini_cancel_loading"
+                            state.error != null -> "audio_mini_retry"
+                            else -> "audio_mini_toggle"
+                        },
+                    ),
             ) {
                 when {
-                    state.loading -> state.loadingFraction?.let { fraction ->
-                        CircularProgressIndicator(
-                            progress = { fraction },
+                    state.loading -> {
+                        state.loadingFraction?.let { fraction ->
+                            CircularProgressIndicator(
+                                progress = { fraction },
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } ?: CircularProgressIndicator(
                             modifier = Modifier.size(16.dp),
                             strokeWidth = 2.dp,
                         )
-                    } ?: CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                    )
-                    state.error != null -> Icon(Icons.Filled.Refresh, "Retry audio", Modifier.size(18.dp))
-                    state.playing -> Icon(Icons.Filled.Pause, "Pause audio", Modifier.size(18.dp))
-                    else -> Icon(Icons.Filled.PlayArrow, "Play audio", Modifier.size(18.dp))
+                    }
+
+                    state.error != null -> {
+                        Icon(Icons.Filled.Refresh, "Retry audio", Modifier.size(18.dp))
+                    }
+
+                    state.playing -> {
+                        Icon(Icons.Filled.Pause, "Pause audio", Modifier.size(18.dp))
+                    }
+
+                    else -> {
+                        Icon(Icons.Filled.PlayArrow, "Play audio", Modifier.size(18.dp))
+                    }
                 }
             }
             Spacer(Modifier.width(2.dp))
             Text(
                 text = context,
-                modifier = Modifier
-                    .weight(1f)
-                    .combinedClickable(
-                        onClick = { state.origin?.let(onOpenOrigin) },
-                        onLongClick = { showDetails = true },
-                    )
-                    .testTag("audio_mini_context"),
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .combinedClickable(
+                            onClick = { state.origin?.let(onOpenOrigin) },
+                            onLongClick = { showDetails = true },
+                        ).testTag("audio_mini_context"),
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
@@ -153,11 +169,12 @@ fun AudioMiniPlayer(
                 text = status,
                 modifier = Modifier.widthIn(max = 88.dp),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (state.error == null) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.error
-                },
+                color =
+                    if (state.error == null) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -209,34 +226,35 @@ private fun BufferedProgressScrubber(
     val bufferedColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.45f)
     val playedColor = MaterialTheme.colorScheme.primary
     Canvas(
-        modifier = modifier
-            .height(MINI_PLAYER_HEIGHT)
-            .semantics {
-                contentDescription = "Audio position"
-                progressBarRangeInfo = ProgressBarRangeInfo(playedFraction, 0f..1f)
-                setProgress { target ->
-                    if (!enabled) return@setProgress false
-                    onSeek(target.coerceIn(0f, 1f))
-                    true
-                }
-            }
-            .pointerInput(enabled) {
-                if (!enabled) return@pointerInput
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    fun update(x: Float) = onSeek((x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f))
-                    update(down.position.x)
-                    down.consume()
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        update(change.position.x)
-                        val pressed = change.pressed
-                        change.consume()
-                        if (!pressed) break
+        modifier =
+            modifier
+                .height(MINI_PLAYER_HEIGHT)
+                .semantics {
+                    contentDescription = "Audio position"
+                    progressBarRangeInfo = ProgressBarRangeInfo(playedFraction, 0f..1f)
+                    setProgress { target ->
+                        if (!enabled) return@setProgress false
+                        onSeek(target.coerceIn(0f, 1f))
+                        true
                     }
-                }
-            },
+                }.pointerInput(enabled) {
+                    if (!enabled) return@pointerInput
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+
+                        fun update(x: Float) = onSeek((x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f))
+                        update(down.position.x)
+                        down.consume()
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            update(change.position.x)
+                            val pressed = change.pressed
+                            change.consume()
+                            if (!pressed) break
+                        }
+                    }
+                },
     ) {
         val y = size.height / 2f
         val trackWidth = 4.dp.toPx()

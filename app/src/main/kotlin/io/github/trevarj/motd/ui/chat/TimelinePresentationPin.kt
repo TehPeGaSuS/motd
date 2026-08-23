@@ -1,7 +1,10 @@
 package io.github.trevarj.motd.ui.chat
 
 /** A same-frame scroll correction, applied with `LazyListState.requestScrollToItem(index, offset)`. */
-internal data class TimelinePin(val index: Int, val offset: Int)
+internal data class TimelinePin(
+    val index: Int,
+    val offset: Int,
+)
 
 /**
  * Where the viewport must be re-pinned after a Paging presentation, or `null` to leave it alone.

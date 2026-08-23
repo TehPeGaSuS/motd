@@ -56,6 +56,8 @@ class NetworkIgnorePolicyTest {
         )
     }
 
-    private fun ignore(pattern: String, enabled: Boolean = true) =
-        NetworkIgnoreEntity(id = 1, networkId = 1, pattern = pattern, enabled = enabled, createdAt = 1)
+    private fun ignore(
+        pattern: String,
+        enabled: Boolean = true,
+    ) = NetworkIgnoreEntity(id = 1, networkId = 1, pattern = pattern, enabled = enabled, createdAt = 1)
 }

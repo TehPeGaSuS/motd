@@ -5,7 +5,9 @@ import kotlin.math.ceil
 import kotlin.math.sqrt
 
 /** Compact, transport-safe voice waveform. Peaks are quantized to five bits. */
-data class AudioWaveform(val peaks: List<Int>) {
+data class AudioWaveform(
+    val peaks: List<Int>,
+) {
     init {
         require(peaks.all { it in 0..MAX_PEAK }) { "Waveform peaks must be five-bit values." }
     }
@@ -49,53 +51,62 @@ data class AudioWaveform(val peaks: List<Int>) {
                 require(count in 1..MAX_PEAKS)
                 require(packed.size == HEADER_BYTES + ceil(count * BITS_PER_PEAK / 8.0).toInt())
                 var bitOffset = HEADER_BYTES * 8
-                val peaks = List(count) {
-                    var peak = 0
-                    repeat(BITS_PER_PEAK) { bit ->
-                        val absolute = bitOffset + bit
-                        val set = packed[absolute / 8].toInt() and (1 shl (absolute % 8)) != 0
-                        if (set) peak = peak or (1 shl bit)
+                val peaks =
+                    List(count) {
+                        var peak = 0
+                        repeat(BITS_PER_PEAK) { bit ->
+                            val absolute = bitOffset + bit
+                            val set = packed[absolute / 8].toInt() and (1 shl (absolute % 8)) != 0
+                            if (set) peak = peak or (1 shl bit)
+                        }
+                        bitOffset += BITS_PER_PEAK
+                        peak
                     }
-                    bitOffset += BITS_PER_PEAK
-                    peak
-                }
                 AudioWaveform(peaks)
             }.getOrNull()
         }
 
-        fun fromAmplitudes(samples: List<Int>, peakCount: Int = DISPLAY_PEAKS): AudioWaveform {
+        fun fromAmplitudes(
+            samples: List<Int>,
+            peakCount: Int = DISPLAY_PEAKS,
+        ): AudioWaveform {
             if (samples.isEmpty() || peakCount <= 0) return EMPTY
-            val peaks = List(peakCount) { index ->
-                val start = index * samples.size / peakCount
-                val end = ((index + 1) * samples.size / peakCount).coerceAtLeast(start + 1)
-                val amplitude = samples.subList(start.coerceAtMost(samples.lastIndex), end.coerceAtMost(samples.size))
-                    .maxOrNull()
-                    ?.coerceIn(0, 32_767)
-                    ?: 0
-                (sqrt(amplitude / 32_767f) * MAX_PEAK).toInt().coerceIn(0, MAX_PEAK)
-            }
+            val peaks =
+                List(peakCount) { index ->
+                    val start = index * samples.size / peakCount
+                    val end = ((index + 1) * samples.size / peakCount).coerceAtLeast(start + 1)
+                    val amplitude =
+                        samples
+                            .subList(start.coerceAtMost(samples.lastIndex), end.coerceAtMost(samples.size))
+                            .maxOrNull()
+                            ?.coerceIn(0, 32_767)
+                            ?: 0
+                    (sqrt(amplitude / 32_767f) * MAX_PEAK).toInt().coerceIn(0, MAX_PEAK)
+                }
             return AudioWaveform(peaks)
         }
     }
 }
 
-fun audioWaveformFromUrl(url: String): AudioWaveform? =
-    fragmentParameters(url)[WAVEFORM_FRAGMENT]?.let(AudioWaveform::decode)
+fun audioWaveformFromUrl(url: String): AudioWaveform? = fragmentParameters(url)[WAVEFORM_FRAGMENT]?.let(AudioWaveform::decode)
 
-fun appendAudioWaveform(url: String, waveform: AudioWaveform): String {
+fun appendAudioWaveform(
+    url: String,
+    waveform: AudioWaveform,
+): String {
     val encoded = waveform.encode() ?: return url
     val separator = if ('#' in url) "&" else "#"
     return "$url$separator$WAVEFORM_FRAGMENT=$encoded"
 }
 
 private fun fragmentParameters(url: String): Map<String, String> =
-    url.substringAfter('#', "")
+    url
+        .substringAfter('#', "")
         .split('&')
         .mapNotNull { part ->
             val key = part.substringBefore('=', "")
             val value = part.substringAfter('=', "")
             if (key.isBlank() || value.isBlank()) null else key to value
-        }
-        .toMap()
+        }.toMap()
 
 private const val WAVEFORM_FRAGMENT = "motd-wave"

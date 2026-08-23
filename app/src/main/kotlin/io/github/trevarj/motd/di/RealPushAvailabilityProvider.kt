@@ -18,10 +18,10 @@ import io.github.trevarj.motd.ui.settings.PushAvailabilityProvider
 import io.github.trevarj.motd.ui.settings.PushDistributor
 import io.github.trevarj.motd.ui.settings.PushSetupStatus
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
 
 class RealPushAvailabilityProvider(
@@ -34,7 +34,6 @@ class RealPushAvailabilityProvider(
     private val notificationPermission: StateFlow<Boolean> = MutableStateFlow(true),
     private val refreshNotificationPermission: () -> Unit = {},
 ) : PushAvailabilityProvider() {
-
     override fun refreshNotificationPermission() {
         refreshNotificationPermission.invoke()
     }
@@ -72,22 +71,23 @@ class RealPushAvailabilityProvider(
         refreshNotificationPermission = notificationPermission::refresh,
     )
 
-    override fun availability(): Flow<PushAvailability> = combine(
-        connectionManager.connectionStates,
-        networks,
-        health,
-        notificationPermission,
-    ) { states, networkRows, healthByNetwork, notificationsGranted ->
-        buildAvailability(
-            states = states,
-            networks = networkRows,
-            health = healthByNetwork,
-            installed = distributors(),
-            selected = selectedDistributor(),
-            hasDistributor = hasDistributor(),
-            notificationsGranted = notificationsGranted,
-        )
-    }.distinctUntilChanged()
+    override fun availability(): Flow<PushAvailability> =
+        combine(
+            connectionManager.connectionStates,
+            networks,
+            health,
+            notificationPermission,
+        ) { states, networkRows, healthByNetwork, notificationsGranted ->
+            buildAvailability(
+                states = states,
+                networks = networkRows,
+                health = healthByNetwork,
+                installed = distributors(),
+                selected = selectedDistributor(),
+                hasDistributor = hasDistributor(),
+                notificationsGranted = notificationsGranted,
+            )
+        }.distinctUntilChanged()
 
     private fun buildAvailability(
         states: Map<Long, IrcClientState>,
@@ -99,28 +99,57 @@ class RealPushAvailabilityProvider(
         notificationsGranted: Boolean,
     ): PushAvailability {
         val eligible = networks.filter { it.autoConnect && it.role != NetworkRole.BOUNCER_ROOT }
-        val liveWebpush = states.values.any {
-            it is IrcClientState.Ready && it.caps.hasCap(WebPushRegistrar.WEBPUSH_CAP)
-        }
+        val liveWebpush =
+            states.values.any {
+                it is IrcClientState.Ready && it.caps.hasCap(WebPushRegistrar.WEBPUSH_CAP)
+            }
         val durableWebpush = health.values.any { it.capability == PushCapability.SUPPORTED }
         val protected = eligible.count { health[it.id]?.registrationState == PushRegistrationState.ACTIVE }
-        val latest = eligible.mapNotNull { row ->
-            health[row.id]?.let { maxOf(it.lastDeliveryAt ?: 0L, it.probeAt ?: 0L, it.registeredAt ?: 0L) }
-        }.maxOrNull()?.takeIf { it > 0L }
+        val latest =
+            eligible
+                .mapNotNull { row ->
+                    health[row.id]?.let { maxOf(it.lastDeliveryAt ?: 0L, it.probeAt ?: 0L, it.registeredAt ?: 0L) }
+                }.maxOrNull()
+                ?.takeIf { it > 0L }
         val error = eligible.mapNotNull { health[it.id]?.errorCode }.firstOrNull()
-        val status = when {
-            selected == null && installed.size > 1 -> PushSetupStatus.CHOOSE_DISTRIBUTOR
-            !hasDistributor -> PushSetupStatus.CHOOSE_DISTRIBUTOR
-            eligible.isEmpty() -> PushSetupStatus.NEEDS_ATTENTION
-            eligible.any { health[it.id]?.registrationState == PushRegistrationState.VERIFYING } ->
-                PushSetupStatus.VERIFYING
-            eligible.any { health[it.id]?.registrationState == PushRegistrationState.WAITING_FOR_SERVER } ->
-                PushSetupStatus.WAITING_FOR_SERVER
-            protected == eligible.size -> PushSetupStatus.ACTIVE
-            protected > 0 -> PushSetupStatus.PARTIAL_FALLBACK
-            error != null -> PushSetupStatus.NEEDS_ATTENTION
-            else -> PushSetupStatus.REQUESTING_ENDPOINT
-        }
+        val status =
+            when {
+                selected == null && installed.size > 1 -> {
+                    PushSetupStatus.CHOOSE_DISTRIBUTOR
+                }
+
+                !hasDistributor -> {
+                    PushSetupStatus.CHOOSE_DISTRIBUTOR
+                }
+
+                eligible.isEmpty() -> {
+                    PushSetupStatus.NEEDS_ATTENTION
+                }
+
+                eligible.any { health[it.id]?.registrationState == PushRegistrationState.VERIFYING } -> {
+                    PushSetupStatus.VERIFYING
+                }
+
+                eligible.any { health[it.id]?.registrationState == PushRegistrationState.WAITING_FOR_SERVER } -> {
+                    PushSetupStatus.WAITING_FOR_SERVER
+                }
+
+                protected == eligible.size -> {
+                    PushSetupStatus.ACTIVE
+                }
+
+                protected > 0 -> {
+                    PushSetupStatus.PARTIAL_FALLBACK
+                }
+
+                error != null -> {
+                    PushSetupStatus.NEEDS_ATTENTION
+                }
+
+                else -> {
+                    PushSetupStatus.REQUESTING_ENDPOINT
+                }
+            }
         return PushAvailability(
             bouncerWebpush = liveWebpush || durableWebpush,
             distributorInstalled = hasDistributor,
@@ -138,7 +167,8 @@ class RealPushAvailabilityProvider(
 
 private fun Set<String>.hasCap(cap: String): Boolean = any { it == cap || it.startsWith("$cap=") }
 
-private fun Context.applicationLabel(packageName: String): String = runCatching {
-    val info = packageManager.getApplicationInfo(packageName, 0)
-    packageManager.getApplicationLabel(info).toString()
-}.getOrDefault(packageName)
+private fun Context.applicationLabel(packageName: String): String =
+    runCatching {
+        val info = packageManager.getApplicationInfo(packageName, 0)
+        packageManager.getApplicationLabel(info).toString()
+    }.getOrDefault(packageName)

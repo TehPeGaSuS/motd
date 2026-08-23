@@ -10,7 +10,6 @@ import org.junit.Test
  * user actually sent, while the app is allowed to animate at all.
  */
 class ReactionBurstTest {
-
     private fun plays(
         isSelf: Boolean = true,
         previousCount: Int? = 1,

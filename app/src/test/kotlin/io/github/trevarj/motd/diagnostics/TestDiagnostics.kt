@@ -1,8 +1,8 @@
 package io.github.trevarj.motd.diagnostics
 
-import java.io.OutputStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.io.OutputStream
 
 internal data class RecordedDiagnostic(
     val component: String,
@@ -23,7 +23,11 @@ internal class RecordingDiagnostics : DiagnosticLogger {
 
     override fun setEnabled(enabled: Boolean) = Unit
 
-    override fun record(component: String, event: String, fields: () -> Map<String, Any?>) {
+    override fun record(
+        component: String,
+        event: String,
+        fields: () -> Map<String, Any?>,
+    ) {
         events += RecordedDiagnostic(component, event, fields())
     }
 

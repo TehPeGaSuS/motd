@@ -27,32 +27,40 @@ class Migration8To9Test {
     fun migration_adds_nullable_pending_close_and_preserves_buffer_state() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(8) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL(CREATE_BUFFERS_V8)
-                    }
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(8) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL(CREATE_BUFFERS_V8)
+                            }
 
-                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
-                })
-                .build(),
-        )
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                old: Int,
+                                new: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL(INSERT_BUFFER)
 
         MIGRATION_8_9.migrate(db)
 
-        db.query(
-            "SELECT displayName, muted, localUnreadFloorTime, pendingCloseAt FROM buffers WHERE id = 1",
-        ).use { cursor ->
-            assertTrue(cursor.moveToFirst())
-            assertEquals("#motd", cursor.getString(0))
-            assertEquals(1, cursor.getInt(1))
-            assertEquals(456L, cursor.getLong(2))
-            assertNull(cursor.getString(3))
-        }
+        db
+            .query(
+                "SELECT displayName, muted, localUnreadFloorTime, pendingCloseAt FROM buffers WHERE id = 1",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("#motd", cursor.getString(0))
+                assertEquals(1, cursor.getInt(1))
+                assertEquals(456L, cursor.getLong(2))
+                assertNull(cursor.getString(3))
+            }
 
         db.execSQL("UPDATE buffers SET pendingCloseAt = 789 WHERE id = 1")
         db.query("SELECT pendingCloseAt FROM buffers WHERE id = 1").use { cursor ->

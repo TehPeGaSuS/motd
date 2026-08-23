@@ -13,7 +13,6 @@ import java.net.Proxy
  *, leaving the destination UNRESOLVED so DNS is done remotely by the proxy.
  */
 class ProxyForNetworkTest {
-
     private fun addr(p: Proxy) = p.address() as InetSocketAddress
 
     @Test

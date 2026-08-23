@@ -17,21 +17,27 @@ import io.nekohasekai.libbox.OverrideOptions
 import io.nekohasekai.libbox.PlatformInterface
 import io.nekohasekai.libbox.SetupOptions
 import io.nekohasekai.libbox.SystemProxyStatus
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.net.Inet6Address
 import java.net.InterfaceAddress
+import javax.inject.Inject
+import javax.inject.Singleton
 import java.net.NetworkInterface as JavaNetworkInterface
 
 /** Loopback endpoint returned by the embedded obfuscation core. */
-data class LocalSocksEndpoint(val host: String = "127.0.0.1", val port: Int)
+data class LocalSocksEndpoint(
+    val host: String = "127.0.0.1",
+    val port: Int,
+)
 
 /** A running embedded SOCKS core lease owned by one physical IRC connection attempt. */
-data class LocalSocksLease(val endpoint: LocalSocksEndpoint, val release: () -> Unit)
+data class LocalSocksLease(
+    val endpoint: LocalSocksEndpoint,
+    val release: () -> Unit,
+)
 
 /**
  * Small, generated-code-free boundary around libbox. The eventual libbox adapter is responsible
@@ -40,6 +46,7 @@ data class LocalSocksLease(val endpoint: LocalSocksEndpoint, val release: () -> 
  */
 interface LocalSocksEngine {
     fun start(configJson: String): Result<Int>
+
     fun stop()
 }
 
@@ -57,7 +64,8 @@ class LocalSocksProvider private constructor(
     private val engineFactory: () -> LocalSocksEngine,
     private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
 ) {
-    @Inject constructor(
+    @Inject
+    constructor(
         @ApplicationContext context: Context,
         diagnostics: DiagnosticLogger,
     ) : this({ LibboxLocalSocksEngine(context) }, diagnostics)
@@ -80,60 +88,65 @@ class LocalSocksProvider private constructor(
     }
 
     @Synchronized
-    fun start(link: VlessLink): Result<LocalSocksEndpoint> {
-        return acquire(link).map { it.endpoint }
-    }
+    fun start(link: VlessLink): Result<LocalSocksEndpoint> = acquire(link).map { it.endpoint }
 
     @Synchronized
-    fun acquire(link: VlessLink, ownerKey: String? = null): Result<LocalSocksLease> {
+    fun acquire(
+        link: VlessLink,
+        ownerKey: String? = null,
+    ): Result<LocalSocksLease> {
         val configJson = link.toSingBoxConfigJson()
         val coreKey = if (ownerKey.isNullOrBlank()) configJson else "$configJson\nowner=$ownerKey"
         activeCores[coreKey]?.let { core ->
             core.refs++
             var released = false
-            return Result.success(LocalSocksLease(core.endpoint) {
-                synchronized(this) {
-                    if (!released) {
-                        released = true
-                        release(coreKey)
+            return Result.success(
+                LocalSocksLease(core.endpoint) {
+                    synchronized(this) {
+                        if (!released) {
+                            released = true
+                            release(coreKey)
+                        }
                     }
-                }
-            })
+                },
+            )
         }
         val engine = engineFactory()
         // Wall time of the whole native bring-up (setup + command server + service load). This is
         // the number the startup plan's pre-warm step is gated on; classification only — the link
         // and endpoint never reach the journal.
         val startedAtMs = System.nanoTime() / 1_000_000
-        return engine.start(configJson).onFailure { error ->
-            diagnostics.record("obfs", "core_start_failed") {
-                mapOf(
-                    "owner" to ownerKey,
-                    "error" to error::class.simpleName,
-                    "duration_ms" to (System.nanoTime() / 1_000_000 - startedAtMs),
-                )
-            }
-        }.mapCatching { port ->
-            require(port in 1..65535) { "Embedded SOCKS provider returned invalid port" }
-            diagnostics.record("obfs", "core_start") {
-                mapOf(
-                    "owner" to ownerKey,
-                    "duration_ms" to (System.nanoTime() / 1_000_000 - startedAtMs),
-                    "active_cores" to activeCores.size + 1,
-                )
-            }
-            val endpoint = LocalSocksEndpoint(port = port)
-            activeCores[coreKey] = ActiveCore(engine, endpoint, refs = 1)
-            var released = false
-            LocalSocksLease(endpoint) {
-                synchronized(this) {
-                    if (!released) {
-                        released = true
-                        release(coreKey)
+        return engine
+            .start(configJson)
+            .onFailure { error ->
+                diagnostics.record("obfs", "core_start_failed") {
+                    mapOf(
+                        "owner" to ownerKey,
+                        "error" to error::class.simpleName,
+                        "duration_ms" to (System.nanoTime() / 1_000_000 - startedAtMs),
+                    )
+                }
+            }.mapCatching { port ->
+                require(port in 1..65535) { "Embedded SOCKS provider returned invalid port" }
+                diagnostics.record("obfs", "core_start") {
+                    mapOf(
+                        "owner" to ownerKey,
+                        "duration_ms" to (System.nanoTime() / 1_000_000 - startedAtMs),
+                        "active_cores" to activeCores.size + 1,
+                    )
+                }
+                val endpoint = LocalSocksEndpoint(port = port)
+                activeCores[coreKey] = ActiveCore(engine, endpoint, refs = 1)
+                var released = false
+                LocalSocksLease(endpoint) {
+                    synchronized(this) {
+                        if (!released) {
+                            released = true
+                            release(coreKey)
+                        }
                     }
                 }
-            }
-        }.onFailure { engine.stop() }
+            }.onFailure { engine.stop() }
     }
 
     @Synchronized
@@ -153,32 +166,35 @@ class LocalSocksProvider private constructor(
 }
 
 /** Direct adapter for the pinned, arm64-only libbox AAR. No generated API leaks out of service. */
-private class LibboxLocalSocksEngine(context: Context) : LocalSocksEngine {
+private class LibboxLocalSocksEngine(
+    context: Context,
+) : LocalSocksEngine {
     private val appContext = context.applicationContext
     private val platform = AndroidPlatform(appContext)
     private var server: CommandServer? = null
     private var initialized = false
 
     @Synchronized
-    override fun start(configJson: String): Result<Int> = runCatching {
-        initialize()
-        val port = selectLocalSocksPort(Libbox::availablePort)
-        val commandServer = CommandServer(NoOpCommandServerHandler, platform)
-        commandServer.start()
-        try {
-            // Libbox treats zero as a literal port and returns zero on Android. Start its
-            // availability scan at a nonzero range, then give sing-box the selected port.
-            commandServer.startOrReloadService(
-                configJson.replace("\"listen_port\":0", "\"listen_port\":$port"),
-                OverrideOptions(),
-            )
-            server = commandServer
-            port
-        } catch (error: Throwable) {
-            commandServer.close()
-            throw error
+    override fun start(configJson: String): Result<Int> =
+        runCatching {
+            initialize()
+            val port = selectLocalSocksPort(Libbox::availablePort)
+            val commandServer = CommandServer(NoOpCommandServerHandler, platform)
+            commandServer.start()
+            try {
+                // Libbox treats zero as a literal port and returns zero on Android. Start its
+                // availability scan at a nonzero range, then give sing-box the selected port.
+                commandServer.startOrReloadService(
+                    configJson.replace("\"listen_port\":0", "\"listen_port\":$port"),
+                    OverrideOptions(),
+                )
+                server = commandServer
+                port
+            } catch (error: Throwable) {
+                commandServer.close()
+                throw error
+            }
         }
-    }
 
     @Synchronized
     override fun stop() {
@@ -190,12 +206,14 @@ private class LibboxLocalSocksEngine(context: Context) : LocalSocksEngine {
 
     private fun initialize() {
         if (initialized) return
-        Libbox.setup(SetupOptions().apply {
-            basePath = appContext.filesDir.absolutePath
-            workingPath = appContext.filesDir.absolutePath
-            tempPath = appContext.cacheDir.absolutePath
-            fixAndroidStack = true
-        })
+        Libbox.setup(
+            SetupOptions().apply {
+                basePath = appContext.filesDir.absolutePath
+                workingPath = appContext.filesDir.absolutePath
+                tempPath = appContext.cacheDir.absolutePath
+                fixAndroidStack = true
+            },
+        )
         initialized = true
     }
 }
@@ -211,13 +229,18 @@ internal fun selectLocalSocksPort(findAvailablePort: (Int) -> Int): Int =
 
 /** SOCKS-only configuration uses no VPN, system proxy, interface monitor, or notifications. */
 private object NoOpCommandServerHandler : CommandServerHandler {
-    override fun getSystemProxyStatus(): SystemProxyStatus = SystemProxyStatus().apply {
-        available = false
-        enabled = false
-    }
+    override fun getSystemProxyStatus(): SystemProxyStatus =
+        SystemProxyStatus().apply {
+            available = false
+            enabled = false
+        }
+
     override fun serviceReload() = Unit
+
     override fun serviceStop() = Unit
+
     override fun setSystemProxyEnabled(enabled: Boolean) = Unit
+
     override fun writeDebugMessage(message: String) = Unit
 }
 
@@ -231,26 +254,33 @@ private class NetworkInterfaces(
     private val interfaces: Iterator<io.nekohasekai.libbox.NetworkInterface>,
 ) : io.nekohasekai.libbox.NetworkInterfaceIterator {
     override fun hasNext() = interfaces.hasNext()
+
     override fun next(): io.nekohasekai.libbox.NetworkInterface = interfaces.next()
 }
 
 private object EmptyNetworkInterfaces : io.nekohasekai.libbox.NetworkInterfaceIterator {
     override fun hasNext() = false
-    override fun next(): io.nekohasekai.libbox.NetworkInterface =
-        throw NoSuchElementException("No platform network interfaces are exposed")
+
+    override fun next(): io.nekohasekai.libbox.NetworkInterface = throw NoSuchElementException("No platform network interfaces are exposed")
 }
 
-private class Strings(private val strings: List<String>) : io.nekohasekai.libbox.StringIterator {
+private class Strings(
+    private val strings: List<String>,
+) : io.nekohasekai.libbox.StringIterator {
     private var index = 0
 
     override fun hasNext() = index < strings.size
+
     override fun len() = strings.size
+
     override fun next(): String = strings[index++]
 }
 
 private object EmptyStrings : io.nekohasekai.libbox.StringIterator {
     override fun hasNext() = false
+
     override fun len() = 0
+
     override fun next(): String = throw NoSuchElementException("No platform strings are exposed")
 }
 
@@ -260,13 +290,17 @@ private object EmptyStrings : io.nekohasekai.libbox.StringIterator {
  * adapter is not sufficient: it needs a real active interface and lifecycle-safe callbacks.
  * This deliberately exposes no TUN/VPN or system-proxy behaviour.
  */
-private class AndroidPlatform(context: Context) : PlatformInterface {
+private class AndroidPlatform(
+    context: Context,
+) : PlatformInterface {
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
     private var interfaceMonitor: io.nekohasekai.libbox.InterfaceUpdateListener? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun autoDetectInterfaceControl(fd: Int) = Unit
+
     override fun clearDNSCache() = Unit
+
     @Synchronized
     override fun closeDefaultInterfaceMonitor(listener: io.nekohasekai.libbox.InterfaceUpdateListener?) {
         networkCallback?.let { callback ->
@@ -275,54 +309,81 @@ private class AndroidPlatform(context: Context) : PlatformInterface {
         networkCallback = null
         interfaceMonitor = null
     }
+
     override fun findConnectionOwner(
-        ipProtocol: Int, sourceAddress: String?, sourcePort: Int, destinationAddress: String?, destinationPort: Int,
+        ipProtocol: Int,
+        sourceAddress: String?,
+        sourcePort: Int,
+        destinationAddress: String?,
+        destinationPort: Int,
     ): io.nekohasekai.libbox.ConnectionOwner = io.nekohasekai.libbox.ConnectionOwner()
+
     override fun getInterfaces(): io.nekohasekai.libbox.NetworkInterfaceIterator {
-        val interfaces = runCatching {
-            val javaInterfaces = JavaNetworkInterface.getNetworkInterfaces().toList()
-                .associateBy { it.name }
-            connectivity.allNetworks.mapNotNull { network ->
-                val properties = connectivity.getLinkProperties(network) ?: return@mapNotNull null
-                val name = properties.interfaceName ?: return@mapNotNull null
-                val javaInterface = javaInterfaces[name] ?: return@mapNotNull null
-                val capabilities = connectivity.getNetworkCapabilities(network)
-                toLibboxInterface(javaInterface, properties, capabilities)
-            }.distinctBy { it.name }
-        }.getOrElse { emptyList() }
+        val interfaces =
+            runCatching {
+                val javaInterfaces =
+                    JavaNetworkInterface
+                        .getNetworkInterfaces()
+                        .toList()
+                        .associateBy { it.name }
+                connectivity.allNetworks
+                    .mapNotNull { network ->
+                        val properties = connectivity.getLinkProperties(network) ?: return@mapNotNull null
+                        val name = properties.interfaceName ?: return@mapNotNull null
+                        val javaInterface = javaInterfaces[name] ?: return@mapNotNull null
+                        val capabilities = connectivity.getNetworkCapabilities(network)
+                        toLibboxInterface(javaInterface, properties, capabilities)
+                    }.distinctBy { it.name }
+            }.getOrElse { emptyList() }
         return if (interfaces.isEmpty()) EmptyNetworkInterfaces else NetworkInterfaces(interfaces.iterator())
     }
+
     override fun includeAllNetworks() = false
+
     override fun localDNSTransport(): io.nekohasekai.libbox.LocalDNSTransport? = null
-    override fun openTun(options: io.nekohasekai.libbox.TunOptions?): Int =
-        throw UnsupportedOperationException("libbox TUN is not enabled by motd")
+
+    override fun openTun(options: io.nekohasekai.libbox.TunOptions?): Int = throw UnsupportedOperationException("libbox TUN is not enabled by motd")
+
     // sing-box's Android platform implementation returns an object even when Wi-Fi is absent.
-    override fun readWIFIState(): io.nekohasekai.libbox.WIFIState =
-        io.nekohasekai.libbox.WIFIState("", "")
+    override fun readWIFIState(): io.nekohasekai.libbox.WIFIState = io.nekohasekai.libbox.WIFIState("", "")
+
     override fun sendNotification(notification: io.nekohasekai.libbox.Notification?) = Unit
+
     @Synchronized
     override fun startDefaultInterfaceMonitor(listener: io.nekohasekai.libbox.InterfaceUpdateListener?) {
         closeDefaultInterfaceMonitor(interfaceMonitor)
         interfaceMonitor = listener
         if (listener == null) return
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) = reportDefaultInterface()
-            override fun onLost(network: Network) = reportDefaultInterface()
-            override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) =
-                reportDefaultInterface()
-            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) =
-                reportDefaultInterface()
-        }
+        val callback =
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) = reportDefaultInterface()
+
+                override fun onLost(network: Network) = reportDefaultInterface()
+
+                override fun onLinkPropertiesChanged(
+                    network: Network,
+                    properties: LinkProperties,
+                ) = reportDefaultInterface()
+
+                override fun onCapabilitiesChanged(
+                    network: Network,
+                    capabilities: NetworkCapabilities,
+                ) = reportDefaultInterface()
+            }
         networkCallback = callback
         connectivity.registerDefaultNetworkCallback(callback)
         reportDefaultInterface()
     }
+
     override fun systemCertificates(): io.nekohasekai.libbox.StringIterator = EmptyStrings
+
     override fun underNetworkExtension() = false
+
     // Match sing-box-for-Android's platform bridge. Let Android own socket/interface selection;
     // binding the VLESS socket through the Java interface inventory can leave later writes on a
     // stale route after the bouncer child capability transition.
     override fun usePlatformAutoDetectInterfaceControl() = true
+
     override fun useProcFS() = false
 
     private fun reportDefaultInterface() {
@@ -333,11 +394,12 @@ private class AndroidPlatform(context: Context) : PlatformInterface {
         val index = runCatching { JavaNetworkInterface.getByName(name)?.index ?: -1 }.getOrDefault(-1)
         val capabilities = network?.let(connectivity::getNetworkCapabilities)
         val expensive = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
-        val constrained = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_CONGESTED) == false
-        } else {
-            false
-        }
+        val constrained =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_CONGESTED) == false
+            } else {
+                false
+            }
         listener.updateDefaultInterface(name, index, expensive, constrained)
     }
 
@@ -357,12 +419,13 @@ private class AndroidPlatform(context: Context) : PlatformInterface {
             metered = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
         }
 
-    private fun NetworkCapabilities?.interfaceType(): Int = when {
-        this?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> Libbox.InterfaceTypeWIFI
-        this?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> Libbox.InterfaceTypeCellular
-        this?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> Libbox.InterfaceTypeEthernet
-        else -> Libbox.InterfaceTypeOther
-    }
+    private fun NetworkCapabilities?.interfaceType(): Int =
+        when {
+            this?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> Libbox.InterfaceTypeWIFI
+            this?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> Libbox.InterfaceTypeCellular
+            this?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> Libbox.InterfaceTypeEthernet
+            else -> Libbox.InterfaceTypeOther
+        }
 
     private fun interfaceFlags(
         network: JavaNetworkInterface,
@@ -381,11 +444,12 @@ private class AndroidPlatform(context: Context) : PlatformInterface {
     private fun InterfaceAddress.toLibboxPrefix(): String {
         // A scoped IPv6 host string (for example, fe80::1%wlan0) is not accepted by
         // netip.ParsePrefix. This is the same scope-stripping conversion used upstream.
-        val host = if (address is Inet6Address) {
-            Inet6Address.getByAddress(address.address).hostAddress
-        } else {
-            address.hostAddress
-        }
+        val host =
+            if (address is Inet6Address) {
+                Inet6Address.getByAddress(address.address).hostAddress
+            } else {
+                address.hostAddress
+            }
         return "$host/$networkPrefixLength"
     }
 }
@@ -394,23 +458,36 @@ private class AndroidPlatform(context: Context) : PlatformInterface {
  * Configuration handed to the eventual libbox adapter. The core chooses/binds the ephemeral
  * loopback port and reports it from [LocalSocksEngine.start].
  */
-internal fun VlessLink.toSingBoxConfigJson(): String = Json.encodeToString(
-    kotlinx.serialization.json.JsonObject.serializer(),
-    buildJsonObject {
-        put("inbounds", buildJsonArray {
-            add(buildJsonObject {
-                put("type", "socks")
-                put("listen", "127.0.0.1")
-                put("listen_port", 0)
-            })
-        })
-        put("outbounds", buildJsonArray {
-            add(Json.parseToJsonElement(toSingBoxOutboundJson()))
-        })
-        // sing-box otherwise selects its implicit direct outbound for unmatched SOCKS traffic.
-        // Every connection received by this private inbound must traverse the VLESS tunnel.
-        put("route", buildJsonObject {
-            put("final", "motd-reality")
-        })
-    },
-)
+internal fun VlessLink.toSingBoxConfigJson(): String =
+    Json.encodeToString(
+        kotlinx.serialization.json.JsonObject
+            .serializer(),
+        buildJsonObject {
+            put(
+                "inbounds",
+                buildJsonArray {
+                    add(
+                        buildJsonObject {
+                            put("type", "socks")
+                            put("listen", "127.0.0.1")
+                            put("listen_port", 0)
+                        },
+                    )
+                },
+            )
+            put(
+                "outbounds",
+                buildJsonArray {
+                    add(Json.parseToJsonElement(toSingBoxOutboundJson()))
+                },
+            )
+            // sing-box otherwise selects its implicit direct outbound for unmatched SOCKS traffic.
+            // Every connection received by this private inbound must traverse the VLESS tunnel.
+            put(
+                "route",
+                buildJsonObject {
+                    put("final", "motd-reality")
+                },
+            )
+        },
+    )

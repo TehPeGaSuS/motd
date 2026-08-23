@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import android.os.SystemClock
+import android.view.View
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
@@ -27,11 +29,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -46,8 +48,8 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Mail
 import androidx.compose.material.icons.outlined.Notifications
@@ -61,13 +63,13 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
@@ -87,18 +89,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.withFrameNanos
@@ -108,9 +106,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -122,11 +120,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.Velocity
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -134,9 +127,18 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.unit.dp
 import androidx.core.view.HapticFeedbackConstantsCompat
 import androidx.core.view.ViewCompat
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.AudioPlaybackOrigin
 import io.github.trevarj.motd.audio.AudioPlaybackState
@@ -146,20 +148,18 @@ import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcClientState
-import io.github.trevarj.motd.ui.components.ConnectionBanner
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AudioPlaybackViewModel
+import io.github.trevarj.motd.ui.components.ConnectionBanner
 import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
-import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.MotdMotion
-import android.os.SystemClock
-import android.view.View
-import kotlin.math.abs
+import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 /** Stateful entry: wires the ViewModel and drives navigation/empty-state. */
 @Composable
@@ -245,10 +245,12 @@ fun ChatListScreen(
     )
 }
 
-internal fun defaultChatBufferId(rows: List<ChatListRow>): Long? = rows.maxWithOrNull(
-    compareBy<ChatListRow> { it.lastMessageTime ?: Long.MIN_VALUE }
-        .thenBy(ChatListRow::bufferId),
-)?.bufferId
+internal fun defaultChatBufferId(rows: List<ChatListRow>): Long? =
+    rows
+        .maxWithOrNull(
+            compareBy<ChatListRow> { it.lastMessageTime ?: Long.MIN_VALUE }
+                .thenBy(ChatListRow::bufferId),
+        )?.bufferId
 
 /**
  * The top bar's transition key: title/actions cross-fade only when the mode itself changes, so a
@@ -261,13 +263,14 @@ private fun chatListTopBarMode(
     invitationMode: Boolean,
     archiveMode: Boolean,
     scoped: Boolean,
-): ChatListTopBarMode = when {
-    selectionActive -> ChatListTopBarMode.SELECTION
-    invitationMode -> ChatListTopBarMode.INVITATIONS
-    archiveMode -> ChatListTopBarMode.ARCHIVE
-    scoped -> ChatListTopBarMode.SCOPED
-    else -> ChatListTopBarMode.DEFAULT
-}
+): ChatListTopBarMode =
+    when {
+        selectionActive -> ChatListTopBarMode.SELECTION
+        invitationMode -> ChatListTopBarMode.INVITATIONS
+        archiveMode -> ChatListTopBarMode.ARCHIVE
+        scoped -> ChatListTopBarMode.SCOPED
+        else -> ChatListTopBarMode.DEFAULT
+    }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -325,12 +328,13 @@ fun ChatListContent(
     var selectedIds by rememberSaveable(archiveMode, invitationMode, state.selectedNetworkId) { mutableStateOf(emptyList<Long>()) }
     val selectedRows = orderedSelectedRows(visibleRows, selectedIds)
     val selectionActive = selectedRows.isNotEmpty()
-    val topBarMode = chatListTopBarMode(
-        selectionActive = selectionActive,
-        invitationMode = invitationMode,
-        archiveMode = archiveMode,
-        scoped = state.selectedNetworkName != null,
-    )
+    val topBarMode =
+        chatListTopBarMode(
+            selectionActive = selectionActive,
+            invitationMode = invitationMode,
+            archiveMode = archiveMode,
+            scoped = state.selectedNetworkName != null,
+        )
     // Exit latches: the selection empties and the scope name nulls on the same frame their mode
     // leaves, so the outgoing top-bar/chip content holds the last real value while it fades.
     var lastSelectedRows by remember { mutableStateOf(listOf<ChatListRow>()) }
@@ -340,7 +344,10 @@ fun ChatListContent(
     var confirmRemoval by remember { mutableStateOf(false) }
     var archiveRevealSignal by rememberSaveable(state.selectedNetworkId) { mutableStateOf(0) }
 
-    fun setArchivedWithReveal(ids: Collection<Long>, archived: Boolean) {
+    fun setArchivedWithReveal(
+        ids: Collection<Long>,
+        archived: Boolean,
+    ) {
         onSetArchived(ids, archived)
         if (!archiveMode && archived && ids.isNotEmpty()) archiveRevealSignal += 1
     }
@@ -421,20 +428,28 @@ fun ChatListContent(
                             label = "chatlist_top_bar_title",
                         ) { mode ->
                             when (mode) {
-                                ChatListTopBarMode.SELECTION ->
+                                ChatListTopBarMode.SELECTION -> {
                                     Text(pluralStringResource(R.plurals.chatlist_selected_count, lastSelectedRows.size, lastSelectedRows.size))
-                                ChatListTopBarMode.INVITATIONS ->
+                                }
+
+                                ChatListTopBarMode.INVITATIONS -> {
                                     Text(text = stringResource(R.string.chatlist_invitations), fontWeight = FontWeight.Bold)
-                                ChatListTopBarMode.ARCHIVE ->
+                                }
+
+                                ChatListTopBarMode.ARCHIVE -> {
                                     Text(text = stringResource(R.string.chatlist_archived_chats), fontWeight = FontWeight.Bold)
+                                }
+
                                 // Scoped: show the network name so the active filter is legible.
-                                ChatListTopBarMode.SCOPED ->
+                                ChatListTopBarMode.SCOPED -> {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(text = lastScopeName, fontWeight = FontWeight.Bold)
                                         ChatListTitleConnectingSpinner(visible = titleConnecting)
                                     }
+                                }
+
                                 // Use the platform typography instead of the stylized brand asset here.
-                                ChatListTopBarMode.DEFAULT ->
+                                ChatListTopBarMode.DEFAULT -> {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
                                             text = stringResource(R.string.app_name),
@@ -442,6 +457,7 @@ fun ChatListContent(
                                         )
                                         ChatListTitleConnectingSpinner(visible = titleConnecting)
                                     }
+                                }
                             }
                         }
                     },
@@ -466,9 +482,16 @@ fun ChatListContent(
                             ) { icon ->
                                 Icon(
                                     icon,
-                                    contentDescription = stringResource(
-                                        if (selectionActive) R.string.chatlist_selection_close else if (archiveMode || invitationMode) R.string.action_back else R.string.drawer_open,
-                                    ),
+                                    contentDescription =
+                                        stringResource(
+                                            if (selectionActive) {
+                                                R.string.chatlist_selection_close
+                                            } else if (archiveMode || invitationMode) {
+                                                R.string.action_back
+                                            } else {
+                                                R.string.drawer_open
+                                            },
+                                        ),
                                 )
                             }
                         }
@@ -491,21 +514,31 @@ fun ChatListContent(
                                         val pinTarget = aggregateToggleTarget(lastSelectedRows) { it.pinned }
                                         val muteTarget = aggregateToggleTarget(lastSelectedRows) { it.muted }
                                         IconButton(
-                                            onClick = { onSetPinned(selectedRows.map(ChatListRow::bufferId), pinTarget); selectedIds = emptyList() },
+                                            onClick = {
+                                                onSetPinned(selectedRows.map(ChatListRow::bufferId), pinTarget)
+                                                selectedIds = emptyList()
+                                            },
                                             modifier = Modifier.testTag("chatlist_selection_pin"),
                                         ) { Icon(Icons.Filled.PushPin, stringResource(if (pinTarget) R.string.chatlist_pin else R.string.chatlist_unpin)) }
                                         IconButton(
-                                            onClick = { onSetMuted(selectedRows.map(ChatListRow::bufferId), muteTarget); selectedIds = emptyList() },
+                                            onClick = {
+                                                onSetMuted(selectedRows.map(ChatListRow::bufferId), muteTarget)
+                                                selectedIds = emptyList()
+                                            },
                                             modifier = Modifier.testTag("chatlist_selection_mute"),
                                         ) { Icon(if (muteTarget) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications, stringResource(if (muteTarget) R.string.chatlist_mute else R.string.chatlist_unmute)) }
                                         IconButton(
-                                            onClick = { setArchivedWithReveal(selectedRows.map(ChatListRow::bufferId), !archiveMode); selectedIds = emptyList() },
+                                            onClick = {
+                                                setArchivedWithReveal(selectedRows.map(ChatListRow::bufferId), !archiveMode)
+                                                selectedIds = emptyList()
+                                            },
                                             modifier = Modifier.testTag("chatlist_selection_archive"),
                                         ) { Icon(archiveActionIcon(archiveMode), stringResource(if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive)) }
                                         IconButton(onClick = { confirmRemoval = true }, modifier = Modifier.testTag("chatlist_selection_remove")) {
                                             Icon(Icons.Outlined.Delete, stringResource(R.string.chatlist_remove))
                                         }
                                     }
+
                                     ChatListTopBarMode.DEFAULT, ChatListTopBarMode.SCOPED -> {
                                         IconButton(onClick = onOpenSearch) {
                                             Icon(
@@ -520,7 +553,10 @@ fun ChatListContent(
                                             )
                                         }
                                     }
-                                    ChatListTopBarMode.INVITATIONS, ChatListTopBarMode.ARCHIVE -> Unit
+
+                                    ChatListTopBarMode.INVITATIONS, ChatListTopBarMode.ARCHIVE -> {
+                                        Unit
+                                    }
                                 }
                             }
                         }
@@ -573,30 +609,32 @@ fun ChatListContent(
                         val noNetworks = !archiveMode && state.networks.isEmpty()
                         EmptyState(
                             icon = if (archiveMode) Icons.Outlined.Archive else Icons.Outlined.Forum,
-                            title = stringResource(
-                                if (noNetworks) {
-                                    R.string.chatlist_no_networks_title
-                                } else if (archiveMode) {
-                                    R.string.chatlist_archived_empty_title
-                                } else if (state.selectedNetworkId != null) {
-                                    R.string.chatlist_scoped_empty_title
-                                } else {
-                                    R.string.chatlist_empty_title
-                                },
-                            ),
-                            message = if (archiveMode) {
-                                null
-                            } else if (noNetworks) {
-                                stringResource(R.string.chatlist_no_networks_message)
-                            } else {
+                            title =
                                 stringResource(
-                                    if (state.selectedNetworkId != null) {
-                                        R.string.chatlist_scoped_empty_message
+                                    if (noNetworks) {
+                                        R.string.chatlist_no_networks_title
+                                    } else if (archiveMode) {
+                                        R.string.chatlist_archived_empty_title
+                                    } else if (state.selectedNetworkId != null) {
+                                        R.string.chatlist_scoped_empty_title
                                     } else {
-                                        R.string.chatlist_empty_message
+                                        R.string.chatlist_empty_title
                                     },
-                                )
-                            },
+                                ),
+                            message =
+                                if (archiveMode) {
+                                    null
+                                } else if (noNetworks) {
+                                    stringResource(R.string.chatlist_no_networks_message)
+                                } else {
+                                    stringResource(
+                                        if (state.selectedNetworkId != null) {
+                                            R.string.chatlist_scoped_empty_message
+                                        } else {
+                                            R.string.chatlist_empty_message
+                                        },
+                                    )
+                                },
                             actionLabel = if (noNetworks) stringResource(R.string.drawer_add_network) else null,
                             onAction = if (noNetworks) onOpenAddNetwork else null,
                             // The list that has no rows is exactly what the ghost rows stand in for.
@@ -725,11 +763,13 @@ fun ChatListContent(
     }
 }
 
-internal fun shouldOpenOnboarding(state: ChatListState): Boolean =
-    !state.loading && state.networks.isEmpty() && !state.onboardingComplete
+internal fun shouldOpenOnboarding(state: ChatListState): Boolean = !state.loading && state.networks.isEmpty() && !state.onboardingComplete
 
 @Composable
-private fun ScopeChip(name: String, onClear: () -> Unit) {
+private fun ScopeChip(
+    name: String,
+    onClear: () -> Unit,
+) {
     Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
         FilterChip(
             selected = true,
@@ -777,15 +817,22 @@ internal data class ChatListPlacementGate(
 internal fun reduceChatListPlacement(
     gate: ChatListPlacementGate,
     signal: ChatListPlacementSignal,
-): ChatListPlacementGate = when (signal) {
-    // Re-entering visibility always re-arms from scratch, so the catch-up snapshot snaps again.
-    ChatListPlacementSignal.PaneResumed ->
-        if (gate.visible) gate else ChatListPlacementGate(visible = true, rendered = false)
-    ChatListPlacementSignal.PaneHidden -> ChatListPlacementGate(visible = false, rendered = false)
-    // Frames rendered while hidden prove nothing about what the user saw.
-    ChatListPlacementSignal.FrameRendered ->
-        if (gate.visible) gate.copy(rendered = true) else gate
-}
+): ChatListPlacementGate =
+    when (signal) {
+        // Re-entering visibility always re-arms from scratch, so the catch-up snapshot snaps again.
+        ChatListPlacementSignal.PaneResumed -> {
+            if (gate.visible) gate else ChatListPlacementGate(visible = true, rendered = false)
+        }
+
+        ChatListPlacementSignal.PaneHidden -> {
+            ChatListPlacementGate(visible = false, rendered = false)
+        }
+
+        // Frames rendered while hidden prove nothing about what the user saw.
+        ChatListPlacementSignal.FrameRendered -> {
+            if (gate.visible) gate.copy(rendered = true) else gate
+        }
+    }
 
 /**
  * Chat-list rows fade for inserts/removals and spring to their new position when activity
@@ -798,8 +845,7 @@ internal object ChatListItemMotion {
     val fadeOutSpec: FiniteAnimationSpec<Float> = MotdMotion.microFadeOut
 
     /** The spec every row-level `animateItem` reads; null means "move without animating". */
-    fun placementSpec(gate: ChatListPlacementGate): FiniteAnimationSpec<IntOffset>? =
-        if (gate.animatesPlacement) MotdMotion.rowPlacement else null
+    fun placementSpec(gate: ChatListPlacementGate): FiniteAnimationSpec<IntOffset>? = if (gate.animatesPlacement) MotdMotion.rowPlacement else null
 
     /**
      * Tracks the pane's own destination lifecycle rather than treating "still composed" as
@@ -814,17 +860,21 @@ internal object ChatListItemMotion {
         val lifecycleOwner = LocalLifecycleOwner.current
         var gate by remember(lifecycleOwner) { mutableStateOf(ChatListPlacementGate()) }
         DisposableEffect(lifecycleOwner) {
-            val observer = LifecycleEventObserver { _, event ->
-                val signal = when (event) {
-                    Lifecycle.Event.ON_RESUME -> ChatListPlacementSignal.PaneResumed
-                    Lifecycle.Event.ON_PAUSE,
-                    Lifecycle.Event.ON_STOP,
-                    Lifecycle.Event.ON_DESTROY,
-                    -> ChatListPlacementSignal.PaneHidden
-                    else -> null
+            val observer =
+                LifecycleEventObserver { _, event ->
+                    val signal =
+                        when (event) {
+                            Lifecycle.Event.ON_RESUME -> ChatListPlacementSignal.PaneResumed
+
+                            Lifecycle.Event.ON_PAUSE,
+                            Lifecycle.Event.ON_STOP,
+                            Lifecycle.Event.ON_DESTROY,
+                            -> ChatListPlacementSignal.PaneHidden
+
+                            else -> null
+                        }
+                    if (signal != null) gate = reduceChatListPlacement(gate, signal)
                 }
-                if (signal != null) gate = reduceChatListPlacement(gate, signal)
-            }
             lifecycleOwner.lifecycle.addObserver(observer)
             onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
         }
@@ -886,14 +936,15 @@ private fun ChatList(
     val topItemKey = chatListTopItemKey(invitationMode, invitations, actionableInvitationCount, sections)
     val topItemTracker = remember { ChatListTopItemTracker(topItemKey) }
     if (topItemTracker.key != topItemKey) {
-        val repin = Snapshot.withoutReadObservation {
-            shouldRepinChatListTop(
-                previousTopKey = topItemTracker.key,
-                topKey = topItemKey,
-                canScrollBackward = listState.canScrollBackward,
-                scrollInProgress = listState.isScrollInProgress,
-            )
-        }
+        val repin =
+            Snapshot.withoutReadObservation {
+                shouldRepinChatListTop(
+                    previousTopKey = topItemTracker.key,
+                    topKey = topItemKey,
+                    canScrollBackward = listState.canScrollBackward,
+                    scrollInProgress = listState.isScrollInProgress,
+                )
+            }
         topItemTracker.key = topItemKey
         if (repin) listState.requestScrollToItem(0)
     }
@@ -935,27 +986,32 @@ private fun ChatList(
         }
         archiveSettling = true
         val remaining = abs(targetPx - archiveDisplayExposurePx) / archiveFolderGeometry.rowPx
-        archiveSettleJob = scope.launch {
-            animate(
-                initialValue = archiveDisplayExposurePx,
-                targetValue = targetPx,
-                animationSpec = MotdMotion.archiveSettleSpec(remaining),
-            ) { value, _ ->
-                archiveDisplayExposurePx = value
+        archiveSettleJob =
+            scope.launch {
+                animate(
+                    initialValue = archiveDisplayExposurePx,
+                    targetValue = targetPx,
+                    animationSpec = MotdMotion.archiveSettleSpec(remaining),
+                ) { value, _ ->
+                    archiveDisplayExposurePx = value
+                }
+                archiveDisplayExposurePx = targetPx
+                archiveSettling = false
+                archiveSettleJob = null
             }
-            archiveDisplayExposurePx = targetPx
-            archiveSettling = false
-            archiveSettleJob = null
-        }
     }
 
-    fun applyArchiveFolderPull(deltaY: Float, atTop: Boolean): Float {
+    fun applyArchiveFolderPull(
+        deltaY: Float,
+        atTop: Boolean,
+    ): Float {
         archiveSettleJob?.cancel()
         archiveSettleJob = null
         archiveSettling = false
-        val result = dispatchArchiveEvent(
-            ArchiveFolderPullEvent.DragDelta(deltaY, SystemClock.uptimeMillis(), ArchiveFolderPullSource.USER_INPUT, atTop),
-        )
+        val result =
+            dispatchArchiveEvent(
+                ArchiveFolderPullEvent.DragDelta(deltaY, SystemClock.uptimeMillis(), ArchiveFolderPullSource.USER_INPUT, atTop),
+            )
         archiveDisplayExposurePx = result.state.exposurePx
         return result.consumedY
     }
@@ -993,100 +1049,120 @@ private fun ChatList(
         handledArchiveRevealSignal = archiveRevealSignal
     }
 
-    val archiveFolderPullConnection = remember(archiveFolderPullEligible, archiveSettling) {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source != NestedScrollSource.UserInput || !archiveFolderPullEligible || archiveSettling) return Offset.Zero
-                if (available.y < 0f && archivePullState.phase == ArchiveFolderPullPhase.REVEALED) {
-                    val result = scrollRevealedArchiveFolder(
-                        archiveDisplayExposurePx,
-                        available.y,
-                        archiveFolderGeometry,
-                    )
-                    archiveDisplayExposurePx = result.exposurePx
-                    if (result.hidden) dispatchArchiveEvent(ArchiveFolderPullEvent.RevealedRowHidden)
-                    return Offset(0f, result.consumedY)
+    val archiveFolderPullConnection =
+        remember(archiveFolderPullEligible, archiveSettling) {
+            object : NestedScrollConnection {
+                override fun onPreScroll(
+                    available: Offset,
+                    source: NestedScrollSource,
+                ): Offset {
+                    if (source != NestedScrollSource.UserInput || !archiveFolderPullEligible || archiveSettling) return Offset.Zero
+                    if (available.y < 0f && archivePullState.phase == ArchiveFolderPullPhase.REVEALED) {
+                        val result =
+                            scrollRevealedArchiveFolder(
+                                archiveDisplayExposurePx,
+                                available.y,
+                                archiveFolderGeometry,
+                            )
+                        archiveDisplayExposurePx = result.exposurePx
+                        if (result.hidden) dispatchArchiveEvent(ArchiveFolderPullEvent.RevealedRowHidden)
+                        return Offset(0f, result.consumedY)
+                    }
+                    return if (available.y < 0f && archivePullState.gestureActive && archiveDisplayExposurePx > 0f) {
+                        Offset(0f, applyArchiveFolderPull(available.y, atTop = true))
+                    } else {
+                        Offset.Zero
+                    }
                 }
-                return if (available.y < 0f && archivePullState.gestureActive && archiveDisplayExposurePx > 0f) {
-                    Offset(0f, applyArchiveFolderPull(available.y, atTop = true))
-                } else Offset.Zero
-            }
 
-            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                if (source != NestedScrollSource.UserInput || !archiveFolderPullEligible || archiveSettling) return Offset.Zero
-                if (available.y > 0f && !listState.canScrollBackward &&
-                    archivePullState.phase == ArchiveFolderPullPhase.REVEALED
-                ) {
-                    val result = scrollRevealedArchiveFolder(
-                        archiveDisplayExposurePx,
-                        available.y,
-                        archiveFolderGeometry,
-                    )
-                    archiveDisplayExposurePx = result.exposurePx
-                    return Offset(0f, result.consumedY)
+                override fun onPostScroll(
+                    consumed: Offset,
+                    available: Offset,
+                    source: NestedScrollSource,
+                ): Offset {
+                    if (source != NestedScrollSource.UserInput || !archiveFolderPullEligible || archiveSettling) return Offset.Zero
+                    if (available.y > 0f && !listState.canScrollBackward &&
+                        archivePullState.phase == ArchiveFolderPullPhase.REVEALED
+                    ) {
+                        val result =
+                            scrollRevealedArchiveFolder(
+                                archiveDisplayExposurePx,
+                                available.y,
+                                archiveFolderGeometry,
+                            )
+                        archiveDisplayExposurePx = result.exposurePx
+                        return Offset(0f, result.consumedY)
+                    }
+                    return if (available.y > 0f && !listState.canScrollBackward && archivePullState.gestureActive) {
+                        Offset(0f, applyArchiveFolderPull(available.y, atTop = true))
+                    } else {
+                        Offset.Zero
+                    }
                 }
-                return if (available.y > 0f && !listState.canScrollBackward && archivePullState.gestureActive) {
-                    Offset(0f, applyArchiveFolderPull(available.y, atTop = true))
-                } else Offset.Zero
-            }
 
-            override suspend fun onPreFling(available: Velocity): Velocity = Velocity.Zero
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = Velocity.Zero
+                override suspend fun onPreFling(available: Velocity): Velocity = Velocity.Zero
+
+                override suspend fun onPostFling(
+                    consumed: Velocity,
+                    available: Velocity,
+                ): Velocity = Velocity.Zero
+            }
         }
-    }
     val currentDispatchArchiveEvent by rememberUpdatedState(::dispatchArchiveEvent)
     val archiveFolderRevealed = archivePullState.phase == ArchiveFolderPullPhase.REVEALED
     val revealArchiveActionLabel = stringResource(R.string.chatlist_archived_reveal_action)
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .clipToBounds()
-            .nestedScroll(archiveFolderPullConnection)
-            .pointerInput(archiveFolderPullEligible, archiveFolderRevealed) {
-                // Once revealed, leave taps to the folder and use nested scroll to hide it.
-                if (!archiveFolderPullEligible || archiveFolderRevealed) return@pointerInput
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                    archiveSettleJob?.cancel()
-                    archiveSettleJob = null
-                    archiveSettling = false
-                    currentDispatchArchiveEvent(ArchiveFolderPullEvent.StartGesture(SystemClock.uptimeMillis()))
-                    // Observe release after children without treating LazyColumn drag consumption as
-                    // cancellation. The observer never consumes input from scrolling or row taps.
-                    var pointerEvent = awaitPointerEvent(PointerEventPass.Final)
-                    while (pointerEvent.changes.any { it.pressed }) {
-                        pointerEvent = awaitPointerEvent(PointerEventPass.Final)
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .clipToBounds()
+                .nestedScroll(archiveFolderPullConnection)
+                .pointerInput(archiveFolderPullEligible, archiveFolderRevealed) {
+                    // Once revealed, leave taps to the folder and use nested scroll to hide it.
+                    if (!archiveFolderPullEligible || archiveFolderRevealed) return@pointerInput
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        archiveSettleJob?.cancel()
+                        archiveSettleJob = null
+                        archiveSettling = false
+                        currentDispatchArchiveEvent(ArchiveFolderPullEvent.StartGesture(SystemClock.uptimeMillis()))
+                        // Observe release after children without treating LazyColumn drag consumption as
+                        // cancellation. The observer never consumes input from scrolling or row taps.
+                        var pointerEvent = awaitPointerEvent(PointerEventPass.Final)
+                        while (pointerEvent.changes.any { it.pressed }) {
+                            pointerEvent = awaitPointerEvent(PointerEventPass.Final)
+                        }
+                        val event =
+                            if (pointerEvent.type == PointerEventType.Release) {
+                                ArchiveFolderPullEvent.Release(SystemClock.uptimeMillis())
+                            } else {
+                                ArchiveFolderPullEvent.Cancel
+                            }
+                        val result = currentDispatchArchiveEvent(event)
+                        settleArchivePull(archiveFolderPullSettleTarget(result.state, archiveFolderGeometry))
                     }
-                    val event = if (pointerEvent.type == PointerEventType.Release) {
-                        ArchiveFolderPullEvent.Release(SystemClock.uptimeMillis())
-                    } else {
-                        ArchiveFolderPullEvent.Cancel
+                }.semantics {
+                    if (archiveFolderPullEligible && archivePullState.phase != ArchiveFolderPullPhase.REVEALED) {
+                        customActions =
+                            listOf(
+                                CustomAccessibilityAction(revealArchiveActionLabel) {
+                                    val result = dispatchArchiveEvent(ArchiveFolderPullEvent.RevealAccessibilityAction)
+                                    archiveDisplayExposurePx = result.state.exposurePx
+                                    true
+                                },
+                            )
                     }
-                    val result = currentDispatchArchiveEvent(event)
-                    settleArchivePull(archiveFolderPullSettleTarget(result.state, archiveFolderGeometry))
-                }
-            }
-            .semantics {
-                if (archiveFolderPullEligible && archivePullState.phase != ArchiveFolderPullPhase.REVEALED) {
-                    customActions = listOf(
-                        CustomAccessibilityAction(revealArchiveActionLabel) {
-                            val result = dispatchArchiveEvent(ArchiveFolderPullEvent.RevealAccessibilityAction)
-                            archiveDisplayExposurePx = result.state.exposurePx
-                            true
-                        },
-                    )
-                }
-            }
-            .testTag("chatlist_archive_pull_target"),
+                }.testTag("chatlist_archive_pull_target"),
     ) {
         ArchiveAccessibilityAnnouncement(archiveAnnouncement)
 
         if (archivedOnly) {
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(archiveFolderHeight)
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .height(archiveFolderHeight),
             ) {
                 ArchivedChatsFolder(archivedRows.size, onOpenArchive)
             }
@@ -1094,15 +1170,17 @@ private fun ChatList(
 
         LazyColumn(
             state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    translationY = when {
-                        archivedOnly -> archiveFolderGeometry.rowPx
-                        archiveFolderPullEligible -> archiveDisplayExposurePx
-                        else -> 0f
-                    }
-                },
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationY =
+                            when {
+                                archivedOnly -> archiveFolderGeometry.rowPx
+                                archiveFolderPullEligible -> archiveDisplayExposurePx
+                                else -> 0f
+                            }
+                    },
             contentPadding = PaddingValues(bottom = 88.dp),
         ) {
             if (invitationMode) {
@@ -1120,11 +1198,12 @@ private fun ChatList(
                             invitation = invitation,
                             onJoin = { onAcceptInvitation(invitation.messageId) },
                             onIgnore = { onIgnoreInvitation(invitation.messageId) },
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                placementSpec = placementSpec,
-                            ),
+                            modifier =
+                                Modifier.animateItem(
+                                    fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                    fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                    placementSpec = placementSpec,
+                                ),
                         )
                     }
                 }
@@ -1134,11 +1213,12 @@ private fun ChatList(
                         // Box wrapper (as for fools rows below) so the header items animate with
                         // their neighbor rows without threading a Modifier into each composable.
                         Box(
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                placementSpec = placementSpec,
-                            ),
+                            modifier =
+                                Modifier.animateItem(
+                                    fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                    fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                    placementSpec = placementSpec,
+                                ),
                         ) {
                             InvitationsFolder(
                                 count = invitations.size,
@@ -1163,21 +1243,23 @@ private fun ChatList(
                         onStartSelection = onStartSelection,
                         onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
                         syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
-                        modifier = Modifier.animateItem(
-                            fadeInSpec = ChatListItemMotion.fadeInSpec,
-                            fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                            placementSpec = placementSpec,
-                        ),
+                        modifier =
+                            Modifier.animateItem(
+                                fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                placementSpec = placementSpec,
+                            ),
                     )
                 }
                 if (sections.friends.isNotEmpty()) {
                     item(key = "friends-header") {
                         Box(
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                placementSpec = placementSpec,
-                            ),
+                            modifier =
+                                Modifier.animateItem(
+                                    fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                    fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                    placementSpec = placementSpec,
+                                ),
                         ) {
                             SectionHeader(stringResource(R.string.chatlist_friends))
                         }
@@ -1197,22 +1279,24 @@ private fun ChatList(
                             onStartSelection = onStartSelection,
                             onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
                             syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                placementSpec = placementSpec,
-                            ),
+                            modifier =
+                                Modifier.animateItem(
+                                    fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                    fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                    placementSpec = placementSpec,
+                                ),
                         )
                     }
                 }
                 if (sections.showRecentHeader) {
                     item(key = "recent-header") {
                         Box(
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                placementSpec = placementSpec,
-                            ),
+                            modifier =
+                                Modifier.animateItem(
+                                    fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                    fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                    placementSpec = placementSpec,
+                                ),
                         ) {
                             SectionHeader(stringResource(R.string.chatlist_recent))
                         }
@@ -1233,21 +1317,23 @@ private fun ChatList(
                         onStartSelection = onStartSelection,
                         onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
                         syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
-                        modifier = Modifier.animateItem(
-                            fadeInSpec = ChatListItemMotion.fadeInSpec,
-                            fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                            placementSpec = placementSpec,
-                        ),
+                        modifier =
+                            Modifier.animateItem(
+                                fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                placementSpec = placementSpec,
+                            ),
                     )
                 }
                 if (sections.fools.isNotEmpty()) {
                     item(key = "fools-header") {
                         Box(
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                placementSpec = placementSpec,
-                            ),
+                            modifier =
+                                Modifier.animateItem(
+                                    fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                    fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                    placementSpec = placementSpec,
+                                ),
                         ) {
                             FoolsSectionHeader(
                                 count = sections.fools.size,
@@ -1262,12 +1348,13 @@ private fun ChatList(
                     if (foolsExpanded) {
                         items(sections.fools, key = { it.bufferId }) { row ->
                             Box(
-                                modifier = Modifier
-                                    .animateItem(
-                                        fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                        fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                        placementSpec = placementSpec,
-                                    ),
+                                modifier =
+                                    Modifier
+                                        .animateItem(
+                                            fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                            fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                            placementSpec = placementSpec,
+                                        ),
                             ) {
                                 SelectableChatListRow(
                                     row = row,
@@ -1292,10 +1379,11 @@ private fun ChatList(
         }
 
         if (archiveFolderPullEligible && archiveDisplayExposurePx > 0f) {
-            val overlayModifier = Modifier
-                .fillMaxWidth()
-                .height(archiveFolderHeight)
-                .graphicsLayer { translationY = archiveDisplayExposurePx - archiveFolderGeometry.rowPx }
+            val overlayModifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(archiveFolderHeight)
+                    .graphicsLayer { translationY = archiveDisplayExposurePx - archiveFolderGeometry.rowPx }
             ArchiveFolderPullOverlay(
                 phase = archivePullState.phase,
                 exposurePx = archiveDisplayExposurePx,
@@ -1306,15 +1394,18 @@ private fun ChatList(
             )
         }
 
-        if (!selectionActive && !invitationMode) ViewportScrollToTopFab(
-            listState = listState,
-            sections = sections,
-            foolsExpanded = foolsExpanded,
-            onClick = { scope.launch { listState.animateScrollToItem(0) } },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 16.dp, bottom = 88.dp),
-        )
+        if (!selectionActive && !invitationMode) {
+            ViewportScrollToTopFab(
+                listState = listState,
+                sections = sections,
+                foolsExpanded = foolsExpanded,
+                onClick = { scope.launch { listState.animateScrollToItem(0) } },
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = 88.dp),
+            )
+        }
     }
 }
 
@@ -1324,17 +1415,19 @@ private fun InvitationsFolder(
     actionableCount: Int,
     onOpen: () -> Unit,
 ) {
-    val detail = pluralStringResource(
-        R.plurals.chatlist_invitations_pending_count,
-        actionableCount,
-        actionableCount,
-    )
+    val detail =
+        pluralStringResource(
+            R.plurals.chatlist_invitations_pending_count,
+            actionableCount,
+            actionableCount,
+        )
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onOpen)
-            .testTag("chatlist_invitations_folder")
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onOpen)
+                .testTag("chatlist_invitations_folder")
+                .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Outlined.Mail, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -1356,20 +1449,22 @@ private fun InvitationListItem(
     modifier: Modifier = Modifier,
 ) {
     val resolved = !invitation.actionable
-    val status = when (invitation.state) {
-        InviteState.JOINING -> stringResource(R.string.chatlist_invitation_joining)
-        InviteState.JOINED -> stringResource(R.string.chatlist_invitation_joined)
-        InviteState.DISMISSED -> stringResource(R.string.chatlist_invitation_ignored)
-        InviteState.FAILED -> stringResource(R.string.chatlist_invitation_failed)
-        else -> stringResource(R.string.chatlist_invitation_pending)
-    }
+    val status =
+        when (invitation.state) {
+            InviteState.JOINING -> stringResource(R.string.chatlist_invitation_joining)
+            InviteState.JOINED -> stringResource(R.string.chatlist_invitation_joined)
+            InviteState.DISMISSED -> stringResource(R.string.chatlist_invitation_ignored)
+            InviteState.FAILED -> stringResource(R.string.chatlist_invitation_failed)
+            else -> stringResource(R.string.chatlist_invitation_pending)
+        }
     Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .alpha(if (resolved) 0.56f else 1f)
-            .semantics { stateDescription = status }
-            .testTag("chatlist_invitation_${invitation.messageId}"),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .alpha(if (resolved) 0.56f else 1f)
+                .semantics { stateDescription = status }
+                .testTag("chatlist_invitation_${invitation.messageId}"),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
@@ -1426,11 +1521,12 @@ private fun ArchivedChatsFolder(
     contentColor: Color = MaterialTheme.colorScheme.onSurface,
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onOpenArchive)
-            .testTag("chatlist_archived_folder")
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onOpenArchive)
+                .testTag("chatlist_archived_folder")
+                .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Outlined.Archive, contentDescription = null, tint = contentColor)
@@ -1465,16 +1561,17 @@ private fun ArchiveFolderPullOverlay(
     val activeContent = MaterialTheme.colorScheme.onPrimaryContainer
     val backgroundColor = lerp(pullBackground, activeBackground, activeProgress)
     val contentColor = lerp(inactiveContent, activeContent, activeProgress)
-    val prompt = stringResource(
-        if (armed) R.string.chatlist_archived_pull_armed else R.string.chatlist_archived_pull_hint,
-    )
+    val prompt =
+        stringResource(
+            if (armed) R.string.chatlist_archived_pull_armed else R.string.chatlist_archived_pull_hint,
+        )
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                alpha = if (armed || committed) 1f else archiveFolderPullHintAlpha(exposurePx, geometry)
-            }
-            .background(backgroundColor),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    alpha = if (armed || committed) 1f else archiveFolderPullHintAlpha(exposurePx, geometry)
+                }.background(backgroundColor),
     ) {
         if (committed) {
             // Keep rendering the same pull surface after release so the list never changes shape.
@@ -1485,54 +1582,60 @@ private fun ArchiveFolderPullOverlay(
             )
         } else {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clearAndSetSemantics { stateDescription = prompt }
-                    .testTag("chatlist_archived_pull_${phase.name.lowercase()}")
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .clearAndSetSemantics { stateDescription = prompt }
+                        .testTag("chatlist_archived_pull_${phase.name.lowercase()}")
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .background(contentColor.copy(alpha = .14f), CircleShape),
+                    modifier =
+                        Modifier
+                            .size(24.dp)
+                            .background(contentColor.copy(alpha = .14f), CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         Icons.Filled.ExpandMore,
                         contentDescription = null,
                         tint = contentColor,
-                        modifier = Modifier
-                            .size(18.dp)
-                            .graphicsLayer { rotationZ = 180f * activeProgress },
+                        modifier =
+                            Modifier
+                                .size(18.dp)
+                                .graphicsLayer { rotationZ = 180f * activeProgress },
                     )
                 }
                 Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(start = 16.dp),
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .padding(start = 16.dp),
                 ) {
                     Text(
                         text = stringResource(R.string.chatlist_archived_pull_hint),
                         color = contentColor,
                         fontWeight = FontWeight.Medium,
-                        modifier = Modifier.graphicsLayer {
-                            alpha = 1f - activeProgress
-                            translationY = -8.dp.toPx() * activeProgress
-                            scaleX = 1f - .1f * activeProgress
-                            scaleY = scaleX
-                        },
+                        modifier =
+                            Modifier.graphicsLayer {
+                                alpha = 1f - activeProgress
+                                translationY = -8.dp.toPx() * activeProgress
+                                scaleX = 1f - .1f * activeProgress
+                                scaleY = scaleX
+                            },
                     )
                     Text(
                         text = stringResource(R.string.chatlist_archived_pull_armed),
                         color = contentColor,
                         fontWeight = FontWeight.Medium,
-                        modifier = Modifier.graphicsLayer {
-                            alpha = activeProgress
-                            translationY = 8.dp.toPx() * (1f - activeProgress)
-                            scaleX = .9f + .1f * activeProgress
-                            scaleY = scaleX
-                        },
+                        modifier =
+                            Modifier.graphicsLayer {
+                                alpha = activeProgress
+                                translationY = 8.dp.toPx() * (1f - activeProgress)
+                                scaleX = .9f + .1f * activeProgress
+                                scaleY = scaleX
+                            },
                     )
                 }
             }
@@ -1555,10 +1658,11 @@ internal fun ArchiveAccessibilityAnnouncement(message: String?) {
     Text(
         text = message,
         color = Color.Transparent,
-        modifier = Modifier
-            .size(1.dp)
-            .semantics { liveRegion = LiveRegionMode.Polite }
-            .testTag("chatlist_archive_announcement"),
+        modifier =
+            Modifier
+                .size(1.dp)
+                .semantics { liveRegion = LiveRegionMode.Polite }
+                .testTag("chatlist_archive_announcement"),
     )
 }
 
@@ -1576,22 +1680,24 @@ private fun ViewportScrollToTopFab(
     val firstVisibleItemIndex by remember(listState) {
         derivedStateOf { listState.firstVisibleItemIndex }
     }
-    val unreadAbove = remember(sections, foolsExpanded, firstVisibleItemIndex) {
-        unreadActivityBeforeDisplayIndex(sections, foolsExpanded, firstVisibleItemIndex)
-    }
+    val unreadAbove =
+        remember(sections, foolsExpanded, firstVisibleItemIndex) {
+            unreadActivityBeforeDisplayIndex(sections, foolsExpanded, firstVisibleItemIndex)
+        }
     // The exit fade must not render the zero that triggered it; hold the last positive count for
     // the badge's outgoing frames, like the other latched exits in this file.
     var lastPositiveUnreadAbove by remember { mutableIntStateOf(0) }
     if (unreadAbove > 0) lastPositiveUnreadAbove = unreadAbove
-    val description = if (unreadAbove > 0) {
-        pluralStringResource(
-            R.plurals.chatlist_scroll_to_top_with_unread,
-            unreadAbove,
-            unreadAbove,
-        )
-    } else {
-        stringResource(R.string.chatlist_scroll_to_top)
-    }
+    val description =
+        if (unreadAbove > 0) {
+            pluralStringResource(
+                R.plurals.chatlist_scroll_to_top_with_unread,
+                unreadAbove,
+                unreadAbove,
+            )
+        } else {
+            stringResource(R.string.chatlist_scroll_to_top)
+        }
 
     AnimatedVisibility(
         visible = canScrollToTop,
@@ -1628,13 +1734,18 @@ private fun ViewportScrollToTopFab(
 }
 
 @Composable
-private fun FoolsSectionHeader(count: Int, expanded: Boolean, onToggle: () -> Unit) {
+private fun FoolsSectionHeader(
+    count: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .clickable(onClick = onToggle)
-            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .clickable(onClick = onToggle)
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -1700,9 +1811,10 @@ private fun SelectableChatListRow(
     ) {
         // Keep the normal foreground opaque so the archive affordance appears only during drag.
         Box(
-            modifier = Modifier
-                .background(MaterialTheme.colorScheme.surface)
-                .testTag("chatlist_row_surface_${row.bufferId}"),
+            modifier =
+                Modifier
+                    .background(MaterialTheme.colorScheme.surface)
+                    .testTag("chatlist_row_surface_${row.bufferId}"),
         ) {
             ChatListRowItem(
                 row = row,
@@ -1732,7 +1844,10 @@ const val CHAT_LIST_TITLE_CONNECTING_TAG = "chatlist_title_connecting"
  * ConnectionBanner remains the announcing surface for connection trouble.
  */
 @Composable
-internal fun ChatListTitleConnectingSpinner(visible: Boolean, modifier: Modifier = Modifier) {
+internal fun ChatListTitleConnectingSpinner(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+) {
     AnimatedVisibility(
         visible = visible,
         modifier = modifier,
@@ -1742,9 +1857,10 @@ internal fun ChatListTitleConnectingSpinner(visible: Boolean, modifier: Modifier
         HistorySyncSpinner(
             contentDescription = stringResource(R.string.chatlist_title_connecting),
             // Padding inside the visibility scope so a settled connection leaves no gap.
-            modifier = Modifier
-                .padding(start = 8.dp)
-                .testTag(CHAT_LIST_TITLE_CONNECTING_TAG),
+            modifier =
+                Modifier
+                    .padding(start = 8.dp)
+                    .testTag(CHAT_LIST_TITLE_CONNECTING_TAG),
         )
     }
 }
@@ -1757,10 +1873,11 @@ private fun ChatListTopBar(
     navigationIcon: @Composable () -> Unit,
     actions: @Composable RowScope.() -> Unit,
 ) {
-    val colors = TopAppBarDefaults.topAppBarColors(
-        containerColor = MaterialTheme.colorScheme.surface,
-        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-    )
+    val colors =
+        TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        )
     TopAppBar(
         modifier = modifier,
         title = title,
@@ -1774,10 +1891,11 @@ private fun ChatListTopBar(
 @Composable
 private fun ArchiveSwipeBackground(archiveMode: Boolean) {
     Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.secondaryContainer)
-            .padding(horizontal = 24.dp),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.secondaryContainer)
+                .padding(horizontal = 24.dp),
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1790,8 +1908,7 @@ private fun ArchiveSwipeBackground(archiveMode: Boolean) {
 }
 
 /** Keep every archive affordance's glyph aligned with the action it will perform. */
-internal fun archiveActionIcon(archiveMode: Boolean): ImageVector =
-    if (archiveMode) Icons.Outlined.Unarchive else Icons.Outlined.Archive
+internal fun archiveActionIcon(archiveMode: Boolean): ImageVector = if (archiveMode) Icons.Outlined.Unarchive else Icons.Outlined.Archive
 
 /** Destructive-delete confirmation; channel copy mentions the implicit part/leave. */
 @Composable
@@ -1801,11 +1918,12 @@ private fun DeleteConfirmDialog(
     onDismiss: () -> Unit,
 ) {
     val copy = chatRemovalCopy(row.type)
-    val message = if (copy.messageFormatsDisplayName) {
-        stringResource(copy.message, row.displayName)
-    } else {
-        stringResource(copy.message)
-    }
+    val message =
+        if (copy.messageFormatsDisplayName) {
+            stringResource(copy.message, row.displayName)
+        } else {
+            stringResource(copy.message)
+        }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(copy.confirmTitle)) },
@@ -1827,16 +1945,25 @@ private fun DeleteConfirmDialog(
 }
 
 /** Type totals retain the compatibility SERVER branch even though ordinary list queries hide it. */
-internal data class ChatRemovalCounts(val channels: Int, val queries: Int, val servers: Int)
-
-internal fun removalCounts(rows: Collection<ChatListRow>): ChatRemovalCounts = ChatRemovalCounts(
-    channels = rows.count { it.type == BufferType.CHANNEL },
-    queries = rows.count { it.type == BufferType.QUERY },
-    servers = rows.count { it.type == BufferType.SERVER },
+internal data class ChatRemovalCounts(
+    val channels: Int,
+    val queries: Int,
+    val servers: Int,
 )
 
+internal fun removalCounts(rows: Collection<ChatListRow>): ChatRemovalCounts =
+    ChatRemovalCounts(
+        channels = rows.count { it.type == BufferType.CHANNEL },
+        queries = rows.count { it.type == BufferType.QUERY },
+        servers = rows.count { it.type == BufferType.SERVER },
+    )
+
 @Composable
-private fun MultiDeleteConfirmDialog(rows: List<ChatListRow>, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+private fun MultiDeleteConfirmDialog(
+    rows: List<ChatListRow>,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     val counts = removalCounts(rows)
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1855,23 +1982,36 @@ private fun MultiDeleteConfirmDialog(rows: List<ChatListRow>, onConfirm: () -> U
     )
 }
 
-internal fun pruneSelectedIds(selectedIds: Collection<Long>, visibleRows: Collection<ChatListRow>): List<Long> {
+internal fun pruneSelectedIds(
+    selectedIds: Collection<Long>,
+    visibleRows: Collection<ChatListRow>,
+): List<Long> {
     val visible = visibleRows.map(ChatListRow::bufferId).toSet()
     return selectedIds.distinct().filter(visible::contains)
 }
 
-internal fun orderedSelectedRows(rows: List<ChatListRow>, selectedIds: Collection<Long>): List<ChatListRow> {
+internal fun orderedSelectedRows(
+    rows: List<ChatListRow>,
+    selectedIds: Collection<Long>,
+): List<ChatListRow> {
     val selected = selectedIds.toSet()
     return rows.filter { it.bufferId in selected }
 }
 
-internal fun toggleSelectedId(selectedIds: Collection<Long>, id: Long): List<Long> =
-    if (id in selectedIds) selectedIds.filterNot { it == id } else addSelectedId(selectedIds, id)
+internal fun toggleSelectedId(
+    selectedIds: Collection<Long>,
+    id: Long,
+): List<Long> = if (id in selectedIds) selectedIds.filterNot { it == id } else addSelectedId(selectedIds, id)
 
-internal fun addSelectedId(selectedIds: Collection<Long>, id: Long): List<Long> = (selectedIds + id).distinct()
+internal fun addSelectedId(
+    selectedIds: Collection<Long>,
+    id: Long,
+): List<Long> = (selectedIds + id).distinct()
 
-internal fun aggregateToggleTarget(rows: Collection<ChatListRow>, value: (ChatListRow) -> Boolean): Boolean =
-    rows.isNotEmpty() && !rows.all(value)
+internal fun aggregateToggleTarget(
+    rows: Collection<ChatListRow>,
+    value: (ChatListRow) -> Boolean,
+): Boolean = rows.isNotEmpty() && !rows.all(value)
 
 internal data class ChatRemovalCopy(
     @get:StringRes val actionLabel: Int,
@@ -1881,29 +2021,38 @@ internal data class ChatRemovalCopy(
     val messageFormatsDisplayName: Boolean,
 )
 
-internal fun chatRemovalCopy(type: BufferType): ChatRemovalCopy = when (type) {
-    BufferType.QUERY -> ChatRemovalCopy(
-        actionLabel = R.string.chatlist_forget,
-        confirmTitle = R.string.chatlist_forget_confirm_title,
-        message = R.string.chatlist_forget_confirm_message,
-        confirmAction = R.string.chatlist_forget_action,
-        messageFormatsDisplayName = false,
-    )
-    BufferType.CHANNEL -> ChatRemovalCopy(
-        actionLabel = R.string.chatlist_delete,
-        confirmTitle = R.string.chatlist_delete_confirm_title,
-        message = R.string.chatlist_delete_confirm_channel,
-        confirmAction = R.string.action_delete,
-        messageFormatsDisplayName = true,
-    )
-    BufferType.SERVER -> ChatRemovalCopy(
-        actionLabel = R.string.chatlist_delete,
-        confirmTitle = R.string.chatlist_delete_confirm_title,
-        message = R.string.chatlist_delete_confirm_message,
-        confirmAction = R.string.action_delete,
-        messageFormatsDisplayName = true,
-    )
-}
+internal fun chatRemovalCopy(type: BufferType): ChatRemovalCopy =
+    when (type) {
+        BufferType.QUERY -> {
+            ChatRemovalCopy(
+                actionLabel = R.string.chatlist_forget,
+                confirmTitle = R.string.chatlist_forget_confirm_title,
+                message = R.string.chatlist_forget_confirm_message,
+                confirmAction = R.string.chatlist_forget_action,
+                messageFormatsDisplayName = false,
+            )
+        }
+
+        BufferType.CHANNEL -> {
+            ChatRemovalCopy(
+                actionLabel = R.string.chatlist_delete,
+                confirmTitle = R.string.chatlist_delete_confirm_title,
+                message = R.string.chatlist_delete_confirm_channel,
+                confirmAction = R.string.action_delete,
+                messageFormatsDisplayName = true,
+            )
+        }
+
+        BufferType.SERVER -> {
+            ChatRemovalCopy(
+                actionLabel = R.string.chatlist_delete,
+                confirmTitle = R.string.chatlist_delete_confirm_title,
+                message = R.string.chatlist_delete_confirm_message,
+                confirmAction = R.string.action_delete,
+                messageFormatsDisplayName = true,
+            )
+        }
+    }
 
 @Composable
 private fun SectionHeader(text: String) {
@@ -1913,10 +2062,11 @@ private fun SectionHeader(text: String) {
         color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.SemiBold,
         // Same container as the row wrappers so the list reads as one continuous surface.
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
     )
 }
 
@@ -1925,48 +2075,76 @@ private fun SectionHeader(text: String) {
 private fun ChatListContentPreview() {
     MotdTheme {
         ChatListContent(
-            state = ChatListState(
-                rows = listOf(
-                    ChatListRow(
-                        bufferId = 1, networkId = 1, networkName = "Libera",
-                        displayName = "#kotlin", type = BufferType.CHANNEL,
-                        pinned = true, muted = false,
-                        lastMessageText = "check out the new coroutines API",
-                        lastMessageSender = "alice",
-                        lastMessageTime = System.currentTimeMillis() - 60_000,
-                        unreadCount = 5, mentionCount = 1,
-                    ),
-                    ChatListRow(
-                        bufferId = 2, networkId = 1, networkName = "Libera",
-                        displayName = "#libera", type = BufferType.CHANNEL,
-                        pinned = false, muted = true,
-                        lastMessageText = "welcome!", lastMessageSender = "bob",
-                        lastMessageTime = System.currentTimeMillis() - 3_600_000,
-                        unreadCount = 0, mentionCount = 0,
-                    ),
-                    ChatListRow(
-                        bufferId = 3, networkId = 1, networkName = "Libera",
-                        displayName = "carol", type = BufferType.QUERY,
-                        pinned = false, muted = false,
-                        lastMessageText = "ping me when you're around",
-                        lastMessageSender = "carol",
-                        lastMessageTime = System.currentTimeMillis() - 86_400_000,
-                        unreadCount = 2, mentionCount = 0,
-                    ),
+            state =
+                ChatListState(
+                    rows =
+                        listOf(
+                            ChatListRow(
+                                bufferId = 1,
+                                networkId = 1,
+                                networkName = "Libera",
+                                displayName = "#kotlin",
+                                type = BufferType.CHANNEL,
+                                pinned = true,
+                                muted = false,
+                                lastMessageText = "check out the new coroutines API",
+                                lastMessageSender = "alice",
+                                lastMessageTime = System.currentTimeMillis() - 60_000,
+                                unreadCount = 5,
+                                mentionCount = 1,
+                            ),
+                            ChatListRow(
+                                bufferId = 2,
+                                networkId = 1,
+                                networkName = "Libera",
+                                displayName = "#libera",
+                                type = BufferType.CHANNEL,
+                                pinned = false,
+                                muted = true,
+                                lastMessageText = "welcome!",
+                                lastMessageSender = "bob",
+                                lastMessageTime = System.currentTimeMillis() - 3_600_000,
+                                unreadCount = 0,
+                                mentionCount = 0,
+                            ),
+                            ChatListRow(
+                                bufferId = 3,
+                                networkId = 1,
+                                networkName = "Libera",
+                                displayName = "carol",
+                                type = BufferType.QUERY,
+                                pinned = false,
+                                muted = false,
+                                lastMessageText = "ping me when you're around",
+                                lastMessageSender = "carol",
+                                lastMessageTime = System.currentTimeMillis() - 86_400_000,
+                                unreadCount = 2,
+                                mentionCount = 0,
+                            ),
+                        ),
+                    connection = mapOf(1L to IrcClientState.Connecting),
+                    networks =
+                        listOf(
+                            NetworkEntity(
+                                id = 1,
+                                name = "Libera",
+                                role = NetworkRole.DIRECT,
+                                host = "irc.libera.chat",
+                                port = 6697,
+                                nick = "me",
+                                username = "me",
+                                realname = "Me",
+                            ),
+                        ),
+                    loading = false,
                 ),
-                connection = mapOf(1L to IrcClientState.Connecting),
-                networks = listOf(
-                    NetworkEntity(
-                        id = 1, name = "Libera", role = NetworkRole.DIRECT,
-                        host = "irc.libera.chat", port = 6697,
-                        nick = "me", username = "me", realname = "Me",
-                    ),
-                ),
-                loading = false,
-            ),
-            onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
-            onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
-            onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
+            onOpenBuffer = {},
+            onOpenSettings = {},
+            onOpenSearch = {},
+            onSetPinned = { _, _ -> },
+            onSetMuted = { _, _ -> },
+            onJoinChannel = { _, _, _ -> },
+            onMessageUser = { _, _ -> },
         )
     }
 }
@@ -1976,20 +2154,31 @@ private fun ChatListContentPreview() {
 private fun ChatListEmptyPreview() {
     MotdTheme {
         ChatListContent(
-            state = ChatListState(
-                rows = emptyList(),
-                networks = listOf(
-                    NetworkEntity(
-                        id = 1, name = "Libera", role = NetworkRole.DIRECT,
-                        host = "irc.libera.chat", port = 6697,
-                        nick = "me", username = "me", realname = "Me",
-                    ),
+            state =
+                ChatListState(
+                    rows = emptyList(),
+                    networks =
+                        listOf(
+                            NetworkEntity(
+                                id = 1,
+                                name = "Libera",
+                                role = NetworkRole.DIRECT,
+                                host = "irc.libera.chat",
+                                port = 6697,
+                                nick = "me",
+                                username = "me",
+                                realname = "Me",
+                            ),
+                        ),
+                    loading = false,
                 ),
-                loading = false,
-            ),
-            onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {},
-            onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> },
-            onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> },
+            onOpenBuffer = {},
+            onOpenSettings = {},
+            onOpenSearch = {},
+            onSetPinned = { _, _ -> },
+            onSetMuted = { _, _ -> },
+            onJoinChannel = { _, _, _ -> },
+            onMessageUser = { _, _ -> },
         )
     }
 }

@@ -17,6 +17,7 @@ sealed interface HistoryAvailability {
     ) : HistoryAvailability
 
     data object NegotiatingOrOffline : HistoryAvailability
+
     data object Unsupported : HistoryAvailability
 }
 

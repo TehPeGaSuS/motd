@@ -1,27 +1,27 @@
 package io.github.trevarj.motd.ui.chat
 
-import io.github.trevarj.motd.data.db.MessageEntity
+import androidx.paging.LoadState
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
-import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
-import io.github.trevarj.motd.data.visibility.CONVERSATION_KINDS
-import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
-import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.history.HistoryLadderStalled
 import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.history.seamAbove
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.sync.GapFillProgress
+import io.github.trevarj.motd.data.visibility.CONVERSATION_KINDS
+import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistorySyncStatus
+import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.ui.components.HistoryGapState
 import io.github.trevarj.motd.ui.components.ReactionChip
-import androidx.paging.LoadState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -75,16 +75,20 @@ data class TimelineSeamState(
      * [filling] is checked before [failed] so a retry that is already running shows its progress
      * rather than the error it is retrying.
      */
-    fun stateFor(seam: TimelineSeam): HistoryGapState = when {
-        !seam.recoverable -> HistoryGapState.Unrecoverable
-        seam.gapId in filling -> HistoryGapState.Loading
-        historyUnavailable || seam.gapId in failed -> HistoryGapState.Failed
-        else -> HistoryGapState.Idle
-    }
+    fun stateFor(seam: TimelineSeam): HistoryGapState =
+        when {
+            !seam.recoverable -> HistoryGapState.Unrecoverable
+            seam.gapId in filling -> HistoryGapState.Loading
+            historyUnavailable || seam.gapId in failed -> HistoryGapState.Failed
+            else -> HistoryGapState.Idle
+        }
 }
 
 /** One seam as a row renders it: which gap to retry on tap, and the state its divider draws. */
-data class RowSeam(val gapId: Long, val state: HistoryGapState)
+data class RowSeam(
+    val gapId: Long,
+    val state: HistoryGapState,
+)
 
 /**
  * How close a seam has to be to the older edge of the viewport before history is loaded across it,
@@ -189,10 +193,11 @@ internal fun viewportAnchorAt(
     firstVisibleIndex: Int,
     itemCount: Int,
     peek: (Int) -> MessageEntity?,
-): TimelineAnchor? = firstVisibleIndex
-    .takeIf { it in 0 until itemCount }
-    ?.let(peek)
-    ?.timelineAnchor()
+): TimelineAnchor? =
+    firstVisibleIndex
+        .takeIf { it in 0 until itemCount }
+        ?.let(peek)
+        ?.timelineAnchor()
 
 internal fun MessageEntity.timelineAnchor() = TimelineAnchor(serverTime, id, timelineOrder)
 
@@ -215,14 +220,18 @@ internal data class SeamLoadingGate(
 internal fun historyUnreachable(
     availability: HistoryAvailability,
     connectionState: IrcClientState?,
-): Boolean = when (availability) {
-    HistoryAvailability.Unsupported -> true
-    HistoryAvailability.NegotiatingOrOffline -> isHistoryOffline(connectionState)
-    is HistoryAvailability.Ready -> false
-}
+): Boolean =
+    when (availability) {
+        HistoryAvailability.Unsupported -> true
+        HistoryAvailability.NegotiatingOrOffline -> isHistoryOffline(connectionState)
+        is HistoryAvailability.Ready -> false
+    }
 
 /** A tap on a failed seam's divider. [token] makes each tap a distinct event over a StateFlow. */
-internal data class GapTapRequest(val gapId: Long, val token: Long)
+internal data class GapTapRequest(
+    val gapId: Long,
+    val token: Long,
+)
 
 /** One load the timeline has decided to start, and where the demand came from. */
 internal data class GapFillRequest(
@@ -246,7 +255,9 @@ internal data class GapFillRequest(
  */
 internal sealed interface SeamDecision {
     /** Start this load. Exactly one [SeamLoadingRule.settle] must follow. */
-    data class Start(val request: GapFillRequest) : SeamDecision
+    data class Start(
+        val request: GapFillRequest,
+    ) : SeamDecision
 
     /** [SeamLoadingGate.armable] is false: the screen may not load history at all right now. */
     data object GateClosed : SeamDecision
@@ -275,14 +286,15 @@ internal sealed interface SeamDecision {
 
 /** Fixed classification string for the journal; never a free-form or user-derived value. */
 internal val SeamDecision.journalName: String
-    get() = when (this) {
-        is SeamDecision.Start -> if (request.fromTap) "start_tap" else "start"
-        SeamDecision.GateClosed -> "gate_closed"
-        SeamDecision.NoDemand -> "no_demand"
-        SeamDecision.AwaitingRetryTap -> "awaiting_retry_tap"
-        SeamDecision.AlreadyTriedAtDepth -> "already_tried_at_depth"
-        SeamDecision.NotRecoverable -> "not_recoverable"
-    }
+    get() =
+        when (this) {
+            is SeamDecision.Start -> if (request.fromTap) "start_tap" else "start"
+            SeamDecision.GateClosed -> "gate_closed"
+            SeamDecision.NoDemand -> "no_demand"
+            SeamDecision.AwaitingRetryTap -> "awaiting_retry_tap"
+            SeamDecision.AlreadyTriedAtDepth -> "already_tried_at_depth"
+            SeamDecision.NotRecoverable -> "not_recoverable"
+        }
 
 /**
  * The timeline's one history rule: **a seam behaves exactly like the end of the list.**
@@ -421,21 +433,21 @@ internal class SeamLoadingRule {
         // nearer hole is the one they are reading toward. Only one is started either way — the other
         // is offered on the next emission, and serializing them is what keeps a second fetch from
         // computing its boundary against a store this one is halfway through moving.
-        val candidate = approachable
-            .filter { seam ->
-                // Never fetched during this approach: nothing to be deeper than. Afterwards the
-                // reader must be anchored on a STRICTLY OLDER row than the one they were on when the
-                // last page was fetched — scrolling into history makes the newest visible row older,
-                // so `here < at` IS "the reader got deeper", and drifting back toward the present can
-                // never grant. Either anchor being unnameable refuses, because an unprovable move is
-                // not a move.
-                if (seam.gapId !in fetchedAtDepth) return@filter true
-                val at = fetchedAtDepth[seam.gapId] ?: return@filter false
-                val here = prefetch.viewportAnchor ?: return@filter false
-                here < at
-            }
-            .maxWithOrNull(compareBy({ it.position }, { it.gapId }))
-            ?: return SeamDecision.AlreadyTriedAtDepth
+        val candidate =
+            approachable
+                .filter { seam ->
+                    // Never fetched during this approach: nothing to be deeper than. Afterwards the
+                    // reader must be anchored on a STRICTLY OLDER row than the one they were on when the
+                    // last page was fetched — scrolling into history makes the newest visible row older,
+                    // so `here < at` IS "the reader got deeper", and drifting back toward the present can
+                    // never grant. Either anchor being unnameable refuses, because an unprovable move is
+                    // not a move.
+                    if (seam.gapId !in fetchedAtDepth) return@filter true
+                    val at = fetchedAtDepth[seam.gapId] ?: return@filter false
+                    val here = prefetch.viewportAnchor ?: return@filter false
+                    here < at
+                }.maxWithOrNull(compareBy({ it.position }, { it.gapId }))
+                ?: return SeamDecision.AlreadyTriedAtDepth
         fetchedAtDepth[candidate.gapId] = prefetch.viewportAnchor
         return SeamDecision.Start(GapFillRequest(roomId, candidate.gapId, fromTap = false))
     }
@@ -448,10 +460,15 @@ internal class SeamLoadingRule {
      * leaves the seam loading. [GapFillProgress.MOVED] additionally clears a previous failure, since
      * a page that landed is the retry having worked.
      */
-    fun settle(request: GapFillRequest, progress: GapFillProgress) {
+    fun settle(
+        request: GapFillRequest,
+        progress: GapFillProgress,
+    ) {
         when (progress) {
             GapFillProgress.FAILED -> failures += request.gapId
+
             GapFillProgress.MOVED -> failures -= request.gapId
+
             // Contention, not failure: the interval is still owed and the next scroll retries it.
             GapFillProgress.STALLED, GapFillProgress.DROPPED -> Unit
         }
@@ -472,8 +489,9 @@ fun rowSeam(
     row: MessageEntity,
     olderNeighbor: MessageEntity?,
     seams: TimelineSeamState,
-): RowSeam? = seamAbove(row, olderNeighbor, seams.seams)
-    ?.let { RowSeam(it.gapId, seams.stateFor(it)) }
+): RowSeam? =
+    seamAbove(row, olderNeighbor, seams.seams)
+        ?.let { RowSeam(it.gapId, seams.stateFor(it)) }
 
 /** Frozen normal-entry boundary; [lowerBound] means older unread rows are not loaded yet. */
 data class UnreadEntrySnapshot(
@@ -523,9 +541,10 @@ fun isFoolMessage(
     message: MessageEntity,
     fools: Set<String>,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
-): Boolean = message.kind in CONVERSATION_KINDS &&
-    !message.isSelf &&
-    message.matchesConfiguredActor(fools, identityRules)
+): Boolean =
+    message.kind in CONVERSATION_KINDS &&
+        !message.isSelf &&
+        message.matchesConfiguredActor(fools, identityRules)
 
 /**
  * Policy predicate: drops presence rows when hidden, and drops fool rows only in HIDE mode.
@@ -545,11 +564,12 @@ const val GROUP_WINDOW_MS: Long = 3 * 60 * 1000
 enum class LagTone { GOOD, DEGRADED, BAD }
 
 /** Classify a PING/PONG round-trip into a display tone. Thresholds chosen for IRC-scale latency. */
-fun lagTone(lagMs: Long): LagTone = when {
-    lagMs < 300 -> LagTone.GOOD
-    lagMs < 1_500 -> LagTone.DEGRADED
-    else -> LagTone.BAD
-}
+fun lagTone(lagMs: Long): LagTone =
+    when {
+        lagMs < 300 -> LagTone.GOOD
+        lagMs < 1_500 -> LagTone.DEGRADED
+        else -> LagTone.BAD
+    }
 
 /**
  * Scroll-offset slack (px) within which the reverse list still counts as "at bottom" for autoscroll.
@@ -596,13 +616,19 @@ internal const val TOP_ALIGNMENT_MAX_PASSES = 8
  * animating it to index 0 while the enter transition is running adds needless layout work.
  * Own-send scrolls unconditionally at the call site and does not route through this helper.
  */
-fun shouldAutoscrollToNewest(atBottom: Boolean, oldCount: Int, newCount: Int): Boolean =
-    atBottom && oldCount > 0 && newCount > oldCount
+fun shouldAutoscrollToNewest(
+    atBottom: Boolean,
+    oldCount: Int,
+    newCount: Int,
+): Boolean = atBottom && oldCount > 0 && newCount > oldCount
 
 /** Which jump the scroll-to-bottom FAB performs. */
 sealed interface ScrollToBottomFabJump {
     /** Jump to the nearest unread @mention below the viewport (the FAB's mention walk). */
-    data class Mention(val target: ChatPositionTarget) : ScrollToBottomFabJump
+    data class Mention(
+        val target: ChatPositionTarget,
+    ) : ScrollToBottomFabJump
+
     /** Jump straight to the newest row. */
     object Newest : ScrollToBottomFabJump
 }
@@ -616,8 +642,11 @@ fun scrollToBottomFabJump(
     longPress: Boolean,
     mentionTarget: ChatPositionTarget?,
 ): ScrollToBottomFabJump =
-    if (longPress || mentionTarget == null) ScrollToBottomFabJump.Newest
-    else ScrollToBottomFabJump.Mention(mentionTarget)
+    if (longPress || mentionTarget == null) {
+        ScrollToBottomFabJump.Newest
+    } else {
+        ScrollToBottomFabJump.Mention(mentionTarget)
+    }
 
 /**
  * Tracks the user's decision to follow live arrivals independently from the reverse list's
@@ -625,7 +654,9 @@ fun scrollToBottomFabJump(
  * without representing user intent, so deriving this state directly from the current bottom
  * position is racy.
  */
-internal class AutoFollowTracker(initialItemCount: Int) {
+internal class AutoFollowTracker(
+    initialItemCount: Int,
+) {
     var following: Boolean = true
         private set
 
@@ -636,7 +667,11 @@ internal class AutoFollowTracker(initialItemCount: Int) {
         get() = itemCount
 
     /** Consume the first post-entry Paging snapshot without treating it as a live arrival. */
-    fun reset(itemCount: Int, atBottom: Boolean, newestEffectiveId: Long? = null) {
+    fun reset(
+        itemCount: Int,
+        atBottom: Boolean,
+        newestEffectiveId: Long? = null,
+    ) {
         this.itemCount = itemCount
         this.newestEffectiveId = newestEffectiveId
         following = atBottom
@@ -651,7 +686,11 @@ internal class AutoFollowTracker(initialItemCount: Int) {
      * Update follow intent only for real user scrolling. Programmatic motion and Paging anchor
      * shifts must not disable it. A user scroll that settles back at the bottom opts in again.
      */
-    fun onScrollStateChanged(scrolling: Boolean, programmatic: Boolean, atBottom: Boolean) {
+    fun onScrollStateChanged(
+        scrolling: Boolean,
+        programmatic: Boolean,
+        atBottom: Boolean,
+    ) {
         if (programmatic) return
         following = if (scrolling) false else atBottom
     }
@@ -670,9 +709,10 @@ internal class AutoFollowTracker(initialItemCount: Int) {
      * break live following. Auto-generated row ids are monotonic, so a lower identity (for example
      * exposing an older row after deletion) is not mistaken for a live arrival.
      */
-    fun onTimelineChanged(newItemCount: Int, newNewestEffectiveId: Long?): Boolean {
-        return onTimelineChangedWithEntry(newItemCount, newNewestEffectiveId).shouldFollow
-    }
+    fun onTimelineChanged(
+        newItemCount: Int,
+        newNewestEffectiveId: Long?,
+    ): Boolean = onTimelineChangedWithEntry(newItemCount, newNewestEffectiveId).shouldFollow
 
     /**
      * Classify a timeline update for both viewport following and the one-shot entrance animation.
@@ -684,8 +724,9 @@ internal class AutoFollowTracker(initialItemCount: Int) {
         newNewestEffectiveId: Long?,
     ): TimelineChange {
         val previousNewestId = newestEffectiveId
-        val shouldFollow = following && previousNewestId != null &&
-            newNewestEffectiveId != null && newNewestEffectiveId > previousNewestId
+        val shouldFollow =
+            following && previousNewestId != null &&
+                newNewestEffectiveId != null && newNewestEffectiveId > previousNewestId
         itemCount = newItemCount
         // An empty invalidation snapshot is not a real timeline transition. Retain the last
         // meaningful identity so the repopulated snapshot can still be classified as live/old.
@@ -708,11 +749,16 @@ internal data class TimelineChange(
 )
 
 /** Timeline invalidations must retain in-flight entries while independent burst rows arrive. */
-internal fun appendLiveEntryId(current: Set<Long>, arrived: Long?): Set<Long> =
-    if (arrived == null || arrived in current) current else current + arrived
+internal fun appendLiveEntryId(
+    current: Set<Long>,
+    arrived: Long?,
+): Set<Long> = if (arrived == null || arrived in current) current else current + arrived
 
 /** A disposed row consumes only its own entrance identity. */
-internal fun consumeLiveEntryId(current: Set<Long>, consumed: Long): Set<Long> = current - consumed
+internal fun consumeLiveEntryId(
+    current: Set<Long>,
+    consumed: Long,
+): Set<Long> = current - consumed
 
 /**
  * A send in progress, presented as a bubble travelling from the composer into the timeline.
@@ -745,14 +791,20 @@ data class OutgoingFlight(
      * under the ghost. Until the identities land, the row is recognised by what it looks like: an
      * unconfirmed message of ours carrying exactly the text in flight.
      */
-    fun matches(message: MessageEntity): Boolean = when {
-        eventIds.isNotEmpty() -> message.id in eventIds
-        // Pending rows are stamped with the wall clock at insert, which is always at or after the
-        // tap that produced them. Once confirmed a row can have its time rewritten by the server,
-        // but by then it has no pending label and only the identity branch above applies.
-        else -> message.isSelf && message.pendingLabel != null &&
-            message.serverTime >= launchedAtMs && message.text == text
-    }
+    fun matches(message: MessageEntity): Boolean =
+        when {
+            eventIds.isNotEmpty() -> {
+                message.id in eventIds
+            }
+
+            // Pending rows are stamped with the wall clock at insert, which is always at or after the
+            // tap that produced them. Once confirmed a row can have its time rewritten by the server,
+            // but by then it has no pending label and only the identity branch above applies.
+            else -> {
+                message.isSelf && message.pendingLabel != null &&
+                    message.serverTime >= launchedAtMs && message.text == text
+            }
+        }
 }
 
 /**
@@ -773,7 +825,10 @@ internal fun isActionCommand(text: String): Boolean = text.startsWith("/me ")
  * closed gap, while showing text the row does not have. An unreported set of texts (a fake, or an
  * older seam) is treated as matching.
  */
-internal fun acceptedRowMatchesFlight(accepted: SendAcceptance.Accepted, sentText: String): Boolean =
+internal fun acceptedRowMatchesFlight(
+    accepted: SendAcceptance.Accepted,
+    sentText: String,
+): Boolean =
     accepted.eventIds.size == 1 &&
         (accepted.storedTexts.isEmpty() || accepted.storedTexts.singleOrNull() == sentText)
 
@@ -783,13 +838,14 @@ internal fun launchOutgoingFlight(
     text: String,
     replyTo: MessageEntity?,
     nowMs: Long,
-): OutgoingFlight = OutgoingFlight(
-    token = token,
-    text = text,
-    replySender = replyTo?.sender,
-    replyText = replyTo?.text,
-    launchedAtMs = nowMs,
-)
+): OutgoingFlight =
+    OutgoingFlight(
+        token = token,
+        text = text,
+        replySender = replyTo?.sender,
+        replyText = replyTo?.text,
+        launchedAtMs = nowMs,
+    )
 
 /**
  * Predict [showsSender] for the row a flight is about to become, before that row exists.
@@ -804,19 +860,21 @@ internal fun predictFlightShowsSender(
     selfNick: String,
     normalizedSelf: String,
     nowMs: Long,
-): Boolean = showsSender(
-    current = MessageEntity(
-        bufferId = newest?.bufferId ?: -1L,
-        serverTime = nowMs,
-        sender = selfNick,
-        normalizedActor = normalizedSelf,
-        kind = MessageKind.PRIVMSG,
-        text = "",
-        isSelf = true,
-        dedupKey = "",
-    ),
-    olderNeighbor = newest,
-)
+): Boolean =
+    showsSender(
+        current =
+            MessageEntity(
+                bufferId = newest?.bufferId ?: -1L,
+                serverTime = nowMs,
+                sender = selfNick,
+                normalizedActor = normalizedSelf,
+                kind = MessageKind.PRIVMSG,
+                text = "",
+                isSelf = true,
+                dedupKey = "",
+            ),
+        olderNeighbor = newest,
+    )
 
 /**
  * Adopt the durable row identities an accepted send produced. A stale token is ignored so a slow
@@ -827,19 +885,22 @@ internal fun attachOutgoingFlightEvents(
     current: OutgoingFlight?,
     token: Long,
     eventIds: Collection<Long>,
-): OutgoingFlight? = when {
-    current == null || current.token != token -> current
-    eventIds.isEmpty() -> null
-    else -> current.copy(eventIds = eventIds.toSet())
-}
+): OutgoingFlight? =
+    when {
+        current == null || current.token != token -> current
+        eventIds.isEmpty() -> null
+        else -> current.copy(eventIds = eventIds.toSet())
+    }
 
 /**
  * End a flight by token after it lands, is rejected or replaced, or leaves the screen. The
  * timeline reveals the landing row the moment its flight is gone, so this is the only way a row
  * hidden behind a ghost comes back.
  */
-internal fun settleOutgoingFlight(current: OutgoingFlight?, token: Long): OutgoingFlight? =
-    if (current?.token == token) null else current
+internal fun settleOutgoingFlight(
+    current: OutgoingFlight?,
+    token: Long,
+): OutgoingFlight? = if (current?.token == token) null else current
 
 /** Replacing a collapsed system-run head is an in-place summary update, not a new visual row. */
 internal fun extendsSystemRun(
@@ -848,8 +909,9 @@ internal fun extendsSystemRun(
     peek: (Int) -> MessageEntity?,
 ): Boolean {
     liveEntryId ?: return false
-    val index = (0 until minOf(itemCount, MAX_PLACEHOLDER_PROBES))
-        .firstOrNull { peek(it)?.id == liveEntryId } ?: return false
+    val index =
+        (0 until minOf(itemCount, MAX_PLACEHOLDER_PROBES))
+            .firstOrNull { peek(it)?.id == liveEntryId } ?: return false
     if (index + 1 >= itemCount) return false
     val current = peek(index) ?: return false
     val older = peek(index + 1) ?: return false
@@ -860,9 +922,10 @@ fun newestEffectiveMessageId(
     itemCount: Int,
     peek: (Int) -> MessageEntity?,
     policy: MessageVisibilityPolicy,
-): Long? = (0 until minOf(itemCount, MAX_PLACEHOLDER_PROBES)).firstNotNullOfOrNull { index ->
-    peek(index)?.takeIf(policy::effectiveBottom)?.id
-}
+): Long? =
+    (0 until minOf(itemCount, MAX_PLACEHOLDER_PROBES)).firstNotNullOfOrNull { index ->
+        peek(index)?.takeIf(policy::effectiveBottom)?.id
+    }
 
 /**
  * Reverse-list bottom with any raw tail ignored by policy treated as already settled.
@@ -930,7 +993,10 @@ internal sealed interface ScrollPositionOutcome {
     data object ParkAtBottom : ScrollPositionOutcome
 
     /** A resolvable anchor row; save it as the viewport to restore. */
-    data class Save(val anchorIndex: Int, val row: MessageEntity) : ScrollPositionOutcome
+    data class Save(
+        val anchorIndex: Int,
+        val row: MessageEntity,
+    ) : ScrollPositionOutcome
 
     /** Indeterminate snapshot: forget the saved viewport without asserting anything. */
     data object Forget : ScrollPositionOutcome
@@ -958,8 +1024,9 @@ internal fun scrollPositionOutcome(
     if (isAtEffectiveBottom(firstVisibleIndex, firstVisibleOffset, itemCount, peek, policy)) {
         return ScrollPositionOutcome.ParkAtBottom
     }
-    val (anchorIndex, row) = nearestAnchorRow(firstVisibleIndex, itemCount, peek, policy)
-        ?: return ScrollPositionOutcome.Forget
+    val (anchorIndex, row) =
+        nearestAnchorRow(firstVisibleIndex, itemCount, peek, policy)
+            ?: return ScrollPositionOutcome.Forget
     return ScrollPositionOutcome.Save(anchorIndex, row)
 }
 
@@ -1024,24 +1091,27 @@ internal fun firstUnreadWinsEntry(
     savedIndex: Int,
     firstUnreadIndex: Int,
     furthestDisplayedIndex: Int?,
-): Boolean = when (furthestDisplayedIndex) {
-    null -> firstUnreadIndex >= savedIndex
-    // A park is by construction a row that was displayed, so the watermark is normally at least as
-    // deep as it. The max is what keeps the rule honest if a watermark is ever recorded late.
-    else -> firstUnreadIndex > maxOf(savedIndex, furthestDisplayedIndex)
-}
+): Boolean =
+    when (furthestDisplayedIndex) {
+        null -> firstUnreadIndex >= savedIndex
+
+        // A park is by construction a row that was displayed, so the watermark is normally at least as
+        // deep as it. The max is what keeps the rule honest if a watermark is ever recorded late.
+        else -> firstUnreadIndex > maxOf(savedIndex, furthestDisplayedIndex)
+    }
 
 /** [firstUnreadWinsEntry] applied to the two entry targets. */
 internal fun preferredEntryTarget(
     saved: ChatPositionTarget?,
     firstUnread: ChatPositionTarget?,
     furthestDisplayedIndex: Int?,
-): ChatPositionTarget? = when {
-    saved == null -> firstUnread
-    firstUnread == null -> saved
-    firstUnreadWinsEntry(saved.index, firstUnread.index, furthestDisplayedIndex) -> firstUnread
-    else -> saved
-}
+): ChatPositionTarget? =
+    when {
+        saved == null -> firstUnread
+        firstUnread == null -> saved
+        firstUnreadWinsEntry(saved.index, firstUnread.index, furthestDisplayedIndex) -> firstUnread
+        else -> saved
+    }
 
 /**
  * Whether a re-resolved entry anchor names a different place than the one entry actually landed on.
@@ -1053,7 +1123,10 @@ internal fun preferredEntryTarget(
  * correction: an unmoved anchor must NOT republish, or the placement already in progress would be
  * restarted against the same row for nothing.
  */
-internal fun entryAnchorMoved(entered: ChatPositionTarget, repaired: ChatPositionTarget): Boolean =
+internal fun entryAnchorMoved(
+    entered: ChatPositionTarget,
+    repaired: ChatPositionTarget,
+): Boolean =
     entered.index != repaired.index ||
         entered.expectedEventId != repaired.expectedEventId ||
         entered.serverTime != repaired.serverTime
@@ -1069,11 +1142,12 @@ internal fun entryAnchorMoved(entered: ChatPositionTarget, repaired: ChatPositio
 internal fun nullDividerBottomEntry(
     firstUnread: TimelineAnchor?,
     entered: ChatPositionTarget,
-): Boolean = firstUnread == null &&
-    entered.index == 0 &&
-    entered.expectedEventId == null &&
-    entered.expectedMsgid == null &&
-    !entered.fromSavedPosition
+): Boolean =
+    firstUnread == null &&
+        entered.index == 0 &&
+        entered.expectedEventId == null &&
+        entered.expectedMsgid == null &&
+        !entered.fromSavedPosition
 
 /**
  * [firstUnreadWinsEntry] applied to the two entry indices, for the Pager key.
@@ -1086,12 +1160,13 @@ internal fun preferredEntryIndex(
     savedIndex: Int?,
     firstUnreadIndex: Int?,
     furthestDisplayedIndex: Int?,
-): Int? = when {
-    savedIndex == null -> firstUnreadIndex
-    firstUnreadIndex == null -> savedIndex
-    firstUnreadWinsEntry(savedIndex, firstUnreadIndex, furthestDisplayedIndex) -> firstUnreadIndex
-    else -> savedIndex
-}
+): Int? =
+    when {
+        savedIndex == null -> firstUnreadIndex
+        firstUnreadIndex == null -> savedIndex
+        firstUnreadWinsEntry(savedIndex, firstUnreadIndex, furthestDisplayedIndex) -> firstUnreadIndex
+        else -> savedIndex
+    }
 
 /**
  * Deepest row the timeline has actually placed on screen, or null while that cannot be proven.
@@ -1124,11 +1199,12 @@ internal fun materializableTargetIndex(
     requestedIndex: Int,
     itemCount: Int,
     hasExactIdentity: Boolean,
-): Int? = when {
-    requestedIndex in 0 until itemCount -> requestedIndex
-    !hasExactIdentity && requestedIndex == itemCount && itemCount > 0 -> itemCount - 1
-    else -> null
-}
+): Int? =
+    when {
+        requestedIndex in 0 until itemCount -> requestedIndex
+        !hasExactIdentity && requestedIndex == itemCount && itemCount > 0 -> itemCount - 1
+        else -> null
+    }
 
 /** Find a materialized row by the stable LazyColumn key, never by its pre-layout index. */
 internal fun materializedTargetVisibleIndex(
@@ -1228,8 +1304,10 @@ data class ChatScrollPosition(
  * unsaved target only repairs list state retained physically off-bottom; it must not displace an
  * already-bottom conversation.
  */
-fun shouldScrollToInitialTarget(target: ChatPositionTarget, atBottom: Boolean): Boolean =
-    target.fromSavedPosition || target.forceScrollOnEntry || !atBottom
+fun shouldScrollToInitialTarget(
+    target: ChatPositionTarget,
+    atBottom: Boolean,
+): Boolean = target.fromSavedPosition || target.forceScrollOnEntry || !atBottom
 
 /**
  * Index to bring to the bottom (start) of a reversed viewport so that [firstUnreadIndex] lands
@@ -1238,11 +1316,16 @@ fun shouldScrollToInitialTarget(target: ChatPositionTarget, atBottom: Boolean): 
  * then stays in view within the lower viewport with read history above it). Caller must guard
  * `rowsFit >= 1`; an empty measurement would otherwise scroll past the first unread.
  */
-internal fun firstUnreadTopAnchorIndex(firstUnreadIndex: Int, rowsFit: Int): Int =
-    (firstUnreadIndex - (rowsFit - 1)).coerceAtLeast(0)
+internal fun firstUnreadTopAnchorIndex(
+    firstUnreadIndex: Int,
+    rowsFit: Int,
+): Int = (firstUnreadIndex - (rowsFit - 1)).coerceAtLeast(0)
 
 /** Canonical local identity is checked before the case-sensitive opaque wire msgid. */
-fun positionTargetMatches(target: ChatPositionTarget, actual: MessageEntity?): Boolean {
+fun positionTargetMatches(
+    target: ChatPositionTarget,
+    actual: MessageEntity?,
+): Boolean {
     actual ?: return false
     if (target.expectedEventId != null && actual.id != target.expectedEventId) return false
     if (target.expectedMsgid != null && actual.msgid != target.expectedMsgid) return false
@@ -1274,19 +1357,23 @@ internal suspend fun <T> requestAndAwaitTarget(
     return withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
         while (true) {
             var streamEnded = false
-            val terminal = withTimeoutOrNull(rehintIntervalMs) {
-                snapshots.firstOrNull { snapshot ->
-                    observedLoading = observedLoading || snapshot.loading
-                    val replaced = snapshot.generation != before.generation
-                    val newFailure = snapshot.failed && (!before.failed || observedLoading || replaced)
-                    snapshot.item != null || newFailure ||
-                        (!snapshot.addressable && !snapshot.loading) ||
-                        ((observedLoading || replaced) && !snapshot.loading)
-                }.also { streamEnded = it == null }
-            }
+            val terminal =
+                withTimeoutOrNull(rehintIntervalMs) {
+                    snapshots
+                        .firstOrNull { snapshot ->
+                            observedLoading = observedLoading || snapshot.loading
+                            val replaced = snapshot.generation != before.generation
+                            val newFailure = snapshot.failed && (!before.failed || observedLoading || replaced)
+                            snapshot.item != null || newFailure ||
+                                (!snapshot.addressable && !snapshot.loading) ||
+                                ((observedLoading || replaced) && !snapshot.loading)
+                        }.also { streamEnded = it == null }
+                }
             when {
                 terminal != null -> return@withTimeoutOrNull terminal.item
+
                 streamEnded -> return@withTimeoutOrNull null
+
                 // A whole interval passed with no terminal snapshot and no load ever observed for a
                 // parked placeholder viewport: Paging can drop the single viewport hint when it
                 // races the generation's initial prepend/refresh, and nothing else will ever load
@@ -1301,19 +1388,32 @@ internal suspend fun <T> requestAndAwaitTarget(
     }
 }
 
-data class ReplyJumpRequest(val msgid: String)
+data class ReplyJumpRequest(
+    val msgid: String,
+)
 
 sealed interface ChatUiEvent {
     data object InvalidCommand : ChatUiEvent
+
     data object ReactionBlocked : ChatUiEvent
+
     data object ReactionTargetUnavailable : ChatUiEvent
+
     data object ReactionSendFailed : ChatUiEvent
+
     data object SendRejected : ChatUiEvent
+
     /** A submission never reached the wire because the reserved draft no longer matched it. */
     data object SendDropped : ChatUiEvent
+
     data object NotInChannel : ChatUiEvent
-    data class ReplyJumpUnavailable(val request: ReplyJumpRequest) : ChatUiEvent
+
+    data class ReplyJumpUnavailable(
+        val request: ReplyJumpRequest,
+    ) : ChatUiEvent
+
     data object ConversationLayoutWriteFailed : ChatUiEvent
+
     data object PresenceModeWriteFailed : ChatUiEvent
 }
 
@@ -1333,7 +1433,10 @@ data class ConversationPresenceState(
     val effective: PresenceMode get() = override ?: global
 }
 
-data class QueuedChatUiEvent(val id: Long, val value: ChatUiEvent)
+data class QueuedChatUiEvent(
+    val id: Long,
+    val value: ChatUiEvent,
+)
 
 /** StateFlow-backed FIFO so recreation replays every unacknowledged event exactly once. */
 internal class ChatUiEventQueue {
@@ -1342,19 +1445,20 @@ internal class ChatUiEventQueue {
     private val _pending = MutableStateFlow<List<QueuedChatUiEvent>>(emptyList())
     val pending = _pending.asStateFlow()
 
-    fun enqueue(value: ChatUiEvent): QueuedChatUiEvent = synchronized(lock) {
-        QueuedChatUiEvent(++nextId, value).also { event ->
-            _pending.value = _pending.value + event
+    fun enqueue(value: ChatUiEvent): QueuedChatUiEvent =
+        synchronized(lock) {
+            QueuedChatUiEvent(++nextId, value).also { event ->
+                _pending.value = _pending.value + event
+            }
         }
-    }
 
-    fun acknowledge(id: Long) = synchronized(lock) {
-        _pending.value = _pending.value.filterNot { it.id == id }
-    }
+    fun acknowledge(id: Long) =
+        synchronized(lock) {
+            _pending.value = _pending.value.filterNot { it.id == id }
+        }
 }
 
-internal fun ChatUiEvent.hasRetryAction(): Boolean =
-    this is ChatUiEvent.ReplyJumpUnavailable
+internal fun ChatUiEvent.hasRetryAction(): Boolean = this is ChatUiEvent.ReplyJumpUnavailable
 
 /** Run a snackbar action before acknowledging its replay-safe queued event. */
 internal fun handleChatUiEventResult(
@@ -1407,7 +1511,9 @@ sealed interface ChatHistoryUiState {
     data object LoadOlder : ChatHistoryUiState
 
     /** History is unreachable: [offline] true when disconnected/fatal, false while negotiating. */
-    data class Unavailable(val offline: Boolean) : ChatHistoryUiState
+    data class Unavailable(
+        val offline: Boolean,
+    ) : ChatHistoryUiState
 
     /** The network does not advertise CHATHISTORY. */
     data object Unsupported : ChatHistoryUiState
@@ -1432,19 +1538,31 @@ internal fun chatHistoryUiState(
             // A stall is not a wire failure and must not be dressed as one: the request went out and
             // was answered, it just could not move the ladder. What the reader wants there is the
             // fetch itself, so offer it rather than an error they did not cause.
-            append.error is HistoryLadderStalled -> ChatHistoryUiState.LoadOlder
-            availability == HistoryAvailability.NegotiatingOrOffline ->
+            append.error is HistoryLadderStalled -> {
+                ChatHistoryUiState.LoadOlder
+            }
+
+            availability == HistoryAvailability.NegotiatingOrOffline -> {
                 ChatHistoryUiState.Unavailable(offline = isHistoryOffline(connectionState))
-            else -> ChatHistoryUiState.Retry
+            }
+
+            else -> {
+                ChatHistoryUiState.Retry
+            }
         }
     }
     if (append.endOfPaginationReached && historyComplete) {
         return ChatHistoryUiState.ConfirmedStart
     }
     return when (availability) {
-        HistoryAvailability.Unsupported -> ChatHistoryUiState.Unsupported
-        HistoryAvailability.NegotiatingOrOffline ->
+        HistoryAvailability.Unsupported -> {
+            ChatHistoryUiState.Unsupported
+        }
+
+        HistoryAvailability.NegotiatingOrOffline -> {
             ChatHistoryUiState.Unavailable(offline = isHistoryOffline(connectionState))
+        }
+
         // This footer is an item at the far end of the timeline, so it is composed only once the
         // reader has actually scrolled past the oldest retained row — the exact position where the
         // ladder's APPEND fires. An armed ladder therefore says so, but it says it honestly: only
@@ -1454,8 +1572,9 @@ internal fun chatHistoryUiState(
         //
         // End-of-pagination without persisted completion stays silent: the direction is finished for
         // this Pager and a status line there would promise a page that is never coming.
-        is HistoryAvailability.Ready ->
+        is HistoryAvailability.Ready -> {
             if (append.endOfPaginationReached) ChatHistoryUiState.Hidden else ChatHistoryUiState.Armed
+        }
     }
 }
 
@@ -1477,14 +1596,26 @@ internal fun timelineHistoryStatus(
     prepend: LoadState,
     itemCount: Int,
     syncStatus: HistorySyncStatus,
-): HistorySyncStatus = when {
-    itemCount == 0 && refresh is LoadState.Loading -> HistorySyncStatus.Syncing
-    prepend is LoadState.Loading -> HistorySyncStatus.Syncing
-    prepend is LoadState.Error -> HistorySyncStatus.Failed(
-        prepend.error.message ?: "Unable to load newer history",
-    )
-    else -> syncStatus
-}
+): HistorySyncStatus =
+    when {
+        itemCount == 0 && refresh is LoadState.Loading -> {
+            HistorySyncStatus.Syncing
+        }
+
+        prepend is LoadState.Loading -> {
+            HistorySyncStatus.Syncing
+        }
+
+        prepend is LoadState.Error -> {
+            HistorySyncStatus.Failed(
+                prepend.error.message ?: "Unable to load newer history",
+            )
+        }
+
+        else -> {
+            syncStatus
+        }
+    }
 
 /** Appearance grace before the append shimmer may show, matching the title spinner's 140 ms fade. */
 internal const val FOOTER_APPEARANCE_DELAY_MS = 140L
@@ -1513,7 +1644,10 @@ internal class FooterStatePresenter {
     private var lastLoadingSeenMs: Long? = null
     private var shownSinceMs: Long? = null
 
-    fun resolve(candidate: ChatHistoryUiState, nowMs: Long): ChatHistoryUiState {
+    fun resolve(
+        candidate: ChatHistoryUiState,
+        nowMs: Long,
+    ): ChatHistoryUiState {
         if (isImmediate(candidate)) return settle(candidate)
         if (candidate == ChatHistoryUiState.Loading) {
             // A Loading that returns within the flick window continues the same burst and keeps the
@@ -1549,27 +1683,33 @@ internal class FooterStatePresenter {
         return presented
     }
 
-    private fun isImmediate(candidate: ChatHistoryUiState): Boolean = when (candidate) {
-        ChatHistoryUiState.ConfirmedStart,
-        ChatHistoryUiState.Unsupported,
-        ChatHistoryUiState.Retry,
-        ChatHistoryUiState.LoadOlder,
-        -> true
-        else -> false
-    }
+    private fun isImmediate(candidate: ChatHistoryUiState): Boolean =
+        when (candidate) {
+            ChatHistoryUiState.ConfirmedStart,
+            ChatHistoryUiState.Unsupported,
+            ChatHistoryUiState.Retry,
+            ChatHistoryUiState.LoadOlder,
+            -> true
+
+            else -> false
+        }
 }
 
-internal fun isHistoryOffline(connectionState: IrcClientState?): Boolean = when (connectionState) {
-    IrcClientState.Disconnected -> true
-    is IrcClientState.Failed -> connectionState.fatal
-    else -> false
-}
+internal fun isHistoryOffline(connectionState: IrcClientState?): Boolean =
+    when (connectionState) {
+        IrcClientState.Disconnected -> true
+        is IrcClientState.Failed -> connectionState.fatal
+        else -> false
+    }
 
 /** Retries each offline mediator failure once when its connection generation is Ready. */
 internal class HistoryReadyRetryGate {
     private var retriedError: Throwable? = null
 
-    fun update(availability: HistoryAvailability, append: LoadState): Boolean {
+    fun update(
+        availability: HistoryAvailability,
+        append: LoadState,
+    ): Boolean {
         if (availability == HistoryAvailability.Unsupported) return false
         val error = (append as? LoadState.Error)?.error ?: return false
         if (error !is io.github.trevarj.motd.irc.client.IrcDisconnectedException) return false
@@ -1592,13 +1732,14 @@ fun aggregateReactions(
     myAccount: String? = null,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
 ): Map<String, List<ReactionChip>> {
-    val myActorKeys = buildSet {
-        myAccount?.takeUnless { it.isEmpty() || it == "*" }?.let { add("account:$it") }
-        myNick?.let { nick ->
-            add(identityRules.actorKey(nick, account = null))
-            if (myAccount != null) add(identityRules.actorKey(nick, myAccount))
+    val myActorKeys =
+        buildSet {
+            myAccount?.takeUnless { it.isEmpty() || it == "*" }?.let { add("account:$it") }
+            myNick?.let { nick ->
+                add(identityRules.actorKey(nick, account = null))
+                if (myAccount != null) add(identityRules.actorKey(nick, myAccount))
+            }
         }
-    }
     val myNormalizedNick = myNick?.let(identityRules::normalize)
     // msgid -> emoji -> (count, mine)
     val byMsg = LinkedHashMap<String, LinkedHashMap<String, MutableReactionAgg>>()
@@ -1608,8 +1749,10 @@ fun aggregateReactions(
         agg.count++
         if (
             r.actorKey in myActorKeys ||
-            (myAccount == null && myNormalizedNick != null &&
-                identityRules.normalize(r.sender) == myNormalizedNick)
+            (
+                myAccount == null && myNormalizedNick != null &&
+                    identityRules.normalize(r.sender) == myNormalizedNick
+            )
         ) {
             agg.mine = true
         }
@@ -1619,4 +1762,7 @@ fun aggregateReactions(
     }
 }
 
-private class MutableReactionAgg(var count: Int = 0, var mine: Boolean = false)
+private class MutableReactionAgg(
+    var count: Int = 0,
+    var mine: Boolean = false,
+)

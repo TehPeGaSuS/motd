@@ -31,16 +31,21 @@ import kotlin.math.max
 internal enum class GeneratedAvatarSubject { USER, NETWORK }
 
 /** Network rows use an unmistakable topology mark instead of another person-shaped sprite. */
-internal fun prominentAvatarGlyph(subject: GeneratedAvatarSubject): FontAwesomeGlyph? =
-    if (subject == GeneratedAvatarSubject.NETWORK) FontAwesomeGlyph.NETWORK else null
+internal fun prominentAvatarGlyph(subject: GeneratedAvatarSubject): FontAwesomeGlyph? = if (subject == GeneratedAvatarSubject.NETWORK) FontAwesomeGlyph.NETWORK else null
 
-internal enum class AvatarDetail { MINI, STANDARD, FULL;
+internal enum class AvatarDetail {
+    MINI,
+    STANDARD,
+    FULL,
+    ;
+
     companion object {
-        fun forSize(size: Dp): AvatarDetail = when {
-            size < 24.dp -> MINI
-            size < 32.dp -> STANDARD
-            else -> FULL
-        }
+        fun forSize(size: Dp): AvatarDetail =
+            when {
+                size < 24.dp -> MINI
+                size < 32.dp -> STANDARD
+                else -> FULL
+            }
     }
 }
 
@@ -107,8 +112,9 @@ internal fun generatedAvatarTraits(
     val project = if (subject == GeneratedAvatarSubject.USER) matchedProjectMark(name) else null
     val head = seededIndex(seed, 1, 8)
     // The cap collides with heads that already own a top feature; those pulls take the antenna.
-    val accessory = seededIndex(seed, 3, 10)
-        .let { if (it == 2 && head in TOP_FEATURE_HEADS) 0 else it }
+    val accessory =
+        seededIndex(seed, 3, 10)
+            .let { if (it == 2 && head in TOP_FEATURE_HEADS) 0 else it }
     return GeneratedAvatarTraits(
         head = head,
         visor = seededIndex(seed, 2, 6),
@@ -124,11 +130,16 @@ internal fun generatedAvatarTraits(
     )
 }
 
-private fun avatarSeed(subject: GeneratedAvatarSubject, name: String, networkId: Long?): Long {
-    val scope = when (subject) {
-        GeneratedAvatarSubject.USER -> "user"
-        GeneratedAvatarSubject.NETWORK -> "network:${networkId ?: 0L}"
-    }
+private fun avatarSeed(
+    subject: GeneratedAvatarSubject,
+    name: String,
+    networkId: Long?,
+): Long {
+    val scope =
+        when (subject) {
+            GeneratedAvatarSubject.USER -> "user"
+            GeneratedAvatarSubject.NETWORK -> "network:${networkId ?: 0L}"
+        }
     return fnv1a64("$scope:${canonicalAvatarNick(name)}")
 }
 
@@ -140,7 +151,11 @@ private fun fnv1a64(value: String): Long {
     return hash
 }
 
-private fun seededIndex(seed: Long, salt: Int, bound: Int): Int {
+private fun seededIndex(
+    seed: Long,
+    salt: Int,
+    bound: Int,
+): Int {
     var value = seed + -7046029254386353131L * (salt + 1L)
     value = (value xor (value ushr 30)) * -4658895280553007687L
     value = (value xor (value ushr 27)) * -7723592293110705685L
@@ -162,7 +177,10 @@ internal fun matchedProjectMark(nick: String): ProjectMark? {
         ?.mark
 }
 
-private data class ProjectMatch(val mark: ProjectMark, val alias: String)
+private data class ProjectMatch(
+    val mark: ProjectMark,
+    val alias: String,
+)
 
 internal fun nickTokens(nick: String): List<String> {
     val stripped = nick.trim().trimStart('~', '&', '@', '%', '+')
@@ -185,10 +203,11 @@ internal fun nickTokens(nick: String): List<String> {
             continue
         }
         val previousChar = previous
-        val boundary = previousChar != null && (
-            (previousChar.isLowerCase() && char.isUpperCase()) ||
-                (previousChar.isLetter() && char.isDigit()) ||
-                (previousChar.isDigit() && char.isLetter())
+        val boundary =
+            previousChar != null && (
+                (previousChar.isLowerCase() && char.isUpperCase()) ||
+                    (previousChar.isLetter() && char.isDigit()) ||
+                    (previousChar.isDigit() && char.isLetter())
             )
         if (boundary) flush()
         current.append(char)
@@ -198,21 +217,24 @@ internal fun nickTokens(nick: String): List<String> {
     return tokens
 }
 
-internal fun tokenMatchesAlias(token: String, alias: String): Boolean =
-    token == alias || (alias.length >= 4 && (token.startsWith(alias) || token.endsWith(alias)))
+internal fun tokenMatchesAlias(
+    token: String,
+    alias: String,
+): Boolean = token == alias || (alias.length >= 4 && (token.startsWith(alias) || token.endsWith(alias)))
 
 /** Use an actual Font Awesome mark when it is both available and still legible at chest scale. */
-internal fun ProjectMark.fontAwesomeGlyph(): FontAwesomeGlyph? = when (this) {
-    ProjectMark.RUST -> FontAwesomeGlyph.RUST
-    ProjectMark.PYTHON -> FontAwesomeGlyph.PYTHON
-    ProjectMark.GO -> FontAwesomeGlyph.GOLANG
-    ProjectMark.GIT -> FontAwesomeGlyph.GIT_ALT
-    ProjectMark.GITHUB -> FontAwesomeGlyph.GITHUB
-    ProjectMark.LINUX -> FontAwesomeGlyph.LINUX
-    ProjectMark.DOCKER -> FontAwesomeGlyph.DOCKER
-    ProjectMark.ANDROID -> FontAwesomeGlyph.ANDROID
-    else -> null
-}
+internal fun ProjectMark.fontAwesomeGlyph(): FontAwesomeGlyph? =
+    when (this) {
+        ProjectMark.RUST -> FontAwesomeGlyph.RUST
+        ProjectMark.PYTHON -> FontAwesomeGlyph.PYTHON
+        ProjectMark.GO -> FontAwesomeGlyph.GOLANG
+        ProjectMark.GIT -> FontAwesomeGlyph.GIT_ALT
+        ProjectMark.GITHUB -> FontAwesomeGlyph.GITHUB
+        ProjectMark.LINUX -> FontAwesomeGlyph.LINUX
+        ProjectMark.DOCKER -> FontAwesomeGlyph.DOCKER
+        ProjectMark.ANDROID -> FontAwesomeGlyph.ANDROID
+        else -> null
+    }
 
 /** Avatar for people. The nick-color scheme is intentionally shared with sender labels. */
 @Composable
@@ -268,13 +290,14 @@ private fun GeneratedAvatar(
     // Dark themes raise the disc one container step so the vivid sprite doesn't sit on a disc
     // that sinks into the row card; light themes keep the regular raised container.
     val base = if (dark) scheme.surfaceContainerHighest else scheme.surfaceContainerHigh
-    val palette = remember(primary, base, scheme.surfaceContainerLowest) {
-        SpritePalette.from(
-            primary = primary,
-            base = base,
-            panel = scheme.surfaceContainerLowest,
-        )
-    }
+    val palette =
+        remember(primary, base, scheme.surfaceContainerLowest) {
+            SpritePalette.from(
+                primary = primary,
+                base = base,
+                panel = scheme.surfaceContainerLowest,
+            )
+        }
     Canvas(modifier = modifier.size(avatarSize).clip(CircleShape)) {
         val canvasSize = size
         // The modifier owns the circular clip. Scale the 24×24 scene from its top-left origin;
@@ -291,11 +314,12 @@ private fun GeneratedAvatar(
             }
         }
         val ring = statusRing ?: palette.primary.copy(alpha = 0.52f)
-        val ringWidth = if (subject == GeneratedAvatarSubject.NETWORK) {
-            max(1.5.dp.toPx(), 1.75f)
-        } else {
-            max(1.dp.toPx(), 1.25f)
-        }
+        val ringWidth =
+            if (subject == GeneratedAvatarSubject.NETWORK) {
+                max(1.5.dp.toPx(), 1.75f)
+            } else {
+                max(1.dp.toPx(), 1.25f)
+            }
         val ringInset = max(0.75.dp.toPx(), ringWidth / 2f + 0.35.dp.toPx())
         drawCircle(
             color = ring,
@@ -325,7 +349,11 @@ private data class SpritePalette(
          * visor ([panel]) stay Material neutrals, which is what keeps terminal themes and AMOLED
          * coherent.
          */
-        fun from(primary: Color, base: Color, panel: Color): SpritePalette {
+        fun from(
+            primary: Color,
+            base: Color,
+            panel: Color,
+        ): SpritePalette {
             val ramp = identityRamp(primary)
             return SpritePalette(
                 base = base,
@@ -357,7 +385,10 @@ private fun DrawScope.drawUserSprite(
 }
 
 /** Fill the badge with a large topology glyph that remains legible at the drawer's 32dp size. */
-private fun DrawScope.drawProminentGlyph(glyph: FontAwesomeGlyph, colors: SpritePalette) {
+private fun DrawScope.drawProminentGlyph(
+    glyph: FontAwesomeGlyph,
+    colors: SpritePalette,
+) {
     drawCircle(colors.shade, radius = 8.5f, center = p(12f, 12f))
     val maxSize = 12f
     val scale = maxSize / max(glyph.viewBoxWidth, glyph.viewBoxHeight)
@@ -375,17 +406,22 @@ private fun DrawScope.drawProminentGlyph(glyph: FontAwesomeGlyph, colors: Sprite
 
 // Parts draw fully opaque (solid ramp steps + solid ink); only the rare glitch scan line keeps
 // an alpha, deliberately, because it is a CRT artifact rather than a part.
-private fun DrawScope.drawBody(traits: GeneratedAvatarTraits, colors: SpritePalette) {
+private fun DrawScope.drawBody(
+    traits: GeneratedAvatarTraits,
+    colors: SpritePalette,
+) {
     val top = if (traits.head % 2 == 0) 15f else 14f
     when (traits.body) {
         1 -> { // broad shoulders
             drawRoundRect(colors.shade, p(3.5f, top + 1f), s(17f, 9f), CornerRadius(3f, 3f))
             drawRoundRect(colors.primary, p(6f, top + 3f), s(12f, 7f), CornerRadius(2.5f, 2.5f))
         }
+
         2 -> { // rounded pod
             drawRoundRect(colors.shade, p(6.5f, top), s(11f, 10f), CornerRadius(5.5f, 5.5f))
             drawRoundRect(colors.primary, p(8.5f, top + 2f), s(7f, 8f), CornerRadius(4f, 4f))
         }
+
         else -> { // classic slab
             drawRoundRect(colors.shade, p(5f, top), s(14f, 10f), CornerRadius(4f, 4f))
             drawRoundRect(colors.primary, p(7f, top + 2f), s(10f, 8f), CornerRadius(3f, 3f))
@@ -395,28 +431,44 @@ private fun DrawScope.drawBody(traits: GeneratedAvatarTraits, colors: SpritePale
     drawLine(colors.shade, p(12f, top + 3f), p(12f, 22f), 0.65f)
 }
 
-private fun DrawScope.drawHead(variant: Int, colors: SpritePalette) {
+private fun DrawScope.drawHead(
+    variant: Int,
+    colors: SpritePalette,
+) {
     when (variant) {
-        0 -> drawRoundRect(colors.highlight, p(5f, 5f), s(14f, 13f), CornerRadius(5f, 5f))
-        1 -> drawRoundRect(colors.highlight, p(4f, 6f), s(16f, 12f), CornerRadius(3f, 3f))
-        2 -> drawCircle(colors.highlight, 7f, p(12f, 11f))
+        0 -> {
+            drawRoundRect(colors.highlight, p(5f, 5f), s(14f, 13f), CornerRadius(5f, 5f))
+        }
+
+        1 -> {
+            drawRoundRect(colors.highlight, p(4f, 6f), s(16f, 12f), CornerRadius(3f, 3f))
+        }
+
+        2 -> {
+            drawCircle(colors.highlight, 7f, p(12f, 11f))
+        }
+
         3 -> {
             drawRoundRect(colors.highlight, p(5f, 4f), s(14f, 14f), CornerRadius(2f, 2f))
             drawRoundRect(colors.shade, p(4f, 7f), s(16f, 7f), CornerRadius(2f, 2f))
         }
+
         4 -> {
             drawRoundRect(colors.highlight, p(6f, 5f), s(12f, 13f), CornerRadius(4f, 4f))
             drawCircle(colors.highlight, 3f, p(6f, 12f))
             drawCircle(colors.highlight, 3f, p(18f, 12f))
         }
+
         5 -> {
             drawRoundRect(colors.highlight, p(5f, 6f), s(14f, 12f), CornerRadius(6f, 6f))
             drawRoundRect(colors.shade, p(7f, 4f), s(10f, 3f), CornerRadius(2f, 2f))
         }
+
         6 -> { // CRT bezel
             drawRoundRect(colors.highlight, p(4.5f, 4.5f), s(15f, 12f), CornerRadius(2.5f, 2.5f))
             drawRoundRect(colors.shade, p(4.5f, 14.5f), s(15f, 2.6f), CornerRadius(1.3f, 1.3f))
         }
+
         else -> { // tall dome
             drawRoundRect(colors.highlight, p(6f, 3f), s(12f, 15f), CornerRadius(6f, 6f))
             drawRoundRect(colors.shade, p(8.5f, 15.3f), s(7f, 2.2f), CornerRadius(1.1f, 1.1f))
@@ -424,25 +476,39 @@ private fun DrawScope.drawHead(variant: Int, colors: SpritePalette) {
     }
 }
 
-private fun DrawScope.drawVisor(traits: GeneratedAvatarTraits, colors: SpritePalette) {
+private fun DrawScope.drawVisor(
+    traits: GeneratedAvatarTraits,
+    colors: SpritePalette,
+) {
     val visor = if (traits.tintedVisor) lerp(colors.panel, colors.primary, 0.18f) else colors.panel
     when (traits.visor) {
-        0 -> drawRoundRect(visor, p(7f, 9f), s(10f, 3.5f), CornerRadius(1.5f, 1.5f))
+        0 -> {
+            drawRoundRect(visor, p(7f, 9f), s(10f, 3.5f), CornerRadius(1.5f, 1.5f))
+        }
+
         1 -> {
             drawRoundRect(visor, p(6f, 9f), s(5f, 3.5f), CornerRadius(1.5f, 1.5f))
             drawRoundRect(visor, p(13f, 9f), s(5f, 3.5f), CornerRadius(1.5f, 1.5f))
         }
+
         2 -> {
             drawCircle(visor, 2.2f, p(8.5f, 10.5f))
             drawCircle(visor, 2.2f, p(15.5f, 10.5f))
         }
-        3 -> drawRoundRect(visor, p(6f, 8.5f), s(12f, 4.5f), CornerRadius(0.8f, 0.8f))
+
+        3 -> {
+            drawRoundRect(visor, p(6f, 8.5f), s(12f, 4.5f), CornerRadius(0.8f, 0.8f))
+        }
+
         4 -> {
             drawRoundRect(visor, p(7f, 9f), s(4f, 3.5f), CornerRadius(1.5f, 1.5f))
             drawRoundRect(visor, p(13f, 9f), s(4f, 3.5f), CornerRadius(1.5f, 1.5f))
             drawLine(visor, p(11f, 10.75f), p(13f, 10.75f), 0.8f)
         }
-        else -> drawRoundRect(visor, p(7f, 9.5f), s(10f, 2.4f), CornerRadius(1.2f, 1.2f))
+
+        else -> {
+            drawRoundRect(visor, p(7f, 9.5f), s(10f, 2.4f), CornerRadius(1.2f, 1.2f))
+        }
     }
     drawLine(colors.primary, p(8f, 10.7f), p(16f, 10.7f), 0.55f, StrokeCap.Round)
     if (traits.glitchScanline) {
@@ -450,12 +516,16 @@ private fun DrawScope.drawVisor(traits: GeneratedAvatarTraits, colors: SpritePal
     }
 }
 
-private fun DrawScope.drawAccessory(variant: Int, colors: SpritePalette) {
+private fun DrawScope.drawAccessory(
+    variant: Int,
+    colors: SpritePalette,
+) {
     when (variant) {
         0 -> { // antenna
             drawLine(colors.ink, p(12f, 5f), p(12f, 2.1f), 0.8f, StrokeCap.Round)
             drawCircle(colors.primary, 1.1f, p(12f, 1.9f))
         }
+
         1 -> { // headphones, cups carry a mid-tone dot
             drawStrokeArc(colors.ink, 210f, 120f, Rect(4f, 4f, 20f, 19f), 1.1f)
             drawRoundRect(colors.ink, p(3.5f, 10f), s(2f, 5f), CornerRadius(0.8f, 0.8f))
@@ -463,31 +533,48 @@ private fun DrawScope.drawAccessory(variant: Int, colors: SpritePalette) {
             drawCircle(colors.primary, 0.55f, p(4.5f, 12.5f))
             drawCircle(colors.primary, 0.55f, p(19.5f, 12.5f))
         }
-        2 -> drawRoundRect(colors.ink, p(5.5f, 4f), s(13f, 2.4f), CornerRadius(1.2f, 1.2f)) // cap
-        3 -> drawStrokeArc(colors.ink, 190f, 160f, Rect(3.8f, 3.8f, 20.2f, 20.2f), 1.4f) // hood
+
+        2 -> {
+            drawRoundRect(colors.ink, p(5.5f, 4f), s(13f, 2.4f), CornerRadius(1.2f, 1.2f))
+        }
+
+        // cap
+        3 -> {
+            drawStrokeArc(colors.ink, 190f, 160f, Rect(3.8f, 3.8f, 20.2f, 20.2f), 1.4f)
+        }
+
+        // hood
         4 -> { // periscope
             drawLine(colors.ink, p(12f, 5f), p(12f, 2.6f), 0.8f)
             drawLine(colors.ink, p(12f, 2.6f), p(14.2f, 2.6f), 0.8f, StrokeCap.Round)
             drawCircle(colors.primary, 0.85f, p(14.6f, 2.6f))
         }
+
         5 -> { // circuit temples
             drawLine(colors.ink, p(5.2f, 9f), p(3.2f, 7.5f), 0.7f)
             drawLine(colors.ink, p(18.8f, 9f), p(20.8f, 7.5f), 0.7f)
             drawCircle(colors.primary, 0.72f, p(3f, 7.3f))
             drawCircle(colors.primary, 0.72f, p(21f, 7.3f))
         }
+
         6 -> { // ear pods
             drawCircle(colors.ink, 1.5f, p(4f, 11.5f))
             drawCircle(colors.ink, 1.5f, p(20f, 11.5f))
             drawCircle(colors.primary, 0.6f, p(4f, 11.5f))
             drawCircle(colors.primary, 0.6f, p(20f, 11.5f))
         }
-        7 -> drawRoundRect(colors.primary, p(10.8f, 1.8f), s(2.4f, 3.6f), CornerRadius(1.2f, 1.2f)) // dorsal fin
+
+        7 -> {
+            drawRoundRect(colors.primary, p(10.8f, 1.8f), s(2.4f, 3.6f), CornerRadius(1.2f, 1.2f))
+        }
+
+        // dorsal fin
         8 -> { // carry handle
             drawLine(colors.ink, p(9f, 2.6f), p(9f, 5.2f), 0.8f)
             drawLine(colors.ink, p(15f, 2.6f), p(15f, 5.2f), 0.8f)
             drawLine(colors.ink, p(9f, 2.6f), p(15f, 2.6f), 0.8f, StrokeCap.Round)
         }
+
         else -> { // twin horns
             drawLine(colors.ink, p(5.5f, 6.5f), p(3.6f, 4.6f), 0.8f, StrokeCap.Round)
             drawLine(colors.ink, p(18.5f, 6.5f), p(20.4f, 4.6f), 0.8f, StrokeCap.Round)
@@ -497,29 +584,49 @@ private fun DrawScope.drawAccessory(variant: Int, colors: SpritePalette) {
     }
 }
 
-private fun DrawScope.drawExpression(variant: Int, colors: SpritePalette) {
+private fun DrawScope.drawExpression(
+    variant: Int,
+    colors: SpritePalette,
+) {
     val color = colors.ink
     when (variant) {
-        0 -> drawLine(color, p(10f, 14.5f), p(14f, 14.5f), 0.7f, StrokeCap.Round)
-        1 -> drawStrokeArc(color, 15f, 150f, Rect(9f, 13f, 15f, 17f), 0.7f)
+        0 -> {
+            drawLine(color, p(10f, 14.5f), p(14f, 14.5f), 0.7f, StrokeCap.Round)
+        }
+
+        1 -> {
+            drawStrokeArc(color, 15f, 150f, Rect(9f, 13f, 15f, 17f), 0.7f)
+        }
+
         2 -> {
             drawCircle(color, 0.6f, p(10.5f, 14.5f))
             drawCircle(color, 0.6f, p(13.5f, 14.5f))
         }
-        3 -> drawArc( // open smile: a filled lower half-disc
-            color = color,
-            startAngle = 0f,
-            sweepAngle = 180f,
-            useCenter = true,
-            topLeft = p(10.4f, 12.4f),
-            size = s(3.2f, 3.2f),
-        )
+
+        3 -> {
+            drawArc( // open smile: a filled lower half-disc
+                color = color,
+                startAngle = 0f,
+                sweepAngle = 180f,
+                useCenter = true,
+                topLeft = p(10.4f, 12.4f),
+                size = s(3.2f, 3.2f),
+            )
+        }
+
         4 -> {
             drawLine(color, p(9.8f, 15f), p(12f, 13.8f), 0.65f, StrokeCap.Round)
             drawLine(color, p(12f, 13.8f), p(14.2f, 15f), 0.65f, StrokeCap.Round)
         }
-        5 -> drawCircle(color, 0.9f, p(12f, 14.6f)) // surprised o
-        else -> drawLine(color, p(10f, 15f), p(13.6f, 14.2f), 0.7f, StrokeCap.Round) // smirk
+
+        5 -> {
+            drawCircle(color, 0.9f, p(12f, 14.6f))
+        }
+
+        // surprised o
+        else -> {
+            drawLine(color, p(10f, 15f), p(13.6f, 14.2f), 0.7f, StrokeCap.Round)
+        } // smirk
     }
 }
 
@@ -541,8 +648,17 @@ private fun DrawScope.drawStrokeArc(
     )
 }
 
-private fun p(x: Float, y: Float) = androidx.compose.ui.geometry.Offset(x, y)
-private fun s(width: Float, height: Float) = androidx.compose.ui.geometry.Size(width, height)
+private fun p(
+    x: Float,
+    y: Float,
+) = androidx.compose.ui.geometry
+    .Offset(x, y)
+
+private fun s(
+    width: Float,
+    height: Float,
+) = androidx.compose.ui.geometry
+    .Size(width, height)
 
 /**
  * Font Awesome Free 6.7.2 solid SVG path data, rendered directly as tiny chest emblems rather
@@ -639,15 +755,16 @@ internal enum class FontAwesomeGlyph(
     val path: Path by lazy { PathParser().parsePathString(vectorData).toPath() }
 
     companion object {
-        fun forBadge(kind: GenericBadge): FontAwesomeGlyph = when (kind) {
-            GenericBadge.TERMINAL -> TERMINAL
-            GenericBadge.CODE -> CODE
-            GenericBadge.CHIP -> CHIP
-            GenericBadge.NETWORK -> NETWORK
-            GenericBadge.DATABASE -> DATABASE
-            GenericBadge.SECURITY -> SECURITY
-            GenericBadge.BOT -> BOT
-            GenericBadge.PACKAGE -> PACKAGE
-        }
+        fun forBadge(kind: GenericBadge): FontAwesomeGlyph =
+            when (kind) {
+                GenericBadge.TERMINAL -> TERMINAL
+                GenericBadge.CODE -> CODE
+                GenericBadge.CHIP -> CHIP
+                GenericBadge.NETWORK -> NETWORK
+                GenericBadge.DATABASE -> DATABASE
+                GenericBadge.SECURITY -> SECURITY
+                GenericBadge.BOT -> BOT
+                GenericBadge.PACKAGE -> PACKAGE
+            }
     }
 }

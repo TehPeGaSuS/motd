@@ -44,22 +44,24 @@ class EmojiCatalogTest {
 
     @Test
     fun `fuzzy subsequence finds a partially typed name`() {
-        val entries = listOf(
-            EmojiSearchEntry("x", "grinning_face"),
-            EmojiSearchEntry("y", "heart_eyes"),
-        )
+        val entries =
+            listOf(
+                EmojiSearchEntry("x", "grinning_face"),
+                EmojiSearchEntry("y", "heart_eyes"),
+            )
 
         assertEquals("x", searchSystemEmojis(entries, "grnng").single().emoji)
     }
 
     @Test
     fun `ranking prefers exact and word starts before loose substrings`() {
-        val entries = listOf(
-            EmojiSearchEntry("substring", "interface"),
-            EmojiSearchEntry("word", "grinning_face"),
-            EmojiSearchEntry("exact", "face"),
-            EmojiSearchEntry("prefix", "face_with_tears_of_joy"),
-        )
+        val entries =
+            listOf(
+                EmojiSearchEntry("substring", "interface"),
+                EmojiSearchEntry("word", "grinning_face"),
+                EmojiSearchEntry("exact", "face"),
+                EmojiSearchEntry("prefix", "face_with_tears_of_joy"),
+            )
 
         assertEquals(
             listOf("exact", "prefix", "word", "substring"),

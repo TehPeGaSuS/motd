@@ -12,7 +12,6 @@ import org.junit.Test
  * that orphan BOUNCER_CHILD rows are excluded.
  */
 class ConnectionIntentsTest {
-
     private fun net(
         id: Long,
         autoConnect: Boolean = true,
@@ -81,5 +80,4 @@ class ConnectionIntentsTest {
         // A sticky user disconnect on the child still wins over parallel dialing.
         assertEquals(setOf(1L), wantedNetworkIds(listOf(root, child), mapOf(2L to false)))
     }
-
 }

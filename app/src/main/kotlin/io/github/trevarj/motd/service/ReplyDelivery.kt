@@ -17,9 +17,10 @@ internal fun prepareReplyDelivery(
     replyTagAllowed: Boolean,
 ): ReplyDelivery {
     if (replyToMsgid == null) return ReplyDelivery(text, null)
-    val needsPrefix = parentSender != null && (
-        !replyTagAllowed || (visibleChannelPrefix && bufferType == BufferType.CHANNEL)
-    )
+    val needsPrefix =
+        parentSender != null && (
+            !replyTagAllowed || (visibleChannelPrefix && bufferType == BufferType.CHANNEL)
+        )
     val prefix = parentSender?.let { "$it: " }
     val deliveredText = if (needsPrefix && prefix != null && !text.startsWith(prefix)) prefix + text else text
     return ReplyDelivery(

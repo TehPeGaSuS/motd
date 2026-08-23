@@ -17,41 +17,42 @@ import org.junit.Test
  * `account/network` authcid form.
  */
 class BuildChildConfigTest {
-
-    private fun root() = NetworkEntity(
-        id = 1,
-        name = "soju",
-        role = NetworkRole.BOUNCER_ROOT,
-        host = "bouncer.example.org",
-        port = 6697,
-        tls = true,
-        nick = "motd",
-        username = "motd",
-        realname = "motd",
-        saslMechanism = SaslMechanism.PLAIN.name,
-        saslUser = "motd",
-        saslPassword = "s3cret",
-    )
+    private fun root() =
+        NetworkEntity(
+            id = 1,
+            name = "soju",
+            role = NetworkRole.BOUNCER_ROOT,
+            host = "bouncer.example.org",
+            port = 6697,
+            tls = true,
+            nick = "motd",
+            username = "motd",
+            realname = "motd",
+            saslMechanism = SaslMechanism.PLAIN.name,
+            saslUser = "motd",
+            saslPassword = "s3cret",
+        )
 
     /** Child materialized from a soju BOUNCER NETWORK notify: carries the UPSTREAM host/port. */
-    private fun child() = NetworkEntity(
-        id = 2,
-        name = "libera",
-        role = NetworkRole.BOUNCER_CHILD,
-        parentId = 1,
-        bouncerNetId = "7",
-        // soju's BOUNCER NETWORK attrs report the upstream server here — the bug source.
-        host = "irc.libera.chat",
-        port = 6697,
-        tls = true,
-        nick = "motd",
-        username = "motd",
-        realname = "motd",
-        // A wrongly-mirrored child could even carry NO SASL; the fix pulls creds from the root.
-        saslMechanism = SaslMechanism.NONE.name,
-        saslUser = null,
-        saslPassword = null,
-    )
+    private fun child() =
+        NetworkEntity(
+            id = 2,
+            name = "libera",
+            role = NetworkRole.BOUNCER_CHILD,
+            parentId = 1,
+            bouncerNetId = "7",
+            // soju's BOUNCER NETWORK attrs report the upstream server here — the bug source.
+            host = "irc.libera.chat",
+            port = 6697,
+            tls = true,
+            nick = "motd",
+            username = "motd",
+            realname = "motd",
+            // A wrongly-mirrored child could even carry NO SASL; the fix pulls creds from the root.
+            saslMechanism = SaslMechanism.NONE.name,
+            saslUser = null,
+            saslPassword = null,
+        )
 
     @Test
     fun `child connects to the bouncer endpoint, not the upstream host`() {
@@ -84,12 +85,13 @@ class BuildChildConfigTest {
 
     @Test
     fun `direct network uses its own fields and no bind`() {
-        val direct = child().copy(
-            role = NetworkRole.DIRECT,
-            parentId = null,
-            bouncerNetId = null,
-            serverPassword = "motd/libera:secret",
-        )
+        val direct =
+            child().copy(
+                role = NetworkRole.DIRECT,
+                parentId = null,
+                bouncerNetId = null,
+                serverPassword = "motd/libera:secret",
+            )
         val cfg = buildChildConfig(direct, root = null)
         assertEquals("irc.libera.chat", cfg.host)
         assertNull(cfg.bouncerNetId)
@@ -98,15 +100,16 @@ class BuildChildConfigTest {
 
     @Test
     fun `direct non-SASL network threads NickServ fallback into client config`() {
-        val direct = child().copy(
-            role = NetworkRole.DIRECT,
-            parentId = null,
-            bouncerNetId = null,
-            nickServPassword = "nick-secret",
-            nickServIdentifySyntax = NickServIdentifySyntax.PASSWORD_NICK.name,
-            nickServRecoveryEnabled = true,
-            nickServRecoverySequence = "GHOST, REGAIN",
-        )
+        val direct =
+            child().copy(
+                role = NetworkRole.DIRECT,
+                parentId = null,
+                bouncerNetId = null,
+                nickServPassword = "nick-secret",
+                nickServIdentifySyntax = NickServIdentifySyntax.PASSWORD_NICK.name,
+                nickServRecoveryEnabled = true,
+                nickServRecoverySequence = "GHOST, REGAIN",
+            )
 
         val cfg = buildChildConfig(direct, root = null)
 
@@ -117,14 +120,15 @@ class BuildChildConfigTest {
 
     @Test
     fun `bouncer child never inherits NickServ fallback`() {
-        val cfg = buildChildConfig(
-            child().copy(
-                nickServPassword = "upstream-secret",
-                nickServRecoveryEnabled = true,
-                nickServRecoverySequence = "REGAIN",
-            ),
-            root().copy(nickServPassword = "root-secret", nickServRecoveryEnabled = true),
-        )
+        val cfg =
+            buildChildConfig(
+                child().copy(
+                    nickServPassword = "upstream-secret",
+                    nickServRecoveryEnabled = true,
+                    nickServRecoverySequence = "REGAIN",
+                ),
+                root().copy(nickServPassword = "root-secret", nickServRecoveryEnabled = true),
+            )
 
         assertNull(cfg.nickServPassword)
         assertEquals(emptyList<String>(), cfg.nickServRecoveryCommands)
@@ -142,10 +146,13 @@ class BuildChildConfigTest {
 
     @Test
     fun `direct network threads its own wsUrl into the config`() {
-        val direct = child().copy(
-            role = NetworkRole.DIRECT, parentId = null, bouncerNetId = null,
-            wsUrl = "wss://irc.example.org:443/",
-        )
+        val direct =
+            child().copy(
+                role = NetworkRole.DIRECT,
+                parentId = null,
+                bouncerNetId = null,
+                wsUrl = "wss://irc.example.org:443/",
+            )
         val cfg = buildChildConfig(direct, root = null)
         assertEquals("wss://irc.example.org:443/", cfg.wsUrl)
     }
@@ -153,10 +160,11 @@ class BuildChildConfigTest {
     @Test
     fun `child inherits the bouncer root's wsUrl, not its own`() {
         // The physical socket is the bouncer's, so the WSS URL follows the root endpoint.
-        val cfg = buildChildConfig(
-            child().copy(wsUrl = "wss://upstream.example:443/"),
-            root().copy(wsUrl = "wss://bnc.example.org:443/"),
-        )
+        val cfg =
+            buildChildConfig(
+                child().copy(wsUrl = "wss://upstream.example:443/"),
+                root().copy(wsUrl = "wss://bnc.example.org:443/"),
+            )
         assertEquals("wss://bnc.example.org:443/", cfg.wsUrl)
     }
 
@@ -188,19 +196,20 @@ class BuildChildConfigTest {
         val root = root()
         val baseline = networkFingerprint(child, root)
 
-        val rootTransportChanges = listOf(
-            root.copy(host = "new-bouncer.example.org"),
-            root.copy(port = 443),
-            root.copy(tls = false),
-            root.copy(saslMechanism = SaslMechanism.EXTERNAL.name),
-            root.copy(saslUser = "other-account"),
-            root.copy(saslPassword = "changed-secret"),
-            root.copy(serverPassword = "changed-server-secret"),
-            root.copy(clientCertAlias = "client-cert"),
-            root.copy(wsUrl = "wss://bnc.example.org:443/"),
-            root.copy(obfsMode = ObfsMode.SOCKS5, proxyHost = "127.0.0.1", proxyPort = 1080),
-            root.copy(obfsMode = ObfsMode.TOR),
-        )
+        val rootTransportChanges =
+            listOf(
+                root.copy(host = "new-bouncer.example.org"),
+                root.copy(port = 443),
+                root.copy(tls = false),
+                root.copy(saslMechanism = SaslMechanism.EXTERNAL.name),
+                root.copy(saslUser = "other-account"),
+                root.copy(saslPassword = "changed-secret"),
+                root.copy(serverPassword = "changed-server-secret"),
+                root.copy(clientCertAlias = "client-cert"),
+                root.copy(wsUrl = "wss://bnc.example.org:443/"),
+                root.copy(obfsMode = ObfsMode.SOCKS5, proxyHost = "127.0.0.1", proxyPort = 1080),
+                root.copy(obfsMode = ObfsMode.TOR),
+            )
 
         rootTransportChanges.forEach { changedRoot ->
             assertNotEquals(baseline, networkFingerprint(child, changedRoot))

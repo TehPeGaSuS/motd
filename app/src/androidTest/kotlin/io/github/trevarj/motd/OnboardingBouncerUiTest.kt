@@ -44,10 +44,11 @@ class OnboardingBouncerUiTest {
     fun failedDiscovery_showsRetainedRowsAndRetry() {
         var retried = false
         content(
-            discovery = BouncerDiscoveryState.Failed(
-                BouncerOperationError.ConnectionLost,
-                listOf(BouncerNetworkRow("libera", "Libera", selected = true)),
-            ),
+            discovery =
+                BouncerDiscoveryState.Failed(
+                    BouncerOperationError.ConnectionLost,
+                    listOf(BouncerNetworkRow("libera", "Libera", selected = true)),
+                ),
             onRetryDiscovery = { retried = true },
         )
 
@@ -84,10 +85,25 @@ class OnboardingBouncerUiTest {
             MotdTheme {
                 OnboardingContent(
                     state = state,
-                    onNext = {}, onBack = {}, onSkip = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
-                    onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
-                    onRetryBouncerDiscovery = {}, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onSelectHistoryDepth = {}, onFinish = {},
-                    onConfirmPlaintext = {}, onDismissPlaintext = {},
+                    onNext = {},
+                    onBack = {},
+                    onSkip = {},
+                    onChoose = {},
+                    onChooseBouncerKind = {},
+                    onSelectPreset = {},
+                    onServerChange = {},
+                    onAuthChange = {},
+                    onSojuLoginChange = {},
+                    onZncLoginChange = {},
+                    onRetry = {},
+                    onRetryBouncerDiscovery = {},
+                    onToggleBouncer = {},
+                    onBouncerAddDraftChange = {},
+                    onAddBouncer = {},
+                    onSelectHistoryDepth = {},
+                    onFinish = {},
+                    onConfirmPlaintext = {},
+                    onDismissPlaintext = {},
                 )
             }
         }
@@ -95,10 +111,11 @@ class OnboardingBouncerUiTest {
         compose.onAllNodesWithTag("onboarding_bouncer_add_error").assertCountEquals(1)
         compose.onNodeWithTag("onboarding_bouncer_add_name").assertTextContains("New")
         compose.runOnIdle { state = state.copy(bouncerAdd = BouncerAddState.Success, bouncerAddDraft = BouncerAddDraft()) }
-        val emptyEditableText = SemanticsMatcher.expectValue(
-            SemanticsProperties.EditableText,
-            AnnotatedString(""),
-        )
+        val emptyEditableText =
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.EditableText,
+                AnnotatedString(""),
+            )
         compose.onNodeWithTag("onboarding_bouncer_add_name").assert(emptyEditableText)
         compose.onNodeWithTag("onboarding_bouncer_add_host").assert(emptyEditableText)
     }
@@ -113,10 +130,25 @@ class OnboardingBouncerUiTest {
             MotdTheme {
                 OnboardingContent(
                     state = baseState(discovery, draft, add),
-                    onNext = {}, onBack = {}, onSkip = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
-                    onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
-                    onRetryBouncerDiscovery = onRetryDiscovery, onToggleBouncer = {}, onBouncerAddDraftChange = {}, onAddBouncer = {}, onSelectHistoryDepth = {}, onFinish = {},
-                    onConfirmPlaintext = {}, onDismissPlaintext = {},
+                    onNext = {},
+                    onBack = {},
+                    onSkip = {},
+                    onChoose = {},
+                    onChooseBouncerKind = {},
+                    onSelectPreset = {},
+                    onServerChange = {},
+                    onAuthChange = {},
+                    onSojuLoginChange = {},
+                    onZncLoginChange = {},
+                    onRetry = {},
+                    onRetryBouncerDiscovery = onRetryDiscovery,
+                    onToggleBouncer = {},
+                    onBouncerAddDraftChange = {},
+                    onAddBouncer = {},
+                    onSelectHistoryDepth = {},
+                    onFinish = {},
+                    onConfirmPlaintext = {},
+                    onDismissPlaintext = {},
                 )
             }
         }

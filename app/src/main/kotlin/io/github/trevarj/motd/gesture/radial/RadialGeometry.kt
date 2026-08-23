@@ -75,8 +75,7 @@ data class RadialArc(
 
     fun sliceStartDegrees(index: Int): Float = normalizeDegrees(startDegrees + sliceDegrees * index)
 
-    fun sliceCenterDegrees(index: Int): Float =
-        normalizeDegrees(startDegrees + sliceDegrees * (index + 0.5f))
+    fun sliceCenterDegrees(index: Int): Float = normalizeDegrees(startDegrees + sliceDegrees * (index + 0.5f))
 
     /** Slice under [degrees], or null when the direction falls off either end of the arc. */
     fun indexAt(degrees: Float): Int? {
@@ -99,14 +98,21 @@ sealed interface RadialHit {
     data object Outside : RadialHit
 
     /** Over slice [index], not yet committed to descending. */
-    data class Slice(val index: Int) : RadialHit
+    data class Slice(
+        val index: Int,
+    ) : RadialHit
 
     /** Dragged past the commit radius on slice [index]. */
-    data class Descend(val index: Int) : RadialHit
+    data class Descend(
+        val index: Int,
+    ) : RadialHit
 }
 
 /** Nearest screen edge to [center]; ties resolve left, right, top, bottom so layout is deterministic. */
-fun dockFor(center: Offset, screenSize: Size): RadialDock {
+fun dockFor(
+    center: Offset,
+    screenSize: Size,
+): RadialDock {
     val left = center.x
     val right = screenSize.width - center.x
     val top = center.y
@@ -121,12 +127,13 @@ fun dockFor(center: Offset, screenSize: Size): RadialDock {
 }
 
 /** The direction a ring docked on [dock] fans towards: away from the edge it is pinned against. */
-fun inwardDegrees(dock: RadialDock): Float = when (dock) {
-    RadialDock.LEFT -> 0f
-    RadialDock.TOP -> 90f
-    RadialDock.RIGHT -> 180f
-    RadialDock.BOTTOM -> 270f
-}
+fun inwardDegrees(dock: RadialDock): Float =
+    when (dock) {
+        RadialDock.LEFT -> 0f
+        RadialDock.TOP -> 90f
+        RadialDock.RIGHT -> 180f
+        RadialDock.BOTTOM -> 270f
+    }
 
 /**
  * How wide a ring centred on [center] may fan before its labels leave the screen.
@@ -136,7 +143,11 @@ fun inwardDegrees(dock: RadialDock): Float = when (dock) {
  * axis, so the room perpendicular to that axis caps φ directly. Clamped to [MIN_RING_SWEEP_DEGREES]
  * so a ring pinned into a corner still has somewhere to draw.
  */
-fun availableSweepDegrees(center: Offset, screenSize: Size, metrics: RadialMetrics): Float {
+fun availableSweepDegrees(
+    center: Offset,
+    screenSize: Size,
+    metrics: RadialMetrics,
+): Float {
     val inward = inwardDegrees(dockFor(center, screenSize))
     val (before, after) = sideSweeps(center, screenSize, metrics, inward)
     return (before + after).coerceIn(MIN_RING_SWEEP_DEGREES, MAX_RING_SWEEP_DEGREES)
@@ -149,7 +160,12 @@ fun availableSweepDegrees(center: Offset, screenSize: Size, metrics: RadialMetri
  * wider wedge is strictly easier to hit, and how many entries fit is already decided by
  * [ringCapacity] before this is called.
  */
-fun arcForDock(center: Offset, screenSize: Size, slices: Int, metrics: RadialMetrics): RadialArc {
+fun arcForDock(
+    center: Offset,
+    screenSize: Size,
+    slices: Int,
+    metrics: RadialMetrics,
+): RadialArc {
     val inward = inwardDegrees(dockFor(center, screenSize))
     val (before, after) = sideSweeps(center, screenSize, metrics, inward)
     val raw = before + after
@@ -164,11 +180,15 @@ fun arcForDock(center: Offset, screenSize: Size, slices: Int, metrics: RadialMet
 }
 
 /** How many slices an arc of [sweepDegrees] carries without dropping below the hard floor. */
-fun ringCapacity(sweepDegrees: Float): Int =
-    max(2, floor(sweepDegrees / MIN_SLICE_DEGREES).toInt())
+fun ringCapacity(sweepDegrees: Float): Int = max(2, floor(sweepDegrees / MIN_SLICE_DEGREES).toInt())
 
 /** Classify [position] against a ring centred on [center] and laid out as [arc]. */
-fun radialHit(center: Offset, position: Offset, arc: RadialArc, metrics: RadialMetrics): RadialHit {
+fun radialHit(
+    center: Offset,
+    position: Offset,
+    arc: RadialArc,
+    metrics: RadialMetrics,
+): RadialHit {
     val distance = hypot(position.x - center.x, position.y - center.y)
     if (distance < metrics.deadzoneRadius) return RadialHit.Deadzone
     val index = arc.indexAt(bearingDegrees(center, position)) ?: return RadialHit.Outside
@@ -177,7 +197,11 @@ fun radialHit(center: Offset, position: Offset, arc: RadialArc, metrics: RadialM
 }
 
 /** Point [radius] away from [center] along [degrees]. */
-fun polarOffset(center: Offset, degrees: Float, radius: Float): Offset {
+fun polarOffset(
+    center: Offset,
+    degrees: Float,
+    radius: Float,
+): Offset {
     val radians = Math.toRadians(degrees.toDouble())
     return Offset(
         x = center.x + (radius * cos(radians)).toFloat(),
@@ -186,12 +210,18 @@ fun polarOffset(center: Offset, degrees: Float, radius: Float): Offset {
 }
 
 /** Where slice [index]'s icon/label sits, [radius] out from [center]. */
-fun sliceAnchor(center: Offset, arc: RadialArc, index: Int, radius: Float): Offset =
-    polarOffset(center, arc.sliceCenterDegrees(index), radius)
+fun sliceAnchor(
+    center: Offset,
+    arc: RadialArc,
+    index: Int,
+    radius: Float,
+): Offset = polarOffset(center, arc.sliceCenterDegrees(index), radius)
 
 /** Direction from [center] to [position], in screen degrees. */
-fun bearingDegrees(center: Offset, position: Offset): Float =
-    normalizeDegrees(Math.toDegrees(atan2((position.y - center.y).toDouble(), (position.x - center.x).toDouble())).toFloat())
+fun bearingDegrees(
+    center: Offset,
+    position: Offset,
+): Float = normalizeDegrees(Math.toDegrees(atan2((position.y - center.y).toDouble(), (position.x - center.x).toDouble())).toFloat())
 
 /** Fold any angle into `[0, 360)`. */
 fun normalizeDegrees(degrees: Float): Float = ((degrees % 360f) + 360f) % 360f
@@ -213,20 +243,29 @@ private fun sideSweeps(
 }
 
 /** Largest deviation whose label still lands inside the margin, given [room] perpendicular to the arc. */
-private fun swingLimit(room: Float, labelRadius: Float): Float {
+private fun swingLimit(
+    room: Float,
+    labelRadius: Float,
+): Float {
     if (labelRadius <= 0f) return MAX_RING_SWEEP_DEGREES / 2f
     val ratio = (room / labelRadius).coerceIn(0f, 1f)
     return Math.toDegrees(asin(ratio.toDouble())).toFloat()
 }
 
 /** Distance from [center] to the margin box along an axis-aligned [degrees] direction. */
-private fun roomAlong(center: Offset, screenSize: Size, degrees: Float, margin: Float): Float {
+private fun roomAlong(
+    center: Offset,
+    screenSize: Size,
+    degrees: Float,
+    margin: Float,
+): Float {
     val direction = normalizeDegrees(degrees)
-    val room = when {
-        direction < 45f || direction >= 315f -> screenSize.width - margin - center.x
-        direction < 135f -> screenSize.height - margin - center.y
-        direction < 225f -> center.x - margin
-        else -> center.y - margin
-    }
+    val room =
+        when {
+            direction < 45f || direction >= 315f -> screenSize.width - margin - center.x
+            direction < 135f -> screenSize.height - margin - center.y
+            direction < 225f -> center.x - margin
+            else -> center.y - margin
+        }
     return max(0f, room)
 }

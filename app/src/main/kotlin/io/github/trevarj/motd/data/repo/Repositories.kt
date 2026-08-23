@@ -15,17 +15,20 @@ import io.github.trevarj.motd.data.db.NetworkIgnoreEntity
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.history.TimelineSeam
-import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
 interface NetworkRepository {
     fun observeNetworks(): Flow<List<NetworkEntity>>
+
     suspend fun addNetwork(n: NetworkEntity): Long
+
     suspend fun updateNetwork(n: NetworkEntity)
+
     suspend fun deleteNetwork(id: Long)
 
     /**
@@ -37,6 +40,7 @@ interface NetworkRepository {
     suspend fun reorderNetworks(orderedIds: List<Long>)
 
     // Round 5: point reads for the network-management screens.
+
     /** Point read (drives NetworkSettings/Bouncer screens; delegates to NetworkDao.byId). */
     suspend fun networkById(id: Long): NetworkEntity?
 
@@ -46,23 +50,52 @@ interface NetworkRepository {
 
 interface NetworkIgnoreRepository {
     fun observeIgnores(networkId: Long): Flow<List<NetworkIgnoreEntity>>
+
     fun observeBuffers(networkId: Long): Flow<List<NetworkBufferToolRow>>
-    suspend fun addIgnore(networkId: Long, pattern: String): Result<Unit>
-    suspend fun setIgnoreEnabled(id: Long, enabled: Boolean)
+
+    suspend fun addIgnore(
+        networkId: Long,
+        pattern: String,
+    ): Result<Unit>
+
+    suspend fun setIgnoreEnabled(
+        id: Long,
+        enabled: Boolean,
+    )
+
     suspend fun deleteIgnore(id: Long)
+
     /** Non-null when unmuting hid a backlog; see BufferDao.setMuted. */
-    suspend fun setMuted(bufferId: Long, muted: Boolean): MuteBacklogSuppression?
+    suspend fun setMuted(
+        bufferId: Long,
+        muted: Boolean,
+    ): MuteBacklogSuppression?
+
     /** Undo the backlog a previous [setMuted] hid. */
     suspend fun restoreMuteBacklog(suppression: MuteBacklogSuppression) = Unit
 }
 
 object NoopNetworkIgnoreRepository : NetworkIgnoreRepository {
     override fun observeIgnores(networkId: Long): Flow<List<NetworkIgnoreEntity>> = flowOf(emptyList())
+
     override fun observeBuffers(networkId: Long): Flow<List<NetworkBufferToolRow>> = flowOf(emptyList())
-    override suspend fun addIgnore(networkId: Long, pattern: String): Result<Unit> = Result.success(Unit)
-    override suspend fun setIgnoreEnabled(id: Long, enabled: Boolean) = Unit
+
+    override suspend fun addIgnore(
+        networkId: Long,
+        pattern: String,
+    ): Result<Unit> = Result.success(Unit)
+
+    override suspend fun setIgnoreEnabled(
+        id: Long,
+        enabled: Boolean,
+    ) = Unit
+
     override suspend fun deleteIgnore(id: Long) = Unit
-    override suspend fun setMuted(bufferId: Long, muted: Boolean): MuteBacklogSuppression? = null
+
+    override suspend fun setMuted(
+        bufferId: Long,
+        muted: Boolean,
+    ): MuteBacklogSuppression? = null
 }
 
 interface BufferRepository {
@@ -84,31 +117,60 @@ interface BufferRepository {
      * before it is opened or written to. The default keeps lightweight fakes source-compatible.
      */
     suspend fun canonicalBufferId(id: Long): Long? = id
+
     /** Canonical live invitation events, including resolved rows retained for user context. */
     fun observeInvitations(): Flow<List<InvitationEventRow>> = flowOf(emptyList())
+
     /** Normalized CHANNEL names confirmed by EventProcessor self-JOIN persistence. */
     fun observeJoinedChannelNames(networkId: Long): Flow<Set<String>> = flowOf(emptySet())
+
     fun observeBuffer(id: Long): Flow<BufferEntity?>
+
     fun observeMembers(bufferId: Long): Flow<List<MemberEntity>>
+
     /** Nick-only member projection, cheap enough to observe from the moment a conversation opens. */
-    fun observeMemberNicks(bufferId: Long): Flow<List<String>> =
-        observeMembers(bufferId).map { members -> members.map(MemberEntity::nick) }
+    fun observeMemberNicks(bufferId: Long): Flow<List<String>> = observeMembers(bufferId).map { members -> members.map(MemberEntity::nick) }
+
     /** Per-nick last-spoke time in a channel (PRIVMSG/NOTICE/ACTION, isSelf=0). Empty when unavailable. */
     fun observeLastSpokeByNick(bufferId: Long): Flow<Map<String, Long>> = flowOf(emptyMap())
-    suspend fun setPinned(id: Long, pinned: Boolean)
+
+    suspend fun setPinned(
+        id: Long,
+        pinned: Boolean,
+    )
+
     /** Non-null when unmuting hid a backlog; see BufferDao.setMuted. */
-    suspend fun setMuted(id: Long, muted: Boolean): MuteBacklogSuppression?
+    suspend fun setMuted(
+        id: Long,
+        muted: Boolean,
+    ): MuteBacklogSuppression?
+
     /** Undo the backlog a previous [setMuted] hid. */
     suspend fun restoreMuteBacklog(suppression: MuteBacklogSuppression) = Unit
+
     /** Hide or restore a durable CHANNEL/QUERY without altering its IRC membership or history. */
-    suspend fun setArchived(id: Long, archived: Boolean) = Unit
+    suspend fun setArchived(
+        id: Long,
+        archived: Boolean,
+    ) = Unit
+
     /** Persists a nullable per-conversation override; false means the requested room disappeared. */
-    suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean
+    suspend fun setLayoutDensityOverride(
+        id: Long,
+        layout: LayoutDensity?,
+    ): Boolean
+
     /** Persists a nullable per-conversation presence override; false means the room disappeared. */
-    suspend fun setPresenceModeOverride(id: Long, mode: PresenceMode?): Boolean
+    suspend fun setPresenceModeOverride(
+        id: Long,
+        mode: PresenceMode?,
+    ): Boolean
 
     /** Persists a validated conversation avatar model through durable room redirects. */
-    suspend fun setAvatarOverride(id: Long, model: String?): Boolean = false
+    suspend fun setAvatarOverride(
+        id: Long,
+        model: String?,
+    ): Boolean = false
 
     /** Remove local content. QUERY identity/cursor state remains as a hidden reconnect tombstone;
      *  the parting of a joined CHANNEL is handled upstream by the caller (ChatListViewModel). */
@@ -119,7 +181,10 @@ interface BufferRepository {
 
 interface MessageRepository {
     /** Each visibility spec creates a distinct, positionally correct Pager generation. */
-    fun messages(bufferId: Long, visibility: MessageVisibilitySpec): Flow<PagingData<MessageEntity>>
+    fun messages(
+        bufferId: Long,
+        visibility: MessageVisibilitySpec,
+    ): Flow<PagingData<MessageEntity>>
 
     /**
      * As [messages], but seeds the Pager's first source load around [initialKey] (a 0-based
@@ -134,26 +199,46 @@ interface MessageRepository {
         visibility: MessageVisibilitySpec,
         initialKey: Int?,
     ): Flow<PagingData<MessageEntity>> = messages(bufferId, visibility)
-    fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>>
+
+    fun reactions(
+        bufferId: Long,
+        msgids: List<String>,
+    ): Flow<List<ReactionEntity>>
+
     /** Canonical event-id lookup used by notification and restored-scroll anchors. */
     suspend fun byId(id: Long): MessageEntity? = null
+
     /** Resolve durable losing room redirects before validating an event-scoped deep link. */
     suspend fun canonicalRoomId(bufferId: Long): Long = bufferId
-    suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
+
+    suspend fun byMsgid(
+        bufferId: Long,
+        msgid: String,
+    ): MessageEntity?
+
     /** Reactive reply-target lookup; emits again when echo/history supplies the referenced msgid. */
-    fun observeByMsgid(bufferId: Long, msgid: String): Flow<MessageEntity?>
+    fun observeByMsgid(
+        bufferId: Long,
+        msgid: String,
+    ): Flow<MessageEntity?>
+
     /**
      * Suspend until the local row [id] carries a durable server msgid, or [timeoutMs] elapses.
      * Returns the msgid, or null on timeout / missing row. Used to defer a reaction tapped on a
      * still-pending own message until its echo lands.
      */
-    suspend fun awaitMsgid(id: Long, timeoutMs: Long): String?
+    suspend fun awaitMsgid(
+        id: Long,
+        timeoutMs: Long,
+    ): String?
+
     suspend fun countNewerThan(
         bufferId: Long,
         serverTime: Long,
         id: Long,
         visibility: MessageVisibilitySpec,
     ): Int
+
     /**
      * Seams for the room's stored history gaps, ordered oldest-first.
      *
@@ -169,6 +254,7 @@ interface MessageRepository {
         bufferId: Long,
         visibility: MessageVisibilitySpec,
     ): Flow<List<TimelineSeam>> = flowOf(emptyList())
+
     /** Delete a locally-stored failed row by id, repairing any exact local read anchor. */
     suspend fun deleteMessage(id: Long)
 }
@@ -196,11 +282,17 @@ sealed interface SearchCoverage {
     data object BufferComplete : SearchCoverage
 
     /** Known holes: [openGaps] recorded intervals, plus whether the oldest edge is reached. */
-    data class BufferPartial(val openGaps: Int, val historyComplete: Boolean) : SearchCoverage
+    data class BufferPartial(
+        val openGaps: Int,
+        val historyComplete: Boolean,
+    ) : SearchCoverage
 }
 
 interface SearchRepository {
-    fun search(query: String, bufferId: Long?): Flow<LocalSearchResult>
+    fun search(
+        query: String,
+        bufferId: Long?,
+    ): Flow<LocalSearchResult>
 
     /** Coverage for the given scope; null bufferId means the all-buffers scope. */
     fun coverage(bufferId: Long?): Flow<SearchCoverage>
@@ -210,7 +302,9 @@ interface SearchRepository {
  * A completed preview lookup kept in the process-lifetime cache. A nullable [preview] distinguishes
  * a known negative result from a cache miss, represented by a null [cachedPreview] return value.
  */
-data class CachedLinkPreview(val preview: LinkPreview?)
+data class CachedLinkPreview(
+    val preview: LinkPreview?,
+)
 
 /**
  * Declared web or text link preview; in-memory LRU + shared fetch on miss. [networkId] identifies
@@ -219,9 +313,15 @@ data class CachedLinkPreview(val preview: LinkPreview?)
  */
 interface LinkPreviewRepository {
     /** Returns a completed positive or negative result without starting work. */
-    fun cachedPreview(url: String, networkId: Long?): CachedLinkPreview? = null
+    fun cachedPreview(
+        url: String,
+        networkId: Long?,
+    ): CachedLinkPreview? = null
 
-    suspend fun preview(url: String, networkId: Long?): LinkPreview?
+    suspend fun preview(
+        url: String,
+        networkId: Long?,
+    ): LinkPreview?
 }
 
 enum class LinkPreviewKind { WEB, VIDEO, FILE, TEXT, WIKIPEDIA }

@@ -41,13 +41,14 @@ class ComposerSendClearUiTest {
     @get:Rule
     val compose = createAndroidComposeRule<ComposeHostActivity>()
 
-    private val buffer = BufferEntity(
-        id = 1,
-        networkId = 1,
-        name = "#kotlin",
-        displayName = "#kotlin",
-        type = BufferType.CHANNEL,
-    )
+    private val buffer =
+        BufferEntity(
+            id = 1,
+            networkId = 1,
+            name = "#kotlin",
+            displayName = "#kotlin",
+            type = BufferType.CHANNEL,
+        )
 
     /** Renders the real chat surface over an empty timeline, with the draft under test control. */
     private fun setContent(
@@ -61,10 +62,11 @@ class ComposerSendClearUiTest {
             val items = pages.collectAsLazyPagingItems()
             MotdTheme {
                 ChatContent(
-                    state = ChatState(
-                        buffer = buffer,
-                        connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
-                    ),
+                    state =
+                        ChatState(
+                            buffer = buffer,
+                            connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
+                        ),
                     items = items,
                     composerEnabled = true,
                     onBack = {},
@@ -129,23 +131,24 @@ class ComposerSendClearUiTest {
         compose.runOnIdle { assertEquals(0, settled) }
 
         compose.runOnUiThread {
-            pages.value = PagingData.from(
-                listOf(
-                    MessageEntity(
-                        id = 42,
-                        bufferId = buffer.id,
-                        serverTime = launchedAt + 1,
-                        sender = "me",
-                        kind = MessageKind.PRIVMSG,
-                        text = "hello",
-                        isSelf = true,
-                        pendingLabel = "pending-42",
-                        dedupKey = "pending-42",
-                        serverTimeAuthoritative = false,
-                        timelineOrder = 42,
+            pages.value =
+                PagingData.from(
+                    listOf(
+                        MessageEntity(
+                            id = 42,
+                            bufferId = buffer.id,
+                            serverTime = launchedAt + 1,
+                            sender = "me",
+                            kind = MessageKind.PRIVMSG,
+                            text = "hello",
+                            isSelf = true,
+                            pendingLabel = "pending-42",
+                            dedupKey = "pending-42",
+                            serverTimeAuthoritative = false,
+                            timelineOrder = 42,
+                        ),
                     ),
-                ),
-            )
+                )
         }
         compose.waitForIdle()
         compose.mainClock.advanceTimeByFrame()

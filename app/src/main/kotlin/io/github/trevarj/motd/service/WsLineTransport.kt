@@ -36,11 +36,11 @@ class WsLineTransport(
     /** Optional `Origin` header for soju Origin/Host authorization; null keeps OkHttp's default. */
     private val origin: String? = null,
 ) : IrcTransport {
-
     private companion object {
         // IRCv3 WebSocket subprotocol: one IRC line per text frame, no trailing CRLF.
         const val SUBPROTOCOL = "text.ircv3.net"
         const val CONNECT_TIMEOUT_MS = 15_000L
+
         // 512-byte IRC line limit (RFC 1459) incl. the CRLF the WS framing omits: 510 payload bytes.
         const val MAX_LINE_BYTES = 512
     }
@@ -53,15 +53,18 @@ class WsLineTransport(
     private val opened = CompletableDeferred<Unit>()
 
     @Volatile private var webSocket: WebSocket? = null
+
     @Volatile private var closed = false
 
     override suspend fun connect() {
-        val builder = OkHttpClient.Builder()
-            .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            // IRC connections are long-lived and mostly idle; disable the read timeout and rely on
-            // the IrcClient ping watchdog for liveness, exactly like OkioLineTransport (soTimeout=0).
-            .readTimeout(0, TimeUnit.MILLISECONDS)
-            .pingInterval(0, TimeUnit.MILLISECONDS)
+        val builder =
+            OkHttpClient
+                .Builder()
+                .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                // IRC connections are long-lived and mostly idle; disable the read timeout and rely on
+                // the IrcClient ping watchdog for liveness, exactly like OkioLineTransport (soTimeout=0).
+                .readTimeout(0, TimeUnit.MILLISECONDS)
+                .pingInterval(0, TimeUnit.MILLISECONDS)
         if (sslSocketFactory != null && trustManager != null) {
             builder.sslSocketFactory(sslSocketFactory, trustManager)
         }
@@ -70,43 +73,64 @@ class WsLineTransport(
         }
         val client = builder.build()
 
-        val request = Request.Builder()
-            .url(url)
-            .header("Sec-WebSocket-Protocol", SUBPROTOCOL)
-            .apply { if (origin != null) header("Origin", origin) }
-            .build()
+        val request =
+            Request
+                .Builder()
+                .url(url)
+                .header("Sec-WebSocket-Protocol", SUBPROTOCOL)
+                .apply { if (origin != null) header("Origin", origin) }
+                .build()
 
-        val listener = object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                opened.complete(Unit)
-            }
+        val listener =
+            object : WebSocketListener() {
+                override fun onOpen(
+                    webSocket: WebSocket,
+                    response: Response,
+                ) {
+                    opened.complete(Unit)
+                }
 
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                // Each text frame is exactly one IRC line (no CRLF). Defensively strip any trailing
-                // CRLF a lenient server might still send.
-                inbound.trySend(text.removeSuffix("\r\n").removeSuffix("\n"))
-            }
+                override fun onMessage(
+                    webSocket: WebSocket,
+                    text: String,
+                ) {
+                    // Each text frame is exactly one IRC line (no CRLF). Defensively strip any trailing
+                    // CRLF a lenient server might still send.
+                    inbound.trySend(text.removeSuffix("\r\n").removeSuffix("\n"))
+                }
 
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                // Peer initiated close: complete the inbound flow so IrcClient sees a clean EOF.
-                closed = true
-                inbound.close()
-                webSocket.close(code, null)
-            }
+                override fun onClosing(
+                    webSocket: WebSocket,
+                    code: Int,
+                    reason: String,
+                ) {
+                    // Peer initiated close: complete the inbound flow so IrcClient sees a clean EOF.
+                    closed = true
+                    inbound.close()
+                    webSocket.close(code, null)
+                }
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                closed = true
-                inbound.close()
-            }
+                override fun onClosed(
+                    webSocket: WebSocket,
+                    code: Int,
+                    reason: String,
+                ) {
+                    closed = true
+                    inbound.close()
+                }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                // Surface the failure to connect() if still handshaking, else terminate the flow so
-                // the watchdog/reconnect path fires — same disconnect semantics as a socket error.
-                if (!opened.isCompleted) opened.completeExceptionally(t)
-                closed = true
-                inbound.close(t)
+                override fun onFailure(
+                    webSocket: WebSocket,
+                    t: Throwable,
+                    response: Response?,
+                ) {
+                    // Surface the failure to connect() if still handshaking, else terminate the flow so
+                    // the watchdog/reconnect path fires — same disconnect semantics as a socket error.
+                    if (!opened.isCompleted) opened.completeExceptionally(t)
+                    closed = true
+                    inbound.close(t)
+                }
             }
-        }
 
         // newWebSocket returns immediately; the handshake runs on OkHttp's dispatcher. Await open.
         webSocket = client.newWebSocket(request, listener)

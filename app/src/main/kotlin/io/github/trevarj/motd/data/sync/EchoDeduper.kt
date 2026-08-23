@@ -15,11 +15,18 @@ import java.security.MessageDigest
  */
 internal object SemanticIdentity {
     /** Key for a live or history message. */
-    fun keyFor(msgid: String?, serverTime: Long, sender: String, text: String): String =
-        msgid ?: sha1Hex("$serverTime|$sender|$text")
+    fun keyFor(
+        msgid: String?,
+        serverTime: Long,
+        sender: String,
+        text: String,
+    ): String = msgid ?: sha1Hex("$serverTime|$sender|$text")
 
-    fun keyFor(ctx: MessageContext, sender: String, text: String): String =
-        keyFor(ctx.msgid, ctx.serverTime, sender, text)
+    fun keyFor(
+        ctx: MessageContext,
+        sender: String,
+        text: String,
+    ): String = keyFor(ctx.msgid, ctx.serverTime, sender, text)
 
     /** Key for a locally-sent pending row awaiting its labeled echo. */
     fun pendingKey(label: String): String = "pending:$label"

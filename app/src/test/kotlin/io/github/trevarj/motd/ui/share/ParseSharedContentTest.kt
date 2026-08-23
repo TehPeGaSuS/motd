@@ -16,11 +16,12 @@ class ParseSharedContentTest {
         type: String? = null,
         text: String? = null,
         stream: Uri? = null,
-    ): Intent = Intent(Intent.ACTION_SEND).apply {
-        this.type = type
-        text?.let { putExtra(Intent.EXTRA_TEXT, it) }
-        stream?.let { putExtra(Intent.EXTRA_STREAM, it) }
-    }
+    ): Intent =
+        Intent(Intent.ACTION_SEND).apply {
+            this.type = type
+            text?.let { putExtra(Intent.EXTRA_TEXT, it) }
+            stream?.let { putExtra(Intent.EXTRA_STREAM, it) }
+        }
 
     @Test fun plainTextShareBecomesText() {
         val share = parseSharedContent(sendIntent(type = "text/plain", text = "hello"))
@@ -43,10 +44,11 @@ class ParseSharedContentTest {
     }
 
     @Test fun sendMultipleIsIgnored() {
-        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-            type = "image/*"
-            putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(uri))
-        }
+        val intent =
+            Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "image/*"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(uri))
+            }
         assertNull(parseSharedContent(intent))
     }
 

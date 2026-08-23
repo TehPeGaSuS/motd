@@ -20,40 +20,59 @@ internal class SaslAuthenticator(
 ) {
     sealed interface Step {
         /** Emit these AUTHENTICATE lines, then keep feeding server responses. */
-        data class Send(val lines: List<String>) : Step
+        data class Send(
+            val lines: List<String>,
+        ) : Step
+
         data object Done : Step
-        data class Failed(val reason: String) : Step
+
+        data class Failed(
+            val reason: String,
+        ) : Step
+
         /** Not a SASL-relevant line; ignore. */
         data object Ignore : Step
     }
 
     /** The very first line to send to kick off the exchange. */
-    fun begin(): String = when (mechanism) {
-        SaslMechanism.PLAIN -> "AUTHENTICATE PLAIN"
-        SaslMechanism.EXTERNAL -> "AUTHENTICATE EXTERNAL"
-        SaslMechanism.NONE -> error("SASL begin with NONE")
-    }
+    fun begin(): String =
+        when (mechanism) {
+            SaslMechanism.PLAIN -> "AUTHENTICATE PLAIN"
+            SaslMechanism.EXTERNAL -> "AUTHENTICATE EXTERNAL"
+            SaslMechanism.NONE -> error("SASL begin with NONE")
+        }
 
     /** Feed one inbound message; drive the SASL exchange forward. */
-    fun onMessage(msg: IrcMessage): Step = when (msg.command) {
-        "AUTHENTICATE" -> {
-            // Server prompts with `AUTHENTICATE +` to request our response payload.
-            if (msg.params.firstOrNull() == "+") {
-                when (mechanism) {
-                    SaslMechanism.PLAIN -> Step.Send(plainResponse())
-                    SaslMechanism.EXTERNAL -> Step.Send(listOf("AUTHENTICATE +"))
-                    SaslMechanism.NONE -> Step.Ignore
+    fun onMessage(msg: IrcMessage): Step =
+        when (msg.command) {
+            "AUTHENTICATE" -> {
+                // Server prompts with `AUTHENTICATE +` to request our response payload.
+                if (msg.params.firstOrNull() == "+") {
+                    when (mechanism) {
+                        SaslMechanism.PLAIN -> Step.Send(plainResponse())
+                        SaslMechanism.EXTERNAL -> Step.Send(listOf("AUTHENTICATE +"))
+                        SaslMechanism.NONE -> Step.Ignore
+                    }
+                } else {
+                    Step.Ignore
                 }
-            } else {
+            }
+
+            "903" -> {
+                Step.Done
+            }
+
+            // RPL_SASLSUCCESS
+            "904", "905", "906", "907" -> {
+                Step.Failed(
+                    "SASL ${msg.command}: ${msg.params.lastOrNull().orEmpty()}",
+                )
+            }
+
+            else -> {
                 Step.Ignore
             }
         }
-        "903" -> Step.Done // RPL_SASLSUCCESS
-        "904", "905", "906", "907" -> Step.Failed(
-            "SASL ${msg.command}: ${msg.params.lastOrNull().orEmpty()}",
-        )
-        else -> Step.Ignore
-    }
 
     private fun plainResponse(): List<String> {
         val u = user ?: ""
@@ -63,7 +82,7 @@ internal class SaslAuthenticator(
         // bouncer capability-transition state instead of the selected network. Ordinary account
         // logins retain the historical same-id form required by the IRC plan.
         val authzid = if ('/' in u) "" else u
-        val raw = "${authzid}\u0000${u}\u0000${p}".toByteArray(Charsets.UTF_8)
+        val raw = "${authzid}\u0000${u}\u0000$p".toByteArray(Charsets.UTF_8)
         val b64 = Base64.getEncoder().encodeToString(raw)
         return chunk(b64)
     }

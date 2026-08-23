@@ -30,15 +30,23 @@ class Migration13To14Test {
     fun migrationPreservesExistingTimelineAndAddsVisibleQueryDefaults() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(13) {
-                    override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion13(db)
-                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
-                })
-                .build(),
-        )
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(13) {
+                            override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion13(db)
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL(
             """INSERT INTO networks(
@@ -64,15 +72,16 @@ class Migration13To14Test {
 
         MIGRATION_13_14.migrate(db)
 
-        db.query(
-            "SELECT dismissed, historyDiscardedThroughMsgid, historyDiscardedThroughTime " +
-                "FROM buffers WHERE id = 2",
-        ).use { cursor ->
-            assertTrue(cursor.moveToFirst())
-            assertEquals(0, cursor.getInt(0))
-            assertTrue(cursor.isNull(1))
-            assertTrue(cursor.isNull(2))
-        }
+        db
+            .query(
+                "SELECT dismissed, historyDiscardedThroughMsgid, historyDiscardedThroughTime " +
+                    "FROM buffers WHERE id = 2",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+                assertTrue(cursor.isNull(1))
+                assertTrue(cursor.isNull(2))
+            }
         db.query("SELECT text FROM messages WHERE id = 3").use { cursor ->
             assertTrue(cursor.moveToFirst())
             assertEquals("kept", cursor.getString(0))
@@ -85,18 +94,25 @@ class Migration13To14Test {
 
     private fun createExportedVersion13(db: SupportSQLiteDatabase) {
         val resource = "${MotdDatabase::class.java.canonicalName}/13.json"
-        val schema = checkNotNull(javaClass.classLoader?.getResourceAsStream(resource))
-            .bufferedReader().use { Json.parseToJsonElement(it.readText()).jsonObject }
+        val schema =
+            checkNotNull(javaClass.classLoader?.getResourceAsStream(resource))
+                .bufferedReader()
+                .use { Json.parseToJsonElement(it.readText()).jsonObject }
         val database = schema.getValue("database").jsonObject
         database.getValue("entities").jsonArray.forEach { element ->
             val entity = element.jsonObject
             val tableName = entity.getValue("tableName").jsonPrimitive.content
+
             fun executeTemplate(sql: String) {
                 db.execSQL(sql.replace("\${TABLE_NAME}", tableName))
             }
             executeTemplate(entity.getValue("createSql").jsonPrimitive.content)
             entity["indices"]?.jsonArray.orEmpty().forEach { index ->
-                executeTemplate(index.jsonObject.getValue("createSql").jsonPrimitive.content)
+                executeTemplate(
+                    index.jsonObject
+                        .getValue("createSql")
+                        .jsonPrimitive.content,
+                )
             }
             entity["contentSyncTriggers"]?.jsonArray.orEmpty().forEach { trigger ->
                 db.execSQL(trigger.jsonPrimitive.content)

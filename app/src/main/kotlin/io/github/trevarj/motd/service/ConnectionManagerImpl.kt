@@ -2042,8 +2042,7 @@ class ConnectionManagerImpl
             cap == READ_MARKER_CAP || cap.startsWith("$READ_MARKER_CAP=") ||
                 cap == SOJU_READ_CAP || cap.startsWith("$SOJU_READ_CAP=")
 
-        private suspend fun openBuffers(networkId: Long): List<OpenBufferTarget> =
-            bufferDao.openTargets(networkId).map { OpenBufferTarget(it.id, it.name, it.pinned) }
+        private suspend fun openBuffers(networkId: Long): List<OpenBufferTarget> = bufferDao.openTargets(networkId).map { OpenBufferTarget(it.id, it.name, it.pinned) }
 
         private suspend fun normalize(
             networkId: Long,
@@ -3099,8 +3098,7 @@ internal suspend fun awaitCapabilityAvailable(
 }
 
 /** This connection's terminal answer about CHATHISTORY; see [awaitHistoryCapDecision]. */
-internal suspend fun awaitHistoryReady(client: IrcClient): Boolean =
-    awaitHistoryCapDecision({ client.historyAvailability }, client.pendingFeatureCaps)
+internal suspend fun awaitHistoryReady(client: IrcClient): Boolean = awaitHistoryCapDecision({ client.historyAvailability }, client.pendingFeatureCaps)
 
 /**
  * One Ready session's whole history catch-up: the entry decision and the CAP NEW re-arm that backs
@@ -3194,8 +3192,7 @@ internal fun catchUpRetryDelayMs(attempt: Int): Long = (2_000L * (1L shl attempt
  */
 internal const val CATCH_UP_MAX_ATTEMPTS = 5
 
-internal fun shouldRetryIncompleteCatchUp(result: HistoryResyncState.Failed): Boolean =
-    result is HistoryResyncState.Incomplete && result.retryRecommended
+internal fun shouldRetryIncompleteCatchUp(result: HistoryResyncState.Failed): Boolean = result is HistoryResyncState.Incomplete && result.retryRecommended
 
 internal fun terminalCatchUpCanVouchForConnection(result: HistoryResyncState.Failed): Boolean =
     result is HistoryResyncState.Capped ||
@@ -3205,8 +3202,7 @@ internal fun terminalCatchUpCanVouchForConnection(result: HistoryResyncState.Fai
         )
 
 /** Wire requests needed to converge local markers with a read-marker-capable server. */
-internal fun readMarkerSyncRequests(markers: List<BufferReadMarker>): List<ReadMarkerSyncRequest> =
-    markers.map { ReadMarkerSyncRequest(it.bufferId, it.target, it.timestamp) }
+internal fun readMarkerSyncRequests(markers: List<BufferReadMarker>): List<ReadMarkerSyncRequest> = markers.map { ReadMarkerSyncRequest(it.bufferId, it.target, it.timestamp) }
 
 internal data class ReadMarkerSyncRequest(
     val bufferId: Long,

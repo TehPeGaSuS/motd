@@ -7,14 +7,15 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class RemoteAvatarStateTest {
-    private val alice = AvatarRecord(
-        networkId = 7,
-        identity = "account:alice",
-        nick = "alice",
-        account = "Alice",
-        url = "https://example.com/{size}.png",
-        updatedAt = 1,
-    )
+    private val alice =
+        AvatarRecord(
+            networkId = 7,
+            identity = "account:alice",
+            nick = "alice",
+            account = "Alice",
+            url = "https://example.com/{size}.png",
+            updatedAt = 1,
+        )
 
     @Test fun resolves_account_then_nick_with_network_isolation() {
         val state = RemoteAvatarState(enabled = true, records = listOf(alice))

@@ -27,7 +27,6 @@ import org.junit.Test
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ReadySessionCatchUpWiringTest {
-
     private class Recorder {
         var catchUps = 0
         var backfills = 0
@@ -51,108 +50,116 @@ class ReadySessionCatchUpWiringTest {
     }
 
     @Test
-    fun `a bouncer that advertises chathistory only by cap new still catches up`() = runTest {
-        val transport = FakeTransport()
-        val client = readyClient(transport, caps = "batch message-tags server-time")
-        val recorder = Recorder()
+    fun `a bouncer that advertises chathistory only by cap new still catches up`() =
+        runTest {
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch message-tags server-time")
+            val recorder = Recorder()
 
-        val session = session(client, recorder)
-        runCurrent()
+            val session = session(client, recorder)
+            runCurrent()
 
-        // Nothing pending and no chathistory: the entry decision settles NEGATIVE on this client's
-        // own pending-cap set instead of blocking, releases the entry gate, and runs no pass. That
-        // is the ZNC/no-history shape, and holding the gate here is what used to make chat entry
-        // unreachable for the whole Ready session.
-        assertEquals(1, recorder.gateReleases)
-        assertEquals(0, recorder.catchUps)
+            // Nothing pending and no chathistory: the entry decision settles NEGATIVE on this client's
+            // own pending-cap set instead of blocking, releases the entry gate, and runs no pass. That
+            // is the ZNC/no-history shape, and holding the gate here is what used to make chat entry
+            // unreachable for the whole Ready session.
+            assertEquals(1, recorder.gateReleases)
+            assertEquals(0, recorder.catchUps)
 
-        // chathistory is in the PRE-bind CAP REQ set, so it never appears in the post-welcome
-        // deferred set the entry decision settles on. Only the re-arm can still catch this.
-        transport.feed(":srv CAP me NEW :draft/chathistory")
-        runCurrent()
-        transport.feed(":srv CAP me ACK :draft/chathistory")
-        runCurrent()
+            // chathistory is in the PRE-bind CAP REQ set, so it never appears in the post-welcome
+            // deferred set the entry decision settles on. Only the re-arm can still catch this.
+            transport.feed(":srv CAP me NEW :draft/chathistory")
+            runCurrent()
+            transport.feed(":srv CAP me ACK :draft/chathistory")
+            runCurrent()
 
-        assertEquals(1, recorder.catchUps)
-        assertEquals(1, recorder.backfills)
-        // The re-arm stands in for the entry catch-up; it does not release the gate a second time.
-        assertEquals(1, recorder.gateReleases)
-        session.join()
-    }
-
-    @Test
-    fun `an outstanding chathistory cap req is waited out, not read as unsupported`() = runTest {
-        val transport = FakeTransport()
-        val client = readyClient(transport, caps = "batch message-tags server-time")
-        // The client REQs the newly advertised cap, so it is genuinely outstanding: availability is
-        // NegotiatingOrOffline and the answer lives in pendingFeatureCaps.
-        transport.feed(":srv CAP me NEW :draft/chathistory")
-        runCurrent()
-        val recorder = Recorder()
-
-        val session = session(client, recorder)
-        runCurrent()
-
-        // Attached to anything that cannot shed the cap, this would sit here until the decision
-        // timeout expired and then decide "unsupported".
-        assertEquals(0, recorder.gateReleases)
-        assertEquals(0, recorder.catchUps)
-
-        transport.feed(":srv CAP me ACK :draft/chathistory")
-        runCurrent()
-
-        // The ENTRY branch owns this one: it claimed the catch-up and released the gate behind it,
-        // which is what the chat screen's entry waits block on.
-        assertEquals(1, recorder.catchUps)
-        assertEquals(1, recorder.gateReleases)
-        assertEquals(1, recorder.backfills)
-        session.join()
-    }
+            assertEquals(1, recorder.catchUps)
+            assertEquals(1, recorder.backfills)
+            // The re-arm stands in for the entry catch-up; it does not release the gate a second time.
+            assertEquals(1, recorder.gateReleases)
+            session.join()
+        }
 
     @Test
-    fun `a session that already has chathistory runs exactly one catch-up`() = runTest {
-        val transport = FakeTransport()
-        val client = readyClient(transport, caps = "batch message-tags server-time draft/chathistory")
-        val recorder = Recorder()
+    fun `an outstanding chathistory cap req is waited out, not read as unsupported`() =
+        runTest {
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch message-tags server-time")
+            // The client REQs the newly advertised cap, so it is genuinely outstanding: availability is
+            // NegotiatingOrOffline and the answer lives in pendingFeatureCaps.
+            transport.feed(":srv CAP me NEW :draft/chathistory")
+            runCurrent()
+            val recorder = Recorder()
 
-        val session = session(client, recorder)
-        session.join()
+            val session = session(client, recorder)
+            runCurrent()
 
-        // The entry decision claimed it, so the re-arm must stand down rather than double-issue.
-        assertEquals(1, recorder.catchUps)
-        assertEquals(1, recorder.backfills)
-        assertEquals(1, recorder.gateReleases)
-    }
+            // Attached to anything that cannot shed the cap, this would sit here until the decision
+            // timeout expired and then decide "unsupported".
+            assertEquals(0, recorder.gateReleases)
+            assertEquals(0, recorder.catchUps)
+
+            transport.feed(":srv CAP me ACK :draft/chathistory")
+            runCurrent()
+
+            // The ENTRY branch owns this one: it claimed the catch-up and released the gate behind it,
+            // which is what the chat screen's entry waits block on.
+            assertEquals(1, recorder.catchUps)
+            assertEquals(1, recorder.gateReleases)
+            assertEquals(1, recorder.backfills)
+            session.join()
+        }
 
     @Test
-    fun `a client the actor already replaced verifies nothing`() = runTest {
-        val transport = FakeTransport()
-        val client = readyClient(transport, caps = "batch message-tags server-time")
-        val replacement = readyClient(FakeTransport(), caps = "batch message-tags server-time")
-        val recorder = Recorder()
+    fun `a session that already has chathistory runs exactly one catch-up`() =
+        runTest {
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch message-tags server-time draft/chathistory")
+            val recorder = Recorder()
 
-        // Same network, live generation, but the actor swapped the socket underneath this session.
-        // A pass pinned to the replaced client can no longer verify anything.
-        val session = session(client, recorder, liveClient = { replacement })
-        runCurrent()
-        transport.feed(":srv CAP me NEW :draft/chathistory")
-        runCurrent()
-        transport.feed(":srv CAP me ACK :draft/chathistory")
-        runCurrent()
+            val session = session(client, recorder)
+            session.join()
 
-        assertEquals(0, recorder.catchUps)
-        assertEquals(0, recorder.backfills)
-        // Nor may a superseded session release the gate the live one owns.
-        assertEquals(0, recorder.gateReleases)
-        session.join()
-    }
+            // The entry decision claimed it, so the re-arm must stand down rather than double-issue.
+            assertEquals(1, recorder.catchUps)
+            assertEquals(1, recorder.backfills)
+            assertEquals(1, recorder.gateReleases)
+        }
 
-    private suspend fun TestScope.readyClient(transport: FakeTransport, caps: String): IrcClient {
-        val client = IrcClient(
-            IrcClientConfig("irc.example", 6697, true, "me", "me", "Me"),
-            TransportFactory { _, _, _, _, _ -> transport },
-            CoroutineScope(SupervisorJob() + coroutineContext),
-        )
+    @Test
+    fun `a client the actor already replaced verifies nothing`() =
+        runTest {
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch message-tags server-time")
+            val replacement = readyClient(FakeTransport(), caps = "batch message-tags server-time")
+            val recorder = Recorder()
+
+            // Same network, live generation, but the actor swapped the socket underneath this session.
+            // A pass pinned to the replaced client can no longer verify anything.
+            val session = session(client, recorder, liveClient = { replacement })
+            runCurrent()
+            transport.feed(":srv CAP me NEW :draft/chathistory")
+            runCurrent()
+            transport.feed(":srv CAP me ACK :draft/chathistory")
+            runCurrent()
+
+            assertEquals(0, recorder.catchUps)
+            assertEquals(0, recorder.backfills)
+            // Nor may a superseded session release the gate the live one owns.
+            assertEquals(0, recorder.gateReleases)
+            session.join()
+        }
+
+    private suspend fun TestScope.readyClient(
+        transport: FakeTransport,
+        caps: String,
+    ): IrcClient {
+        val client =
+            IrcClient(
+                IrcClientConfig("irc.example", 6697, true, "me", "me", "Me"),
+                TransportFactory { _, _, _, _, _ -> transport },
+                CoroutineScope(SupervisorJob() + coroutineContext),
+            )
         client.start()
         runCurrent()
         transport.feed(":srv CAP * LS :$caps")
@@ -167,10 +174,19 @@ class ReadySessionCatchUpWiringTest {
 
     private class FakeTransport : IrcTransport {
         private val inbound = Channel<String>(Channel.UNLIMITED)
+
         override suspend fun connect() = Unit
+
         override val incoming = inbound.consumeAsFlow()
+
         override suspend fun send(line: String) = Unit
-        override suspend fun close() { inbound.close() }
-        suspend fun feed(line: String) { inbound.send(line) }
+
+        override suspend fun close() {
+            inbound.close()
+        }
+
+        suspend fun feed(line: String) {
+            inbound.send(line)
+        }
     }
 }

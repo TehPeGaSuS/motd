@@ -1,24 +1,33 @@
 package io.github.trevarj.motd.data.prefs
 
-import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.service.DeliveryMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
 
 enum class ThemeMode {
-    SYSTEM, LIGHT, DARK, AMOLED,
+    SYSTEM,
+    LIGHT,
+    DARK,
+    AMOLED,
+
     // Terminal color schemes (light + dark where the scheme has both).
-    GRUVBOX_DARK, GRUVBOX_LIGHT,
-    SOLARIZED_DARK, SOLARIZED_LIGHT,
+    GRUVBOX_DARK,
+    GRUVBOX_LIGHT,
+    SOLARIZED_DARK,
+    SOLARIZED_LIGHT,
     DRACULA,
     NORD,
-    CATPPUCCIN_LATTE, CATPPUCCIN_MOCHA,
+    CATPPUCCIN_LATTE,
+    CATPPUCCIN_MOCHA,
     TOKYO_NIGHT,
 }
 
 // Round 4: user-customizable UI settings.
 enum class LayoutDensity { COMPACT, COMFORTABLE, TWO_LINE }
+
 enum class NickColorPalette { THEME, CLASSIC, VIVID }
+
 enum class FoolsMode { COLLAPSE, HIDE }
 
 /**
@@ -43,7 +52,10 @@ const val SMART_PRESENCE_WINDOW_MS: Long = 5 * 60 * 1000
  * `show_join_part_quit` boolean instead: an explicit `false` stays a full hide, an explicit `true`
  * stays "show everything", and no stored choice at all adopts the new smart default.
  */
-internal fun presenceModeFromPreference(saved: String?, legacyShowJoinPartQuit: String?): PresenceMode =
+internal fun presenceModeFromPreference(
+    saved: String?,
+    legacyShowJoinPartQuit: String?,
+): PresenceMode =
     saved?.let { runCatching { PresenceMode.valueOf(it) }.getOrNull() }
         ?: when (legacyShowJoinPartQuit?.toBooleanStrictOrNull()) {
             false -> PresenceMode.HIDDEN
@@ -52,19 +64,22 @@ internal fun presenceModeFromPreference(saved: String?, legacyShowJoinPartQuit: 
         }
 
 /** Decode saved palettes, migrating both former defaults to the theme-derived default. */
-internal fun nickColorPaletteFromPreference(saved: String?): NickColorPalette = when (saved) {
-    "CLASSIC" -> NickColorPalette.CLASSIC
-    "VIVID" -> NickColorPalette.VIVID
-    "THEME", "DEFAULT", "PASTEL", null -> NickColorPalette.THEME
-    else -> NickColorPalette.THEME
-}
+internal fun nickColorPaletteFromPreference(saved: String?): NickColorPalette =
+    when (saved) {
+        "CLASSIC" -> NickColorPalette.CLASSIC
+        "VIVID" -> NickColorPalette.VIVID
+        "THEME", "DEFAULT", "PASTEL", null -> NickColorPalette.THEME
+        else -> NickColorPalette.THEME
+    }
 
 /**
  * How far back the first history sync of a network enumerates. A bounded window keeps onboarding
  * responsive on a large bouncer account; EVERYTHING enumerates from epoch in one pass, so nothing
  * is left for the paced backfill.
  */
-enum class HistorySyncDepth(val lookbackMs: Long?) {
+enum class HistorySyncDepth(
+    val lookbackMs: Long?,
+) {
     WEEK(7L * 24 * 60 * 60 * 1_000),
     MONTH(30L * 24 * 60 * 60 * 1_000),
     QUARTER(90L * 24 * 60 * 60 * 1_000),
@@ -81,8 +96,7 @@ val AUTO_AWAY_MINUTE_CHOICES: List<Int> = listOf(1, 5, 10, 15, 30, 60)
 const val DEFAULT_AUTO_AWAY_MINUTES: Int = 10
 
 /** Snap a stored/incoming delay onto [AUTO_AWAY_MINUTE_CHOICES]; anything unknown takes the default. */
-internal fun autoAwayMinutesFromPreference(saved: Int?): Int =
-    saved?.takeIf { it in AUTO_AWAY_MINUTE_CHOICES } ?: DEFAULT_AUTO_AWAY_MINUTES
+internal fun autoAwayMinutesFromPreference(saved: Int?): Int = saved?.takeIf { it in AUTO_AWAY_MINUTE_CHOICES } ?: DEFAULT_AUTO_AWAY_MINUTES
 
 /**
  * Which visual style to use for nick avatars. IRC sprites are the default for new users; [NONE]
@@ -92,8 +106,7 @@ internal fun autoAwayMinutesFromPreference(saved: Int?): Int =
 enum class AvatarStyle { MONOGRAM, INITIALS, IRC_SPRITE, NONE }
 
 /** Decode a saved choice while defaulting installations without one to IRC sprites. */
-internal fun avatarStyleFromPreference(saved: String?): AvatarStyle =
-    saved?.let { runCatching { AvatarStyle.valueOf(it) }.getOrNull() } ?: AvatarStyle.IRC_SPRITE
+internal fun avatarStyleFromPreference(saved: String?): AvatarStyle = saved?.let { runCatching { AvatarStyle.valueOf(it) }.getOrNull() } ?: AvatarStyle.IRC_SPRITE
 
 /** Subtle IRC-themed chat background rendered behind the message list. NONE keeps the plain
  *  theme background (opt-in; default for existing users). */
@@ -101,10 +114,11 @@ enum class ChatWallpaper { NONE, CLASSIC, NETWORK, PIXEL }
 
 /** True for terminal color-scheme variants (dynamic color does not apply to these). */
 val ThemeMode.isTerminalTheme: Boolean
-    get() = when (this) {
-        ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.AMOLED -> false
-        else -> true
-    }
+    get() =
+        when (this) {
+            ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.AMOLED -> false
+            else -> true
+        }
 
 @Serializable
 data class Settings(
@@ -152,7 +166,10 @@ data class Settings(
 fun normalizeNick(nick: String): String = nick.trim().lowercase()
 
 /** Compare stored preference entries using one network's advertised IRC identity rules. */
-fun IrcIdentityRules.matchesConfiguredNick(nick: String, configuredNicks: Set<String>): Boolean {
+fun IrcIdentityRules.matchesConfiguredNick(
+    nick: String,
+    configuredNicks: Set<String>,
+): Boolean {
     if (configuredNicks.isEmpty()) return false
     val normalizedNick = normalize(nick.trim())
     return configuredNicks.any { normalize(it.trim()) == normalizedNick }
@@ -160,51 +177,97 @@ fun IrcIdentityRules.matchesConfiguredNick(nick: String, configuredNicks: Set<St
 
 interface SettingsRepository {
     val settings: Flow<Settings>
+
     suspend fun setThemeMode(m: ThemeMode)
+
     suspend fun setDynamicColor(enabled: Boolean)
+
     suspend fun setDeliveryMode(m: DeliveryMode)
+
     // Round 4
     suspend fun setLayoutDensity(d: LayoutDensity)
+
     suspend fun setNickColorsEnabled(enabled: Boolean)
+
     suspend fun setNickColorPalette(p: NickColorPalette)
+
     /** hue 0..359 (coerced); null removes. [nick] is normalized internally. */
-    suspend fun setNickColorOverride(nick: String, hue: Int?)
+    suspend fun setNickColorOverride(
+        nick: String,
+        hue: Int?,
+    )
+
     /** Adding a friend removes the nick from fools, and vice versa. */
-    suspend fun setFriend(nick: String, isFriend: Boolean)
-    suspend fun setFool(nick: String, isFool: Boolean)
+    suspend fun setFriend(
+        nick: String,
+        isFriend: Boolean,
+    )
+
+    suspend fun setFool(
+        nick: String,
+        isFool: Boolean,
+    )
+
     /** Rules-aware variants remove the actual equivalent stored entries in one transaction. */
-    suspend fun setFriend(nick: String, isFriend: Boolean, identityRules: IrcIdentityRules) {
+    suspend fun setFriend(
+        nick: String,
+        isFriend: Boolean,
+        identityRules: IrcIdentityRules,
+    ) {
         setFriend(nick, isFriend)
     }
-    suspend fun setFool(nick: String, isFool: Boolean, identityRules: IrcIdentityRules) {
+
+    suspend fun setFool(
+        nick: String,
+        isFool: Boolean,
+        identityRules: IrcIdentityRules,
+    ) {
         setFool(nick, isFool)
     }
+
     suspend fun setFoolsMode(m: FoolsMode)
+
     suspend fun setPresenceMode(m: PresenceMode)
+
     suspend fun setAvatarStyle(style: AvatarStyle)
+
     suspend fun setChatWallpaper(w: ChatWallpaper)
+
     suspend fun setShowComposerEmoji(show: Boolean)
+
     suspend fun setChatSoundsEnabled(enabled: Boolean)
+
     suspend fun setHistorySyncDepth(d: HistorySyncDepth)
+
     suspend fun setAutoAwayEnabled(enabled: Boolean)
+
     /** [minutes] is coerced onto [AUTO_AWAY_MINUTE_CHOICES]. */
     suspend fun setAutoAwayMinutes(minutes: Int)
+
     /** Blank keeps the localized default message. */
     suspend fun setAutoAwayMessage(message: String)
 }
 
 /** Webpush endpoint + client keypair persistence (DataStore). Implemented by WP4 alongside
  *  SettingsRepository; consumed by WP9. All values base64url. */
-data class PushKeys(val privateKey: String, val publicUncompressed: String, val auth: String)
+data class PushKeys(
+    val privateKey: String,
+    val publicUncompressed: String,
+    val auth: String,
+)
 
 interface PushPrefs {
     // Per-network endpoints (keyed by network row id).
     suspend fun endpoints(): Map<Long, String>
+
     suspend fun endpointFor(networkId: Long): String?
-    suspend fun setEndpointFor(networkId: Long, endpoint: String?)  // null removes
+
+    suspend fun setEndpointFor(networkId: Long, endpoint: String?) // null removes
+
     suspend fun clearEndpoints()
 
-    suspend fun keys(): PushKeys?                      // one shared keypair
+    suspend fun keys(): PushKeys? // one shared keypair
+
     suspend fun setKeys(keys: PushKeys)
 }
 
@@ -215,14 +278,28 @@ interface PushPrefs {
  */
 interface CertTrustStore {
     /** Pinned lowercase-hex SHA-256 for [host]:[port], or null when unpinned. */
-    suspend fun pinnedFor(host: String, port: Int): String?
+    suspend fun pinnedFor(
+        host: String,
+        port: Int,
+    ): String?
 
     /** True when [sha256] (case-insensitive) matches the pin for [host]:[port]. */
-    suspend fun isPinned(host: String, port: Int, sha256: String): Boolean
+    suspend fun isPinned(
+        host: String,
+        port: Int,
+        sha256: String,
+    ): Boolean
 
     /** Pin (or re-pin) [sha256] for [host]:[port]; stored lowercase. */
-    suspend fun pin(host: String, port: Int, sha256: String)
+    suspend fun pin(
+        host: String,
+        port: Int,
+        sha256: String,
+    )
 
     /** Remove any pin for [host]:[port]. */
-    suspend fun unpin(host: String, port: Int)
+    suspend fun unpin(
+        host: String,
+        port: Int,
+    )
 }

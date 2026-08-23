@@ -13,17 +13,19 @@ package io.github.trevarj.motd.gesture
 /** Preorder walk of the whole tree, root first. */
 fun GestureMenuConfig.allNodes(): List<GestureNode> = root.flattenNodes()
 
-private fun GestureNode.flattenNodes(): List<GestureNode> =
-    listOf(this) + childNodes.flatMap { it.flattenNodes() }
+private fun GestureNode.flattenNodes(): List<GestureNode> = listOf(this) + childNodes.flatMap { it.flattenNodes() }
 
 fun GestureMenuConfig.findNode(nodeId: String): GestureNode? = allNodes().firstOrNull { it.id == nodeId }
 
 /** Id of the submenu holding [nodeId], or null for the root and for ids that are not in the tree. */
-fun GestureMenuConfig.parentIdOf(nodeId: String): String? =
-    allNodes().firstOrNull { node -> node.childNodes.any { it.id == nodeId } }?.id
+fun GestureMenuConfig.parentIdOf(nodeId: String): String? = allNodes().firstOrNull { node -> node.childNodes.any { it.id == nodeId } }?.id
 
 /** Add [child] to the submenu [parentId]; ignored when the id is already taken or the parent is not a ring. */
-fun GestureMenuConfig.addChild(parentId: String, child: GestureNode, index: Int? = null): GestureMenuConfig {
+fun GestureMenuConfig.addChild(
+    parentId: String,
+    child: GestureNode,
+    index: Int? = null,
+): GestureMenuConfig {
     if (findNode(child.id) != null) return this
     if (findNode(parentId) !is GestureNode.Submenu) return this
     return mapNodes { node ->
@@ -42,7 +44,10 @@ fun GestureMenuConfig.removeNode(nodeId: String): GestureMenuConfig {
 }
 
 /** Move [nodeId] by [delta] places inside its own ring. Never changes rings. */
-fun GestureMenuConfig.moveAmongSiblings(nodeId: String, delta: Int): GestureMenuConfig {
+fun GestureMenuConfig.moveAmongSiblings(
+    nodeId: String,
+    delta: Int,
+): GestureMenuConfig {
     if (delta == 0) return this
     val parentId = parentIdOf(nodeId) ?: return this
     val parent = findNode(parentId) as? GestureNode.Submenu ?: return this
@@ -58,7 +63,11 @@ fun GestureMenuConfig.moveAmongSiblings(nodeId: String, delta: Int): GestureMenu
  * Move [nodeId] (with its subtree) into the submenu [newParentId]. Refused when the target is the
  * node itself or one of its own descendants — a menu is a tree, and a cycle would hang the walk.
  */
-fun GestureMenuConfig.reparent(nodeId: String, newParentId: String, index: Int? = null): GestureMenuConfig {
+fun GestureMenuConfig.reparent(
+    nodeId: String,
+    newParentId: String,
+    index: Int? = null,
+): GestureMenuConfig {
     if (nodeId == root.id || nodeId == newParentId) return this
     val node = findNode(nodeId) ?: return this
     if (findNode(newParentId) !is GestureNode.Submenu) return this
@@ -67,7 +76,10 @@ fun GestureMenuConfig.reparent(nodeId: String, newParentId: String, index: Int? 
 }
 
 /** Replace [nodeId] with [transform]'s result; a rename onto an id already in the tree is refused. */
-fun GestureMenuConfig.updateNode(nodeId: String, transform: (GestureNode) -> GestureNode): GestureMenuConfig {
+fun GestureMenuConfig.updateNode(
+    nodeId: String,
+    transform: (GestureNode) -> GestureNode,
+): GestureMenuConfig {
     val current = findNode(nodeId) ?: return this
     val updated = transform(current)
     if (updated.id != nodeId && findNode(updated.id) != null) return this
@@ -75,24 +87,36 @@ fun GestureMenuConfig.updateNode(nodeId: String, transform: (GestureNode) -> Ges
 }
 
 /** Point a leaf at a different action. Nodes that are not leaves keep what they are. */
-fun GestureMenuConfig.bindAction(nodeId: String, action: GestureAction): GestureMenuConfig =
-    updateNode(nodeId) { node -> (node as? GestureNode.Leaf)?.copy(action = action) ?: node }
+fun GestureMenuConfig.bindAction(
+    nodeId: String,
+    action: GestureAction,
+): GestureMenuConfig = updateNode(nodeId) { node -> (node as? GestureNode.Leaf)?.copy(action = action) ?: node }
 
 /** Something about a menu that would not render or behave, reported per node for inline editor chips. */
 sealed interface GestureMenuViolation {
     val nodeId: String
 
     /** A ring with more slices than a thumb can hit. */
-    data class RingOverflow(override val nodeId: String, val slices: Int) : GestureMenuViolation
+    data class RingOverflow(
+        override val nodeId: String,
+        val slices: Int,
+    ) : GestureMenuViolation
 
     /** A ring nested past [MAX_GESTURE_RINGS]; [ring] is the ring this node would have opened. */
-    data class TooDeep(override val nodeId: String, val ring: Int) : GestureMenuViolation
+    data class TooDeep(
+        override val nodeId: String,
+        val ring: Int,
+    ) : GestureMenuViolation
 
     /** A slice with nothing to label it. */
-    data class BlankLabel(override val nodeId: String) : GestureMenuViolation
+    data class BlankLabel(
+        override val nodeId: String,
+    ) : GestureMenuViolation
 
     /** The same id used twice, which would make every edit ambiguous. */
-    data class DuplicateId(override val nodeId: String) : GestureMenuViolation
+    data class DuplicateId(
+        override val nodeId: String,
+    ) : GestureMenuViolation
 }
 
 /**
@@ -107,12 +131,16 @@ fun validateGestureMenu(config: GestureMenuConfig): List<GestureMenuViolation> {
     val violations = mutableListOf<GestureMenuViolation>()
     val nodes = config.allNodes()
 
-    nodes.groupBy { it.id }
+    nodes
+        .groupBy { it.id }
         .filter { (_, sharing) -> sharing.size > 1 }
         .keys
         .forEach { violations += GestureMenuViolation.DuplicateId(it) }
 
-    fun walk(node: GestureNode, ring: Int) {
+    fun walk(
+        node: GestureNode,
+        ring: Int,
+    ) {
         if (node !is GestureNode.Unknown && node.label.isBlank()) {
             violations += GestureMenuViolation.BlankLabel(node.id)
         }
@@ -142,20 +170,26 @@ private fun GestureMenuConfig.mapNodes(transform: (GestureNode) -> GestureNode?)
 }
 
 private fun GestureNode.Submenu.transformChildren(transform: (GestureNode) -> GestureNode?): GestureNode.Submenu {
-    val mapped = children.mapNotNull { child ->
-        when (val replaced = transform(child)) {
-            null -> null
-            is GestureNode.Submenu -> replaced.transformChildren(transform)
-            else -> replaced
+    val mapped =
+        children.mapNotNull { child ->
+            when (val replaced = transform(child)) {
+                null -> null
+                is GestureNode.Submenu -> replaced.transformChildren(transform)
+                else -> replaced
+            }
         }
-    }
     return copy(children = mapped)
 }
 
-private fun <T> List<T>.inserted(value: T, index: Int?): List<T> {
+private fun <T> List<T>.inserted(
+    value: T,
+    index: Int?,
+): List<T> {
     val at = index?.coerceIn(0, size) ?: size
     return toMutableList().apply { add(at, value) }
 }
 
-private fun <T> List<T>.moved(from: Int, to: Int): List<T> =
-    toMutableList().apply { add(to, removeAt(from)) }
+private fun <T> List<T>.moved(
+    from: Int,
+    to: Int,
+): List<T> = toMutableList().apply { add(to, removeAt(from)) }

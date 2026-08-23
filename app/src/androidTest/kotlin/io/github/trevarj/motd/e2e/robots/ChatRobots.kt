@@ -2,16 +2,16 @@ package io.github.trevarj.motd.e2e.robots
 
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
-import androidx.compose.ui.test.junit4.ComposeTestRule
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onAllNodesWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
@@ -31,18 +31,24 @@ private const val NEWEST_ROW_RESET_INTERVAL_MS = 5_000L
 /** Artifact subdirectory the newest-row snapshots are written under. */
 private const val NEWEST_ROW_DIAGNOSTIC_LABEL = "newest_row"
 
-internal class ChatListRobot(compose: ComposeTestRule) : BaseRobot(compose) {
+internal class ChatListRobot(
+    compose: ComposeTestRule,
+) : BaseRobot(compose) {
     fun open(bufferId: Long) = click("chatlist_row_$bufferId")
 }
 
-internal class ChatRobot(compose: ComposeTestRule) : BaseRobot(compose) {
+internal class ChatRobot(
+    compose: ComposeTestRule,
+) : BaseRobot(compose) {
     fun send(text: String) {
         replace("chat_composer_field", text)
         click("chat_composer_send")
     }
 }
 
-internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule) {
+internal class TimelineRobot(
+    private val rule: ComposeTestRule,
+) : BaseRobot(rule) {
     fun assertMessage(text: String) {
         scrollContainerTo("chat_timeline", hasText(text, substring = true))
         rule.onNodeWithText(text, substring = true, useUnmergedTree = true).assertTextContains(text, substring = true)
@@ -61,7 +67,10 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         awaitNewestRow(messageTag, rowId, timeoutMs = 30_000, diagnostics = diagnostics)
         val players = rule.onAllNodes(playerMatcher, useUnmergedTree = true).assertCountEquals(1)
         val player = players[0].assertIsDisplayed()
-        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+        val density =
+            InstrumentationRegistry
+                .getInstrumentation()
+                .targetContext.resources.displayMetrics.density
         val heightDp = player.fetchSemanticsNode().boundsInRoot.height / density
         assertTrue("audio player height was ${heightDp}dp", heightDp <= 84f)
         rule.onAllNodes(detailsMatcher, useUnmergedTree = true).assertCountEquals(1)[0].performClick()
@@ -161,18 +170,34 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         awaitTag(secondTag, timeoutMs)
         val timeline = rule.onNodeWithTag("chat_timeline", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         expectedLabel?.let {
-            rule.onNode(
-                hasText(it) and hasAnyAncestor(hasTestTag("chat_read_marker_divider")),
-                useUnmergedTree = true,
-            ).assertIsDisplayed()
+            rule
+                .onNode(
+                    hasText(it) and hasAnyAncestor(hasTestTag("chat_read_marker_divider")),
+                    useUnmergedTree = true,
+                ).assertIsDisplayed()
         }
-        val divider = rule.onNodeWithTag("chat_read_marker_divider", useUnmergedTree = true)
-            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        val first = rule.onNodeWithTag(firstTag, useUnmergedTree = true)
-            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        val second = rule.onNodeWithTag(secondTag, useUnmergedTree = true)
-            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+        val divider =
+            rule
+                .onNodeWithTag("chat_read_marker_divider", useUnmergedTree = true)
+                .assertIsDisplayed()
+                .fetchSemanticsNode()
+                .boundsInRoot
+        val first =
+            rule
+                .onNodeWithTag(firstTag, useUnmergedTree = true)
+                .assertIsDisplayed()
+                .fetchSemanticsNode()
+                .boundsInRoot
+        val second =
+            rule
+                .onNodeWithTag(secondTag, useUnmergedTree = true)
+                .assertIsDisplayed()
+                .fetchSemanticsNode()
+                .boundsInRoot
+        val density =
+            InstrumentationRegistry
+                .getInstrumentation()
+                .targetContext.resources.displayMetrics.density
         assertTrue("first unread was above the timeline viewport", first.top >= timeline.top - density)
         assertTrue(
             "first unread was not anchored near the viewport top: timeline=${timeline.top}, row=${first.top}",
@@ -218,11 +243,13 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
             runCatching {
                 rule.onNodeWithTag("chat_timeline", useUnmergedTree = true).performScrollToIndex(lastIndex)
             }.onFailure {
-                rule.onNodeWithTag("chat_timeline", useUnmergedTree = true)
+                rule
+                    .onNodeWithTag("chat_timeline", useUnmergedTree = true)
                     .performTouchInput { swipeDown(durationMillis = 300) }
             }
         } else {
-            rule.onNodeWithTag("chat_timeline", useUnmergedTree = true)
+            rule
+                .onNodeWithTag("chat_timeline", useUnmergedTree = true)
                 .performTouchInput { swipeDown(durationMillis = 300) }
         }
         // The boundary hit composes the footer — the shimmer while an APPEND is actually in flight,
@@ -266,9 +293,10 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
             // list is the newest row — which the viewport mark-read effect reads as "the user is at
             // the bottom" and acknowledges the whole room. Only call this once the journey no longer
             // depends on anything being unread.
-            val reached = runCatching {
-                container("chat_timeline").performScrollToNode(hasTestTag(CHAT_GAP_DIVIDER_TAG))
-            }.isSuccess
+            val reached =
+                runCatching {
+                    container("chat_timeline").performScrollToNode(hasTestTag(CHAT_GAP_DIVIDER_TAG))
+                }.isSuccess
             if (reached) return true
             scrollToOlderBoundary()
         }
@@ -325,14 +353,20 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
     }
 
     /** Repeat [scrollToOlderBoundary] until a row containing [text] becomes addressable. */
-    fun scrollOlderUntil(text: String, maximumSwipes: Int = 48) {
+    fun scrollOlderUntil(
+        text: String,
+        maximumSwipes: Int = 48,
+    ) {
         repeat(maximumSwipes) {
-            val reached = runCatching {
-                rule.onNodeWithTag("chat_timeline", useUnmergedTree = true)
-                    .performScrollToNode(hasText(text, substring = true))
-            }.isSuccess
+            val reached =
+                runCatching {
+                    rule
+                        .onNodeWithTag("chat_timeline", useUnmergedTree = true)
+                        .performScrollToNode(hasText(text, substring = true))
+                }.isSuccess
             if (reached) {
-                rule.onNodeWithText(text, substring = true, useUnmergedTree = true)
+                rule
+                    .onNodeWithText(text, substring = true, useUnmergedTree = true)
                     .assertTextContains(text, substring = true)
                 return
             }
@@ -344,7 +378,8 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
     }
 
     private fun timelineItemCount(): Int =
-        rule.onAllNodesWithTag("chat_timeline", useUnmergedTree = true)
+        rule
+            .onAllNodesWithTag("chat_timeline", useUnmergedTree = true)
             .fetchSemanticsNodes()
             .singleOrNull()
             ?.config
@@ -368,8 +403,10 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         awaitTag("chat_scroll_to_bottom_fab")
         rule.onNodeWithTag("chat_scroll_to_bottom_fab", useUnmergedTree = true).performClick()
         rule.waitUntil(10_000) {
-            rule.onAllNodesWithTag("chat_scroll_to_bottom_fab", useUnmergedTree = true)
-                .fetchSemanticsNodes().isEmpty()
+            rule
+                .onAllNodesWithTag("chat_scroll_to_bottom_fab", useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .isEmpty()
         }
         rule.waitForIdle()
     }
@@ -378,7 +415,10 @@ internal class TimelineRobot(private val rule: ComposeTestRule) : BaseRobot(rule
         rule.onAllNodesWithTag("chat_read_marker_divider", useUnmergedTree = true).assertCountEquals(0)
     }
 
-    fun assertMessageVisible(tag: String, timeoutMs: Long = 10_000) {
+    fun assertMessageVisible(
+        tag: String,
+        timeoutMs: Long = 10_000,
+    ) {
         rule.waitUntil(timeoutMs) {
             runCatching { rule.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed() }.isSuccess
         }

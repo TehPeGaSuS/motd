@@ -11,7 +11,6 @@ import org.junit.Test
  * Precedence: already-read > foreground > mute > fool; friend status never bypasses a mute.
  */
 class NotificationDecisionTest {
-
     @Test
     fun `foreground buffer suppresses everything`() {
         // Even a friend / normal / un-muted case is suppressed while foregrounded.
@@ -65,17 +64,21 @@ class NotificationDecisionTest {
 
     @Test
     fun `read marker dismisses only when it covers the newest notification`() {
-        val latest = io.github.trevarj.motd.data.db.TimelineAnchor(100, 2)
+        val latest =
+            io.github.trevarj.motd.data.db
+                .TimelineAnchor(100, 2)
         assertFalse(
             readMarkerCoversNotification(
-                io.github.trevarj.motd.data.db.TimelineAnchor(100, 1),
+                io.github.trevarj.motd.data.db
+                    .TimelineAnchor(100, 1),
                 latest,
             ),
         )
         assertTrue(readMarkerCoversNotification(latest, latest))
         assertTrue(
             readMarkerCoversNotification(
-                io.github.trevarj.motd.data.db.TimelineAnchor(101, 1),
+                io.github.trevarj.motd.data.db
+                    .TimelineAnchor(101, 1),
                 latest,
             ),
         )

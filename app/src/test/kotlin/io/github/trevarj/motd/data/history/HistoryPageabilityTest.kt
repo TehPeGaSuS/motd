@@ -15,7 +15,6 @@ import org.junit.Test
  * literals here rather than referenced through a constant: a rename must break this file.
  */
 class HistoryPageabilityTest {
-
     private fun gap(
         id: Long = 7,
         recoverable: Boolean = true,
@@ -33,7 +32,10 @@ class HistoryPageabilityTest {
         recoverable = recoverable,
     )
 
-    private fun ref(msgid: String?, serverTime: Long?) = ChatHistoryReference(msgid, serverTime)
+    private fun ref(
+        msgid: String?,
+        serverTime: Long?,
+    ) = ChatHistoryReference(msgid, serverTime)
 
     private fun older(
         focusedGap: HistoryGapEntity? = null,
@@ -56,10 +58,11 @@ class HistoryPageabilityTest {
     @Test
     fun olderEndsAfterAPageWhenTheRemainingFocusedGapBecameUnrecoverable() {
         // Same condition, different classification: the fetch itself proved the remainder empty.
-        val result = older(
-            focusedGap = gap(recoverable = false),
-            progress = PageProgress(previous = ref("row", 900), insertedCount = 1),
-        )
+        val result =
+            older(
+                focusedGap = gap(recoverable = false),
+                progress = PageProgress(previous = ref("row", 900), insertedCount = 1),
+            )
 
         assertEquals(Pageability.End("exhausted_focused_gap"), result)
     }
@@ -83,10 +86,11 @@ class HistoryPageabilityTest {
 
     @Test
     fun anUnrecoverableGapOutranksProgressEvenWhenTheBoundaryReceded() {
-        val result = older(
-            focusedGap = gap(recoverable = false, newerServerTime = 200),
-            progress = PageProgress(previous = ref("newer", 500), insertedCount = 3),
-        )
+        val result =
+            older(
+                focusedGap = gap(recoverable = false, newerServerTime = 200),
+                progress = PageProgress(previous = ref("newer", 500), insertedCount = 3),
+            )
 
         assertEquals(Pageability.End("exhausted_focused_gap"), result)
     }
@@ -95,11 +99,12 @@ class HistoryPageabilityTest {
 
     @Test
     fun theFocusedGapsNewerEdgeOutranksTheCursorAndTheOldestLocalRow() {
-        val result = older(
-            focusedGap = gap(),
-            cursorOldest = ref("cursor", 50),
-            oldestLocalRow = ref("row", 10),
-        )
+        val result =
+            older(
+                focusedGap = gap(),
+                cursorOldest = ref("cursor", 50),
+                oldestLocalRow = ref("row", 10),
+            )
 
         assertEquals(Pageability.Page(ref("newer", 500), focusedGapId = 7), result)
     }
@@ -158,11 +163,12 @@ class HistoryPageabilityTest {
         // ladder would issue the identical request the gap's own fill issues. Clamping to the gap's
         // older edge puts it strictly below the interval instead — BEFORE is strictly-older-than, so
         // the two demand sources can no longer name the same rows.
-        val result = older(
-            cursorOldest = ref("newer", 500),
-            oldestLocalRow = ref("newer", 500),
-            gapFloor = ref("older", 100),
-        )
+        val result =
+            older(
+                cursorOldest = ref("newer", 500),
+                oldestLocalRow = ref("newer", 500),
+                gapFloor = ref("older", 100),
+            )
 
         assertEquals(Pageability.Page(ref("older", 100), focusedGapId = null), result)
     }
@@ -210,20 +216,22 @@ class HistoryPageabilityTest {
     @Test
     fun olderEndsWhenNothingLandedAndTheBoundaryDidNotMove() {
         val boundary = ref("newer", 500)
-        val result = older(
-            focusedGap = gap(),
-            progress = PageProgress(previous = boundary, insertedCount = 0),
-        )
+        val result =
+            older(
+                focusedGap = gap(),
+                progress = PageProgress(previous = boundary, insertedCount = 0),
+            )
 
         assertEquals(Pageability.End("no_append_progress"), result)
     }
 
     @Test
     fun olderContinuesWhenRowsLandedEvenThoughTheBoundaryDidNotMove() {
-        val result = older(
-            focusedGap = gap(),
-            progress = PageProgress(previous = ref("newer", 500), insertedCount = 1),
-        )
+        val result =
+            older(
+                focusedGap = gap(),
+                progress = PageProgress(previous = ref("newer", 500), insertedCount = 1),
+            )
 
         assertEquals(Pageability.Page(ref("newer", 500), focusedGapId = 7), result)
     }
@@ -232,10 +240,11 @@ class HistoryPageabilityTest {
     fun olderContinuesWhenTheBoundaryRecededEvenThoughNothingLanded() {
         // A saturated equal-timestamp page edge stops THIS fetch, not the direction: the next
         // request is different, so the ambiguity that stopped this page no longer applies.
-        val result = older(
-            focusedGap = gap(newerMsgid = null, newerServerTime = 300),
-            progress = PageProgress(previous = ref(null, 500), insertedCount = 0),
-        )
+        val result =
+            older(
+                focusedGap = gap(newerMsgid = null, newerServerTime = 300),
+                progress = PageProgress(previous = ref(null, 500), insertedCount = 0),
+            )
 
         assertEquals(Pageability.Page(ref(null, 300), focusedGapId = 7), result)
     }
@@ -302,10 +311,11 @@ class HistoryPageabilityTest {
     fun theMsgidStripAsymmetryHoldsForAGapDirectedPage() {
         // The boundary keeps its timestamp and loses its msgid, which is what a timestamp-only wire
         // does to a persisted reference. Both requests would be byte-identical, so it is not progress.
-        val stripped = older(
-            focusedGap = gap(newerMsgid = null, newerServerTime = 500),
-            progress = PageProgress(previous = ref("newer", 500), insertedCount = 0),
-        )
+        val stripped =
+            older(
+                focusedGap = gap(newerMsgid = null, newerServerTime = 500),
+                progress = PageProgress(previous = ref("newer", 500), insertedCount = 0),
+            )
 
         assertEquals(Pageability.End("no_append_progress"), stripped)
 

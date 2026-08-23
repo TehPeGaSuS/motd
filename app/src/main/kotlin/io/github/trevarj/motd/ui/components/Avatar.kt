@@ -13,30 +13,30 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.trevarj.motd.data.prefs.AvatarStyle
+import coil.compose.AsyncImage
 import io.github.trevarj.motd.avatar.AvatarRecord
 import io.github.trevarj.motd.avatar.avatarIdentity
 import io.github.trevarj.motd.avatar.canonicalAvatarNick
 import io.github.trevarj.motd.avatar.conversationAvatarModel
 import io.github.trevarj.motd.avatar.expandAvatarUrl
+import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
-import io.github.trevarj.motd.ui.theme.bestOnColor
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import coil.compose.AsyncImage
+import io.github.trevarj.motd.ui.theme.bestOnColor
 
 data class RemoteAvatarState(
     val enabled: Boolean = false,
@@ -59,17 +59,23 @@ data class RemoteAvatarState(
         }
     }
 
-    fun url(networkId: Long?, name: String, account: String?, sizePx: Int): String? {
+    fun url(
+        networkId: Long?,
+        name: String,
+        account: String?,
+        sizePx: Int,
+    ): String? {
         if (!enabled) return null
         val identity = avatarIdentity(name, account)
         val normalizedNick = canonicalAvatarNick(name)
-        val record = if (networkId != null) {
-            byNetworkIdentity[networkId to identity] ?: byNetworkNick[networkId to normalizedNick]
-        } else {
-            // Global friends/fools management has no network context. Use a remote image only when
-            // every matching network agrees on one URL; ambiguity falls back to the monogram.
-            unambiguousByIdentity[identity] ?: unambiguousByNick[normalizedNick]
-        }
+        val record =
+            if (networkId != null) {
+                byNetworkIdentity[networkId to identity] ?: byNetworkNick[networkId to normalizedNick]
+            } else {
+                // Global friends/fools management has no network context. Use a remote image only when
+                // every matching network agrees on one URL; ambiguity falls back to the monogram.
+                unambiguousByIdentity[identity] ?: unambiguousByNick[normalizedNick]
+            }
         return record?.url?.let { expandAvatarUrl(it, sizePx) }
     }
 }
@@ -83,12 +89,10 @@ val LocalRemoteAvatars = staticCompositionLocalOf { RemoteAvatarState() }
  */
 @Composable
 @ReadOnlyComposable
-internal fun isAppliedThemeDark(): Boolean =
-    MaterialTheme.colorScheme.background.luminance() < 0.5f
+internal fun isAppliedThemeDark(): Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
 /** Pick a legible on-color (black/white) for text/initials over [bg] by its luminance. */
-internal fun onColorFor(bg: Color): Color =
-    bestOnColor(bg)
+internal fun onColorFor(bg: Color): Color = bestOnColor(bg)
 
 /**
  * True when the user chose [AvatarStyle.NONE]. [Avatar] then renders nothing at all, but call sites
@@ -130,12 +134,22 @@ fun Avatar(
     val shape: Shape = if (isChannel) MotdShapes.channelAvatar else CircleShape
     Box(modifier = modifier.size(size), contentAlignment = Alignment.Center) {
         when (style) {
-            AvatarStyle.MONOGRAM -> MonogramAvatar(name, nick, size, isChannel, shape, Modifier)
-            AvatarStyle.INITIALS -> InitialsAvatar(name, nick, size, isChannel, shape, Modifier)
-            AvatarStyle.IRC_SPRITE -> {
-                if (isChannel) IrcChannelBadge(name, size, Modifier)
-                else IrcSpriteAvatar(name, size, Modifier)
+            AvatarStyle.MONOGRAM -> {
+                MonogramAvatar(name, nick, size, isChannel, shape, Modifier)
             }
+
+            AvatarStyle.INITIALS -> {
+                InitialsAvatar(name, nick, size, isChannel, shape, Modifier)
+            }
+
+            AvatarStyle.IRC_SPRITE -> {
+                if (isChannel) {
+                    IrcChannelBadge(name, size, Modifier)
+                } else {
+                    IrcSpriteAvatar(name, size, Modifier)
+                }
+            }
+
             AvatarStyle.NONE -> {}
         }
         conversationAvatarModel(
@@ -163,7 +177,14 @@ fun Avatar(
  * the color identity; the disc stays mostly neutral, so the avatar column reads calm rather than busy.
  */
 @Composable
-private fun MonogramAvatar(name: String, nick: Color, size: Dp, isChannel: Boolean, shape: Shape, modifier: Modifier) {
+private fun MonogramAvatar(
+    name: String,
+    nick: Color,
+    size: Dp,
+    isChannel: Boolean,
+    shape: Shape,
+    modifier: Modifier,
+) {
     val scheme = MaterialTheme.colorScheme
     val dark = isAppliedThemeDark()
     val base = scheme.surfaceContainerHigh
@@ -176,13 +197,14 @@ private fun MonogramAvatar(name: String, nick: Color, size: Dp, isChannel: Boole
     val glyph = lerp(nick, scheme.onSurface, 0.30f)
 
     Box(
-        modifier = modifier
-            .size(size)
-            .clip(shape)
-            .background(Brush.verticalGradient(listOf(top, bottom)))
-            // The hairline ring is what defines the shape on AMOLED (disc barely above true black);
-            // do not drop it.
-            .border(1.dp, nick.copy(alpha = 0.40f), shape),
+        modifier =
+            modifier
+                .size(size)
+                .clip(shape)
+                .background(Brush.verticalGradient(listOf(top, bottom)))
+                // The hairline ring is what defines the shape on AMOLED (disc barely above true black);
+                // do not drop it.
+                .border(1.dp, nick.copy(alpha = 0.40f), shape),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -197,12 +219,20 @@ private fun MonogramAvatar(name: String, nick: Color, size: Dp, isChannel: Boole
 
 /** The bolder alternate: two initials over the solid, saturated nick color (the original style). */
 @Composable
-private fun InitialsAvatar(name: String, bg: Color, size: Dp, isChannel: Boolean, shape: Shape, modifier: Modifier) {
+private fun InitialsAvatar(
+    name: String,
+    bg: Color,
+    size: Dp,
+    isChannel: Boolean,
+    shape: Shape,
+    modifier: Modifier,
+) {
     Box(
-        modifier = modifier
-            .size(size)
-            .clip(shape)
-            .background(bg),
+        modifier =
+            modifier
+                .size(size)
+                .clip(shape)
+                .background(bg),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -216,14 +246,18 @@ private fun InitialsAvatar(name: String, bg: Color, size: Dp, isChannel: Boolean
 }
 
 /** First two significant characters. Skips channel sigils and non-letter/digit leading chars. */
-private fun initials(name: String, isChannel: Boolean): String {
+private fun initials(
+    name: String,
+    isChannel: Boolean,
+): String {
     val stripped = name.trimStart('#', '&', '@', '+', '~', '%', '!').ifEmpty { name }
     val words = stripped.split(' ', '-', '_', '.').filter { it.isNotBlank() }
-    val chars = when {
-        words.size >= 2 -> "${words[0].first()}${words[1].first()}"
-        stripped.length >= 2 -> stripped.take(2)
-        else -> stripped.take(1).ifEmpty { "?" }
-    }
+    val chars =
+        when {
+            words.size >= 2 -> "${words[0].first()}${words[1].first()}"
+            stripped.length >= 2 -> stripped.take(2)
+            else -> stripped.take(1).ifEmpty { "?" }
+        }
     return chars.uppercase()
 }
 

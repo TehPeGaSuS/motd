@@ -4,8 +4,7 @@ package io.github.trevarj.motd.irc.ext
  * Tag-escaped `k=v;k2=v2` attribute strings used by soju's BOUNCER and WEBPUSH commands
  *. Values use the IRCv3 tag-value escape table.
  */
-internal fun renderAttrString(attrs: Map<String, String>): String =
-    attrs.entries.joinToString(";") { (k, v) -> "$k=${escapeAttrValue(v)}" }
+internal fun renderAttrString(attrs: Map<String, String>): String = attrs.entries.joinToString(";") { (k, v) -> "$k=${escapeAttrValue(v)}" }
 
 internal fun parseAttrString(raw: String): Map<String, String> {
     if (raw.isEmpty() || raw == "*") return emptyMap()
@@ -43,7 +42,11 @@ private fun unescapeAttrValue(value: String): String {
     var i = 0
     while (i < value.length) {
         val ch = value[i]
-        if (ch != '\\') { sb.append(ch); i++; continue }
+        if (ch != '\\') {
+            sb.append(ch)
+            i++
+            continue
+        }
         if (i == value.length - 1) break
         when (val next = value[i + 1]) {
             ':' -> sb.append(';')

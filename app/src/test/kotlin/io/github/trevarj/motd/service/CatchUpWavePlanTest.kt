@@ -13,7 +13,6 @@ import org.junit.Test
  * decisions without also standing up a transport.
  */
 class CatchUpWavePlanTest {
-
     private fun target(
         id: Long?,
         name: String,
@@ -47,16 +46,18 @@ class CatchUpWavePlanTest {
 
     @Test
     fun `unchanged rooms are settled instead of fetched`() {
-        val plan = planCatchUpWaves(
-            candidates = listOf(
-                CatchUpCandidate(target(1, "#quiet"), changed = false),
-                CatchUpCandidate(target(2, "#busy", latest = 900), changed = true),
-                // Never mentioned by discovery and never fetched by this device: nothing to settle,
-                // because a room the pass does not know cannot be wearing a status.
-                CatchUpCandidate(target(null, "stranger"), changed = false),
-            ),
-            foregroundBufferId = null,
-        )
+        val plan =
+            planCatchUpWaves(
+                candidates =
+                    listOf(
+                        CatchUpCandidate(target(1, "#quiet"), changed = false),
+                        CatchUpCandidate(target(2, "#busy", latest = 900), changed = true),
+                        // Never mentioned by discovery and never fetched by this device: nothing to settle,
+                        // because a room the pass does not know cannot be wearing a status.
+                        CatchUpCandidate(target(null, "stranger"), changed = false),
+                    ),
+                foregroundBufferId = null,
+            )
 
         assertEquals(listOf("#busy"), plan.waveOne.map { it.name })
         assertEquals(emptyList<String>(), plan.waveTwo.map { it.name })
@@ -65,18 +66,20 @@ class CatchUpWavePlanTest {
 
     @Test
     fun `wave one leads with the visible chat then pinned then the most recent advertisement`() {
-        val plan = planCatchUpWaves(
-            candidates = listOf(
-                CatchUpCandidate(target(1, "#old", latest = 100), changed = true),
-                CatchUpCandidate(target(2, "#newest", latest = 900), changed = true),
-                CatchUpCandidate(target(3, "#pinned", latest = 200, pinned = true), changed = true),
-                CatchUpCandidate(target(4, "#visible", latest = 50), changed = true),
-                // No advertisement at all (an open buffer with no cursor): it still has to be
-                // fetched, but it sorts behind everything discovery actually described.
-                CatchUpCandidate(target(5, "#unknown"), changed = true),
-            ),
-            foregroundBufferId = 4,
-        )
+        val plan =
+            planCatchUpWaves(
+                candidates =
+                    listOf(
+                        CatchUpCandidate(target(1, "#old", latest = 100), changed = true),
+                        CatchUpCandidate(target(2, "#newest", latest = 900), changed = true),
+                        CatchUpCandidate(target(3, "#pinned", latest = 200, pinned = true), changed = true),
+                        CatchUpCandidate(target(4, "#visible", latest = 50), changed = true),
+                        // No advertisement at all (an open buffer with no cursor): it still has to be
+                        // fetched, but it sorts behind everything discovery actually described.
+                        CatchUpCandidate(target(5, "#unknown"), changed = true),
+                    ),
+                foregroundBufferId = 4,
+            )
 
         assertEquals(
             listOf("#visible", "#pinned", "#newest", "#old", "#unknown"),
@@ -86,12 +89,13 @@ class CatchUpWavePlanTest {
 
     @Test
     fun `overflow past the wave-one bound becomes the paced sweep in the same order`() {
-        val candidates = (1..15).map { index ->
-            CatchUpCandidate(
-                target(index.toLong(), "#chan$index", latest = (100 - index).toLong()),
-                changed = true,
-            )
-        }
+        val candidates =
+            (1..15).map { index ->
+                CatchUpCandidate(
+                    target(index.toLong(), "#chan$index", latest = (100 - index).toLong()),
+                    changed = true,
+                )
+            }
 
         val plan = planCatchUpWaves(candidates, foregroundBufferId = null, waveOneLimit = 4)
 

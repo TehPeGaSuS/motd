@@ -57,10 +57,11 @@ data class ServerForm(
      * Toggle TLS and re-default the port when the user hasn't typed a custom one, so 6697/6667
      * track the switch without clobbering an explicit port.
      */
-    fun withTls(enabled: Boolean): ServerForm = copy(
-        tls = enabled,
-        port = if (portIsDefault) (if (enabled) PORT_TLS else PORT_PLAIN) else port,
-    )
+    fun withTls(enabled: Boolean): ServerForm =
+        copy(
+            tls = enabled,
+            port = if (portIsDefault) (if (enabled) PORT_TLS else PORT_PLAIN) else port,
+        )
 
     /**
      * SERVER-step validity for both paths: host, a valid port, and a nick. The soju root now
@@ -72,8 +73,9 @@ data class ServerForm(
 
     /** Transport-only validity (host + valid port), independent of identity. */
     val hostAndPortValid: Boolean
-        get() = host.isNotBlank() &&
-            port.toIntOrNull()?.let { it in 1..65535 } == true
+        get() =
+            host.isNotBlank() &&
+                port.toIntOrNull()?.let { it in 1..65535 } == true
 }
 
 /** Auth-form fields (step 4). */
@@ -89,8 +91,9 @@ data class AuthForm(
     val nickServRecoverySequence: String = "REGAIN",
 ) {
     val serverPasswordValid: Boolean
-        get() = serverPassword.none { it == '\r' || it == '\n' } &&
-            serverPassword.toByteArray(Charsets.UTF_8).size <= MAX_SERVER_PASSWORD_BYTES
+        get() =
+            serverPassword.none { it == '\r' || it == '\n' } &&
+                serverPassword.toByteArray(Charsets.UTF_8).size <= MAX_SERVER_PASSWORD_BYTES
 
     val nickServRecoveryCommands: List<String>
         get() = nickServRecoverySequence.split(',').map(String::trim)
@@ -101,17 +104,21 @@ data class AuthForm(
             if (nickServPassword.isBlank()) return true
             if (nickServPassword.any(Char::isWhitespace) ||
                 nickServPassword.toByteArray(Charsets.UTF_8).size > MAX_NICKSERV_PASSWORD_BYTES
-            ) return false
+            ) {
+                return false
+            }
             return !nickServRecoveryEnabled ||
                 nickServRecoveryCommands.all { it.matches(NICKSERV_COMMAND) }
         }
 
     val isValid: Boolean
-        get() = serverPasswordValid && nickServValid && when (mode) {
-            AuthMode.NONE -> true
-            AuthMode.PLAIN -> saslUser.isNotBlank() && saslPassword.isNotBlank()
-            AuthMode.EXTERNAL -> certAlias != null
-        }
+        get() =
+            serverPasswordValid && nickServValid &&
+                when (mode) {
+                    AuthMode.NONE -> true
+                    AuthMode.PLAIN -> saslUser.isNotBlank() && saslPassword.isNotBlank()
+                    AuthMode.EXTERNAL -> certAlias != null
+                }
 }
 
 /** Leaves room for `PASS :`, CRLF, and the IRC 512-byte non-tag message limit. */
@@ -130,8 +137,14 @@ data class BouncerNetworkRow(
 
 /** LISTNETWORKS request state. Rows remain available while a refresh or retry is in flight. */
 sealed interface BouncerDiscoveryState {
-    data class Loading(val rows: List<BouncerNetworkRow> = emptyList()) : BouncerDiscoveryState
-    data class Loaded(val rows: List<BouncerNetworkRow>) : BouncerDiscoveryState
+    data class Loading(
+        val rows: List<BouncerNetworkRow> = emptyList(),
+    ) : BouncerDiscoveryState
+
+    data class Loaded(
+        val rows: List<BouncerNetworkRow>,
+    ) : BouncerDiscoveryState
+
     data class Failed(
         val error: BouncerOperationError,
         val rows: List<BouncerNetworkRow> = emptyList(),
@@ -141,8 +154,13 @@ sealed interface BouncerDiscoveryState {
 /** ADDNETWORK is deliberately independent from discovery: a passive LIST must not hide its error. */
 sealed interface BouncerAddState {
     data object Idle : BouncerAddState
+
     data object Submitting : BouncerAddState
-    data class Failed(val error: BouncerOperationError) : BouncerAddState
+
+    data class Failed(
+        val error: BouncerOperationError,
+    ) : BouncerAddState
+
     data object Success : BouncerAddState
 }
 
@@ -190,98 +208,171 @@ data class OnboardingState(
         get() = if (isSoju) NetworkRole.BOUNCER_ROOT else NetworkRole.DIRECT
 
     val activeAuth: AuthForm
-        get() = when {
-            isSoju -> sojuLogin.toAuthForm()
-            isZnc -> zncLogin.toAuthForm()
-            else -> auth
-        }
+        get() =
+            when {
+                isSoju -> sojuLogin.toAuthForm()
+                isZnc -> zncLogin.toAuthForm()
+                else -> auth
+            }
 
     /** True once the connect test reached a Ready state. */
     val isReady: Boolean get() = connState is IrcClientState.Ready
 
     val bouncerNetworks: List<BouncerNetworkRow>
-        get() = when (val discovery = bouncerDiscovery) {
-            is BouncerDiscoveryState.Loading -> discovery.rows
-            is BouncerDiscoveryState.Loaded -> discovery.rows
-            is BouncerDiscoveryState.Failed -> discovery.rows
-            null -> emptyList()
-        }
+        get() =
+            when (val discovery = bouncerDiscovery) {
+                is BouncerDiscoveryState.Loading -> discovery.rows
+                is BouncerDiscoveryState.Loaded -> discovery.rows
+                is BouncerDiscoveryState.Failed -> discovery.rows
+                null -> emptyList()
+            }
 
     /** Whether the "next" affordance should be enabled on the current step. */
     val canAdvance: Boolean
-        get() = when (step) {
-            OnboardingStep.WELCOME -> true
-            OnboardingStep.CHOICE -> choice != null
-            // Every path collects host/port/nick; the active login form gates AUTH.
-            OnboardingStep.SERVER -> server.isValid
-            OnboardingStep.AUTH -> when {
-                isSoju -> sojuLogin.isValid
-                isZnc -> zncLogin.isValid
-                else -> auth.isValid
+        get() =
+            when (step) {
+                OnboardingStep.WELCOME -> {
+                    true
+                }
+
+                OnboardingStep.CHOICE -> {
+                    choice != null
+                }
+
+                // Every path collects host/port/nick; the active login form gates AUTH.
+                OnboardingStep.SERVER -> {
+                    server.isValid
+                }
+
+                OnboardingStep.AUTH -> {
+                    when {
+                        isSoju -> sojuLogin.isValid
+                        isZnc -> zncLogin.isValid
+                        else -> auth.isValid
+                    }
+                }
+
+                OnboardingStep.CONNECT -> {
+                    isReady
+                }
+
+                OnboardingStep.FINISH -> {
+                    true
+                }
             }
-            OnboardingStep.CONNECT -> isReady
-            OnboardingStep.FINISH -> true
-        }
 }
 
 /** All actions that can mutate wizard state. Pure — no side effects here. */
 sealed interface OnboardingAction {
     data object Next : OnboardingAction
-    data object Back : OnboardingAction
-    data class GoTo(val step: OnboardingStep) : OnboardingAction
 
-    data class ChooseConnection(val choice: ConnectionChoice) : OnboardingAction
-    data class ChooseBouncerKind(val kind: BouncerKind) : OnboardingAction
-    data class SelectPreset(val id: NetworkPresetId) : OnboardingAction
+    data object Back : OnboardingAction
+
+    data class GoTo(
+        val step: OnboardingStep,
+    ) : OnboardingAction
+
+    data class ChooseConnection(
+        val choice: ConnectionChoice,
+    ) : OnboardingAction
+
+    data class ChooseBouncerKind(
+        val kind: BouncerKind,
+    ) : OnboardingAction
+
+    data class SelectPreset(
+        val id: NetworkPresetId,
+    ) : OnboardingAction
+
     data object ShowPlaintextWarning : OnboardingAction
+
     data object ConfirmPlaintext : OnboardingAction
+
     data object DismissPlaintextWarning : OnboardingAction
 
-    data class EditServer(val server: ServerForm) : OnboardingAction
-    data class EditAuth(val auth: AuthForm) : OnboardingAction
-    data class EditSojuLogin(val login: SojuLoginForm) : OnboardingAction
-    data class EditZncLogin(val login: ZncLoginForm) : OnboardingAction
+    data class EditServer(
+        val server: ServerForm,
+    ) : OnboardingAction
+
+    data class EditAuth(
+        val auth: AuthForm,
+    ) : OnboardingAction
+
+    data class EditSojuLogin(
+        val login: SojuLoginForm,
+    ) : OnboardingAction
+
+    data class EditZncLogin(
+        val login: ZncLoginForm,
+    ) : OnboardingAction
 
     // Connect-test lifecycle (folded back from ViewModel side effects).
-    data class NetworkCreated(val networkId: Long) : OnboardingAction
-    data class ConnStateChanged(val state: IrcClientState) : OnboardingAction
+    data class NetworkCreated(
+        val networkId: Long,
+    ) : OnboardingAction
+
+    data class ConnStateChanged(
+        val state: IrcClientState,
+    ) : OnboardingAction
+
     data class BouncerListLoading(
         val networkId: Long,
         val sessionGeneration: Long,
         val attempt: Long,
     ) : OnboardingAction
+
     data class BouncerListed(
         val networkId: Long,
         val sessionGeneration: Long,
         val attempt: Long,
         val rows: List<BouncerNetworkRow>,
     ) : OnboardingAction
+
     data class BouncerListFailed(
         val networkId: Long,
         val sessionGeneration: Long,
         val attempt: Long,
         val error: BouncerOperationError,
     ) : OnboardingAction
+
     data class BouncerSnapshot(
         val networkId: Long,
         val sessionGeneration: Long,
         val rows: List<BouncerNetworkRow>,
     ) : OnboardingAction
-    data class ToggleBouncerNetwork(val netId: String) : OnboardingAction
-    data class SelectHistorySyncDepth(val depth: HistorySyncDepth) : OnboardingAction
-    data class EditBouncerAddDraft(val draft: BouncerAddDraft) : OnboardingAction
-    data class BouncerAddSubmitting(val networkId: Long, val sessionGeneration: Long) : OnboardingAction
+
+    data class ToggleBouncerNetwork(
+        val netId: String,
+    ) : OnboardingAction
+
+    data class SelectHistorySyncDepth(
+        val depth: HistorySyncDepth,
+    ) : OnboardingAction
+
+    data class EditBouncerAddDraft(
+        val draft: BouncerAddDraft,
+    ) : OnboardingAction
+
+    data class BouncerAddSubmitting(
+        val networkId: Long,
+        val sessionGeneration: Long,
+    ) : OnboardingAction
+
     data class BouncerAdded(
         val networkId: Long,
         val sessionGeneration: Long,
         val row: BouncerNetworkRow,
     ) : OnboardingAction
+
     data class BouncerAddFailed(
         val networkId: Long,
         val sessionGeneration: Long,
         val error: BouncerOperationError,
     ) : OnboardingAction
-    data class Error(val message: String?) : OnboardingAction
+
+    data class Error(
+        val message: String?,
+    ) : OnboardingAction
 }
 
 /** Steps in order; used for Next/Back traversal. */
@@ -298,31 +389,44 @@ private fun prevStep(step: OnboardingStep): OnboardingStep {
 }
 
 /** Pure reducer: (state, action) -> state. */
-fun onboardingReducer(state: OnboardingState, action: OnboardingAction): OnboardingState =
+fun onboardingReducer(
+    state: OnboardingState,
+    action: OnboardingAction,
+): OnboardingState =
     when (action) {
-        is OnboardingAction.Next ->
+        is OnboardingAction.Next -> {
             if (state.canAdvance) state.copy(step = nextStep(state.step)) else state
+        }
 
-        is OnboardingAction.Back -> state.copy(step = prevStep(state.step))
+        is OnboardingAction.Back -> {
+            state.copy(step = prevStep(state.step))
+        }
 
-        is OnboardingAction.GoTo -> state.copy(step = action.step)
+        is OnboardingAction.GoTo -> {
+            state.copy(step = action.step)
+        }
 
-        is OnboardingAction.ChooseConnection -> state.copy(
-            choice = action.choice,
-            presetId = if (action.choice == ConnectionChoice.NETWORK) {
-                state.presetId
-            } else {
-                NetworkPresetId.CUSTOM
-            },
-            showPlaintextWarning = false,
-            plaintextConfirmed = false,
-        )
+        is OnboardingAction.ChooseConnection -> {
+            state.copy(
+                choice = action.choice,
+                presetId =
+                    if (action.choice == ConnectionChoice.NETWORK) {
+                        state.presetId
+                    } else {
+                        NetworkPresetId.CUSTOM
+                    },
+                showPlaintextWarning = false,
+                plaintextConfirmed = false,
+            )
+        }
 
-        is OnboardingAction.ChooseBouncerKind -> state.copy(
-            bouncerKind = action.kind,
-            showPlaintextWarning = false,
-            plaintextConfirmed = false,
-        )
+        is OnboardingAction.ChooseBouncerKind -> {
+            state.copy(
+                bouncerKind = action.kind,
+                showPlaintextWarning = false,
+                plaintextConfirmed = false,
+            )
+        }
 
         is OnboardingAction.SelectPreset -> {
             val preset = networkPreset(action.id)
@@ -345,115 +449,181 @@ fun onboardingReducer(state: OnboardingState, action: OnboardingAction): Onboard
             }
         }
 
-        is OnboardingAction.ShowPlaintextWarning ->
+        is OnboardingAction.ShowPlaintextWarning -> {
             state.copy(showPlaintextWarning = true)
+        }
 
-        is OnboardingAction.ConfirmPlaintext ->
+        is OnboardingAction.ConfirmPlaintext -> {
             state.copy(showPlaintextWarning = false, plaintextConfirmed = true)
+        }
 
-        is OnboardingAction.DismissPlaintextWarning ->
+        is OnboardingAction.DismissPlaintextWarning -> {
             state.copy(showPlaintextWarning = false)
+        }
 
         is OnboardingAction.EditServer -> {
             val selected = networkPreset(state.presetId)
             state.copy(
                 server = action.server,
-                presetId = if (selected?.matches(action.server) == true) {
-                    state.presetId
-                } else {
-                    NetworkPresetId.CUSTOM
-                },
+                presetId =
+                    if (selected?.matches(action.server) == true) {
+                        state.presetId
+                    } else {
+                        NetworkPresetId.CUSTOM
+                    },
                 showPlaintextWarning = false,
                 plaintextConfirmed = false,
             )
         }
 
-        is OnboardingAction.EditAuth -> state.copy(auth = action.auth)
+        is OnboardingAction.EditAuth -> {
+            state.copy(auth = action.auth)
+        }
 
-        is OnboardingAction.EditSojuLogin -> state.copy(sojuLogin = action.login)
+        is OnboardingAction.EditSojuLogin -> {
+            state.copy(sojuLogin = action.login)
+        }
 
-        is OnboardingAction.EditZncLogin -> state.copy(zncLogin = action.login)
+        is OnboardingAction.EditZncLogin -> {
+            state.copy(zncLogin = action.login)
+        }
 
-        is OnboardingAction.NetworkCreated -> state.copy(networkId = action.networkId)
+        is OnboardingAction.NetworkCreated -> {
+            state.copy(networkId = action.networkId)
+        }
 
-        is OnboardingAction.ConnStateChanged ->
+        is OnboardingAction.ConnStateChanged -> {
             state.copy(
                 connState = action.state,
                 stateLog = state.stateLog + action.state,
                 error = (action.state as? IrcClientState.Failed)?.reason ?: state.error,
             )
+        }
 
-        is OnboardingAction.BouncerListLoading ->
-            if (state.networkId != action.networkId) state else state.copy(
-                bouncerSessionGeneration = action.sessionGeneration,
-                bouncerListAttempt = action.attempt,
-                bouncerDiscovery = BouncerDiscoveryState.Loading(state.bouncerNetworks),
-            )
+        is OnboardingAction.BouncerListLoading -> {
+            if (state.networkId != action.networkId) {
+                state
+            } else {
+                state.copy(
+                    bouncerSessionGeneration = action.sessionGeneration,
+                    bouncerListAttempt = action.attempt,
+                    bouncerDiscovery = BouncerDiscoveryState.Loading(state.bouncerNetworks),
+                )
+            }
+        }
 
-        is OnboardingAction.BouncerListed ->
-            if (!state.matchesBouncerList(action.networkId, action.sessionGeneration, action.attempt)) state else state.copy(
-                bouncerDiscovery = BouncerDiscoveryState.Loaded(
-                    mergeBouncerNetworkRows(state.bouncerNetworks, action.rows),
-                ),
-            )
+        is OnboardingAction.BouncerListed -> {
+            if (!state.matchesBouncerList(action.networkId, action.sessionGeneration, action.attempt)) {
+                state
+            } else {
+                state.copy(
+                    bouncerDiscovery =
+                        BouncerDiscoveryState.Loaded(
+                            mergeBouncerNetworkRows(state.bouncerNetworks, action.rows),
+                        ),
+                )
+            }
+        }
 
-        is OnboardingAction.BouncerListFailed ->
-            if (!state.matchesBouncerList(action.networkId, action.sessionGeneration, action.attempt)) state else state.copy(
-                bouncerDiscovery = BouncerDiscoveryState.Failed(action.error, state.bouncerNetworks),
-            )
+        is OnboardingAction.BouncerListFailed -> {
+            if (!state.matchesBouncerList(action.networkId, action.sessionGeneration, action.attempt)) {
+                state
+            } else {
+                state.copy(
+                    bouncerDiscovery = BouncerDiscoveryState.Failed(action.error, state.bouncerNetworks),
+                )
+            }
+        }
 
-        is OnboardingAction.BouncerSnapshot ->
-            if (!state.matchesBouncerSession(action.networkId, action.sessionGeneration)) state else state.copy(
-                // A passive bouncer notification reconciles the import rows but deliberately
-                // retains Loading/Failed. Only the matching explicit LIST result resolves it.
-                bouncerDiscovery = when (val discovery = state.bouncerDiscovery) {
-                    is BouncerDiscoveryState.Loading -> discovery.copy(
-                        rows = mergeBouncerNetworkRows(discovery.rows, action.rows),
-                    )
-                    is BouncerDiscoveryState.Failed -> discovery.copy(
-                        rows = mergeBouncerNetworkRows(discovery.rows, action.rows),
-                    )
-                    is BouncerDiscoveryState.Loaded -> discovery.copy(
-                        rows = mergeBouncerNetworkRows(discovery.rows, action.rows),
-                    )
-                    null -> null
-                },
-            )
+        is OnboardingAction.BouncerSnapshot -> {
+            if (!state.matchesBouncerSession(action.networkId, action.sessionGeneration)) {
+                state
+            } else {
+                state.copy(
+                    // A passive bouncer notification reconciles the import rows but deliberately
+                    // retains Loading/Failed. Only the matching explicit LIST result resolves it.
+                    bouncerDiscovery =
+                        when (val discovery = state.bouncerDiscovery) {
+                            is BouncerDiscoveryState.Loading -> {
+                                discovery.copy(
+                                    rows = mergeBouncerNetworkRows(discovery.rows, action.rows),
+                                )
+                            }
 
-        is OnboardingAction.ToggleBouncerNetwork ->
+                            is BouncerDiscoveryState.Failed -> {
+                                discovery.copy(
+                                    rows = mergeBouncerNetworkRows(discovery.rows, action.rows),
+                                )
+                            }
+
+                            is BouncerDiscoveryState.Loaded -> {
+                                discovery.copy(
+                                    rows = mergeBouncerNetworkRows(discovery.rows, action.rows),
+                                )
+                            }
+
+                            null -> {
+                                null
+                            }
+                        },
+                )
+            }
+        }
+
+        is OnboardingAction.ToggleBouncerNetwork -> {
             state.withBouncerRows(
                 state.bouncerNetworks.map {
                     if (it.netId == action.netId) it.copy(selected = !it.selected) else it
                 },
             )
+        }
 
-        is OnboardingAction.SelectHistorySyncDepth -> state.copy(historySyncDepth = action.depth)
+        is OnboardingAction.SelectHistorySyncDepth -> {
+            state.copy(historySyncDepth = action.depth)
+        }
 
-        is OnboardingAction.EditBouncerAddDraft -> state.copy(
-            bouncerAddDraft = action.draft,
-            bouncerAdd = if (state.bouncerAdd is BouncerAddState.Success) BouncerAddState.Idle else state.bouncerAdd,
-        )
+        is OnboardingAction.EditBouncerAddDraft -> {
+            state.copy(
+                bouncerAddDraft = action.draft,
+                bouncerAdd = if (state.bouncerAdd is BouncerAddState.Success) BouncerAddState.Idle else state.bouncerAdd,
+            )
+        }
 
-        is OnboardingAction.BouncerAddSubmitting ->
+        is OnboardingAction.BouncerAddSubmitting -> {
             if (!state.matchesBouncerSession(action.networkId, action.sessionGeneration) ||
                 state.bouncerAdd is BouncerAddState.Submitting
-            ) state
-            else state.copy(bouncerAdd = BouncerAddState.Submitting)
+            ) {
+                state
+            } else {
+                state.copy(bouncerAdd = BouncerAddState.Submitting)
+            }
+        }
 
-        is OnboardingAction.BouncerAdded ->
-            if (!state.matchesBouncerSession(action.networkId, action.sessionGeneration)) state else state.withBouncerRows(
-                rows = mergeBouncerNetworkRows(state.bouncerNetworks, listOf(action.row)),
-                addState = BouncerAddState.Success,
-                // Clearing is exclusively part of the accepted ADD transition, so recomposition
-                // and passive snapshots cannot erase a failed draft or clear success twice.
-                draft = BouncerAddDraft(),
-            )
+        is OnboardingAction.BouncerAdded -> {
+            if (!state.matchesBouncerSession(action.networkId, action.sessionGeneration)) {
+                state
+            } else {
+                state.withBouncerRows(
+                    rows = mergeBouncerNetworkRows(state.bouncerNetworks, listOf(action.row)),
+                    addState = BouncerAddState.Success,
+                    // Clearing is exclusively part of the accepted ADD transition, so recomposition
+                    // and passive snapshots cannot erase a failed draft or clear success twice.
+                    draft = BouncerAddDraft(),
+                )
+            }
+        }
 
-        is OnboardingAction.BouncerAddFailed ->
-            if (!state.matchesBouncerSession(action.networkId, action.sessionGeneration)) state
-            else state.copy(bouncerAdd = BouncerAddState.Failed(action.error))
+        is OnboardingAction.BouncerAddFailed -> {
+            if (!state.matchesBouncerSession(action.networkId, action.sessionGeneration)) {
+                state
+            } else {
+                state.copy(bouncerAdd = BouncerAddState.Failed(action.error))
+            }
+        }
 
-        is OnboardingAction.Error -> state.copy(error = action.message)
+        is OnboardingAction.Error -> {
+            state.copy(error = action.message)
+        }
     }
 
 private fun mergeBouncerNetworkRows(
@@ -470,19 +640,23 @@ private fun OnboardingState.withBouncerRows(
     rows: List<BouncerNetworkRow>,
     addState: BouncerAddState = bouncerAdd,
     draft: BouncerAddDraft = bouncerAddDraft,
-): OnboardingState = copy(
-    bouncerDiscovery = when (val discovery = bouncerDiscovery) {
-        is BouncerDiscoveryState.Loading -> discovery.copy(rows = rows)
-        is BouncerDiscoveryState.Loaded -> discovery.copy(rows = rows)
-        is BouncerDiscoveryState.Failed -> discovery.copy(rows = rows)
-        null -> null
-    },
-    bouncerAdd = addState,
-    bouncerAddDraft = draft,
-)
+): OnboardingState =
+    copy(
+        bouncerDiscovery =
+            when (val discovery = bouncerDiscovery) {
+                is BouncerDiscoveryState.Loading -> discovery.copy(rows = rows)
+                is BouncerDiscoveryState.Loaded -> discovery.copy(rows = rows)
+                is BouncerDiscoveryState.Failed -> discovery.copy(rows = rows)
+                null -> null
+            },
+        bouncerAdd = addState,
+        bouncerAddDraft = draft,
+    )
 
-private fun OnboardingState.matchesBouncerSession(networkId: Long, sessionGeneration: Long): Boolean =
-    networkId == this.networkId && sessionGeneration == bouncerSessionGeneration
+private fun OnboardingState.matchesBouncerSession(
+    networkId: Long,
+    sessionGeneration: Long,
+): Boolean = networkId == this.networkId && sessionGeneration == bouncerSessionGeneration
 
 private fun OnboardingState.matchesBouncerList(
     networkId: Long,

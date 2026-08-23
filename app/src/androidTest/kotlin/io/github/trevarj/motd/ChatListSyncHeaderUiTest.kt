@@ -50,8 +50,10 @@ class ChatListSyncHeaderUiTest {
         compose.onNodeWithTag("chatlist_sync_header_waiting", useUnmergedTree = true).assertIsDisplayed()
         assertEquals(
             0,
-            compose.onAllNodesWithTag("chatlist_sync_header_progress", useUnmergedTree = true)
-                .fetchSemanticsNodes().size,
+            compose
+                .onAllNodesWithTag("chatlist_sync_header_progress", useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .size,
         )
     }
 
@@ -59,10 +61,14 @@ class ChatListSyncHeaderUiTest {
     fun onlyTheStaticLabelIsALiveRegion() {
         setHeader(ChatListSyncChrome.Syncing(done = 12, total = 42))
 
-        val label = compose.onNodeWithTag("chatlist_sync_header_label", useUnmergedTree = true)
-            .fetchSemanticsNode()
-        val count = compose.onNodeWithTag("chatlist_sync_header_count", useUnmergedTree = true)
-            .fetchSemanticsNode()
+        val label =
+            compose
+                .onNodeWithTag("chatlist_sync_header_label", useUnmergedTree = true)
+                .fetchSemanticsNode()
+        val count =
+            compose
+                .onNodeWithTag("chatlist_sync_header_count", useUnmergedTree = true)
+                .fetchSemanticsNode()
 
         assertTrue(label.config.contains(SemanticsProperties.LiveRegion))
         // The count changes on every settled buffer; announcing it would spam TalkBack.

@@ -30,12 +30,13 @@ class ComposerDraftStoreTest {
     private var roomId = 0L
 
     @Before
-    fun setUp() = runTest {
-        db = inMemoryDb()
-        val networkId = db.networkDao().insert(network())
-        roomId = db.bufferDao().insert(buffer(networkId, "#room", BufferType.CHANNEL))
-        store = ComposerDraftStore(db)
-    }
+    fun setUp() =
+        runTest {
+            db = inMemoryDb()
+            val networkId = db.networkDao().insert(network())
+            roomId = db.bufferDao().insert(buffer(networkId, "#room", BufferType.CHANNEL))
+            store = ComposerDraftStore(db)
+        }
 
     @After
     fun tearDown() = db.close()
@@ -49,105 +50,122 @@ class ComposerDraftStoreTest {
     }
 
     @Test
-    fun `every push announces its buffer so an already-open chat can drain it`() = runTest {
-        val seen = mutableListOf<Long>()
-        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            store.prefillPushes.collect { seen += it }
+    fun `every push announces its buffer so an already-open chat can drain it`() =
+        runTest {
+            val seen = mutableListOf<Long>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                store.prefillPushes.collect { seen += it }
+            }
+            runCurrent()
+
+            store.push(roomId, "alice: ")
+            store.push(roomId + 1, "bob: ")
+            runCurrent()
+
+            assertEquals(listOf(roomId, roomId + 1), seen)
         }
-        runCurrent()
-
-        store.push(roomId, "alice: ")
-        store.push(roomId + 1, "bob: ")
-        runCurrent()
-
-        assertEquals(listOf(roomId, roomId + 1), seen)
-    }
 
     @Test
-    fun `a push nobody was listening for still leaves the prefill queued`() = runTest {
-        store.push(roomId, "alice: ")
+    fun `a push nobody was listening for still leaves the prefill queued`() =
+        runTest {
+            store.push(roomId, "alice: ")
 
-        val seen = mutableListOf<Long>()
-        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            store.prefillPushes.collect { seen += it }
+            val seen = mutableListOf<Long>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                store.prefillPushes.collect { seen += it }
+            }
+            runCurrent()
+
+            // No replay: the announcement is gone, but the text it announced is not.
+            assertTrue(seen.isEmpty())
+            assertEquals("alice: ", store.consume(roomId))
         }
-        runCurrent()
-
-        // No replay: the announcement is gone, but the text it announced is not.
-        assertTrue(seen.isEmpty())
-        assertEquals("alice: ", store.consume(roomId))
-    }
 
     @Test
-    fun `draft text and reply survive store recreation`() = runTest {
-        store.saveDraft(roomId, "hello", replyToEventId = 77L)
+    fun `draft text and reply survive store recreation`() =
+        runTest {
+            store.saveDraft(roomId, "hello", replyToEventId = 77L)
 
-        val restored = ComposerDraftStore(db).loadDraft(roomId)
+            val restored = ComposerDraftStore(db).loadDraft(roomId)
 
-        assertEquals("hello", restored?.text)
-        assertEquals(77L, restored?.replyToEventId)
-    }
-
-    @Test
-    fun `accepted version clears only while unchanged`() = runTest {
-        val submitted = store.saveDraft(roomId, "first", replyToEventId = 7L)!!
-        store.saveDraft(roomId, "new text", replyToEventId = 7L)
-
-        assertFalse(store.clearIfUnchanged(submitted))
-        assertEquals("new text", store.loadDraft(roomId)?.text)
-
-        val latest = store.loadDraft(roomId)!!
-        assertTrue(store.clearIfUnchanged(latest))
-        assertNull(store.loadDraft(roomId))
-    }
+            assertEquals("hello", restored?.text)
+            assertEquals(77L, restored?.replyToEventId)
+        }
 
     @Test
-    fun `reply-only draft is durable and blank without reply removes row`() = runTest {
-        store.saveDraft(roomId, "", replyToEventId = 9L)
-        assertEquals(9L, store.loadDraft(roomId)?.replyToEventId)
+    fun `accepted version clears only while unchanged`() =
+        runTest {
+            val submitted = store.saveDraft(roomId, "first", replyToEventId = 7L)!!
+            store.saveDraft(roomId, "new text", replyToEventId = 7L)
 
-        store.saveDraft(roomId, "", replyToEventId = null)
-        assertNull(store.loadDraft(roomId))
-    }
+            assertFalse(store.clearIfUnchanged(submitted))
+            assertEquals("new text", store.loadDraft(roomId)?.text)
 
-    @Test
-    fun `reply deletion does not delete draft`() = runTest {
-        val eventId = db.messageDao().insertAll(
-            listOf(message(roomId, "reply", serverTime = 100, dedupKey = "reply-delete")),
-        ).single()
-        store.saveDraft(roomId, "keep me", eventId)
-
-        db.messageDao().deleteWithAnchorFallback(eventId)
-
-        assertEquals("keep me", store.loadDraft(roomId)?.text)
-        assertEquals(eventId, store.loadDraft(roomId)?.replyToEventId)
-    }
+            val latest = store.loadDraft(roomId)!!
+            assertTrue(store.clearIfUnchanged(latest))
+            assertNull(store.loadDraft(roomId))
+        }
 
     @Test
-    fun `unchanged submitted draft clears after reply coalesces`() = runTest {
-        val loserId = db.messageDao().insertAll(
-            listOf(message(roomId, "reply", serverTime = 100, dedupKey = "reply-loser")),
-        ).single()
-        val winnerId = db.messageDao().insertAll(
-            listOf(message(roomId, "reply", serverTime = 200, dedupKey = "reply-winner")),
-        ).single()
-        val submitted = store.saveDraft(roomId, "answer", loserId)!!
-        db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(loserId, winnerId))
-        db.composerDraftDao().repointReplies(loserId, winnerId)
-        db.messageDao().deleteById(loserId)
+    fun `reply-only draft is durable and blank without reply removes row`() =
+        runTest {
+            store.saveDraft(roomId, "", replyToEventId = 9L)
+            assertEquals(9L, store.loadDraft(roomId)?.replyToEventId)
 
-        assertTrue(store.clearIfUnchanged(submitted))
-        assertNull(store.loadDraft(roomId))
-    }
+            store.saveDraft(roomId, "", replyToEventId = null)
+            assertNull(store.loadDraft(roomId))
+        }
 
     @Test
-    fun `stale save cannot recreate draft in dismissed query`() = runTest {
-        val networkId = db.bufferDao().rawById(roomId)!!.networkId
-        val queryId = db.bufferDao().insert(buffer(networkId, "alice", BufferType.QUERY))
-        store.saveDraft(queryId, "before delete", replyToEventId = null)
-        db.bufferDao().deleteBuffer(queryId)
+    fun `reply deletion does not delete draft`() =
+        runTest {
+            val eventId =
+                db
+                    .messageDao()
+                    .insertAll(
+                        listOf(message(roomId, "reply", serverTime = 100, dedupKey = "reply-delete")),
+                    ).single()
+            store.saveDraft(roomId, "keep me", eventId)
 
-        assertNull(store.saveDraft(queryId, "stale edit", replyToEventId = null))
-        assertNull(store.loadDraft(queryId))
-    }
+            db.messageDao().deleteWithAnchorFallback(eventId)
+
+            assertEquals("keep me", store.loadDraft(roomId)?.text)
+            assertEquals(eventId, store.loadDraft(roomId)?.replyToEventId)
+        }
+
+    @Test
+    fun `unchanged submitted draft clears after reply coalesces`() =
+        runTest {
+            val loserId =
+                db
+                    .messageDao()
+                    .insertAll(
+                        listOf(message(roomId, "reply", serverTime = 100, dedupKey = "reply-loser")),
+                    ).single()
+            val winnerId =
+                db
+                    .messageDao()
+                    .insertAll(
+                        listOf(message(roomId, "reply", serverTime = 200, dedupKey = "reply-winner")),
+                    ).single()
+            val submitted = store.saveDraft(roomId, "answer", loserId)!!
+            db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(loserId, winnerId))
+            db.composerDraftDao().repointReplies(loserId, winnerId)
+            db.messageDao().deleteById(loserId)
+
+            assertTrue(store.clearIfUnchanged(submitted))
+            assertNull(store.loadDraft(roomId))
+        }
+
+    @Test
+    fun `stale save cannot recreate draft in dismissed query`() =
+        runTest {
+            val networkId = db.bufferDao().rawById(roomId)!!.networkId
+            val queryId = db.bufferDao().insert(buffer(networkId, "alice", BufferType.QUERY))
+            store.saveDraft(queryId, "before delete", replyToEventId = null)
+            db.bufferDao().deleteBuffer(queryId)
+
+            assertNull(store.saveDraft(queryId, "stale edit", replyToEventId = null))
+            assertNull(store.loadDraft(queryId))
+        }
 }

@@ -181,8 +181,7 @@ fun isSystemKind(kind: MessageKind): Boolean =
         else -> false
     }
 
-internal fun commandResponseGroup(message: MessageEntity): String? =
-    message.eventPayload?.takeIf { it.startsWith(COMMAND_RESPONSE_PAYLOAD_PREFIX) }
+internal fun commandResponseGroup(message: MessageEntity): String? = message.eventPayload?.takeIf { it.startsWith(COMMAND_RESPONSE_PAYLOAD_PREFIX) }
 
 internal fun sameSystemRun(
     first: MessageEntity,

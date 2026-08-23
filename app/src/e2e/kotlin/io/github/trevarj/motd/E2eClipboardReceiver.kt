@@ -20,7 +20,10 @@ import android.util.Base64
  * uid can reach it while the harness drives the foreground app.
  */
 class E2eClipboardReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
+    override fun onReceive(
+        context: Context,
+        intent: Intent,
+    ) {
         val encoded = intent.getStringExtra(EXTRA_TEXT_B64) ?: return
         // Base64 keeps the payload intact across the host shell, adb's re-quoting, and the device
         // shell; decoding here is the only place the raw text is materialized.

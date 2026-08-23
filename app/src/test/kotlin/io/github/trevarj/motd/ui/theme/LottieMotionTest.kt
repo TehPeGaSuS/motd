@@ -9,7 +9,6 @@ import org.junit.Test
  * wants motion at all, and whether a one-shot beat is owed a play.
  */
 class LottieMotionTest {
-
     @Test fun `animator scale zero means animations off`() {
         // Compose specs get this from MotionDurationScale for free; Lottie has to be told.
         assertFalse(MotdLottieMotion.motionEnabled(0f))

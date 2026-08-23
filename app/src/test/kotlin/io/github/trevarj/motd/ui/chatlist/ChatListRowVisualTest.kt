@@ -20,8 +20,9 @@ class ChatListRowVisualTest {
             chatListRowVisualState(selected = false, active = false, unread = true),
         )
 
-        val containers = ChatListRowVisualState.entries
-            .map { chatListRowContainer(it, MotdLightScheme) }
+        val containers =
+            ChatListRowVisualState.entries
+                .map { chatListRowContainer(it, MotdLightScheme) }
         assertEquals(containers.size, containers.distinct().size)
     }
 

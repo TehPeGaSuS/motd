@@ -3,10 +3,10 @@ package io.github.trevarj.motd.service
 import app.cash.turbine.test
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -22,11 +22,11 @@ import java.util.concurrent.TimeUnit
  * frames surface as bare lines, and a server-side close completes the incoming flow.
  */
 class WsLineTransportTest {
-
     private lateinit var server: MockWebServer
 
     // Captures what the client sent and lets the server push frames back.
     private val received = CopyOnWriteArrayList<String>()
+
     @Volatile private var serverSocket: WebSocket? = null
     private val opened = CountDownLatch(1)
 
@@ -36,20 +36,33 @@ class WsLineTransportTest {
     @Before
     fun setUp() {
         server = MockWebServer()
-        val serverListener = object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
-                serverSocket = webSocket
-                opened.countDown()
+        val serverListener =
+            object : WebSocketListener() {
+                override fun onOpen(
+                    webSocket: WebSocket,
+                    response: okhttp3.Response,
+                ) {
+                    serverSocket = webSocket
+                    opened.countDown()
+                }
+
+                override fun onMessage(
+                    webSocket: WebSocket,
+                    text: String,
+                ) {
+                    received.add(text)
+                    framesReceived.countDown()
+                }
+
+                override fun onClosing(
+                    webSocket: WebSocket,
+                    code: Int,
+                    reason: String,
+                ) {
+                    // Complete the close handshake so MockWebServer's queue drains on shutdown.
+                    webSocket.close(code, null)
+                }
             }
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                received.add(text)
-                framesReceived.countDown()
-            }
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                // Complete the close handshake so MockWebServer's queue drains on shutdown.
-                webSocket.close(code, null)
-            }
-        }
         server.enqueue(MockResponse().withWebSocketUpgrade(serverListener))
         server.start()
     }
@@ -63,58 +76,61 @@ class WsLineTransportTest {
     private fun wsUrl(): String = "ws://${server.hostName}:${server.port}/"
 
     @Test
-    fun `inbound frames surface as bare IRC lines`() = runBlocking {
-        val transport = WsLineTransport(url = wsUrl())
-        transport.connect()
-        assertTrue(opened.await(5, TimeUnit.SECONDS))
+    fun `inbound frames surface as bare IRC lines`() =
+        runBlocking {
+            val transport = WsLineTransport(url = wsUrl())
+            transport.connect()
+            assertTrue(opened.await(5, TimeUnit.SECONDS))
 
-        withTimeout(5_000) {
-            transport.incoming.test {
-                // Server sends one IRC line per WS text frame (no CRLF, per text.ircv3.net).
-                serverSocket!!.send("PING abc")
-                serverSocket!!.send(":srv 001 me :Welcome")
-                assertEquals("PING abc", awaitItem())
-                assertEquals(":srv 001 me :Welcome", awaitItem())
-                // A lenient server sending a trailing CRLF is still stripped to a bare line.
-                serverSocket!!.send("NOTICE * :hi\r\n")
-                assertEquals("NOTICE * :hi", awaitItem())
+            withTimeout(5_000) {
+                transport.incoming.test {
+                    // Server sends one IRC line per WS text frame (no CRLF, per text.ircv3.net).
+                    serverSocket!!.send("PING abc")
+                    serverSocket!!.send(":srv 001 me :Welcome")
+                    assertEquals("PING abc", awaitItem())
+                    assertEquals(":srv 001 me :Welcome", awaitItem())
+                    // A lenient server sending a trailing CRLF is still stripped to a bare line.
+                    serverSocket!!.send("NOTICE * :hi\r\n")
+                    assertEquals("NOTICE * :hi", awaitItem())
+                }
             }
+            transport.close()
         }
-        transport.close()
-    }
 
     @Test
-    fun `send transmits one WS text frame per line without CRLF`() = runBlocking {
-        val transport = WsLineTransport(url = wsUrl())
-        transport.connect()
-        assertTrue(opened.await(5, TimeUnit.SECONDS))
+    fun `send transmits one WS text frame per line without CRLF`() =
+        runBlocking {
+            val transport = WsLineTransport(url = wsUrl())
+            transport.connect()
+            assertTrue(opened.await(5, TimeUnit.SECONDS))
 
-        transport.send("NICK motd")
-        transport.send("USER motd 0 * :motd")
-        // Any caller-supplied CRLF is stripped so the frame carries exactly the IRC line.
-        transport.send("JOIN #a\r\n")
+            transport.send("NICK motd")
+            transport.send("USER motd 0 * :motd")
+            // Any caller-supplied CRLF is stripped so the frame carries exactly the IRC line.
+            transport.send("JOIN #a\r\n")
 
-        // Wait until the server observed all three frames; a missing frame fails here with a message
-        // instead of spinning until the JUnit/Gradle timeout.
-        assertTrue("server did not observe 3 frames", framesReceived.await(5, TimeUnit.SECONDS))
-        assertEquals(listOf("NICK motd", "USER motd 0 * :motd", "JOIN #a"), received.toList())
-        transport.close()
-    }
+            // Wait until the server observed all three frames; a missing frame fails here with a message
+            // instead of spinning until the JUnit/Gradle timeout.
+            assertTrue("server did not observe 3 frames", framesReceived.await(5, TimeUnit.SECONDS))
+            assertEquals(listOf("NICK motd", "USER motd 0 * :motd", "JOIN #a"), received.toList())
+            transport.close()
+        }
 
     @Test
-    fun `server close completes the incoming flow`() = runBlocking {
-        val transport = WsLineTransport(url = wsUrl())
-        transport.connect()
-        assertTrue(opened.await(5, TimeUnit.SECONDS))
+    fun `server close completes the incoming flow`() =
+        runBlocking {
+            val transport = WsLineTransport(url = wsUrl())
+            transport.connect()
+            assertTrue(opened.await(5, TimeUnit.SECONDS))
 
-        withTimeout(5_000) {
-            transport.incoming.test {
-                serverSocket!!.send("PING x")
-                assertEquals("PING x", awaitItem())
-                serverSocket!!.close(1000, "bye")
-                awaitComplete()
+            withTimeout(5_000) {
+                transport.incoming.test {
+                    serverSocket!!.send("PING x")
+                    assertEquals("PING x", awaitItem())
+                    serverSocket!!.close(1000, "bye")
+                    awaitComplete()
+                }
             }
+            transport.close()
         }
-        transport.close()
-    }
 }

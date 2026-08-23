@@ -29,10 +29,11 @@ object MotdSizes {
     val floatingActionButton = 56.dp
 }
 
-val MotdMaterialShapes = Shapes(
-    extraSmall = MotdShapes.tag,
-    small = MotdShapes.compact,
-    medium = MotdShapes.card,
-    large = MotdShapes.bubble,
-    extraLarge = MotdShapes.composer,
-)
+val MotdMaterialShapes =
+    Shapes(
+        extraSmall = MotdShapes.tag,
+        small = MotdShapes.compact,
+        medium = MotdShapes.card,
+        large = MotdShapes.bubble,
+        extraLarge = MotdShapes.composer,
+    )

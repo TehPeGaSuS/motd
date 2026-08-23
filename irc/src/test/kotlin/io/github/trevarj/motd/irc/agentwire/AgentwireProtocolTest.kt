@@ -1,6 +1,5 @@
 package io.github.trevarj.motd.irc.agentwire
 
-import java.security.MessageDigest
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -10,6 +9,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import java.security.MessageDigest
 
 class AgentwireProtocolTest {
     @Test
@@ -114,9 +114,10 @@ class AgentwireProtocolTest {
     @Test
     fun `fragmented envelope reassembles out of order and tolerates exact duplicate`() {
         val envelope = event(content = "λ".repeat(8_000))
-        val fragments = fragmentAgentwireEnvelope(envelope).map { raw ->
-            (decodeAgentwireValue(raw).getOrThrow() as AgentwireValue.Fragment).value
-        }
+        val fragments =
+            fragmentAgentwireEnvelope(envelope).map { raw ->
+                (decodeAgentwireValue(raw).getOrThrow() as AgentwireValue.Fragment).value
+            }
         assertTrue(fragments.size > 1)
         val reassembler = AgentwireReassembler()
         assertNull(reassembler.accept(fragments.last()).getOrThrow())
@@ -129,9 +130,10 @@ class AgentwireProtocolTest {
 
     @Test
     fun `conflicting duplicate invalidates assembly`() {
-        val fragments = fragmentAgentwireEnvelope(event("x".repeat(10_000))).map {
-            (decodeAgentwireValue(it).getOrThrow() as AgentwireValue.Fragment).value
-        }
+        val fragments =
+            fragmentAgentwireEnvelope(event("x".repeat(10_000))).map {
+                (decodeAgentwireValue(it).getOrThrow() as AgentwireValue.Fragment).value
+            }
         val reassembler = AgentwireReassembler()
         reassembler.accept(fragments.first()).getOrThrow()
         assertTrue(reassembler.accept(fragments.first().copy(b64 = fragments.first().b64.reversed())).isFailure)
@@ -141,9 +143,10 @@ class AgentwireProtocolTest {
 
     @Test
     fun `required capability comparison ignores capability values`() {
-        val caps = AGENTWIRE_REQUIRED_CAPS.mapTo(mutableSetOf()) { cap ->
-            if (cap == "draft/multiline") "$cap=max-bytes=4096" else cap
-        }
+        val caps =
+            AGENTWIRE_REQUIRED_CAPS.mapTo(mutableSetOf()) { cap ->
+                if (cap == "draft/multiline") "$cap=max-bytes=4096" else cap
+            }
         assertTrue(agentwireMissingCaps(caps).isEmpty())
         assertEquals(setOf("account-tag"), agentwireMissingCaps(caps - "account-tag"))
     }
@@ -156,22 +159,25 @@ class AgentwireProtocolTest {
         assertEquals("058c5ad375bd89d3074349e4b01650525eb8138bd3d651d90236e72b4d4f964c", sha(resourceBytes("agentwire/fixtures/topic.txt")))
     }
 
-    private fun event(content: String) = AgentwireEnvelope(
-        kind = "assistant.completed",
-        type = "event",
-        id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        at = 1,
-        instance = "instance",
-        epoch = "epoch",
-        sid = "session",
-        data = buildJsonObject { put("content", content) },
-    )
+    private fun event(content: String) =
+        AgentwireEnvelope(
+            kind = "assistant.completed",
+            type = "event",
+            id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            at = 1,
+            instance = "instance",
+            epoch = "epoch",
+            sid = "session",
+            data = buildJsonObject { put("content", content) },
+        )
 
     private fun assertFailure(raw: String) {
         if (decodeAgentwireValue(raw).isSuccess) fail("expected validation failure: $raw")
     }
 
     private fun resource(path: String): String = resourceBytes(path).toString(Charsets.UTF_8)
+
     private fun resourceBytes(path: String): ByteArray = checkNotNull(javaClass.classLoader?.getResourceAsStream(path)).readBytes()
+
     private fun sha(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 }

@@ -7,7 +7,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IsupportTest {
-
     @Test
     fun `defaults when nothing advertised`() {
         val isup = Isupport()

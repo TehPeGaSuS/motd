@@ -16,33 +16,37 @@ import org.junit.Test
 
 class SettingsUiModelsTest {
     @Test
-    fun `audio cache feedback follows completion and reports failures`() = runTest {
-        var completed = false
+    fun `audio cache feedback follows completion and reports failures`() =
+        runTest {
+            var completed = false
 
-        val cleared = audioCacheClearEvent {
-            completed = true
-        }
-        val failed = audioCacheClearEvent {
-            throw IllegalStateException("disk error")
-        }
+            val cleared =
+                audioCacheClearEvent {
+                    completed = true
+                }
+            val failed =
+                audioCacheClearEvent {
+                    throw IllegalStateException("disk error")
+                }
 
-        assertTrue(completed)
-        assertEquals(AudioCacheClearEvent.CLEARED, cleared)
-        assertEquals(AudioCacheClearEvent.FAILED, failed)
-    }
+            assertTrue(completed)
+            assertEquals(AudioCacheClearEvent.CLEARED, cleared)
+            assertEquals(AudioCacheClearEvent.FAILED, failed)
+        }
 
     @Test
-    fun `audio cache feedback preserves cancellation`() = runTest {
-        var cancellation: CancellationException? = null
+    fun `audio cache feedback preserves cancellation`() =
+        runTest {
+            var cancellation: CancellationException? = null
 
-        try {
-            audioCacheClearEvent { throw CancellationException("cancelled") }
-        } catch (caught: CancellationException) {
-            cancellation = caught
+            try {
+                audioCacheClearEvent { throw CancellationException("cancelled") }
+            } catch (caught: CancellationException) {
+                cancellation = caught
+            }
+
+            assertEquals("cancelled", cancellation?.message)
         }
-
-        assertEquals("cancelled", cancellation?.message)
-    }
 
     @Test
     fun `theme groups expose every exact light and dark selection once`() {
@@ -99,23 +103,33 @@ class SettingsUiModelsTest {
 
     @Test
     fun `network save requires a valid dirty form and includes auto connect`() {
-        val entity = network(1, "Libera", NetworkRole.DIRECT).copy(
-            nick = "me", username = "me", realname = "Me", autoConnect = true,
-        )
-        val clean = NetworkSettingsUiState(
-            entity = entity,
-            displayName = entity.name,
-            server = entity.toServerForm(),
-            auth = entity.toAuthForm(),
-            autoConnect = true,
-        )
+        val entity =
+            network(1, "Libera", NetworkRole.DIRECT).copy(
+                nick = "me",
+                username = "me",
+                realname = "Me",
+                autoConnect = true,
+            )
+        val clean =
+            NetworkSettingsUiState(
+                entity = entity,
+                displayName = entity.name,
+                server = entity.toServerForm(),
+                auth = entity.toAuthForm(),
+                autoConnect = true,
+            )
         assertFalse(clean.hasUnsavedChanges)
         assertFalse(clean.canSave)
         assertTrue(clean.copy(autoConnect = false).canSave)
         assertFalse(clean.copy(server = ServerForm()).canSave)
     }
 
-    private fun network(id: Long, name: String, role: NetworkRole, parentId: Long? = null) = NetworkEntity(
+    private fun network(
+        id: Long,
+        name: String,
+        role: NetworkRole,
+        parentId: Long? = null,
+    ) = NetworkEntity(
         id = id,
         name = name,
         role = role,

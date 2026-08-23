@@ -78,21 +78,22 @@ data class TimelineSeam(
 fun timelineSeams(
     gaps: List<ResolvedGap>,
     newestPresented: TimelineAnchor? = null,
-): List<TimelineSeam> = gaps
-    .map { resolved ->
-        val position = resolved.newer.asInclusiveLowerBound()
-        TimelineSeam(
-            resolved.gap.id,
-            // Only a seam sitting ABOVE the whole presented list moves; every other one is min'd
-            // with a bound it is already below and comes through untouched.
-            newestPresented?.let { minOf(position, it) } ?: position,
-            resolved.gap.recoverable,
-        )
-    }
-    // gapId only breaks ties between two gaps resolving to the same position, so the order is
-    // total and stable regardless of how the caller happened to read the rows. Two clamped gaps
-    // land on the same row by construction, which is exactly the tie this already covers.
-    .sortedWith(compareBy({ it.position }, { it.gapId }))
+): List<TimelineSeam> =
+    gaps
+        .map { resolved ->
+            val position = resolved.newer.asInclusiveLowerBound()
+            TimelineSeam(
+                resolved.gap.id,
+                // Only a seam sitting ABOVE the whole presented list moves; every other one is min'd
+                // with a bound it is already below and comes through untouched.
+                newestPresented?.let { minOf(position, it) } ?: position,
+                resolved.gap.recoverable,
+            )
+        }
+        // gapId only breaks ties between two gaps resolving to the same position, so the order is
+        // total and stable regardless of how the caller happened to read the rows. Two clamped gaps
+        // land on the same row by construction, which is exactly the tie this already covers.
+        .sortedWith(compareBy({ it.position }, { it.gapId }))
 
 /**
  * The seam, if any, that belongs immediately above [row] in the reversed timeline.

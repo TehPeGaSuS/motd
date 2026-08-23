@@ -31,16 +31,18 @@ class MonitorPresenceTest {
     }
 
     @Test fun `friends win bounded slots before ordered query peers`() {
-        val selection = selectMonitorTargets(
-            friends = setOf("Zed", "alice"),
-            queryRows = listOf(
-                query("bob", pinned = false, activity = 200),
-                query("carol", pinned = true, activity = 100),
-                query("ALICE", pinned = true, activity = 300),
-            ),
-            limit = 3,
-            normalize = String::lowercase,
-        )
+        val selection =
+            selectMonitorTargets(
+                friends = setOf("Zed", "alice"),
+                queryRows =
+                    listOf(
+                        query("bob", pinned = false, activity = 200),
+                        query("carol", pinned = true, activity = 100),
+                        query("ALICE", pinned = true, activity = 300),
+                    ),
+                limit = 3,
+                normalize = String::lowercase,
+            )
 
         assertEquals(listOf("alice", "Zed", "carol"), selection.selected)
         assertEquals(listOf("alice", "Zed", "carol", "bob"), selection.allDesired)
@@ -91,7 +93,11 @@ class MonitorPresenceTest {
         assertEquals(PresenceState.ONLINE, states[renamed])
     }
 
-    private fun query(nick: String, pinned: Boolean, activity: Long) = MonitorQueryRow(
+    private fun query(
+        nick: String,
+        pinned: Boolean,
+        activity: Long,
+    ) = MonitorQueryRow(
         networkId = 1,
         displayName = nick,
         pinned = pinned,

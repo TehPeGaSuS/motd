@@ -11,21 +11,21 @@ import org.junit.Test
  * value must survive the IRCv3 tag escape table and the attribute order must stay stable.
  */
 class SearchCommandsTest {
-
     private fun attributes(req: SearchRequest): String = SearchCommands.search(req).params.single()
 
     @Test
     fun rendersMandatoryAndOptionalAttributesInFixedOrder() {
-        val message = SearchCommands.search(
-            SearchRequest(
-                target = "#chan",
-                text = "hello",
-                from = "alice",
-                after = 1_000,
-                before = 2_000,
-                limit = 25,
-            ),
-        )
+        val message =
+            SearchCommands.search(
+                SearchRequest(
+                    target = "#chan",
+                    text = "hello",
+                    from = "alice",
+                    after = 1_000,
+                    before = 2_000,
+                    limit = 25,
+                ),
+            )
 
         assertEquals("SEARCH", message.command)
         assertEquals(
@@ -106,11 +106,12 @@ class SearchCommandsTest {
 
     @Test
     fun parsesTimeAndMsgidTags() {
-        val hit = parseSearchResult(
-            IrcMessage.parse(
-                "@time=2024-01-02T03:04:05.678Z;msgid=abc :alice!u@h PRIVMSG #chan :hit",
-            ),
-        )!!
+        val hit =
+            parseSearchResult(
+                IrcMessage.parse(
+                    "@time=2024-01-02T03:04:05.678Z;msgid=abc :alice!u@h PRIVMSG #chan :hit",
+                ),
+            )!!
 
         assertEquals(1_704_164_645_678L, hit.serverTime)
         assertEquals("abc", hit.msgid)
@@ -122,9 +123,10 @@ class SearchCommandsTest {
         assertNull(untagged.serverTime)
         assertNull(untagged.msgid)
 
-        val unparsable = parseSearchResult(
-            IrcMessage.parse("@time=not-a-timestamp;msgid= :alice!u@h PRIVMSG #chan :hit"),
-        )!!
+        val unparsable =
+            parseSearchResult(
+                IrcMessage.parse("@time=not-a-timestamp;msgid= :alice!u@h PRIVMSG #chan :hit"),
+            )!!
         assertNull("an unparsable time tag is absent, not an error", unparsable.serverTime)
         assertNull("an empty msgid tag is absent", unparsable.msgid)
     }

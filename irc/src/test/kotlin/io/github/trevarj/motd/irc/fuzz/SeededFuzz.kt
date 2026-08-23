@@ -33,32 +33,38 @@ internal object SeededFuzz {
         val configuredCase = System.getenv("MOTD_FUZZ_CASE")?.toIntOrNull()
         val configuredShard = System.getenv("MOTD_FUZZ_SHARD")?.toIntOrNull()?.takeIf { it >= 0 } ?: 0
         val profileCases = fuzzProfileValue(prCases, nightlyCases)
-        val generatedCases = System.getenv("MOTD_FUZZ_CASES")?.toIntOrNull()
-            ?.takeIf { it > 0 }
-            ?: profileCases
-        val requested = if (configuredCase != null) {
-            listOf(CorpusCase(configuredSeed ?: DEFAULT_SEED, configuredCase))
-        } else {
-            val firstGeneratedCase = configuredShard * generatedCases
-            buildList {
-                addAll(regressions(target, version))
-                repeat(generatedCases) { offset ->
-                    add(CorpusCase(configuredSeed ?: DEFAULT_SEED, firstGeneratedCase + offset))
-                }
-            }.distinct()
-        }
+        val generatedCases =
+            System
+                .getenv("MOTD_FUZZ_CASES")
+                ?.toIntOrNull()
+                ?.takeIf { it > 0 }
+                ?: profileCases
+        val requested =
+            if (configuredCase != null) {
+                listOf(CorpusCase(configuredSeed ?: DEFAULT_SEED, configuredCase))
+            } else {
+                val firstGeneratedCase = configuredShard * generatedCases
+                buildList {
+                    addAll(regressions(target, version))
+                    repeat(generatedCases) { offset ->
+                        add(CorpusCase(configuredSeed ?: DEFAULT_SEED, firstGeneratedCase + offset))
+                    }
+                }.distinct()
+            }
 
         requested.forEach { request ->
-            val fuzzCase = FuzzCase(
-                index = request.index,
-                seed = request.seed,
-                random = Random(derivedSeed(target, version, request.seed, request.index)),
-            )
+            val fuzzCase =
+                FuzzCase(
+                    index = request.index,
+                    seed = request.seed,
+                    random = Random(derivedSeed(target, version, request.seed, request.index)),
+                )
             try {
                 block(fuzzCase)
             } catch (failure: Throwable) {
-                val replay = "MOTD_FUZZ_SEED=${request.seed.shellQuote()} MOTD_FUZZ_CASE=${request.index} " +
-                    "nix develop -c ./gradlew :irc:test --tests '$replayTest' --stacktrace"
+                val replay =
+                    "MOTD_FUZZ_SEED=${request.seed.shellQuote()} MOTD_FUZZ_CASE=${request.index} " +
+                        "nix develop -c ./gradlew :irc:test --tests '$replayTest' --stacktrace"
                 writeFailure(target, version, fuzzCase, replay, failure)
                 throw AssertionError(
                     "Generated test failed: target=$target version=$version seed=${request.seed} " +
@@ -69,11 +75,16 @@ internal object SeededFuzz {
         }
     }
 
-    private fun regressions(target: String, version: Int): List<CorpusCase> {
-        val stream = SeededFuzz::class.java.getResourceAsStream("/fuzz/regressions.tsv")
-            ?: return emptyList()
+    private fun regressions(
+        target: String,
+        version: Int,
+    ): List<CorpusCase> {
+        val stream =
+            SeededFuzz::class.java.getResourceAsStream("/fuzz/regressions.tsv")
+                ?: return emptyList()
         return stream.bufferedReader().useLines { lines ->
-            lines.map(String::trim)
+            lines
+                .map(String::trim)
                 .filter { it.isNotEmpty() && !it.startsWith('#') }
                 .mapNotNull { line ->
                     val fields = line.split('\t')
@@ -82,14 +93,20 @@ internal object SeededFuzz {
                     } else {
                         fields[3].toIntOrNull()?.let { CorpusCase(fields[2], it) }
                     }
-                }
-                .toList()
+                }.toList()
         }
     }
 
-    private fun derivedSeed(target: String, version: Int, seed: String, index: Int): Long {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest("$target\u0000$version\u0000$seed\u0000$index".toByteArray(StandardCharsets.UTF_8))
+    private fun derivedSeed(
+        target: String,
+        version: Int,
+        seed: String,
+        index: Int,
+    ): Long {
+        val digest =
+            MessageDigest
+                .getInstance("SHA-256")
+                .digest("$target\u0000$version\u0000$seed\u0000$index".toByteArray(StandardCharsets.UTF_8))
         return digest.take(8).fold(0L) { result, byte -> (result shl 8) or (byte.toLong() and 0xff) }
     }
 
@@ -102,10 +119,12 @@ internal object SeededFuzz {
     ) {
         val dir = File(System.getenv("MOTD_FUZZ_FAILURE_DIR") ?: "build/fuzz-failures")
         if (!dir.exists() && !dir.mkdirs()) return
-        val seedHash = MessageDigest.getInstance("SHA-256")
-            .digest(fuzzCase.seed.toByteArray(StandardCharsets.UTF_8))
-            .take(6)
-            .joinToString("") { "%02x".format(it) }
+        val seedHash =
+            MessageDigest
+                .getInstance("SHA-256")
+                .digest(fuzzCase.seed.toByteArray(StandardCharsets.UTF_8))
+                .take(6)
+                .joinToString("") { "%02x".format(it) }
         File(dir, "${target.safe()}-$seedHash-${fuzzCase.index}.txt").writeText(
             buildString {
                 appendLine("target=$target")
@@ -126,12 +145,24 @@ internal object SeededFuzz {
 
     private fun String.shellQuote(): String = "'${replace("'", "'\"'\"'")}'"
 
-    private data class CorpusCase(val seed: String, val index: Int)
+    private data class CorpusCase(
+        val seed: String,
+        val index: Int,
+    )
 
     private const val DEFAULT_SEED = "motd-fuzz-v1"
 }
 
-private fun fuzzProfileValue(pr: Int, nightly: Int): Int {
+private fun fuzzProfileValue(
+    pr: Int,
+    nightly: Int,
+): Int {
     val profile = System.getenv("MOTD_FUZZ_PROFILE")
-    return if (profile == "nightly") nightly else if (profile == "pr") pr else 1
+    return if (profile == "nightly") {
+        nightly
+    } else if (profile == "pr") {
+        pr
+    } else {
+        1
+    }
 }

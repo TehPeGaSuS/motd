@@ -26,21 +26,25 @@ class Migration21To22Test {
     fun `migration adds an empty durable multi-gap table without changing buffers`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(21) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL("CREATE TABLE buffers (id INTEGER PRIMARY KEY NOT NULL, name TEXT NOT NULL)")
-                    }
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(21) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL("CREATE TABLE buffers (id INTEGER PRIMARY KEY NOT NULL, name TEXT NOT NULL)")
+                            }
 
-                    override fun onUpgrade(
-                        db: SupportSQLiteDatabase,
-                        oldVersion: Int,
-                        newVersion: Int,
-                    ) = Unit
-                }).build(),
-        )
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL("INSERT INTO buffers(id, name) VALUES (7, '#kept')")
 
@@ -80,9 +84,10 @@ class Migration21To22Test {
         }
         db.query("PRAGMA index_list(history_gaps)").use { cursor ->
             val nameColumn = cursor.getColumnIndexOrThrow("name")
-            val names = buildSet {
-                while (cursor.moveToNext()) add(cursor.getString(nameColumn))
-            }
+            val names =
+                buildSet {
+                    while (cursor.moveToNext()) add(cursor.getString(nameColumn))
+                }
             assertTrue("index_history_gaps_roomId_olderServerTime" in names)
             assertTrue("index_history_gaps_roomId_newerServerTime" in names)
         }

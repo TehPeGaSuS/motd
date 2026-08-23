@@ -20,7 +20,6 @@ import org.junit.Test
  * per-role identity key and the idempotent soju-child import.
  */
 class NetworkDedupTest {
-
     /** In-memory NetworkDao: only the methods addNetwork touches are backed; rest throw. */
     private class InMemoryNetworkDao : NetworkDao {
         val rows = LinkedHashMap<Long, NetworkEntity>()
@@ -36,31 +35,54 @@ class NetworkDedupTest {
             yield()
             return rows.values.toList()
         }
+
         override suspend fun byId(id: Long): NetworkEntity? = rows[id]
-        override suspend fun childrenOf(rootId: Long): List<NetworkEntity> =
-            rows.values.filter { it.parentId == rootId }
-        override suspend fun localTreeIds(id: Long): List<Long> = rows.values
-            .filter { it.id == id || it.parentId == id }
-            .map { it.id }
+
+        override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = rows.values.filter { it.parentId == rootId }
+
+        override suspend fun localTreeIds(id: Long): List<Long> =
+            rows.values
+                .filter { it.id == id || it.parentId == id }
+                .map { it.id }
+
         override suspend fun deleteMembersForNetworks(networkIds: List<Long>) = Unit
+
         override suspend fun deleteReactionsForNetworks(networkIds: List<Long>) = Unit
+
         override suspend fun deleteUsersForNetworks(networkIds: List<Long>) = Unit
+
         override suspend fun deleteNetworkRows(networkIds: List<Long>) {
             networkIds.forEach(rows::remove)
         }
 
         override suspend fun maxOrdering(): Int = rows.values.maxOfOrNull { it.ordering } ?: -1
-        override suspend fun idsInOrder(): List<Long> = rows.values
-            .sortedWith(compareBy(NetworkEntity::ordering, NetworkEntity::id))
-            .map { it.id }
-        override suspend fun setOrdering(id: Long, ordering: Int) {
+
+        override suspend fun idsInOrder(): List<Long> =
+            rows.values
+                .sortedWith(compareBy(NetworkEntity::ordering, NetworkEntity::id))
+                .map { it.id }
+
+        override suspend fun setOrdering(
+            id: Long,
+            ordering: Int,
+        ) {
             rows[id]?.let { rows[id] = it.copy(ordering = ordering) }
         }
 
         override fun observeAll(): Flow<List<NetworkEntity>> = flowOf(rows.values.toList())
+
         override suspend fun connectable(): List<NetworkEntity> = rows.values.filter { it.autoConnect }
-        override suspend fun update(n: NetworkEntity) { rows[n.id] = n }
-        override suspend fun updateBouncerConnection(id: Long, host: String, port: Int, nick: String) {
+
+        override suspend fun update(n: NetworkEntity) {
+            rows[n.id] = n
+        }
+
+        override suspend fun updateBouncerConnection(
+            id: Long,
+            host: String,
+            port: Int,
+            nick: String,
+        ) {
             rows[id]?.let { rows[id] = it.copy(host = host, port = port, nick = nick) }
         }
     }
@@ -68,168 +90,214 @@ class NetworkDedupTest {
     private class RecordingBouncerKinds : BouncerKindPrefs {
         override val zncNetworkIds: Flow<Set<Long>> = flowOf(emptySet())
         val cleared = mutableListOf<Long>()
+
         override suspend fun markZnc(networkId: Long) = Unit
-        override suspend fun clear(networkId: Long) { cleared += networkId }
+
+        override suspend fun clear(networkId: Long) {
+            cleared += networkId
+        }
     }
 
-    private fun direct(host: String, port: Int = 6697, nick: String = "motd") = NetworkEntity(
-        name = host, role = NetworkRole.DIRECT,
-        host = host, port = port, nick = nick, username = nick, realname = nick,
+    private fun direct(
+        host: String,
+        port: Int = 6697,
+        nick: String = "motd",
+    ) = NetworkEntity(
+        name = host,
+        role = NetworkRole.DIRECT,
+        host = host,
+        port = port,
+        nick = nick,
+        username = nick,
+        realname = nick,
     )
 
-    private fun root(host: String, saslUser: String?) = NetworkEntity(
-        name = host, role = NetworkRole.BOUNCER_ROOT,
-        host = host, port = 6697, nick = "motd", username = "motd", realname = "motd",
-        saslMechanism = "PLAIN", saslUser = saslUser,
+    private fun root(
+        host: String,
+        saslUser: String?,
+    ) = NetworkEntity(
+        name = host,
+        role = NetworkRole.BOUNCER_ROOT,
+        host = host,
+        port = 6697,
+        nick = "motd",
+        username = "motd",
+        realname = "motd",
+        saslMechanism = "PLAIN",
+        saslUser = saslUser,
     )
 
-    private fun child(parentId: Long, netId: String, host: String = "irc.child.org") = NetworkEntity(
-        name = netId, role = NetworkRole.BOUNCER_CHILD, parentId = parentId, bouncerNetId = netId,
-        host = host, port = 6697, nick = "motd", username = "motd", realname = "motd",
+    private fun child(
+        parentId: Long,
+        netId: String,
+        host: String = "irc.child.org",
+    ) = NetworkEntity(
+        name = netId,
+        role = NetworkRole.BOUNCER_CHILD,
+        parentId = parentId,
+        bouncerNetId = netId,
+        host = host,
+        port = 6697,
+        nick = "motd",
+        username = "motd",
+        realname = "motd",
     )
 
     @Test
-    fun `adding the same direct server twice returns the existing id and no second row`() = runBlocking {
-        val dao = InMemoryNetworkDao()
-        val repo = NetworkRepositoryImpl(dao)
-        val first = repo.addNetwork(direct("irc.libera.chat"))
-        val second = repo.addNetwork(direct("irc.libera.chat"))
-        assertEquals(first, second)
-        assertEquals(1, dao.rows.size)
-    }
+    fun `adding the same direct server twice returns the existing id and no second row`() =
+        runBlocking {
+            val dao = InMemoryNetworkDao()
+            val repo = NetworkRepositoryImpl(dao)
+            val first = repo.addNetwork(direct("irc.libera.chat"))
+            val second = repo.addNetwork(direct("irc.libera.chat"))
+            assertEquals(first, second)
+            assertEquals(1, dao.rows.size)
+        }
 
     @Test
-    fun `concurrent equivalent adds serialize to one network row`() = runTest {
-        val dao = InMemoryNetworkDao()
-        val repo = NetworkRepositoryImpl(dao)
+    fun `concurrent equivalent adds serialize to one network row`() =
+        runTest {
+            val dao = InMemoryNetworkDao()
+            val repo = NetworkRepositoryImpl(dao)
 
-        val ids = List(20) { async { repo.addNetwork(direct("irc.libera.chat")) } }.awaitAll()
+            val ids = List(20) { async { repo.addNetwork(direct("irc.libera.chat")) } }.awaitAll()
 
-        assertEquals(1, ids.toSet().size)
-        assertEquals(1, dao.rows.size)
-    }
-
-    @Test
-    fun `host normalization dedups trailing-dot and case variants`() = runBlocking {
-        val dao = InMemoryNetworkDao()
-        val repo = NetworkRepositoryImpl(dao)
-        val a = repo.addNetwork(direct("irc.libera.chat"))
-        val b = repo.addNetwork(direct("IRC.Libera.Chat."))
-        assertEquals(a, b)
-        assertEquals(1, dao.rows.size)
-    }
+            assertEquals(1, ids.toSet().size)
+            assertEquals(1, dao.rows.size)
+        }
 
     @Test
-    fun `different nick on the same server is a distinct network`() = runBlocking {
-        val dao = InMemoryNetworkDao()
-        val repo = NetworkRepositoryImpl(dao)
-        repo.addNetwork(direct("irc.libera.chat", nick = "alice"))
-        repo.addNetwork(direct("irc.libera.chat", nick = "bob"))
-        assertEquals(2, dao.rows.size)
-    }
+    fun `host normalization dedups trailing-dot and case variants`() =
+        runBlocking {
+            val dao = InMemoryNetworkDao()
+            val repo = NetworkRepositoryImpl(dao)
+            val a = repo.addNetwork(direct("irc.libera.chat"))
+            val b = repo.addNetwork(direct("IRC.Libera.Chat."))
+            assertEquals(a, b)
+            assertEquals(1, dao.rows.size)
+        }
 
     @Test
-    fun `different ZNC network selectors on one endpoint stay distinct`() = runBlocking {
-        val dao = InMemoryNetworkDao()
-        val repo = NetworkRepositoryImpl(dao)
-        val seed = direct("znc.example.org").copy(saslMechanism = "PLAIN", saslUser = "motd/libera")
-        repo.addNetwork(seed)
-        repo.addNetwork(seed.copy(name = "oftc", saslUser = "motd/oftc"))
-        assertEquals(2, dao.rows.size)
-    }
+    fun `different nick on the same server is a distinct network`() =
+        runBlocking {
+            val dao = InMemoryNetworkDao()
+            val repo = NetworkRepositoryImpl(dao)
+            repo.addNetwork(direct("irc.libera.chat", nick = "alice"))
+            repo.addNetwork(direct("irc.libera.chat", nick = "bob"))
+            assertEquals(2, dao.rows.size)
+        }
 
     @Test
-    fun `same ZNC selector deduplicates`() = runBlocking {
-        val dao = InMemoryNetworkDao()
-        val repo = NetworkRepositoryImpl(dao)
-        val seed = direct("znc.example.org").copy(saslMechanism = "PLAIN", saslUser = "motd/libera")
-        val first = repo.addNetwork(seed)
-        val second = repo.addNetwork(seed.copy(name = "renamed"))
-        assertEquals(first, second)
-        assertEquals(1, dao.rows.size)
-    }
+    fun `different ZNC network selectors on one endpoint stay distinct`() =
+        runBlocking {
+            val dao = InMemoryNetworkDao()
+            val repo = NetworkRepositoryImpl(dao)
+            val seed = direct("znc.example.org").copy(saslMechanism = "PLAIN", saslUser = "motd/libera")
+            repo.addNetwork(seed)
+            repo.addNetwork(seed.copy(name = "oftc", saslUser = "motd/oftc"))
+            assertEquals(2, dao.rows.size)
+        }
 
     @Test
-    fun `different CLoak network selectors on one endpoint stay distinct`() = runBlocking {
-        val dao = InMemoryNetworkDao()
-        val repo = NetworkRepositoryImpl(dao)
-        val seed = direct("cloak.example.org").copy(serverPassword = "motd/libera:secret")
-        repo.addNetwork(seed)
-        repo.addNetwork(seed.copy(name = "oftc", serverPassword = "motd/oftc:secret"))
-        assertEquals(2, dao.rows.size)
-    }
+    fun `same ZNC selector deduplicates`() =
+        runBlocking {
+            val dao = InMemoryNetworkDao()
+            val repo = NetworkRepositoryImpl(dao)
+            val seed = direct("znc.example.org").copy(saslMechanism = "PLAIN", saslUser = "motd/libera")
+            val first = repo.addNetwork(seed)
+            val second = repo.addNetwork(seed.copy(name = "renamed"))
+            assertEquals(first, second)
+            assertEquals(1, dao.rows.size)
+        }
 
     @Test
-    fun `same CLoak selector deduplicates without using its password`() = runBlocking {
-        val dao = InMemoryNetworkDao()
-        val repo = NetworkRepositoryImpl(dao)
-        val seed = direct("cloak.example.org").copy(serverPassword = "motd/libera:old-secret")
-        val first = repo.addNetwork(seed)
-        val second = repo.addNetwork(seed.copy(name = "renamed", serverPassword = "motd/libera:new-secret"))
-        assertEquals(first, second)
-        assertEquals(1, dao.rows.size)
-    }
+    fun `different CLoak network selectors on one endpoint stay distinct`() =
+        runBlocking {
+            val dao = InMemoryNetworkDao()
+            val repo = NetworkRepositoryImpl(dao)
+            val seed = direct("cloak.example.org").copy(serverPassword = "motd/libera:secret")
+            repo.addNetwork(seed)
+            repo.addNetwork(seed.copy(name = "oftc", serverPassword = "motd/oftc:secret"))
+            assertEquals(2, dao.rows.size)
+        }
 
     @Test
-    fun `different port is a distinct network`() = runBlocking {
-        val dao = InMemoryNetworkDao()
-        val repo = NetworkRepositoryImpl(dao)
-        repo.addNetwork(direct("irc.libera.chat", port = 6697))
-        repo.addNetwork(direct("irc.libera.chat", port = 6667))
-        assertEquals(2, dao.rows.size)
-    }
+    fun `same CLoak selector deduplicates without using its password`() =
+        runBlocking {
+            val dao = InMemoryNetworkDao()
+            val repo = NetworkRepositoryImpl(dao)
+            val seed = direct("cloak.example.org").copy(serverPassword = "motd/libera:old-secret")
+            val first = repo.addNetwork(seed)
+            val second = repo.addNetwork(seed.copy(name = "renamed", serverPassword = "motd/libera:new-secret"))
+            assertEquals(first, second)
+            assertEquals(1, dao.rows.size)
+        }
 
     @Test
-    fun `same bouncer account added twice reuses the root`() = runBlocking {
-        val dao = InMemoryNetworkDao()
-        val repo = NetworkRepositoryImpl(dao)
-        val a = repo.addNetwork(root("bnc.example.org", saslUser = "acct"))
-        val b = repo.addNetwork(root("bnc.example.org", saslUser = "acct"))
-        assertEquals(a, b)
-        assertEquals(1, dao.rows.size)
-        // A different soju login on the same host is a distinct root.
-        repo.addNetwork(root("bnc.example.org", saslUser = "other"))
-        assertEquals(2, dao.rows.size)
-    }
+    fun `different port is a distinct network`() =
+        runBlocking {
+            val dao = InMemoryNetworkDao()
+            val repo = NetworkRepositoryImpl(dao)
+            repo.addNetwork(direct("irc.libera.chat", port = 6697))
+            repo.addNetwork(direct("irc.libera.chat", port = 6667))
+            assertEquals(2, dao.rows.size)
+        }
 
     @Test
-    fun `bouncer child import is idempotent per (parent, netId)`() = runBlocking {
-        val dao = InMemoryNetworkDao()
-        val repo = NetworkRepositoryImpl(dao)
-        val rootId = repo.addNetwork(root("bnc.example.org", saslUser = "acct"))
-        val first = repo.addNetwork(child(rootId, netId = "42"))
-        val second = repo.addNetwork(child(rootId, netId = "42", host = "different.host"))
-        assertEquals(first, second)
-        assertEquals(2, dao.rows.size) // root + one child
-        // A different netId under the same root is a distinct child.
-        repo.addNetwork(child(rootId, netId = "43"))
-        assertEquals(3, dao.rows.size)
-    }
+    fun `same bouncer account added twice reuses the root`() =
+        runBlocking {
+            val dao = InMemoryNetworkDao()
+            val repo = NetworkRepositoryImpl(dao)
+            val a = repo.addNetwork(root("bnc.example.org", saslUser = "acct"))
+            val b = repo.addNetwork(root("bnc.example.org", saslUser = "acct"))
+            assertEquals(a, b)
+            assertEquals(1, dao.rows.size)
+            // A different soju login on the same host is a distinct root.
+            repo.addNetwork(root("bnc.example.org", saslUser = "other"))
+            assertEquals(2, dao.rows.size)
+        }
 
     @Test
-    fun `child netId collision across different roots stays distinct`() = runBlocking {
-        val dao = InMemoryNetworkDao()
-        val repo = NetworkRepositoryImpl(dao)
-        val root1 = repo.addNetwork(root("bnc1.example.org", saslUser = "a"))
-        val root2 = repo.addNetwork(root("bnc2.example.org", saslUser = "b"))
-        repo.addNetwork(child(root1, netId = "1"))
-        repo.addNetwork(child(root2, netId = "1"))
-        assertEquals(4, dao.rows.size) // two roots + two children
-    }
+    fun `bouncer child import is idempotent per (parent, netId)`() =
+        runBlocking {
+            val dao = InMemoryNetworkDao()
+            val repo = NetworkRepositoryImpl(dao)
+            val rootId = repo.addNetwork(root("bnc.example.org", saslUser = "acct"))
+            val first = repo.addNetwork(child(rootId, netId = "42"))
+            val second = repo.addNetwork(child(rootId, netId = "42", host = "different.host"))
+            assertEquals(first, second)
+            assertEquals(2, dao.rows.size) // root + one child
+            // A different netId under the same root is a distinct child.
+            repo.addNetwork(child(rootId, netId = "43"))
+            assertEquals(3, dao.rows.size)
+        }
 
     @Test
-    fun `deleting a bouncer root deletes every local child and clears their classifications`() = runBlocking {
-        val dao = InMemoryNetworkDao()
-        val kinds = RecordingBouncerKinds()
-        val repo = NetworkRepositoryImpl(dao, kinds)
-        val rootId = repo.addNetwork(root("bnc.example.org", saslUser = "acct"))
-        val childOne = repo.addNetwork(child(rootId, netId = "1"))
-        val childTwo = repo.addNetwork(child(rootId, netId = "2"))
-        val unrelated = repo.addNetwork(direct("irc.example.org"))
+    fun `child netId collision across different roots stays distinct`() =
+        runBlocking {
+            val dao = InMemoryNetworkDao()
+            val repo = NetworkRepositoryImpl(dao)
+            val root1 = repo.addNetwork(root("bnc1.example.org", saslUser = "a"))
+            val root2 = repo.addNetwork(root("bnc2.example.org", saslUser = "b"))
+            repo.addNetwork(child(root1, netId = "1"))
+            repo.addNetwork(child(root2, netId = "1"))
+            assertEquals(4, dao.rows.size) // two roots + two children
+        }
 
-        repo.deleteNetwork(rootId)
+    @Test
+    fun `deleting a bouncer root deletes every local child and clears their classifications`() =
+        runBlocking {
+            val dao = InMemoryNetworkDao()
+            val kinds = RecordingBouncerKinds()
+            val repo = NetworkRepositoryImpl(dao, kinds)
+            val rootId = repo.addNetwork(root("bnc.example.org", saslUser = "acct"))
+            val childOne = repo.addNetwork(child(rootId, netId = "1"))
+            val childTwo = repo.addNetwork(child(rootId, netId = "2"))
+            val unrelated = repo.addNetwork(direct("irc.example.org"))
 
-        assertEquals(setOf(unrelated), dao.rows.keys)
-        assertEquals(setOf(rootId, childOne, childTwo), kinds.cleared.toSet())
-    }
+            repo.deleteNetwork(rootId)
+
+            assertEquals(setOf(unrelated), dao.rows.keys)
+            assertEquals(setOf(rootId, childOne, childTwo), kinds.cleared.toSet())
+        }
 }

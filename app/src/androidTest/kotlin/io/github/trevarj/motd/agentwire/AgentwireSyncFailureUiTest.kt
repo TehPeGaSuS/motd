@@ -36,28 +36,37 @@ class AgentwireSyncFailureUiTest {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 when (val phase = sync) {
-                    is AgentwireSyncState.Failed ->
+                    is AgentwireSyncState.Failed -> {
                         AgentwireSyncFailureCard(phase, "#claude", onRetry = { retries += 1 })
-                    is AgentwireSyncState.NotJoined ->
+                    }
+
+                    is AgentwireSyncState.NotJoined -> {
                         AgentwireNotJoinedCard("#claude", onJoin = { joins += 1 })
-                    else -> Unit
+                    }
+
+                    else -> {
+                        Unit
+                    }
                 }
             }
         }
 
         compose.onNodeWithTag("agentwire_sync_failure_card").assertIsDisplayed()
         compose.onNodeWithText("Agent sync timed out").assertIsDisplayed()
-        compose.onNodeWithText("No response from the agent after 30 seconds", substring = true)
+        compose
+            .onNodeWithText("No response from the agent after 30 seconds", substring = true)
             .assertIsDisplayed()
         // The ignore counters are the diagnosability payload; the card must surface the tally.
-        compose.onNodeWithText("12 agent event(s) arrived but were ignored", substring = true)
+        compose
+            .onNodeWithText("12 agent event(s) arrived but were ignored", substring = true)
             .assertIsDisplayed()
         compose.onNodeWithTag("agentwire_sync_retry").performClick()
         compose.runOnIdle { assertEquals(1, retries) }
 
         sync = AgentwireSyncState.Failed(AgentwireSyncFailure.Rejected("unknown topic agent"))
         compose.onNodeWithText("Agent sync rejected").assertIsDisplayed()
-        compose.onNodeWithText("The bridge rejected the sync request: unknown topic agent")
+        compose
+            .onNodeWithText("The bridge rejected the sync request: unknown topic agent")
             .assertIsDisplayed()
         compose.onNodeWithText("Retry sync").assertIsDisplayed()
 
@@ -68,7 +77,8 @@ class AgentwireSyncFailureUiTest {
 
         sync = AgentwireSyncState.Failed(AgentwireSyncFailure.SendFailed("the write did not reach the server"))
         compose.onNodeWithText("Cannot reach the channel").assertIsDisplayed()
-        compose.onNodeWithText("Sending the sync request failed: the write did not reach the server")
+        compose
+            .onNodeWithText("Sending the sync request failed: the write did not reach the server")
             .assertIsDisplayed()
 
         sync = AgentwireSyncState.NotJoined

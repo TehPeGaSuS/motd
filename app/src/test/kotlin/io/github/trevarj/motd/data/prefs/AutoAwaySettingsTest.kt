@@ -25,31 +25,34 @@ class AutoAwaySettingsTest {
     }
 
     @Test
-    fun auto_away_preferences_round_trip() = runTest {
-        repository.setAutoAwayEnabled(true)
-        repository.setAutoAwayMinutes(30)
-        repository.setAutoAwayMessage("  gone fishing  ")
+    fun auto_away_preferences_round_trip() =
+        runTest {
+            repository.setAutoAwayEnabled(true)
+            repository.setAutoAwayMinutes(30)
+            repository.setAutoAwayMessage("  gone fishing  ")
 
-        val saved = repository.settings.first()
-        assertTrue(saved.autoAwayEnabled)
-        assertEquals(30, saved.autoAwayMinutes)
-        assertEquals("gone fishing", saved.autoAwayMessage)
-    }
-
-    @Test
-    fun a_blank_message_falls_back_to_the_stored_default() = runTest {
-        repository.setAutoAwayMessage("brb")
-        assertEquals("brb", repository.settings.first().autoAwayMessage)
-
-        repository.setAutoAwayMessage("   ")
-        assertEquals("", repository.settings.first().autoAwayMessage)
-    }
+            val saved = repository.settings.first()
+            assertTrue(saved.autoAwayEnabled)
+            assertEquals(30, saved.autoAwayMinutes)
+            assertEquals("gone fishing", saved.autoAwayMessage)
+        }
 
     @Test
-    fun an_off_list_delay_is_coerced_to_the_default() = runTest {
-        repository.setAutoAwayMinutes(7)
-        assertEquals(DEFAULT_AUTO_AWAY_MINUTES, repository.settings.first().autoAwayMinutes)
-    }
+    fun a_blank_message_falls_back_to_the_stored_default() =
+        runTest {
+            repository.setAutoAwayMessage("brb")
+            assertEquals("brb", repository.settings.first().autoAwayMessage)
+
+            repository.setAutoAwayMessage("   ")
+            assertEquals("", repository.settings.first().autoAwayMessage)
+        }
+
+    @Test
+    fun an_off_list_delay_is_coerced_to_the_default() =
+        runTest {
+            repository.setAutoAwayMinutes(7)
+            assertEquals(DEFAULT_AUTO_AWAY_MINUTES, repository.settings.first().autoAwayMinutes)
+        }
 
     @Test
     fun stored_delays_are_snapped_onto_the_offered_choices() {

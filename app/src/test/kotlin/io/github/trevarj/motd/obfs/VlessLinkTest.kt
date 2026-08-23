@@ -9,9 +9,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VlessLinkTest {
-    private val valid = "vless://123e4567-e89b-12d3-a456-426614174000@edge.example:443?" +
-        "type=tcp&security=reality&sni=www.cloudflare.com&pbk=public-key&sid=a1b2&" +
-        "fp=chrome"
+    private val valid =
+        "vless://123e4567-e89b-12d3-a456-426614174000@edge.example:443?" +
+            "type=tcp&security=reality&sni=www.cloudflare.com&pbk=public-key&sid=a1b2&" +
+            "fp=chrome"
 
     @Test
     fun `parses supported TCP REALITY no-flow link into sing-box outbound`() {
@@ -24,7 +25,13 @@ class VlessLinkTest {
         assertEquals("vless", outbound["type"]!!.jsonPrimitive.content)
         assertEquals("edge.example", outbound["server"]!!.jsonPrimitive.content)
         assertEquals("www.cloudflare.com", outbound["tls"]!!.jsonObject["server_name"]!!.jsonPrimitive.content)
-        assertEquals("public-key", outbound["tls"]!!.jsonObject["reality"]!!.jsonObject["public_key"]!!.jsonPrimitive.content)
+        assertEquals(
+            "public-key",
+            outbound["tls"]!!
+                .jsonObject["reality"]!!
+                .jsonObject["public_key"]!!
+                .jsonPrimitive.content,
+        )
     }
 
     @Test

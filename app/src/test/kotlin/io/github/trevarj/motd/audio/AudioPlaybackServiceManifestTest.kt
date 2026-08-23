@@ -13,10 +13,11 @@ import org.robolectric.RobolectricTestRunner
 class AudioPlaybackServiceManifestTest {
     @Test fun mediaSessionServiceIsResolvableByMedia3() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val services = context.packageManager.queryIntentServices(
-            Intent(MediaSessionService.SERVICE_INTERFACE).setPackage(context.packageName),
-            0,
-        )
+        val services =
+            context.packageManager.queryIntentServices(
+                Intent(MediaSessionService.SERVICE_INTERFACE).setPackage(context.packageName),
+                0,
+            )
 
         assertTrue(
             services.any { it.serviceInfo.name == AudioPlaybackService::class.java.name },

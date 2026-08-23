@@ -27,32 +27,40 @@ class Migration7To8Test {
     fun migration_adds_nullable_local_unread_floor_and_preserves_buffer_state() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
-        helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(DB_NAME)
-                .callback(object : SupportSQLiteOpenHelper.Callback(7) {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL(CREATE_BUFFERS_V7)
-                    }
+        helper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(7) {
+                            override fun onCreate(db: SupportSQLiteDatabase) {
+                                db.execSQL(CREATE_BUFFERS_V7)
+                            }
 
-                    override fun onUpgrade(db: SupportSQLiteDatabase, old: Int, new: Int) = Unit
-                })
-                .build(),
-        )
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                old: Int,
+                                new: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
         val db = helper!!.writableDatabase
         db.execSQL(INSERT_BUFFER)
 
         MIGRATION_7_8.migrate(db)
 
-        db.query(
-            "SELECT displayName, muted, readMarkerTime, localUnreadFloorTime FROM buffers WHERE id = 1",
-        ).use { cursor ->
-            assertTrue(cursor.moveToFirst())
-            assertEquals("#motd", cursor.getString(0))
-            assertEquals(1, cursor.getInt(1))
-            assertEquals(123L, cursor.getLong(2))
-            assertNull(cursor.getString(3))
-        }
+        db
+            .query(
+                "SELECT displayName, muted, readMarkerTime, localUnreadFloorTime FROM buffers WHERE id = 1",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("#motd", cursor.getString(0))
+                assertEquals(1, cursor.getInt(1))
+                assertEquals(123L, cursor.getLong(2))
+                assertNull(cursor.getString(3))
+            }
     }
 
     private companion object {

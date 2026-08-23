@@ -22,7 +22,10 @@ interface HistoryGapFiller {
     val fillsInFlight: StateFlow<Set<Long>>
 
     /** Fill [gapId]. Each call grants one fresh page budget, whether a tap or the timeline asked. */
-    suspend fun fillGap(roomId: RoomId, gapId: Long): GapFillProgress
+    suspend fun fillGap(
+        roomId: RoomId,
+        gapId: Long,
+    ): GapFillProgress
 }
 
 /**
@@ -54,5 +57,9 @@ enum class GapFillProgress {
 /** No history transport at all: nothing ever fills, so every seam keeps the state it already has. */
 object NoopHistoryGapFiller : HistoryGapFiller {
     override val fillsInFlight: StateFlow<Set<Long>> = MutableStateFlow(emptySet())
-    override suspend fun fillGap(roomId: RoomId, gapId: Long) = GapFillProgress.MOVED
+
+    override suspend fun fillGap(
+        roomId: RoomId,
+        gapId: Long,
+    ) = GapFillProgress.MOVED
 }

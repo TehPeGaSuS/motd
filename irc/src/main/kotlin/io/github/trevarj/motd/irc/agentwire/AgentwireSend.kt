@@ -22,8 +22,9 @@ suspend fun IrcClient.sendAgentwire(
     val previewBytes = preview?.toByteArray(Charsets.UTF_8)?.size ?: 0
     require(previewBytes <= 4_096) { "Agentwire preview exceeds 4096 UTF-8 bytes" }
     envelope.data?.get("content")?.let { content ->
-        val text = (content as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
-            ?: throw IllegalArgumentException("Agentwire content must be a string")
+        val text =
+            (content as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+                ?: throw IllegalArgumentException("Agentwire content must be a string")
         require(text.toByteArray(Charsets.UTF_8).size <= AGENTWIRE_MAX_CONTENT_BYTES) {
             "Agentwire content exceeds 64 KiB"
         }
@@ -33,14 +34,15 @@ suspend fun IrcClient.sendAgentwire(
     val messages = ArrayList<IrcMessage>()
     values.forEachIndexed { index, value ->
         if (index == 0 && preview != null) {
-            val plan = planChatMessage(
-                target = target,
-                text = preview,
-                replyToMsgid = null,
-                label = null,
-                multilineLimits = multilineLimits(ready.caps),
-                protocolTags = mapOf(AGENTWIRE_TAG to value),
-            ) ?: return false
+            val plan =
+                planChatMessage(
+                    target = target,
+                    text = preview,
+                    replyToMsgid = null,
+                    label = null,
+                    multilineLimits = multilineLimits(ready.caps),
+                    protocolTags = mapOf(AGENTWIRE_TAG to value),
+                ) ?: return false
             when (plan) {
                 is MultilineSendPlan.Single -> {
                     if (plan.message.params.any { value -> value.any { it == '\r' || it == '\n' } }) return false
@@ -48,6 +50,7 @@ suspend fun IrcClient.sendAgentwire(
                     if (previewBytes > 400) return false
                     messages += plan.message
                 }
+
                 is MultilineSendPlan.Batch -> {
                     messages += plan.opening
                     messages += plan.components
@@ -55,20 +58,21 @@ suspend fun IrcClient.sendAgentwire(
                 }
             }
         } else {
-            messages += IrcMessage(
-                tags = mapOf(AGENTWIRE_TAG to value),
-                command = "TAGMSG",
-                params = listOf(target),
-            )
+            messages +=
+                IrcMessage(
+                    tags = mapOf(AGENTWIRE_TAG to value),
+                    command = "TAGMSG",
+                    params = listOf(target),
+                )
         }
     }
     return sendAtomicallyIfConnected(messages)
 }
 
-fun AgentwireEnvelope.readablePreview(): String? = when (kind) {
-    "turn.prompt", "turn.steer" -> data?.get("content").stringContent()
-    else -> null
-}
+fun AgentwireEnvelope.readablePreview(): String? =
+    when (kind) {
+        "turn.prompt", "turn.steer" -> data?.get("content").stringContent()
+        else -> null
+    }
 
-private fun kotlinx.serialization.json.JsonElement?.stringContent(): String? =
-    (this as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+private fun kotlinx.serialization.json.JsonElement?.stringContent(): String? = (this as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull

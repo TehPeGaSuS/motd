@@ -49,14 +49,33 @@ interface AudioPlaybackController {
     val state: StateFlow<AudioPlaybackState>
     val waveforms: StateFlow<Map<String, AudioWaveform>>
     val cacheStatuses: StateFlow<Map<String, AudioCacheStatus>>
-    fun play(request: AudioPlaybackRequest, speed: Float = 1f)
+
+    fun play(
+        request: AudioPlaybackRequest,
+        speed: Float = 1f,
+    )
+
     fun toggle(request: AudioPlaybackRequest)
+
     fun inspectCache(attachment: AudioAttachment)
+
     fun toggleActive()
+
     fun pause()
+
     fun dismiss(itemId: String)
+
     fun cancelLoading()
+
     fun retryActive()
-    fun seekTo(itemId: String, positionMs: Long)
-    fun setSpeed(itemId: String, speed: Float)
+
+    fun seekTo(
+        itemId: String,
+        positionMs: Long,
+    )
+
+    fun setSpeed(
+        itemId: String,
+        speed: Float,
+    )
 }

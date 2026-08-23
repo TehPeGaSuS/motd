@@ -187,7 +187,9 @@ fun SendSpikeHarness(modifier: Modifier = Modifier) {
 }
 
 /** The two things on trial. */
-enum class SpikeVariant(val label: String) {
+enum class SpikeVariant(
+    val label: String,
+) {
     SHARED_ELEMENT("A shared element"),
     RUNWAY_PROBE("B animateItem"),
 }
@@ -224,20 +226,31 @@ private const val HandoffMarginMs = 150
 private const val MatchStartTimeoutMs = 250L
 
 /** Where a bubble came from; `fromSelf` bubbles are the ones a flight can land in. */
-private data class SpikeRow(val id: Long, val text: String, val fromSelf: Boolean)
+private data class SpikeRow(
+    val id: Long,
+    val text: String,
+    val fromSelf: Boolean,
+)
 
 /** One tap in flight. [rowId] is the lazy key, the shared-element key, and the flight's identity. */
-private data class SpikeFlight(val text: String, val rowId: Long)
+private data class SpikeFlight(
+    val text: String,
+    val rowId: Long,
+)
 
 /** Shared-element key. A dedicated type keeps it from colliding with any other key in the tree. */
-private data class SpikeGhostKey(val rowId: Long)
+private data class SpikeGhostKey(
+    val rowId: Long,
+)
 
 /**
  * Plain mutable holder for the newest row's id, so the live-edge re-pin in [SpikeTimeline] can
  * detect a head change during composition without a state backwards write. Mirrors
  * `ChatListTopItemTracker`.
  */
-private class SpikeHeadTracker(var id: Long?)
+private class SpikeHeadTracker(
+    var id: Long?,
+)
 
 /**
  * Everything the harness mutates, in one holder so the surface composables take three parameters
@@ -316,26 +329,27 @@ private class SpikeState {
  * with content above it) rather than a short bottom-packed list, and the timeline reaches the top
  * of the pane so the runway's translation has something for `clipToBounds` to clip.
  */
-private fun seedRows(): List<SpikeRow> = listOf(
-    SpikeRow(18, "otherwise the runway would have nothing to overflow", false),
-    SpikeRow(17, "the seed is long enough to overflow the pane, too", true),
-    SpikeRow(16, "same correction production applies when a message lands", true),
-    SpikeRow(15, "so the bench re-pins index 0 in the same remeasure", false),
-    SpikeRow(14, "which is exactly what a head insert does to it", true),
-    SpikeRow(13, "unless the viewport keeps following the old first key", false),
-    SpikeRow(12, "right above the composer divider, in view", true),
-    SpikeRow(11, "index 0, which reverseLayout draws at the foot", false),
-    SpikeRow(10, "so where does a landing row actually end up", true),
-    SpikeRow(9, "and that is why the runway exists", false),
-    SpikeRow(8, "the row does not exist yet when the bubble takes off", true),
-    SpikeRow(7, "wait, it flies into a row that has not been persisted?", false),
-    SpikeRow(6, "1200ms is the late-target stress case", true),
-    SpikeRow(5, "how long can the gap get", false),
-    SpikeRow(4, "long enough that the ghost has to hold its own", true),
-    SpikeRow(3, "scroll me to check the clip", false),
-    SpikeRow(2, "older rows glide when the list shifts", true),
-    SpikeRow(1, "welcome to the send spike", false),
-)
+private fun seedRows(): List<SpikeRow> =
+    listOf(
+        SpikeRow(18, "otherwise the runway would have nothing to overflow", false),
+        SpikeRow(17, "the seed is long enough to overflow the pane, too", true),
+        SpikeRow(16, "same correction production applies when a message lands", true),
+        SpikeRow(15, "so the bench re-pins index 0 in the same remeasure", false),
+        SpikeRow(14, "which is exactly what a head insert does to it", true),
+        SpikeRow(13, "unless the viewport keeps following the old first key", false),
+        SpikeRow(12, "right above the composer divider, in view", true),
+        SpikeRow(11, "index 0, which reverseLayout draws at the foot", false),
+        SpikeRow(10, "so where does a landing row actually end up", true),
+        SpikeRow(9, "and that is why the runway exists", false),
+        SpikeRow(8, "the row does not exist yet when the bubble takes off", true),
+        SpikeRow(7, "wait, it flies into a row that has not been persisted?", false),
+        SpikeRow(6, "1200ms is the late-target stress case", true),
+        SpikeRow(5, "how long can the gap get", false),
+        SpikeRow(4, "long enough that the ghost has to hold its own", true),
+        SpikeRow(3, "scroll me to check the clip", false),
+        SpikeRow(2, "older rows glide when the list shifts", true),
+        SpikeRow(1, "welcome to the send spike", false),
+    )
 
 /**
  * The tap's lifecycle: hold the ghost for the configured delay, hand the match to the row, then
@@ -356,7 +370,10 @@ private fun seedRows(): List<SpikeRow> = listOf(
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-private fun SpikeFlightDriver(state: SpikeState, sharedScope: SharedTransitionScope?) {
+private fun SpikeFlightDriver(
+    state: SpikeState,
+    sharedScope: SharedTransitionScope?,
+) {
     val flight = state.flight
     LaunchedEffect(flight?.rowId) {
         val current = flight ?: return@LaunchedEffect
@@ -406,11 +423,12 @@ private fun SpikeSurface(
 ) {
     SpikeFlightDriver(state = state, sharedScope = sharedScope)
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .onGloballyPositioned { state.hostOrigin = it.positionInWindow() }
-            .testTag("send_spike_surface"),
+        modifier =
+            modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .onGloballyPositioned { state.hostOrigin = it.positionInWindow() }
+                .testTag("send_spike_surface"),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             SpikeControls(state = state)
@@ -420,11 +438,12 @@ private fun SpikeSurface(
             // vertically: the lazy container already clips its own scrollable area to its bounds,
             // so the only thing a caller-side clip can contain is the runway translation below.
             Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .then(if (state.clipTimeline) Modifier.clipToBounds() else Modifier)
-                    .testTag("send_spike_timeline_pane"),
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .then(if (state.clipTimeline) Modifier.clipToBounds() else Modifier)
+                        .testTag("send_spike_timeline_pane"),
             ) {
                 SpikeTimeline(
                     state = state,
@@ -486,14 +505,16 @@ private fun SpikeTimeline(
     }
     val boundsTransform = rememberSpikeBoundsTransform(state.slowMotion)
     val placementMs = state.scaled(RowPlacementMs)
-    val placementSpec: FiniteAnimationSpec<IntOffset> = remember(placementMs) {
-        tween(durationMillis = placementMs, easing = FastOutSlowInEasing)
-    }
+    val placementSpec: FiniteAnimationSpec<IntOffset> =
+        remember(placementMs) {
+            tween(durationMillis = placementMs, easing = FastOutSlowInEasing)
+        }
     LazyColumn(
         state = state.listState,
-        modifier = modifier
-            .graphicsLayer { translationY = -state.ghostHeight * state.runway.value }
-            .testTag("send_spike_timeline"),
+        modifier =
+            modifier
+                .graphicsLayer { translationY = -state.ghostHeight * state.runway.value }
+                .testTag("send_spike_timeline"),
         reverseLayout = true,
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
@@ -501,34 +522,37 @@ private fun SpikeTimeline(
             if (sharedScope != null && row.id == flightRowId) {
                 // Variant A's landing endpoint. It composes late -- that is the whole point -- and
                 // is born already visible, taking the match over from the ghost in the same frame.
-                val sharedState = with(sharedScope) {
-                    rememberSharedContentState(key = SpikeGhostKey(row.id))
-                }
+                val sharedState =
+                    with(sharedScope) {
+                        rememberSharedContentState(key = SpikeGhostKey(row.id))
+                    }
                 SpikeBubble(
                     text = row.text,
                     fromSelf = row.fromSelf,
-                    modifier = with(sharedScope) {
-                        Modifier.sharedElementWithCallerManagedVisibility(
-                            sharedContentState = sharedState,
-                            visible = true,
-                            boundsTransform = boundsTransform,
-                            renderInOverlayDuringTransition = state.renderInOverlay,
-                        )
-                    },
+                    modifier =
+                        with(sharedScope) {
+                            Modifier.sharedElementWithCallerManagedVisibility(
+                                sharedContentState = sharedState,
+                                visible = true,
+                                boundsTransform = boundsTransform,
+                                renderInOverlayDuringTransition = state.renderInOverlay,
+                            )
+                        },
                 )
             } else {
                 SpikeBubble(
                     text = row.text,
                     fromSelf = row.fromSelf,
-                    modifier = if (state.variant == SpikeVariant.RUNWAY_PROBE) {
-                        Modifier.animateItem(
-                            fadeInSpec = null,
-                            placementSpec = placementSpec,
-                            fadeOutSpec = null,
-                        )
-                    } else {
-                        Modifier
-                    },
+                    modifier =
+                        if (state.variant == SpikeVariant.RUNWAY_PROBE) {
+                            Modifier.animateItem(
+                                fadeInSpec = null,
+                                placementSpec = placementSpec,
+                                fadeOutSpec = null,
+                            )
+                        } else {
+                            Modifier
+                        },
                 )
             }
         }
@@ -562,39 +586,41 @@ private fun BoxScope.SpikeGhost(
     }
     val boundsTransform = rememberSpikeBoundsTransform(state.slowMotion)
     Box(
-        modifier = Modifier
-            .align(Alignment.TopStart)
-            .fillMaxWidth()
-            .offset {
-                val fieldTop = state.composerField?.top ?: return@offset IntOffset.Zero
-                val top = fieldTop - state.hostOrigin.y - state.ghostHeight * lift.value
-                IntOffset(0, top.roundToInt())
-            }
-            .onSizeChanged { state.ghostHeight = it.height.toFloat() }
-            .testTag("send_spike_ghost"),
+        modifier =
+            Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .offset {
+                    val fieldTop = state.composerField?.top ?: return@offset IntOffset.Zero
+                    val top = fieldTop - state.hostOrigin.y - state.ghostHeight * lift.value
+                    IntOffset(0, top.roundToInt())
+                }.onSizeChanged { state.ghostHeight = it.height.toFloat() }
+                .testTag("send_spike_ghost"),
     ) {
-        val bubbleModifier = if (sharedScope != null) {
-            val sharedState = with(sharedScope) {
-                rememberSharedContentState(key = SpikeGhostKey(flight.rowId))
-            }
-            with(sharedScope) {
-                Modifier.sharedElementWithCallerManagedVisibility(
-                    sharedContentState = sharedState,
-                    visible = state.ghostVisible,
-                    boundsTransform = boundsTransform,
-                    renderInOverlayDuringTransition = state.renderInOverlay,
+        val bubbleModifier =
+            if (sharedScope != null) {
+                val sharedState =
+                    with(sharedScope) {
+                        rememberSharedContentState(key = SpikeGhostKey(flight.rowId))
+                    }
+                with(sharedScope) {
+                    Modifier.sharedElementWithCallerManagedVisibility(
+                        sharedContentState = sharedState,
+                        visible = state.ghostVisible,
+                        boundsTransform = boundsTransform,
+                        renderInOverlayDuringTransition = state.renderInOverlay,
+                    )
+                }
+            } else {
+                // Variant B's handoff: nothing animates the ghost into the row, it just leaves. Kept
+                // inside this branch so variant A never runs a stray animation for a value it ignores.
+                val ghostAlpha by animateFloatAsState(
+                    targetValue = if (state.ghostVisible) 1f else 0f,
+                    animationSpec = tween(durationMillis = state.scaled(GhostFadeMs)),
+                    label = "spike_ghost_alpha",
                 )
+                Modifier.graphicsLayer { alpha = ghostAlpha }
             }
-        } else {
-            // Variant B's handoff: nothing animates the ghost into the row, it just leaves. Kept
-            // inside this branch so variant A never runs a stray animation for a value it ignores.
-            val ghostAlpha by animateFloatAsState(
-                targetValue = if (state.ghostVisible) 1f else 0f,
-                animationSpec = tween(durationMillis = state.scaled(GhostFadeMs)),
-                label = "spike_ghost_alpha",
-            )
-            Modifier.graphicsLayer { alpha = ghostAlpha }
-        }
         SpikeBubble(text = flight.text, fromSelf = true, modifier = bubbleModifier)
     }
 }
@@ -620,20 +646,26 @@ private fun rememberSpikeBoundsTransform(slowMotion: Int): BoundsTransform {
  * bubble is the shared element's endpoint.
  */
 @Composable
-private fun SpikeBubble(text: String, fromSelf: Boolean, modifier: Modifier = Modifier) {
+private fun SpikeBubble(
+    text: String,
+    fromSelf: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val colors = MaterialTheme.colorScheme
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 3.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 3.dp),
         horizontalArrangement = if (fromSelf) Arrangement.End else Arrangement.Start,
     ) {
         Box(
-            modifier = modifier
-                .widthIn(max = 280.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(if (fromSelf) colors.primaryContainer else colors.surfaceVariant)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier =
+                modifier
+                    .widthIn(max = 280.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(if (fromSelf) colors.primaryContainer else colors.surfaceVariant)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             Text(
                 text = text,
@@ -646,26 +678,31 @@ private fun SpikeBubble(text: String, fromSelf: Boolean, modifier: Modifier = Mo
 
 /** The fake composer. Its window rect is where every ghost takes off from. */
 @Composable
-private fun SpikeComposer(state: SpikeState, modifier: Modifier = Modifier) {
+private fun SpikeComposer(
+    state: SpikeState,
+    modifier: Modifier = Modifier,
+) {
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         OutlinedTextField(
             value = state.draft,
             onValueChange = { state.draft = it },
-            modifier = Modifier
-                .weight(1f)
-                .onGloballyPositioned {
-                    state.composerField = Rect(
-                        offset = it.positionInWindow(),
-                        size = Size(it.size.width.toFloat(), it.size.height.toFloat()),
-                    )
-                }
-                .testTag("send_spike_field"),
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .onGloballyPositioned {
+                        state.composerField =
+                            Rect(
+                                offset = it.positionInWindow(),
+                                size = Size(it.size.width.toFloat(), it.size.height.toFloat()),
+                            )
+                    }.testTag("send_spike_field"),
             placeholder = { Text("Message") },
             maxLines = 4,
         )
@@ -681,7 +718,10 @@ private fun SpikeComposer(state: SpikeState, modifier: Modifier = Modifier) {
 
 /** The bench controls. See the file KDoc for what each row is for. */
 @Composable
-private fun SpikeControls(state: SpikeState, modifier: Modifier = Modifier) {
+private fun SpikeControls(
+    state: SpikeState,
+    modifier: Modifier = Modifier,
+) {
     val idle = state.flight == null
     Column(
         modifier = modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -745,7 +785,10 @@ private fun SpikeControls(state: SpikeState, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SpikeChipRow(label: String, content: @Composable () -> Unit) {
+private fun SpikeChipRow(
+    label: String,
+    content: @Composable () -> Unit,
+) {
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically,

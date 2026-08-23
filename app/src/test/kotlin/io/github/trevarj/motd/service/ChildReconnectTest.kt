@@ -14,7 +14,6 @@ import org.junit.Test
  * interrupts its bouncer connection.
  */
 class ChildReconnectTest {
-
     private fun net(
         id: Long,
         autoConnect: Boolean = true,
@@ -41,7 +40,9 @@ class ChildReconnectTest {
         assertEquals(
             emptySet<Long>(),
             childrenNeedingReconnect(
-                1L, listOf(root, childA, childB), emptyMap(),
+                1L,
+                listOf(root, childA, childB),
+                emptyMap(),
                 actorAlive = mapOf(2L to true, 3L to true),
                 states = mapOf(2L to ready(), 3L to ready()),
             ),
@@ -55,7 +56,9 @@ class ChildReconnectTest {
         assertEquals(
             emptySet<Long>(),
             childrenNeedingReconnect(
-                1L, listOf(connecting, registering), emptyMap(),
+                1L,
+                listOf(connecting, registering),
+                emptyMap(),
                 actorAlive = mapOf(2L to true, 3L to true),
                 states = mapOf(2L to IrcClientState.Connecting, 3L to IrcClientState.Registering),
             ),
@@ -69,7 +72,9 @@ class ChildReconnectTest {
         assertEquals(
             setOf(2L),
             childrenNeedingReconnect(
-                1L, listOf(ownChild, healthyChild), emptyMap(),
+                1L,
+                listOf(ownChild, healthyChild),
+                emptyMap(),
                 actorAlive = mapOf(2L to false, 3L to true),
                 states = mapOf(2L to IrcClientState.Failed("root was down", fatal = false), 3L to ready()),
             ),

@@ -14,7 +14,10 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 
 /** A canned moderation reason. [key] only names the test tag; [label] is the text that is sent. */
-enum class ReasonPreset(val key: String, private val label: Int) {
+enum class ReasonPreset(
+    val key: String,
+    private val label: Int,
+) {
     SPAM("spam", R.string.moderation_reason_spam),
     FLOODING("flooding", R.string.moderation_reason_flooding),
     DISRUPTIVE("disruptive", R.string.moderation_reason_disruptive),

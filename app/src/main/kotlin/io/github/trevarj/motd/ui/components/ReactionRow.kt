@@ -14,14 +14,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,12 +49,16 @@ import com.airbnb.lottie.compose.rememberLottieComposition
 import com.airbnb.lottie.model.KeyPath
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
-import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.lottieFillColor
 
 /** One aggregated reaction: an emoji, its count, and whether the current user reacted. */
-data class ReactionChip(val emoji: String, val count: Int, val mine: Boolean)
+data class ReactionChip(
+    val emoji: String,
+    val count: Int,
+    val mine: Boolean,
+)
 
 /**
  * How long [R.raw.reaction_burst] runs at an unscaled clock: 24 frames at the shared 60fps timebase.
@@ -81,12 +85,13 @@ private const val REACTION_POP_DURATION_MS = 280
  * gesture, not part of the app's shared vocabulary. Being an ordinary Compose spec, the platform
  * animator duration scale still applies to it for free.
  */
-private val ReactionChipPop: FiniteAnimationSpec<Float> = keyframes {
-    durationMillis = REACTION_POP_DURATION_MS
-    1f at 0
-    1.18f at 110
-    1f at REACTION_POP_DURATION_MS
-}
+private val ReactionChipPop: FiniteAnimationSpec<Float> =
+    keyframes {
+        durationMillis = REACTION_POP_DURATION_MS
+        1f at 0
+        1.18f at 110
+        1f at REACTION_POP_DURATION_MS
+    }
 
 /**
  * Whether a chip owes a burst.
@@ -124,9 +129,10 @@ fun ReactionRow(
     FlowRow(
         // Ease chip add/remove and wrap-line growth; rows scrolled in render at final size (no
         // first-layout animation). Tight top gap so chips sit snugly under the message body.
-        modifier = modifier
-            .animateContentSize(animationSpec = MotdMotion.contentSize)
-            .padding(top = 2.dp),
+        modifier =
+            modifier
+                .animateContentSize(animationSpec = MotdMotion.contentSize)
+                .padding(top = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -139,11 +145,23 @@ fun ReactionRow(
 }
 
 @Composable
-private fun ReactionChipView(chip: ReactionChip, isSelf: Boolean, onClick: () -> Unit) {
-    val bg = if (chip.mine) MaterialTheme.colorScheme.primaryContainer
-    else MaterialTheme.colorScheme.surfaceContainerHighest
-    val fg = if (chip.mine) MaterialTheme.colorScheme.onPrimaryContainer
-    else MaterialTheme.colorScheme.onSurfaceVariant
+private fun ReactionChipView(
+    chip: ReactionChip,
+    isSelf: Boolean,
+    onClick: () -> Unit,
+) {
+    val bg =
+        if (chip.mine) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        }
+    val fg =
+        if (chip.mine) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
 
     val motionEnabled = LocalLottieMotionEnabled.current
     var previousCount by remember { mutableStateOf<Int?>(null) }
@@ -168,19 +186,24 @@ private fun ReactionChipView(chip: ReactionChip, isSelf: Boolean, onClick: () ->
             // Compact chip: a fixed short height keeps reactions snug under the message instead of
             // the 48dp minimumInteractiveComponentSize that ballooned the row; the tap target stays
             // usable via the chip's own horizontal/vertical padding.
-            modifier = Modifier
-                .testTag("chat_reaction_chip_${chip.emoji}")
-                // Paint-only scale: layout keeps the settled size throughout the overshoot.
-                .graphicsLayer { scaleX = pop.value; scaleY = pop.value }
-                .wrapContentWidth()
-                .heightIn(min = 24.dp)
-                .background(bg, RoundedCornerShape(50))
-                .then(
-                    if (chip.mine) Modifier.border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(50))
-                    else Modifier,
-                )
-                .clickable { onClick() }
-                .padding(horizontal = 8.dp, vertical = 2.dp),
+            modifier =
+                Modifier
+                    .testTag("chat_reaction_chip_${chip.emoji}")
+                    // Paint-only scale: layout keeps the settled size throughout the overshoot.
+                    .graphicsLayer {
+                        scaleX = pop.value
+                        scaleY = pop.value
+                    }.wrapContentWidth()
+                    .heightIn(min = 24.dp)
+                    .background(bg, RoundedCornerShape(50))
+                    .then(
+                        if (chip.mine) {
+                            Modifier.border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(50))
+                        } else {
+                            Modifier
+                        },
+                    ).clickable { onClick() }
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -219,25 +242,28 @@ private fun ReactionChipView(chip: ReactionChip, isSelf: Boolean, onClick: () ->
 @Composable
 private fun BoxScope.ReactionBurst(onFinished: () -> Unit) {
     val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.reaction_burst))
-    val animation = animateLottieCompositionAsState(
-        composition = composition,
-        isPlaying = true,
-        iterations = 1,
-        restartOnPlay = false,
-    )
+    val animation =
+        animateLottieCompositionAsState(
+            composition = composition,
+            isPlaying = true,
+            iterations = 1,
+            restartOnPlay = false,
+        )
     // Unmount once the sparks are spent: a chip that burst should not keep a LottieDrawable alive
     // for the rest of the timeline's life.
     LaunchedEffect(animation.isAtEnd) { if (animation.isAtEnd) onFinished() }
     val sparkColor = MaterialTheme.colorScheme.primary.toArgb()
-    val dynamicProperties = remember(sparkColor) {
-        // Built directly rather than through rememberLottieDynamicProperty, which keys on the
-        // vararg keypath array's identity and so re-resolves the keypath on every pass.
-        LottieDynamicProperties(listOf(lottieFillColor(sparkColor, KeyPath("burst", "**"))))
-    }
+    val dynamicProperties =
+        remember(sparkColor) {
+            // Built directly rather than through rememberLottieDynamicProperty, which keys on the
+            // vararg keypath array's identity and so re-resolves the keypath on every pass.
+            LottieDynamicProperties(listOf(lottieFillColor(sparkColor, KeyPath("burst", "**"))))
+        }
     Box(
-        modifier = Modifier
-            .matchParentSize()
-            .wrapContentSize(align = Alignment.Center, unbounded = true),
+        modifier =
+            Modifier
+                .matchParentSize()
+                .wrapContentSize(align = Alignment.Center, unbounded = true),
     ) {
         LottieAnimation(
             composition = composition,
@@ -253,11 +279,12 @@ private fun BoxScope.ReactionBurst(onFinished: () -> Unit) {
 private fun ReactionRowPreview() {
     MotdTheme {
         ReactionRow(
-            reactions = listOf(
-                ReactionChip("👍", 3, mine = true),
-                ReactionChip("❤️", 1, mine = false),
-                ReactionChip("😂", 5, mine = false),
-            ),
+            reactions =
+                listOf(
+                    ReactionChip("👍", 3, mine = true),
+                    ReactionChip("❤️", 1, mine = false),
+                    ReactionChip("😂", 5, mine = false),
+                ),
             onReact = {},
         )
     }

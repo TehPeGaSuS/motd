@@ -12,20 +12,28 @@ class SharePickerModelsTest {
         type: BufferType = BufferType.CHANNEL,
         archived: Boolean = false,
     ) = ChatListRow(
-        bufferId = id, networkId = 1, networkName = "Libera",
-        displayName = name, type = type,
-        pinned = false, muted = false,
-        lastMessageText = null, lastMessageSender = null, lastMessageTime = null,
-        unreadCount = 0, mentionCount = 0,
+        bufferId = id,
+        networkId = 1,
+        networkName = "Libera",
+        displayName = name,
+        type = type,
+        pinned = false,
+        muted = false,
+        lastMessageText = null,
+        lastMessageSender = null,
+        lastMessageTime = null,
+        unreadCount = 0,
+        mentionCount = 0,
         archived = archived,
     )
 
-    private val rows = listOf(
-        row(1, "#motd"),
-        row(2, "Alice", BufferType.QUERY),
-        row(3, "#archived", archived = true),
-        row(4, "irc.example.org", BufferType.SERVER),
-    )
+    private val rows =
+        listOf(
+            row(1, "#motd"),
+            row(2, "Alice", BufferType.QUERY),
+            row(3, "#archived", archived = true),
+            row(4, "irc.example.org", BufferType.SERVER),
+        )
 
     @Test fun blankQueryKeepsEveryEligibleRowInOrder() {
         assertEquals(listOf(1L, 2L), filterShareTargets(rows, "").map { it.bufferId })

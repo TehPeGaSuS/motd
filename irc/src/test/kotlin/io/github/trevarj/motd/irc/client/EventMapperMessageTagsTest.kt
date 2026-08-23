@@ -13,23 +13,26 @@ class EventMapperMessageTagsTest {
 
     @Test
     fun `legacy reply tag maps onto chat message`() {
-        val event = mapper.map(
-            IrcMessage.parse("@draft/reply=parent :alice!u@h PRIVMSG #chan :hello"),
-        ) as IrcEvent.ChatMessage
+        val event =
+            mapper.map(
+                IrcMessage.parse("@draft/reply=parent :alice!u@h PRIVMSG #chan :hello"),
+            ) as IrcEvent.ChatMessage
 
         assertEquals("parent", event.replyToMsgid)
     }
 
     @Test
     fun `message context distinguishes tagged time from local fallback`() {
-        val tagged = mapper.map(
-            IrcMessage.parse(
-                "@time=2026-07-16T19:09:19.000Z :alice!u@h PRIVMSG #chan :tagged",
-            ),
-        ) as IrcEvent.ChatMessage
-        val local = mapper.map(
-            IrcMessage.parse(":alice!u@h PRIVMSG #chan :local"),
-        ) as IrcEvent.ChatMessage
+        val tagged =
+            mapper.map(
+                IrcMessage.parse(
+                    "@time=2026-07-16T19:09:19.000Z :alice!u@h PRIVMSG #chan :tagged",
+                ),
+            ) as IrcEvent.ChatMessage
+        val local =
+            mapper.map(
+                IrcMessage.parse(":alice!u@h PRIVMSG #chan :local"),
+            ) as IrcEvent.ChatMessage
 
         assertEquals(ServerTimeSource.TAG, tagged.ctx.serverTimeSource)
         assertEquals(ServerTimeSource.LOCAL, local.ctx.serverTimeSource)
@@ -37,9 +40,10 @@ class EventMapperMessageTagsTest {
 
     @Test
     fun `reaction aliases map onto tag message`() {
-        val event = mapper.map(
-            IrcMessage.parse("@+react=👍;+reply=parent :alice!u@h TAGMSG #chan"),
-        ) as IrcEvent.TagMessage
+        val event =
+            mapper.map(
+                IrcMessage.parse("@+react=👍;+reply=parent :alice!u@h TAGMSG #chan"),
+            ) as IrcEvent.TagMessage
 
         assertEquals("👍", event.reactEmoji)
         assertEquals("parent", event.reactTargetMsgid)
@@ -47,18 +51,20 @@ class EventMapperMessageTagsTest {
 
     @Test
     fun `unreaction aliases remain raw mutations`() {
-        val event = mapper.map(
-            IrcMessage.parse("@+unreact=👍;+reply=parent :alice!u@h TAGMSG #chan"),
-        )
+        val event =
+            mapper.map(
+                IrcMessage.parse("@+unreact=👍;+reply=parent :alice!u@h TAGMSG #chan"),
+            )
 
         assertTrue(event is IrcEvent.Raw)
     }
 
     @Test
     fun `standard replies map to typed events`() {
-        val event = mapper.map(
-            IrcMessage.parse("@label=attempt-1 :irc.example FAIL PRIVMSG CANNOTSENDTOCHAN #chan :Cannot send"),
-        ) as IrcEvent.StandardReply
+        val event =
+            mapper.map(
+                IrcMessage.parse("@label=attempt-1 :irc.example FAIL PRIVMSG CANNOTSENDTOCHAN #chan :Cannot send"),
+            ) as IrcEvent.StandardReply
 
         assertEquals(IrcEvent.StandardReplySeverity.FAIL, event.severity)
         assertEquals("PRIVMSG", event.commandName)
@@ -70,9 +76,10 @@ class EventMapperMessageTagsTest {
 
     @Test
     fun `channel rename maps to typed event`() {
-        val event = mapper.map(
-            IrcMessage.parse(":oper!u@h RENAME #old #new :moving"),
-        ) as IrcEvent.ChannelRenamed
+        val event =
+            mapper.map(
+                IrcMessage.parse(":oper!u@h RENAME #old #new :moving"),
+            ) as IrcEvent.ChannelRenamed
 
         assertEquals("oper", event.actor)
         assertEquals("#old", event.oldName)

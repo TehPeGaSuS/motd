@@ -13,7 +13,10 @@ private const val OP_GLYPHS = "~&@"
  * Halfop is intentionally excluded (Confirmed decision #7): only '~', '&', '@' grant moderation.
  * A glyph not present in [prefixOrder] never qualifies.
  */
-fun canModerate(ownPrefixes: String, prefixOrder: String): Boolean {
+fun canModerate(
+    ownPrefixes: String,
+    prefixOrder: String,
+): Boolean {
     val order = prefixOrder.ifEmpty { DEFAULT_PREFIX_ORDER }
     return ownPrefixes.any { it in OP_GLYPHS && order.indexOf(it) >= 0 }
 }
@@ -34,16 +37,36 @@ enum class BanScope { NICK, HOST, CUSTOM }
  * The exact mask a ban/exception dialog will send, so the preview and the wire cannot diverge.
  * Blank means "nothing to send yet" (no member chosen, address not resolved, empty custom text).
  */
-fun composeBanMask(scope: BanScope, nick: String?, host: String?, custom: String): String =
+fun composeBanMask(
+    scope: BanScope,
+    nick: String?,
+    host: String?,
+    custom: String,
+): String =
     when (scope) {
-        BanScope.NICK -> nick?.trim()?.takeIf(String::isNotBlank)?.let(::banMask).orEmpty()
-        BanScope.HOST -> host?.trim()?.takeIf(String::isNotBlank)?.let(::hostMask).orEmpty()
-        BanScope.CUSTOM -> custom.trim()
+        BanScope.NICK -> {
+            nick
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?.let(::banMask)
+                .orEmpty()
+        }
+
+        BanScope.HOST -> {
+            host
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?.let(::hostMask)
+                .orEmpty()
+        }
+
+        BanScope.CUSTOM -> {
+            custom.trim()
+        }
     }
 
 /**
  * Host portion of a cached `user@host` hostmask, or null when it carries no host.
  * Used as the second lookup step before falling back to a labeled WHOIS.
  */
-fun hostFromUserHost(userHost: String?): String? =
-    userHost?.substringAfter('@', "")?.trim()?.takeIf { it.isNotBlank() && it != userHost.trim() }
+fun hostFromUserHost(userHost: String?): String? = userHost?.substringAfter('@', "")?.trim()?.takeIf { it.isNotBlank() && it != userHost.trim() }

@@ -7,7 +7,8 @@ import androidx.test.core.app.ApplicationProvider
 // Shared helpers for Robolectric in-memory DB tests.
 internal fun inMemoryDb(): MotdDatabase {
     val context = ApplicationProvider.getApplicationContext<Context>()
-    return Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
+    return Room
+        .inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
         .allowMainThreadQueries()
         .build()
 }

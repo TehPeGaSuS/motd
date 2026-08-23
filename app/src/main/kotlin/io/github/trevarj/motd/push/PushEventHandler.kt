@@ -3,8 +3,8 @@ package io.github.trevarj.motd.push
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.EventMapper
 import io.github.trevarj.motd.irc.event.IrcEvent
-import io.github.trevarj.motd.irc.proto.IrcParseException
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.irc.proto.IrcParseException
 import io.github.trevarj.motd.irc.proto.Isupport
 import io.github.trevarj.motd.service.IrcEventSink
 import javax.inject.Inject
@@ -50,27 +50,29 @@ class PushEventHandler(
         diagnostics.record("push", "payload_received") {
             mapOf("network_id" to networkId, "bytes" to body.size)
         }
-        val plaintext = if (alreadyDecrypted) {
-            body
-        } else {
-            runCatching { crypto.decrypt(body, keys) }
-                .getOrElse {
-                    diagnostics.record("push", "decrypt_failed") { mapOf("network_id" to networkId) }
-                    healthStore.warning(networkId, "PAYLOAD_DECRYPT_FAILED")
-                    return null
-                }
-        }
-        val line = String(plaintext, Charsets.UTF_8)
-        val msg = runCatching { IrcMessage.parse(line) }
-            .getOrElse {
-                if (it is IrcParseException) {
-                    diagnostics.record("push", "parse_failed") { mapOf("network_id" to networkId) }
-                    healthStore.warning(networkId, "PAYLOAD_INVALID")
-                    return null
-                } else {
-                    throw it
-                }
+        val plaintext =
+            if (alreadyDecrypted) {
+                body
+            } else {
+                runCatching { crypto.decrypt(body, keys) }
+                    .getOrElse {
+                        diagnostics.record("push", "decrypt_failed") { mapOf("network_id" to networkId) }
+                        healthStore.warning(networkId, "PAYLOAD_DECRYPT_FAILED")
+                        return null
+                    }
             }
+        val line = String(plaintext, Charsets.UTF_8)
+        val msg =
+            runCatching { IrcMessage.parse(line) }
+                .getOrElse {
+                    if (it is IrcParseException) {
+                        diagnostics.record("push", "parse_failed") { mapOf("network_id" to networkId) }
+                        healthStore.warning(networkId, "PAYLOAD_INVALID")
+                        return null
+                    } else {
+                        throw it
+                    }
+                }
         if (isRegistrationProbe(msg)) {
             diagnostics.record("push", "registration_probe") { mapOf("network_id" to networkId) }
             healthStore.probeDelivered(networkId)
@@ -119,7 +121,10 @@ class PushEventHandler(
  * (the RFC vector itself is exercised directly against [WebPushCrypto] in WebPushCryptoTest).
  */
 fun interface WebPushCryptoFacade {
-    fun decrypt(body: ByteArray, keys: WebPushCrypto.KeyMaterial): ByteArray
+    fun decrypt(
+        body: ByteArray,
+        keys: WebPushCrypto.KeyMaterial,
+    ): ByteArray
 
     companion object {
         val Default = WebPushCryptoFacade { body, keys -> WebPushCrypto.decrypt(body, keys) }

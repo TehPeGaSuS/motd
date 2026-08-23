@@ -108,14 +108,21 @@ object WebPushCrypto {
 
     // --- HKDF (RFC 5869) over HmacSHA256 ------------------------------------
 
-    private fun hkdfExtract(salt: ByteArray, ikm: ByteArray): ByteArray {
+    private fun hkdfExtract(
+        salt: ByteArray,
+        ikm: ByteArray,
+    ): ByteArray {
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(salt, "HmacSHA256"))
         return mac.doFinal(ikm)
     }
 
     /** HKDF-Expand for outputs <= 32 bytes (a single HMAC block; sufficient for Web Push). */
-    private fun hkdfExpand(prk: ByteArray, info: ByteArray, length: Int): ByteArray {
+    private fun hkdfExpand(
+        prk: ByteArray,
+        info: ByteArray,
+        length: Int,
+    ): ByteArray {
         require(length in 1..32) { "hkdfExpand length must be 1..32, was $length" }
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(prk, "HmacSHA256"))
@@ -125,12 +132,13 @@ object WebPushCrypto {
     }
 
     /** `"Content-Encoding: <coding>" || 0x00` info string (RFC 8188 §2.3). */
-    private fun contentEncodingInfo(coding: String): ByteArray =
-        concat("Content-Encoding: $coding".toByteArray(Charsets.US_ASCII), byteArrayOf(0x00))
+    private fun contentEncodingInfo(coding: String): ByteArray = concat("Content-Encoding: $coding".toByteArray(Charsets.US_ASCII), byteArrayOf(0x00))
 
     /** `"WebPush: info" || 0x00 || ua_public || as_public` (RFC 8291 §3.4). */
-    private fun keyCombiningInfo(uaPublic: ByteArray, asPublic: ByteArray): ByteArray =
-        concat("WebPush: info".toByteArray(Charsets.US_ASCII), byteArrayOf(0x00), uaPublic, asPublic)
+    private fun keyCombiningInfo(
+        uaPublic: ByteArray,
+        asPublic: ByteArray,
+    ): ByteArray = concat("WebPush: info".toByteArray(Charsets.US_ASCII), byteArrayOf(0x00), uaPublic, asPublic)
 
     // --- decryption ----------------------------------------------------------
 
@@ -138,7 +146,10 @@ object WebPushCrypto {
      * Decrypt an RFC 8291 `aes128gcm` Web Push body with the receiver's key material.
      * Returns the padding-stripped plaintext.
      */
-    fun decrypt(body: ByteArray, keys: KeyMaterial): ByteArray {
+    fun decrypt(
+        body: ByteArray,
+        keys: KeyMaterial,
+    ): ByteArray {
         require(body.size >= 21) { "body too short for aes128gcm header" }
         val salt = body.copyOfRange(0, 16)
         // rs (record size, bytes 16..19) is not needed to decrypt a single record.
@@ -158,9 +169,10 @@ object WebPushCrypto {
         ciphertext: ByteArray,
         keys: KeyMaterial,
     ): ByteArray {
-        val (cek, nonce) = deriveKeyAndNonce(salt, asPub, keys.publicUncompressed, keys.auth) {
-            ecdh(privateKeyFromScalar(keys.privateKey), decodeUncompressed(asPub))
-        }
+        val (cek, nonce) =
+            deriveKeyAndNonce(salt, asPub, keys.publicUncompressed, keys.auth) {
+                ecdh(privateKeyFromScalar(keys.privateKey), decodeUncompressed(asPub))
+            }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(cek, "AES"), GCMParameterSpec(GCM_TAG_BITS, nonce))
         return cipher.doFinal(ciphertext)
@@ -193,7 +205,10 @@ object WebPushCrypto {
         return cek to nonce
     }
 
-    private fun ecdh(priv: ECPrivateKey, pub: ECPublicKey): ByteArray {
+    private fun ecdh(
+        priv: ECPrivateKey,
+        pub: ECPublicKey,
+    ): ByteArray {
         val ka = KeyAgreement.getInstance("ECDH")
         ka.init(priv)
         ka.doPhase(pub, true)
@@ -225,9 +240,10 @@ object WebPushCrypto {
     ): ByteArray {
         val senderPub = encodeUncompressed(senderKeys.public as ECPublicKey)
         // uaPublic = receiver, asPublic = sender — same ordering the decrypt side expects.
-        val (cek, nonce) = deriveKeyAndNonce(salt, senderPub, receiverPublic, receiverAuth) {
-            ecdh(senderKeys.private as ECPrivateKey, decodeUncompressed(receiverPublic))
-        }
+        val (cek, nonce) =
+            deriveKeyAndNonce(salt, senderPub, receiverPublic, receiverAuth) {
+                ecdh(senderKeys.private as ECPrivateKey, decodeUncompressed(receiverPublic))
+            }
 
         val padded = concat(plaintext, byteArrayOf(0x02)) // last-record delimiter, no extra zeros
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -256,7 +272,10 @@ object WebPushCrypto {
     // --- byte utils ----------------------------------------------------------
 
     /** Left-pad or trim a two's-complement magnitude to exactly [width] big-endian bytes. */
-    private fun fixedWidth(bytes: ByteArray, width: Int): ByteArray {
+    private fun fixedWidth(
+        bytes: ByteArray,
+        width: Int,
+    ): ByteArray {
         if (bytes.size == width) return bytes
         val out = ByteArray(width)
         if (bytes.size > width) {

@@ -9,8 +9,9 @@ import org.junit.Test
 class ReplyPreviewResolutionTest {
     @Test
     fun `row-local repository result converts to preview without a Paging scan`() {
-        val reply = message(id = 2, msgid = "target", sender = "bob", text = "reply target")
-            .toReplyPreviewData()
+        val reply =
+            message(id = 2, msgid = "target", sender = "bob", text = "reply target")
+                .toReplyPreviewData()
 
         assertEquals("bob", reply?.sender)
         assertEquals("reply target", reply?.text)
@@ -22,7 +23,12 @@ class ReplyPreviewResolutionTest {
         assertNull(reply?.toReplyPreviewData())
     }
 
-    private fun message(id: Long, msgid: String, sender: String, text: String) = MessageEntity(
+    private fun message(
+        id: Long,
+        msgid: String,
+        sender: String,
+        text: String,
+    ) = MessageEntity(
         id = id,
         bufferId = 1,
         msgid = msgid,

@@ -34,10 +34,11 @@ fun PresenceModeSheet(
                 selected = state.override == null,
                 tag = "chat_presence_global",
                 label = stringResource(R.string.chat_presence_use_global),
-                supporting = stringResource(
-                    R.string.chat_presence_global_summary,
-                    stringResource(presenceModeLabel(state.global)),
-                ),
+                supporting =
+                    stringResource(
+                        R.string.chat_presence_global_summary,
+                        stringResource(presenceModeLabel(state.global)),
+                    ),
                 onSelect = onSelect,
             )
             PresenceMode.entries.forEach { mode ->
@@ -64,13 +65,14 @@ private fun PresenceOption(
     onSelect: (PresenceMode?) -> Unit,
 ) {
     ListItem(
-        modifier = Modifier
-            .testTag(tag)
-            .selectable(
-                selected = selected,
-                role = Role.RadioButton,
-                onClick = { onSelect(value) },
-            ),
+        modifier =
+            Modifier
+                .testTag(tag)
+                .selectable(
+                    selected = selected,
+                    role = Role.RadioButton,
+                    onClick = { onSelect(value) },
+                ),
         headlineContent = { Text(label) },
         supportingContent = supporting?.let { text -> { Text(text) } },
         trailingContent = { RadioButton(selected = selected, onClick = null) },
@@ -78,15 +80,17 @@ private fun PresenceOption(
 }
 
 @StringRes
-internal fun presenceModeLabel(mode: PresenceMode): Int = when (mode) {
-    PresenceMode.ALL -> R.string.settings_presence_all
-    PresenceMode.SMART -> R.string.settings_presence_smart
-    PresenceMode.HIDDEN -> R.string.settings_presence_hidden
-}
+internal fun presenceModeLabel(mode: PresenceMode): Int =
+    when (mode) {
+        PresenceMode.ALL -> R.string.settings_presence_all
+        PresenceMode.SMART -> R.string.settings_presence_smart
+        PresenceMode.HIDDEN -> R.string.settings_presence_hidden
+    }
 
 @StringRes
-internal fun presenceModeDescription(mode: PresenceMode): Int = when (mode) {
-    PresenceMode.ALL -> R.string.settings_presence_all_desc
-    PresenceMode.SMART -> R.string.settings_presence_smart_desc
-    PresenceMode.HIDDEN -> R.string.settings_presence_hidden_desc
-}
+internal fun presenceModeDescription(mode: PresenceMode): Int =
+    when (mode) {
+        PresenceMode.ALL -> R.string.settings_presence_all_desc
+        PresenceMode.SMART -> R.string.settings_presence_smart_desc
+        PresenceMode.HIDDEN -> R.string.settings_presence_hidden_desc
+    }

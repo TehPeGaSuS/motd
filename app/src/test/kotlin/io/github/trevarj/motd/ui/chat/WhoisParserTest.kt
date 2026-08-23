@@ -8,20 +8,22 @@ import org.junit.Test
 
 class WhoisParserTest {
     @Test fun cached_whox_fills_missing_whois_fields_without_overriding_newer_values() {
-        val cached = UserEntity(
-            networkId = 1,
-            nick = "alice",
-            username = "cached-user",
-            account = "cached-account",
-            away = true,
-            hostmask = "cached-user@cached.host",
-            realname = "Cached Real",
-        )
-        val merged = mergeUserDetails(
-            "Alice",
-            cached,
-            WhoisInfo(nick = "Alice", username = "fresh-user", host = "fresh.host"),
-        )!!
+        val cached =
+            UserEntity(
+                networkId = 1,
+                nick = "alice",
+                username = "cached-user",
+                account = "cached-account",
+                away = true,
+                hostmask = "cached-user@cached.host",
+                realname = "Cached Real",
+            )
+        val merged =
+            mergeUserDetails(
+                "Alice",
+                cached,
+                WhoisInfo(nick = "Alice", username = "fresh-user", host = "fresh.host"),
+            )!!
         assertEquals("fresh-user", merged.username)
         assertEquals("fresh.host", merged.host)
         assertEquals("cached-account", merged.account)
@@ -32,20 +34,24 @@ class WhoisParserTest {
         assertEquals("cached-user", cachedOnly.username)
         assertEquals("cached.host", cachedOnly.host)
     }
-    private fun numeric(code: String, vararg params: String) =
-        IrcMessage(command = code, params = params.toList())
+
+    private fun numeric(
+        code: String,
+        vararg params: String,
+    ) = IrcMessage(command = code, params = params.toList())
 
     @Test fun folds_full_whois() {
-        val info = parseWhois(
-            listOf(
-                numeric("311", "me", "alice", "aliceuser", "alice.host", "*", "Alice Real"),
-                numeric("312", "me", "alice", "irc.libera.chat", "Libera server"),
-                numeric("319", "me", "alice", "#kotlin @#android +#compose"),
-                numeric("330", "me", "alice", "aliceacct", "is logged in as"),
-                numeric("317", "me", "alice", "42", "1700000000"),
-                numeric("318", "me", "alice", "End of WHOIS"),
-            ),
-        )
+        val info =
+            parseWhois(
+                listOf(
+                    numeric("311", "me", "alice", "aliceuser", "alice.host", "*", "Alice Real"),
+                    numeric("312", "me", "alice", "irc.libera.chat", "Libera server"),
+                    numeric("319", "me", "alice", "#kotlin @#android +#compose"),
+                    numeric("330", "me", "alice", "aliceacct", "is logged in as"),
+                    numeric("317", "me", "alice", "42", "1700000000"),
+                    numeric("318", "me", "alice", "End of WHOIS"),
+                ),
+            )
         requireNotNull(info)
         assertEquals("alice", info.nick)
         assertEquals("aliceuser", info.username)
@@ -58,13 +64,14 @@ class WhoisParserTest {
     }
 
     @Test fun folds_away_message() {
-        val info = parseWhois(
-            listOf(
-                numeric("311", "me", "bob", "bobuser", "bob.host", "*", "Bob"),
-                numeric("301", "me", "bob", "gone fishing"),
-                numeric("318", "me", "bob", "End of WHOIS"),
-            ),
-        )
+        val info =
+            parseWhois(
+                listOf(
+                    numeric("311", "me", "bob", "bobuser", "bob.host", "*", "Bob"),
+                    numeric("301", "me", "bob", "gone fishing"),
+                    numeric("318", "me", "bob", "End of WHOIS"),
+                ),
+            )
         assertEquals("gone fishing", info?.awayMessage)
     }
 

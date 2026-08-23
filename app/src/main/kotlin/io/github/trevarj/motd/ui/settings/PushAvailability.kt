@@ -37,7 +37,10 @@ data class PushAvailability(
     val needsDistributor: Boolean get() = bouncerWebpush && !distributorInstalled
 }
 
-data class PushDistributor(val packageName: String, val label: String)
+data class PushDistributor(
+    val packageName: String,
+    val label: String,
+)
 
 enum class PushSetupStatus {
     CHOOSE_DISTRIBUTOR,
@@ -56,9 +59,11 @@ enum class PushSetupStatus {
  * The default is conservative (push unavailable) so a stub renders the disabled/explainer state.
  * The real implementation lives in `di/RealPushAvailabilityProvider` and is bound via `di/AppModule`.
  */
-open class PushAvailabilityProvider @Inject constructor() {
-    open fun availability(): Flow<PushAvailability> = flowOf(PushAvailability())
+open class PushAvailabilityProvider
+    @Inject
+    constructor() {
+        open fun availability(): Flow<PushAvailability> = flowOf(PushAvailability())
 
-    /** Re-read app notification permission after a screen returns from Android Settings. */
-    open fun refreshNotificationPermission() = Unit
-}
+        /** Re-read app notification permission after a screen returns from Android Settings. */
+        open fun refreshNotificationPermission() = Unit
+    }

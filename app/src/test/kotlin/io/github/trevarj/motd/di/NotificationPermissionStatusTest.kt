@@ -8,7 +8,9 @@ import org.junit.Test
 class NotificationPermissionStatusTest {
     private class FakeHistory : NotificationPermissionRequestHistory {
         var launched = false
+
         override fun wasLaunched(): Boolean = launched
+
         override fun markLaunched() {
             launched = true
         }
@@ -34,11 +36,12 @@ class NotificationPermissionStatusTest {
     }
 
     @Test fun pre_tiramisu_is_granted_and_never_requests() {
-        val status = NotificationPermissionStatus(
-            apiLevel = { Build.VERSION_CODES.TIRAMISU - 1 },
-            isGrantedBySystem = { false },
-            requestHistory = FakeHistory(),
-        )
+        val status =
+            NotificationPermissionStatus(
+                apiLevel = { Build.VERSION_CODES.TIRAMISU - 1 },
+                isGrantedBySystem = { false },
+                requestHistory = FakeHistory(),
+            )
 
         assertTrue(status.granted.value)
         assertFalse(status.shouldRequestAutomatically(rationaleAvailable = false))

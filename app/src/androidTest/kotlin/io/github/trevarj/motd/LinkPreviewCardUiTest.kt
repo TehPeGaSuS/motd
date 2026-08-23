@@ -30,14 +30,15 @@ class LinkPreviewCardUiTest {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 LinkPreviewCard(
-                    preview = LinkPreview(
-                        "https://en.wikipedia.org/wiki/Alan_Turing",
-                        "Alan Turing",
-                        "Alan Turing was an English mathematician and computer scientist.",
-                        "https://upload.wikimedia.org/turing.jpg",
-                        "Wikipedia",
-                        LinkPreviewKind.WIKIPEDIA,
-                    ),
+                    preview =
+                        LinkPreview(
+                            "https://en.wikipedia.org/wiki/Alan_Turing",
+                            "Alan Turing",
+                            "Alan Turing was an English mathematician and computer scientist.",
+                            "https://upload.wikimedia.org/turing.jpg",
+                            "Wikipedia",
+                            LinkPreviewKind.WIKIPEDIA,
+                        ),
                     loading = false,
                     onClick = {},
                 )

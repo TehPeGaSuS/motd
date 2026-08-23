@@ -17,55 +17,57 @@ import java.io.File
  * pins a static weight instance via [FontVariation.Settings] rather than shipping separate static
  * files.
  */
-val JetBrainsMonoFamily: FontFamily = FontFamily(
-    Font(
-        R.font.jetbrains_mono_wght,
-        weight = FontWeight.Normal,
-        variationSettings = FontVariation.Settings(FontVariation.weight(400)),
-    ),
-    Font(
-        R.font.jetbrains_mono_wght,
-        weight = FontWeight.Medium,
-        variationSettings = FontVariation.Settings(FontVariation.weight(500)),
-    ),
-    Font(
-        R.font.jetbrains_mono_wght,
-        weight = FontWeight.Bold,
-        variationSettings = FontVariation.Settings(FontVariation.weight(700)),
-    ),
-    Font(
-        R.font.jetbrains_mono_italic_wght,
-        weight = FontWeight.Normal,
-        style = FontStyle.Italic,
-        variationSettings = FontVariation.Settings(FontVariation.weight(400)),
-    ),
-    Font(
-        R.font.jetbrains_mono_italic_wght,
-        weight = FontWeight.Medium,
-        style = FontStyle.Italic,
-        variationSettings = FontVariation.Settings(FontVariation.weight(500)),
-    ),
-    Font(
-        R.font.jetbrains_mono_italic_wght,
-        weight = FontWeight.Bold,
-        style = FontStyle.Italic,
-        variationSettings = FontVariation.Settings(FontVariation.weight(700)),
-    ),
-)
+val JetBrainsMonoFamily: FontFamily =
+    FontFamily(
+        Font(
+            R.font.jetbrains_mono_wght,
+            weight = FontWeight.Normal,
+            variationSettings = FontVariation.Settings(FontVariation.weight(400)),
+        ),
+        Font(
+            R.font.jetbrains_mono_wght,
+            weight = FontWeight.Medium,
+            variationSettings = FontVariation.Settings(FontVariation.weight(500)),
+        ),
+        Font(
+            R.font.jetbrains_mono_wght,
+            weight = FontWeight.Bold,
+            variationSettings = FontVariation.Settings(FontVariation.weight(700)),
+        ),
+        Font(
+            R.font.jetbrains_mono_italic_wght,
+            weight = FontWeight.Normal,
+            style = FontStyle.Italic,
+            variationSettings = FontVariation.Settings(FontVariation.weight(400)),
+        ),
+        Font(
+            R.font.jetbrains_mono_italic_wght,
+            weight = FontWeight.Medium,
+            style = FontStyle.Italic,
+            variationSettings = FontVariation.Settings(FontVariation.weight(500)),
+        ),
+        Font(
+            R.font.jetbrains_mono_italic_wght,
+            weight = FontWeight.Bold,
+            style = FontStyle.Italic,
+            variationSettings = FontVariation.Settings(FontVariation.weight(700)),
+        ),
+    )
 
 /**
  * Resolve a user's font choice to a Compose [FontFamily]; null keeps the platform default.
  * CUSTOM has no bundled resource — it always resolves through [rememberAppFontFamily] instead,
  * which is why it falls through to null (system) here.
  */
-fun FontChoice.fontFamily(): FontFamily? = when (this) {
-    FontChoice.SYSTEM -> null
-    FontChoice.SANS -> FontFamily.SansSerif
-    FontChoice.SERIF -> FontFamily.Serif
-    FontChoice.MONOSPACE -> FontFamily.Monospace
-    FontChoice.JETBRAINS_MONO -> JetBrainsMonoFamily
-    FontChoice.CUSTOM -> null
-}
+fun FontChoice.fontFamily(): FontFamily? =
+    when (this) {
+        FontChoice.SYSTEM -> null
+        FontChoice.SANS -> FontFamily.SansSerif
+        FontChoice.SERIF -> FontFamily.Serif
+        FontChoice.MONOSPACE -> FontFamily.Monospace
+        FontChoice.JETBRAINS_MONO -> JetBrainsMonoFamily
+        FontChoice.CUSTOM -> null
+    }
 
 /**
  * Composable font resolution that additionally handles CUSTOM by loading [customFontFile] from
@@ -74,7 +76,10 @@ fun FontChoice.fontFamily(): FontFamily? = when (this) {
  * covers a restored backup whose font binary never traveled (see ConfigurationBackup).
  */
 @Composable
-fun rememberAppFontFamily(choice: FontChoice, customFontFile: File?): FontFamily? {
+fun rememberAppFontFamily(
+    choice: FontChoice,
+    customFontFile: File?,
+): FontFamily? {
     if (choice != FontChoice.CUSTOM) return choice.fontFamily()
     val file = customFontFile?.takeIf { it.exists() } ?: return null
     return remember(file.absolutePath, file.lastModified()) {

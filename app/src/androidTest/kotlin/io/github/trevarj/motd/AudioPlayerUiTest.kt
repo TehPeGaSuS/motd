@@ -1,7 +1,7 @@
 package io.github.trevarj.motd
 
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -87,11 +87,12 @@ class AudioPlayerUiTest {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 AudioMiniPlayer(
-                    state = AudioPlaybackState(
-                        activeId = attachment.playbackId,
-                        attachment = attachment,
-                        durationMs = 60_000,
-                    ),
+                    state =
+                        AudioPlaybackState(
+                            activeId = attachment.playbackId,
+                            attachment = attachment,
+                            durationMs = 60_000,
+                        ),
                     onToggle = {},
                     onCancelLoading = {},
                     onRetry = {},
@@ -110,11 +111,12 @@ class AudioPlayerUiTest {
     @Test fun voice_speed_is_only_available_in_the_mini_player() {
         val attachment = audio().copy(voice = true)
         var requestedSpeed: Float? = null
-        val state = AudioPlaybackState(
-            activeId = attachment.playbackId,
-            attachment = attachment,
-            durationMs = 60_000,
-        )
+        val state =
+            AudioPlaybackState(
+                activeId = attachment.playbackId,
+                attachment = attachment,
+                durationMs = 60_000,
+            )
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 AudioAttachmentPlayers(
@@ -143,9 +145,10 @@ class AudioPlayerUiTest {
         compose.runOnIdle { assertTrue(requestedSpeed == 1.5f) }
     }
 
-    private fun audio() = AudioAttachment(
-        url = "https://files.example/song.ogg",
-        title = "song.ogg",
-        mimeType = "audio/ogg",
-    )
+    private fun audio() =
+        AudioAttachment(
+            url = "https://files.example/song.ogg",
+            title = "song.ogg",
+            mimeType = "audio/ogg",
+        )
 }

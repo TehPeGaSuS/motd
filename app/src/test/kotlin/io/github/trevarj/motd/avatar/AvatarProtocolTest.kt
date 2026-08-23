@@ -70,10 +70,11 @@ class AvatarProtocolTest {
     }
 
     @Test fun metadata_limits_distinguish_receive_and_publish_support() {
-        val receiveOnly = setOf(
-            "batch",
-            "draft/metadata-2=before-connect,max-keys=0,max-value-bytes=1",
-        )
+        val receiveOnly =
+            setOf(
+                "batch",
+                "draft/metadata-2=before-connect,max-keys=0,max-value-bytes=1",
+            )
         assertTrue(supportsAvatarSubscription(receiveOnly))
         assertFalse(supportsAvatarMutation(receiveOnly))
         assertFalse(supportsAvatarPublishing(receiveOnly))

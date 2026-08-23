@@ -19,11 +19,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
@@ -39,7 +40,6 @@ import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
-import androidx.compose.ui.res.stringResource
 
 /** Alpha for the per-nick row background wash in COMPACT density: strong enough to band messages
  *  by speaker, faint enough to stay readable in light and dark themes. */
@@ -100,42 +100,64 @@ internal fun CompactMessageRow(
     val friendTint = if (senderIsFriend) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Unspecified
     // Per-nick row wash: a faint tint of the sender's own nick color behind the whole row so runs of
     // messages are visually trackable by speaker (stable per nick — no fragile list-wide parity).
-    val rowTint = if (hasMention) {
-        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
-    } else {
-        nameColor.copy(alpha = COMPACT_ROW_TINT_ALPHA)
-    }
+    val rowTint =
+        if (hasMention) {
+            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
+        } else {
+            nameColor.copy(alpha = COMPACT_ROW_TINT_ALPHA)
+        }
 
     // The `nick: text` content is a single flowing AnnotatedString so it wraps as one paragraph
     // like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
     // Continuation lines (showSender == false) drop the `nick:` prefix so a run reads as one speaker.
     // Known-nick @mentions in the body are colored via the memoized resolver.
     val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
-    val line = remember(
-        sender, text, kind, nameColor, bodyColor, linkColor, senderIsFriend, showSender,
-        mentionColor, codeBackground, codeColor, nickFontSize,
-    ) {
-        buildCompactLine(
-            sender, text, kind, nameColor, bodyColor, linkColor, friendTint, showSender,
-            mentionColor, codeBackground, codeColor, nickFontSize = nickFontSize,
-        )
-    }
+    val line =
+        remember(
+            sender,
+            text,
+            kind,
+            nameColor,
+            bodyColor,
+            linkColor,
+            senderIsFriend,
+            showSender,
+            mentionColor,
+            codeBackground,
+            codeColor,
+            nickFontSize,
+        ) {
+            buildCompactLine(
+                sender,
+                text,
+                kind,
+                nameColor,
+                bodyColor,
+                linkColor,
+                friendTint,
+                showSender,
+                mentionColor,
+                codeBackground,
+                codeColor,
+                nickFontSize = nickFontSize,
+            )
+        }
 
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            // Tint fills the full row width (behind the horizontal padding) so the speaker band is
-            // unbroken edge to edge.
-            .background(rowTint)
-            .combinedClickable(
-                // Null lazily avoids an interaction object because this row has no indication.
-                interactionSource = null,
-                indication = null,
-                onClick = {},
-                onLongClick = onLongPress,
-                onLongClickLabel = actionsLabel,
-            )
-            .padding(horizontal = spacing.messageOuterHPad, vertical = spacing.compactRowVPad),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                // Tint fills the full row width (behind the horizontal padding) so the speaker band is
+                // unbroken edge to edge.
+                .background(rowTint)
+                .combinedClickable(
+                    // Null lazily avoids an interaction object because this row has no indication.
+                    interactionSource = null,
+                    indication = null,
+                    onClick = {},
+                    onLongClick = onLongPress,
+                    onLongClickLabel = actionsLabel,
+                ).padding(horizontal = spacing.messageOuterHPad, vertical = spacing.compactRowVPad),
     ) {
         reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
@@ -143,11 +165,12 @@ internal fun CompactMessageRow(
             Text(
                 text = line,
                 style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier
-                    .weight(1f)
-                    // Tapping the row's nick opens the nick sheet; the whole line is the target since
-                    // the nick is inline (bubble-style per-name tap isn't meaningful on one line).
-                    .let { if (onSenderClick != null) it.padding(end = 6.dp) else it },
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        // Tapping the row's nick opens the nick sheet; the whole line is the target since
+                        // the nick is inline (bubble-style per-name tap isn't meaningful on one line).
+                        .let { if (onSenderClick != null) it.padding(end = 6.dp) else it },
             )
             // Trailing timestamp keeps the IRC "right gutter" feel without a bubble.
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
@@ -156,8 +179,12 @@ internal fun CompactMessageRow(
                     Text(
                         text = formattedTime,
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (failed) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color =
+                            if (failed) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                     )
                 }
             }
@@ -168,12 +195,13 @@ internal fun CompactMessageRow(
                 url = url,
                 onImageClick = onImageClick,
                 onLongPress = onLongPress,
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .widthIn(max = 280.dp)
-                    .heightIn(max = 200.dp)
-                    .aspectRatio(4f / 3f)
-                    .clip(RoundedCornerShape(8.dp))
+                modifier =
+                    Modifier
+                        .padding(top = 2.dp)
+                        .widthIn(max = 280.dp)
+                        .heightIn(max = 200.dp)
+                        .aspectRatio(4f / 3f)
+                        .clip(RoundedCornerShape(8.dp)),
             )
         }
 
@@ -207,40 +235,44 @@ internal fun buildCompactLine(
     codeBackground: Color = Color.Unspecified,
     codeColor: Color = Color.Unspecified,
     nickFontSize: androidx.compose.ui.unit.TextUnit = 14.sp,
-): AnnotatedString = buildAnnotatedString {
-    val nickStyle = SpanStyle(
-        color = nameColor,
-        fontSize = nickFontSize,
-        fontWeight = FontWeight.Bold,
-        background = friendTint,
-    )
-    // Continuation lines omit the sender prefix entirely.
-    if (showSender) {
-        when (kind) {
-            MessageKind.NOTICE -> {
-                // irssi-style notice marker: `-nick-`.
-                withStyle(nickStyle) { append("-$sender-") }
-                append(" ")
-            }
-            else -> {
-                withStyle(nickStyle) { append(sender) }
-                withStyle(SpanStyle(color = bodyColor)) { append(": ") }
+): AnnotatedString =
+    buildAnnotatedString {
+        val nickStyle =
+            SpanStyle(
+                color = nameColor,
+                fontSize = nickFontSize,
+                fontWeight = FontWeight.Bold,
+                background = friendTint,
+            )
+        // Continuation lines omit the sender prefix entirely.
+        if (showSender) {
+            when (kind) {
+                MessageKind.NOTICE -> {
+                    // irssi-style notice marker: `-nick-`.
+                    withStyle(nickStyle) { append("-$sender-") }
+                    append(" ")
+                }
+
+                else -> {
+                    withStyle(nickStyle) { append(sender) }
+                    withStyle(SpanStyle(color = bodyColor)) { append(": ") }
+                }
             }
         }
+        appendRichText(
+            text = text,
+            plainStyle = SpanStyle(color = bodyColor),
+            linkStyle = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline),
+            codeStyle =
+                SpanStyle(
+                    color = codeColor,
+                    background = codeBackground,
+                    fontFamily = FontFamily.Monospace,
+                    fontStyle = FontStyle.Normal,
+                ),
+            mentionColor = mentionColor,
+        )
     }
-    appendRichText(
-        text = text,
-        plainStyle = SpanStyle(color = bodyColor),
-        linkStyle = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline),
-        codeStyle = SpanStyle(
-            color = codeColor,
-            background = codeBackground,
-            fontFamily = FontFamily.Monospace,
-            fontStyle = FontStyle.Normal,
-        ),
-        mentionColor = mentionColor,
-    )
-}
 
 @Preview
 @Composable
@@ -249,27 +281,47 @@ private fun CompactMessageRowPreview() {
     MotdTheme(layoutDensity = io.github.trevarj.motd.data.prefs.LayoutDensity.COMPACT) {
         Column {
             MessageBubble(
-                sender = "alice", text = "me: welcome to the channel!",
-                timeMs = 0L, isSelf = false, kind = MessageKind.PRIVMSG, showSender = true,
+                sender = "alice",
+                text = "me: welcome to the channel!",
+                timeMs = 0L,
+                isSelf = false,
+                kind = MessageKind.PRIVMSG,
+                showSender = true,
                 hasMention = true,
                 senderIsFriend = true,
                 reactions = listOf(ReactionChip("👍", 2, mine = false)),
             )
             MessageBubble(
-                sender = "alice", text = "check https://example.com out",
-                timeMs = 0L, isSelf = false, kind = MessageKind.PRIVMSG, showSender = false,
+                sender = "alice",
+                text = "check https://example.com out",
+                timeMs = 0L,
+                isSelf = false,
+                kind = MessageKind.PRIVMSG,
+                showSender = false,
             )
             MessageBubble(
-                sender = "bob", text = "waves hello", timeMs = 0L,
-                isSelf = false, kind = MessageKind.ACTION, showSender = true,
+                sender = "bob",
+                text = "waves hello",
+                timeMs = 0L,
+                isSelf = false,
+                kind = MessageKind.ACTION,
+                showSender = true,
             )
             MessageBubble(
-                sender = "ChanServ", text = "This channel is registered.", timeMs = 0L,
-                isSelf = false, kind = MessageKind.NOTICE, showSender = true,
+                sender = "ChanServ",
+                text = "This channel is registered.",
+                timeMs = 0L,
+                isSelf = false,
+                kind = MessageKind.NOTICE,
+                showSender = true,
             )
             MessageBubble(
-                sender = "me", text = "my own reply, still left-aligned in IRC style",
-                timeMs = 0L, isSelf = true, kind = MessageKind.PRIVMSG, showSender = false,
+                sender = "me",
+                text = "my own reply, still left-aligned in IRC style",
+                timeMs = 0L,
+                isSelf = true,
+                kind = MessageKind.PRIVMSG,
+                showSender = false,
             )
         }
     }

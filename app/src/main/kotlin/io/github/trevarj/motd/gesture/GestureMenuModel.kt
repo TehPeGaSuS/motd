@@ -1,6 +1,5 @@
 package io.github.trevarj.motd.gesture
 
-import java.util.UUID
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -16,6 +15,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonEncoder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import java.util.UUID
 
 /** Format version stamped into every persisted menu. */
 const val GESTURE_MENU_VERSION = 1
@@ -110,7 +110,9 @@ sealed interface GestureNode {
      * Written back verbatim so a menu authored on a newer build is not quietly amputated by an
      * older one that merely opened the editor.
      */
-    data class Unknown(val raw: JsonObject) : GestureNode {
+    data class Unknown(
+        val raw: JsonObject,
+    ) : GestureNode {
         override val id: String
             get() = raw.stringOrNull("id") ?: "unknown-${raw.hashCode().toUInt().toString(16)}"
         override val label: String get() = raw.stringOrNull("label").orEmpty()
@@ -131,11 +133,12 @@ val GestureNode.opensRing: Boolean
  * limit. Zero for nodes that open no ring.
  */
 val GestureNode.ringSlices: Int
-    get() = when (this) {
-        is GestureNode.Submenu -> children.size
-        is GestureNode.Provider -> clampedLimit
-        else -> 0
-    }
+    get() =
+        when (this) {
+            is GestureNode.Submenu -> children.size
+            is GestureNode.Provider -> clampedLimit
+            else -> 0
+        }
 
 // --- serialization -----------------------------------------------------------------------------
 
@@ -144,14 +147,14 @@ val GestureNode.ringSlices: Int
  * written so an older build sees complete objects, unknown keys are dropped rather than fatal, and
  * out-of-range enums coerce to their default instead of failing the decode.
  */
-internal val gestureMenuJson: Json = Json {
-    encodeDefaults = true
-    ignoreUnknownKeys = true
-    coerceInputValues = true
-}
+internal val gestureMenuJson: Json =
+    Json {
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+    }
 
-internal fun encodeGestureMenu(config: GestureMenuConfig): String =
-    gestureMenuJson.encodeToString(GestureMenuConfig.serializer(), config)
+internal fun encodeGestureMenu(config: GestureMenuConfig): String = gestureMenuJson.encodeToString(GestureMenuConfig.serializer(), config)
 
 /** Decodes a stored menu; anything unreadable falls back to the built-in default. */
 internal fun decodeGestureMenu(raw: String?): GestureMenuConfig {
@@ -176,14 +179,18 @@ object GestureNodeSerializer : KSerializer<GestureNode> {
     override val descriptor: SerialDescriptor =
         buildClassSerialDescriptor("io.github.trevarj.motd.gesture.GestureNode")
 
-    override fun serialize(encoder: Encoder, value: GestureNode) {
+    override fun serialize(
+        encoder: Encoder,
+        value: GestureNode,
+    ) {
         val json = encoder.asJsonEncoder()
-        val element = when (value) {
-            is GestureNode.Submenu -> json.json.typed(SUBMENU, GestureNode.Submenu.serializer(), value)
-            is GestureNode.Leaf -> json.json.typed(LEAF, GestureNode.Leaf.serializer(), value)
-            is GestureNode.Provider -> json.json.typed(PROVIDER, GestureNode.Provider.serializer(), value)
-            is GestureNode.Unknown -> value.raw
-        }
+        val element =
+            when (value) {
+                is GestureNode.Submenu -> json.json.typed(SUBMENU, GestureNode.Submenu.serializer(), value)
+                is GestureNode.Leaf -> json.json.typed(LEAF, GestureNode.Leaf.serializer(), value)
+                is GestureNode.Provider -> json.json.typed(PROVIDER, GestureNode.Provider.serializer(), value)
+                is GestureNode.Unknown -> value.raw
+            }
         json.encodeJsonElement(element)
     }
 
@@ -193,12 +200,13 @@ object GestureNodeSerializer : KSerializer<GestureNode> {
         // A ring entry that is not an object holds nothing this build could ever run; it becomes an
         // inert slice rather than failing its parent, which would cost the whole surrounding ring.
         val obj = element as? JsonObject ?: return GestureNode.Unknown(JsonObject(emptyMap()))
-        val serializer = when (obj.stringOrNull(GESTURE_TYPE_KEY)) {
-            SUBMENU -> GestureNode.Submenu.serializer()
-            LEAF -> GestureNode.Leaf.serializer()
-            PROVIDER -> GestureNode.Provider.serializer()
-            else -> return GestureNode.Unknown(obj)
-        }
+        val serializer =
+            when (obj.stringOrNull(GESTURE_TYPE_KEY)) {
+                SUBMENU -> GestureNode.Submenu.serializer()
+                LEAF -> GestureNode.Leaf.serializer()
+                PROVIDER -> GestureNode.Provider.serializer()
+                else -> return GestureNode.Unknown(obj)
+            }
         // A known type whose body this build cannot read is kept verbatim too, so a newer build's
         // extra required field costs one inert slice instead of the whole menu.
         return runCatching { json.json.decodeFromJsonElement(serializer, obj.withoutType()) }
@@ -206,23 +214,23 @@ object GestureNodeSerializer : KSerializer<GestureNode> {
     }
 }
 
-internal fun <T> Json.typed(type: String, serializer: KSerializer<T>, value: T): JsonObject {
+internal fun <T> Json.typed(
+    type: String,
+    serializer: KSerializer<T>,
+    value: T,
+): JsonObject {
     val body = encodeToJsonElement(serializer, value) as JsonObject
     val head = linkedMapOf<String, JsonElement>(GESTURE_TYPE_KEY to JsonPrimitive(type))
     return JsonObject(head + body)
 }
 
-internal fun JsonObject.withoutType(): JsonObject =
-    if (containsKey(GESTURE_TYPE_KEY)) JsonObject(this - GESTURE_TYPE_KEY) else this
+internal fun JsonObject.withoutType(): JsonObject = if (containsKey(GESTURE_TYPE_KEY)) JsonObject(this - GESTURE_TYPE_KEY) else this
 
-internal fun JsonObject.stringOrNull(key: String): String? =
-    (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+internal fun JsonObject.stringOrNull(key: String): String? = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
 
-internal fun Encoder.asJsonEncoder(): JsonEncoder =
-    this as? JsonEncoder ?: throw SerializationException("Gesture menus are JSON-only.")
+internal fun Encoder.asJsonEncoder(): JsonEncoder = this as? JsonEncoder ?: throw SerializationException("Gesture menus are JSON-only.")
 
-internal fun Decoder.asJsonDecoder(): JsonDecoder =
-    this as? JsonDecoder ?: throw SerializationException("Gesture menus are JSON-only.")
+internal fun Decoder.asJsonDecoder(): JsonDecoder = this as? JsonDecoder ?: throw SerializationException("Gesture menus are JSON-only.")
 
 /**
  * Enum codec that degrades an unrecognised name to [fallback].
@@ -237,7 +245,10 @@ abstract class FallbackEnumSerializer<T : Enum<T>>(
 ) : KSerializer<T> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor(serialName, PrimitiveKind.STRING)
 
-    override fun serialize(encoder: Encoder, value: T) = encoder.encodeString(value.name)
+    override fun serialize(
+        encoder: Encoder,
+        value: T,
+    ) = encoder.encodeString(value.name)
 
     override fun deserialize(decoder: Decoder): T {
         val raw = decoder.decodeString()

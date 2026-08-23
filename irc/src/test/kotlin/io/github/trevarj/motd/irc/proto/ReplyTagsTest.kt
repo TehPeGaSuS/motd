@@ -6,28 +6,31 @@ import org.junit.Test
 class ReplyTagsTest {
     @Test
     fun `standard reply tag wins over compatibility aliases`() {
-        val message = IrcMessage.parse(
-            "@draft/reply=server-draft;reply=server;+draft/reply=client-draft;+reply=standard " +
-                ":alice!u@h PRIVMSG #chan :hello",
-        )
+        val message =
+            IrcMessage.parse(
+                "@draft/reply=server-draft;reply=server;+draft/reply=client-draft;+reply=standard " +
+                    ":alice!u@h PRIVMSG #chan :hello",
+            )
 
         assertEquals("standard", message.replyReference())
     }
 
     @Test
     fun `legacy draft client tag is recognized`() {
-        val message = IrcMessage.parse(
-            "@+draft/reply=parent :alice!u@h PRIVMSG #chan :hello",
-        )
+        val message =
+            IrcMessage.parse(
+                "@+draft/reply=parent :alice!u@h PRIVMSG #chan :hello",
+            )
 
         assertEquals("parent", message.replyReference())
     }
 
     @Test
     fun `server-tagged history reply is recognized`() {
-        val message = IrcMessage.parse(
-            "@draft/reply=parent :alice!u@h PRIVMSG #chan :hello",
-        )
+        val message =
+            IrcMessage.parse(
+                "@draft/reply=parent :alice!u@h PRIVMSG #chan :hello",
+            )
 
         assertEquals("parent", message.replyReference())
     }

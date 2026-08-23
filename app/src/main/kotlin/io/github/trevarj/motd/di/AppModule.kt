@@ -7,67 +7,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import io.github.trevarj.motd.data.prefs.CertTrustStore
-import io.github.trevarj.motd.data.prefs.AppearancePrefs
-import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
-import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
-import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
-import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
-import io.github.trevarj.motd.data.prefs.BouncerKindPrefsImpl
-import io.github.trevarj.motd.data.prefs.ReplyPrefs
-import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
-import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
-import io.github.trevarj.motd.data.prefs.PushPrefs
-import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
-import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefsImpl
-import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
-import io.github.trevarj.motd.data.prefs.HistorySyncPrefsImpl
-import io.github.trevarj.motd.data.prefs.OnboardingPrefs
-import io.github.trevarj.motd.data.prefs.OnboardingPrefsImpl
-import io.github.trevarj.motd.data.prefs.SettingsRepository
-import io.github.trevarj.motd.data.repo.BufferRepository
-import io.github.trevarj.motd.data.repo.BufferRepositoryImpl
-import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
-import io.github.trevarj.motd.data.repo.LinkPreviewFetchPolicy
-import io.github.trevarj.motd.data.repo.LinkPreviewRepository
-import io.github.trevarj.motd.data.repo.LinkPreviewRepositoryImpl
-import io.github.trevarj.motd.data.repo.MessageRepository
-import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
-import io.github.trevarj.motd.data.repo.NetworkRepository
-import io.github.trevarj.motd.data.repo.NetworkRepositoryImpl
-import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
-import io.github.trevarj.motd.data.repo.NetworkIgnoreRepositoryImpl
-import io.github.trevarj.motd.data.repo.SearchRepository
-import io.github.trevarj.motd.data.repo.SearchRepositoryImpl
-import io.github.trevarj.motd.data.sync.ChatHistoryMediatorFactoryImpl
-import io.github.trevarj.motd.data.sync.ChatSoundPlayer
-import io.github.trevarj.motd.data.sync.EventProcessor
-import io.github.trevarj.motd.data.sync.HistoryGapFillCoordinator
-import io.github.trevarj.motd.data.sync.HistoryGapFiller
-import io.github.trevarj.motd.data.sync.MessageNotifier
-import io.github.trevarj.motd.data.sync.TypingTrackerImpl
-import io.github.trevarj.motd.diagnostics.DiagnosticLogger
-import io.github.trevarj.motd.diagnostics.FileDiagnosticLogger
-import io.github.trevarj.motd.push.PushEventHandler
-import io.github.trevarj.motd.push.DataStorePushHealthStore
-import io.github.trevarj.motd.push.PushHealthStore
-import io.github.trevarj.motd.push.UnifiedPushApi
-import io.github.trevarj.motd.push.UnifiedPushApiImpl
-import io.github.trevarj.motd.push.WebPushCryptoFacade
-import io.github.trevarj.motd.service.ConnectionManager
-import io.github.trevarj.motd.service.ChannelCloseCoordinator
-import io.github.trevarj.motd.service.PendingChannelCloseCoordinator
-import io.github.trevarj.motd.service.AndroidChatSoundPlayer
-import io.github.trevarj.motd.service.AppVisibility
-import io.github.trevarj.motd.service.ForegroundBufferTracker
-import io.github.trevarj.motd.service.HistoryResyncController
-import io.github.trevarj.motd.service.HistoryResyncCoordinator
-import io.github.trevarj.motd.service.IrcEventSink
-import io.github.trevarj.motd.service.MotdNotifications
-import io.github.trevarj.motd.service.ReadMarkerRepository
-import io.github.trevarj.motd.service.ReadMarkerSnapshotter
-import io.github.trevarj.motd.service.TypingTracker
-import io.github.trevarj.motd.ui.settings.PushAvailabilityProvider
+import io.github.trevarj.motd.attachment.AttachmentPrefs
+import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
+import io.github.trevarj.motd.attachment.AttachmentUploader
+import io.github.trevarj.motd.attachment.AttachmentUploaderImpl
 import io.github.trevarj.motd.audio.AndroidVoiceRecorder
 import io.github.trevarj.motd.audio.AudioMetadataRepository
 import io.github.trevarj.motd.audio.AudioMetadataRepositoryImpl
@@ -80,10 +23,6 @@ import io.github.trevarj.motd.audio.VoiceMessageSender
 import io.github.trevarj.motd.audio.VoiceMessageSenderImpl
 import io.github.trevarj.motd.audio.VoicePrefs
 import io.github.trevarj.motd.audio.VoiceRecorder
-import io.github.trevarj.motd.attachment.AttachmentPrefs
-import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
-import io.github.trevarj.motd.attachment.AttachmentUploader
-import io.github.trevarj.motd.attachment.AttachmentUploaderImpl
 import io.github.trevarj.motd.avatar.AvatarController
 import io.github.trevarj.motd.avatar.AvatarCoordinator
 import io.github.trevarj.motd.avatar.AvatarPrefs
@@ -92,16 +31,77 @@ import io.github.trevarj.motd.avatar.AvatarStore
 import io.github.trevarj.motd.avatar.AvatarStoreImpl
 import io.github.trevarj.motd.bouncer.BouncerServClient
 import io.github.trevarj.motd.bouncer.BouncerServClientImpl
-import io.github.trevarj.motd.gesture.GesturePrefs
-import io.github.trevarj.motd.gesture.GesturePrefsImpl
-import io.github.trevarj.motd.ui.onboarding.ConnectionManagerOnboardingBouncerOperations
-import io.github.trevarj.motd.ui.onboarding.OnboardingBouncerOperations
 import io.github.trevarj.motd.bouncer.BouncerServSessionProvider
 import io.github.trevarj.motd.bouncer.ConnectionBouncerServSessionProvider
 import io.github.trevarj.motd.data.backup.ConfigurationBackupRepository
 import io.github.trevarj.motd.data.backup.ConfigurationBackupRepositoryImpl
+import io.github.trevarj.motd.data.prefs.AppearancePrefs
+import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefsImpl
+import io.github.trevarj.motd.data.prefs.CertTrustStore
+import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
+import io.github.trevarj.motd.data.prefs.HistorySyncPrefsImpl
+import io.github.trevarj.motd.data.prefs.OnboardingPrefs
+import io.github.trevarj.motd.data.prefs.OnboardingPrefsImpl
+import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
+import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefsImpl
+import io.github.trevarj.motd.data.prefs.PushPrefs
+import io.github.trevarj.motd.data.prefs.ReplyPrefs
+import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
+import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.repo.BufferRepository
+import io.github.trevarj.motd.data.repo.BufferRepositoryImpl
+import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
+import io.github.trevarj.motd.data.repo.LinkPreviewFetchPolicy
+import io.github.trevarj.motd.data.repo.LinkPreviewRepository
+import io.github.trevarj.motd.data.repo.LinkPreviewRepositoryImpl
+import io.github.trevarj.motd.data.repo.MessageRepository
+import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
+import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
+import io.github.trevarj.motd.data.repo.NetworkIgnoreRepositoryImpl
+import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.data.repo.NetworkRepositoryImpl
+import io.github.trevarj.motd.data.repo.SearchRepository
+import io.github.trevarj.motd.data.repo.SearchRepositoryImpl
+import io.github.trevarj.motd.data.sync.ChatHistoryMediatorFactoryImpl
+import io.github.trevarj.motd.data.sync.ChatSoundPlayer
+import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.data.sync.HistoryGapFillCoordinator
+import io.github.trevarj.motd.data.sync.HistoryGapFiller
+import io.github.trevarj.motd.data.sync.MessageNotifier
+import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.dcc.DccTransferController
 import io.github.trevarj.motd.dcc.DccTransferControllerImpl
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.diagnostics.FileDiagnosticLogger
+import io.github.trevarj.motd.gesture.GesturePrefs
+import io.github.trevarj.motd.gesture.GesturePrefsImpl
+import io.github.trevarj.motd.push.DataStorePushHealthStore
+import io.github.trevarj.motd.push.PushEventHandler
+import io.github.trevarj.motd.push.PushHealthStore
+import io.github.trevarj.motd.push.UnifiedPushApi
+import io.github.trevarj.motd.push.UnifiedPushApiImpl
+import io.github.trevarj.motd.push.WebPushCryptoFacade
+import io.github.trevarj.motd.service.AndroidChatSoundPlayer
+import io.github.trevarj.motd.service.AppVisibility
+import io.github.trevarj.motd.service.ChannelCloseCoordinator
+import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.ForegroundBufferTracker
+import io.github.trevarj.motd.service.HistoryResyncController
+import io.github.trevarj.motd.service.HistoryResyncCoordinator
+import io.github.trevarj.motd.service.IrcEventSink
+import io.github.trevarj.motd.service.MotdNotifications
+import io.github.trevarj.motd.service.PendingChannelCloseCoordinator
+import io.github.trevarj.motd.service.ReadMarkerRepository
+import io.github.trevarj.motd.service.ReadMarkerSnapshotter
+import io.github.trevarj.motd.service.TypingTracker
+import io.github.trevarj.motd.ui.onboarding.ConnectionManagerOnboardingBouncerOperations
+import io.github.trevarj.motd.ui.onboarding.OnboardingBouncerOperations
+import io.github.trevarj.motd.ui.settings.PushAvailabilityProvider
 import javax.inject.Singleton
 
 /**
@@ -111,7 +111,6 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 internal abstract class AppModule {
-
     // -- data/repo (WP4) --
     @Binds @Singleton
     abstract fun networkRepository(impl: NetworkRepositoryImpl): NetworkRepository
@@ -264,6 +263,7 @@ internal abstract class AppModule {
     ): ReadMarkerSnapshotter
 
     // -- push (WP9 / WP-R2) --
+
     /** UnifiedPush static-connector seam → real impl (WP-R2). */
     @Binds @Singleton
     abstract fun unifiedPushApi(impl: UnifiedPushApiImpl): UnifiedPushApi
@@ -287,8 +287,11 @@ internal abstract class AppModule {
         fun historyGapFiller(coordinator: HistoryGapFillCoordinator): HistoryGapFiller =
             object : HistoryGapFiller {
                 override val fillsInFlight = coordinator.fillsInFlight
-                override suspend fun fillGap(roomId: Long, gapId: Long) =
-                    coordinator.fillGap(roomId, gapId).progress
+
+                override suspend fun fillGap(
+                    roomId: Long,
+                    gapId: Long,
+                ) = coordinator.fillGap(roomId, gapId).progress
             }
 
         /** Provide the real crypto/health collaborators; EventProcessor owns notification policy. */
@@ -298,12 +301,13 @@ internal abstract class AppModule {
             sink: IrcEventSink,
             healthStore: PushHealthStore,
             diagnosticLogger: DiagnosticLogger,
-        ): PushEventHandler = PushEventHandler(
-            WebPushCryptoFacade.Default,
-            sink,
-            healthStore,
-            diagnosticLogger,
-        )
+        ): PushEventHandler =
+            PushEventHandler(
+                WebPushCryptoFacade.Default,
+                sink,
+                healthStore,
+                diagnosticLogger,
+            )
 
         /**
          * Real UnifiedPush availability check: an installed distributor AND a connected client
@@ -318,13 +322,14 @@ internal abstract class AppModule {
             healthStore: PushHealthStore,
             unifiedPush: UnifiedPushApi,
             notificationPermission: NotificationPermissionStatus,
-        ): PushAvailabilityProvider = RealPushAvailabilityProvider(
-            context,
-            connectionManager,
-            db.networkDao(),
-            healthStore,
-            unifiedPush,
-            notificationPermission,
-        )
+        ): PushAvailabilityProvider =
+            RealPushAvailabilityProvider(
+                context,
+                connectionManager,
+                db.networkDao(),
+                healthStore,
+                unifiedPush,
+                notificationPermission,
+            )
     }
 }

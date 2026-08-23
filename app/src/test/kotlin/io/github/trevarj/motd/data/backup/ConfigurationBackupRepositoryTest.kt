@@ -37,110 +37,116 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class ConfigurationBackupRepositoryTest {
-
     @Test
-    fun credentialsExcludedExportOmitsSecretsAndImportsAsPendingCredentials() = runTest {
-        val sourceDb = inMemoryDb()
-        val source = repository(sourceDb)
-        sourceDb.networkDao().insert(secretNetwork(clientCertAlias = "device-cert"))
+    fun credentialsExcludedExportOmitsSecretsAndImportsAsPendingCredentials() =
+        runTest {
+            val sourceDb = inMemoryDb()
+            val source = repository(sourceDb)
+            sourceDb.networkDao().insert(secretNetwork(clientCertAlias = "device-cert"))
 
-        val raw = source.exportToString(
-            mode = BackupExportMode.CREDENTIALS_EXCLUDED,
-            nowEpochMillis = 1_000L,
-        )
+            val raw =
+                source.exportToString(
+                    mode = BackupExportMode.CREDENTIALS_EXCLUDED,
+                    nowEpochMillis = 1_000L,
+                )
 
-        assertFalse(raw.contains("sasl-secret"))
-        assertFalse(raw.contains("server-secret"))
-        assertFalse(raw.contains("nickserv-secret"))
-        assertFalse(raw.contains("vless://secret"))
+            assertFalse(raw.contains("sasl-secret"))
+            assertFalse(raw.contains("server-secret"))
+            assertFalse(raw.contains("nickserv-secret"))
+            assertFalse(raw.contains("vless://secret"))
 
-        val targetDb = inMemoryDb()
-        val target = repository(targetDb)
-        val preview = target.preview(raw, importMode = BackupImportMode.MERGE)
-        assertEquals(1, preview.addedNetworks)
-        assertEquals(1, preview.missingCredentialNetworks)
+            val targetDb = inMemoryDb()
+            val target = repository(targetDb)
+            val preview = target.preview(raw, importMode = BackupImportMode.MERGE)
+            assertEquals(1, preview.addedNetworks)
+            assertEquals(1, preview.missingCredentialNetworks)
 
-        target.import(raw, importMode = BackupImportMode.MERGE)
+            target.import(raw, importMode = BackupImportMode.MERGE)
 
-        val imported = targetDb.networkDao().allNow().single()
-        assertNull(imported.saslPassword)
-        assertNull(imported.serverPassword)
-        assertNull(imported.nickServPassword)
-        assertEquals("PASSWORD_NICK", imported.nickServIdentifySyntax)
-        assertTrue(imported.nickServRecoveryEnabled)
-        assertEquals("GHOST,REGAIN", imported.nickServRecoverySequence)
-        assertNull(imported.obfsLink)
-        assertEquals(
-            "saslPassword,serverPassword,nickServPassword,obfsLink,clientCertificate",
-            imported.pendingCredentialRequirements,
-        )
-        assertFalse(imported.autoConnect)
-        assertEquals(true, imported.restoreAutoConnect)
-    }
-
-    @Test
-    fun encryptedExportRoundTripsCredentials() = runTest {
-        val sourceDb = inMemoryDb()
-        val source = repository(sourceDb)
-        sourceDb.networkDao().insert(secretNetwork(clientCertAlias = null))
-
-        val raw = source.exportToString(
-            mode = BackupExportMode.ENCRYPTED_WITH_CREDENTIALS,
-            password = "correct horse battery",
-            nowEpochMillis = 1_000L,
-        )
-
-        assertFalse(raw.contains("sasl-secret"))
-        assertFalse(raw.contains("server-secret"))
-        assertFalse(raw.contains("nickserv-secret"))
-        assertFalse(raw.contains("vless://secret"))
-
-        val targetDb = inMemoryDb()
-        val target = repository(targetDb)
-        val preview = target.preview(
-            raw,
-            password = "correct horse battery",
-            importMode = BackupImportMode.MERGE,
-        )
-        assertEquals(true, preview.containsSecrets)
-        assertEquals(0, preview.missingCredentialNetworks)
-
-        target.import(raw, password = "correct horse battery", importMode = BackupImportMode.MERGE)
-
-        val imported = targetDb.networkDao().allNow().single()
-        assertEquals("sasl-secret", imported.saslPassword)
-        assertEquals("server-secret", imported.serverPassword)
-        assertEquals("nickserv-secret", imported.nickServPassword)
-        assertEquals("PASSWORD_NICK", imported.nickServIdentifySyntax)
-        assertTrue(imported.nickServRecoveryEnabled)
-        assertEquals("GHOST,REGAIN", imported.nickServRecoverySequence)
-        assertEquals("vless://secret", imported.obfsLink)
-        assertNull(imported.pendingCredentialRequirements)
-        assertEquals(true, imported.autoConnect)
-    }
-
-    @Test
-    fun wrongPasswordRejectsEncryptedImportWithoutMutation() = runTest {
-        val sourceDb = inMemoryDb()
-        val source = repository(sourceDb)
-        sourceDb.networkDao().insert(secretNetwork(clientCertAlias = null))
-        val raw = source.exportToString(
-            mode = BackupExportMode.ENCRYPTED_WITH_CREDENTIALS,
-            password = "correct horse battery",
-            nowEpochMillis = 1_000L,
-        )
-
-        val targetDb = inMemoryDb()
-        val target = repository(targetDb)
-
-        try {
-            target.import(raw, password = "wrong horse battery", importMode = BackupImportMode.MERGE)
-            fail("wrong password must reject encrypted import")
-        } catch (_: Exception) {
-            // Expected: GCM authentication fails before any import mutation.
+            val imported = targetDb.networkDao().allNow().single()
+            assertNull(imported.saslPassword)
+            assertNull(imported.serverPassword)
+            assertNull(imported.nickServPassword)
+            assertEquals("PASSWORD_NICK", imported.nickServIdentifySyntax)
+            assertTrue(imported.nickServRecoveryEnabled)
+            assertEquals("GHOST,REGAIN", imported.nickServRecoverySequence)
+            assertNull(imported.obfsLink)
+            assertEquals(
+                "saslPassword,serverPassword,nickServPassword,obfsLink,clientCertificate",
+                imported.pendingCredentialRequirements,
+            )
+            assertFalse(imported.autoConnect)
+            assertEquals(true, imported.restoreAutoConnect)
         }
-        assertEquals(emptyList<NetworkEntity>(), targetDb.networkDao().allNow())
-    }
+
+    @Test
+    fun encryptedExportRoundTripsCredentials() =
+        runTest {
+            val sourceDb = inMemoryDb()
+            val source = repository(sourceDb)
+            sourceDb.networkDao().insert(secretNetwork(clientCertAlias = null))
+
+            val raw =
+                source.exportToString(
+                    mode = BackupExportMode.ENCRYPTED_WITH_CREDENTIALS,
+                    password = "correct horse battery",
+                    nowEpochMillis = 1_000L,
+                )
+
+            assertFalse(raw.contains("sasl-secret"))
+            assertFalse(raw.contains("server-secret"))
+            assertFalse(raw.contains("nickserv-secret"))
+            assertFalse(raw.contains("vless://secret"))
+
+            val targetDb = inMemoryDb()
+            val target = repository(targetDb)
+            val preview =
+                target.preview(
+                    raw,
+                    password = "correct horse battery",
+                    importMode = BackupImportMode.MERGE,
+                )
+            assertEquals(true, preview.containsSecrets)
+            assertEquals(0, preview.missingCredentialNetworks)
+
+            target.import(raw, password = "correct horse battery", importMode = BackupImportMode.MERGE)
+
+            val imported = targetDb.networkDao().allNow().single()
+            assertEquals("sasl-secret", imported.saslPassword)
+            assertEquals("server-secret", imported.serverPassword)
+            assertEquals("nickserv-secret", imported.nickServPassword)
+            assertEquals("PASSWORD_NICK", imported.nickServIdentifySyntax)
+            assertTrue(imported.nickServRecoveryEnabled)
+            assertEquals("GHOST,REGAIN", imported.nickServRecoverySequence)
+            assertEquals("vless://secret", imported.obfsLink)
+            assertNull(imported.pendingCredentialRequirements)
+            assertEquals(true, imported.autoConnect)
+        }
+
+    @Test
+    fun wrongPasswordRejectsEncryptedImportWithoutMutation() =
+        runTest {
+            val sourceDb = inMemoryDb()
+            val source = repository(sourceDb)
+            sourceDb.networkDao().insert(secretNetwork(clientCertAlias = null))
+            val raw =
+                source.exportToString(
+                    mode = BackupExportMode.ENCRYPTED_WITH_CREDENTIALS,
+                    password = "correct horse battery",
+                    nowEpochMillis = 1_000L,
+                )
+
+            val targetDb = inMemoryDb()
+            val target = repository(targetDb)
+
+            try {
+                target.import(raw, password = "wrong horse battery", importMode = BackupImportMode.MERGE)
+                fail("wrong password must reject encrypted import")
+            } catch (_: Exception) {
+                // Expected: GCM authentication fails before any import mutation.
+            }
+            assertEquals(emptyList<NetworkEntity>(), targetDb.networkDao().allNow())
+        }
 
     /**
      * The gesture lab's on/off flag never travels, but an authored menu does — and only once it
@@ -148,72 +154,75 @@ class ConfigurationBackupRepositoryTest {
      * onto the device it is restored to.
      */
     @Test
-    fun gestureMenuTravelsOnlyWhenItDiffersFromTheDefault() = runTest {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val gesturePrefs = GesturePrefsImpl(context)
-        val sourceDb = inMemoryDb()
-        val source = repository(sourceDb)
+    fun gestureMenuTravelsOnlyWhenItDiffersFromTheDefault() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val gesturePrefs = GesturePrefsImpl(context)
+            val sourceDb = inMemoryDb()
+            val source = repository(sourceDb)
 
-        gesturePrefs.setMenu(GestureMenuConfig())
-        val untouched = source.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
-        assertFalse(
-            source.preview(untouched, importMode = BackupImportMode.MERGE).settingGroups.contains("gesture menu"),
-        )
+            gesturePrefs.setMenu(GestureMenuConfig())
+            val untouched = source.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+            assertFalse(
+                source.preview(untouched, importMode = BackupImportMode.MERGE).settingGroups.contains("gesture menu"),
+            )
 
-        val edited = GestureMenuConfig()
-            .updateNode("default-away") { (it as GestureNode.Leaf).copy(label = "Step out") }
-            .removeNode("default-networks")
-        gesturePrefs.setMenu(edited)
-        val raw = source.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+            val edited =
+                GestureMenuConfig()
+                    .updateNode("default-away") { (it as GestureNode.Leaf).copy(label = "Step out") }
+                    .removeNode("default-networks")
+            gesturePrefs.setMenu(edited)
+            val raw = source.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
 
-        assertTrue(raw.contains("Step out"))
-        val target = repository(inMemoryDb())
-        assertTrue(target.preview(raw, importMode = BackupImportMode.MERGE).settingGroups.contains("gesture menu"))
+            assertTrue(raw.contains("Step out"))
+            val target = repository(inMemoryDb())
+            assertTrue(target.preview(raw, importMode = BackupImportMode.MERGE).settingGroups.contains("gesture menu"))
 
-        gesturePrefs.setMenu(GestureMenuConfig())
-        target.import(raw, importMode = BackupImportMode.MERGE)
+            gesturePrefs.setMenu(GestureMenuConfig())
+            target.import(raw, importMode = BackupImportMode.MERGE)
 
-        assertEquals(edited, gesturePrefs.menu.first())
-        gesturePrefs.setMenu(GestureMenuConfig())
-    }
+            assertEquals(edited, gesturePrefs.menu.first())
+            gesturePrefs.setMenu(GestureMenuConfig())
+        }
 
     /** Stage-1 appearance fields (font, timestamps, spacing, bubbles, launcher icon) travel with a backup. */
     @Test
-    fun newAppearanceFieldsRoundTripThroughExportAndImport() = runTest {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val appearancePrefs = AppearancePrefsImpl(context)
-        val source = repository(inMemoryDb())
+    fun newAppearanceFieldsRoundTripThroughExportAndImport() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val appearancePrefs = AppearancePrefsImpl(context)
+            val source = repository(inMemoryDb())
 
-        appearancePrefs.setFontChoice(FontChoice.JETBRAINS_MONO)
-        appearancePrefs.setShowTimestamps(false)
-        appearancePrefs.setTimeFormat(TimeFormat.H24)
-        appearancePrefs.setMessageSpacing(MessageSpacing.RELAXED)
-        appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.SQUARE)
-        appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
-        // Only the display name travels; the font binary itself is not part of the backup payload.
-        appearancePrefs.setCustomFontName("Iosevka Term.ttf")
+            appearancePrefs.setFontChoice(FontChoice.JETBRAINS_MONO)
+            appearancePrefs.setShowTimestamps(false)
+            appearancePrefs.setTimeFormat(TimeFormat.H24)
+            appearancePrefs.setMessageSpacing(MessageSpacing.RELAXED)
+            appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.SQUARE)
+            appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
+            // Only the display name travels; the font binary itself is not part of the backup payload.
+            appearancePrefs.setCustomFontName("Iosevka Term.ttf")
 
-        val raw = source.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+            val raw = source.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
 
-        appearancePrefs.setFontChoice(FontChoice.SYSTEM)
-        appearancePrefs.setShowTimestamps(true)
-        appearancePrefs.setTimeFormat(TimeFormat.AUTO)
-        appearancePrefs.setMessageSpacing(MessageSpacing.DEFAULT)
-        appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.ROUNDED)
-        appearancePrefs.setLauncherIcon(LauncherIcon.DEFAULT)
-        appearancePrefs.setCustomFontName("")
+            appearancePrefs.setFontChoice(FontChoice.SYSTEM)
+            appearancePrefs.setShowTimestamps(true)
+            appearancePrefs.setTimeFormat(TimeFormat.AUTO)
+            appearancePrefs.setMessageSpacing(MessageSpacing.DEFAULT)
+            appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.ROUNDED)
+            appearancePrefs.setLauncherIcon(LauncherIcon.DEFAULT)
+            appearancePrefs.setCustomFontName("")
 
-        source.import(raw, importMode = BackupImportMode.MERGE)
+            source.import(raw, importMode = BackupImportMode.MERGE)
 
-        val config = appearancePrefs.config.first()
-        assertEquals(FontChoice.JETBRAINS_MONO, config.fontChoice)
-        assertEquals(false, config.showTimestamps)
-        assertEquals(TimeFormat.H24, config.timeFormat)
-        assertEquals(MessageSpacing.RELAXED, config.messageSpacing)
-        assertEquals(BubbleCornerStyle.SQUARE, config.bubbleCornerStyle)
-        assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
-        assertEquals("Iosevka Term.ttf", config.customFontName)
-    }
+            val config = appearancePrefs.config.first()
+            assertEquals(FontChoice.JETBRAINS_MONO, config.fontChoice)
+            assertEquals(false, config.showTimestamps)
+            assertEquals(TimeFormat.H24, config.timeFormat)
+            assertEquals(MessageSpacing.RELAXED, config.messageSpacing)
+            assertEquals(BubbleCornerStyle.SQUARE, config.bubbleCornerStyle)
+            assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
+            assertEquals("Iosevka Term.ttf", config.customFontName)
+        }
 
     private fun repository(db: io.github.trevarj.motd.data.db.MotdDatabase): ConfigurationBackupRepositoryImpl {
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -232,26 +241,27 @@ class ConfigurationBackupRepositoryTest {
         )
     }
 
-    private fun secretNetwork(clientCertAlias: String?): NetworkEntity = NetworkEntity(
-        name = "libera",
-        role = NetworkRole.DIRECT,
-        host = "irc.libera.chat",
-        port = 6697,
-        tls = true,
-        nick = "me",
-        username = "me",
-        realname = "Me",
-        saslMechanism = "PLAIN",
-        saslUser = "me",
-        saslPassword = "sasl-secret",
-        serverPassword = "server-secret",
-        nickServPassword = "nickserv-secret",
-        nickServIdentifySyntax = "PASSWORD_NICK",
-        nickServRecoveryEnabled = true,
-        nickServRecoverySequence = "GHOST,REGAIN",
-        clientCertAlias = clientCertAlias,
-        autoConnect = true,
-        obfsMode = ObfsMode.EMBEDDED_REALITY,
-        obfsLink = "vless://secret",
-    )
+    private fun secretNetwork(clientCertAlias: String?): NetworkEntity =
+        NetworkEntity(
+            name = "libera",
+            role = NetworkRole.DIRECT,
+            host = "irc.libera.chat",
+            port = 6697,
+            tls = true,
+            nick = "me",
+            username = "me",
+            realname = "Me",
+            saslMechanism = "PLAIN",
+            saslUser = "me",
+            saslPassword = "sasl-secret",
+            serverPassword = "server-secret",
+            nickServPassword = "nickserv-secret",
+            nickServIdentifySyntax = "PASSWORD_NICK",
+            nickServRecoveryEnabled = true,
+            nickServRecoverySequence = "GHOST,REGAIN",
+            clientCertAlias = clientCertAlias,
+            autoConnect = true,
+            obfsMode = ObfsMode.EMBEDDED_REALITY,
+            obfsLink = "vless://secret",
+        )
 }

@@ -32,12 +32,13 @@ class ThemeCatalogTest {
     }
 
     @Test fun modusCatalog_includesEveryOfficialLightAndDarkVariant() {
-        val pairs = mapOf(
-            ColorThemePreset.MODUS_OPERANDI to ColorThemePreset.MODUS_VIVENDI,
-            ColorThemePreset.MODUS_OPERANDI_TINTED to ColorThemePreset.MODUS_VIVENDI_TINTED,
-            ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA to ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA,
-            ColorThemePreset.MODUS_OPERANDI_TRITANOPIA to ColorThemePreset.MODUS_VIVENDI_TRITANOPIA,
-        )
+        val pairs =
+            mapOf(
+                ColorThemePreset.MODUS_OPERANDI to ColorThemePreset.MODUS_VIVENDI,
+                ColorThemePreset.MODUS_OPERANDI_TINTED to ColorThemePreset.MODUS_VIVENDI_TINTED,
+                ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA to ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA,
+                ColorThemePreset.MODUS_OPERANDI_TRITANOPIA to ColorThemePreset.MODUS_VIVENDI_TRITANOPIA,
+            )
 
         pairs.forEach { (light, dark) ->
             assertTrue("$light must be light", !light.isDark)
@@ -70,18 +71,19 @@ class ThemeCatalogTest {
     }
 
     @Test fun systemPartners_stayNullForDarkOnlyAndAlternateDarkPalettes() {
-        val neverPaired = setOf(
-            ColorThemePreset.SYSTEM,
-            ColorThemePreset.AMOLED,
-            ColorThemePreset.DRACULA,
-            ColorThemePreset.MONOKAI,
-            ColorThemePreset.ONE_DARK,
-            ColorThemePreset.TOKYO_NIGHT,
-            ColorThemePreset.ZENBURN,
-            ColorThemePreset.AYU_MIRAGE,
-            ColorThemePreset.KANAGAWA_DRAGON,
-            ColorThemePreset.ROSE_PINE_MOON,
-        )
+        val neverPaired =
+            setOf(
+                ColorThemePreset.SYSTEM,
+                ColorThemePreset.AMOLED,
+                ColorThemePreset.DRACULA,
+                ColorThemePreset.MONOKAI,
+                ColorThemePreset.ONE_DARK,
+                ColorThemePreset.TOKYO_NIGHT,
+                ColorThemePreset.ZENBURN,
+                ColorThemePreset.AYU_MIRAGE,
+                ColorThemePreset.KANAGAWA_DRAGON,
+                ColorThemePreset.ROSE_PINE_MOON,
+            )
         neverPaired.forEach { assertNull("$it must not auto-swap", it.systemPartner) }
     }
 
@@ -180,14 +182,15 @@ class ThemeCatalogTest {
                 val backgrounds = nickBackgrounds(variant)
                 NickColorPalette.entries.forEach { palette ->
                     for (hue in 0..359) {
-                        val colors = NickColorScheme(
-                            enabled = true,
-                            palette = palette,
-                            overrides = mapOf("nick" to hue),
-                            isDark = preset.isDark,
-                            textBackgrounds = backgrounds,
-                            themeColors = listOf(variant.primary, variant.tertiary, variant.secondary),
-                        )
+                        val colors =
+                            NickColorScheme(
+                                enabled = true,
+                                palette = palette,
+                                overrides = mapOf("nick" to hue),
+                                isDark = preset.isDark,
+                                textBackgrounds = backgrounds,
+                                themeColors = listOf(variant.primary, variant.tertiary, variant.secondary),
+                            )
                         val color = colors.nick("nick", variant.onSurface)
                         backgrounds.forEachIndexed { index, background ->
                             assertContrast(preset, "$palette nick hue $hue on $index", color, background, 4.5)
@@ -203,38 +206,50 @@ class ThemeCatalogTest {
         }
     }
 
-    private fun staticSchemes(): List<Pair<ColorThemePreset, ColorScheme>> = buildList {
-        add(ColorThemePreset.LIGHT to MotdLightScheme)
-        add(ColorThemePreset.DARK to MotdDarkScheme)
-        ColorThemePreset.entries.filter { it.isFixedPalette }.forEach { preset ->
-            add(preset to requireNotNull(fixedThemeScheme(preset)))
+    private fun staticSchemes(): List<Pair<ColorThemePreset, ColorScheme>> =
+        buildList {
+            add(ColorThemePreset.LIGHT to MotdLightScheme)
+            add(ColorThemePreset.DARK to MotdDarkScheme)
+            ColorThemePreset.entries.filter { it.isFixedPalette }.forEach { preset ->
+                add(preset to requireNotNull(fixedThemeScheme(preset)))
+            }
         }
-    }
 
-    private fun neutralSurfaces(scheme: ColorScheme): List<Color> = listOf(
-        scheme.background,
-        scheme.surface,
-        scheme.surfaceContainerLowest,
-        scheme.surfaceContainerLow,
-        scheme.surfaceContainer,
-        scheme.surfaceContainerHigh,
-        scheme.surfaceContainerHighest,
-        scheme.surfaceVariant,
-    ).distinct()
+    private fun neutralSurfaces(scheme: ColorScheme): List<Color> =
+        listOf(
+            scheme.background,
+            scheme.surface,
+            scheme.surfaceContainerLowest,
+            scheme.surfaceContainerLow,
+            scheme.surfaceContainer,
+            scheme.surfaceContainerHigh,
+            scheme.surfaceContainerHighest,
+            scheme.surfaceVariant,
+        ).distinct()
 
-    private fun nickBackgrounds(scheme: ColorScheme): List<Color> = (
-        neutralSurfaces(scheme) + listOf(
-            scheme.primaryContainer,
-            scheme.secondaryContainer,
-            scheme.tertiaryContainer,
-        )
-    ).distinct()
+    private fun nickBackgrounds(scheme: ColorScheme): List<Color> =
+        (
+            neutralSurfaces(scheme) +
+                listOf(
+                    scheme.primaryContainer,
+                    scheme.secondaryContainer,
+                    scheme.tertiaryContainer,
+                )
+        ).distinct()
 
-    private fun assertTextPair(preset: ColorThemePreset, role: String, foreground: Color, background: Color) {
+    private fun assertTextPair(
+        preset: ColorThemePreset,
+        role: String,
+        foreground: Color,
+        background: Color,
+    ) {
         assertContrast(preset, role, foreground, background, 4.5)
     }
 
-    private fun assertBubbleContainers(preset: ColorThemePreset, scheme: ColorScheme) {
+    private fun assertBubbleContainers(
+        preset: ColorThemePreset,
+        scheme: ColorScheme,
+    ) {
         listOf(
             "other bubble" to scheme.surfaceContainerHigh,
             "own bubble" to scheme.primaryContainer,

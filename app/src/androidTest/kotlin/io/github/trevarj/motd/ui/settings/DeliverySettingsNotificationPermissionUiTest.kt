@@ -1,7 +1,7 @@
 package io.github.trevarj.motd.ui.settings
 
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -28,7 +28,8 @@ class DeliverySettingsNotificationPermissionUiTest {
 
         compose.onNodeWithTag("settings_notification_permission_warning").assertIsDisplayed()
         compose.onNodeWithTag("settings_fix_notifications").assertIsDisplayed()
-        compose.onNodeWithText("Synchronization may continue while message and status alerts are blocked. Enable notifications in Android settings to receive alerts.")
+        compose
+            .onNodeWithText("Synchronization may continue while message and status alerts are blocked. Enable notifications in Android settings to receive alerts.")
             .assertIsDisplayed()
         compose.onAllNodesWithTag("settings_push_status_card").assertCountEquals(0)
     }

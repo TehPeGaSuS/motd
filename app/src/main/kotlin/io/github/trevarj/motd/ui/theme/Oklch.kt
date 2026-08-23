@@ -18,18 +18,32 @@ import kotlin.math.sin
  * were visually adjacent and tiers that barely separated. Oklab is uniform enough that evenly
  * spaced hues actually look evenly spaced.
  */
-internal data class Oklch(val lightness: Float, val chroma: Float, val hue: Float)
+internal data class Oklch(
+    val lightness: Float,
+    val chroma: Float,
+    val hue: Float,
+)
 
 private fun toLinear(component: Float): Float =
-    if (component <= 0.04045f) component / 12.92f
-    else ((component + 0.055f) / 1.055f).pow(2.4f)
+    if (component <= 0.04045f) {
+        component / 12.92f
+    } else {
+        ((component + 0.055f) / 1.055f).pow(2.4f)
+    }
 
 private fun toGamma(component: Float): Float =
-    if (component <= 0.0031308f) component * 12.92f
-    else 1.055f * component.coerceAtLeast(0f).pow(1f / 2.4f) - 0.055f
+    if (component <= 0.0031308f) {
+        component * 12.92f
+    } else {
+        1.055f * component.coerceAtLeast(0f).pow(1f / 2.4f) - 0.055f
+    }
 
 /** Linear sRGB -> Oklab (Ottosson's matrices). */
-private fun linearToOklab(r: Float, g: Float, b: Float): FloatArray {
+private fun linearToOklab(
+    r: Float,
+    g: Float,
+    b: Float,
+): FloatArray {
     val l = cbrt(0.4122214708f * r + 0.5363325363f * g + 0.0514459929f * b)
     val m = cbrt(0.2119034982f * r + 0.6806995451f * g + 0.1073969566f * b)
     val s = cbrt(0.0883024619f * r + 0.2817188376f * g + 0.6299787005f * b)
@@ -41,7 +55,11 @@ private fun linearToOklab(r: Float, g: Float, b: Float): FloatArray {
 }
 
 /** Oklab -> linear sRGB; components may fall outside 0..1 when the color is out of gamut. */
-private fun oklabToLinear(lightness: Float, a: Float, b: Float): FloatArray {
+private fun oklabToLinear(
+    lightness: Float,
+    a: Float,
+    b: Float,
+): FloatArray {
     val l = (lightness + 0.3963377774f * a + 0.2158037573f * b).let { it * it * it }
     val m = (lightness - 0.1055613458f * a - 0.0638541728f * b).let { it * it * it }
     val s = (lightness - 0.0894841775f * a - 1.2914855480f * b).let { it * it * it }
@@ -60,14 +78,21 @@ internal fun Color.toOklch(): Oklch {
 
 private const val GAMUT_SLACK = 0.0005f
 
-private fun inGamut(lightness: Float, chroma: Float, hue: Float): Boolean {
+private fun inGamut(
+    lightness: Float,
+    chroma: Float,
+    hue: Float,
+): Boolean {
     val radians = hue * PI.toFloat() / 180f
     val linear = oklabToLinear(lightness, chroma * cos(radians), chroma * sin(radians))
     return linear.all { it >= -GAMUT_SLACK && it <= 1f + GAMUT_SLACK }
 }
 
 /** Widest chroma sRGB can hold at this lightness and hue. */
-internal fun maxChroma(lightness: Float, hue: Float): Float {
+internal fun maxChroma(
+    lightness: Float,
+    hue: Float,
+): Float {
     if (lightness <= 0.001f || lightness >= 0.999f) return 0f
     var low = 0f
     var high = 0.42f
@@ -90,18 +115,25 @@ internal fun Color.relativeChroma(): Float {
 }
 
 /** OkLCH -> [Color], reducing chroma to the gamut boundary rather than clipping (which shifts hue). */
-internal fun oklchColor(lightness: Float, chroma: Float, hue: Float): Color {
+internal fun oklchColor(
+    lightness: Float,
+    chroma: Float,
+    hue: Float,
+): Color {
     val l = lightness.coerceIn(0f, 1f)
     val h = ((hue % 360f) + 360f) % 360f
-    val c = if (inGamut(l, chroma, h)) chroma else {
-        var low = 0f
-        var high = chroma
-        repeat(18) {
-            val mid = (low + high) / 2f
-            if (inGamut(l, mid, h)) low = mid else high = mid
+    val c =
+        if (inGamut(l, chroma, h)) {
+            chroma
+        } else {
+            var low = 0f
+            var high = chroma
+            repeat(18) {
+                val mid = (low + high) / 2f
+                if (inGamut(l, mid, h)) low = mid else high = mid
+            }
+            low
         }
-        low
-    }
     val radians = h * PI.toFloat() / 180f
     val linear = oklabToLinear(l, c * cos(radians), c * sin(radians))
     return Color(
@@ -112,6 +144,8 @@ internal fun oklchColor(lightness: Float, chroma: Float, hue: Float): Color {
 }
 
 /** Same hue and relative chroma, re-fitted to the gamut at a new lightness. */
-internal fun oklchColorAt(lightness: Float, relativeChroma: Float, hue: Float): Color =
-    oklchColor(lightness, maxChroma(lightness, hue) * relativeChroma, hue)
-
+internal fun oklchColorAt(
+    lightness: Float,
+    relativeChroma: Float,
+    hue: Float,
+): Color = oklchColor(lightness, maxChroma(lightness, hue) * relativeChroma, hue)

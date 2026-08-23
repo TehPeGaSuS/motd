@@ -42,16 +42,19 @@ class ChatListPresenceUiTest {
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         for ((index, presence) in PresenceState.entries.withIndex()) {
-            val description = context.getString(
-                when (presence) {
-                    PresenceState.ONLINE -> R.string.presence_online
-                    PresenceState.OFFLINE -> R.string.presence_offline
-                    PresenceState.UNKNOWN -> R.string.presence_unknown
-                },
-            )
-            compose.onNodeWithTag("chatlist_presence_${presence.name.lowercase()}", useUnmergedTree = true)
+            val description =
+                context.getString(
+                    when (presence) {
+                        PresenceState.ONLINE -> R.string.presence_online
+                        PresenceState.OFFLINE -> R.string.presence_offline
+                        PresenceState.UNKNOWN -> R.string.presence_unknown
+                    },
+                )
+            compose
+                .onNodeWithTag("chatlist_presence_${presence.name.lowercase()}", useUnmergedTree = true)
                 .assertIsDisplayed()
-            compose.onNodeWithTag("chatlist_row_${index + 1}")
+            compose
+                .onNodeWithTag("chatlist_row_${index + 1}")
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, description))
         }
     }
@@ -94,24 +97,27 @@ class ChatListPresenceUiTest {
         listOf("online", "offline", "unknown").forEach { state ->
             assertEquals(
                 0,
-                compose.onAllNodesWithTag("chatlist_presence_$state", useUnmergedTree = true)
-                    .fetchSemanticsNodes().size,
+                compose
+                    .onAllNodesWithTag("chatlist_presence_$state", useUnmergedTree = true)
+                    .fetchSemanticsNodes()
+                    .size,
             )
         }
     }
 
-    private fun queryRow() = ChatListRow(
-        bufferId = 1,
-        networkId = 1,
-        networkName = "Libera",
-        displayName = "alice",
-        type = BufferType.QUERY,
-        pinned = false,
-        muted = false,
-        lastMessageText = "hello",
-        lastMessageSender = "alice",
-        lastMessageTime = 1L,
-        unreadCount = 0,
-        mentionCount = 0,
-    )
+    private fun queryRow() =
+        ChatListRow(
+            bufferId = 1,
+            networkId = 1,
+            networkName = "Libera",
+            displayName = "alice",
+            type = BufferType.QUERY,
+            pinned = false,
+            muted = false,
+            lastMessageText = "hello",
+            lastMessageSender = "alice",
+            lastMessageTime = 1L,
+            unreadCount = 0,
+            mentionCount = 0,
+        )
 }

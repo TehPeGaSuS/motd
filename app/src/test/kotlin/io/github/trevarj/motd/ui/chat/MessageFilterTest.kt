@@ -3,16 +3,15 @@ package io.github.trevarj.motd.ui.chat
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import io.github.trevarj.motd.data.prefs.PresenceMode
 
 /** Pure timeline-filter behavior: JPQ visibility, fools HIDE, exemptions. */
 class MessageFilterTest {
-
     private fun msg(
         sender: String = "alice",
         kind: MessageKind = MessageKind.PRIVMSG,

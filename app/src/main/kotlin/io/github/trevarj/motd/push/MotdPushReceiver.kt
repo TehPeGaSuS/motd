@@ -8,8 +8,8 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.service.ConnectionManager
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -35,13 +35,15 @@ import org.unifiedpush.android.connector.data.PushMessage
  * callback runs its suspend work to completion with `runBlocking` on a background dispatcher.
  */
 class MotdPushReceiver : MessagingReceiver() {
-
     /**
      * Connector callbacks include a server acknowledgement round trip. Move the connector's
      * synchronous dispatch off the main thread so a slow relay cannot freeze the application or
      * trigger an input ANR while registration is in progress.
      */
-    override fun onReceive(context: Context, intent: android.content.Intent) {
+    override fun onReceive(
+        context: Context,
+        intent: android.content.Intent,
+    ) {
         val pending = goAsync()
         receiverScope.launch {
             try {
@@ -56,18 +58,27 @@ class MotdPushReceiver : MessagingReceiver() {
     @InstallIn(SingletonComponent::class)
     interface PushEntryPoint {
         fun registrar(): WebPushRegistrar
+
         fun eventHandler(): PushEventHandler
+
         fun connectionManager(): ConnectionManager
+
         fun networkDao(): NetworkDao
+
         fun unifiedPush(): UnifiedPushApi
+
         fun pushHealthStore(): PushHealthStore
+
         fun pushDistributorController(): PushDistributorController
     }
 
-    private fun entry(context: Context): PushEntryPoint =
-        EntryPointAccessors.fromApplication(context.applicationContext, PushEntryPoint::class.java)
+    private fun entry(context: Context): PushEntryPoint = EntryPointAccessors.fromApplication(context.applicationContext, PushEntryPoint::class.java)
 
-    override fun onNewEndpoint(context: Context, endpoint: PushEndpoint, instance: String) {
+    override fun onNewEndpoint(
+        context: Context,
+        endpoint: PushEndpoint,
+        instance: String,
+    ) {
         val e = entry(context)
         runOnWakelock {
             val networkId = resolveInstance(e, instance) ?: return@runOnWakelock
@@ -78,7 +89,11 @@ class MotdPushReceiver : MessagingReceiver() {
         }
     }
 
-    override fun onMessage(context: Context, message: PushMessage, instance: String) {
+    override fun onMessage(
+        context: Context,
+        message: PushMessage,
+        instance: String,
+    ) {
         val e = entry(context)
         runOnWakelock {
             val networkId = resolveInstance(e, instance) ?: return@runOnWakelock
@@ -87,7 +102,11 @@ class MotdPushReceiver : MessagingReceiver() {
         }
     }
 
-    override fun onRegistrationFailed(context: Context, reason: FailedReason, instance: String) {
+    override fun onRegistrationFailed(
+        context: Context,
+        reason: FailedReason,
+        instance: String,
+    ) {
         val e = entry(context)
         runOnWakelock {
             val networkId = resolveInstance(e, instance) ?: return@runOnWakelock
@@ -99,7 +118,10 @@ class MotdPushReceiver : MessagingReceiver() {
         }
     }
 
-    override fun onUnregistered(context: Context, instance: String) {
+    override fun onUnregistered(
+        context: Context,
+        instance: String,
+    ) {
         val e = entry(context)
         runOnWakelock {
             val networkId = instance.toLongOrNull()
@@ -118,9 +140,15 @@ class MotdPushReceiver : MessagingReceiver() {
      * Map a UnifiedPush `instance` string to a known network row id. Non-numeric or
      * unknown-network instances are logged, ignored, and `unregisterApp`-ed (stale hygiene).
      */
-    private suspend fun resolveInstance(e: PushEntryPoint, instance: String): Long? =
+    private suspend fun resolveInstance(
+        e: PushEntryPoint,
+        instance: String,
+    ): Long? =
         when (val decision = classifyInstance(instance) { id -> e.networkDao().byId(id) != null }) {
-            is InstanceDecision.Known -> decision.networkId
+            is InstanceDecision.Known -> {
+                decision.networkId
+            }
+
             InstanceDecision.Stale -> {
                 Log.w(TAG, "stale/unknown push instance '$instance'; unregistering")
                 e.unifiedPush().unregisterApp(instance)
@@ -146,7 +174,10 @@ class MotdPushReceiver : MessagingReceiver() {
 
 /** Outcome of classifying a UnifiedPush `instance` string. */
 internal sealed interface InstanceDecision {
-    data class Known(val networkId: Long) : InstanceDecision
+    data class Known(
+        val networkId: Long,
+    ) : InstanceDecision
+
     /** Non-numeric or refers to a network row that does not exist — should be unregistered. */
     data object Stale : InstanceDecision
 }

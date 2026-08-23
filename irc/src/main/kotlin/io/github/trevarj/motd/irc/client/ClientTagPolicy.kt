@@ -7,7 +7,10 @@ package io.github.trevarj.motd.irc.client
  * client tags. `*` denies all tags except explicit `-tag` exemptions; without `*`, listed tags are
  * denied and negated entries remain allowed.
  */
-fun clientTagAllowed(isupport: Map<String, String>, tag: String): Boolean {
+fun clientTagAllowed(
+    isupport: Map<String, String>,
+    tag: String,
+): Boolean {
     val denied = isupport["CLIENTTAGDENY"] ?: return true
     val name = tag.removePrefix("+")
     val entries = denied.split(',').map(String::trim).filter(String::isNotEmpty)
@@ -17,12 +20,16 @@ fun clientTagAllowed(isupport: Map<String, String>, tag: String): Boolean {
 }
 
 /** A client tag also requires the negotiated `message-tags` capability. */
-fun canSendClientTag(caps: Set<String>, isupport: Map<String, String>, tag: String): Boolean =
-    caps.any { it.substringBefore('=') == "message-tags" } && clientTagAllowed(isupport, tag)
+fun canSendClientTag(
+    caps: Set<String>,
+    isupport: Map<String, String>,
+    tag: String,
+): Boolean = caps.any { it.substringBefore('=') == "message-tags" } && clientTagAllowed(isupport, tag)
 
 fun canSendReactionTags(
     caps: Set<String>,
     isupport: Map<String, String>,
     remove: Boolean,
-): Boolean = canSendClientTag(caps, isupport, "+reply") &&
-    canSendClientTag(caps, isupport, if (remove) "+draft/unreact" else "+draft/react")
+): Boolean =
+    canSendClientTag(caps, isupport, "+reply") &&
+        canSendClientTag(caps, isupport, if (remove) "+draft/unreact" else "+draft/react")

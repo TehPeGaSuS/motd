@@ -67,10 +67,11 @@ fun ChannelControlsSection(
     var dialog by remember { mutableStateOf<ChannelControlDialog?>(null) }
 
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp)
-            .testTag("channelinfo_controls_section"),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+                .testTag("channelinfo_controls_section"),
     ) {
         SectionHeader(stringResource(R.string.channelinfo_controls_title))
 
@@ -162,7 +163,7 @@ fun ChannelControlsSection(
                 headline = stringResource(R.string.channelinfo_excepts_row),
                 supporting = stringResource(R.string.channelinfo_excepts_desc),
                 tag = "channelinfo_excepts_row",
-                onClick = { dialog = ChannelControlDialog.Except(letter, invite =false) },
+                onClick = { dialog = ChannelControlDialog.Except(letter, invite = false) },
             )
         }
         modes.inviteExceptionChar?.let { letter ->
@@ -170,7 +171,7 @@ fun ChannelControlsSection(
                 headline = stringResource(R.string.channelinfo_invex_row),
                 supporting = stringResource(R.string.channelinfo_invex_desc),
                 tag = "channelinfo_invex_row",
-                onClick = { dialog = ChannelControlDialog.Except(letter, invite =true) },
+                onClick = { dialog = ChannelControlDialog.Except(letter, invite = true) },
             )
         }
 
@@ -184,67 +185,113 @@ fun ChannelControlsSection(
     }
 
     when (val open = dialog) {
-        null -> Unit
-        ChannelControlDialog.Invite -> InviteDialog(
-            onDismiss = { dialog = null },
-            onInvite = { onInvite(it); dialog = null },
-        )
-        ChannelControlDialog.Key -> KeyDialog(
-            onDismiss = { dialog = null },
-            onSet = { onSetKey(it); dialog = null },
-        )
-        ChannelControlDialog.Limit -> LimitDialog(
-            onDismiss = { dialog = null },
-            onSet = { onSetLimit(it); dialog = null },
-        )
-        ChannelControlDialog.Ban -> BanTargetDialog(
-            dialogTag = "channelinfo_ban_dialog",
-            title = stringResource(R.string.channelinfo_ban_dialog_title),
-            members = members,
-            resolvedHost = resolvedHost,
-            hostLoading = hostLoading,
-            onNickSelected = onNickSelected,
-            onDismiss = { dialog = null; onNickSelected(null) },
-            onBan = { nick, mask, alsoKick ->
-                onBanWithMask(nick, mask, alsoKick)
-                dialog = null
-                onNickSelected(null)
-            },
-            onUnban = { mask ->
-                onSetListMask('b', mask, false)
-                dialog = null
-                onNickSelected(null)
-            },
-        )
-        is ChannelControlDialog.Except -> ExceptionDialog(
-            letter = open.letter,
-            invite = open.invite,
-            members = members,
-            resolvedHost = resolvedHost,
-            hostLoading = hostLoading,
-            onNickSelected = onNickSelected,
-            onDismiss = { dialog = null; onNickSelected(null) },
-            onAdd = { mask ->
-                onSetListMask(open.letter, mask, true)
-                dialog = null
-                onNickSelected(null)
-            },
-        )
-        ChannelControlDialog.CustomMode -> CustomModeDialog(
-            catalog = modes,
-            onDismiss = { dialog = null },
-            onSend = { letters, args -> onSetChannelMode(letters, args); dialog = null },
-        )
+        null -> {
+            Unit
+        }
+
+        ChannelControlDialog.Invite -> {
+            InviteDialog(
+                onDismiss = { dialog = null },
+                onInvite = {
+                    onInvite(it)
+                    dialog = null
+                },
+            )
+        }
+
+        ChannelControlDialog.Key -> {
+            KeyDialog(
+                onDismiss = { dialog = null },
+                onSet = {
+                    onSetKey(it)
+                    dialog = null
+                },
+            )
+        }
+
+        ChannelControlDialog.Limit -> {
+            LimitDialog(
+                onDismiss = { dialog = null },
+                onSet = {
+                    onSetLimit(it)
+                    dialog = null
+                },
+            )
+        }
+
+        ChannelControlDialog.Ban -> {
+            BanTargetDialog(
+                dialogTag = "channelinfo_ban_dialog",
+                title = stringResource(R.string.channelinfo_ban_dialog_title),
+                members = members,
+                resolvedHost = resolvedHost,
+                hostLoading = hostLoading,
+                onNickSelected = onNickSelected,
+                onDismiss = {
+                    dialog = null
+                    onNickSelected(null)
+                },
+                onBan = { nick, mask, alsoKick ->
+                    onBanWithMask(nick, mask, alsoKick)
+                    dialog = null
+                    onNickSelected(null)
+                },
+                onUnban = { mask ->
+                    onSetListMask('b', mask, false)
+                    dialog = null
+                    onNickSelected(null)
+                },
+            )
+        }
+
+        is ChannelControlDialog.Except -> {
+            ExceptionDialog(
+                letter = open.letter,
+                invite = open.invite,
+                members = members,
+                resolvedHost = resolvedHost,
+                hostLoading = hostLoading,
+                onNickSelected = onNickSelected,
+                onDismiss = {
+                    dialog = null
+                    onNickSelected(null)
+                },
+                onAdd = { mask ->
+                    onSetListMask(open.letter, mask, true)
+                    dialog = null
+                    onNickSelected(null)
+                },
+            )
+        }
+
+        ChannelControlDialog.CustomMode -> {
+            CustomModeDialog(
+                catalog = modes,
+                onDismiss = { dialog = null },
+                onSend = { letters, args ->
+                    onSetChannelMode(letters, args)
+                    dialog = null
+                },
+            )
+        }
     }
 }
 
 /** Which control dialog is open. Sealed so an exception dialog can carry its advertised letter. */
 private sealed interface ChannelControlDialog {
     data object Invite : ChannelControlDialog
+
     data object Key : ChannelControlDialog
+
     data object Limit : ChannelControlDialog
+
     data object Ban : ChannelControlDialog
-    data class Except(val letter: Char, val invite: Boolean) : ChannelControlDialog
+
+    data class Except(
+        val letter: Char,
+        val invite: Boolean,
+    ) : ChannelControlDialog
+
     data object CustomMode : ChannelControlDialog
 }
 
@@ -271,14 +318,20 @@ private fun GroupHeader(text: String) {
 
 /** A row whose whole surface opens a dialog. */
 @Composable
-private fun ActionRow(headline: String, supporting: String, tag: String, onClick: () -> Unit) {
+private fun ActionRow(
+    headline: String,
+    supporting: String,
+    tag: String,
+    onClick: () -> Unit,
+) {
     ListItem(
         headlineContent = { Text(headline) },
         supportingContent = { Text(supporting) },
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag(tag)
-            .clickable(onClick = onClick),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag(tag)
+                .clickable(onClick = onClick),
     )
 }
 
@@ -345,7 +398,10 @@ private fun SetOrRemoveRow(
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun InviteDialog(onDismiss: () -> Unit, onInvite: (String) -> Unit) {
+private fun InviteDialog(
+    onDismiss: () -> Unit,
+    onInvite: (String) -> Unit,
+) {
     var nick by remember { mutableStateOf("") }
     ControlDialog(
         tag = "channelinfo_invite_dialog",
@@ -368,7 +424,10 @@ private fun InviteDialog(onDismiss: () -> Unit, onInvite: (String) -> Unit) {
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun KeyDialog(onDismiss: () -> Unit, onSet: (String) -> Unit) {
+private fun KeyDialog(
+    onDismiss: () -> Unit,
+    onSet: (String) -> Unit,
+) {
     var key by remember { mutableStateOf("") }
     // A key with a space or comma cannot survive the MODE line, so it is rejected up front.
     val valid = key.isNotBlank() && key.none { it == ' ' || it == ',' }
@@ -396,7 +455,10 @@ private val LIMIT_PRESETS = listOf(25, 50, 100, 500)
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun LimitDialog(onDismiss: () -> Unit, onSet: (Int) -> Unit) {
+private fun LimitDialog(
+    onDismiss: () -> Unit,
+    onSet: (Int) -> Unit,
+) {
     var limit by remember { mutableStateOf("") }
     val parsed = limit.toIntOrNull()?.takeIf { it >= 1 }
     ControlDialog(
@@ -447,9 +509,10 @@ private fun ExceptionDialog(
     val mask = target.mask(resolvedHost)
     ControlDialog(
         tag = "${prefix}_dialog",
-        title = stringResource(
-            if (invite) R.string.channelinfo_invex_dialog_title else R.string.channelinfo_excepts_dialog_title,
-        ),
+        title =
+            stringResource(
+                if (invite) R.string.channelinfo_invex_dialog_title else R.string.channelinfo_excepts_dialog_title,
+            ),
         onDismiss = onDismiss,
         confirmLabel = stringResource(R.string.action_add),
         confirmTag = "${prefix}_confirm",
@@ -457,9 +520,10 @@ private fun ExceptionDialog(
         onConfirm = { onAdd(mask) },
     ) {
         Text(
-            text = stringResource(
-                if (invite) R.string.channelinfo_invex_desc else R.string.channelinfo_excepts_desc,
-            ),
+            text =
+                stringResource(
+                    if (invite) R.string.channelinfo_invex_desc else R.string.channelinfo_excepts_desc,
+                ),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -520,14 +584,19 @@ private fun CustomModeDialog(
         if (hints.isNotEmpty()) {
             Text(
                 // map is inline, so stringResource stays inside the composable context.
-                text = hints.map { hint ->
-                    when (hint) {
-                        is ModeHint.NeedsValue ->
-                            stringResource(R.string.channelinfo_custom_mode_needs_value, hint.letter.toString())
-                        is ModeHint.Unknown ->
-                            stringResource(R.string.channelinfo_custom_mode_unknown, hint.letter.toString())
-                    }
-                }.joinToString("\n"),
+                text =
+                    hints
+                        .map { hint ->
+                            when (hint) {
+                                is ModeHint.NeedsValue -> {
+                                    stringResource(R.string.channelinfo_custom_mode_needs_value, hint.letter.toString())
+                                }
+
+                                is ModeHint.Unknown -> {
+                                    stringResource(R.string.channelinfo_custom_mode_unknown, hint.letter.toString())
+                                }
+                            }
+                        }.joinToString("\n"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier.testTag("channelinfo_custom_mode_hint"),
@@ -559,9 +628,10 @@ private fun ControlDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier
-            .semantics { testTagsAsResourceId = true }
-            .testTag(tag),
+        modifier =
+            Modifier
+                .semantics { testTagsAsResourceId = true }
+                .testTag(tag),
         title = { Text(title) },
         text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { body() } },
         confirmButton = {

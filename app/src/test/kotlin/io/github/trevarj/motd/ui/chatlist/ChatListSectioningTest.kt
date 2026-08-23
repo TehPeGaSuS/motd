@@ -14,19 +14,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatListSectioningTest {
-
     @Test
     fun `invitation projection decodes typed payload and distinguishes handled state`() {
-        fun event(state: InviteState) = InvitationEventRow(
-            messageId = 7,
-            bufferId = 8,
-            networkId = 9,
-            networkName = "libera",
-            text = "alice invited you",
-            eventPayload = InvitePayloadV1("alice", "me", "#secret").encode(),
-            inviteState = state,
-            serverTime = 10,
-        )
+        fun event(state: InviteState) =
+            InvitationEventRow(
+                messageId = 7,
+                bufferId = 8,
+                networkId = 9,
+                networkName = "libera",
+                text = "alice invited you",
+                eventPayload = InvitePayloadV1("alice", "me", "#secret").encode(),
+                inviteState = state,
+                serverTime = 10,
+            )
 
         val pending = requireNotNull(toChatListInvitation(event(InviteState.PENDING)))
         val joined = requireNotNull(toChatListInvitation(event(InviteState.JOINED)))
@@ -54,10 +54,18 @@ class ChatListSectioningTest {
         unreadCount: Int = 0,
         mentionCount: Int = 0,
     ) = ChatListRow(
-        bufferId = id, networkId = networkId, networkName = "net",
-        displayName = name, type = type, pinned = pinned, muted = false,
-        lastMessageText = null, lastMessageSender = null, lastMessageTime = null,
-        unreadCount = unreadCount, mentionCount = mentionCount,
+        bufferId = id,
+        networkId = networkId,
+        networkName = "net",
+        displayName = name,
+        type = type,
+        pinned = pinned,
+        muted = false,
+        lastMessageText = null,
+        lastMessageSender = null,
+        lastMessageTime = null,
+        unreadCount = unreadCount,
+        mentionCount = mentionCount,
         caseMapping = caseMapping,
     )
 
@@ -78,9 +86,10 @@ class ChatListSectioningTest {
         val active = row(id = 1, name = "alice", type = BufferType.QUERY)
         val remaining = row(id = 2, name = "#active", type = BufferType.CHANNEL)
 
-        val (activeRows, archivedRows) = partitionArchivedRows(
-            applyArchiveOverrides(listOf(active, remaining), mapOf(active.bufferId to true)),
-        )
+        val (activeRows, archivedRows) =
+            partitionArchivedRows(
+                applyArchiveOverrides(listOf(active, remaining), mapOf(active.bufferId to true)),
+            )
 
         assertEquals(listOf(remaining), activeRows)
         assertEquals(listOf(active.copy(archived = true)), archivedRows)
@@ -91,9 +100,10 @@ class ChatListSectioningTest {
         val archived = row(id = 1, name = "alice", type = BufferType.QUERY).copy(archived = true)
         val remainingArchived = row(id = 2, name = "#old", type = BufferType.CHANNEL).copy(archived = true)
 
-        val (activeRows, archivedRows) = partitionArchivedRows(
-            applyArchiveOverrides(listOf(archived, remainingArchived), mapOf(archived.bufferId to false)),
-        )
+        val (activeRows, archivedRows) =
+            partitionArchivedRows(
+                applyArchiveOverrides(listOf(archived, remainingArchived), mapOf(archived.bufferId to false)),
+            )
 
         assertEquals(listOf(archived.copy(archived = false)), activeRows)
         assertEquals(listOf(remainingArchived), archivedRows)
@@ -247,11 +257,12 @@ class ChatListSectioningTest {
             started,
             reduce(started, ArchiveFolderPullEvent.DragDelta(100f, 0, ArchiveFolderPullSource.USER_INPUT, false)).state,
         )
-        val invalid = reduceArchiveFolderPull(
-            ArchiveFolderPullState(exposurePx = Float.NaN),
-            ArchiveFolderPullEvent.DragDelta(10f, 0, ArchiveFolderPullSource.USER_INPUT, true),
-            ArchiveFolderPullGeometry(Float.NaN),
-        )
+        val invalid =
+            reduceArchiveFolderPull(
+                ArchiveFolderPullState(exposurePx = Float.NaN),
+                ArchiveFolderPullEvent.DragDelta(10f, 0, ArchiveFolderPullSource.USER_INPUT, true),
+                ArchiveFolderPullGeometry(Float.NaN),
+            )
         assertEquals(ArchiveFolderPullState(), invalid.state)
         assertEquals(0f, invalid.consumedY, 0f)
     }
@@ -287,17 +298,21 @@ class ChatListSectioningTest {
         assertEquals(0f, archiveFolderPullHintAlpha(16f, pullGeometry), 0f)
         assertEquals(1f, archiveFolderPullHintAlpha(56f, pullGeometry), 0f)
         assertEquals(0f, archiveFolderPullSettleTarget(ArchiveFolderPullState(), pullGeometry), 0f)
-        assertEquals(56f, archiveFolderPullSettleTarget(
-            ArchiveFolderPullState(56f, ArchiveFolderPullPhase.REVEALED), pullGeometry), 0f)
+        assertEquals(
+            56f,
+            archiveFolderPullSettleTarget(ArchiveFolderPullState(56f, ArchiveFolderPullPhase.REVEALED), pullGeometry),
+            0f,
+        )
     }
 
     @Test
     fun `classifies queries into friends and fools, regular otherwise`() {
-        val rows = listOf(
-            row(1, "alice"),
-            row(2, "bob"),
-            row(3, "carol"),
-        )
+        val rows =
+            listOf(
+                row(1, "alice"),
+                row(2, "bob"),
+                row(3, "carol"),
+            )
         val s = sectionChatList(rows, friends = setOf("alice"), fools = setOf("bob"))
         assertEquals(listOf(1L), s.friends.map { it.bufferId })
         assertEquals(listOf(2L), s.fools.map { it.bufferId })
@@ -306,10 +321,11 @@ class ChatListSectioningTest {
 
     @Test
     fun `channels never classify even if name matches a friend or fool`() {
-        val rows = listOf(
-            row(1, "#alice", type = BufferType.CHANNEL),
-            row(2, "#bob", type = BufferType.CHANNEL),
-        )
+        val rows =
+            listOf(
+                row(1, "#alice", type = BufferType.CHANNEL),
+                row(2, "#bob", type = BufferType.CHANNEL),
+            )
         val s = sectionChatList(rows, friends = setOf("#alice"), fools = setOf("#bob"))
         assertEquals(emptyList<Long>(), s.friends.map { it.bufferId })
         assertEquals(emptyList<Long>(), s.fools.map { it.bufferId })
@@ -318,11 +334,12 @@ class ChatListSectioningTest {
 
     @Test
     fun `pinned rows override friend and fool tiers while preserving friend membership`() {
-        val rows = listOf(
-            row(1, "alice", pinned = true),
-            row(2, "bob", pinned = true),
-            row(3, "carol"),
-        )
+        val rows =
+            listOf(
+                row(1, "alice", pinned = true),
+                row(2, "bob", pinned = true),
+                row(3, "carol"),
+            )
         val s = sectionChatList(rows, friends = setOf("alice", "carol"), fools = setOf("bob"))
         assertEquals(listOf(1L, 2L), s.pinned.map { it.bufferId })
         assertEquals(listOf(3L), s.friends.map { it.bufferId })
@@ -340,21 +357,23 @@ class ChatListSectioningTest {
     fun `tiers preserve activity order and have global priority`() {
         // Input is descending activity. Tiering may move a row ahead of a newer lower-priority
         // row, but must never reorder two rows that remain in the same tier.
-        val rows = listOf(
-            row(10, "pinned-regular", pinned = true),
-            row(11, "alice", pinned = true),
-            row(12, "bob", pinned = true),
-            row(20, "regular-newer"),
-            row(21, "carol"),
-            row(22, "regular-older"),
-            row(23, "dave"),
-            row(24, "eve"),
-        )
-        val s = sectionChatList(
-            rows,
-            friends = setOf("alice", "carol", "dave"),
-            fools = setOf("bob", "eve"),
-        )
+        val rows =
+            listOf(
+                row(10, "pinned-regular", pinned = true),
+                row(11, "alice", pinned = true),
+                row(12, "bob", pinned = true),
+                row(20, "regular-newer"),
+                row(21, "carol"),
+                row(22, "regular-older"),
+                row(23, "dave"),
+                row(24, "eve"),
+            )
+        val s =
+            sectionChatList(
+                rows,
+                friends = setOf("alice", "carol", "dave"),
+                fools = setOf("bob", "eve"),
+            )
 
         assertEquals(listOf(10L, 11L, 12L), s.pinned.map { it.bufferId })
         assertEquals(listOf(21L, 23L), s.friends.map { it.bufferId })
@@ -408,18 +427,20 @@ class ChatListSectioningTest {
 
     @Test
     fun `sectioning applies each rows casemapping conservatively and keeps tier order`() {
-        val rows = listOf(
-            row(1, "friend^", networkId = 1, caseMapping = "rfc1459-strict"),
-            row(2, "friend^", networkId = 2, caseMapping = "rfc1459"),
-            row(3, "{helper}", networkId = 3, caseMapping = "vendor-unicode"),
-            row(4, "[helper]", networkId = 3, caseMapping = "vendor-unicode"),
-        )
+        val rows =
+            listOf(
+                row(1, "friend^", networkId = 1, caseMapping = "rfc1459-strict"),
+                row(2, "friend^", networkId = 2, caseMapping = "rfc1459"),
+                row(3, "{helper}", networkId = 3, caseMapping = "vendor-unicode"),
+                row(4, "[helper]", networkId = 3, caseMapping = "vendor-unicode"),
+            )
 
-        val sections = sectionChatList(
-            rows,
-            friends = linkedSetOf("friend~", "[helper]"),
-            fools = emptySet(),
-        )
+        val sections =
+            sectionChatList(
+                rows,
+                friends = linkedSetOf("friend~", "[helper]"),
+                fools = emptySet(),
+            )
 
         assertEquals(listOf(2L, 4L), sections.friends.map { it.bufferId })
         assertEquals(listOf(1L, 3L), sections.regular.map { it.bufferId })
@@ -427,17 +448,19 @@ class ChatListSectioningTest {
 
     @Test
     fun `activity above viewport follows rendered section indices`() {
-        val sections = sectionChatList(
-            rows = listOf(
-                row(1, "pinned", pinned = true, unreadCount = 2),
-                row(2, "friend", unreadCount = 3),
-                row(3, "regular-new", unreadCount = 4),
-                row(4, "regular-old", mentionCount = 2),
-                row(5, "fool", unreadCount = 5),
-            ),
-            friends = setOf("friend"),
-            fools = setOf("fool"),
-        )
+        val sections =
+            sectionChatList(
+                rows =
+                    listOf(
+                        row(1, "pinned", pinned = true, unreadCount = 2),
+                        row(2, "friend", unreadCount = 3),
+                        row(3, "regular-new", unreadCount = 4),
+                        row(4, "regular-old", mentionCount = 2),
+                        row(5, "fool", unreadCount = 5),
+                    ),
+                friends = setOf("friend"),
+                fools = setOf("fool"),
+            )
 
         assertEquals(0, unreadActivityBeforeDisplayIndex(sections, foolsExpanded = false, 0))
         assertEquals(2, unreadActivityBeforeDisplayIndex(sections, foolsExpanded = false, 1))
@@ -449,9 +472,19 @@ class ChatListSectioningTest {
         assertEquals(16, unreadActivityBeforeDisplayIndex(sections, foolsExpanded = true, 8))
     }
 
-    private fun invitation(id: Long, state: InviteState = InviteState.PENDING) = ChatListInvitation(
-        messageId = id, bufferId = 1, networkId = 1, networkName = "net",
-        inviter = "alice", channel = "#chan", text = "invite", state = state, serverTime = id,
+    private fun invitation(
+        id: Long,
+        state: InviteState = InviteState.PENDING,
+    ) = ChatListInvitation(
+        messageId = id,
+        bufferId = 1,
+        networkId = 1,
+        networkName = "net",
+        inviter = "alice",
+        channel = "#chan",
+        text = "invite",
+        state = state,
+        serverTime = id,
     )
 
     @Test
@@ -460,6 +493,7 @@ class ChatListSectioningTest {
         val friend = row(id = 2, name = "ally")
         val regular = row(id = 3, name = "#chan", type = BufferType.CHANNEL)
         val fool = row(id = 4, name = "troll")
+
         fun sections(rows: List<ChatListRow>) = sectionChatList(rows, setOf("ally"), setOf("troll"))
         val all = sections(listOf(pinned, friend, regular, fool))
 

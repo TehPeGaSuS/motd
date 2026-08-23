@@ -2,7 +2,6 @@ package io.github.trevarj.motd.ui.settings
 
 import android.content.Intent
 import android.os.PowerManager
-import android.provider.Settings as AndroidSettings
 import android.text.format.DateUtils
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -19,12 +18,8 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,16 +27,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import android.provider.Settings as AndroidSettings
 
 /** Notifications & delivery category: delivery mode (persistent/push) and battery optimization. */
 @Composable
@@ -53,11 +53,12 @@ fun DeliverySettingsScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(viewModel) { viewModel.refreshNotificationPermission() }
     DisposableEffect(lifecycleOwner, viewModel) {
-        val observer = object : DefaultLifecycleObserver {
-            override fun onResume(owner: LifecycleOwner) {
-                viewModel.refreshNotificationPermission()
+        val observer =
+            object : DefaultLifecycleObserver {
+                override fun onResume(owner: LifecycleOwner) {
+                    viewModel.refreshNotificationPermission()
+                }
             }
-        }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
@@ -117,29 +118,42 @@ fun DeliverySettingsContent(
                     Text(
                         stringResource(
                             when {
-                                deliveryMode != DeliveryMode.UNIFIED_PUSH -> R.string.settings_battery_desc
-                                pushAvailability.protectedNetworks in 1 until pushAvailability.eligibleNetworks ->
+                                deliveryMode != DeliveryMode.UNIFIED_PUSH -> {
+                                    R.string.settings_battery_desc
+                                }
+
+                                pushAvailability.protectedNetworks in 1 until pushAvailability.eligibleNetworks -> {
                                     R.string.settings_battery_hybrid_desc
-                                else -> R.string.settings_battery_push_desc
+                                }
+
+                                else -> {
+                                    R.string.settings_battery_push_desc
+                                }
                             },
                         ),
                     )
                 },
-                colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                modifier = Modifier.testTag("settings_battery_optimization").clickable {
-                    val pm = context.getSystemService(PowerManager::class.java)
-                    val targetPackage = if (deliveryMode == DeliveryMode.UNIFIED_PUSH) {
-                        pushAvailability.selectedDistributor ?: context.packageName
-                    } else context.packageName
-                    if (pm?.isIgnoringBatteryOptimizations(targetPackage) == true) {
-                        context.startActivity(Intent(AndroidSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-                    } else {
-                        context.startActivity(
-                            Intent(AndroidSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                                .setData("package:$targetPackage".toUri()),
-                        )
-                    }
-                },
+                colors =
+                    androidx.compose.material3.ListItemDefaults
+                        .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                modifier =
+                    Modifier.testTag("settings_battery_optimization").clickable {
+                        val pm = context.getSystemService(PowerManager::class.java)
+                        val targetPackage =
+                            if (deliveryMode == DeliveryMode.UNIFIED_PUSH) {
+                                pushAvailability.selectedDistributor ?: context.packageName
+                            } else {
+                                context.packageName
+                            }
+                        if (pm?.isIgnoringBatteryOptimizations(targetPackage) == true) {
+                            context.startActivity(Intent(AndroidSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                        } else {
+                            context.startActivity(
+                                Intent(AndroidSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                    .setData("package:$targetPackage".toUri()),
+                            )
+                        }
+                    },
             )
         }
     }
@@ -185,11 +199,12 @@ private fun DeliveryGroup(
         // Selectable once the bouncer advertises webpush; a missing distributor is surfaced as
         // actionable guidance rather than a silently-disabled control (registration self-heals when
         // a distributor is installed). Only the missing-webpush case disables the control.
-        val subtitle = when {
-            availability.needsDistributor -> stringResource(R.string.settings_delivery_push_needs_distributor)
-            availability.selectable -> stringResource(R.string.settings_delivery_push_desc)
-            else -> stringResource(R.string.settings_delivery_push_unavailable)
-        }
+        val subtitle =
+            when {
+                availability.needsDistributor -> stringResource(R.string.settings_delivery_push_needs_distributor)
+                availability.selectable -> stringResource(R.string.settings_delivery_push_desc)
+                else -> stringResource(R.string.settings_delivery_push_unavailable)
+            }
         RadioRow(
             label = stringResource(R.string.settings_delivery_push),
             subtitle = subtitle,
@@ -212,9 +227,10 @@ private fun DeliveryGroup(
         ) {
             TextButton(
                 onClick = onInstallDistributor,
-                modifier = Modifier
-                    .padding(start = 52.dp)
-                    .testTag("settings_install_distributor"),
+                modifier =
+                    Modifier
+                        .padding(start = 52.dp)
+                        .testTag("settings_install_distributor"),
             ) {
                 Text(stringResource(R.string.settings_delivery_push_install_distributor))
             }
@@ -241,38 +257,46 @@ private fun PushStatusCard(
     onChooseDistributor: () -> Unit,
     onRetry: () -> Unit,
 ) {
-    val title = stringResource(
-        when (availability.setupStatus) {
-            PushSetupStatus.CHOOSE_DISTRIBUTOR -> R.string.settings_delivery_push_status_choose
-            PushSetupStatus.REQUESTING_ENDPOINT -> R.string.settings_delivery_push_status_endpoint
-            PushSetupStatus.WAITING_FOR_SERVER -> R.string.settings_delivery_push_status_server
-            PushSetupStatus.VERIFYING -> R.string.settings_delivery_push_status_verifying
-            PushSetupStatus.ACTIVE -> R.string.settings_delivery_push_status_active
-            PushSetupStatus.PARTIAL_FALLBACK -> R.string.settings_delivery_push_status_partial
-            PushSetupStatus.NEEDS_ATTENTION -> R.string.settings_delivery_push_status_attention
-        },
-    )
+    val title =
+        stringResource(
+            when (availability.setupStatus) {
+                PushSetupStatus.CHOOSE_DISTRIBUTOR -> R.string.settings_delivery_push_status_choose
+                PushSetupStatus.REQUESTING_ENDPOINT -> R.string.settings_delivery_push_status_endpoint
+                PushSetupStatus.WAITING_FOR_SERVER -> R.string.settings_delivery_push_status_server
+                PushSetupStatus.VERIFYING -> R.string.settings_delivery_push_status_verifying
+                PushSetupStatus.ACTIVE -> R.string.settings_delivery_push_status_active
+                PushSetupStatus.PARTIAL_FALLBACK -> R.string.settings_delivery_push_status_partial
+                PushSetupStatus.NEEDS_ATTENTION -> R.string.settings_delivery_push_status_attention
+            },
+        )
     Card(
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            .testTag("settings_push_status_card"),
+        modifier =
+            Modifier
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .testTag("settings_push_status_card"),
     ) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
-            availability.distributors.firstOrNull { it.packageName == availability.selectedDistributor }
+            availability.distributors
+                .firstOrNull { it.packageName == availability.selectedDistributor }
                 ?.let { Text(it.label, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium) }
             if (availability.eligibleNetworks > 0) {
-                Text(pluralStringResource(
-                    R.plurals.settings_delivery_push_coverage,
-                    availability.eligibleNetworks,
-                    availability.protectedNetworks,
-                    availability.eligibleNetworks,
-                ))
+                Text(
+                    pluralStringResource(
+                        R.plurals.settings_delivery_push_coverage,
+                        availability.eligibleNetworks,
+                        availability.protectedNetworks,
+                        availability.eligibleNetworks,
+                    ),
+                )
             }
             availability.lastSuccessAt?.let {
-                Text(stringResource(
-                    R.string.settings_delivery_push_last_success,
-                    DateUtils.getRelativeTimeSpanString(it).toString(),
-                ))
+                Text(
+                    stringResource(
+                        R.string.settings_delivery_push_last_success,
+                        DateUtils.getRelativeTimeSpanString(it).toString(),
+                    ),
+                )
             }
             availability.errorCode?.let {
                 Text(stringResource(R.string.settings_delivery_push_error, it.replace('_', ' ').lowercase()))
@@ -284,10 +308,15 @@ private fun PushStatusCard(
                         onClick = onChooseDistributor,
                         modifier = Modifier.testTag("settings_push_choose_distributor"),
                     ) {
-                        Text(stringResource(
-                            if (availability.selectedDistributor == null) R.string.settings_delivery_push_choose
-                            else R.string.settings_delivery_push_change,
-                        ))
+                        Text(
+                            stringResource(
+                                if (availability.selectedDistributor == null) {
+                                    R.string.settings_delivery_push_choose
+                                } else {
+                                    R.string.settings_delivery_push_change
+                                },
+                            ),
+                        )
                     }
                 }
                 TextButton(
@@ -302,9 +331,10 @@ private fun PushStatusCard(
 @Composable
 private fun NotificationPermissionWarning(onFixNotifications: () -> Unit) {
     Card(
-        modifier = Modifier
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .testTag("settings_notification_permission_warning"),
+        modifier =
+            Modifier
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .testTag("settings_notification_permission_warning"),
     ) {
         Column(Modifier.padding(16.dp)) {
             Text(
@@ -327,7 +357,8 @@ private fun DeliverySettingsPreview() {
         DeliverySettingsContent(
             deliveryMode = DeliveryMode.PERSISTENT_SOCKET,
             pushAvailability = PushAvailability(),
-            onBack = {}, onDeliveryMode = {},
+            onBack = {},
+            onDeliveryMode = {},
         )
     }
 }

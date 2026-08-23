@@ -3,10 +3,8 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcClientState
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
@@ -16,6 +14,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 internal data class ConnectionActorSnapshot(
     val connection: ManagedConnection?,
@@ -43,17 +43,37 @@ internal class ConnectionRegistry(
     private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
 ) {
     private sealed interface Command {
-        data class BeginStart(val result: CompletableDeferred<Boolean>) : Command
-        data class AttachObservers(val jobs: List<Job>, val result: CompletableDeferred<Unit>) : Command
-        data class Stop(val result: CompletableDeferred<List<Job>>) : Command
+        data class BeginStart(
+            val result: CompletableDeferred<Boolean>,
+        ) : Command
+
+        data class AttachObservers(
+            val jobs: List<Job>,
+            val result: CompletableDeferred<Unit>,
+        ) : Command
+
+        data class Stop(
+            val result: CompletableDeferred<List<Job>>,
+        ) : Command
+
         data class Reconcile(
             val rows: List<Pair<NetworkEntity, String>>,
             val wantedIds: Set<Long>,
             val awaitingCertTrust: Set<Long>,
             val result: CompletableDeferred<Unit>,
         ) : Command
-        data class Connect(val row: NetworkEntity, val fingerprint: String, val result: CompletableDeferred<Unit>) : Command
-        data class Disconnect(val networkId: Long, val result: CompletableDeferred<Unit>) : Command
+
+        data class Connect(
+            val row: NetworkEntity,
+            val fingerprint: String,
+            val result: CompletableDeferred<Unit>,
+        ) : Command
+
+        data class Disconnect(
+            val networkId: Long,
+            val result: CompletableDeferred<Unit>,
+        ) : Command
+
         data class ActorState(
             val networkId: Long,
             val generation: Long,
@@ -61,38 +81,58 @@ internal class ConnectionRegistry(
             val state: IrcClientState,
             val result: CompletableDeferred<Unit>,
         ) : Command
+
         data class ActorConnection(
             val networkId: Long,
             val generation: Long,
             val connection: ManagedConnection?,
         ) : Command
-        data class ActorStopped(val networkId: Long, val generation: Long) : Command
+
+        data class ActorStopped(
+            val networkId: Long,
+            val generation: Long,
+        ) : Command
+
         data class HistoryCatchUpFinished(
             val networkId: Long,
             val generation: Long,
             val result: CompletableDeferred<Unit>,
         ) : Command
+
         data class Callback(
             val networkId: Long,
             val generation: Long,
             val block: suspend () -> Unit,
             val result: CompletableDeferred<Boolean>,
         ) : Command
-        data class CallbackFinished(val token: Long) : Command
+
+        data class CallbackFinished(
+            val token: Long,
+        ) : Command
+
         data object NetworkAvailable : Command
+
         data object NetworkLost : Command
+
         data object WakeNonReady : Command
+
         data object ProbeReady : Command
+
         data class ArmEchoTimeout(
             val key: String,
             val timeoutMs: Long,
             val onTimeout: suspend () -> Unit,
         ) : Command
-        data class EchoTimeoutFinished(val key: String, val token: Long) : Command
+
+        data class EchoTimeoutFinished(
+            val key: String,
+            val token: Long,
+        ) : Command
     }
 
     private val commands = Channel<Command>(Channel.UNLIMITED)
     private val generations = ConnectionGenerationGate()
+
     private data class OwnedActor(
         val actor: ConnectionLifecycleActor,
         val fingerprint: String,
@@ -100,20 +140,24 @@ internal class ConnectionRegistry(
         var connection: ManagedConnection? = null,
         var isAlive: Boolean = false,
     )
+
     private val actors = LinkedHashMap<Long, OwnedActor>()
     private val states = LinkedHashMap<Long, IrcClientState>()
     private val terminalFingerprints = HashMap<Long, String>()
+
     // Connection-lifecycle state, not a fetch lock: it tracks the in-flight reconnect catch-up
     // generation per network so entryHistoryReady stays gated until that catch-up settles. All
     // CHATHISTORY wire serialization lives in HistoryPageLoader's per-network lock, not here.
     private val historyCatchUpGenerations = HashMap<Long, Long>()
     private val observerJobs = mutableListOf<Job>()
     private val pendingEchoJobs = HashMap<String, Pair<Long, Job>>()
+
     private data class CallbackJob(
         val networkId: Long,
         val generation: Long,
         val job: Job,
     )
+
     private val callbackJobs = HashMap<Long, CallbackJob>()
     private val echoTokens = AtomicLong()
     private val callbackTokens = AtomicLong()
@@ -125,9 +169,10 @@ internal class ConnectionRegistry(
     val snapshot: StateFlow<ConnectionRegistrySnapshot> = _snapshot.asStateFlow()
     private val _states = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
     val connectionStates: StateFlow<Map<Long, IrcClientState>> = _states.asStateFlow()
-    private val _connectionActivity = MutableStateFlow(
-        ConnectionActivitySnapshot(initializationComplete = false),
-    )
+    private val _connectionActivity =
+        MutableStateFlow(
+            ConnectionActivitySnapshot(initializationComplete = false),
+        )
     val connectionActivity: StateFlow<ConnectionActivitySnapshot> = _connectionActivity.asStateFlow()
 
     init {
@@ -166,14 +211,23 @@ internal class ConnectionRegistry(
     private fun releaseWaiter(command: Command) {
         when (command) {
             is Command.BeginStart -> command.result.complete(false)
+
             is Command.AttachObservers -> command.result.complete(Unit)
+
             is Command.Stop -> command.result.complete(emptyList())
+
             is Command.Reconcile -> command.result.complete(Unit)
+
             is Command.Connect -> command.result.complete(Unit)
+
             is Command.Disconnect -> command.result.complete(Unit)
+
             is Command.ActorState -> command.result.complete(Unit)
+
             is Command.HistoryCatchUpFinished -> command.result.complete(Unit)
+
             is Command.Callback -> command.result.complete(false)
+
             // Fire-and-forget commands have no waiter to release. Kept exhaustive on purpose: a
             // new command with a result must decide its own contained answer here.
             is Command.ActorConnection,
@@ -203,29 +257,51 @@ internal class ConnectionRegistry(
         awaitingCertTrust: Set<Long>,
     ) = request<Unit> { Command.Reconcile(rows, wantedIds, awaitingCertTrust, it) }
 
-    suspend fun connect(row: NetworkEntity, fingerprint: String) =
-        request<Unit> { Command.Connect(row, fingerprint, it) }
+    suspend fun connect(
+        row: NetworkEntity,
+        fingerprint: String,
+    ) = request<Unit> { Command.Connect(row, fingerprint, it) }
 
     suspend fun disconnect(networkId: Long) = request<Unit> { Command.Disconnect(networkId, it) }
 
-    suspend fun actorState(networkId: Long, generation: Long, fingerprint: String, state: IrcClientState) =
-        request<Unit> { Command.ActorState(networkId, generation, fingerprint, state, it) }
+    suspend fun actorState(
+        networkId: Long,
+        generation: Long,
+        fingerprint: String,
+        state: IrcClientState,
+    ) = request<Unit> { Command.ActorState(networkId, generation, fingerprint, state, it) }
 
-    fun actorConnection(networkId: Long, generation: Long, connection: ManagedConnection?) {
+    fun actorConnection(
+        networkId: Long,
+        generation: Long,
+        connection: ManagedConnection?,
+    ) {
         commands.trySend(Command.ActorConnection(networkId, generation, connection))
     }
 
-    fun actorStopped(networkId: Long, generation: Long) {
+    fun actorStopped(
+        networkId: Long,
+        generation: Long,
+    ) {
         commands.trySend(Command.ActorStopped(networkId, generation))
     }
 
-    suspend fun historyCatchUpFinished(networkId: Long, generation: Long) =
-        request<Unit> { Command.HistoryCatchUpFinished(networkId, generation, it) }
+    suspend fun historyCatchUpFinished(
+        networkId: Long,
+        generation: Long,
+    ) = request<Unit> { Command.HistoryCatchUpFinished(networkId, generation, it) }
 
-    suspend fun runIfCurrent(networkId: Long, generation: Long, block: suspend () -> Unit): Boolean =
-        request { Command.Callback(networkId, generation, block, it) }
+    suspend fun runIfCurrent(
+        networkId: Long,
+        generation: Long,
+        block: suspend () -> Unit,
+    ): Boolean = request { Command.Callback(networkId, generation, block, it) }
 
-    fun armEchoTimeout(key: String, timeoutMs: Long, onTimeout: suspend () -> Unit) {
+    fun armEchoTimeout(
+        key: String,
+        timeoutMs: Long,
+        onTimeout: suspend () -> Unit,
+    ) {
         commands.trySend(Command.ArmEchoTimeout(key, timeoutMs, onTimeout))
     }
 
@@ -247,8 +323,10 @@ internal class ConnectionRegistry(
         if (!commands.trySend(Command.ProbeReady).isSuccess) probeReadyPending.set(false)
     }
 
-    fun isCurrent(networkId: Long, generation: Long): Boolean =
-        generations.isCurrent(networkId, generation)
+    fun isCurrent(
+        networkId: Long,
+        generation: Long,
+    ): Boolean = generations.isCurrent(networkId, generation)
 
     private suspend fun handle(command: Command) {
         when (command) {
@@ -261,6 +339,7 @@ internal class ConnectionRegistry(
                 }
                 command.result.complete(changed)
             }
+
             is Command.AttachObservers -> {
                 if (started) {
                     observerJobs += command.jobs
@@ -270,6 +349,7 @@ internal class ConnectionRegistry(
                 publish()
                 command.result.complete(Unit)
             }
+
             is Command.Stop -> {
                 started = false
                 initialReconcileComplete = true
@@ -294,6 +374,7 @@ internal class ConnectionRegistry(
                 publish()
                 command.result.complete(cleanupJobs)
             }
+
             is Command.Reconcile -> {
                 if (!started) {
                     command.result.complete(Unit)
@@ -311,6 +392,7 @@ internal class ConnectionRegistry(
                 publish()
                 command.result.complete(Unit)
             }
+
             is Command.Connect -> {
                 if (!started) {
                     command.result.complete(Unit)
@@ -325,11 +407,13 @@ internal class ConnectionRegistry(
                 publish()
                 command.result.complete(Unit)
             }
+
             is Command.Disconnect -> {
                 removeActor(command.networkId, clearTerminal = false)
                 publish()
                 command.result.complete(Unit)
             }
+
             is Command.ActorState -> {
                 if (generations.isCurrent(command.networkId, command.generation)) {
                     if (command.state is IrcClientState.Failed && command.state.fatal &&
@@ -339,22 +423,27 @@ internal class ConnectionRegistry(
                     }
                     val prior = states[command.networkId]
                     when {
-                        command.state is IrcClientState.Ready && prior !is IrcClientState.Ready ->
+                        command.state is IrcClientState.Ready && prior !is IrcClientState.Ready -> {
                             historyCatchUpGenerations[command.networkId] = command.generation
-                        command.state !is IrcClientState.Ready ->
+                        }
+
+                        command.state !is IrcClientState.Ready -> {
                             historyCatchUpGenerations.remove(command.networkId)
+                        }
                     }
                     states[command.networkId] = command.state
                     publish()
                 }
                 command.result.complete(Unit)
             }
+
             is Command.ActorConnection -> {
                 if (generations.isCurrent(command.networkId, command.generation)) {
                     actors[command.networkId]?.connection = command.connection
                     publish()
                 }
             }
+
             is Command.ActorStopped -> {
                 if (generations.isCurrent(command.networkId, command.generation)) {
                     actors[command.networkId]?.let {
@@ -365,6 +454,7 @@ internal class ConnectionRegistry(
                     publish()
                 }
             }
+
             is Command.HistoryCatchUpFinished -> {
                 if (historyCatchUpGenerations[command.networkId] == command.generation) {
                     historyCatchUpGenerations.remove(command.networkId)
@@ -372,57 +462,69 @@ internal class ConnectionRegistry(
                 }
                 command.result.complete(Unit)
             }
+
             is Command.Callback -> {
                 if (!generations.isCurrent(command.networkId, command.generation)) {
                     command.result.complete(false)
                     return
                 }
                 val token = callbackTokens.incrementAndGet()
-                val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
-                    try {
-                        if (generations.isCurrent(command.networkId, command.generation)) {
-                            command.block()
-                            command.result.complete(true)
-                        } else {
+                val job =
+                    scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+                        try {
+                            if (generations.isCurrent(command.networkId, command.generation)) {
+                                command.block()
+                                command.result.complete(true)
+                            } else {
+                                command.result.complete(false)
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            // Deliberate crash-containment barrier: a failed post-Ready Room write must
+                            // not take the process down. The write is still lost, so record it —
+                            // otherwise the loss is completely silent.
+                            diagnostics.record("connections", "callback_failed") {
+                                mapOf(
+                                    "network_id" to command.networkId,
+                                    "error" to error::class.simpleName,
+                                )
+                            }
                             command.result.complete(false)
+                        } finally {
+                            command.result.complete(false)
+                            commands.trySend(Command.CallbackFinished(token))
                         }
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (error: Exception) {
-                        // Deliberate crash-containment barrier: a failed post-Ready Room write must
-                        // not take the process down. The write is still lost, so record it —
-                        // otherwise the loss is completely silent.
-                        diagnostics.record("connections", "callback_failed") {
-                            mapOf(
-                                "network_id" to command.networkId,
-                                "error" to error::class.simpleName,
-                            )
-                        }
-                        command.result.complete(false)
-                    } finally {
-                        command.result.complete(false)
-                        commands.trySend(Command.CallbackFinished(token))
                     }
-                }
                 callbackJobs[token] = CallbackJob(command.networkId, command.generation, job)
                 publish()
                 job.start()
             }
+
             is Command.CallbackFinished -> {
                 callbackJobs.remove(command.token)
                 publish()
             }
+
             // The two wake sources stay distinguishable inside the actor: connectivity may only
             // reset the backoff escalation on a real loss→available edge, while the (human-paced)
             // foreground wake always does. See WakeCause.
-            Command.NetworkAvailable ->
+            Command.NetworkAvailable -> {
                 actors.values.forEach { it.actor.onNetworkAvailable(WakeCause.Connectivity) }
-            Command.NetworkLost -> actors.values.forEach { it.actor.onNetworkLost() }
-            Command.WakeNonReady -> actors.forEach { (networkId, registered) ->
-                if (registered.actor.isAlive && states[networkId] !is IrcClientState.Ready) {
-                    registered.actor.onNetworkAvailable(WakeCause.Foreground)
+            }
+
+            Command.NetworkLost -> {
+                actors.values.forEach { it.actor.onNetworkLost() }
+            }
+
+            Command.WakeNonReady -> {
+                actors.forEach { (networkId, registered) ->
+                    if (registered.actor.isAlive && states[networkId] !is IrcClientState.Ready) {
+                        registered.actor.onNetworkAvailable(WakeCause.Foreground)
+                    }
                 }
             }
+
             Command.ProbeReady -> {
                 try {
                     actors.forEach { (networkId, registered) ->
@@ -434,18 +536,21 @@ internal class ConnectionRegistry(
                     probeReadyPending.set(false)
                 }
             }
+
             is Command.ArmEchoTimeout -> {
                 if (!started) return
                 pendingEchoJobs.remove(command.key)?.second?.cancel()
                 val token = echoTokens.incrementAndGet()
-                val job = scope.launch {
-                    delay(command.timeoutMs)
-                    command.onTimeout()
-                    commands.send(Command.EchoTimeoutFinished(command.key, token))
-                }
+                val job =
+                    scope.launch {
+                        delay(command.timeoutMs)
+                        command.onTimeout()
+                        commands.send(Command.EchoTimeoutFinished(command.key, token))
+                    }
                 pendingEchoJobs[command.key] = token to job
                 publish()
             }
+
             is Command.EchoTimeoutFinished -> {
                 if (pendingEchoJobs[command.key]?.first == command.token) {
                     pendingEchoJobs.remove(command.key)
@@ -463,13 +568,16 @@ internal class ConnectionRegistry(
         if (terminalFingerprints[row.id] == fingerprint) return
         terminalFingerprints.remove(row.id)
         val existing = actors[row.id]
-        if (existing != null && !shouldRebuildActor(
+        if (existing != null &&
+            !shouldRebuildActor(
                 fingerprintChanged = existing.fingerprint != fingerprint,
                 actorAlive = existing.actor.isAlive,
                 lastState = states[row.id],
                 awaitingCertTrust = row.id in awaitingCertTrust,
             )
-        ) return
+        ) {
+            return
+        }
 
         // Invalidate before stopAndJoin -- see the ordering note in Command.Stop.
         generations.invalidate(row.id)
@@ -482,7 +590,10 @@ internal class ConnectionRegistry(
         owned.isAlive = actor.isAlive
     }
 
-    private suspend fun removeActor(networkId: Long, clearTerminal: Boolean) {
+    private suspend fun removeActor(
+        networkId: Long,
+        clearTerminal: Boolean,
+    ) {
         // Invalidate before stopAndJoin -- see the ordering note in Command.Stop.
         generations.invalidate(networkId)
         callbackJobs.filterValues { it.networkId == networkId }.toList().forEach { (token, callback) ->
@@ -500,29 +611,32 @@ internal class ConnectionRegistry(
 
     private fun publish() {
         val immutableStates = states.toMap()
-        _snapshot.value = ConnectionRegistrySnapshot(
-            started = started,
-            actors = actors.mapValues { (_, owned) ->
-                ConnectionActorSnapshot(
-                    connection = owned.connection,
-                    isAlive = owned.isAlive,
-                    fingerprint = owned.fingerprint,
-                    generation = owned.generation,
-                )
-            },
-            states = immutableStates,
-            observerCount = observerJobs.size,
-            pendingEchoCount = pendingEchoJobs.size,
-            fingerprintCount = actors.size,
-            terminalFingerprintCount = terminalFingerprints.size,
-            callbackCount = callbackJobs.size,
-        )
-        _connectionActivity.value = ConnectionActivitySnapshot(
-            states = immutableStates,
-            progressing = actors.mapValues { (_, actor) -> actor.isAlive },
-            initializationComplete = initialReconcileComplete,
-            historyCatchUpPending = historyCatchUpGenerations.keys.toSet(),
-        )
+        _snapshot.value =
+            ConnectionRegistrySnapshot(
+                started = started,
+                actors =
+                    actors.mapValues { (_, owned) ->
+                        ConnectionActorSnapshot(
+                            connection = owned.connection,
+                            isAlive = owned.isAlive,
+                            fingerprint = owned.fingerprint,
+                            generation = owned.generation,
+                        )
+                    },
+                states = immutableStates,
+                observerCount = observerJobs.size,
+                pendingEchoCount = pendingEchoJobs.size,
+                fingerprintCount = actors.size,
+                terminalFingerprintCount = terminalFingerprints.size,
+                callbackCount = callbackJobs.size,
+            )
+        _connectionActivity.value =
+            ConnectionActivitySnapshot(
+                states = immutableStates,
+                progressing = actors.mapValues { (_, actor) -> actor.isAlive },
+                initializationComplete = initialReconcileComplete,
+                historyCatchUpPending = historyCatchUpGenerations.keys.toSet(),
+            )
         _states.value = immutableStates
     }
 

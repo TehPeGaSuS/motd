@@ -32,15 +32,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +55,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.bouncer.ChannelCommandFields
 import io.github.trevarj.motd.bouncer.NetworkCommandFields
@@ -109,40 +109,41 @@ fun BouncerNetworksScreen(
     BouncerNetworksContent(
         state = state,
         onBack = onBack,
-        callbacks = BouncerControlCallbacks(
-            onConnect = viewModel::connect,
-            onRefresh = viewModel::refresh,
-            onProbe = viewModel::probeCapabilities,
-            onSelectTab = viewModel::selectTab,
-            onClearFeedback = viewModel::clearFeedback,
-            onToggleImport = { row ->
-                if (row.childNetworkId == null) viewModel.importNetwork(row) else viewModel.removeLocal(row)
-            },
-            onCreateNetwork = viewModel::createNetwork,
-            onUpdateNetwork = viewModel::updateNetwork,
-            onDeleteNetwork = viewModel::deleteFromBouncer,
-            onChannelStatus = viewModel::channelStatus,
-            onCreateChannel = viewModel::createChannel,
-            onUpdateChannel = viewModel::updateChannel,
-            onDeleteChannel = viewModel::deleteChannel,
-            onUpdateAccount = viewModel::updateAccount,
-            onSaslStatus = viewModel::saslStatus,
-            onSetSaslPlain = viewModel::setSaslPlain,
-            onResetSasl = viewModel::resetSasl,
-            onGenerateCertFp = viewModel::generateCertFp,
-            onShowCertFp = viewModel::showCertFp,
-            onUserStatus = viewModel::userStatus,
-            onCreateUser = viewModel::createUser,
-            onUpdateUser = viewModel::updateUser,
-            onRequestUserDeletion = viewModel::requestUserDeletion,
-            onConfirmUserDeletion = viewModel::confirmUserDeletion,
-            onCancelUserDeletion = viewModel::cancelUserDeletion,
-            onRunAsUser = viewModel::runAsUser,
-            onServerStatus = viewModel::serverStatus,
-            onServerNotice = viewModel::sendServerNotice,
-            onServerDebug = viewModel::setServerDebug,
-            onSubmitConsole = viewModel::submitConsole,
-        ),
+        callbacks =
+            BouncerControlCallbacks(
+                onConnect = viewModel::connect,
+                onRefresh = viewModel::refresh,
+                onProbe = viewModel::probeCapabilities,
+                onSelectTab = viewModel::selectTab,
+                onClearFeedback = viewModel::clearFeedback,
+                onToggleImport = { row ->
+                    if (row.childNetworkId == null) viewModel.importNetwork(row) else viewModel.removeLocal(row)
+                },
+                onCreateNetwork = viewModel::createNetwork,
+                onUpdateNetwork = viewModel::updateNetwork,
+                onDeleteNetwork = viewModel::deleteFromBouncer,
+                onChannelStatus = viewModel::channelStatus,
+                onCreateChannel = viewModel::createChannel,
+                onUpdateChannel = viewModel::updateChannel,
+                onDeleteChannel = viewModel::deleteChannel,
+                onUpdateAccount = viewModel::updateAccount,
+                onSaslStatus = viewModel::saslStatus,
+                onSetSaslPlain = viewModel::setSaslPlain,
+                onResetSasl = viewModel::resetSasl,
+                onGenerateCertFp = viewModel::generateCertFp,
+                onShowCertFp = viewModel::showCertFp,
+                onUserStatus = viewModel::userStatus,
+                onCreateUser = viewModel::createUser,
+                onUpdateUser = viewModel::updateUser,
+                onRequestUserDeletion = viewModel::requestUserDeletion,
+                onConfirmUserDeletion = viewModel::confirmUserDeletion,
+                onCancelUserDeletion = viewModel::cancelUserDeletion,
+                onRunAsUser = viewModel::runAsUser,
+                onServerStatus = viewModel::serverStatus,
+                onServerNotice = viewModel::sendServerNotice,
+                onServerDebug = viewModel::setServerDebug,
+                onSubmitConsole = viewModel::submitConsole,
+            ),
     )
 }
 
@@ -225,11 +226,12 @@ private fun ConnectionAndCapabilityCard(
     callbacks: BouncerControlCallbacks,
 ) {
     val ready = state.rootState is IrcClientState.Ready
-    val container = when {
-        !ready -> MaterialTheme.colorScheme.errorContainer
-        !state.capabilities.verified -> MaterialTheme.colorScheme.tertiaryContainer
-        else -> MaterialTheme.colorScheme.secondaryContainer
-    }
+    val container =
+        when {
+            !ready -> MaterialTheme.colorScheme.errorContainer
+            !state.capabilities.verified -> MaterialTheme.colorScheme.tertiaryContainer
+            else -> MaterialTheme.colorScheme.secondaryContainer
+        }
     Surface(
         color = container,
         shape = RoundedCornerShape(16.dp),
@@ -275,13 +277,14 @@ private fun BouncerTabs(
     administrator: Boolean,
     onSelect: (BouncerControlTab) -> Unit,
 ) {
-    val tabs = buildList {
-        add(BouncerControlTab.NETWORKS to R.string.bouncer_tab_networks)
-        add(BouncerControlTab.CHANNELS to R.string.bouncer_tab_channels)
-        add(BouncerControlTab.ACCOUNT to R.string.bouncer_tab_account)
-        if (administrator) add(BouncerControlTab.ADMIN to R.string.bouncer_tab_admin)
-        add(BouncerControlTab.CONSOLE to R.string.bouncer_tab_console)
-    }
+    val tabs =
+        buildList {
+            add(BouncerControlTab.NETWORKS to R.string.bouncer_tab_networks)
+            add(BouncerControlTab.CHANNELS to R.string.bouncer_tab_channels)
+            add(BouncerControlTab.ACCOUNT to R.string.bouncer_tab_account)
+            if (administrator) add(BouncerControlTab.ADMIN to R.string.bouncer_tab_admin)
+            add(BouncerControlTab.CONSOLE to R.string.bouncer_tab_console)
+        }
     val visibleSelected = tabs.indexOfFirst { it.first == selected }.coerceAtLeast(0)
     // Scrollable so each tab sizes to its label instead of being equally
     // divided across the width (which truncates labels once Console is added).
@@ -307,7 +310,9 @@ private fun NetworksPanel(
     var editRow by remember { mutableStateOf<BouncerNetRow?>(null) }
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag("bouncer_networks_panel"),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        contentPadding =
+            androidx.compose.foundation.layout
+                .PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
@@ -341,14 +346,20 @@ private fun NetworksPanel(
         NetworkEditorDialog(
             existingName = null,
             onDismiss = { showCreate = false },
-            onSubmit = { fields -> showCreate = false; callbacks.onCreateNetwork(fields) },
+            onSubmit = { fields ->
+                showCreate = false
+                callbacks.onCreateNetwork(fields)
+            },
         )
     }
     editRow?.let { row ->
         NetworkEditorDialog(
             existingName = row.name,
             onDismiss = { editRow = null },
-            onSubmit = { fields -> editRow = null; callbacks.onUpdateNetwork(row.name, fields) },
+            onSubmit = { fields ->
+                editRow = null
+                callbacks.onUpdateNetwork(row.name, fields)
+            },
         )
     }
 }
@@ -371,7 +382,9 @@ private fun BouncerRow(
             supportingContent = { row.host?.let { Text(it) } },
             leadingContent = {
                 Box(
-                    Modifier.size(10.dp).clip(CircleShape)
+                    Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
                         .background(bouncerStateColor(row.bouncerState)),
                 )
             },
@@ -381,9 +394,10 @@ private fun BouncerRow(
                         checked = row.childNetworkId != null,
                         onCheckedChange = { onToggleImport(row) },
                         enabled = enabled,
-                        modifier = Modifier.testTag("bouncer_switch_${row.netId}").semantics {
-                            contentDescription = showInMotdLabel
-                        },
+                        modifier =
+                            Modifier.testTag("bouncer_switch_${row.netId}").semantics {
+                                contentDescription = showInMotdLabel
+                            },
                     )
                     Box {
                         IconButton(onClick = { menuOpen = true }, enabled = enabled) {
@@ -392,7 +406,10 @@ private fun BouncerRow(
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.action_edit)) },
-                                onClick = { menuOpen = false; onEdit(row) },
+                                onClick = {
+                                    menuOpen = false
+                                    onEdit(row)
+                                },
                             )
                             DropdownMenuItem(
                                 text = {
@@ -401,13 +418,18 @@ private fun BouncerRow(
                                         color = MaterialTheme.colorScheme.error,
                                     )
                                 },
-                                onClick = { menuOpen = false; showDeleteConfirm = true },
+                                onClick = {
+                                    menuOpen = false
+                                    showDeleteConfirm = true
+                                },
                             )
                         }
                     }
                 }
             },
-            colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
+            colors =
+                androidx.compose.material3.ListItemDefaults
+                    .colors(containerColor = Color.Transparent),
         )
     }
     if (showDeleteConfirm) {
@@ -416,7 +438,10 @@ private fun BouncerRow(
             title = { Text(stringResource(R.string.bouncer_delete_confirm_title)) },
             text = { Text(stringResource(R.string.bouncer_delete_confirm_message, row.name)) },
             confirmButton = {
-                TextButton(onClick = { showDeleteConfirm = false; onDeleteFromBouncer(row) }) {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    onDeleteFromBouncer(row)
+                }) {
                     Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error)
                 }
             },
@@ -444,17 +469,20 @@ private fun bouncerStateColor(state: String?): Color {
 private fun BouncerNetworksReadyPreview() {
     MotdTheme {
         BouncerNetworksContent(
-            state = BouncerNetworksUiState(
-                rootState = IrcClientState.Ready("me", emptySet(), emptyMap()),
-                capabilities = io.github.trevarj.motd.bouncer.BouncerServCapabilities(
-                    setOf("network create", "network update", "server status"),
-                    verified = true,
+            state =
+                BouncerNetworksUiState(
+                    rootState = IrcClientState.Ready("me", emptySet(), emptyMap()),
+                    capabilities =
+                        io.github.trevarj.motd.bouncer.BouncerServCapabilities(
+                            setOf("network create", "network update", "server status"),
+                            verified = true,
+                        ),
+                    rows =
+                        listOf(
+                            BouncerNetRow("1", "Libera", "irc.libera.chat", "connected", childNetworkId = 5),
+                            BouncerNetRow("2", "OFTC", "irc.oftc.net", "disconnected", childNetworkId = null),
+                        ),
                 ),
-                rows = listOf(
-                    BouncerNetRow("1", "Libera", "irc.libera.chat", "connected", childNetworkId = 5),
-                    BouncerNetRow("2", "OFTC", "irc.oftc.net", "disconnected", childNetworkId = null),
-                ),
-            ),
             onBack = {},
             callbacks = BouncerControlCallbacks(),
         )

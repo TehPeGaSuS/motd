@@ -15,12 +15,17 @@ import org.junit.Test
  * presentation position, which is what conservation is measured in.
  */
 class TimelinePresentationPinTest {
+    private fun window(
+        itemCount: Int,
+        placeholdersBefore: Int,
+        ids: List<Long>,
+    ) = TimelineWindow(itemCount, placeholdersBefore, ids)
 
-    private fun window(itemCount: Int, placeholdersBefore: Int, ids: List<Long>) =
-        TimelineWindow(itemCount, placeholdersBefore, ids)
-
-    private fun anchor(index: Int, key: Long?, offset: Int = 24) =
-        TimelineViewportAnchor(index = index, offset = offset, key = key)
+    private fun anchor(
+        index: Int,
+        key: Long?,
+        offset: Int = 24,
+    ) = TimelineViewportAnchor(index = index, offset = offset, key = key)
 
     /**
      * The reconnect catch-up, with the numbers the real thing produces.
@@ -34,13 +39,14 @@ class TimelinePresentationPinTest {
     @Test
     fun catchUpThatShiftsEveryRowAndUnloadsTheAnchorIsPinnedToTheAnchorsNewIndex() {
         val previous = window(itemCount = 500, placeholdersBefore = 200, ids = (200L..399L).toList())
-        val current = window(
-            itemCount = 600,
-            placeholdersBefore = 225,
-            // 75 rows that were placeholders before (unknown identities), then the newest 75 rows the
-            // old window did hold. Old index i is new index i + 100 throughout.
-            ids = (1125L..1199L).toList() + (200L..274L).toList(),
-        )
+        val current =
+            window(
+                itemCount = 600,
+                placeholdersBefore = 225,
+                // 75 rows that were placeholders before (unknown identities), then the newest 75 rows the
+                // old window did hold. Old index i is new index i + 100 throughout.
+                ids = (1125L..1199L).toList() + (200L..274L).toList(),
+            )
 
         val pin = timelinePresentationPin(anchor(index = 300, key = 300L), previous, current)
 
@@ -50,11 +56,12 @@ class TimelinePresentationPinTest {
     @Test
     fun theRestoredOffsetIsTheOffsetTheViewportHeld() {
         val previous = window(itemCount = 500, placeholdersBefore = 200, ids = (200L..399L).toList())
-        val current = window(
-            itemCount = 600,
-            placeholdersBefore = 225,
-            ids = (1125L..1199L).toList() + (200L..274L).toList(),
-        )
+        val current =
+            window(
+                itemCount = 600,
+                placeholdersBefore = 225,
+                ids = (1125L..1199L).toList() + (200L..274L).toList(),
+            )
 
         val pin = timelinePresentationPin(anchor(index = 300, key = 300L, offset = 137), previous, current)
 
@@ -75,11 +82,12 @@ class TimelinePresentationPinTest {
         val previous = window(itemCount = 300, placeholdersBefore = 0, ids = (0L..299L).toList())
         // Ten rows newer than everything, plus fifty filled into the interior below the window's
         // older edge — which is where the reference stops and the unmeasured span begins.
-        val current = window(
-            itemCount = 360,
-            placeholdersBefore = 0,
-            ids = (900L..909L).toList() + (0L..199L).toList(),
-        )
+        val current =
+            window(
+                itemCount = 360,
+                placeholdersBefore = 0,
+                ids = (900L..909L).toList() + (0L..199L).toList(),
+            )
         val trueIndex = 310
         val heldToday = 250
 
@@ -101,11 +109,12 @@ class TimelinePresentationPinTest {
     @Test
     fun theNearestConservedRowMeasuresTheShift() {
         val previous = window(itemCount = 300, placeholdersBefore = 0, ids = (0L..299L).toList())
-        val current = window(
-            itemCount = 360,
-            placeholdersBefore = 0,
-            ids = (900L..909L).toList() + (0L..59L).toList() + (700L..749L).toList() + (60L..199L).toList(),
-        )
+        val current =
+            window(
+                itemCount = 360,
+                placeholdersBefore = 0,
+                ids = (900L..909L).toList() + (0L..59L).toList() + (700L..749L).toList() + (60L..199L).toList(),
+            )
 
         val pin = timelinePresentationPin(anchor(index = 250, key = 250L), previous, current)
 
@@ -185,11 +194,12 @@ class TimelinePresentationPinTest {
     @Test
     fun aWindowRePlacedEntirelyOlderThanTheViewportIsNotPinned() {
         val previous = window(itemCount = 500, placeholdersBefore = 200, ids = (200L..399L).toList())
-        val current = window(
-            itemCount = 600,
-            placeholdersBefore = 420,
-            ids = (320L..399L).toList() + (1400L..1469L).toList(),
-        )
+        val current =
+            window(
+                itemCount = 600,
+                placeholdersBefore = 420,
+                ids = (320L..399L).toList() + (1400L..1469L).toList(),
+            )
 
         assertNull(timelinePresentationPin(anchor(index = 300, key = 300L), previous, current))
     }
@@ -202,11 +212,12 @@ class TimelinePresentationPinTest {
     @Test
     fun anAnchorThatWasDeletedRatherThanUnloadedIsNotPinned() {
         val previous = window(itemCount = 300, placeholdersBefore = 0, ids = (0L..299L).toList())
-        val current = window(
-            itemCount = 309,
-            placeholdersBefore = 0,
-            ids = (900L..909L).toList() + (0L..249L).toList() + (251L..299L).toList(),
-        )
+        val current =
+            window(
+                itemCount = 309,
+                placeholdersBefore = 0,
+                ids = (900L..909L).toList() + (0L..249L).toList() + (251L..299L).toList(),
+            )
 
         assertNull(timelinePresentationPin(anchor(index = 250, key = 250L), previous, current))
     }
@@ -225,11 +236,12 @@ class TimelinePresentationPinTest {
     @Test
     fun anAnchorIndexOutsideTheMeasuredPresentationIsRejected() {
         val previous = window(itemCount = 100, placeholdersBefore = 0, ids = (0L..99L).toList())
-        val current = window(
-            itemCount = 150,
-            placeholdersBefore = 0,
-            ids = (900L..949L).toList() + (0L..49L).toList(),
-        )
+        val current =
+            window(
+                itemCount = 150,
+                placeholdersBefore = 0,
+                ids = (900L..949L).toList() + (0L..49L).toList(),
+            )
 
         assertNull(timelinePresentationPin(anchor(index = 500, key = 300L), previous, current))
     }

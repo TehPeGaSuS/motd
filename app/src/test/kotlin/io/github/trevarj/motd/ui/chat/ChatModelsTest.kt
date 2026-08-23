@@ -9,6 +9,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.history.HistoryLadderStalled
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
@@ -16,9 +17,6 @@ import io.github.trevarj.motd.data.repo.MESSAGE_PAGING_CONFIG
 import io.github.trevarj.motd.data.sync.GapFillProgress
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
-import io.github.trevarj.motd.ui.components.HistoryGapState
-import io.github.trevarj.motd.ui.theme.spacingFor
-import io.github.trevarj.motd.data.history.HistoryLadderStalled
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.client.IrcDisconnectedException
@@ -26,15 +24,16 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistorySyncStatus
-import kotlin.random.Random
+import io.github.trevarj.motd.ui.components.HistoryGapState
+import io.github.trevarj.motd.ui.theme.spacingFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.random.Random
 
 class ChatModelsTest {
-
     @Test fun `conversation layout inherits global when no override exists`() {
         assertEquals(
             LayoutDensity.COMPACT,
@@ -68,15 +67,14 @@ class ChatModelsTest {
         sender: String,
         emoji: String,
         actorKey: String = IrcIdentityRules().actorKey(sender, null),
-    ) =
-        ReactionEntity(
-            bufferId = 1L,
-            targetMsgid = msgid,
-            actorKey = actorKey,
-            sender = sender,
-            emoji = emoji,
-            serverTime = 0L,
-        )
+    ) = ReactionEntity(
+        bufferId = 1L,
+        targetMsgid = msgid,
+        actorKey = actorKey,
+        sender = sender,
+        emoji = emoji,
+        serverTime = 0L,
+    )
 
     @Test fun `a flight predicts the silhouette its landing row will resolve`() {
         val now = 10_000L
@@ -132,20 +130,19 @@ class ChatModelsTest {
         normalizedActor: String = IrcIdentityRules().normalize(sender),
         senderAccount: String? = null,
         serverTime: Long = 1L,
-    ) =
-        MessageEntity(
-            id = id,
-            bufferId = 1L,
-            serverTime = serverTime,
-            sender = sender,
-            normalizedActor = normalizedActor,
-            senderAccount = senderAccount,
-            kind = kind,
-            text = "text",
-            isSelf = self,
-            failed = failed,
-            dedupKey = "1",
-        )
+    ) = MessageEntity(
+        id = id,
+        bufferId = 1L,
+        serverTime = serverTime,
+        sender = sender,
+        normalizedActor = normalizedActor,
+        senderAccount = senderAccount,
+        kind = kind,
+        text = "text",
+        isSelf = self,
+        failed = failed,
+        dedupKey = "1",
+    )
 
     @Test fun `mine matches own nick case-insensitively`() {
         val chips = aggregateReactions(listOf(react("m1", "Alice", "👍")), myNick = "alice")
@@ -170,41 +167,45 @@ class ChatModelsTest {
 
     @Test fun `strict casemap does not merge tilde and caret reaction actors`() {
         val strict = IrcIdentityRules(IrcCaseMapping.Rfc1459Strict)
-        val chips = aggregateReactions(
-            listOf(react("m1", "nick~", "👍", strict.actorKey("nick~", null))),
-            myNick = "nick^",
-            identityRules = strict,
-        )
+        val chips =
+            aggregateReactions(
+                listOf(react("m1", "nick~", "👍", strict.actorKey("nick~", null))),
+                myNick = "nick^",
+                identityRules = strict,
+            )
         assertFalse(chips.getValue("m1").single().mine)
     }
 
     @Test fun `reaction ownership prefers exact account actor`() {
-        val chips = aggregateReactions(
-            listOf(react("m1", "oldNick", "👍", actorKey = "account:alice")),
-            myNick = "newNick",
-            myAccount = "alice",
-        )
+        val chips =
+            aggregateReactions(
+                listOf(react("m1", "oldNick", "👍", actorKey = "account:alice")),
+                myNick = "newNick",
+                myAccount = "alice",
+            )
         assertTrue(chips.getValue("m1").single().mine)
     }
 
     @Test fun `persisted account owns reaction without a live nick`() {
-        val chips = aggregateReactions(
-            listOf(react("m1", "oldNick", "👍", actorKey = "account:alice")),
-            myNick = null,
-            myAccount = "alice",
-        )
+        val chips =
+            aggregateReactions(
+                listOf(react("m1", "oldNick", "👍", actorKey = "account:alice")),
+                myNick = null,
+                myAccount = "alice",
+            )
         assertTrue(chips.getValue("m1").single().mine)
     }
 
     @Test fun `counts aggregate per emoji preserving first-appearance order`() {
-        val chips = aggregateReactions(
-            listOf(
-                react("m1", "a", "👍"),
-                react("m1", "b", "👍"),
-                react("m1", "c", "🎉"),
-            ),
-            myNick = "z",
-        ).getValue("m1")
+        val chips =
+            aggregateReactions(
+                listOf(
+                    react("m1", "a", "👍"),
+                    react("m1", "b", "👍"),
+                    react("m1", "c", "🎉"),
+                ),
+                myNick = "z",
+            ).getValue("m1")
         assertEquals(listOf("👍", "🎉"), chips.map { it.emoji })
         assertEquals(2, chips[0].count)
         assertEquals(1, chips[1].count)
@@ -308,10 +309,11 @@ class ChatModelsTest {
         val tracker = AutoFollowTracker(initialItemCount = 10)
         tracker.reset(itemCount = 10, atBottom = true, newestEffectiveId = 7)
 
-        val recoveredHistory = tracker.onTimelineChangedWithEntry(
-            newItemCount = 523,
-            newNewestEffectiveId = 7,
-        )
+        val recoveredHistory =
+            tracker.onTimelineChangedWithEntry(
+                newItemCount = 523,
+                newNewestEffectiveId = 7,
+            )
 
         assertFalse(recoveredHistory.shouldFollow)
         assertNull(recoveredHistory.liveEntryId)
@@ -348,11 +350,12 @@ class ChatModelsTest {
     }
 
     @Test fun `system run extension updates its existing pill without entry motion`() {
-        val rows = listOf(
-            message(id = 9L, kind = MessageKind.JOIN),
-            message(id = 8L, kind = MessageKind.PART),
-            message(id = 7L),
-        )
+        val rows =
+            listOf(
+                message(id = 9L, kind = MessageKind.JOIN),
+                message(id = 8L, kind = MessageKind.PART),
+                message(id = 7L),
+            )
 
         assertTrue(extendsSystemRun(9L, rows.size, rows::getOrNull))
         assertFalse(extendsSystemRun(7L, rows.size, rows::getOrNull))
@@ -399,7 +402,10 @@ class ChatModelsTest {
 
             repeat(1_000) {
                 when (random.nextInt(6)) {
-                    0 -> assertFalse(tracker.onTimelineChanged(0, null))
+                    0 -> {
+                        assertFalse(tracker.onTimelineChanged(0, null))
+                    }
+
                     1 -> {
                         newestId++
                         count = (count + random.nextInt(0, 2)).coerceAtLeast(1)
@@ -408,11 +414,15 @@ class ChatModelsTest {
                             tracker.onTimelineChanged(count, newestId),
                         )
                     }
-                    2 -> tracker.onScrollStateChanged(
-                        scrolling = random.nextBoolean(),
-                        programmatic = true,
-                        atBottom = random.nextBoolean(),
-                    )
+
+                    2 -> {
+                        tracker.onScrollStateChanged(
+                            scrolling = random.nextBoolean(),
+                            programmatic = true,
+                            atBottom = random.nextBoolean(),
+                        )
+                    }
+
                     3 -> {
                         tracker.onScrollStateChanged(
                             scrolling = true,
@@ -421,6 +431,7 @@ class ChatModelsTest {
                         )
                         expectedFollowing = false
                     }
+
                     4 -> {
                         tracker.onScrollStateChanged(
                             scrolling = false,
@@ -429,9 +440,12 @@ class ChatModelsTest {
                         )
                         expectedFollowing = true
                     }
-                    else -> assertFalse(
-                        tracker.onTimelineChanged(count, newestId - 1),
-                    )
+
+                    else -> {
+                        assertFalse(
+                            tracker.onTimelineChanged(count, newestId - 1),
+                        )
+                    }
                 }
                 assertEquals(expectedFollowing, tracker.following)
             }
@@ -439,14 +453,16 @@ class ChatModelsTest {
     }
 
     @Test fun `collapsed fool tail counts as effective bottom and cannot become saved anchor`() {
-        val rows = listOf(
-            message(id = 3, sender = "fool"),
-            message(id = 2, sender = "alice"),
-            message(id = 1, sender = "bob"),
-        )
-        val policy = MessageVisibilityPolicy(
-            MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.COLLAPSE),
-        )
+        val rows =
+            listOf(
+                message(id = 3, sender = "fool"),
+                message(id = 2, sender = "alice"),
+                message(id = 1, sender = "bob"),
+            )
+        val policy =
+            MessageVisibilityPolicy(
+                MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.COLLAPSE),
+            )
 
         assertTrue(isAtEffectiveBottom(1, 0, rows.size, rows::getOrNull, policy))
         assertEquals(2L, newestEffectiveMessageId(rows.size, rows::getOrNull, policy))
@@ -471,9 +487,10 @@ class ChatModelsTest {
         assertFalse(isAtEffectiveBottom(200, 0, 400, parked, policy))
         // One materialized ignored row, then nothing: the ignorable tail must not paper over the
         // placeholders under it either.
-        val foolPolicy = MessageVisibilityPolicy(
-            MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.COLLAPSE),
-        )
+        val foolPolicy =
+            MessageVisibilityPolicy(
+                MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.COLLAPSE),
+            )
         val foolThenPlaceholders: (Int) -> MessageEntity? = { index ->
             message(id = 3, sender = "fool").takeIf { index == 0 }
         }
@@ -688,18 +705,20 @@ class ChatModelsTest {
     }
 
     @Test fun `grouping uses account then casemapped actor and always separates direction`() {
-        val accountOlder = message(
-            id = 1,
-            sender = "OldNick",
-            senderAccount = "alice",
-            serverTime = 100,
-        )
-        val accountCurrent = message(
-            id = 2,
-            sender = "NewNick",
-            senderAccount = "alice",
-            serverTime = 200,
-        )
+        val accountOlder =
+            message(
+                id = 1,
+                sender = "OldNick",
+                senderAccount = "alice",
+                serverTime = 100,
+            )
+        val accountCurrent =
+            message(
+                id = 2,
+                sender = "NewNick",
+                senderAccount = "alice",
+                serverTime = 200,
+            )
         assertFalse(showsSender(accountCurrent, accountOlder))
         assertTrue(showsSender(accountCurrent.copy(senderAccount = "other"), accountOlder))
 
@@ -780,7 +799,10 @@ class ChatModelsTest {
         handleChatUiEventResult(
             event = QueuedChatUiEvent(8, ChatUiEvent.ReplyJumpUnavailable(request)),
             actionPerformed = true,
-            retryReplyJump = { retried = it; order += "retry" },
+            retryReplyJump = {
+                retried = it
+                order += "retry"
+            },
             acknowledge = { order += "ack:$it" },
         )
         assertEquals(request, retried)
@@ -1023,20 +1045,22 @@ class ChatModelsTest {
 
     @Test
     fun `materialized target follows its stable key when an insertion shifts the index`() {
-        val row = MessageEntity(
-            id = 7,
-            bufferId = 1,
-            serverTime = 100,
-            sender = "alice",
-            kind = MessageKind.PRIVMSG,
-            text = "row",
-            dedupKey = "row",
-        )
+        val row =
+            MessageEntity(
+                id = 7,
+                bufferId = 1,
+                serverTime = 100,
+                sender = "alice",
+                kind = MessageKind.PRIVMSG,
+                text = "row",
+                dedupKey = "row",
+            )
         val materialized = MaterializedChatTarget(row, index = 4)
-        val shiftedVisibleItems = listOf(
-            99L to 4,
-            row.id to 5,
-        )
+        val shiftedVisibleItems =
+            listOf(
+                99L to 4,
+                row.id to 5,
+            )
 
         assertEquals(4, materialized.index)
         assertEquals(7L, materialized.row.id)
@@ -1089,11 +1113,12 @@ class ChatModelsTest {
     @Test
     fun `rendered bottom anchor refuses a layout that predates the paging snapshot`() {
         val policy = MessageVisibilityPolicy(MessageVisibilitySpec())
-        val rows = listOf(
-            message(id = 40, serverTime = 5_000),
-            message(id = 30, serverTime = 4_000),
-            message(id = 10, serverTime = 1_000),
-        )
+        val rows =
+            listOf(
+                message(id = 40, serverTime = 5_000),
+                message(id = 30, serverTime = 4_000),
+                message(id = 10, serverTime = 1_000),
+            )
         val peek = { index: Int -> rows.getOrNull(index) }
 
         // The measure pass saw this snapshot: the key still identifies the row at that index.
@@ -1112,10 +1137,11 @@ class ChatModelsTest {
     @Test
     fun `rendered bottom anchor skips an ignored row the way the effective bottom does`() {
         val policy = MessageVisibilityPolicy(MessageVisibilitySpec(fools = setOf("troll")))
-        val rows = listOf(
-            message(id = 40, sender = "troll", serverTime = 5_000),
-            message(id = 30, serverTime = 4_000),
-        )
+        val rows =
+            listOf(
+                message(id = 40, sender = "troll", serverTime = 5_000),
+                message(id = 30, serverTime = 4_000),
+            )
         assertEquals(
             TimelineAnchor(4_000, 30, 30),
             renderedBottomAnchor(0, 40L, rows.size, { rows.getOrNull(it) }, policy),
@@ -1124,11 +1150,13 @@ class ChatModelsTest {
 
     // --- what the viewport asks for ---------------------------------------------------------------
 
-    private fun row(id: Long, serverTime: Long) = message(id = id, serverTime = serverTime)
+    private fun row(
+        id: Long,
+        serverTime: Long,
+    ) = message(id = id, serverTime = serverTime)
 
     /** Newest-first, the way the reversed timeline presents them. */
-    private fun rows(vararg times: Long): List<MessageEntity> =
-        times.mapIndexed { index, time -> row(id = times.size - index.toLong(), serverTime = time) }
+    private fun rows(vararg times: Long): List<MessageEntity> = times.mapIndexed { index, time -> row(id = times.size - index.toLong(), serverTime = time) }
 
     private fun withinPrefetch(
         rows: List<MessageEntity?>,
@@ -1287,11 +1315,12 @@ class ChatModelsTest {
     @Test
     fun `only an in-flight fill spins`() {
         val target = seam(gapId = 2, serverTime = 900)
-        val state = TimelineSeamState(
-            seams = listOf(target),
-            filling = setOf(2L),
-            historyUnavailable = false,
-        )
+        val state =
+            TimelineSeamState(
+                seams = listOf(target),
+                filling = setOf(2L),
+                historyUnavailable = false,
+            )
 
         assertEquals(HistoryGapState.Loading, state.stateFor(target))
     }
@@ -1300,11 +1329,12 @@ class ChatModelsTest {
     fun `a failed attempt offers a retry, an unrelated gap stays a plain idle tap`() {
         val failed = seam(gapId = 2, serverTime = 900)
         val fine = seam(gapId = 3, serverTime = 100)
-        val state = TimelineSeamState(
-            seams = listOf(fine, failed),
-            historyUnavailable = false,
-            failed = setOf(2L),
-        )
+        val state =
+            TimelineSeamState(
+                seams = listOf(fine, failed),
+                historyUnavailable = false,
+                failed = setOf(2L),
+            )
 
         assertEquals(HistoryGapState.Failed, state.stateFor(failed))
         // Per gap, not per room: the seam that has not broken is idle, not retrying.
@@ -1325,12 +1355,13 @@ class ChatModelsTest {
     fun `an in-flight retry shows its progress, and an unrecoverable seam beats everything`() {
         val target = seam(gapId = 2, serverTime = 900)
         val gone = seam(gapId = 4, serverTime = 900, recoverable = false)
-        val state = TimelineSeamState(
-            seams = listOf(target, gone),
-            filling = setOf(2L, 4L),
-            historyUnavailable = true,
-            failed = setOf(2L, 4L),
-        )
+        val state =
+            TimelineSeamState(
+                seams = listOf(target, gone),
+                filling = setOf(2L, 4L),
+                historyUnavailable = true,
+                failed = setOf(2L, 4L),
+            )
 
         assertEquals(HistoryGapState.Loading, state.stateFor(target))
         // A stale in-flight id must never paint a spinner on a seam that will never move.
@@ -1357,12 +1388,15 @@ class ChatModelsTest {
 
     // --- the history rule -------------------------------------------------------------------------
 
-    private fun seam(gapId: Long, serverTime: Long, recoverable: Boolean = true) =
-        io.github.trevarj.motd.data.history.TimelineSeam(
-            gapId = gapId,
-            position = TimelineAnchor(serverTime, gapId, gapId),
-            recoverable = recoverable,
-        )
+    private fun seam(
+        gapId: Long,
+        serverTime: Long,
+        recoverable: Boolean = true,
+    ) = io.github.trevarj.motd.data.history.TimelineSeam(
+        gapId = gapId,
+        position = TimelineAnchor(serverTime, gapId, gapId),
+        recoverable = recoverable,
+    )
 
     private val ready = HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP), 100)
 
@@ -1743,13 +1777,15 @@ class ChatModelsTest {
         // yet and so cannot name the row it is parked on.
         assertEquals(
             2L,
-            rule.next(
-                7,
-                closed,
-                seams,
-                SeamPrefetch(viewportAnchor = null, gapIds = emptySet(), olderEdgeIndex = 60),
-                GapTapRequest(2, 4),
-            ).startedRequest?.gapId,
+            rule
+                .next(
+                    7,
+                    closed,
+                    seams,
+                    SeamPrefetch(viewportAnchor = null, gapIds = emptySet(), olderEdgeIndex = 60),
+                    GapTapRequest(2, 4),
+                ).startedRequest
+                ?.gapId,
         )
     }
 
@@ -1776,15 +1812,17 @@ class ChatModelsTest {
         val rule = SeamLoadingRule()
         val seams = listOf(seam(gapId = 2, serverTime = 900))
         rule.settle(checkNotNull(rule.scrolledTo(viewportAt(1000), seams)), GapFillProgress.FAILED)
-        val tapped = checkNotNull(
-            rule.next(
-                7,
-                gateOpen,
-                seams,
-                SeamPrefetch(viewportAt(1000), setOf(2L), olderEdgeIndex = 60),
-                GapTapRequest(2, 1),
-            ).startedRequest,
-        )
+        val tapped =
+            checkNotNull(
+                rule
+                    .next(
+                        7,
+                        gateOpen,
+                        seams,
+                        SeamPrefetch(viewportAt(1000), setOf(2L), olderEdgeIndex = 60),
+                        GapTapRequest(2, 1),
+                    ).startedRequest,
+            )
 
         rule.settle(tapped, GapFillProgress.MOVED)
 
@@ -1851,12 +1889,13 @@ class ChatModelsTest {
 
     @Test
     fun `only a moved anchor is worth a post-catch-up entry correction`() {
-        val entered = ChatPositionTarget(
-            index = 49,
-            expectedEventId = 7,
-            serverTime = 1_000,
-            placeAtTop = true,
-        )
+        val entered =
+            ChatPositionTarget(
+                index = 49,
+                expectedEventId = 7,
+                serverTime = 1_000,
+                placeAtTop = true,
+            )
 
         // The same row at the same depth: republishing would scroll a placement that is already
         // being made, for nothing.
@@ -1876,12 +1915,13 @@ class ChatModelsTest {
     @Test
     fun `the displayed watermark never claims a row the reader could not read`() {
         val policy = MessageVisibilityPolicy(MessageVisibilitySpec(fools = setOf("troll")))
-        val rows = listOf(
-            message(id = 40, serverTime = 5_000),
-            message(id = 30, serverTime = 4_000),
-            message(id = 20, sender = "troll", serverTime = 3_000),
-            message(id = 10, serverTime = 1_000),
-        )
+        val rows =
+            listOf(
+                message(id = 40, serverTime = 5_000),
+                message(id = 30, serverTime = 4_000),
+                message(id = 20, sender = "troll", serverTime = 3_000),
+                message(id = 10, serverTime = 1_000),
+            )
         val peek = { index: Int -> rows.getOrNull(index) }
 
         // Reverse layout: the deepest visible index is the row at the TOP of the window.

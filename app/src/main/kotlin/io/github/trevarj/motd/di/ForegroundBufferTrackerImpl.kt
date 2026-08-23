@@ -1,11 +1,11 @@
 package io.github.trevarj.motd.di
 
 import io.github.trevarj.motd.service.ForegroundBufferTracker
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
  * Trivial [ForegroundBufferTracker]: a single [MutableStateFlow] holding the bufferId currently
@@ -13,8 +13,13 @@ import kotlinx.coroutines.flow.asStateFlow
  * notification-suppression logic. Replaces WP1's stub.
  */
 @Singleton
-class ForegroundBufferTrackerImpl @Inject constructor() : ForegroundBufferTracker {
-    private val _foreground = MutableStateFlow<Long?>(null)
-    override val foregroundBufferId: StateFlow<Long?> = _foreground.asStateFlow()
-    override fun set(bufferId: Long?) { _foreground.value = bufferId }
-}
+class ForegroundBufferTrackerImpl
+    @Inject
+    constructor() : ForegroundBufferTracker {
+        private val _foreground = MutableStateFlow<Long?>(null)
+        override val foregroundBufferId: StateFlow<Long?> = _foreground.asStateFlow()
+
+        override fun set(bufferId: Long?) {
+            _foreground.value = bufferId
+        }
+    }

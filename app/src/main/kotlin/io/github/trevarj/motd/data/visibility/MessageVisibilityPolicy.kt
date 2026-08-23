@@ -45,7 +45,10 @@ data class MessageVisibilitySpec(
 ) {
     companion object {
         /** [override] is the conversation's own presence choice; null inherits the global one. */
-        fun from(settings: Settings, override: PresenceMode? = null): MessageVisibilitySpec =
+        fun from(
+            settings: Settings,
+            override: PresenceMode? = null,
+        ): MessageVisibilitySpec =
             MessageVisibilitySpec(
                 presenceMode = override ?: settings.presenceMode,
                 fools = settings.fools,
@@ -62,8 +65,10 @@ class MessageVisibilityPolicy(
     private val foolActors = spec.fools.mapTo(hashSetOf<String>()) { identityRules.normalize(it.trim()) }
     private val foolAccounts = spec.fools.mapTo(hashSetOf<String>()) { it.trim() }
 
-    fun matchesFoolIdentity(senderAccount: String?, normalizedActor: String): Boolean =
-        senderAccount?.let { it in foolAccounts } == true || normalizedActor in foolActors
+    fun matchesFoolIdentity(
+        senderAccount: String?,
+        normalizedActor: String,
+    ): Boolean = senderAccount?.let { it in foolAccounts } == true || normalizedActor in foolActors
 
     fun isFool(message: MessageEntity): Boolean =
         message.kind in CONVERSATION_KINDS &&
@@ -84,8 +89,7 @@ class MessageVisibilityPolicy(
             !(spec.foolsMode == FoolsMode.HIDE && !spec.revealHiddenFools && isFool(message))
 
     /** Preview and activity use the same eligibility; fools never reorder the chat list. */
-    fun preview(message: MessageEntity): Boolean =
-        message.kind !in PRESENCE_KINDS && !isFool(message)
+    fun preview(message: MessageEntity): Boolean = message.kind !in PRESENCE_KINDS && !isFool(message)
 
     fun activity(message: MessageEntity): Boolean = preview(message)
 
@@ -98,7 +102,7 @@ class MessageVisibilityPolicy(
         (
             message.kind in CONVERSATION_KINDS ||
                 (message.kind == MessageKind.DCC_TRANSFER && message.eventPayload != null)
-            ) &&
+        ) &&
             !message.isSelf && !isFool(message)
 
     /** Hide removes fool results; Collapse keeps them so the target can be expanded on open. */
@@ -118,27 +122,29 @@ internal class MessageVisibilitySql(
     private val spec: MessageVisibilitySpec,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
 ) {
-    private val foolIdentities = spec.fools.asSequence()
-        .map { configured ->
-            val account = configured.trim()
-            identityRules.normalize(account) to account
-        }
-        .distinct()
-        .sortedWith(compareBy<Pair<String, String>>({ it.first }, { it.second }))
-        .joinToString(",") { (actor, account) ->
-            val accountLiteral = if (account == actor) "NULL" else sqlBlobLiteral(account)
-            "(${sqlBlobLiteral(actor)},$accountLiteral)"
-        }
+    private val foolIdentities =
+        spec.fools
+            .asSequence()
+            .map { configured ->
+                val account = configured.trim()
+                identityRules.normalize(account) to account
+            }.distinct()
+            .sortedWith(compareBy<Pair<String, String>>({ it.first }, { it.second }))
+            .joinToString(",") { (actor, account) ->
+                val accountLiteral = if (account == actor) "NULL" else sqlBlobLiteral(account)
+                "(${sqlBlobLiteral(actor)},$accountLiteral)"
+            }
     private val defaultNotFoolPredicate = buildNotFoolPredicate()
 
-    fun timeline(alias: String = "m"): String = allOf(
-        when (spec.presenceMode) {
-            PresenceMode.ALL -> TRUE
-            PresenceMode.HIDDEN -> notPresence(alias)
-            PresenceMode.SMART -> smartPresence(alias)
-        },
-        if (spec.foolsMode == FoolsMode.HIDE && !spec.revealHiddenFools) notFool(alias) else TRUE,
-    )
+    fun timeline(alias: String = "m"): String =
+        allOf(
+            when (spec.presenceMode) {
+                PresenceMode.ALL -> TRUE
+                PresenceMode.HIDDEN -> notPresence(alias)
+                PresenceMode.SMART -> smartPresence(alias)
+            },
+            if (spec.foolsMode == FoolsMode.HIDE && !spec.revealHiddenFools) notFool(alias) else TRUE,
+        )
 
     fun anchor(alias: String = "m"): String = allOf(timeline(alias), notFool(alias))
 
@@ -146,16 +152,16 @@ internal class MessageVisibilitySql(
 
     // The DCC disjunct mirrors the chat-list unreadCount SQL in Daos.kt: a payload-bearing
     // incoming offer is counted by the cue, so the unread anchor must see the same row.
-    fun visibleUnread(alias: String = "m"): String = allOf(
-        "(${column(alias, "kind")} IN ($CONVERSATION_KIND_SQL) " +
-            "OR (${column(alias, "kind")} = '${MessageKind.DCC_TRANSFER.name}' " +
-            "AND ${column(alias, "eventPayload")} IS NOT NULL))",
-        "${column(alias, "isSelf")} = 0",
-        notFool(alias),
-    )
+    fun visibleUnread(alias: String = "m"): String =
+        allOf(
+            "(${column(alias, "kind")} IN ($CONVERSATION_KIND_SQL) " +
+                "OR (${column(alias, "kind")} = '${MessageKind.DCC_TRANSFER.name}' " +
+                "AND ${column(alias, "eventPayload")} IS NOT NULL))",
+            "${column(alias, "isSelf")} = 0",
+            notFool(alias),
+        )
 
-    private fun notPresence(alias: String): String =
-        "${column(alias, "kind")} NOT IN ($PRESENCE_KIND_SQL)"
+    private fun notPresence(alias: String): String = "${column(alias, "kind")} NOT IN ($PRESENCE_KIND_SQL)"
 
     /**
      * Keep an actor-attributable presence row only when that actor took part in the conversation:
@@ -182,8 +188,7 @@ internal class MessageVisibilitySql(
             "AND spoke.serverTime >= $serverTime - $SMART_PRESENCE_WINDOW_MS))"
     }
 
-    private fun notFool(alias: String): String =
-        if (alias == "m") defaultNotFoolPredicate else buildNotFoolPredicate(alias)
+    private fun notFool(alias: String): String = if (alias == "m") defaultNotFoolPredicate else buildNotFoolPredicate(alias)
 
     private fun buildNotFoolPredicate(alias: String = "m"): String {
         if (foolIdentities.isEmpty()) return TRUE
@@ -202,12 +207,13 @@ internal fun messagePagingQuery(
     bufferId: Long,
     spec: MessageVisibilitySpec,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
-): SimpleSQLiteQuery = SimpleSQLiteQuery(
-    "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
-        "AND ${MessageVisibilitySql(spec, identityRules).timeline()} " +
-        "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC",
-    arrayOf(bufferId),
-)
+): SimpleSQLiteQuery =
+    SimpleSQLiteQuery(
+        "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
+            "AND ${MessageVisibilitySql(spec, identityRules).timeline()} " +
+            "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC",
+        arrayOf(bufferId),
+    )
 
 /**
  * The single newest row [messagePagingQuery] would present, or none when the filter admits none.
@@ -220,12 +226,13 @@ internal fun newestPresentedMessageQuery(
     bufferId: Long,
     spec: MessageVisibilitySpec,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
-): SimpleSQLiteQuery = SimpleSQLiteQuery(
-    "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
-        "AND ${MessageVisibilitySql(spec, identityRules).timeline()} " +
-        "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1",
-    arrayOf(bufferId),
-)
+): SimpleSQLiteQuery =
+    SimpleSQLiteQuery(
+        "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
+            "AND ${MessageVisibilitySql(spec, identityRules).timeline()} " +
+            "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1",
+        arrayOf(bufferId),
+    )
 
 internal fun countTimelineNewerQuery(
     bufferId: Long,
@@ -234,13 +241,14 @@ internal fun countTimelineNewerQuery(
     timelineOrder: Long,
     spec: MessageVisibilitySpec,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
-): SimpleSQLiteQuery = SimpleSQLiteQuery(
-    "SELECT COUNT(*) FROM messages m WHERE m.bufferId = ? " +
-        "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
-        "(m.timelineOrder = ? AND m.id > ?)))) " +
-        "AND ${MessageVisibilitySql(spec, identityRules).timeline()}",
-    arrayOf(bufferId, serverTime, serverTime, timelineOrder, timelineOrder, id),
-)
+): SimpleSQLiteQuery =
+    SimpleSQLiteQuery(
+        "SELECT COUNT(*) FROM messages m WHERE m.bufferId = ? " +
+            "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
+            "(m.timelineOrder = ? AND m.id > ?)))) " +
+            "AND ${MessageVisibilitySql(spec, identityRules).timeline()}",
+        arrayOf(bufferId, serverTime, serverTime, timelineOrder, timelineOrder, id),
+    )
 
 /**
  * Count visible unread rows in the newest [beforeIndex] timeline positions. Paging placeholders and
@@ -284,21 +292,22 @@ internal fun firstVisibleUnreadQuery(
     after: TimelineAnchor,
     spec: MessageVisibilitySpec,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
-): SimpleSQLiteQuery = SimpleSQLiteQuery(
-    "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
-        "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
-        "(m.timelineOrder = ? AND m.id > ?)))) " +
-        "AND ${MessageVisibilitySql(spec, identityRules).visibleUnread()} " +
-        "ORDER BY m.serverTime ASC, m.timelineOrder ASC, m.id ASC LIMIT 1",
-    arrayOf<Any>(
-        bufferId,
-        after.serverTime,
-        after.serverTime,
-        after.timelineOrder,
-        after.timelineOrder,
-        after.eventId,
-    ),
-)
+): SimpleSQLiteQuery =
+    SimpleSQLiteQuery(
+        "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
+            "AND (m.serverTime > ? OR (m.serverTime = ? AND (m.timelineOrder > ? OR " +
+            "(m.timelineOrder = ? AND m.id > ?)))) " +
+            "AND ${MessageVisibilitySql(spec, identityRules).visibleUnread()} " +
+            "ORDER BY m.serverTime ASC, m.timelineOrder ASC, m.id ASC LIMIT 1",
+        arrayOf<Any>(
+            bufferId,
+            after.serverTime,
+            after.serverTime,
+            after.timelineOrder,
+            after.timelineOrder,
+            after.eventId,
+        ),
+    )
 
 /**
  * Oldest unread nick mention among the newest [beforeIndex] visible-timeline rows: the nearest
@@ -337,27 +346,32 @@ internal fun nearestUnreadMentionInPrefixQuery(
     )
 }
 
-private fun allOf(vararg clauses: String): String = clauses
-    .filterNot { it == TRUE }
-    .distinct()
-    .joinToString(" AND ")
-    .ifEmpty { TRUE }
+private fun allOf(vararg clauses: String): String =
+    clauses
+        .filterNot { it == TRUE }
+        .distinct()
+        .joinToString(" AND ")
+        .ifEmpty { TRUE }
 
-private fun column(alias: String, name: String): String = if (alias.isEmpty()) name else "$alias.$name"
+private fun column(
+    alias: String,
+    name: String,
+): String = if (alias.isEmpty()) name else "$alias.$name"
 
 /**
  * Fool sets can exceed SQLite's bind-variable limit. Every value is represented losslessly as a
  * UTF-8 blob literal instead of dropping values or allocating one bind slot per nick.
  */
-private fun sqlBlobLiteral(value: String): String = buildString(value.length * 2 + 3) {
-    append("X'")
-    for (byte in value.encodeToByteArray()) {
-        val value = byte.toInt() and 0xff
-        append(HEX[value ushr 4])
-        append(HEX[value and 0x0f])
+private fun sqlBlobLiteral(value: String): String =
+    buildString(value.length * 2 + 3) {
+        append("X'")
+        for (byte in value.encodeToByteArray()) {
+            val value = byte.toInt() and 0xff
+            append(HEX[value ushr 4])
+            append(HEX[value and 0x0f])
+        }
+        append('\'')
     }
-    append('\'')
-}
 
 private const val TRUE = "1"
 private const val HEX = "0123456789abcdef"

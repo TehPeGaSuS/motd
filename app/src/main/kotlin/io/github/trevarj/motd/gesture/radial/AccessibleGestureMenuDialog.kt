@@ -77,20 +77,26 @@ internal fun AccessibleGestureMenuDialog(
                             }
                         },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        modifier = Modifier
-                            .clickable {
-                                val action = entry.action
-                                when {
-                                    entry.children.isNotEmpty() -> path = path + entry
-                                    action != null -> {
-                                        onExecute(action)
-                                        onDismiss()
+                        modifier =
+                            Modifier
+                                .clickable {
+                                    val action = entry.action
+                                    when {
+                                        entry.children.isNotEmpty() -> {
+                                            path = path + entry
+                                        }
+
+                                        action != null -> {
+                                            onExecute(action)
+                                            onDismiss()
+                                        }
+
+                                        // An empty provider ring: nothing to open and nothing to run.
+                                        else -> {
+                                            Unit
+                                        }
                                     }
-                                    // An empty provider ring: nothing to open and nothing to run.
-                                    else -> Unit
-                                }
-                            }
-                            .testTag(gestureMenuSliceTag(entry.id)),
+                                }.testTag(gestureMenuSliceTag(entry.id)),
                     )
                 }
             }

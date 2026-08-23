@@ -84,35 +84,52 @@ class ReconnectGapPresentationTest {
     /** Realistic ms-resolution soju timestamps; the whole fixture is offsets from this instant. */
     private val base = 1_700_000_000_000L
 
-    @Before fun setUp() = runTest {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        db = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
-            .allowMainThreadQueries()
-            .setQueryExecutor { it.run() }
-            .setTransactionExecutor { it.run() }
-            .build()
-        processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
-        networkId = db.networkDao().insert(
-            NetworkEntity(
-                name = "soju", role = NetworkRole.BOUNCER_CHILD, host = "h", port = 6697,
-                nick = "me", username = "me", realname = "Me",
-            ),
-        )
-        processor.onRegistered(networkId, "me", emptyMap())
-        db.bufferDao().insert(
-            BufferEntity(
-                networkId = networkId, name = "##motdtest", displayName = "##motdtest",
-                type = BufferType.CHANNEL,
-            ),
-        )
-        bufferId = db.bufferDao().byName(networkId, "##motdtest")!!.id
-    }
+    @Before fun setUp() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            db =
+                Room
+                    .inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
+                    .allowMainThreadQueries()
+                    .setQueryExecutor { it.run() }
+                    .setTransactionExecutor { it.run() }
+                    .build()
+            processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
+            networkId =
+                db.networkDao().insert(
+                    NetworkEntity(
+                        name = "soju",
+                        role = NetworkRole.BOUNCER_CHILD,
+                        host = "h",
+                        port = 6697,
+                        nick = "me",
+                        username = "me",
+                        realname = "Me",
+                    ),
+                )
+            processor.onRegistered(networkId, "me", emptyMap())
+            db.bufferDao().insert(
+                BufferEntity(
+                    networkId = networkId,
+                    name = "##motdtest",
+                    displayName = "##motdtest",
+                    type = BufferType.CHANNEL,
+                ),
+            )
+            bufferId = db.bufferDao().byName(networkId, "##motdtest")!!.id
+        }
 
-    @After fun tearDown() { db.close() }
+    @After fun tearDown() {
+        db.close()
+    }
 
     // ---------------------------------------------------------------- fixture builders
 
-    private fun chatMsg(msgid: String, time: Long, self: Boolean = false) = IrcEvent.ChatMessage(
+    private fun chatMsg(
+        msgid: String,
+        time: Long,
+        self: Boolean = false,
+    ) = IrcEvent.ChatMessage(
         ctx = MessageContext(msgid, time, null, null, null),
         kind = IrcEvent.ChatKind.PRIVMSG,
         source = Prefix(if (self) "me" else "alice"),
@@ -164,35 +181,70 @@ class ReconnectGapPresentationTest {
 
     // ---------------------------------------------------------------- paging harness
 
-    private fun differ() = AsyncPagingDataDiffer(
-        diffCallback = object : DiffUtil.ItemCallback<MessageEntity>() {
-            override fun areItemsTheSame(a: MessageEntity, b: MessageEntity) = a.id == b.id
-            override fun areContentsTheSame(a: MessageEntity, b: MessageEntity) = a == b
-        },
-        updateCallback = object : ListUpdateCallback {
-            override fun onInserted(position: Int, count: Int) {}
-            override fun onRemoved(position: Int, count: Int) {}
-            override fun onMoved(fromPosition: Int, toPosition: Int) {}
-            override fun onChanged(position: Int, count: Int, payload: Any?) {}
-        },
-        mainDispatcher = Dispatchers.Unconfined,
-        workerDispatcher = Dispatchers.Unconfined,
-    )
+    private fun differ() =
+        AsyncPagingDataDiffer(
+            diffCallback =
+                object : DiffUtil.ItemCallback<MessageEntity>() {
+                    override fun areItemsTheSame(
+                        a: MessageEntity,
+                        b: MessageEntity,
+                    ) = a.id == b.id
+
+                    override fun areContentsTheSame(
+                        a: MessageEntity,
+                        b: MessageEntity,
+                    ) = a == b
+                },
+            updateCallback =
+                object : ListUpdateCallback {
+                    override fun onInserted(
+                        position: Int,
+                        count: Int,
+                    ) {}
+
+                    override fun onRemoved(
+                        position: Int,
+                        count: Int,
+                    ) {}
+
+                    override fun onMoved(
+                        fromPosition: Int,
+                        toPosition: Int,
+                    ) {}
+
+                    override fun onChanged(
+                        position: Int,
+                        count: Int,
+                        payload: Any?,
+                    ) {}
+                },
+            mainDispatcher = Dispatchers.Unconfined,
+            workerDispatcher = Dispatchers.Unconfined,
+        )
 
     /** Inert history source: the mediator can neither fetch nor rewrite a gap. */
     private object NoHistory : ChatHistoryRemoteMediator.HistorySource {
         override suspend fun availability() = HistoryAvailability.Unsupported
-        override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse =
-            ChatHistoryResponse.Messages(emptyList(), null, null, endOfHistory = true)
+
+        override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse = ChatHistoryResponse.Messages(emptyList(), null, null, endOfHistory = true)
     }
 
     private fun repository(history: ChatHistoryRemoteMediator.HistorySource = NoHistory) =
         MessageRepositoryImpl(
-            db.bufferDao(), db.networkIdentityDao(), db.messageDao(), db.reactionDao(),
+            db.bufferDao(),
+            db.networkIdentityDao(),
+            db.messageDao(),
+            db.reactionDao(),
             ChatHistoryMediatorFactory { roomId ->
                 ChatHistoryRemoteMediator(
-                    roomId, db.bufferDao(), db.messageDao(), processor, history, 50,
-                    db.historyCursorDao(), db.historyGapDao(),
+                    roomId,
+                    db.bufferDao(),
+                    db.messageDao(),
+                    processor,
+                    history,
+                    50,
+                    db.historyCursorDao(),
+                    db.historyGapDao(),
                 )
             },
             db.historyGapDao(),
@@ -203,9 +255,12 @@ class ReconnectGapPresentationTest {
      * Separates "the source never offered the row" from "offered but never loaded".
      */
     private suspend fun windowContains(id: Long): Boolean {
-        val result = db.messageDao().pagingSource(
-            messagePagingQuery(bufferId, MessageVisibilitySpec(), IrcIdentityRules()),
-        ).load(PagingSource.LoadParams.Refresh(null, 1_000, false))
+        val result =
+            db
+                .messageDao()
+                .pagingSource(
+                    messagePagingQuery(bufferId, MessageVisibilitySpec(), IrcIdentityRules()),
+                ).load(PagingSource.LoadParams.Refresh(null, 1_000, false))
         return (result as PagingSource.LoadResult.Page).data.any { it.id == id }
     }
 
@@ -216,10 +271,12 @@ class ReconnectGapPresentationTest {
         onRound: suspend (Int) -> Unit = {},
     ): Presentation {
         val differ = differ()
-        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
-            repository.messages(bufferId, MessageVisibilitySpec())
-                .collectLatest { differ.submitData(it) }
-        }
+        val job =
+            launch(UnconfinedTestDispatcher(testScheduler)) {
+                repository
+                    .messages(bufferId, MessageVisibilitySpec())
+                    .collectLatest { differ.submitData(it) }
+            }
         repeat(rounds) { round ->
             advanceUntilIdle()
             onRound(round)
@@ -263,16 +320,21 @@ class ReconnectGapPresentationTest {
         }
     }
 
-    private suspend fun report(label: String, echo: MessageEntity, p: Presentation) {
+    private suspend fun report(
+        label: String,
+        echo: MessageEntity,
+        p: Presentation,
+    ) {
         val gaps = db.historyGapDao().forRoom(bufferId)
         println(
             "RECONNECT-GAP[$label] echo(id=${echo.id} t=${echo.serverTime} order=${echo.timelineOrder}) " +
                 "itemCount=${p.itemCount} newest=${p.newest?.msgid} " +
                 "inWindow=${windowContains(echo.id)} " +
-                "gaps=" + gaps.joinToString { g ->
-                "(older=${g.olderServerTime}/${g.olderMsgid}/${g.olderEventId} " +
-                    "newer=${g.newerServerTime}/${g.newerMsgid}/${g.newerEventId} rec=${g.recoverable})"
-            },
+                "gaps=" +
+                gaps.joinToString { g ->
+                    "(older=${g.olderServerTime}/${g.olderMsgid}/${g.olderEventId} " +
+                        "newer=${g.newerServerTime}/${g.newerMsgid}/${g.newerEventId} rec=${g.recoverable})"
+                },
         )
     }
 
@@ -284,34 +346,35 @@ class ReconnectGapPresentationTest {
      * Recent window must contain it and the timeline must present it at index 0.
      */
     @Test
-    fun liveEchoIsPresentedWhenTheReconnectGapNewerEdgeResolvesLocally() = runTest {
-        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
-        try {
-            seedBacklog()
-            reconnectCatchUp(firstTime = base + 400_000, count = 50, msgidWire = true)
-            val echo = sendLiveEcho(base + 500_000)
-            val repository = repository()
-            val presented = presentation(repository)
-            report("resolvable-newer-edge", echo, presented)
+    fun liveEchoIsPresentedWhenTheReconnectGapNewerEdgeResolvesLocally() =
+        runTest {
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            try {
+                seedBacklog()
+                reconnectCatchUp(firstTime = base + 400_000, count = 50, msgidWire = true)
+                val echo = sendLiveEcho(base + 500_000)
+                val repository = repository()
+                val presented = presentation(repository)
+                report("resolvable-newer-edge", echo, presented)
 
-            // The gap is still open and still recoverable: the inert history source means no
-            // PREPEND/AFTER merge can ever have closed it. Presenting the live row therefore does
-            // NOT depend on gap closure (Lead 2).
-            val gap = db.historyGapDao().forRoom(bufferId).single()
-            assertTrue("reconnect gap still open and recoverable", gap.recoverable)
-            assertTrue("live echo inside the Recent window", windowContains(echo.id))
-            assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
-            // The window keeps the echo AND says why the rows below it are not contiguous: one seam,
-            // in the slot above the first catch-up row, which is the gap's newer edge.
-            assertEquals(
-                "seam slot",
-                listOf("catchup0" to gap.id),
-                seamPlacements(repository, presented),
-            )
-        } finally {
-            Dispatchers.resetMain()
+                // The gap is still open and still recoverable: the inert history source means no
+                // PREPEND/AFTER merge can ever have closed it. Presenting the live row therefore does
+                // NOT depend on gap closure (Lead 2).
+                val gap = db.historyGapDao().forRoom(bufferId).single()
+                assertTrue("reconnect gap still open and recoverable", gap.recoverable)
+                assertTrue("live echo inside the Recent window", windowContains(echo.id))
+                assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
+                // The window keeps the echo AND says why the rows below it are not contiguous: one seam,
+                // in the slot above the first catch-up row, which is the gap's newer edge.
+                assertEquals(
+                    "seam slot",
+                    listOf("catchup0" to gap.id),
+                    seamPlacements(repository, presented),
+                )
+            } finally {
+                Dispatchers.resetMain()
+            }
         }
-    }
 
     /**
      * Hosted-CI wire: soju advertises `MSGREFTYPES=timestamp`, so the catch-up page's boundary
@@ -319,34 +382,35 @@ class ReconnectGapPresentationTest {
      * eventId/serverTime rungs of `GapAnchorResolver.resolve`.
      */
     @Test
-    fun liveEchoIsPresentedOnATimestampOnlyReconnectGap() = runTest {
-        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
-        try {
-            seedBacklog()
-            reconnectCatchUp(firstTime = base + 400_000, count = 50, msgidWire = false)
-            val echo = sendLiveEcho(base + 500_000)
-            val repository = repository()
-            val presented = presentation(repository)
-            report("timestamp-only", echo, presented)
+    fun liveEchoIsPresentedOnATimestampOnlyReconnectGap() =
+        runTest {
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            try {
+                seedBacklog()
+                reconnectCatchUp(firstTime = base + 400_000, count = 50, msgidWire = false)
+                val echo = sendLiveEcho(base + 500_000)
+                val repository = repository()
+                val presented = presentation(repository)
+                report("timestamp-only", echo, presented)
 
-            val gap = db.historyGapDao().forRoom(bufferId).single()
-            assertTrue("reconnect gap still open and recoverable", gap.recoverable)
-            // The timestamp-only wire strips the msgid, but EventProcessor.resolvePageBoundary
-            // matches the boundary row by serverTime and stores its eventId, so the repository never
-            // needs the Long.MAX_VALUE fallback. This is why the realistic reconnect gap is benign.
-            assertNotNull("timestamp-only gap still carries a resolvable eventId", gap.newerEventId)
-            assertTrue("live echo inside the Recent window", windowContains(echo.id))
-            assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
-            // A stripped msgid changes which resolver rung finds the edge, not where the seam lands.
-            assertEquals(
-                "seam slot",
-                listOf("catchup0" to gap.id),
-                seamPlacements(repository, presented),
-            )
-        } finally {
-            Dispatchers.resetMain()
+                val gap = db.historyGapDao().forRoom(bufferId).single()
+                assertTrue("reconnect gap still open and recoverable", gap.recoverable)
+                // The timestamp-only wire strips the msgid, but EventProcessor.resolvePageBoundary
+                // matches the boundary row by serverTime and stores its eventId, so the repository never
+                // needs the Long.MAX_VALUE fallback. This is why the realistic reconnect gap is benign.
+                assertNotNull("timestamp-only gap still carries a resolvable eventId", gap.newerEventId)
+                assertTrue("live echo inside the Recent window", windowContains(echo.id))
+                assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
+                // A stripped msgid changes which resolver rung finds the edge, not where the seam lands.
+                assertEquals(
+                    "seam slot",
+                    listOf("catchup0" to gap.id),
+                    seamPlacements(repository, presented),
+                )
+            } finally {
+                Dispatchers.resetMain()
+            }
         }
-    }
 
     /**
      * Boundary characterization for the same unresolvable edge one millisecond OLDER than the live
@@ -355,37 +419,47 @@ class ReconnectGapPresentationTest {
      * equal-serverTime tie, not the fallback anchor as such.
      */
     @Test
-    fun liveEchoOneMillisecondNewerThanAnUnresolvableGapEdgeSurvives() = runTest {
-        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
-        try {
-            seedBacklog()
-            val echoTime = base + 500_000
-            db.historyGapDao().insert(
-                HistoryGapEntity(
-                    roomId = bufferId,
-                    olderMsgid = null, olderServerTime = base + 260_000,
-                    newerMsgid = null, newerServerTime = echoTime - 1,
-                    recoverable = true,
-                ),
-            )
-            val echo = sendLiveEcho(echoTime)
-            val repository = repository()
-            val presented = presentation(repository)
-            report("unresolvable-one-ms-older", echo, presented)
+    fun liveEchoOneMillisecondNewerThanAnUnresolvableGapEdgeSurvives() =
+        runTest {
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            try {
+                seedBacklog()
+                val echoTime = base + 500_000
+                db.historyGapDao().insert(
+                    HistoryGapEntity(
+                        roomId = bufferId,
+                        olderMsgid = null,
+                        olderServerTime = base + 260_000,
+                        newerMsgid = null,
+                        newerServerTime = echoTime - 1,
+                        recoverable = true,
+                    ),
+                )
+                val echo = sendLiveEcho(echoTime)
+                val repository = repository()
+                val presented = presentation(repository)
+                report("unresolvable-one-ms-older", echo, presented)
 
-            assertTrue("live echo inside the Recent window", windowContains(echo.id))
-            assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
-            // One millisecond older than the echo puts the seam in the echo's own slot: the break is
-            // genuinely between seed260 and the echo, and it is drawn there rather than applied.
-            assertEquals(
-                "seam slot",
-                listOf(VOICE_MSGID to db.historyGapDao().forRoom(bufferId).single().id),
-                seamPlacements(repository, presented),
-            )
-        } finally {
-            Dispatchers.resetMain()
+                assertTrue("live echo inside the Recent window", windowContains(echo.id))
+                assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
+                // One millisecond older than the echo puts the seam in the echo's own slot: the break is
+                // genuinely between seed260 and the echo, and it is drawn there rather than applied.
+                assertEquals(
+                    "seam slot",
+                    listOf(
+                        VOICE_MSGID to
+                            db
+                                .historyGapDao()
+                                .forRoom(bufferId)
+                                .single()
+                                .id,
+                    ),
+                    seamPlacements(repository, presented),
+                )
+            } finally {
+                Dispatchers.resetMain()
+            }
         }
-    }
 
     /**
      * **Regression pin for the window-bounds starvation.** The gap's newer edge has neither a
@@ -400,48 +474,58 @@ class ReconnectGapPresentationTest {
      * resolved, exactly the E2E symptom. The permissive fallback keeps the newest-end row.
      */
     @Test
-    fun liveEchoAtAnUnresolvableGapEdgeTimestampIsNotStarvedByWindowBounds() = runTest {
-        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
-        try {
-            seedBacklog()
-            val echoTime = base + 500_000
-            // Catch-up island whose boundary the client could not resolve locally (msgid stripped by
-            // the timestamp-only wire AND no retained event for the boundary row), sharing the echo's
-            // millisecond.
-            db.historyGapDao().insert(
-                HistoryGapEntity(
-                    roomId = bufferId,
-                    olderMsgid = null, olderServerTime = base + 260_000,
-                    newerMsgid = null, newerServerTime = echoTime,
-                    recoverable = true,
-                ),
-            )
-            val echo = sendLiveEcho(echoTime)
-            val repository = repository()
-            val presented = presentation(repository)
-            report("unresolvable-equal-time", echo, presented)
+    fun liveEchoAtAnUnresolvableGapEdgeTimestampIsNotStarvedByWindowBounds() =
+        runTest {
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            try {
+                seedBacklog()
+                val echoTime = base + 500_000
+                // Catch-up island whose boundary the client could not resolve locally (msgid stripped by
+                // the timestamp-only wire AND no retained event for the boundary row), sharing the echo's
+                // millisecond.
+                db.historyGapDao().insert(
+                    HistoryGapEntity(
+                        roomId = bufferId,
+                        olderMsgid = null,
+                        olderServerTime = base + 260_000,
+                        newerMsgid = null,
+                        newerServerTime = echoTime,
+                        recoverable = true,
+                    ),
+                )
+                val echo = sendLiveEcho(echoTime)
+                val repository = repository()
+                val presented = presentation(repository)
+                report("unresolvable-equal-time", echo, presented)
 
-            // Observed: the window is not merely missing the echo, it is EMPTY (itemCount 0) — the
-            // MAX_VALUE lower boundary excludes every local row at or below its serverTime. The
-            // timeline has nothing to compose and no paging key to scroll to, which is precisely the
-            // E2E symptom.
-            assertTrue("live echo inside the Recent window", windowContains(echo.id))
-            assertTrue("Recent window is not blanked", presented.itemCount > 0)
-            assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
-            // The cohort-floor projection is what keeps this honest at the tie: the seam sits UNDER
-            // the whole equal-timestamp cohort, so it lands in the echo's slot instead of slicing
-            // through the cohort at a position the client cannot justify — and instead of the
-            // cohort-ceiling anchor that used to sit above every materialized row, match nothing,
-            // and leave a silently truncated timeline with no indication anything was missing.
-            assertEquals(
-                "seam slot",
-                listOf(VOICE_MSGID to db.historyGapDao().forRoom(bufferId).single().id),
-                seamPlacements(repository, presented),
-            )
-        } finally {
-            Dispatchers.resetMain()
+                // Observed: the window is not merely missing the echo, it is EMPTY (itemCount 0) — the
+                // MAX_VALUE lower boundary excludes every local row at or below its serverTime. The
+                // timeline has nothing to compose and no paging key to scroll to, which is precisely the
+                // E2E symptom.
+                assertTrue("live echo inside the Recent window", windowContains(echo.id))
+                assertTrue("Recent window is not blanked", presented.itemCount > 0)
+                assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
+                // The cohort-floor projection is what keeps this honest at the tie: the seam sits UNDER
+                // the whole equal-timestamp cohort, so it lands in the echo's slot instead of slicing
+                // through the cohort at a position the client cannot justify — and instead of the
+                // cohort-ceiling anchor that used to sit above every materialized row, match nothing,
+                // and leave a silently truncated timeline with no indication anything was missing.
+                assertEquals(
+                    "seam slot",
+                    listOf(
+                        VOICE_MSGID to
+                            db
+                                .historyGapDao()
+                                .forRoom(bufferId)
+                                .single()
+                                .id,
+                    ),
+                    seamPlacements(repository, presented),
+                )
+            } finally {
+                Dispatchers.resetMain()
+            }
         }
-    }
 
     /**
      * The Lead-3 shape: the live echo arrives WHILE the mediator is backfilling and rewriting the
@@ -450,46 +534,49 @@ class ReconnectGapPresentationTest {
      * presented.
      */
     @Test
-    fun liveEchoArrivingDuringBackfillChurnIsPresented() = runTest {
-        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
-        try {
-            seedBacklog()
-            reconnectCatchUp(firstTime = base + 400_000, count = 50, msgidWire = false)
-            val history = ScriptedBefore(
-                ArrayDeque(
-                    (0 until 4).map { page ->
-                        (0 until 50).map { row ->
-                            chatMsg(
-                                "fill${page}_$row",
-                                base + 300_000 - page * 50_000L + row * 1_000L,
-                            )
-                        }
-                    },
-                ),
-            )
-            val repository = repository(history)
-            lateinit var echo: MessageEntity
-            val presented = presentation(repository) { round ->
-                // Mid-backfill live arrival, exactly like the voice echo landing while the reconnect
-                // catch-up is still paging.
-                if (round == 2) echo = sendLiveEcho(base + 500_000)
-            }
-            report("backfill-churn", echo, presented)
+    fun liveEchoArrivingDuringBackfillChurnIsPresented() =
+        runTest {
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            try {
+                seedBacklog()
+                reconnectCatchUp(firstTime = base + 400_000, count = 50, msgidWire = false)
+                val history =
+                    ScriptedBefore(
+                        ArrayDeque(
+                            (0 until 4).map { page ->
+                                (0 until 50).map { row ->
+                                    chatMsg(
+                                        "fill${page}_$row",
+                                        base + 300_000 - page * 50_000L + row * 1_000L,
+                                    )
+                                }
+                            },
+                        ),
+                    )
+                val repository = repository(history)
+                lateinit var echo: MessageEntity
+                val presented =
+                    presentation(repository) { round ->
+                        // Mid-backfill live arrival, exactly like the voice echo landing while the reconnect
+                        // catch-up is still paging.
+                        if (round == 2) echo = sendLiveEcho(base + 500_000)
+                    }
+                report("backfill-churn", echo, presented)
 
-            assertNotNull("live echo durable in Room", db.messageDao().byMsgid(bufferId, VOICE_MSGID))
-            assertTrue("live echo inside the Recent window", windowContains(echo.id))
-            assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
-            // Backfill moves the gap under the collector, so the seam's exact slot is a function of
-            // how far the churn got. What must hold regardless: a live row arriving at the newest end
-            // is never fenced off behind a seam it is not actually adjacent to.
-            assertTrue(
-                "the live echo must not be separated from the timeline by a seam",
-                seamPlacements(repository, presented).none { it.first == VOICE_MSGID },
-            )
-        } finally {
-            Dispatchers.resetMain()
+                assertNotNull("live echo durable in Room", db.messageDao().byMsgid(bufferId, VOICE_MSGID))
+                assertTrue("live echo inside the Recent window", windowContains(echo.id))
+                assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
+                // Backfill moves the gap under the collector, so the seam's exact slot is a function of
+                // how far the churn got. What must hold regardless: a live row arriving at the newest end
+                // is never fenced off behind a seam it is not actually adjacent to.
+                assertTrue(
+                    "the live echo must not be separated from the timeline by a seam",
+                    seamPlacements(repository, presented).none { it.first == VOICE_MSGID },
+                )
+            } finally {
+                Dispatchers.resetMain()
+            }
         }
-    }
 
     /**
      * The worst gap the fixture can build — an unidentifiable newer edge tying the newest row's
@@ -504,27 +591,30 @@ class ReconnectGapPresentationTest {
      * every row, which is why both halves are asserted together.
      */
     @Test
-    fun theWorstGapEdgeStillPresentsEveryRowAndPublishesASeam() = runTest {
-        seedBacklog()
-        val newest = checkNotNull(db.messageDao().byMsgid(bufferId, "seed260"))
+    fun theWorstGapEdgeStillPresentsEveryRowAndPublishesASeam() =
+        runTest {
+            seedBacklog()
+            val newest = checkNotNull(db.messageDao().byMsgid(bufferId, "seed260"))
 
-        db.historyGapDao().insert(
-            HistoryGapEntity(
-                roomId = bufferId,
-                olderMsgid = null, olderServerTime = base + 100_000,
-                newerMsgid = null, newerServerTime = newest.serverTime,
-                recoverable = true,
-            ),
-        )
-        val repository = repository()
+            db.historyGapDao().insert(
+                HistoryGapEntity(
+                    roomId = bufferId,
+                    olderMsgid = null,
+                    olderServerTime = base + 100_000,
+                    newerMsgid = null,
+                    newerServerTime = newest.serverTime,
+                    recoverable = true,
+                ),
+            )
+            val repository = repository()
 
-        // The worst boundary the resolver can be handed no longer reaches the presented rows at all:
-        // nothing derives a window from a gap, so every seeded row stays reachable...
-        assertTrue("every seeded row stays reachable", windowContains(newest.id))
-        // ...and the gap is not being ignored either: it publishes a seam, which is how the break is
-        // shown now. A gap store that had simply stopped seeing gaps would also present every row.
-        assertEquals(1, repository.observeTimelineSeams(bufferId, MessageVisibilitySpec()).first().size)
-    }
+            // The worst boundary the resolver can be handed no longer reaches the presented rows at all:
+            // nothing derives a window from a gap, so every seeded row stays reachable...
+            assertTrue("every seeded row stays reachable", windowContains(newest.id))
+            // ...and the gap is not being ignored either: it publishes a seam, which is how the break is
+            // shown now. A gap store that had simply stopped seeing gaps would also present every row.
+            assertEquals(1, repository.observeTimelineSeams(bufferId, MessageVisibilitySpec()).first().size)
+        }
 
     /**
      * A fresh buffer's first CHATHISTORY LATEST seed on a timestamp-only wire returns a SATURATED,
@@ -543,36 +633,38 @@ class ReconnectGapPresentationTest {
      * diagnostic instead of being encoded as a false interval.
      */
     @Test
-    fun saturatedTimestampOnlyLatestSeedWritesNoDegenerateGap() = runTest {
-        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
-        try {
-            val history = SaturatedTimestampWire(
-                latest = (0 until 50).map { chatMsg("seed$it", base + 200_000 + it * 1_000L) },
-                before = ArrayDeque(emptyList()),
-            )
-            val repository = repository(history)
-            val presented = presentation(repository, rounds = 8)
+    fun saturatedTimestampOnlyLatestSeedWritesNoDegenerateGap() =
+        runTest {
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            try {
+                val history =
+                    SaturatedTimestampWire(
+                        latest = (0 until 50).map { chatMsg("seed$it", base + 200_000 + it * 1_000L) },
+                        before = ArrayDeque(emptyList()),
+                    )
+                val repository = repository(history)
+                val presented = presentation(repository, rounds = 8)
 
-            val gaps = db.historyGapDao().forRoom(bufferId)
-            val boundaryRow = checkNotNull(db.messageDao().byMsgid(bufferId, "seed0"))
-            println(
-                "NO-DEGENERATE-GAP requests=${history.calls} gaps=$gaps " +
-                    "boundaryRow(id=${boundaryRow.id} t=${boundaryRow.serverTime}) " +
-                    "itemCount=${presented.itemCount}",
-            )
+                val gaps = db.historyGapDao().forRoom(bufferId)
+                val boundaryRow = checkNotNull(db.messageDao().byMsgid(bufferId, "seed0"))
+                println(
+                    "NO-DEGENERATE-GAP requests=${history.calls} gaps=$gaps " +
+                        "boundaryRow(id=${boundaryRow.id} t=${boundaryRow.serverTime}) " +
+                        "itemCount=${presented.itemCount}",
+                )
 
-            assertTrue("saturated seed writes no gap", gaps.isEmpty())
-            assertTrue("window presents the seeded rows", presented.itemCount > 0)
-            // No gap, so no seam either: the ambiguous boundary is recorded as a diagnostic, not
-            // encoded as a false interval that would now draw a divider claiming lost history.
-            assertEquals(
-                emptyList<Pair<String?, Long>>(),
-                seamPlacements(repository, presented),
-            )
-        } finally {
-            Dispatchers.resetMain()
+                assertTrue("saturated seed writes no gap", gaps.isEmpty())
+                assertTrue("window presents the seeded rows", presented.itemCount > 0)
+                // No gap, so no seam either: the ambiguous boundary is recorded as a diagnostic, not
+                // encoded as a false interval that would now draw a divider claiming lost history.
+                assertEquals(
+                    emptyList<Pair<String?, Long>>(),
+                    seamPlacements(repository, presented),
+                )
+            } finally {
+                Dispatchers.resetMain()
+            }
         }
-    }
 
     /**
      * **Reachability probe — nothing here is hand-constructed.** Runs the whole hosted-CI shape
@@ -595,75 +687,84 @@ class ReconnectGapPresentationTest {
      * gate failure. The assertion is the invariant: the clamped self-send must still be presented.
      */
     @Test
-    fun timestampOnlyWireJourneyKeepsTheClampedSelfSendPresented() = runTest {
-        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
-        try {
-            // (1)+(2) first open of an EMPTY buffer: the mediator seeds with LATEST and then pages
-            // older via BEFORE, every page saturated (50 == limit) and msgid-less.
-            val history = SaturatedTimestampWire(
-                latest = (0 until 50).map { chatMsg("seed$it", base + 200_000 + it * 1_000L) },
-                before = ArrayDeque(
-                    (1..3).map { page ->
-                        (0 until 50).map { row ->
-                            chatMsg("old${page}_$row", base + 200_000 - page * 50_000L + row * 1_000L)
-                        }
-                    },
-                ),
-            )
-            val repository = repository(history)
-            presentation(repository, rounds = 8)
-            val gapsAfterOpen = db.historyGapDao().forRoom(bufferId)
-            println(
-                "REACHABILITY[after-open] requests=${history.calls} gaps=" + gapsAfterOpen.joinToString { g ->
-                    "(older=${g.olderServerTime}/${g.olderMsgid}/${g.olderEventId} " +
-                        "newer=${g.newerServerTime}/${g.newerMsgid}/${g.newerEventId} rec=${g.recoverable})"
-                },
-            )
+    fun timestampOnlyWireJourneyKeepsTheClampedSelfSendPresented() =
+        runTest {
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            try {
+                // (1)+(2) first open of an EMPTY buffer: the mediator seeds with LATEST and then pages
+                // older via BEFORE, every page saturated (50 == limit) and msgid-less.
+                val history =
+                    SaturatedTimestampWire(
+                        latest = (0 until 50).map { chatMsg("seed$it", base + 200_000 + it * 1_000L) },
+                        before =
+                            ArrayDeque(
+                                (1..3).map { page ->
+                                    (0 until 50).map { row ->
+                                        chatMsg("old${page}_$row", base + 200_000 - page * 50_000L + row * 1_000L)
+                                    }
+                                },
+                            ),
+                    )
+                val repository = repository(history)
+                presentation(repository, rounds = 8)
+                val gapsAfterOpen = db.historyGapDao().forRoom(bufferId)
+                println(
+                    "REACHABILITY[after-open] requests=${history.calls} gaps=" +
+                        gapsAfterOpen.joinToString { g ->
+                            "(older=${g.olderServerTime}/${g.olderMsgid}/${g.olderEventId} " +
+                                "newer=${g.newerServerTime}/${g.newerMsgid}/${g.newerEventId} rec=${g.recoverable})"
+                        },
+                )
 
-            // (3) reconnect catch-up that jumps past the known newest boundary.
-            reconnectCatchUp(firstTime = base + 400_000, count = 50, msgidWire = false)
+                // (3) reconnect catch-up that jumps past the known newest boundary.
+                reconnectCatchUp(firstTime = base + 400_000, count = 50, msgidWire = false)
 
-            // (4) real self-send whose echo carries an origin-server time OLDER than the newest
-            // authoritative row, so applySelfSendSortFloor clamps it into an exact tie.
-            val pendingId = processor.insertPending(
-                bufferId, "motd-voice-1", "me", "voice note", null,
-                io.github.trevarj.motd.data.db.MessageKind.PRIVMSG,
-            )
-            processor.process(
-                networkId,
-                IrcEvent.ChatMessage(
-                    ctx = MessageContext(VOICE_MSGID, base + 300_000, null, null, "motd-voice-1"),
-                    kind = IrcEvent.ChatKind.PRIVMSG,
-                    source = Prefix("me"),
-                    target = "##motdtest",
-                    text = "voice note",
-                    isSelf = true,
-                    replyToMsgid = null,
-                ),
-            )
-            val echo = checkNotNull(db.messageDao().byCanonicalId(pendingId))
-            val newestOther = db.messageDao().byMsgid(bufferId, "catchup49")
-            println(
-                "REACHABILITY[clamp] echoTimeOnWire=${base + 300_000} storedEchoTime=${echo.serverTime} " +
-                    "newestCatchUp=${newestOther?.serverTime} clamped=${echo.serverTime != base + 300_000L}",
-            )
+                // (4) real self-send whose echo carries an origin-server time OLDER than the newest
+                // authoritative row, so applySelfSendSortFloor clamps it into an exact tie.
+                val pendingId =
+                    processor.insertPending(
+                        bufferId,
+                        "motd-voice-1",
+                        "me",
+                        "voice note",
+                        null,
+                        io.github.trevarj.motd.data.db.MessageKind.PRIVMSG,
+                    )
+                processor.process(
+                    networkId,
+                    IrcEvent.ChatMessage(
+                        ctx = MessageContext(VOICE_MSGID, base + 300_000, null, null, "motd-voice-1"),
+                        kind = IrcEvent.ChatKind.PRIVMSG,
+                        source = Prefix("me"),
+                        target = "##motdtest",
+                        text = "voice note",
+                        isSelf = true,
+                        replyToMsgid = null,
+                    ),
+                )
+                val echo = checkNotNull(db.messageDao().byCanonicalId(pendingId))
+                val newestOther = db.messageDao().byMsgid(bufferId, "catchup49")
+                println(
+                    "REACHABILITY[clamp] echoTimeOnWire=${base + 300_000} storedEchoTime=${echo.serverTime} " +
+                        "newestCatchUp=${newestOther?.serverTime} clamped=${echo.serverTime != base + 300_000L}",
+                )
 
-            val presented = presentation(repository(history))
-            report("ci-journey", echo, presented)
+                val presented = presentation(repository(history))
+                report("ci-journey", echo, presented)
 
-            assertTrue("live self-send inside the Recent window", windowContains(echo.id))
-            assertTrue("Recent window is not blanked", presented.itemCount > 0)
-            assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
-            // The clamped self-send ties the newest catch-up row's millisecond, which is the exact
-            // cohort a seam projection can slice through. It must never end up above the send.
-            assertTrue(
-                "the clamped self-send must not be fenced off by a seam",
-                seamPlacements(repository(history), presented).none { it.first == VOICE_MSGID },
-            )
-        } finally {
-            Dispatchers.resetMain()
+                assertTrue("live self-send inside the Recent window", windowContains(echo.id))
+                assertTrue("Recent window is not blanked", presented.itemCount > 0)
+                assertEquals("newest presented row", VOICE_MSGID, presented.newest?.msgid)
+                // The clamped self-send ties the newest catch-up row's millisecond, which is the exact
+                // cohort a seam projection can slice through. It must never end up above the send.
+                assertTrue(
+                    "the clamped self-send must not be fenced off by a seam",
+                    seamPlacements(repository(history), presented).none { it.first == VOICE_MSGID },
+                )
+            } finally {
+                Dispatchers.resetMain()
+            }
         }
-    }
 
     /**
      * Saturated, msgid-less LATEST + BEFORE pages: the hosted-CI wire regime. Every reference has a
@@ -677,22 +778,34 @@ class ReconnectGapPresentationTest {
         val calls = mutableListOf<ChatHistoryRequest.Subcommand>()
         private var latestServed = false
 
-        override suspend fun availability() =
-            HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP), 100)
+        override suspend fun availability() = HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP), 100)
 
         override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
             calls += req.subcommand
-            val events = when (req.subcommand) {
-                ChatHistoryRequest.Subcommand.LATEST ->
-                    if (latestServed) emptyList() else latest.also { latestServed = true }
-                ChatHistoryRequest.Subcommand.BEFORE -> before.removeFirstOrNull() ?: emptyList()
-                else -> emptyList()
-            }
-            val refs = events.mapNotNull { (it as? IrcEvent.ChatMessage)?.ctx }
-                .map { ChatHistoryReference(null, it.serverTime) }
+            val events =
+                when (req.subcommand) {
+                    ChatHistoryRequest.Subcommand.LATEST -> {
+                        if (latestServed) emptyList() else latest.also { latestServed = true }
+                    }
+
+                    ChatHistoryRequest.Subcommand.BEFORE -> {
+                        before.removeFirstOrNull() ?: emptyList()
+                    }
+
+                    else -> {
+                        emptyList()
+                    }
+                }
+            val refs =
+                events
+                    .mapNotNull { (it as? IrcEvent.ChatMessage)?.ctx }
+                    .map { ChatHistoryReference(null, it.serverTime) }
             return ChatHistoryResponse.Messages(
-                events, oldest = refs.firstOrNull(), newest = refs.lastOrNull(),
-                endOfHistory = false, primaryMessageCount = refs.size,
+                events,
+                oldest = refs.firstOrNull(),
+                newest = refs.lastOrNull(),
+                endOfHistory = false,
+                primaryMessageCount = refs.size,
             )
         }
     }
@@ -701,20 +814,25 @@ class ReconnectGapPresentationTest {
     private inner class ScriptedBefore(
         private val pages: ArrayDeque<List<IrcEvent>>,
     ) : ChatHistoryRemoteMediator.HistorySource {
-        override suspend fun availability() =
-            HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP), 100)
+        override suspend fun availability() = HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP), 100)
 
         override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
-            val events = if (req.subcommand == ChatHistoryRequest.Subcommand.BEFORE) {
-                pages.removeFirstOrNull() ?: emptyList()
-            } else {
-                emptyList()
-            }
-            val refs = events.mapNotNull { (it as? IrcEvent.ChatMessage)?.ctx }
-                .map { ChatHistoryReference(null, it.serverTime) }
+            val events =
+                if (req.subcommand == ChatHistoryRequest.Subcommand.BEFORE) {
+                    pages.removeFirstOrNull() ?: emptyList()
+                } else {
+                    emptyList()
+                }
+            val refs =
+                events
+                    .mapNotNull { (it as? IrcEvent.ChatMessage)?.ctx }
+                    .map { ChatHistoryReference(null, it.serverTime) }
             return ChatHistoryResponse.Messages(
-                events, oldest = refs.firstOrNull(), newest = refs.lastOrNull(),
-                endOfHistory = false, primaryMessageCount = refs.size,
+                events,
+                oldest = refs.firstOrNull(),
+                newest = refs.lastOrNull(),
+                endOfHistory = false,
+                primaryMessageCount = refs.size,
             )
         }
     }
