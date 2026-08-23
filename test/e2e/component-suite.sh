@@ -15,8 +15,8 @@ cd "$REPO"
   -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect \
   --stacktrace --max-workers=2
 
-count="$(find "$REPO/app/build/outputs/androidTest-results" -type f -name '*.xml' -mmin -15 -print0 2>/dev/null \
-  | xargs -0 -r grep -ho '<testcase ' | wc -l | tr -d ' ')"
+count="$(find "$REPO/app/build/outputs/androidTest-results" -type f -name '*.xml' -mmin -15 -print0 2>/dev/null |
+  xargs -0 -r grep -ho '<testcase ' | wc -l | tr -d ' ')"
 [ "$count" = "$EXPECTED_CASES" ] || {
   echo "component suite must report exactly $EXPECTED_CASES cases; got ${count:-0}" >&2
   exit 1

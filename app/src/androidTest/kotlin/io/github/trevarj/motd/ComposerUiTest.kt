@@ -297,6 +297,10 @@ class ComposerUiTest {
         compose.onNodeWithTag("chat_format_strike").performClick()
         compose.runOnIdle {
             assertTrue(parseIrcFormatting(draft.value.text).runs.all { it.state.strikethrough })
+        }
+        compose.onNodeWithTag("chat_format_clear").performClick()
+        compose.runOnIdle {
+            assertTrue(parseIrcFormatting(draft.value.text).runs.all { it.state.isDefault })
             draft.value = TextFieldValue("first\n", TextRange(6))
         }
         compose.waitForIdle()

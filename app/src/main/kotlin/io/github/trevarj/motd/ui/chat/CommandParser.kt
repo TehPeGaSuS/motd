@@ -226,6 +226,9 @@ internal fun messageFormattingRange(raw: String): IntRange? {
     val trimmed = raw.substring(first, last + 1)
     val formatted = parseIrcFormatting(trimmed)
     val command = parsePlainCommand(formatted.visibleText)
+    if (command is ChatCommand.Message && !formatted.visibleText.trimAsciiWhitespace().startsWith("/")) {
+        return 0 until raw.length
+    }
     val messageText =
         when (command) {
             is ChatCommand.Message -> command.text.removePrefix("/me ")
@@ -244,8 +247,7 @@ internal fun messageFormattingRange(raw: String): IntRange? {
     val plainMessage = plainIrcText(messageText)
     val visibleStart = formatted.visibleText.length - plainMessage.length
     val rawStart = formatted.rawToVisible.indexOfFirst { it == visibleStart }.coerceAtLeast(0)
-    val rawEnd = formatted.rawToVisible.indexOfLast { it == formatted.visibleText.length }
-    return first + rawStart until first + rawEnd
+    return first + rawStart until raw.length
 }
 
 private fun parsePlainCommand(raw: String): ChatCommand {

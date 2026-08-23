@@ -41,6 +41,7 @@ class ComposerFormattingTest {
         assertEquals(0 until 2, messageFormattingRange(" \n"))
 
         val raw = "first\n"
+        assertEquals(0 until raw.length, messageFormattingRange(raw))
         val edit = toggleIrcStyle(raw, raw.length, raw.length, IrcTextStyle.BOLD)
         assertTrue(ircStateAtRawOffset(edit.text, edit.selectionStart).bold)
         assertEquals(raw, plainIrcText(edit.text))
@@ -51,10 +52,13 @@ class ComposerFormattingTest {
         val collapsed = toggleIrcStyle("first\n", 6, 6, IrcTextStyle.STRIKETHROUGH)
         assertTrue(ircStateAtRawOffset(collapsed.text, collapsed.selectionStart).strikethrough)
 
-        val selected = toggleIrcStyle("hello", 0, 5, IrcTextStyle.STRIKETHROUGH)
+        val raw = "hello\n"
+        val selected = toggleIrcStyle(raw, 0, raw.length, IrcTextStyle.STRIKETHROUGH)
         assertTrue(parseIrcFormatting(selected.text).runs.all { it.state.strikethrough })
 
-        val cleared = clearIrcFormatting(selected.text, 0, selected.text.length)
+        val range = messageFormattingRange(selected.text)!!
+        val cleared = clearIrcFormatting(selected.text, range.first, range.last + 1)
+        assertEquals(raw, plainIrcText(cleared.text))
         assertTrue(parseIrcFormatting(cleared.text).runs.all { it.state.isDefault })
     }
 
