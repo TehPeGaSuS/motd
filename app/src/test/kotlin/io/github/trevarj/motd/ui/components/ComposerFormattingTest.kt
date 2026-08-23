@@ -4,7 +4,9 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IrcTextStyle
+import io.github.trevarj.motd.irc.format.clearIrcFormatting
 import io.github.trevarj.motd.irc.format.ircStateAtRawOffset
+import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.format.toggleIrcStyle
 import io.github.trevarj.motd.ui.chat.messageFormattingRange
@@ -42,6 +44,18 @@ class ComposerFormattingTest {
         val edit = toggleIrcStyle(raw, raw.length, raw.length, IrcTextStyle.BOLD)
         assertTrue(ircStateAtRawOffset(edit.text, edit.selectionStart).bold)
         assertEquals(raw, plainIrcText(edit.text))
+    }
+
+    @Test
+    fun `strikethrough and clear work for collapsed and selected ranges`() {
+        val collapsed = toggleIrcStyle("first\n", 6, 6, IrcTextStyle.STRIKETHROUGH)
+        assertTrue(ircStateAtRawOffset(collapsed.text, collapsed.selectionStart).strikethrough)
+
+        val selected = toggleIrcStyle("hello", 0, 5, IrcTextStyle.STRIKETHROUGH)
+        assertTrue(parseIrcFormatting(selected.text).runs.all { it.state.strikethrough })
+
+        val cleared = clearIrcFormatting(selected.text, 0, selected.text.length)
+        assertTrue(parseIrcFormatting(cleared.text).runs.all { it.state.isDefault })
     }
 
     @Test

@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -275,6 +276,37 @@ class ComposerUiTest {
         compose.onNodeWithTag("chat_composer_format_expand").performClick()
         compose.onNodeWithTag("chat_format_color").performClick()
         compose.onNodeWithTag("chat_composer_color_sheet").assertIsDisplayed()
+    }
+
+    @Test
+    fun strikethroughFormatsSelectionAndFutureInput() {
+        val draft = mutableStateOf(TextFieldValue("hello\nthere", TextRange(0, 11)))
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_format_strike").performClick()
+        compose.runOnIdle {
+            assertTrue(parseIrcFormatting(draft.value.text).runs.all { it.state.strikethrough })
+            draft.value = TextFieldValue("first\n", TextRange(6))
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_format_strike").performClick()
+        compose.onNodeWithTag("chat_composer_field").performTextInput("x")
+        compose.runOnIdle {
+            val formatted = parseIrcFormatting(draft.value.text)
+            assertEquals("first\nx", formatted.visibleText)
+            assertTrue(formatted.stateAtVisible(formatted.visibleText.lastIndex).strikethrough)
+        }
     }
 
     @Test
