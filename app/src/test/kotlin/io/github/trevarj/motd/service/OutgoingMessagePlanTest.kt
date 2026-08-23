@@ -4,6 +4,9 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.irc.format.IRC_BOLD
+import io.github.trevarj.motd.irc.format.IRC_COLOR
+import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -24,6 +27,18 @@ class OutgoingMessagePlanTest {
         assertTrue(chunks.all { it.toByteArray(Charsets.UTF_8).size <= 10 })
         assertEquals("hello😀worldcafé", chunks.joinToString(""))
         assertTrue(chunks.none(::hasUnpairedSurrogate))
+    }
+
+    @Test
+    fun `formatted chunks keep plain projection and independent wire state`() {
+        val raw = "$IRC_BOLD${IRC_COLOR}04" + "alpha beta gamma delta$IRC_BOLD"
+        val chunks = prepareOutgoingMessageChunks(raw, isBouncerServ = false, maxBytes = 14)
+
+        assertTrue(chunks.size > 1)
+        assertEquals("alpha beta gamma delta", chunks.joinToString("") { it.displayText })
+        assertTrue(chunks.all { it.ircFormattedText == it.wireText })
+        assertTrue(chunks.all { parseIrcFormatting(it.wireText).activeState.isDefault })
+        assertTrue(chunks.all { it.wireText.toByteArray(Charsets.UTF_8).size <= 14 })
     }
 
     @Test

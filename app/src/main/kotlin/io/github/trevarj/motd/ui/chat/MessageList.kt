@@ -1496,6 +1496,8 @@ private fun MessageRow(
         remember(msg.text, audioAttachments) {
             displayTextForAudioMessage(msg.text, audioAttachments)
         }
+    val renderedMessageText =
+        if (messageText == msg.text) msg.ircFormattedText ?: messageText else messageText
     val standaloneVoice =
         audioAttachments.size == 1 && audioAttachments.single().voice &&
             messageText.isBlank() && reply == null
@@ -1575,7 +1577,7 @@ private fun MessageRow(
                     sender = displaySender,
                     networkId = networkId,
                     senderAccount = msg.senderAccount,
-                    text = messageText,
+                    text = renderedMessageText,
                     timeMs = msg.serverTime,
                     formattedTime = formattedTime,
                     isSelf = msg.isSelf,

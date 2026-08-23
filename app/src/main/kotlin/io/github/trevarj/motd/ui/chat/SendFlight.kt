@@ -30,6 +30,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
@@ -317,7 +318,10 @@ internal fun BoxScope.SendFlightOverlay(
                 networkId = networkId,
                 formattedTime = time,
                 pending = true,
-                reply = flight.replyText?.let { ReplyPreviewData(flight.replySender.orEmpty(), it) },
+                reply =
+                    flight.replyText?.let {
+                        ReplyPreviewData(flight.replySender.orEmpty(), it, flight.replyIrcFormattedText)
+                    },
                 knownNicks = knownNicks,
                 identityRules = identityRules,
             )
@@ -373,6 +377,7 @@ private fun MorphingGhost(
             kind = MessageKind.PRIVMSG,
         )
     val fieldInk = MaterialTheme.colorScheme.onSurface
+    val plainText = remember(flight.text) { plainIrcText(flight.text) }
     val topCorner = if (showSender) spacing.bubbleCorner else spacing.bubbleGroupedCorner
     val shape =
         RoundedCornerShape(
@@ -423,7 +428,7 @@ private fun MorphingGhost(
             // Two identical layouts crossfading ink: text cannot recolor in the draw phase, and
             // the pair keeps the glyphs themselves perfectly still while the color transfers.
             Text(
-                text = flight.text,
+                text = plainText,
                 style = MaterialTheme.typography.bodyLarge,
                 color = fieldInk,
                 modifier =
@@ -437,7 +442,7 @@ private fun MorphingGhost(
                         }.graphicsLayer { alpha = 1f - min(1f, morph.value) },
             )
             Text(
-                text = flight.text,
+                text = plainText,
                 style = MaterialTheme.typography.bodyLarge,
                 color = roles.content,
                 modifier = Modifier.graphicsLayer { alpha = min(1f, morph.value) },

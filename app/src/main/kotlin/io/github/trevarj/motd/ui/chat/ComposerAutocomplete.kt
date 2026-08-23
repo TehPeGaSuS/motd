@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.chat
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import io.github.trevarj.motd.irc.format.parseIrcFormatting
 
 /** A composer completion candidate: display text plus whether it is a `/` command hint. */
 data class Completion(
@@ -24,8 +25,9 @@ fun autocompleteFor(
     normalize: (String) -> String,
     isChannel: Boolean = true,
 ): List<Completion> {
-    val text = value.text
-    val cursor = value.selection.end
+    val formatted = parseIrcFormatting(value.text)
+    val text = formatted.visibleText
+    val cursor = formatted.visibleOffset(value.selection.end)
 
     // Command hints: a leading "/word" with no space yet.
     if (text.startsWith("/") && !text.startsWith("//") && !text.contains(' ')) {
@@ -52,12 +54,16 @@ fun applyPick(
     value: TextFieldValue,
     picked: String,
 ): TextFieldValue {
-    val text = value.text
     if (picked.startsWith("/")) {
         val next = "$picked "
         return TextFieldValue(next, TextRange(next.length))
     }
-    val token = nickTokenAt(text, value.selection.end) ?: return value
-    val result = applyCompletion(text, token, picked)
+    val formatted = parseIrcFormatting(value.text)
+    val visibleCursor = formatted.visibleOffset(value.selection.end)
+    val token = nickTokenAt(formatted.visibleText, visibleCursor) ?: return value
+    val rawStart = formatted.rawToVisible.indexOfLast { it == token.start }.coerceAtLeast(0)
+    val rawEnd = formatted.rawToVisible.indexOfFirst { it == token.end }.takeIf { it >= 0 } ?: value.selection.end
+    val rawToken = token.copy(start = rawStart, end = rawEnd)
+    val result = applyCompletion(value.text, rawToken, picked)
     return TextFieldValue(result.text, TextRange(result.cursor))
 }

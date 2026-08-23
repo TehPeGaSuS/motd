@@ -52,6 +52,8 @@ import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.ext.MonitorCommands
 import io.github.trevarj.motd.irc.ext.MonitorSupport
 import io.github.trevarj.motd.irc.ext.monitorSupport
+import io.github.trevarj.motd.irc.format.plainIrcText
+import io.github.trevarj.motd.irc.format.splitIrcFormattedLinesUtf8
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.transport.TransportFactory
@@ -102,6 +104,7 @@ internal data class OutgoingMessageChunk(
     val wireText: String,
     val displayText: String,
     val kind: MessageKind,
+    val ircFormattedText: String? = null,
 )
 
 /**
@@ -127,34 +130,34 @@ internal fun prepareOutgoingMessageChunks(
         return listOf(
             OutgoingMessageChunk(
                 wireText = normalized,
-                displayText = normalized,
+                displayText = plainIrcText(normalized),
                 kind = MessageKind.PRIVMSG,
+                ircFormattedText = normalized.takeIf { plainIrcText(normalized) != normalized },
             ),
         )
     }
-    val lines = text.split(Regex("\\r\\n|\\r|\\n")).filter { it.isNotEmpty() }
-    if (lines.isEmpty()) return emptyList()
-
     val isAction = text.startsWith("/me ")
-    return lines.flatMapIndexed { lineIndex, line ->
-        val lineIsAction = isAction && lineIndex == 0
-        if (lineIsAction) {
-            val displayText = line.removePrefix("/me ")
-            splitUtf8(displayText, maxBytes - ACTION_OVERHEAD_BYTES).map { chunk ->
-                OutgoingMessageChunk(
-                    wireText = "\u0001ACTION $chunk\u0001",
-                    displayText = chunk,
-                    kind = MessageKind.ACTION,
-                )
-            }
+    val payload = if (isAction) text.removePrefix("/me ") else text
+    val formattedLines =
+        if (isBouncerServ) {
+            payload.split(Regex("\\r\\n|\\r|\\n")).map { line -> splitUtf8(line, maxBytes) }
         } else {
-            splitUtf8(line, maxBytes).map { chunk ->
-                OutgoingMessageChunk(
-                    wireText = chunk,
-                    displayText = if (isBouncerServ) redactBouncerServCommand(chunk) else chunk,
-                    kind = MessageKind.PRIVMSG,
-                )
-            }
+            splitIrcFormattedLinesUtf8(payload, maxBytes - if (isAction) ACTION_OVERHEAD_BYTES else 0)
+        }
+    if (formattedLines.all { line -> line.all(String::isEmpty) }) return emptyList()
+    return formattedLines.flatMapIndexed { lineIndex, line ->
+        line.filter(String::isNotEmpty).map { chunk ->
+            val plainText = if (isBouncerServ) chunk else plainIrcText(chunk)
+            val formattedText = chunk.takeIf { !isBouncerServ && plainText != chunk }
+            val displayText =
+                if (isBouncerServ) redactBouncerServCommand(chunk) else plainText
+            val lineIsAction = isAction && lineIndex == 0
+            OutgoingMessageChunk(
+                wireText = if (lineIsAction) "\u0001ACTION $chunk\u0001" else chunk,
+                displayText = displayText,
+                kind = if (lineIsAction) MessageKind.ACTION else MessageKind.PRIVMSG,
+                ircFormattedText = formattedText,
+            )
         }
     }
 }
@@ -1555,7 +1558,15 @@ class ConnectionManagerImpl
                     networkId = buffer.networkId,
                     eventId = eventId,
                     oldLabel = oldLabel,
-                    events = planned.map { OutgoingEventPlan(it.label, it.chunk.displayText, it.chunk.kind) },
+                    events =
+                        planned.map {
+                            OutgoingEventPlan(
+                                label = it.label,
+                                text = it.chunk.displayText,
+                                kind = it.chunk.kind,
+                                ircFormattedText = it.chunk.ircFormattedText,
+                            )
+                        },
                 ) ?: return ImmediateWireAcceptance.FAILED
             val currentBuffer = bufferDao.observeById(replanned.bufferId) ?: buffer
             return writeDurablePlan(
@@ -2190,7 +2201,15 @@ class ConnectionManagerImpl
                                 sender =
                                     ready?.nick ?: client?.config?.nick
                                         ?: networkDao.byId(buffer.networkId)?.nick.orEmpty(),
-                                events = planned.map { OutgoingEventPlan(it.label, it.chunk.displayText, it.chunk.kind) },
+                                events =
+                                    planned.map {
+                                        OutgoingEventPlan(
+                                            label = it.label,
+                                            text = it.chunk.displayText,
+                                            kind = it.chunk.kind,
+                                            ircFormattedText = it.chunk.ircFormattedText,
+                                        )
+                                    },
                                 replyToEventId = parent?.id,
                                 replyToMsgid = parent?.msgid,
                             )
@@ -2214,7 +2233,7 @@ class ConnectionManagerImpl
                             )
                         },
                         secondaryEffect = { notifyOutgoingAccepted(buffer.id) },
-                        storedTexts = planned.map { it.chunk.displayText },
+                        storedTexts = planned.map { it.chunk.ircFormattedText ?: it.chunk.displayText },
                     )
                 }
             }
@@ -2254,16 +2273,18 @@ class ConnectionManagerImpl
                         } catch (_: Exception) {
                             return@withLock SendAcceptance.Rejected(SendRejectionReason.PERSISTENCE_FAILED)
                         } ?: return@withLock SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
+                    val formattedText = retry.ircFormattedText
+                    val retryPayload = formattedText ?: retry.text
                     val wireText =
                         if (retry.kind == MessageKind.ACTION) {
-                            "\u0001ACTION ${retry.text}\u0001"
+                            "\u0001ACTION $retryPayload\u0001"
                         } else {
-                            retry.text
+                            retryPayload
                         }
                     val planned =
                         listOf(
                             PlannedOutgoingChunk(
-                                OutgoingMessageChunk(wireText, retry.text, retry.kind),
+                                OutgoingMessageChunk(wireText, retry.text, retry.kind, formattedText),
                                 label,
                             ),
                         )
@@ -2326,7 +2347,7 @@ class ConnectionManagerImpl
                         ready = ready,
                         eventId = eventIds.single(),
                         oldLabel = item.label,
-                        text = item.chunk.displayText,
+                        text = item.chunk.ircFormattedText ?: item.chunk.displayText,
                         replyToMsgid = replyToMsgid,
                     )
                 }

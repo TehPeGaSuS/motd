@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chat
 
+import io.github.trevarj.motd.irc.format.IRC_BOLD
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -13,6 +14,22 @@ class CommandParserTest {
     @Test fun plain_text_is_message() {
         assertEquals(ChatCommand.Message("hello world"), parseCommand("hello world"))
         assertEquals(ChatCommand.Message("hello world"), parseCommand("  hello world  "))
+    }
+
+    @Test fun ascii_trim_preserves_formatting_controls() {
+        assertEquals(ChatCommand.Message("${IRC_BOLD}hello$IRC_BOLD"), parseCommand(" \t${IRC_BOLD}hello$IRC_BOLD\n"))
+    }
+
+    @Test fun formatting_is_retained_only_in_message_bearing_command_ranges() {
+        assertEquals(
+            ChatCommand.Msg("alice", "${IRC_BOLD}hello$IRC_BOLD"),
+            parseCommand("/${IRC_BOLD}msg$IRC_BOLD ${IRC_BOLD}alice$IRC_BOLD ${IRC_BOLD}hello$IRC_BOLD"),
+        )
+        assertEquals(
+            ChatCommand.Message("/me ${IRC_BOLD}waves$IRC_BOLD"),
+            parseCommand("/${IRC_BOLD}me$IRC_BOLD ${IRC_BOLD}waves$IRC_BOLD"),
+        )
+        assertEquals(ChatCommand.RawLine("WHOIS alice"), parseCommand("/raw ${IRC_BOLD}WHOIS alice$IRC_BOLD"))
     }
 
     @Test fun double_slash_escapes_to_literal_message() {

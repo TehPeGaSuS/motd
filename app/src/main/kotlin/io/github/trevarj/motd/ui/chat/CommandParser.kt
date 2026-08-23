@@ -1,5 +1,8 @@
 package io.github.trevarj.motd.ui.chat
 
+import io.github.trevarj.motd.irc.format.parseIrcFormatting
+import io.github.trevarj.motd.irc.format.plainIrcText
+
 /**
  * Pure translation of a composer line into a [ChatCommand]. No side effects, no Android/IRC deps,
  * so it is trivially unit-testable (WP7 acceptance). The ViewModel executes the returned command
@@ -180,7 +183,72 @@ fun commandHintsFor(isChannel: Boolean): List<String> = if (isChannel) COMMAND_H
 
 /** Parse [raw] composer input into a [ChatCommand]. See the type doc for the rules. */
 fun parseCommand(raw: String): ChatCommand {
-    val trimmed = raw.trim()
+    val trimmed = raw.trimAsciiWhitespace()
+    val formatted = parseIrcFormatting(trimmed)
+    val command = parsePlainCommand(formatted.visibleText)
+    if (formatted.visibleText == trimmed) return command
+
+    fun rawSuffix(plain: String): String {
+        val visibleStart = formatted.visibleText.length - plain.length
+        val rawStart = formatted.rawToVisible.indexOfFirst { it == visibleStart }.coerceAtLeast(0)
+        val rawEnd = formatted.rawToVisible.indexOfLast { it == formatted.visibleText.length }
+        return formatted.rawText.substring(rawStart, rawEnd)
+    }
+
+    if (command is ChatCommand.Message) {
+        return if (command.text.startsWith("/me ")) {
+            ChatCommand.Message("/me ${rawSuffix(command.text.removePrefix("/me "))}")
+        } else {
+            ChatCommand.Message(rawSuffix(command.text))
+        }
+    }
+    return when (command) {
+        is ChatCommand.Part -> command.copy(reason = command.reason?.let(::rawSuffix))
+        is ChatCommand.Hop -> command.copy(reason = command.reason?.let(::rawSuffix))
+        is ChatCommand.Msg -> command.copy(text = rawSuffix(command.text))
+        is ChatCommand.Notice -> command.copy(text = rawSuffix(command.text))
+        is ChatCommand.SetName -> command.copy(realname = rawSuffix(command.realname))
+        is ChatCommand.Topic -> command.copy(topic = rawSuffix(command.topic))
+        is ChatCommand.Away -> command.copy(message = command.message?.let(::rawSuffix))
+        is ChatCommand.Kick -> command.copy(reason = command.reason?.let(::rawSuffix))
+        is ChatCommand.Knock -> command.copy(reason = command.reason?.let(::rawSuffix))
+        is ChatCommand.Ctcp -> command.copy(request = rawSuffix(command.request))
+        else -> command
+    }
+}
+
+/** Raw range where IRC formatting is valid; command names and routing parameters stay plain. */
+internal fun messageFormattingRange(raw: String): IntRange? {
+    val first = raw.indexOfFirst { it != ' ' && it != '\t' && it != '\r' && it != '\n' }
+    if (first < 0) return null
+    val last = raw.indexOfLast { it != ' ' && it != '\t' && it != '\r' && it != '\n' }
+    val trimmed = raw.substring(first, last + 1)
+    val formatted = parseIrcFormatting(trimmed)
+    val command = parsePlainCommand(formatted.visibleText)
+    val messageText =
+        when (command) {
+            is ChatCommand.Message -> command.text.removePrefix("/me ")
+            is ChatCommand.Part -> command.reason
+            is ChatCommand.Hop -> command.reason
+            is ChatCommand.Msg -> command.text
+            is ChatCommand.Notice -> command.text
+            is ChatCommand.SetName -> command.realname
+            is ChatCommand.Topic -> command.topic
+            is ChatCommand.Away -> command.message
+            is ChatCommand.Kick -> command.reason
+            is ChatCommand.Knock -> command.reason
+            is ChatCommand.Ctcp -> command.request
+            else -> null
+        } ?: return null
+    val plainMessage = plainIrcText(messageText)
+    val visibleStart = formatted.visibleText.length - plainMessage.length
+    val rawStart = formatted.rawToVisible.indexOfFirst { it == visibleStart }.coerceAtLeast(0)
+    val rawEnd = formatted.rawToVisible.indexOfLast { it == formatted.visibleText.length }
+    return first + rawStart until first + rawEnd
+}
+
+private fun parsePlainCommand(raw: String): ChatCommand {
+    val trimmed = raw.trimAsciiWhitespace()
     if (trimmed.isEmpty()) return ChatCommand.None
 
     // Not a command — ordinary message. `//text` escapes a literal leading slash.
@@ -191,7 +259,7 @@ fun parseCommand(raw: String): ChatCommand {
     val afterSlash = trimmed.substring(1)
     val space = afterSlash.indexOf(' ')
     val cmd = (if (space < 0) afterSlash else afterSlash.substring(0, space)).lowercase()
-    val rest = if (space < 0) "" else afterSlash.substring(space + 1).trim()
+    val rest = if (space < 0) "" else afterSlash.substring(space + 1).trimAsciiWhitespace()
 
     // Bare "/" — nothing to send.
     if (cmd.isEmpty()) return ChatCommand.None
@@ -330,6 +398,8 @@ private fun parseMode(rest: String): ChatCommand {
     return ChatCommand.Mode(target = first, modes = rest.afterFirstWord().ifEmpty { null })
 }
 
-private fun String.firstWord(): String = substringBefore(' ').trim()
+private fun String.firstWord(): String = substringBefore(' ').trimAsciiWhitespace()
 
-private fun String.afterFirstWord(): String = substringAfter(' ', "").trim()
+private fun String.afterFirstWord(): String = substringAfter(' ', "").trimAsciiWhitespace()
+
+private fun String.trimAsciiWhitespace(): String = trim { it == ' ' || it == '\t' || it == '\r' || it == '\n' }

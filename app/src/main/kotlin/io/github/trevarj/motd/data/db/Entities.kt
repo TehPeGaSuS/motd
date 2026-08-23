@@ -356,7 +356,10 @@ data class TimelineEventEntity(
     val normalizedActor: String = sender,
     val senderAccount: String? = null,
     val kind: MessageKind,
+    /** Plain projection used by FTS, previews, notifications, accessibility, copy, and share. */
     val text: String,
+    /** Exact IRC-formatted payload used for rendering, retries, and protocol identity. */
+    val ircFormattedText: String? = null,
     val isSelf: Boolean = false,
     val hasMention: Boolean = false, // computed at insert by EventProcessor
     val replyToMsgid: String? = null,

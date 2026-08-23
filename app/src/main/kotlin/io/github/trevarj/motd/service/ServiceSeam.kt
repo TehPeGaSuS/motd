@@ -36,12 +36,11 @@ sealed interface SendAcceptance {
         val eventIds: List<TimelineEventId>,
         val immediateWireAcceptance: ImmediateWireAcceptance = ImmediateWireAcceptance.ACCEPTED,
         /**
-         * The texts actually persisted for the accepted rows, in order.
+         * Row identity texts, using exact IRC-formatted payloads when present, in order.
          *
-         * A submission is not always stored as it was typed: a reply gains a `nick: ` prefix when
-         * the client tag is unavailable, and physical newlines split one submission into several
-         * rows. Presentation that stands in for a row has to compare what was stored, not what was
-         * typed. Empty means unreported, which callers treat as matching.
+         * A submission is not always represented as typed: a reply can gain a `nick: ` prefix and
+         * physical newlines can split into several rows. Presentation must compare wire-preserving
+         * identity, not only plain searchable text. Empty means unreported and therefore matching.
          */
         val storedTexts: List<String> = emptyList(),
     ) : SendAcceptance

@@ -78,6 +78,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.extractUrls
@@ -1643,27 +1644,51 @@ internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendRichText(
     codeStyle: SpanStyle,
     mentionColor: (String) -> androidx.compose.ui.graphics.Color? = { null },
 ) {
-    for (run in parseMircFormatting(text)) {
-        val runPlainStyle = plainStyle.merge(run.style)
-        val runLinkStyle = run.style.merge(linkStyle)
-        val runCodeStyle = run.style.merge(codeStyle)
-        for (segment in parseInlineCode(run.text)) {
-            when (segment) {
-                is InlineTextSegment.Code -> {
-                    withStyle(runCodeStyle) { append(segment.text) }
-                }
+    val formatted = parseIrcFormatting(text)
+    val segments = parseInlineCode(formatted.visibleText)
+    val renderedOffsets = inlineCodeRenderedOffsets(formatted.visibleText, segments)
+    val bodyStart = length
+    for (segment in segments) {
+        when (segment) {
+            is InlineTextSegment.Code -> {
+                withStyle(codeStyle) { append(segment.text) }
+            }
 
-                is InlineTextSegment.Plain -> {
-                    appendPlainLinksAndMentions(
-                        segment.text,
-                        runPlainStyle,
-                        runLinkStyle,
-                        mentionColor,
-                    )
-                }
+            is InlineTextSegment.Plain -> {
+                appendPlainLinksAndMentions(
+                    segment.text,
+                    plainStyle,
+                    linkStyle,
+                    mentionColor,
+                )
             }
         }
     }
+    formatted.runs.forEach { run ->
+        val start = renderedOffsets[run.start]
+        val end = renderedOffsets[run.end]
+        if (start < end) addStyle(run.state.toSpanStyle(), bodyStart + start, bodyStart + end)
+    }
+}
+
+private fun inlineCodeRenderedOffsets(
+    source: String,
+    segments: List<InlineTextSegment>,
+): IntArray {
+    val offsets = IntArray(source.length + 1)
+    var sourceOffset = 0
+    var renderedOffset = 0
+    segments.forEach { segment ->
+        val segmentStart = source.indexOf(segment.text, sourceOffset).coerceAtLeast(sourceOffset)
+        while (sourceOffset < segmentStart) offsets[++sourceOffset] = renderedOffset
+        segment.text.indices.forEach {
+            sourceOffset++
+            renderedOffset++
+            offsets[sourceOffset] = renderedOffset
+        }
+    }
+    while (sourceOffset < source.length) offsets[++sourceOffset] = renderedOffset
+    return offsets
 }
 
 private fun androidx.compose.ui.text.AnnotatedString.Builder.appendPlainLinksAndMentions(
@@ -1787,6 +1812,7 @@ internal fun Modifier.friendNickTint(): Modifier =
 data class ReplyPreviewData(
     val sender: String,
     val text: String,
+    val ircFormattedText: String? = null,
 )
 
 @Composable
@@ -1829,7 +1855,7 @@ internal fun ReplyMiniBubble(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = reply.text,
+                text = mircFormattedText(reply.ircFormattedText ?: reply.text),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,

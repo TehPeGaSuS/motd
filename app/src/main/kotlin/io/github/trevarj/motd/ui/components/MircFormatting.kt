@@ -8,46 +8,120 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.withStyle
+import io.github.trevarj.motd.irc.format.IrcColor
+import io.github.trevarj.motd.irc.format.IrcFormatState
+import io.github.trevarj.motd.irc.format.parseIrcFormatting
 
-private const val CH_BOLD = '\u0002'
-private const val CH_COLOR = '\u0003'
-private const val CH_ITALIC = '\u001D'
-private const val CH_UNDERLINE = '\u001F'
-private const val CH_STRIKETHROUGH = '\u001E'
-private const val CH_MONOSPACE = '\u0011'
-private const val CH_REVERSE = '\u0016'
-private const val CH_RESET = '\u000F'
-
-/**
- * mIRC's original 16-color palette (codes 0-15), the only range every IRC client and bouncer is
- * guaranteed to render consistently. Codes 16-98 (HexChat's later "256-color" extension) are
- * parsed and stripped like any other color code so the digits never leak into the message body,
- * but are not mapped to a color: that extended palette isn't part of the original mIRC spec, isn't
- * consistently implemented across clients, and no source of truth for its exact RGB values is
- * reliable enough to hardcode here without risking silently wrong colors.
- */
-private val MIRC_COLORS_16 =
+/** mIRC 0-98 palette used by current mIRC/HexChat-compatible clients. */
+internal val MIRC_COLORS =
     intArrayOf(
-        0xFFFFFFFF.toInt(),
-        0xFF000000.toInt(),
-        0xFF00007F.toInt(),
-        0xFF009300.toInt(),
-        0xFFFF0000.toInt(),
-        0xFF7F0000.toInt(),
-        0xFF9C009C.toInt(),
-        0xFFFC7F00.toInt(),
-        0xFFFFFF00.toInt(),
-        0xFF00FC00.toInt(),
-        0xFF009393.toInt(),
-        0xFF00FFFF.toInt(),
-        0xFF0000FC.toInt(),
-        0xFFFF00FF.toInt(),
-        0xFF7F7F7F.toInt(),
-        0xFFD2D2D2.toInt(),
+        0xFFFFFF,
+        0x000000,
+        0x00007F,
+        0x009300,
+        0xFF0000,
+        0x7F0000,
+        0x9C009C,
+        0xFC7F00,
+        0xFFFF00,
+        0x00FC00,
+        0x009393,
+        0x00FFFF,
+        0x0000FC,
+        0xFF00FF,
+        0x7F7F7F,
+        0xD2D2D2,
+        0x470000,
+        0x472100,
+        0x474700,
+        0x324700,
+        0x004700,
+        0x00472C,
+        0x004747,
+        0x002747,
+        0x000047,
+        0x2E0047,
+        0x470047,
+        0x47002A,
+        0x740000,
+        0x743A00,
+        0x747400,
+        0x517400,
+        0x007400,
+        0x007449,
+        0x007474,
+        0x004074,
+        0x000074,
+        0x4B0074,
+        0x740074,
+        0x740045,
+        0xB50000,
+        0xB56300,
+        0xB5B500,
+        0x7DB500,
+        0x00B500,
+        0x00B571,
+        0x00B5B5,
+        0x0063B5,
+        0x0000B5,
+        0x7500B5,
+        0xB500B5,
+        0xB5006B,
+        0xFF0000,
+        0xFF8C00,
+        0xFFFF00,
+        0xB2FF00,
+        0x00FF00,
+        0x00FFA0,
+        0x00FFFF,
+        0x008CFF,
+        0x0000FF,
+        0xA500FF,
+        0xFF00FF,
+        0xFF0098,
+        0xFF5959,
+        0xFFB459,
+        0xFFFF71,
+        0xCFFF60,
+        0x6FFF6F,
+        0x65FFC9,
+        0x6DFFFF,
+        0x59B4FF,
+        0x5959FF,
+        0xC459FF,
+        0xFF66FF,
+        0xFF59BC,
+        0xFF9C9C,
+        0xFFD39C,
+        0xFFFF9C,
+        0xE2FF9C,
+        0x9CFF9C,
+        0x9CFFDB,
+        0x9CFFFF,
+        0x9CD3FF,
+        0x9C9CFF,
+        0xDC9CFF,
+        0xFF9CFF,
+        0xFF94D3,
+        0x000000,
+        0x131313,
+        0x282828,
+        0x363636,
+        0x4D4D4D,
+        0x656565,
+        0x818181,
+        0x9F9F9F,
+        0xBCBCBC,
+        0xE2E2E2,
+        0xFFFFFF,
     )
 
-private fun mircColor(index: Int): Color? = MIRC_COLORS_16.getOrNull(index)?.let(::Color)
+private fun ircColor(color: IrcColor?): Color? =
+    when (color) {
+        is IrcColor.Numeric -> MIRC_COLORS.getOrNull(color.code)?.let { Color(0xFF000000 or it.toLong()) }
+        is IrcColor.Hex -> Color(0xFF000000 or color.rgb.toLong())
+        null -> null
+    }
 
 internal data class MircRun(
     val text: String,
@@ -55,147 +129,52 @@ internal data class MircRun(
 )
 
 internal fun mircFormattedText(text: String): AnnotatedString {
-    if (text.none { it.code in 0x01..0x1F }) return AnnotatedString(text)
+    val parsed = parseIrcFormatting(text)
+    if (parsed.runs.all { it.state.isDefault }) return AnnotatedString(parsed.visibleText)
     return buildAnnotatedString {
-        for (run in parseMircFormatting(text)) withStyle(run.style) { append(run.text) }
+        append(parsed.visibleText)
+        parsed.runs.forEach { run -> addStyle(run.state.toSpanStyle(), run.start, run.end) }
     }
 }
 
-/**
- * Splits raw IRC text on mIRC formatting control codes (bold/italic/underline/strikethrough/
- * monospace/reverse/color/reset) into styled runs with the codes themselves stripped. A run
- * carries the SpanStyle that was active when its text was appended; unset properties are left
- * null/Unspecified so the caller's own base style shows through on merge.
- */
+/** Compatibility run projection retained for shared rich-text rendering tests. */
 internal fun parseMircFormatting(text: String): List<MircRun> {
-    if (text.none { it.code in 0x01..0x1F }) return listOf(MircRun(text, SpanStyle()))
-
-    val runs = mutableListOf<MircRun>()
-    val sb = StringBuilder()
-    var bold = false
-    var italic = false
-    var underline = false
-    var strikethrough = false
-    var monospace = false
-    var reversed = false
-    var fg: Int? = null
-    var bg: Int? = null
-
-    fun currentStyle(): SpanStyle {
-        val effectiveFg = if (reversed) bg else fg
-        val effectiveBg = if (reversed) fg else bg
-        val decorations =
-            buildList {
-                if (underline) add(TextDecoration.Underline)
-                if (strikethrough) add(TextDecoration.LineThrough)
-            }
-        return SpanStyle(
-            color = effectiveFg?.let { mircColor(it) } ?: Color.Unspecified,
-            background = effectiveBg?.let { mircColor(it) } ?: Color.Unspecified,
-            fontWeight = if (bold) FontWeight.Bold else null,
-            fontStyle = if (italic) FontStyle.Italic else null,
-            textDecoration = if (decorations.isEmpty()) null else TextDecoration.combine(decorations),
-            fontFamily = if (monospace) FontFamily.Monospace else null,
-        )
+    val parsed = parseIrcFormatting(text)
+    if (parsed.visibleText.isEmpty()) return emptyList()
+    return parsed.runs.map { run ->
+        MircRun(parsed.visibleText.substring(run.start, run.end), run.state.toSpanStyle())
     }
+}
 
-    fun flush() {
-        if (sb.isNotEmpty()) {
-            runs += MircRun(sb.toString(), currentStyle())
-            sb.clear()
+internal fun IrcFormatState.toSpanStyle(): SpanStyle {
+    var foreground = if (reverse) background else foreground
+    val effectiveBackground = if (reverse) this.foreground else background
+    if (foreground != null && foreground == effectiveBackground) {
+        foreground = contrastColor(effectiveBackground)
+    }
+    val decorations =
+        buildList {
+            if (underline) add(TextDecoration.Underline)
+            if (strikethrough) add(TextDecoration.LineThrough)
         }
-    }
+    return SpanStyle(
+        color = ircColor(foreground) ?: Color.Unspecified,
+        background = ircColor(effectiveBackground) ?: Color.Unspecified,
+        fontWeight = if (bold) FontWeight.Bold else null,
+        fontStyle = if (italic) FontStyle.Italic else null,
+        textDecoration = decorations.takeIf(List<TextDecoration>::isNotEmpty)?.let(TextDecoration::combine),
+        fontFamily = if (monospace) FontFamily.Monospace else null,
+    )
+}
 
-    fun readDigits(
-        source: String,
-        from: Int,
-        maxDigits: Int,
-    ): Pair<Int?, Int> {
-        var i = from
-        while (i < source.length && source[i].isDigit() && i - from < maxDigits) i++
-        return if (i > from) source.substring(from, i).toInt() to i else null to from
-    }
-
-    var i = 0
-    while (i < text.length) {
-        when (text[i]) {
-            CH_BOLD -> {
-                flush()
-                bold = !bold
-                i++
-            }
-
-            CH_ITALIC -> {
-                flush()
-                italic = !italic
-                i++
-            }
-
-            CH_UNDERLINE -> {
-                flush()
-                underline = !underline
-                i++
-            }
-
-            CH_STRIKETHROUGH -> {
-                flush()
-                strikethrough = !strikethrough
-                i++
-            }
-
-            CH_MONOSPACE -> {
-                flush()
-                monospace = !monospace
-                i++
-            }
-
-            CH_REVERSE -> {
-                flush()
-                reversed = !reversed
-                i++
-            }
-
-            CH_RESET -> {
-                flush()
-                bold = false
-                italic = false
-                underline = false
-                strikethrough = false
-                monospace = false
-                reversed = false
-                fg = null
-                bg = null
-                i++
-            }
-
-            CH_COLOR -> {
-                flush()
-                i++
-                val (newFg, afterFg) = readDigits(text, i, 2)
-                i = afterFg
-                var newBg: Int? = null
-                if (i < text.length && text[i] == ',') {
-                    val (bgVal, afterBg) = readDigits(text, i + 1, 2)
-                    if (bgVal != null) {
-                        newBg = bgVal
-                        i = afterBg
-                    }
-                }
-                if (newFg == null && newBg == null) {
-                    fg = null
-                    bg = null
-                } else {
-                    if (newFg != null) fg = newFg
-                    if (newBg != null) bg = newBg
-                }
-            }
-
-            else -> {
-                sb.append(text[i])
-                i++
-            }
+private fun contrastColor(background: IrcColor): IrcColor.Hex {
+    val rgb =
+        when (background) {
+            is IrcColor.Numeric -> MIRC_COLORS.getOrElse(background.code) { 0 }
+            is IrcColor.Hex -> background.rgb
         }
-    }
-    flush()
-    return runs
+    val red = rgb shr 16 and 0xFF
+    val green = rgb shr 8 and 0xFF
+    val blue = rgb and 0xFF
+    return IrcColor.Hex(if (red * 299 + green * 587 + blue * 114 > 128_000) 0x000000 else 0xFFFFFF)
 }

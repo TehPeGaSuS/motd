@@ -182,6 +182,7 @@ import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
@@ -2592,7 +2593,7 @@ fun ChatContent(
                             },
                             onSend = {
                                 val text = composerText.text
-                                if (text.isNotBlank()) {
+                                if (plainIrcText(text).isNotBlank()) {
                                     if (isLongDraft(text)) {
                                         AutoFollowTrace.record("long_draft_prompt_open", traceBufferId, traceSessionId)
                                         longDraftPrompt = true
@@ -2634,6 +2635,9 @@ fun ChatContent(
                                     else -> stringResource(R.string.chat_composer_placeholder)
                                 },
                             showEmojiButton = showComposerEmoji,
+                            ircFormattingEnabled =
+                                !isServerBuffer &&
+                                    !state.buffer?.displayName.equals("BouncerServ", ignoreCase = true),
                             onAttachment = {
                                 uploadCurrentDraftDirectly = false
                                 attachmentSheetOpen = true

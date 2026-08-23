@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.irc.client
 
+import io.github.trevarj.motd.irc.format.splitIrcFormattedLinesUtf8
 import io.github.trevarj.motd.irc.proto.IrcMessage
 
 data class MultilineLimits(
@@ -70,22 +71,12 @@ internal fun planChatMessage(
     }
 
     if (normalized.lines().all(String::isEmpty)) return null
-    val combinedBytes = normalized.toByteArray(Charsets.UTF_8).size
-    if (combinedBytes > multilineLimits.maxBytes) return null
-
     val components =
-        buildList {
-            for (line in normalized.split('\n')) {
-                if (line.isEmpty()) {
-                    add(LineFragment(text = "", concat = false))
-                } else {
-                    splitUtf8PreservingWhitespace(line, maxComponentBytes).forEachIndexed { index, fragment ->
-                        add(LineFragment(text = fragment, concat = index > 0))
-                    }
-                }
-            }
+        splitIrcFormattedLinesUtf8(normalized, maxComponentBytes).flatMap { line ->
+            line.mapIndexed { index, fragment -> LineFragment(text = fragment, concat = index > 0) }
         }
     if (components.isEmpty() || components.all { it.text.isEmpty() }) return null
+    if (components.sumOf { it.text.toByteArray(Charsets.UTF_8).size } > multilineLimits.maxBytes) return null
     multilineLimits.maxLines?.let { limit ->
         if (components.size > limit) return null
     }

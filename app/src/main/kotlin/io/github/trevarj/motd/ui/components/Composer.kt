@@ -10,16 +10,19 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,24 +33,49 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.contextmenu.builder.item
+import androidx.compose.foundation.text.contextmenu.modifier.appendTextContextMenuComponents
+import androidx.compose.foundation.text.input.OutputTransformation
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.FormatBold
+import androidx.compose.material.icons.filled.FormatClear
+import androidx.compose.material.icons.filled.FormatColorText
+import androidx.compose.material.icons.filled.FormatItalic
+import androidx.compose.material.icons.filled.FormatUnderlined
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.StrikethroughS
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Mood
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -67,7 +95,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -81,6 +111,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -107,7 +138,18 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.emoji2.emojipicker.EmojiPickerView
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.irc.format.IrcColor
+import io.github.trevarj.motd.irc.format.IrcFormatEdit
+import io.github.trevarj.motd.irc.format.IrcTextStyle
+import io.github.trevarj.motd.irc.format.applyIrcColors
+import io.github.trevarj.motd.irc.format.clearIrcFormatting
+import io.github.trevarj.motd.irc.format.ircStateAtRawOffset
+import io.github.trevarj.motd.irc.format.isIrcStyleSelected
+import io.github.trevarj.motd.irc.format.parseIrcFormatting
+import io.github.trevarj.motd.irc.format.plainIrcText
+import io.github.trevarj.motd.irc.format.toggleIrcStyle
 import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
+import io.github.trevarj.motd.ui.chat.messageFormattingRange
 import io.github.trevarj.motd.ui.chat.searchSystemEmojis
 import io.github.trevarj.motd.ui.chat.systemEmojiSearchEntries
 import io.github.trevarj.motd.ui.theme.LocalNickColors
@@ -341,8 +383,56 @@ fun Composer(
     // send animation pins its stand-in line to this point so the typed glyphs never visibly move.
     onFieldTextPositioned: (Offset) -> Unit = {},
     autocomplete: (@Composable () -> Unit)? = null,
+    ircFormattingEnabled: Boolean = false,
 ) {
     var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
+    var expanded by remember { mutableStateOf(false) }
+    var colorSheetVisible by remember { mutableStateOf(false) }
+    var colorSelection by remember { mutableStateOf(TextRange.Zero) }
+    var selectedForeground by remember { mutableStateOf<Int?>(null) }
+    var selectedBackground by remember { mutableStateOf<Int?>(null) }
+    val editorDensity = LocalDensity.current
+    val expandedHeight =
+        (
+            minOf(
+                with(editorDensity) { (LocalWindowInfo.current.containerSize.height * 0.4f).toDp() },
+                360.dp,
+            ) - 68.dp
+        ).coerceAtLeast(148.dp)
+
+    fun selectedRange(): TextRange? {
+        val allowed = if (ircFormattingEnabled) messageFormattingRange(value.text) else null
+        val selection = value.selection
+        val allowedEnd = allowed?.last?.plus(1) ?: return null
+        return selection.takeIf {
+            if (it.collapsed) it.start in allowed.first..allowedEnd else it.min >= allowed.first && it.max <= allowedEnd
+        }
+    }
+
+    fun applyFormatting(edit: IrcFormatEdit) {
+        onValueChange(TextFieldValue(edit.text, TextRange(edit.selectionStart, edit.selectionEnd)))
+    }
+
+    fun toggle(style: IrcTextStyle) {
+        selectedRange()?.let { selection ->
+            applyFormatting(toggleIrcStyle(value.text, selection.start, selection.end, style))
+        }
+    }
+
+    fun clearFormatting() {
+        selectedRange()?.let { selection ->
+            applyFormatting(clearIrcFormatting(value.text, selection.start, selection.end))
+        }
+    }
+
+    fun openColorSheet() {
+        val selection = selectedRange() ?: return
+        val state = ircStateAtRawOffset(value.text, selection.start)
+        colorSelection = selection
+        selectedForeground = (state.foreground as? IrcColor.Numeric)?.code
+        selectedBackground = (state.background as? IrcColor.Numeric)?.code
+        colorSheetVisible = true
+    }
     val emojiQuery = activeEmojiQuery(value)
     val emojiSearchEntries = remember { systemEmojiSearchEntries() }
     val emojiSuggestions =
@@ -477,10 +567,15 @@ fun Composer(
         if (emojiPickerSession === collapsing) emojiPickerSession = null
     }
 
-    // The first Back closes the picker and restores the keyboard only when it replaced one. Once
-    // the picker state is gone, the platform handles a second Back normally.
-    BackHandler(enabled = emojiPickerSession?.phase == EmojiPickerPhase.OPEN) {
-        dismissEmojiPicker()
+    // Dismiss transient surfaces before leaving chat.
+    BackHandler(
+        enabled = colorSheetVisible || expanded || emojiPickerSession?.phase == EmojiPickerPhase.OPEN,
+    ) {
+        when {
+            colorSheetVisible -> colorSheetVisible = false
+            emojiPickerSession?.phase == EmojiPickerPhase.OPEN -> dismissEmojiPicker()
+            expanded -> expanded = false
+        }
     }
 
     AutocompleteOverlayLayout(
@@ -526,6 +621,19 @@ fun Composer(
                     reply?.let { ReplyBar(it, onCancelReply) }
                 }
 
+                AnimatedVisibility(
+                    visible = ircFormattingEnabled && expanded,
+                    enter = expandVertically(animationSpec = MotdMotion.contentSize),
+                    exit = shrinkVertically(animationSpec = MotdMotion.contentSize),
+                ) {
+                    ComposerFormattingToolbar(
+                        value = value,
+                        onToggle = ::toggle,
+                        onColor = ::openColorSheet,
+                        onClear = ::clearFormatting,
+                    )
+                }
+
                 Row(
                     modifier =
                         Modifier
@@ -540,6 +648,23 @@ fun Composer(
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {
                         Row(verticalAlignment = Alignment.Bottom) {
+                            if (ircFormattingEnabled) {
+                                IconButton(
+                                    onClick = { expanded = !expanded },
+                                    modifier =
+                                        Modifier
+                                            .size(48.dp)
+                                            .testTag("chat_composer_format_expand")
+                                            .semantics { selected = expanded },
+                                ) {
+                                    Icon(
+                                        if (expanded) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                                        contentDescription = if (expanded) "Collapse rich editor" else "Expand rich editor",
+                                        tint =
+                                            if (expanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
                             if (showEmojiButton) {
                                 IconButton(
                                     onClick = {
@@ -597,6 +722,10 @@ fun Composer(
                                     onFocused = { dismissEmojiPicker() },
                                     modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                                     onTextPositioned = onFieldTextPositioned,
+                                    ircFormattingEnabled = ircFormattingEnabled,
+                                    expanded = expanded,
+                                    expandedHeight = expandedHeight,
+                                    onColor = ::openColorSheet,
                                 )
 
                                 // A physical tap on the text field while the picker is open should
@@ -636,7 +765,7 @@ fun Composer(
                         }
                     }
 
-                    val canSend = enabled && value.text.isNotBlank()
+                    val canSend = enabled && plainIrcText(value.text).isNotBlank()
                     // Send and voice are both fixed 48.dp round buttons, so cross-fading the swap
                     // changes only pixels inside that circle and never shifts the input row.
                     Crossfade(
@@ -648,6 +777,7 @@ fun Composer(
                             FilledIconButton(
                                 onClick = {
                                     dismissEmojiPicker()
+                                    expanded = false
                                     onSend()
                                 },
                                 enabled = canSend,
@@ -701,7 +831,244 @@ fun Composer(
             }
         }
     }
+
+    if (ircFormattingEnabled && colorSheetVisible) {
+        ComposerColorSheet(
+            foreground = selectedForeground,
+            background = selectedBackground,
+            onForeground = { selectedForeground = it },
+            onBackground = { selectedBackground = it },
+            onCancel = {
+                colorSheetVisible = false
+                onValueChange(value.copy(selection = colorSelection))
+            },
+            onRemove = {
+                applyFormatting(
+                    applyIrcColors(value.text, colorSelection.start, colorSelection.end, null, null),
+                )
+                colorSheetVisible = false
+            },
+            onApply = {
+                applyFormatting(
+                    applyIrcColors(
+                        value.text,
+                        colorSelection.start,
+                        colorSelection.end,
+                        selectedForeground,
+                        selectedBackground,
+                    ),
+                )
+                colorSheetVisible = false
+            },
+        )
+    }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ComposerFormattingToolbar(
+    value: TextFieldValue,
+    onToggle: (IrcTextStyle) -> Unit,
+    onColor: () -> Unit,
+    onClear: () -> Unit,
+) {
+    val allowed = messageFormattingRange(value.text)
+    val allowedEnd = allowed?.last?.plus(1)
+    val selection =
+        value.selection.takeIf {
+            allowed != null && allowedEnd != null &&
+                if (it.collapsed) it.start in allowed.first..allowedEnd else it.min >= allowed.first && it.max <= allowedEnd
+        }
+    val haptics = LocalHapticFeedback.current
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .testTag("chat_composer_format_toolbar"),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        fun selected(style: IrcTextStyle): Boolean = selection?.let { isIrcStyleSelected(value.text, it.start, it.end, style) } == true
+
+        @Composable
+        fun FormatButton(
+            style: IrcTextStyle?,
+            label: String,
+            icon: androidx.compose.ui.graphics.vector.ImageVector,
+            tag: String,
+            onClick: () -> Unit,
+        ) {
+            TooltipBox(
+                positionProvider =
+                    androidx.compose.material3.TooltipDefaults
+                        .rememberTooltipPositionProvider(androidx.compose.material3.TooltipAnchorPosition.Above),
+                tooltip = { PlainTooltip { Text(label) } },
+                state = rememberTooltipState(),
+            ) {
+                IconButton(
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onClick()
+                    },
+                    enabled = selection != null,
+                    modifier =
+                        Modifier
+                            .size(48.dp)
+                            .testTag(tag)
+                            .semantics { selected = style?.let(::selected) == true },
+                    colors =
+                        IconButtonDefaults.iconButtonColors(
+                            containerColor =
+                                if (style?.let(::selected) == true) {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                } else {
+                                    Color.Transparent
+                                },
+                        ),
+                ) {
+                    Icon(icon, contentDescription = label)
+                }
+            }
+        }
+
+        FormatButton(IrcTextStyle.BOLD, "Bold", Icons.Filled.FormatBold, "chat_format_bold") {
+            onToggle(IrcTextStyle.BOLD)
+        }
+        FormatButton(IrcTextStyle.ITALIC, "Italic", Icons.Filled.FormatItalic, "chat_format_italic") {
+            onToggle(IrcTextStyle.ITALIC)
+        }
+        FormatButton(IrcTextStyle.UNDERLINE, "Underline", Icons.Filled.FormatUnderlined, "chat_format_underline") {
+            onToggle(IrcTextStyle.UNDERLINE)
+        }
+        FormatButton(IrcTextStyle.STRIKETHROUGH, "Strikethrough", Icons.Filled.StrikethroughS, "chat_format_strike") {
+            onToggle(IrcTextStyle.STRIKETHROUGH)
+        }
+        FormatButton(IrcTextStyle.MONOSPACE, "Monospace", Icons.Filled.Code, "chat_format_monospace") {
+            onToggle(IrcTextStyle.MONOSPACE)
+        }
+        FormatButton(null, "Color", Icons.Filled.FormatColorText, "chat_format_color", onColor)
+        FormatButton(null, "Clear formatting", Icons.Filled.FormatClear, "chat_format_clear", onClear)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ComposerColorSheet(
+    foreground: Int?,
+    background: Int?,
+    onForeground: (Int?) -> Unit,
+    onBackground: (Int?) -> Unit,
+    onCancel: () -> Unit,
+    onRemove: () -> Unit,
+    onApply: () -> Unit,
+) {
+    var editingBackground by remember { mutableStateOf(false) }
+    ModalBottomSheet(
+        onDismissRequest = onCancel,
+        modifier = Modifier.testTag("chat_composer_color_sheet"),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 620.dp)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("IRC color", style = MaterialTheme.typography.titleLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { editingBackground = false }) {
+                    Text(if (editingBackground) "Text" else "Text ✓")
+                }
+                TextButton(onClick = { editingBackground = true }) {
+                    Text(if (editingBackground) "Background ✓" else "Background")
+                }
+                if (editingBackground) TextButton(onClick = { onBackground(null) }) { Text("No background") }
+            }
+            val previewBackground = background?.let(::composerPaletteColor) ?: MaterialTheme.colorScheme.surfaceContainerHigh
+            val previewForeground =
+                foreground?.let(::composerPaletteColor)
+                    ?: background?.let {
+                        composerPaletteColor(
+                            io.github.trevarj.motd.irc.format
+                                .readableForeground(it),
+                        )
+                    }
+                    ?: MaterialTheme.colorScheme.onSurface
+            Surface(color = previewBackground, shape = MotdShapes.card) {
+                Text(
+                    "Formatting preview",
+                    color = previewForeground,
+                    modifier = Modifier.fillMaxWidth().padding(12.dp).testTag("chat_composer_color_preview"),
+                )
+            }
+            Text("Basic 16", style = MaterialTheme.typography.titleSmall)
+            ColorGrid(
+                colors = (0..15).toList(),
+                selected = if (editingBackground) background else foreground,
+                onSelect = if (editingBackground) onBackground else onForeground,
+                modifier = Modifier.height(96.dp),
+            )
+            Text("Extended 16–98", style = MaterialTheme.typography.titleSmall)
+            ColorGrid(
+                colors = (16..98).toList(),
+                selected = if (editingBackground) background else foreground,
+                onSelect = if (editingBackground) onBackground else onForeground,
+                modifier = Modifier.weight(1f).heightIn(min = 180.dp),
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            ) {
+                TextButton(onClick = onRemove) { Text("Remove colors") }
+                TextButton(onClick = onCancel) { Text("Cancel") }
+                Button(onClick = onApply) { Text("Apply") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColorGrid(
+    colors: List<Int>,
+    selected: Int?,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(8),
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        items(colors, key = { it }) { code ->
+            val color = composerPaletteColor(code)
+            val labelColor = if (color.luminance() > 0.45f) Color.Black else Color.White
+            Surface(
+                modifier =
+                    Modifier
+                        .aspectRatio(1f)
+                        .clickable { onSelect(code) }
+                        .testTag("chat_color_$code")
+                        .semantics { this.selected = selected == code },
+                color = color,
+                shape = CircleShape,
+                border =
+                    if (selected == code) {
+                        androidx.compose.foundation.BorderStroke(3.dp, MaterialTheme.colorScheme.primary)
+                    } else {
+                        null
+                    },
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(code.toString().padStart(2, '0'), color = labelColor, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
+
+private fun composerPaletteColor(code: Int): Color = Color(0xFF000000 or MIRC_COLORS[code.coerceIn(MIRC_COLORS.indices)].toLong())
 
 @Composable
 private fun VoiceRecordButton(
@@ -955,6 +1322,7 @@ private fun EmojiPickerReplacementSurface(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ComposerTextField(
     value: TextFieldValue,
@@ -964,16 +1332,108 @@ private fun ComposerTextField(
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
     onTextPositioned: (Offset) -> Unit = {},
+    ircFormattingEnabled: Boolean = false,
+    expanded: Boolean = false,
+    expandedHeight: Dp = 148.dp,
+    onColor: () -> Unit = {},
 ) {
+    val state = rememberTextFieldState(value.text, value.selection)
+    val latestValue by rememberUpdatedState(value)
+    val latestOnValueChange by rememberUpdatedState(onValueChange)
+
+    LaunchedEffect(value.text, value.selection) {
+        if (state.text.toString() != value.text || state.selection != value.selection) {
+            state.edit {
+                replace(0, length, value.text)
+                selection = value.selection
+            }
+        }
+    }
+    LaunchedEffect(state) {
+        snapshotFlow { TextFieldValue(state.text.toString(), state.selection) }.collect { current ->
+            if (current != latestValue) latestOnValueChange(current)
+        }
+    }
+
+    fun allowedSelection(): TextRange? {
+        val text = state.text.toString()
+        val allowed = if (ircFormattingEnabled) messageFormattingRange(text) else null
+        val selection = state.selection
+        val end = allowed?.last?.plus(1) ?: return null
+        return selection.takeIf {
+            if (it.collapsed) it.start in allowed.first..end else it.min >= allowed.first && it.max <= end
+        }
+    }
+
+    fun applyEdit(edit: IrcFormatEdit) {
+        state.edit {
+            replace(0, length, edit.text)
+            selection = TextRange(edit.selectionStart, edit.selectionEnd)
+        }
+    }
+
+    val raw = state.text.toString()
+    val selection = allowedSelection()
+    val hasSelection = selection?.collapsed == false
+    val boldSelected = selection?.let { isIrcStyleSelected(raw, it.start, it.end, IrcTextStyle.BOLD) } == true
+    val boldLabel = if (hasSelection && boldSelected) "Remove bold" else "Bold"
+    val outputTransformation =
+        if (ircFormattingEnabled) {
+            OutputTransformation {
+                val formatted = parseIrcFormatting(toString())
+                for (index in formatted.rawText.lastIndex downTo 0) {
+                    if (formatted.rawToVisible[index] == formatted.rawToVisible[index + 1]) replace(index, index + 1, "")
+                }
+                formatted.runs.forEach { run -> addStyle(run.state.toSpanStyle(), run.start, run.end) }
+            }
+        } else {
+            null
+        }
+    val contextMenuModifier =
+        if (ircFormattingEnabled) {
+            Modifier.appendTextContextMenuComponents {
+                if (hasSelection) {
+                    separator()
+
+                    fun styleItem(
+                        style: IrcTextStyle,
+                        label: String,
+                    ) {
+                        item(key = "irc-${style.name}", label = label) {
+                            close()
+                            val current = allowedSelection() ?: return@item
+                            applyEdit(toggleIrcStyle(state.text.toString(), current.start, current.end, style))
+                        }
+                    }
+                    styleItem(IrcTextStyle.BOLD, boldLabel)
+                    styleItem(IrcTextStyle.ITALIC, "Italic")
+                    styleItem(IrcTextStyle.UNDERLINE, "Underline")
+                    styleItem(IrcTextStyle.STRIKETHROUGH, "Strikethrough")
+                    styleItem(IrcTextStyle.MONOSPACE, "Monospace")
+                    item(key = "irc-color", label = "Color") {
+                        close()
+                        onColor()
+                    }
+                    item(key = "irc-clear", label = "Clear formatting") {
+                        close()
+                        val current = allowedSelection() ?: return@item
+                        applyEdit(clearIrcFormatting(state.text.toString(), current.start, current.end))
+                    }
+                }
+            }
+        } else {
+            Modifier
+        }
+
     BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
+        state = state,
         modifier =
             modifier
-                .heightIn(min = 48.dp, max = 148.dp)
-                // Single source of focus truth. Mirroring this through the interaction source as well
-                // dismissed the picker twice for every focus gain.
-                .onFocusChanged {
+                .then(contextMenuModifier)
+                .heightIn(
+                    min = if (expanded) expandedHeight else 48.dp,
+                    max = if (expanded) expandedHeight else 148.dp,
+                ).onFocusChanged {
                     onFocusChanged(it.isFocused)
                     if (it.isFocused) onFocused()
                 }.testTag("chat_composer_field"),
@@ -984,18 +1444,16 @@ private fun ComposerTextField(
                 capitalization = KeyboardCapitalization.Sentences,
                 imeAction = ImeAction.Default,
             ),
-        maxLines = 6,
-        decorationBox = { inner ->
+        lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = if (expanded) Int.MAX_VALUE else 6),
+        outputTransformation = outputTransformation,
+        decorator = { inner ->
             Box(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 12.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
-                if (value.text.isEmpty()) {
+                if (state.text.isEmpty()) {
                     Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                // The draft text's own origin, distinct from the field bounds above: the morph
-                // send animation pins its stand-in line to the first glyph, so decoration padding
-                // must not be baked into the report.
                 Box(Modifier.onGloballyPositioned { onTextPositioned(it.positionInWindow()) }) {
                     inner()
                 }
@@ -1022,12 +1480,14 @@ internal data class EmojiQuery(
 
 internal fun activeEmojiQuery(value: TextFieldValue): EmojiQuery? {
     if (!value.selection.collapsed) return null
-    val cursor = value.selection.start
-    val tokenStart = value.text.lastIndexOfAny(charArrayOf(' ', '\n', '\t'), startIndex = cursor - 1) + 1
-    if (tokenStart >= cursor || value.text.getOrNull(tokenStart) != ':') return null
-    val query = value.text.substring(tokenStart + 1, cursor)
+    val formatted = parseIrcFormatting(value.text)
+    val visibleCursor = formatted.visibleOffset(value.selection.start)
+    val tokenStart = formatted.visibleText.lastIndexOfAny(charArrayOf(' ', '\n', '\t'), startIndex = visibleCursor - 1) + 1
+    if (tokenStart >= visibleCursor || formatted.visibleText.getOrNull(tokenStart) != ':') return null
+    val query = formatted.visibleText.substring(tokenStart + 1, visibleCursor)
     if (query.isEmpty() || query.any { !it.isLetterOrDigit() && it != '_' && it != '-' }) return null
-    return EmojiQuery(tokenStart, cursor, query)
+    val rawStart = formatted.rawToVisible.indexOfLast { it == tokenStart }.coerceAtLeast(0)
+    return EmojiQuery(rawStart, value.selection.start, query)
 }
 
 internal fun replaceEmojiQuery(

@@ -775,6 +775,7 @@ data class OutgoingFlight(
     // height in flight and pops at the handoff.
     val replySender: String? = null,
     val replyText: String? = null,
+    val replyIrcFormattedText: String? = null,
     /**
      * The tap instant. A pending row inserted before it belongs to an earlier send however
      * identical its text, so sending the same line twice in a row cannot make the second ghost
@@ -802,7 +803,7 @@ data class OutgoingFlight(
             // but by then it has no pending label and only the identity branch above applies.
             else -> {
                 message.isSelf && message.pendingLabel != null &&
-                    message.serverTime >= launchedAtMs && message.text == text
+                    message.serverTime >= launchedAtMs && (message.ircFormattedText ?: message.text) == text
             }
         }
 }
@@ -844,6 +845,7 @@ internal fun launchOutgoingFlight(
         text = text,
         replySender = replyTo?.sender,
         replyText = replyTo?.text,
+        replyIrcFormattedText = replyTo?.ircFormattedText,
         launchedAtMs = nowMs,
     )
 

@@ -410,8 +410,8 @@ fun ChatListRowItem(
                     text =
                         when (preview) {
                             is ChatListMessagePreview.Text -> {
-                                io.github.trevarj.motd.ui.components
-                                    .mircFormattedText(preview.value)
+                                androidx.compose.ui.text
+                                    .AnnotatedString(preview.value)
                             }
 
                             is ChatListMessagePreview.Voice -> {

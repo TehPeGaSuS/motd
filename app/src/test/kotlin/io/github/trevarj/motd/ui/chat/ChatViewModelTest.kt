@@ -611,17 +611,30 @@ class ChatViewModelTest {
             assertEquals(
                 LayoutDensity.TWO_LINE,
                 vm.state
-                    .first { it.buffer?.type == BufferType.SERVER }
-                    .conversationLayout.effective,
+                    .first {
+                        it.buffer?.type == BufferType.SERVER &&
+                            it.conversationLayout.bufferDefault == LayoutDensity.TWO_LINE
+                    }.conversationLayout.effective,
             )
 
             vm.setConversationLayoutOverride(LayoutDensity.COMFORTABLE)
-            advanceUntilIdle()
-            assertEquals(LayoutDensity.COMFORTABLE, vm.state.value.conversationLayout.effective)
+            assertEquals(
+                LayoutDensity.COMFORTABLE,
+                vm.state
+                    .first { it.conversationLayout.override == LayoutDensity.COMFORTABLE }
+                    .conversationLayout.effective,
+            )
 
             vm.setConversationLayoutOverride(null)
-            advanceUntilIdle()
-            assertEquals(LayoutDensity.TWO_LINE, vm.state.value.conversationLayout.effective)
+            assertEquals(
+                LayoutDensity.TWO_LINE,
+                vm.state
+                    .first {
+                        it.buffer?.type == BufferType.SERVER &&
+                            it.conversationLayout.override == null &&
+                            it.conversationLayout.bufferDefault == LayoutDensity.TWO_LINE
+                    }.conversationLayout.effective,
+            )
         }
 
     @Test

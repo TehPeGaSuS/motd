@@ -16,7 +16,11 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import io.github.trevarj.motd.irc.format.IRC_BOLD
+import io.github.trevarj.motd.irc.format.IrcColor
+import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
@@ -199,6 +203,67 @@ class ComposerUiTest {
         compose.onNodeWithText("original").assertIsDisplayed()
         compose.mainClock.advanceTimeBy(1_000)
         compose.onNodeWithText("original").assertDoesNotExist()
+    }
+
+    @Test
+    fun richComposer_expandsAndFormatsSelectionWhilePlainComposerStaysPlain() {
+        val draft = mutableStateOf(TextFieldValue("hello", TextRange(0, 5)))
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
+        compose.onNodeWithTag("chat_format_bold").performClick()
+        compose.runOnIdle {
+            assertEquals("${IRC_BOLD}hello$IRC_BOLD", draft.value.text)
+        }
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+        compose.runOnIdle { assertEquals("hello", parseIrcFormatting(draft.value.text).visibleText) }
+
+        compose.setContent {
+            MotdTheme { Composer(TextFieldValue("plain"), {}, {}, true) }
+        }
+        compose.onAllNodesWithTag("chat_composer_format_expand").assertCountEquals(0)
+    }
+
+    @Test
+    fun colorSheet_appliesForegroundAndBackgroundAndFormattingOnlyCannotSend() {
+        val draft = mutableStateOf(TextFieldValue("hello", TextRange(0, 5)))
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_format_color").performClick()
+        compose.onNodeWithTag("chat_color_4").performClick()
+        compose.onNodeWithText("Background").performClick()
+        compose.onNodeWithTag("chat_color_1").performClick()
+        compose.onNodeWithText("Apply").performClick()
+        compose.runOnIdle {
+            val state = parseIrcFormatting(draft.value.text).runs.single().state
+            assertEquals(IrcColor.Numeric(4), state.foreground)
+            assertEquals(IrcColor.Numeric(1), state.background)
+        }
+
+        compose.runOnIdle { draft.value = TextFieldValue("$IRC_BOLD$IRC_BOLD") }
+        compose.onNodeWithTag("chat_composer_send").assertIsNotEnabled()
     }
 
     @Test

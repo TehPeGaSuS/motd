@@ -30,7 +30,7 @@ data class TimelineObservation(
     val label: String? = event.pendingLabel,
     val batchId: String?,
     val timeProvenance: TimeProvenance,
-    val semanticPayload: String = event.eventPayload ?: event.text,
+    val semanticPayload: String = event.eventPayload ?: event.ircFormattedText ?: event.text,
     /** Reconciliation is conservative when a history batch contains genuine repeated payloads. */
     val batchSemanticMultiplicity: Int = 1,
     /** Exact aliases remain safe when repeated payloads have distinct authoritative timestamps. */
@@ -237,7 +237,8 @@ class CanonicalTimelineStore
                         receiveOrder = dao.nextReceiveOrder(networkId),
                         batchId = null,
                         timeProvenance = TimeProvenance.LOCAL_CLOCK,
-                        semanticFingerprint = digest(event.kind.name, event.normalizedActor, event.text),
+                        semanticFingerprint =
+                            digest(event.kind.name, event.normalizedActor, event.ircFormattedText ?: event.text),
                         batchExactOrdinal = null,
                         observedAt = System.currentTimeMillis(),
                     ),
@@ -266,6 +267,7 @@ class CanonicalTimelineStore
                     original.copy(
                         kind = firstPlan.kind,
                         text = firstPlan.text,
+                        ircFormattedText = firstPlan.ircFormattedText,
                         pendingLabel = firstPlan.label,
                         dedupKey = SemanticIdentity.pendingKey(firstPlan.label),
                         failed = false,
@@ -281,6 +283,7 @@ class CanonicalTimelineStore
                                 id = 0,
                                 kind = plan.kind,
                                 text = plan.text,
+                                ircFormattedText = plan.ircFormattedText,
                                 pendingLabel = plan.label,
                                 dedupKey = SemanticIdentity.pendingKey(plan.label),
                                 notificationHandled = false,
@@ -664,7 +667,8 @@ class CanonicalTimelineStore
                     receiveOrder = dao.nextReceiveOrder(networkId),
                     batchId = null,
                     timeProvenance = TimeProvenance.LOCAL_CLOCK,
-                    semanticFingerprint = digest(event.kind.name, event.normalizedActor, event.text),
+                    semanticFingerprint =
+                        digest(event.kind.name, event.normalizedActor, event.ircFormattedText ?: event.text),
                     batchExactOrdinal = null,
                     observedAt = System.currentTimeMillis(),
                 ),
@@ -777,6 +781,12 @@ class CanonicalTimelineStore
                         existing.pendingLabel != null -> incoming.text
                         authoritative && !existing.serverTimeAuthoritative -> incoming.text
                         else -> existing.text
+                    },
+                ircFormattedText =
+                    when {
+                        existing.pendingLabel != null -> incoming.ircFormattedText
+                        authoritative && !existing.serverTimeAuthoritative -> incoming.ircFormattedText
+                        else -> existing.ircFormattedText
                     },
                 isSelf =
                     if (selfAttributionAuthoritative) {

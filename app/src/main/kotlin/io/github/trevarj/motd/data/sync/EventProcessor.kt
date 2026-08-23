@@ -39,6 +39,7 @@ import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.event.messageContextOrNull
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
+import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.replyReference
@@ -54,6 +55,7 @@ data class OutgoingEventPlan(
     val label: String,
     val text: String,
     val kind: MessageKind,
+    val ircFormattedText: String? = null,
 )
 
 data class DurableOutgoingEvent(
@@ -651,7 +653,7 @@ class EventProcessor
             val bufferId = route.bufferId
             val bufferName = route.bufferName
             val type = route.type
-            val storedText = route.storedText
+            val routedText = route.storedText
             val sourceIsSelf = route.sourceIsSelf
             val isDm = type == BufferType.QUERY
             // CHATHISTORY and reconnect playback must both honor a forgotten query's discard boundary.
@@ -666,6 +668,9 @@ class EventProcessor
             val isRootServiceReply =
                 isBouncerServQuery && !sourceIsSelf &&
                     e.kind == IrcEvent.ChatKind.PRIVMSG && networkDao.byId(networkId)?.role == NetworkRole.BOUNCER_ROOT
+            val formatted = if (isBouncerServQuery) null else parseIrcFormatting(routedText)
+            val storedText = formatted?.visibleText ?: routedText
+            val ircFormattedText = routedText.takeIf { formatted != null && it != storedText }
 
             val replyReference = e.replyToMsgid
             val replyMentionsSelf =
@@ -699,10 +704,11 @@ class EventProcessor
                     senderAccount = e.ctx.account,
                     kind = kindOf(e.kind),
                     text = storedText,
+                    ircFormattedText = ircFormattedText,
                     isSelf = sourceIsSelf,
                     hasMention = hasMention,
                     replyToMsgid = e.replyToMsgid,
-                    dedupKey = SemanticIdentity.keyFor(e.ctx, identitySender, storedText),
+                    dedupKey = SemanticIdentity.keyFor(e.ctx, identitySender, ircFormattedText ?: storedText),
                     serverTimeAuthoritative = e.ctx.serverTimeSource == ServerTimeSource.TAG,
                 )
 
@@ -712,7 +718,7 @@ class EventProcessor
                         bufferId,
                         row.kind,
                         identitySender,
-                        storedText,
+                        ircFormattedText ?: storedText,
                         row.serverTime,
                     )
                 val multiplicity = activeHistoryMultiplicities[networkId]?.get(batchKey)
@@ -3696,6 +3702,7 @@ class EventProcessor
                                         normalizedActor = normalizedSender,
                                         kind = event.kind,
                                         text = event.text,
+                                        ircFormattedText = event.ircFormattedText,
                                         isSelf = true,
                                         hasMention = false,
                                         replyToMsgid = replyToMsgid,

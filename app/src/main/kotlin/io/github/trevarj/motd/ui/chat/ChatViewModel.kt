@@ -200,7 +200,7 @@ private sealed interface DraftSubmissionOutcome {
     data object Stale : DraftSubmissionOutcome
 }
 
-internal fun MessageEntity.toReplyPreviewData(): ReplyPreviewData = ReplyPreviewData(sender, text)
+internal fun MessageEntity.toReplyPreviewData(): ReplyPreviewData = ReplyPreviewData(sender, text, ircFormattedText)
 
 /**
  * Wire text for resending a failed row. An ACTION is stored with its `/me ` prefix stripped, so

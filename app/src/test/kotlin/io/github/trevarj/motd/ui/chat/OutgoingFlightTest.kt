@@ -60,6 +60,16 @@ class OutgoingFlightTest {
     }
 
     @Test
+    fun `pending flight identity compares exact formatted payload`() {
+        val formatted = "\u0002hello\u0002"
+        val flight = launchOutgoingFlight(token = 1, text = formatted, replyTo = null, nowMs = 0)
+
+        assertTrue(flight.matches(row(id = 5, text = "hello", pendingLabel = "motd-1", ircFormattedText = formatted)))
+        assertFalse(flight.matches(row(id = 6, text = "hello", pendingLabel = "motd-2")))
+        assertTrue(acceptedRowMatchesFlight(accepted(listOf(5L), listOf(formatted)), formatted))
+    }
+
+    @Test
     fun `a repeat of the same text cannot capture the previous send's pending row`() {
         // Sending "lol" twice before the first echo returns leaves two identical pending rows.
         // Without the launch stamp the second ghost claims the first row, slamming it shut.
@@ -219,6 +229,7 @@ class OutgoingFlightTest {
         pendingLabel: String?,
         isSelf: Boolean = true,
         serverTime: Long = 0,
+        ircFormattedText: String? = null,
     ) = MessageEntity(
         id = id,
         bufferId = 1,
@@ -227,6 +238,7 @@ class OutgoingFlightTest {
         sender = "me",
         kind = MessageKind.PRIVMSG,
         text = text,
+        ircFormattedText = ircFormattedText,
         isSelf = isSelf,
         pendingLabel = pendingLabel,
         dedupKey = "d$id",

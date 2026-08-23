@@ -8,6 +8,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontWeight
+import io.github.trevarj.motd.irc.format.IRC_BOLD
+import io.github.trevarj.motd.irc.format.IRC_HEX_COLOR
+import io.github.trevarj.motd.irc.format.IRC_REVERSE
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertEquals
@@ -126,6 +129,38 @@ class MessageBubbleTextTest {
 
         assertEquals("red", body.text)
         assertTrue(body.spanStyles.any { it.item.color == Color.Red })
+    }
+
+    @Test
+    fun irc_styles_compose_with_links_mentions_and_inline_code() {
+        val body =
+            linkifiedBody(
+                text = "$IRC_BOLD" + "https://exa${IRC_BOLD}mple.com @bob `code`",
+                linkColor = Color.Blue,
+                mentionColor = { nick -> if (nick == "bob") Color.Red else null },
+                codeBackground = Color.DarkGray,
+                codeColor = Color.White,
+            )
+
+        assertEquals("https://example.com @bob code", body.text)
+        assertTrue(body.hasLinkAnnotations(0, "https://example.com".length))
+        assertTrue(body.spanStyles.any { it.item.color == Color.Red && body.text.substring(it.start, it.end) == "@bob" })
+        assertTrue(body.spanStyles.any { it.item.fontFamily == FontFamily.Monospace && body.text.substring(it.start, it.end) == "code" })
+        assertTrue(body.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+    }
+
+    @Test
+    fun reverse_hex_and_equal_colors_remain_readable() {
+        val reversed = mircFormattedText("$IRC_HEX_COLOR" + "ff0000,0000ff${IRC_REVERSE}text")
+        val equal = mircFormattedText("$IRC_HEX_COLOR" + "ffffff,fffffftext")
+
+        val reversedStyle = reversed.spanStyles.last().item
+        val equalStyle = equal.spanStyles.last().item
+        assertEquals("text", reversed.text)
+        assertEquals(Color.Blue, reversedStyle.color)
+        assertEquals(Color.Red, reversedStyle.background)
+        assertEquals(Color.Black, equalStyle.color)
+        assertEquals(Color.White, equalStyle.background)
     }
 
     @Test
