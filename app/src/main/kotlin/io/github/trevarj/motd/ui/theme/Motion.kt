@@ -25,12 +25,6 @@ object MotdMotion {
     const val ArchiveSettleMinimumDurationMs = 200
     const val ArchiveSettleMaximumDurationMs = 300
 
-    /**
-     * How long a launched ghost waits for its row before giving up. A send that is accepted but
-     * whose row never materializes must not hide that row indefinitely.
-     */
-    const val SendFlightTargetTimeoutMs = 1_200L
-
     private val StandardEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
     /** Quintic ease-out keeps the archive settle decisive without spring overshoot. */
     val archiveSettleEasing = Easing { fraction ->

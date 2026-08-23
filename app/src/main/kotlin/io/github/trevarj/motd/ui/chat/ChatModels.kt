@@ -834,7 +834,7 @@ internal fun attachOutgoingFlightEvents(
 }
 
 /**
- * End a flight by token, whether it landed, was rejected, or gave up waiting for its row. The
+ * End a flight by token after it lands, is rejected or replaced, or leaves the screen. The
  * timeline reveals the landing row the moment its flight is gone, so this is the only way a row
  * hidden behind a ghost comes back.
  */

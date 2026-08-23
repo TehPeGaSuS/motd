@@ -75,9 +75,8 @@ import kotlin.math.roundToInt
  *
  * The shipped flight has one hard constraint that ordinary shared-element demos never face: the
  * bubble takes off from the composer *before its landing row exists*. The row only appears once
- * Room has persisted the message, which the shipped code waits up to
- * `MotdMotion.SendFlightTargetTimeoutMs` (1200 ms) for, with a `snapshotFlow` wait plus a `snapTo`
- * fallback. Everything below exists to reproduce that gap on demand.
+ * Room has persisted the message, which the shipped code waits for with `snapshotFlow` before
+ * completing the flight. Everything below exists to reproduce that gap on demand.
  *
  * ## Spike questions
  *
@@ -193,7 +192,7 @@ enum class SpikeVariant(val label: String) {
     RUNWAY_PROBE("B animateItem"),
 }
 
-/** Insert-delay presets in milliseconds; 1200 is the shipped flight's give-up timeout. */
+/** Insert-delay presets in milliseconds; 1200 remains the late-target stress case. */
 private val InsertDelayPresets = listOf(0, 300, 800, 1200)
 
 /** Slow-motion multipliers applied to every spec the harness owns. */
@@ -330,7 +329,7 @@ private fun seedRows(): List<SpikeRow> = listOf(
     SpikeRow(9, "and that is why the runway exists", false),
     SpikeRow(8, "the row does not exist yet when the bubble takes off", true),
     SpikeRow(7, "wait, it flies into a row that has not been persisted?", false),
-    SpikeRow(6, "up to 1200ms, per the snapshotFlow wait", true),
+    SpikeRow(6, "1200ms is the late-target stress case", true),
     SpikeRow(5, "how long can the gap get", false),
     SpikeRow(4, "long enough that the ghost has to hold its own", true),
     SpikeRow(3, "scroll me to check the clip", false),

@@ -128,8 +128,7 @@ internal class SendFlightMotion {
  * The flight replica's materialization over the composer, from the lift fraction. The overlay
  * draws above the input bar, so without this the finished bubble would pop in fully opaque on
  * the tap frame; instead it fades in across the lift's first stretch, while still over the
- * input box, and then rides up whole. The timeout path animates the lift back down, which also
- * dissolves the ghost through this same ramp.
+ * input box, and then rides up whole while persistence prepares its landing row.
  */
 internal fun sendFlightEntryFade(liftFraction: Float): Float {
     val t = (liftFraction / 0.35f).coerceIn(0f, 1f)

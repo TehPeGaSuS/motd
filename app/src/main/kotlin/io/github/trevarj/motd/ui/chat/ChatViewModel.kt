@@ -2146,8 +2146,8 @@ class ChatViewModel
         }
 
         /**
-         * The ghost is done: it landed on its row, or it gave up waiting for one. Either way the row
-         * is revealed, so a stalled send can never hide a real row behind flight state.
+         * The ghost is done: it landed, was rejected or replaced, or its screen closed. Either way
+         * its row is revealed, so a stalled send can never hide behind flight state.
          */
         fun onFlightSettled(token: Long) = abandonFlight(token)
 

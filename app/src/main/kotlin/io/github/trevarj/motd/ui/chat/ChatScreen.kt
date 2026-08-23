@@ -954,20 +954,9 @@ fun ChatContent(
             // visibly in flight. The flight spring itself still waits for the landing report,
             // because the gap must open from zero on the frame the row first composes.
             val liftJob = launch { flightMotion.lift.animateTo(1f, MotdMotion.sendFlightSpring) }
-            val landing = withTimeoutOrNull(MotdMotion.SendFlightTargetTimeoutMs) {
-                snapshotFlow { flightAnchors.landingRow }.filterNotNull().first()
-            }
-            if (landing == null) {
-                // Nothing arrived to fly to. Open the gap outright so the row is whole when
-                // shown, and lower the lift again so the runway the tap opened closes on the
-                // same spring instead of snapping shut when the flight settles.
-                liftJob.cancel()
-                flightMotion.progress.snapTo(1f)
-                flightMotion.lift.animateTo(0f, MotdMotion.sendFlightSpring)
-            } else {
-                flightMotion.progress.animateTo(1f, MotdMotion.sendFlightSpring)
-                liftJob.join()
-            }
+            snapshotFlow { flightAnchors.landingRow }.filterNotNull().first()
+            flightMotion.progress.animateTo(1f, MotdMotion.sendFlightSpring)
+            liftJob.join()
         } finally {
             // Also runs when this effect dies with the screen. A flight that outlived its UI would
             // hide its row again and fly a ghost of a minutes-old message on the next visit.

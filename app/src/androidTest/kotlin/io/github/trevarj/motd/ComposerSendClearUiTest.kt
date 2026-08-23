@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -13,11 +14,16 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.chat.ChatContent
 import io.github.trevarj.motd.ui.chat.ChatState
 import io.github.trevarj.motd.ui.chat.ComposerDraftState
+import io.github.trevarj.motd.ui.chat.EntryPositionState
+import io.github.trevarj.motd.ui.chat.OutgoingFlight
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -46,10 +52,13 @@ class ComposerSendClearUiTest {
     /** Renders the real chat surface over an empty timeline, with the draft under test control. */
     private fun setContent(
         draft: () -> ComposerDraftState,
+        pages: Flow<PagingData<MessageEntity>> = flowOf(PagingData.from(emptyList())),
+        outgoingFlight: () -> OutgoingFlight? = { null },
+        onFlightSettled: (Long) -> Unit = {},
         onSubmit: (String) -> Unit,
     ) {
         compose.setContent {
-            val items = flowOf(PagingData.from(emptyList<MessageEntity>())).collectAsLazyPagingItems()
+            val items = pages.collectAsLazyPagingItems()
             MotdTheme {
                 ChatContent(
                     state = ChatState(
@@ -70,6 +79,9 @@ class ComposerSendClearUiTest {
                     onRetry = {},
                     loadPreview = { _, _ -> null },
                     composerDraft = draft(),
+                    outgoingFlight = outgoingFlight(),
+                    onFlightSettled = onFlightSettled,
+                    entryState = EntryPositionState.Settled,
                 )
             }
         }
@@ -89,6 +101,59 @@ class ComposerSendClearUiTest {
 
         assertEquals(listOf("hello"), submitted)
         compose.onNodeWithText("hello").assertDoesNotExist()
+    }
+
+    @Test
+    fun delayedLanding_keepsFlightUntilPendingRowTakesOver() {
+        val launchedAt = 1_000L
+        val pages = MutableStateFlow(PagingData.from(emptyList<MessageEntity>()))
+        var flight by mutableStateOf<OutgoingFlight?>(
+            OutgoingFlight(token = 7, text = "hello", launchedAtMs = launchedAt),
+        )
+        var settled = 0
+        compose.mainClock.autoAdvance = false
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            onSubmit = {},
+            pages = pages,
+            outgoingFlight = { flight },
+            onFlightSettled = { token ->
+                assertEquals(7L, token)
+                settled++
+                flight = null
+            },
+        )
+
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(2_000)
+        compose.runOnIdle { assertEquals(0, settled) }
+
+        compose.runOnUiThread {
+            pages.value = PagingData.from(
+                listOf(
+                    MessageEntity(
+                        id = 42,
+                        bufferId = buffer.id,
+                        serverTime = launchedAt + 1,
+                        sender = "me",
+                        kind = MessageKind.PRIVMSG,
+                        text = "hello",
+                        isSelf = true,
+                        pendingLabel = "pending-42",
+                        dedupKey = "pending-42",
+                        serverTimeAuthoritative = false,
+                        timelineOrder = 42,
+                    ),
+                ),
+            )
+        }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeBy(2_000)
+        compose.waitForIdle()
+
+        compose.runOnIdle { assertEquals(1, settled) }
+        compose.onNodeWithContentDescription("Sending…").assertIsDisplayed()
     }
 
     @Test
