@@ -24,12 +24,14 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IrcColor
+import io.github.trevarj.motd.irc.format.ircStateAtRawOffset
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -231,6 +233,28 @@ class ComposerUiTest {
         compose.runOnIdle { draft.value = TextFieldValue("text long enough to wrap onto another visual line") }
         compose.waitForIdle()
         compose.onNodeWithTag("chat_composer_format_expand").assertIsDisplayed()
+    }
+
+    @Test
+    fun collapsedCursorOnBlankLineCanEnableFormattingBeforeTyping() {
+        val draft = mutableStateOf(TextFieldValue("first\n", TextRange(6)))
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_format_bold").performClick()
+        compose.runOnIdle {
+            assertTrue(ircStateAtRawOffset(draft.value.text, draft.value.selection.start).bold)
+        }
     }
 
     @Test

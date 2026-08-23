@@ -3,7 +3,10 @@ package io.github.trevarj.motd.ui.components
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.trevarj.motd.irc.format.IRC_BOLD
+import io.github.trevarj.motd.irc.format.IrcTextStyle
+import io.github.trevarj.motd.irc.format.ircStateAtRawOffset
 import io.github.trevarj.motd.irc.format.plainIrcText
+import io.github.trevarj.motd.irc.format.toggleIrcStyle
 import io.github.trevarj.motd.ui.chat.messageFormattingRange
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -28,6 +31,17 @@ class ComposerFormattingTest {
         val range = messageFormattingRange(raw)!!
 
         assertEquals("${IRC_BOLD}hello$IRC_BOLD", raw.substring(range.first, range.last + 1))
+    }
+
+    @Test
+    fun `empty drafts and blank lines accept collapsed formatting`() {
+        assertEquals(0 until 0, messageFormattingRange(""))
+        assertEquals(0 until 2, messageFormattingRange(" \n"))
+
+        val raw = "first\n"
+        val edit = toggleIrcStyle(raw, raw.length, raw.length, IrcTextStyle.BOLD)
+        assertTrue(ircStateAtRawOffset(edit.text, edit.selectionStart).bold)
+        assertEquals(raw, plainIrcText(edit.text))
     }
 
     @Test

@@ -219,6 +219,7 @@ fun parseCommand(raw: String): ChatCommand {
 
 /** Raw range where IRC formatting is valid; command names and routing parameters stay plain. */
 internal fun messageFormattingRange(raw: String): IntRange? {
+    if (plainIrcText(raw).isBlank()) return 0 until raw.length
     val first = raw.indexOfFirst { it != ' ' && it != '\t' && it != '\r' && it != '\n' }
     if (first < 0) return null
     val last = raw.indexOfLast { it != ' ' && it != '\t' && it != '\r' && it != '\n' }
