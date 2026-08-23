@@ -50,14 +50,15 @@ val libboxNdkVersion =
 // The release/debug APKs ship the pinned arm64 native core. Hermetic UI tests exercise plain IRC
 // on an x86_64 emulator, so derive an AAR that retains the generated Java API but omits JNI. This
 // keeps the E2E build installable without pretending that embedded obfuscation supports x86_64.
-val libboxE2eAar by tasks.registering(Zip::class) {
-    from(zipTree(libboxAar))
-    exclude("jni/**")
-    archiveFileName.set("libbox-e2e-no-jni.aar")
-    destinationDirectory.set(layout.buildDirectory.dir("generated/e2e-libs"))
-    isPreserveFileTimestamps = false
-    isReproducibleFileOrder = true
-}
+val libboxE2eAar =
+    tasks.register<Zip>("libboxE2eAar") {
+        from(zipTree(libboxAar))
+        exclude("jni/**")
+        archiveFileName.set("libbox-e2e-no-jni.aar")
+        destinationDirectory.set(layout.buildDirectory.dir("generated/e2e-libs"))
+        isPreserveFileTimestamps = false
+        isReproducibleFileOrder = true
+    }
 
 abstract class VerifyLibboxArtifact : DefaultTask() {
     @get:InputFile abstract val aar: RegularFileProperty
@@ -231,7 +232,7 @@ android {
         }
     }
     sourceSets {
-        getByName("test").resources.srcDir("$projectDir/schemas")
+        getByName("test").resources.directories.add("$projectDir/schemas")
     }
 
     lint {
@@ -252,16 +253,17 @@ android {
     }
 }
 
-val verifyLibboxArtifact by tasks.registering(VerifyLibboxArtifact::class) {
-    group = "verification"
-    description = "Verifies the libbox AAR against its manifest and pinned source contract."
-    aar.set(libboxAar)
-    manifest.set(libboxManifest)
-    expectedVersion.set("v1.13.12")
-    expectedNdkVersion.set(libboxNdkVersion)
-    expectedSha256.set("3fdbd30eba2450935389c100efd88475721d44870bbab870340533ee4ba84977")
-    enforcePinnedSha256.set(!libboxSourceBuild)
-}
+val verifyLibboxArtifact =
+    tasks.register<VerifyLibboxArtifact>("verifyLibboxArtifact") {
+        group = "verification"
+        description = "Verifies the libbox AAR against its manifest and pinned source contract."
+        aar.set(libboxAar)
+        manifest.set(libboxManifest)
+        expectedVersion.set("v1.13.12")
+        expectedNdkVersion.set(libboxNdkVersion)
+        expectedSha256.set("3fdbd30eba2450935389c100efd88475721d44870bbab870340533ee4ba84977")
+        enforcePinnedSha256.set(!libboxSourceBuild)
+    }
 
 tasks.matching { it.name == "check" || it.name.startsWith("assemble") }.configureEach {
     dependsOn(verifyLibboxArtifact)
