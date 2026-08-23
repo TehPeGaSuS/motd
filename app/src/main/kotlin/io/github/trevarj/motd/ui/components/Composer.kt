@@ -1460,8 +1460,11 @@ private fun ComposerTextField(
         outputTransformation = outputTransformation,
         decorator = { inner ->
             Box(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 12.dp),
-                contentAlignment = Alignment.CenterStart,
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = if (expanded) 4.dp else 12.dp),
+                contentAlignment = if (expanded) Alignment.TopStart else Alignment.CenterStart,
             ) {
                 if (state.text.isEmpty()) {
                     Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
