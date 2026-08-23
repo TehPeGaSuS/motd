@@ -11,7 +11,7 @@ setup and teardown deliberately clear application data.
 
 | Mode | Best for | Entry point |
 | --- | --- | --- |
-| Fast headless emulator | Default local feature validation; onboarding, chat, channel, settings, and bouncer journeys | `./test/e2e/headless.sh fast` |
+| Fast headless emulator | CI failure reproduction when lower-level checks cannot validate behavior | `./test/e2e/headless.sh fast` |
 | Full headless emulator | Local A-H, J, R, then teardown shell-runbook sweep | `./test/e2e/headless.sh full` |
 | Public screenshot showcase | Deterministic chat list, conversation, and attachment-sheet captures | `./test/e2e/headless.sh showcase` |
 | Native local stack + USB device | Manual feature work, physical-device checks, quick iteration | `./test/e2e/local-stack.sh` |
@@ -53,7 +53,7 @@ keeping UI-state coverage continuous without coupling those cases to Soju.
 
 ## Fast local headless loop
 
-For ordinary app feature work, run:
+Only when lower-level checks cannot validate behavior, run:
 
 ```sh
 ./test/e2e/headless.sh fast

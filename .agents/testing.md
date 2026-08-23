@@ -1,51 +1,39 @@
 # Testing and verification
 
-Run all Gradle commands through the repository Nix shell. Start with the
-narrowest useful check and expand when a change crosses boundaries.
+Run all Gradle commands through the repository Nix shell. Run the nearest useful
+check in each changed boundary; do not expand into full local suites. Hosted CI
+owns broad verification.
 
 ## Command matrix
 
-| Changed surface | Required checks |
+| Changed surface | Required local checks |
 | --- | --- |
 | Documentation only | `git diff --check`; verify links, commands, and referenced paths |
 | Shell harness/config | `bash -n test/e2e/*.sh test/e2e/fixtures/*.sh test/e2e/hermetic/*/*.sh` plus the relevant dry run |
-| IRC parser/client/transport | `nix develop -c ./gradlew :irc:test --stacktrace` |
-| Android repositories, services, preferences, or ViewModels | `nix develop -c ./gradlew :app:testDebugUnitTest --stacktrace` |
-| Compose/resources/manifest | App unit tests, FOSS lint, and the FOSS debug assembly |
-| Ordinary app user journey | Relevant unit/integration tests plus FOSS lint/build; rely on required CI for E2E |
-| Cross-module or release-sensitive work | The full release-parity Gradle command below |
+| IRC parser/client/transport | Nearest `:irc` test class with `--tests` |
+| Android repositories, services, preferences, or ViewModels | Nearest `:app` test class with `--tests` |
+| Compose/resources/manifest | Nearest test when behavior changed, then `:app:assembleDebug` |
+| Ordinary app user journey | Relevant unit/integration test; assemble only when an APK is needed |
+| Cross-module or release-sensitive work | Nearest tests in each affected module; rely on Required CI for full release parity |
 
-FOSS lint and debug assembly:
-
-```sh
-nix develop -c ./gradlew \
-  :app:lintDebug :app:assembleDebug \
-  --stacktrace
-```
-
-Full release-parity Gradle verification:
+Target one test class during local development:
 
 ```sh
-nix develop .#native -c ./gradlew \
-  :irc:build \
-  :app:testDebugUnitTest :app:testReleaseUnitTest \
-  :app:lintDebug :app:lintRelease :app:assembleRelease \
-  --stacktrace
+nix develop -c ./gradlew :app:testDebugUnitTest \
+  --tests '<fully-qualified-test-class>' --stacktrace
 ```
 
-Lint warnings are errors. Run with the warm daemon and the repo's bounded worker
-cap (`org.gradle.workers.max` in `gradle.properties`); do not add
-`--no-daemon --max-workers=1`, which cost ~30x the wall-clock for no deterministic
-protection. Lint can still rarely hit the `ModifierDeclarationDetector`
-classloader race; just re-run (the warm daemon makes the retry ~10s). Required CI
-and release both wrap lint in a bounded retry for the same reason.
+Use `:irc:test` instead for IRC tests. Run `:app:assembleDebug` when compilation,
+resources, manifest, packaging, or an installable APK must be checked. Full
+module suites, release variants, lint, and E2E belong to Required CI. Run
+`:app:lintDebug` locally only for an explicit pre-push lint check.
 
 ## Deterministic generated tests
 
-The ordinary `:irc:test` and `:app:testDebugUnitTest` tasks include bounded,
-seeded generated tests. Their defaults are stable; CI replaces the seed with the
-pull-request commit and `.github/workflows/fuzz.yml` runs the larger nightly
-profile.
+Generated tests default locally to checked-in regressions plus one generated
+case per target. Required CI explicitly selects the PR workload and replaces the
+seed with the candidate commit; `.github/workflows/fuzz.yml` selects the larger
+nightly profile.
 
 The nightly workflow runs three disjoint case-index shards for each module. An
 IRC shard covers 200,000 parser cases and 75,000 mapper cases. An app shard
@@ -55,15 +43,9 @@ effective counts, index ranges, and any manual overrides.
 
 - `MOTD_FUZZ_SEED=<text>` selects an exact seed.
 - `MOTD_FUZZ_CASE=<index>` replays one independently seeded case.
-- `MOTD_FUZZ_PROFILE=pr|nightly` selects the bounded workload.
+- `MOTD_FUZZ_PROFILE=pr|nightly` selects a hosted workload; unset uses the local workload.
 - `MOTD_FUZZ_CASES=<count>` and `MOTD_FUZZ_STEPS=<count>` override campaign size.
-  Only positive values apply (`0` is ignored and falls back to the profile), so
-  the minimum is `1`. For the tightest inner loop when iterating on code
-  unrelated to the fuzzed surfaces, run e.g.
-  `MOTD_FUZZ_CASES=1 MOTD_FUZZ_STEPS=1 ./gradlew :app:testDebugUnitTest` to
-  shrink the generated campaign to a single case; the committed regression corpus
-  still runs. Never commit that reduced profile; leave the CI/default counts
-  intact so coverage is not silently lost.
+  Only positive values apply (`0` falls back to the selected profile).
 - `MOTD_FUZZ_SHARD=<zero-based index>` offsets generated case indices by one
   configured case-count, allowing parallel jobs to cover disjoint cases under
   the same reproducible seed. Exact `MOTD_FUZZ_CASE` replay ignores the shard.
@@ -78,7 +60,7 @@ version, seed, case, and fixture in that module's
 
 - Do not run the headless emulator suite during routine local development. It
   materially slows the maintainer's workstation. Local verification stops at
-  the relevant unit/integration tests, lint, and builds in the matrix above.
+  nearest unit/integration tests and assembly only when the matrix requires it.
 - `.github/workflows/ci.yml` owns the complete required gate. Its `headless` job runs exactly
   four isolated `@FastHeadlessE2e` methods on API34 Pixel 6 AOSP, while the parallel
   `component-ui` job runs all 111 hermetic component instrumentation cases and excludes the
@@ -91,8 +73,8 @@ version, seed, case, and fixture in that module's
   notifications and UnifiedPush, system pickers, certificates outside the
   fixture trust flow, and a real release installation. Only do this when the
   maintainer explicitly asks for device validation.
-- Run `./test/e2e/headless.sh fast` for the same focused suite locally; CI remains the only
-  hosted entry point so there is no second workflow to drift out of sync.
+- Only when lower-level checks cannot validate behavior, reproduce the focused
+  CI suite with `./test/e2e/headless.sh fast`.
 - `test/e2e/component-suite.sh` is the canonical managed-device launcher for the hermetic
   Compose/component instrumentation tier. It enforces the expected case count so new tests cannot
   silently disappear from CI.

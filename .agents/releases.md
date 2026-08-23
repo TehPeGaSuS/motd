@@ -7,8 +7,8 @@ automation in `.github/workflows/release.yml` is authoritative.
 
 1. Inspect the branch, status, staged diff, and recent tags. Do not include
    unrelated work or assume uncommitted user changes should be released.
-2. Run the local FOSS release-parity unit/integration, lint, and build checks
-   from [`testing.md`](testing.md). Do not run local emulator E2E.
+2. Run only the nearest local checks from [`testing.md`](testing.md). Do not
+   duplicate hosted release parity or run local emulator E2E.
 3. Push the candidate commit and require the complete `Required CI` workflow—including
    its `headless` E2E job and final `gate` job—to pass before tagging.
 4. Confirm the requested semantic version and that the `v<semver>` tag does not

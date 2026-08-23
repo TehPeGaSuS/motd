@@ -34,79 +34,32 @@ arm64-v8a-only. APKs built from this source tree must not be installed on
 32-bit ARM or x86 devices. Other ABI support needs a separately pinned and
 verified libbox artifact.
 
-## Lint
+## Verification
 
-Lint warnings are errors. Run with the warm daemon and the repo's bounded worker
-cap (`org.gradle.workers.max` in `gradle.properties`). Do not add
-`--no-daemon --max-workers=1`: it cost roughly 30x the wall-clock (~300s vs ~10s
-warm) for no deterministic race protection. Lint can rarely hit the
-`ModifierDeclarationDetector` classloader race; if it does, just re-run (the warm
-daemon makes a re-run ~10s). CI and release wrap lint in a bounded retry.
+Use the authoritative local command matrix in
+[`.agents/testing.md`](../.agents/testing.md). Routine development runs the
+nearest test class, not a whole module:
 
 ```sh
-./gradlew :app:lintDebug :app:assembleDebug --stacktrace
+./gradlew :app:testDebugUnitTest \
+  --tests '<fully-qualified-test-class>' --stacktrace
 ```
 
-For release parity:
-
-```sh
-./gradlew :app:lintRelease --stacktrace
-```
-
-## Choose checks by changed surface
-
-Start with the narrowest useful check and expand when a change crosses
-boundaries.
-
-|Changed surface                                           |Required checks                                                                                                       |
-|----------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|
-|Documentation only                                        |`git diff --check`; verify links, commands, and referenced paths                                                      |
-|Shell harness/config                                      |`bash -n test/e2e/*.sh test/e2e/fixtures/*.sh test/e2e/hermetic/*/*.sh` plus the relevant dry run                     |
-|IRC parser/client/transport                               |`./gradlew :irc:test --stacktrace`                                                                                    |
-|Android repositories, services, preferences, or ViewModels|`./gradlew :app:testDebugUnitTest --stacktrace`                                                                   |
-|Compose/resources/manifest                                |App unit tests, FOSS lint, and the FOSS debug assembly                                                                |
-|Ordinary app user journey                                 |Relevant unit/integration tests plus FOSS lint/build; rely on required CI for E2E                                     |
-|Cross-module or release-sensitive work                    |The full release-parity Gradle command below                                                                          |
-
-Full release-parity Gradle verification:
-
-```sh
-./gradlew \
-  :irc:build \
-  :app:testDebugUnitTest :app:testReleaseUnitTest \
-  :app:lintDebug :app:lintRelease :app:assembleRelease \
-  --stacktrace
-```
+Run `:app:assembleDebug` when an APK or packaging check is needed. Full module
+suites, release variants, lint, and E2E run in Required CI; use
+`:app:lintDebug` locally only for an explicit pre-push lint check.
 
 ## Device and E2E testing
 
 Do not run the headless emulator suite during routine local development; it
 materially slows the maintainer's workstation. Local verification stops at the
-relevant unit/integration tests, lint, and builds above.
+nearest unit/integration tests and assembly only when needed.
 
 For the local stack, physical-device, and emulator harnesses, follow
 [`../test/e2e/README.md`](../test/e2e/README.md). The agent-facing selection
 matrix in [`../.agents/testing.md`](../.agents/testing.md) describes which
 suite fits which task. Those harnesses have their own shell requirements
 documented alongside them.
-
-## Generated (fuzz) tests
-
-The ordinary `:irc:test` and `:app:testDebugUnitTest` tasks include bounded,
-seeded generated tests. Their defaults are stable; CI replaces the seed with
-the pull-request commit and a nightly workflow runs the larger profile.
-Override the campaign with environment variables:
-
-- `MOTD_FUZZ_SEED=<text>` — select an exact seed.
-- `MOTD_FUZZ_CASE=<index>` — replay one independently seeded case.
-- `MOTD_FUZZ_PROFILE=pr|nightly` — select the bounded workload.
-- `MOTD_FUZZ_CASES=<count>` / `MOTD_FUZZ_STEPS=<count>` — override campaign size.
-- `MOTD_FUZZ_SHARD=<zero-based index>` — offset generated case indices so
-  parallel jobs cover disjoint cases under the same seed.
-
-Failures print an exact Nix/Gradle replay command and write the operation trace
-below the module's `build/fuzz-failures/` directory. The regression-minimization
-workflow is documented in [`../.agents/testing.md`](../.agents/testing.md).
 
 ## Architecture
 

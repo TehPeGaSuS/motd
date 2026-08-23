@@ -32,7 +32,7 @@ internal object SeededFuzz {
         val configuredSeed = System.getenv("MOTD_FUZZ_SEED")
         val configuredCase = System.getenv("MOTD_FUZZ_CASE")?.toIntOrNull()
         val configuredShard = System.getenv("MOTD_FUZZ_SHARD")?.toIntOrNull()?.takeIf { it >= 0 } ?: 0
-        val profileCases = if (System.getenv("MOTD_FUZZ_PROFILE") == "nightly") nightlyCases else prCases
+        val profileCases = fuzzProfileValue(prCases, nightlyCases)
         val generatedCases = System.getenv("MOTD_FUZZ_CASES")?.toIntOrNull()
             ?.takeIf { it > 0 }
             ?: profileCases
@@ -81,7 +81,7 @@ internal object SeededFuzz {
         val configuredSeed = System.getenv("MOTD_FUZZ_SEED")
         val configuredCase = System.getenv("MOTD_FUZZ_CASE")?.toIntOrNull()
         val configuredShard = System.getenv("MOTD_FUZZ_SHARD")?.toIntOrNull()?.takeIf { it >= 0 } ?: 0
-        val profileCases = if (System.getenv("MOTD_FUZZ_PROFILE") == "nightly") nightlyCases else prCases
+        val profileCases = fuzzProfileValue(prCases, nightlyCases)
         val generatedCases = System.getenv("MOTD_FUZZ_CASES")?.toIntOrNull()
             ?.takeIf { it > 0 }
             ?: profileCases
@@ -179,6 +179,11 @@ internal object SeededFuzz {
     private const val DEFAULT_SEED = "motd-fuzz-v1"
 }
 
+private fun fuzzProfileValue(pr: Int, nightly: Int): Int {
+    val profile = System.getenv("MOTD_FUZZ_PROFILE")
+    return if (profile == "nightly") nightly else if (profile == "pr") pr else 1
+}
+
 internal fun fuzzSteps(pr: Int, nightly: Int): Int =
     System.getenv("MOTD_FUZZ_STEPS")?.toIntOrNull()?.takeIf { it > 0 }
-        ?: if (System.getenv("MOTD_FUZZ_PROFILE") == "nightly") nightly else pr
+        ?: fuzzProfileValue(pr, nightly)

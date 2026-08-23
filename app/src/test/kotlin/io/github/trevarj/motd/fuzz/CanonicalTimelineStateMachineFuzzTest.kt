@@ -76,7 +76,7 @@ class CanonicalTimelineStateMachineFuzzTest {
                     add(Operation.History(logical))
                     add(Operation.History(logical.takeLast(3)))
                 }
-                val operationCount = fuzzSteps(pr = 32, nightly = 128)
+                val operationCount = fuzzSteps(pr = 32, nightly = 128).coerceAtLeast(mandatory.size)
                 val reopenAt = setOf(
                     fuzz.random.nextInt(1, operationCount),
                     fuzz.random.nextInt(1, operationCount),

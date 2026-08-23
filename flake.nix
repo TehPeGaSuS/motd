@@ -69,7 +69,7 @@
           ANDROID_SDK_ROOT = sdkRoot;
           # AGP downloads a dynamically-linked aapt2 that won't run outside FHS;
           # point Gradle at the Nix-provided one instead.
-          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/36.0.0/aapt2";
+          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/36.0.0/aapt2 -Dorg.gradle.workers.max=2";
         };
         devShells.native = pkgs.mkShell {
           packages = [ pkgs.jdk21 nativeAndroidSdk ];
@@ -78,7 +78,7 @@
           ANDROID_SDK_ROOT = nativeAndroidSdkRoot;
           ANDROID_NDK_HOME = "${nativeAndroidSdkRoot}/ndk/${nativeNdkVersion}";
           ANDROID_NDK_ROOT = "${nativeAndroidSdkRoot}/ndk/${nativeNdkVersion}";
-          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${nativeAndroidSdkRoot}/build-tools/36.0.0/aapt2";
+          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${nativeAndroidSdkRoot}/build-tools/36.0.0/aapt2 -Dorg.gradle.workers.max=2";
         };
         devShells.emulator = pkgs.mkShell {
           packages = [ pkgs.jdk21 emulatorSdk ];

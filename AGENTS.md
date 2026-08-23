@@ -50,8 +50,8 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
   is UnifiedPush only; do not reintroduce Firebase/FCM or a Play Store
   distribution unless the maintainer explicitly asks for it. Lint warnings are
   errors.
-  When a change crosses modules or release behavior, run the full documented
-  build rather than only the nearest unit test.
+  When a change crosses modules or release behavior, run the nearest checks in
+  each affected module; Required CI owns full release parity.
 - Do not run emulator/device E2E as part of routine local development. Keep
   local verification to unit/integration tests, lint, and builds. Before
   committing a change that affects a journey covered by `RequiredHeadlessE2eTest`,

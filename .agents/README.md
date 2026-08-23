@@ -29,12 +29,14 @@ connection ownership, or module boundaries.
    behavior in long-running work.
 4. Add or update tests at the same boundary. For UI changes, include semantics
    or stable tags when the interaction belongs in the device harness.
-5. Run the relevant checks from [`testing.md`](testing.md), inspect the final
-   diff, and report any verification that could not be performed.
+5. Run only the nearest local checks from [`testing.md`](testing.md), inspect
+   the final diff, and report any verification that could not be performed.
+   Leave full suites, lint, release variants, and E2E to hosted CI unless the
+   matrix or maintainer explicitly requires them locally.
 
 ## Task guides
 
-- [`testing.md`](testing.md) — unit, lint, build, device, and E2E selection.
+- [`testing.md`](testing.md) — targeted local checks and hosted verification gates.
 - [`releases.md`](releases.md) — signed tags, release artifacts, and failure
   recovery.
 - [`../test/e2e/README.md`](../test/e2e/README.md) — local stack, physical
