@@ -197,12 +197,15 @@ internal fun sameSystemRun(
     }
 }
 
-internal fun messageContentType(message: MessageEntity): MessageContentType =
+internal fun messageContentType(
+    message: MessageEntity,
+    collapseSystemEvents: Boolean = true,
+): MessageContentType =
     when {
         message.kind == MessageKind.INVITE -> MessageContentType.INVITE
         message.kind == MessageKind.DCC_TRANSFER -> MessageContentType.DCC_TRANSFER
         message.kind == MessageKind.NETSPLIT || message.kind == MessageKind.NETJOIN -> MessageContentType.NETWORK_BATCH
-        isSystemKind(message.kind) -> MessageContentType.SYSTEM
+        collapseSystemEvents && isSystemKind(message.kind) -> MessageContentType.SYSTEM
         message.kind == MessageKind.ACTION && message.failed -> MessageContentType.ACTION_FAILED
         message.kind == MessageKind.ACTION -> MessageContentType.ACTION
         message.isSelf && message.failed -> MessageContentType.SELF_FAILED
@@ -293,6 +296,7 @@ fun MessageList(
     bufferId: Long? = null,
     conversationName: String? = null,
     directMessage: Boolean = false,
+    collapseSystemEvents: Boolean = true,
     canRetry: (MessageEntity) -> Boolean = { true },
     loadPreview: suspend (String, Long?) -> LinkPreview?,
     richContentReady: Boolean,
@@ -398,7 +402,7 @@ fun MessageList(
             // Own bubbles, other bubbles, ACTION rows, and retry rows have different composition
             // shapes. Keeping separate pools avoids structural churn at exactly the boundaries that
             // previously produced hitches when a fling crossed own messages.
-            contentType = items.itemContentType(::messageContentType),
+            contentType = items.itemContentType { messageContentType(it, collapseSystemEvents) },
         ) { index ->
             val msg = items[index]
             if (msg == null) {
@@ -477,7 +481,7 @@ fun MessageList(
             // System-event collapse: render one pill on the run's *newest* item and
             // skip the rest. In a reversed list the newest of a contiguous system run is the item
             // whose just-newer neighbor is not a system event.
-            if (isSystemKind(msg.kind)) {
+            if (collapseSystemEvents && isSystemKind(msg.kind)) {
                 if (!isSystemRunChunkHead(msg.id, newer?.let { sameSystemRun(msg, it) } == true)) return@items
                 LiveTimelineEntry(
                     liveEntryIds,
@@ -567,6 +571,7 @@ fun MessageList(
                         bufferId = bufferId,
                         conversationName = conversationName,
                         directMessage = directMessage,
+                        fallbackSender = conversationName.takeUnless { collapseSystemEvents },
                         older = older,
                         formatTime = formatMessageTime,
                         readMarkerTime = readMarkerTime,
@@ -1330,6 +1335,7 @@ private fun MessageRow(
     bufferId: Long?,
     conversationName: String?,
     directMessage: Boolean,
+    fallbackSender: String?,
     older: MessageEntity?,
     formatTime: (Long) -> String,
     readMarkerTime: TimelineAnchor?,
@@ -1393,6 +1399,7 @@ private fun MessageRow(
     // both the gap spacer and the bubble's grouped-corner/header logic below.
     val spacing = LocalSpacing.current
     val showSender = showsSender(msg, older)
+    val displaySender = msg.sender.ifBlank { fallbackSender.orEmpty() }
     val gap = bubbleGap(showSender, older != null, spacing)
 
     // Outermost boundary of the row: the history break comes before the read marker, because the
@@ -1566,7 +1573,7 @@ private fun MessageRow(
                     // Per-message handle for long-press/react/reply/deep-jump. Prefer the stable
                     // server msgid; pending rows fall back to the local id for E2E selection.
                     modifier = Modifier,
-                    sender = msg.sender,
+                    sender = displaySender,
                     networkId = networkId,
                     senderAccount = msg.senderAccount,
                     text = messageText,

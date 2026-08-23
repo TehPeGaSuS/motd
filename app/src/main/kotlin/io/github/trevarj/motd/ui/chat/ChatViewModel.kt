@@ -757,6 +757,7 @@ class ChatViewModel
                 ConversationLayoutState(
                     global = settings.layoutDensity,
                     override = room?.layoutDensityOverride,
+                    bufferDefault = LayoutDensity.TWO_LINE.takeIf { room?.type == BufferType.SERVER },
                 )
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ConversationLayoutState())
 

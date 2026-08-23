@@ -31,11 +31,22 @@ fun ConversationLayoutSheet(
                 value = null,
                 selected = state.override == null,
                 tag = "chat_layout_global",
-                label = stringResource(R.string.chat_layout_use_global),
-                supporting = stringResource(
-                    R.string.chat_layout_global_summary,
-                    densityLabel(state.global),
+                label = stringResource(
+                    if (state.bufferDefault != null) {
+                        R.string.chat_layout_use_server_default
+                    } else {
+                        R.string.chat_layout_use_global
+                    },
                 ),
+                supporting =
+                    if (state.bufferDefault == null) {
+                        stringResource(
+                            R.string.chat_layout_global_summary,
+                            densityLabel(state.global),
+                        )
+                    } else {
+                        null
+                    },
                 onSelect = onSelect,
             )
             LayoutDensity.entries.forEach { density ->

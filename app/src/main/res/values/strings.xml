@@ -531,6 +531,7 @@
     <string name="settings_density_two_line">Two-line</string>
     <string name="chat_layout_title">Conversation layout</string>
     <string name="chat_layout_use_global">Use global setting</string>
+    <string name="chat_layout_use_server_default">Server default (Two-line)</string>
     <string name="chat_layout_global_summary">Current global setting: %1$s</string>
     <string name="chat_layout_overflow_summary">Current: %1$s</string>
     <string name="chat_layout_write_failed">Couldn\'t save conversation layout</string>

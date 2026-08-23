@@ -42,12 +42,23 @@ class ChatModelsTest {
         )
     }
 
-    @Test fun `conversation layout override wins over global`() {
+    @Test fun `conversation layout uses buffer default before global`() {
         assertEquals(
             LayoutDensity.TWO_LINE,
             ConversationLayoutState(
                 global = LayoutDensity.COMPACT,
-                override = LayoutDensity.TWO_LINE,
+                bufferDefault = LayoutDensity.TWO_LINE,
+            ).effective,
+        )
+    }
+
+    @Test fun `conversation layout override wins over buffer default and global`() {
+        assertEquals(
+            LayoutDensity.COMFORTABLE,
+            ConversationLayoutState(
+                global = LayoutDensity.COMPACT,
+                bufferDefault = LayoutDensity.TWO_LINE,
+                override = LayoutDensity.COMFORTABLE,
             ).effective,
         )
     }
@@ -668,6 +679,10 @@ class ChatModelsTest {
         assertEquals(MessageContentType.SELF_FAILED, messageContentType(message(self = true, failed = true)))
         assertEquals(MessageContentType.ACTION, messageContentType(message(kind = MessageKind.ACTION)))
         assertEquals(MessageContentType.SYSTEM, messageContentType(message(kind = MessageKind.JOIN)))
+        assertEquals(
+            MessageContentType.OTHER,
+            messageContentType(message(kind = MessageKind.SERVER_INFO), collapseSystemEvents = false),
+        )
         assertEquals(MessageContentType.NETWORK_BATCH, messageContentType(message(kind = MessageKind.NETSPLIT)))
         assertEquals(MessageContentType.NETWORK_BATCH, messageContentType(message(kind = MessageKind.NETJOIN)))
     }

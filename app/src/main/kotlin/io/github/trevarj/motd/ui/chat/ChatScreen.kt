@@ -2260,6 +2260,7 @@ fun ChatContent(
                         bufferId = state.buffer?.id,
                         conversationName = state.buffer?.displayName,
                         directMessage = state.buffer?.type == BufferType.QUERY,
+                        collapseSystemEvents = !isServerBuffer,
                         // Frozen read-marker so the "New messages" divider stays put.
                         readMarkerTime = unreadEntrySnapshot?.marker,
                         readMarkerLabel = unreadEntryLabel,

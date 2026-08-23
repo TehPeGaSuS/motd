@@ -541,6 +541,34 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `server layout defaults to two-line until explicitly overridden`() = runTest {
+        val server = channel.copy(name = "*", displayName = "test", type = BufferType.SERVER)
+        val settings = FakeSettingsRepository().apply {
+            this.settings.value = Settings(layoutDensity = LayoutDensity.COMPACT)
+        }
+        val buffers = FakeBufferRepository(server)
+        val vm = viewModel(
+            server,
+            FakeConnectionManager(network.id),
+            buffers = buffers,
+            settings = settings,
+        )
+
+        assertEquals(
+            LayoutDensity.TWO_LINE,
+            vm.state.first { it.buffer?.type == BufferType.SERVER }.conversationLayout.effective,
+        )
+
+        vm.setConversationLayoutOverride(LayoutDensity.COMFORTABLE)
+        advanceUntilIdle()
+        assertEquals(LayoutDensity.COMFORTABLE, vm.state.value.conversationLayout.effective)
+
+        vm.setConversationLayoutOverride(null)
+        advanceUntilIdle()
+        assertEquals(LayoutDensity.TWO_LINE, vm.state.value.conversationLayout.effective)
+    }
+
+    @Test
     fun `conversation layout write failure is surfaced without optimistic state`() = runTest {
         val buffers = FakeBufferRepository(channel).apply { layoutWriteResult = false }
         val vm = viewModel(channel, FakeConnectionManager(network.id), buffers = buffers)

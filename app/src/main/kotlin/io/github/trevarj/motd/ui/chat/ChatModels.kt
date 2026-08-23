@@ -1317,12 +1317,13 @@ sealed interface ChatUiEvent {
     data object PresenceModeWriteFailed : ChatUiEvent
 }
 
-/** Database-backed conversation layout and the global setting it may inherit. */
+/** Database-backed conversation layout and the global or buffer-specific default it may inherit. */
 data class ConversationLayoutState(
     val global: LayoutDensity = LayoutDensity.COMFORTABLE,
     val override: LayoutDensity? = null,
+    val bufferDefault: LayoutDensity? = null,
 ) {
-    val effective: LayoutDensity get() = override ?: global
+    val effective: LayoutDensity get() = override ?: bufferDefault ?: global
 }
 
 data class ConversationPresenceState(
