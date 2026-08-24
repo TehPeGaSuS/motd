@@ -7,9 +7,9 @@ REPO="$(cd "$E2E_DIR/../.." && pwd)"
 REAL_STACK_ANNOTATION=io.github.trevarj.motd.FastHeadlessE2e
 # ponytail: one source @Test equals one case; use runner discovery if parameterized tests arrive.
 expected_cases="$(
-  rg --glob '*.kt' --glob '!RequiredHeadlessE2eTest.kt' --count-matches \
+  grep -Rhc --include='*.kt' --exclude='RequiredHeadlessE2eTest.kt' \
     '^[[:space:]]*@Test\b' "$REPO/app/src/androidTest" |
-    awk -F: '{ total += $NF } END { print total + 0 }'
+    awk '{ total += $1 } END { print total + 0 }'
 )"
 
 cd "$REPO"
