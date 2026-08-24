@@ -298,6 +298,7 @@ class IrcClient(
 
     fun start() {
         stop()
+        eventMapper.reset()
         require(observerBufferCapacity > 0) { "observer buffer capacity must be positive" }
         postRegistrationActivity = CompletableDeferred()
         val criticalEvents = Channel<IrcEvent>(CRITICAL_EVENT_CAPACITY)
@@ -325,6 +326,7 @@ class IrcClient(
         unlabeledWhois.failAll(CancellationException("client stopped"))
         cancelWhoxRequests("client stopped")
         batches.reset()
+        eventMapper.reset()
         val t = transport
         transport = null
         registered = false
@@ -474,6 +476,7 @@ class IrcClient(
             }
             cancelWhoxRequests("connection closed")
             batches.reset()
+            eventMapper.reset()
             if (transport === t) transport = null
         }
     }
@@ -570,6 +573,10 @@ class IrcClient(
 
             is BatchAssembler.Outcome.Closed -> {
                 emitBatch(outcome, criticalEvents)
+            }
+
+            is BatchAssembler.Outcome.Overflow -> {
+                throw IrcProtocolException("BATCH", outcome.detail)
             }
 
             BatchAssembler.Outcome.PassThrough -> {

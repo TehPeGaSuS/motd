@@ -30,10 +30,25 @@ class EventMapper(
      * events from stray `READ` traffic. `MARKREAD` (IRCv3) is mapped unconditionally, as before.
      */
     private val sojuReadCap: () -> Boolean = { true },
+    private val maxPendingNamesChannels: Int = MAX_PENDING_NAMES_CHANNELS,
+    private val maxPendingNamesMembers: Int = MAX_PENDING_NAMES_MEMBERS,
 ) {
+    init {
+        require(maxPendingNamesChannels > 0)
+        require(maxPendingNamesMembers > 0)
+    }
+
     // channel(normalized) -> accumulating members for a pending NAMES (353..366) run.
     private val namesBuffers = HashMap<String, MutableList<IrcEvent.Names.Member>>()
     private val namesDisplay = HashMap<String, String>()
+    private var pendingNamesMembers = 0
+
+    /** Drop connection-scoped accumulators before a new transport generation starts. */
+    fun reset() {
+        namesBuffers.clear()
+        namesDisplay.clear()
+        pendingNamesMembers = 0
+    }
 
     private data class ParsedServerTime(
         val value: Long,
@@ -302,6 +317,8 @@ class EventMapper(
     private companion object {
         /** Stable sentinel: unknown history sorts before timestamped chat instead of as "now". */
         const val UNKNOWN_HISTORY_TIME = 0L
+        const val MAX_PENDING_NAMES_CHANNELS = 64
+        const val MAX_PENDING_NAMES_MEMBERS = 10_000
     }
 
     private fun mapChat(
@@ -489,6 +506,9 @@ class EventMapper(
         val channel = msg.params.getOrNull(2) ?: msg.params.getOrNull(1) ?: return false
         val key = isupport().normalize(channel)
         val started = key !in namesBuffers
+        if (started && namesBuffers.size >= maxPendingNamesChannels) {
+            throw IrcProtocolException("NAMES", "more than $maxPendingNamesChannels channels are pending")
+        }
         namesDisplay[key] = channel
         val members = namesBuffers.getOrPut(key) { mutableListOf() }
         val list =
@@ -507,6 +527,9 @@ class EventMapper(
             }
             val rest = entry.substring(i)
             val identity = parseIrcPrefix(rest) ?: continue
+            if (pendingNamesMembers >= maxPendingNamesMembers) {
+                throw IrcProtocolException("NAMES", "more than $maxPendingNamesMembers members are pending")
+            }
             members.add(
                 IrcEvent.Names.Member(
                     identity.nick,
@@ -515,6 +538,7 @@ class EventMapper(
                     identity.host,
                 ),
             )
+            pendingNamesMembers++
         }
         return started
     }
@@ -523,6 +547,7 @@ class EventMapper(
         val channel = msg.params.getOrNull(1) ?: msg.params.getOrNull(0).orEmpty()
         val key = isupport().normalize(channel)
         val members = namesBuffers.remove(key) ?: mutableListOf()
+        pendingNamesMembers -= members.size
         val display = namesDisplay.remove(key) ?: channel
         return IrcEvent.Names(display, members)
     }

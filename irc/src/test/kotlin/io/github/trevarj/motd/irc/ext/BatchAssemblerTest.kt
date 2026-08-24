@@ -43,5 +43,29 @@ class BatchAssemblerTest {
         assertEquals(BatchAssembler.Outcome.PassThrough, assembler.route(msg("BATCH -split")))
     }
 
+    @Test fun `open batch limit resets all retained state`() {
+        val assembler = BatchAssembler(maxOpenBatches = 2)
+        assertEquals(BatchAssembler.Outcome.Buffered, assembler.route(msg("BATCH +one type")))
+        assertEquals(BatchAssembler.Outcome.Buffered, assembler.route(msg("BATCH +two type")))
+
+        val overflow = assembler.route(msg("BATCH +three type")) as BatchAssembler.Outcome.Overflow
+
+        assertTrue(overflow.detail.contains("2 batches"))
+        assertFalse(assembler.hasOpenBatch)
+        assertEquals(BatchAssembler.Outcome.PassThrough, assembler.route(msg("BATCH -one")))
+    }
+
+    @Test fun `buffered message limit is exact and resets on overflow`() {
+        val assembler = BatchAssembler(maxBufferedMessages = 2)
+        assembler.route(msg("BATCH +history chathistory #room"))
+        assertEquals(BatchAssembler.Outcome.Buffered, assembler.route(msg("@batch=history :a PRIVMSG #room :one")))
+        assertEquals(BatchAssembler.Outcome.Buffered, assembler.route(msg("@batch=history :a PRIVMSG #room :two")))
+
+        val overflow = assembler.route(msg("@batch=history :a PRIVMSG #room :three")) as BatchAssembler.Outcome.Overflow
+
+        assertTrue(overflow.detail.contains("2 messages"))
+        assertFalse(assembler.hasOpenBatch)
+    }
+
     private fun msg(line: String) = IrcMessage.parse(line)
 }

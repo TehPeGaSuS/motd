@@ -55,7 +55,13 @@ internal data class CorrelatedResponse(
     val rootBatch: IrcMessage?,
 )
 
-internal class LabelCorrelator {
+internal class LabelCorrelator(
+    private val maxBufferedMessages: Int = MAX_BUFFERED_MESSAGES,
+) {
+    init {
+        require(maxBufferedMessages > 0)
+    }
+
     private val counter = AtomicLong(0)
 
     private class Pending(
@@ -129,7 +135,7 @@ internal class LabelCorrelator {
                 pending.openNested.remove(ref)
                 pending.nestedParents.remove(ref)
                 // Nested close: still buffer the close marker, stay open.
-                pending.buffered.add(msg)
+                if (!buffer(label, pending, msg)) return true
                 refToLabel.remove(ref)
                 return true
             }
@@ -172,7 +178,7 @@ internal class LabelCorrelator {
                     pending.openNested.add(ref)
                     pending.nestedParents[ref] = batchTag
                 }
-                pending.buffered.add(msg)
+                buffer(label, pending, msg)
                 return true
             }
         }
@@ -240,6 +246,19 @@ internal class LabelCorrelator {
         refToLabel.clear()
     }
 
+    private fun buffer(
+        label: String,
+        pending: Pending,
+        message: IrcMessage,
+    ): Boolean {
+        if (pending.buffered.size >= maxBufferedMessages) {
+            failPending(label, pending, "response exceeded $maxBufferedMessages buffered messages")
+            return false
+        }
+        pending.buffered += message
+        return true
+    }
+
     private fun removePending(
         label: String,
         pending: Pending,
@@ -260,6 +279,10 @@ internal class LabelCorrelator {
     }
 
     private fun isErrorNumeric(command: String): Boolean = command.length == 3 && command.all { it.isDigit() } && command[0] == '4'
+
+    private companion object {
+        const val MAX_BUFFERED_MESSAGES = 4_096
+    }
 }
 
 /** Correlates one serialized WHOIS response when `labeled-response` is unavailable. */
