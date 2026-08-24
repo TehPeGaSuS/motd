@@ -4,9 +4,13 @@ set -euo pipefail
 
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$E2E_DIR/../.." && pwd)"
-# Exact count catches silently skipped instrumentation; update only with intentional test changes.
-EXPECTED_CASES=117
 REAL_STACK_ANNOTATION=io.github.trevarj.motd.FastHeadlessE2e
+# ponytail: one source @Test equals one case; use runner discovery if parameterized tests arrive.
+expected_cases="$(
+  rg --glob '*.kt' --glob '!RequiredHeadlessE2eTest.kt' --count-matches \
+    '^[[:space:]]*@Test\b' "$REPO/app/src/androidTest" |
+    awk -F: '{ total += $NF } END { print total + 0 }'
+)"
 
 cd "$REPO"
 # Daemon on; --max-workers=2 because the managed device boots its own emulator.
@@ -17,7 +21,7 @@ cd "$REPO"
 
 count="$(find "$REPO/app/build/outputs/androidTest-results" -type f -name '*.xml' -mmin -15 -print0 2>/dev/null |
   xargs -0 -r grep -ho '<testcase ' | wc -l | tr -d ' ')"
-[ "$count" = "$EXPECTED_CASES" ] || {
-  echo "component suite must report exactly $EXPECTED_CASES cases; got ${count:-0}" >&2
+[ "$count" = "$expected_cases" ] || {
+  echo "component suite must report exactly $expected_cases source cases; got ${count:-0}" >&2
   exit 1
 }
