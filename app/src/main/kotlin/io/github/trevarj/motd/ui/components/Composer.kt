@@ -807,6 +807,7 @@ fun Composer(
                                     onFocused = { dismissEmojiPicker() },
                                     modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                                     onTextPositioned = onFieldTextPositioned,
+                                    contentStartPadding = if (showToolsButton) 4.dp else 16.dp,
                                     ircFormattingEnabled = ircFormattingEnabled,
                                     expanded = expanded,
                                     expandedHeight = expandedHeight,
@@ -1522,6 +1523,7 @@ private fun ComposerTextField(
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
     onTextPositioned: (Offset) -> Unit = {},
+    contentStartPadding: Dp = 4.dp,
     ircFormattingEnabled: Boolean = false,
     expanded: Boolean = false,
     expandedHeight: Dp = 148.dp,
@@ -1622,7 +1624,12 @@ private fun ComposerTextField(
                 modifier =
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = if (expanded) 4.dp else 12.dp),
+                        .padding(
+                            start = contentStartPadding,
+                            end = 4.dp,
+                            top = if (expanded) 8.dp else 12.dp,
+                            bottom = if (expanded) 4.dp else 12.dp,
+                        ),
                 contentAlignment = if (expanded) Alignment.TopStart else Alignment.CenterStart,
             ) {
                 if (state.text.isEmpty()) {

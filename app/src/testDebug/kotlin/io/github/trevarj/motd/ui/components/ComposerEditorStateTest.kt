@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.components
 
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.InterceptPlatformTextInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.platform.PlatformTextInputSession
@@ -19,6 +20,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IRC_COLOR
 import io.github.trevarj.motd.irc.format.IRC_RESET
@@ -81,6 +83,31 @@ class ComposerEditorStateTest {
             compose.runOnIdle { assertEquals(1, inputSessions) }
         }
         compose.runOnIdle { assertEquals("flicker", draft.value.text) }
+    }
+
+    @Test
+    fun noToolsInsetCursorAndPlaceholderFromTheComposerEdge() {
+        var fieldLeft = 0f
+        var textLeft = 0f
+        var expectedInset = 0f
+        compose.setContent {
+            expectedInset = with(LocalDensity.current) { 16.dp.toPx() }
+            MotdTheme(dynamicColor = false) {
+                Composer(
+                    value = TextFieldValue(),
+                    onValueChange = {},
+                    onSend = {},
+                    enabled = true,
+                    showEmojiTool = false,
+                    showFormattingTools = false,
+                    onFieldPositioned = { fieldLeft = it.left },
+                    onFieldTextPositioned = { textLeft = it.x },
+                )
+            }
+        }
+
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(expectedInset, textLeft - fieldLeft, 0.5f) }
     }
 
     @Test
