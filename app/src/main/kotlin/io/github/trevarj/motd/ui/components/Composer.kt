@@ -57,11 +57,14 @@ import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.StrikethroughS
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Mood
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -365,6 +368,7 @@ fun Composer(
     placeholder: String = stringResource(R.string.chat_composer_placeholder),
     showEmojiButton: Boolean = true,
     onAttachment: (() -> Unit)? = null,
+    onUploadDraft: (() -> Unit)? = onAttachment,
     voiceEnabled: Boolean = false,
     voiceRecording: Boolean = false,
     onVoiceHoldStart: () -> Unit = {},
@@ -387,11 +391,11 @@ fun Composer(
 ) {
     var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
     var expanded by remember { mutableStateOf(false) }
-    var visualLineCount by remember { mutableIntStateOf(1) }
     var colorSheetVisible by remember { mutableStateOf(false) }
     var colorSelection by remember { mutableStateOf(TextRange.Zero) }
     var selectedForeground by remember { mutableStateOf<Int?>(null) }
     var selectedBackground by remember { mutableStateOf<Int?>(null) }
+    val hasDraftText = plainIrcText(value.text).isNotEmpty()
     val editorDensity = LocalDensity.current
     val expandedHeight =
         (
@@ -568,8 +572,8 @@ fun Composer(
         if (emojiPickerSession === collapsing) emojiPickerSession = null
     }
 
-    LaunchedEffect(visualLineCount) {
-        if (visualLineCount <= 1) expanded = false
+    LaunchedEffect(hasDraftText) {
+        if (!hasDraftText) expanded = false
     }
 
     // Dismiss transient surfaces before leaving chat.
@@ -636,6 +640,14 @@ fun Composer(
                         onToggle = ::toggle,
                         onColor = ::openColorSheet,
                         onClear = ::clearFormatting,
+                        onUploadDraft =
+                            onUploadDraft?.let { upload ->
+                                {
+                                    keyboard?.hide()
+                                    focusManager.clearFocus(force = true)
+                                    upload()
+                                }
+                            },
                     )
                 }
 
@@ -714,7 +726,6 @@ fun Composer(
                                     expanded = expanded,
                                     expandedHeight = expandedHeight,
                                     onColor = ::openColorSheet,
-                                    onVisualLineCountChange = { visualLineCount = it },
                                 )
 
                                 // A physical tap on the text field while the picker is open should
@@ -734,21 +745,45 @@ fun Composer(
                                 }
                             }
 
-                            onAttachment?.let { action ->
-                                IconButton(
-                                    onClick = {
-                                        emojiPickerSession = null
-                                        keyboard?.hide()
-                                        focusManager.clearFocus(force = true)
-                                        action()
-                                    },
-                                    modifier = Modifier.size(48.dp).testTag("chat_composer_attachment"),
-                                ) {
-                                    Icon(
-                                        Icons.Outlined.AttachFile,
-                                        contentDescription = stringResource(R.string.chat_composer_attachment),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
+                            when {
+                                ircFormattingEnabled && hasDraftText -> {
+                                    IconButton(
+                                        onClick = { expanded = !expanded },
+                                        modifier =
+                                            Modifier
+                                                .size(48.dp)
+                                                .testTag("chat_composer_format_expand")
+                                                .semantics { selected = expanded },
+                                    ) {
+                                        Icon(
+                                            if (expanded) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                                            contentDescription = if (expanded) "Collapse rich editor" else "Expand rich editor",
+                                            tint =
+                                                if (expanded) {
+                                                    MaterialTheme.colorScheme.primary
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                        )
+                                    }
+                                }
+
+                                onAttachment != null -> {
+                                    IconButton(
+                                        onClick = {
+                                            emojiPickerSession = null
+                                            keyboard?.hide()
+                                            focusManager.clearFocus(force = true)
+                                            onAttachment()
+                                        },
+                                        modifier = Modifier.size(48.dp).testTag("chat_composer_attachment"),
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.AttachFile,
+                                            contentDescription = stringResource(R.string.chat_composer_attachment),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -757,25 +792,7 @@ fun Composer(
                     val canSend = enabled && plainIrcText(value.text).isNotBlank()
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        if (ircFormattingEnabled && visualLineCount > 1) {
-                            IconButton(
-                                onClick = { expanded = !expanded },
-                                modifier =
-                                    Modifier
-                                        .size(40.dp)
-                                        .testTag("chat_composer_format_expand")
-                                        .semantics { selected = expanded },
-                            ) {
-                                Icon(
-                                    if (expanded) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-                                    contentDescription = if (expanded) "Collapse rich editor" else "Expand rich editor",
-                                    tint =
-                                        if (expanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
                         // Send and voice remain fixed 48.dp round buttons.
                         Crossfade(
                             targetState = canSend || !voiceEnabled,
@@ -881,6 +898,7 @@ private fun ComposerFormattingToolbar(
     onToggle: (IrcTextStyle) -> Unit,
     onColor: () -> Unit,
     onClear: () -> Unit,
+    onUploadDraft: (() -> Unit)?,
 ) {
     val allowed = messageFormattingRange(value.text)
     val allowedEnd = allowed?.last?.plus(1)
@@ -890,6 +908,7 @@ private fun ComposerFormattingToolbar(
                 if (it.collapsed) it.start in allowed.first..allowedEnd else it.min >= allowed.first && it.max <= allowedEnd
         }
     val haptics = LocalHapticFeedback.current
+    var overflowExpanded by remember { mutableStateOf(false) }
     Row(
         modifier =
             Modifier
@@ -959,6 +978,30 @@ private fun ComposerFormattingToolbar(
         }
         FormatButton(null, "Color", Icons.Filled.FormatColorText, "chat_format_color", onColor)
         FormatButton(null, "Clear formatting", Icons.Filled.FormatClear, "chat_format_clear", onClear)
+        onUploadDraft?.let { upload ->
+            Box {
+                IconButton(
+                    onClick = { overflowExpanded = true },
+                    modifier = Modifier.size(48.dp).testTag("chat_composer_overflow"),
+                ) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "More composer actions")
+                }
+                DropdownMenu(
+                    expanded = overflowExpanded,
+                    onDismissRequest = { overflowExpanded = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Upload current draft") },
+                        onClick = {
+                            overflowExpanded = false
+                            upload()
+                        },
+                        modifier = Modifier.testTag("chat_composer_upload_draft"),
+                        leadingIcon = { Icon(Icons.Outlined.AttachFile, contentDescription = null) },
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1346,7 +1389,6 @@ private fun ComposerTextField(
     expanded: Boolean = false,
     expandedHeight: Dp = 148.dp,
     onColor: () -> Unit = {},
-    onVisualLineCountChange: (Int) -> Unit = {},
 ) {
     val state = rememberTextFieldState(value.text, value.selection)
     val latestValue by rememberUpdatedState(value)
@@ -1456,7 +1498,6 @@ private fun ComposerTextField(
                 imeAction = ImeAction.Default,
             ),
         lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = if (expanded) Int.MAX_VALUE else 6),
-        onTextLayout = { getResult -> onVisualLineCountChange(getResult()?.lineCount ?: 1) },
         outputTransformation = outputTransformation,
         decorator = { inner ->
             Box(

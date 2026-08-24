@@ -2642,6 +2642,10 @@ fun ChatContent(
                                 uploadCurrentDraftDirectly = false
                                 attachmentSheetOpen = true
                             },
+                            onUploadDraft = {
+                                uploadCurrentDraftDirectly = true
+                                attachmentSheetOpen = true
+                            },
                             voiceEnabled = voiceEnabled && voiceState.staged == null && composerText.text.isBlank(),
                             voiceRecording = voiceState.recording != null,
                             onVoiceHoldStart = onVoiceHoldStart,

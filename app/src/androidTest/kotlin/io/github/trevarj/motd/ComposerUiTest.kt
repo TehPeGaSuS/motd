@@ -1,9 +1,6 @@
 package io.github.trevarj.motd
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
@@ -22,7 +19,6 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.ircStateAtRawOffset
@@ -213,27 +209,33 @@ class ComposerUiTest {
     }
 
     @Test
-    fun expandActionAppearsOnlyForMultipleVisualLines() {
-        val draft = mutableStateOf(TextFieldValue("one visual line"))
+    fun attachmentBecomesExpandActionAndMovesToOverflowAfterTyping() {
+        val draft = mutableStateOf(TextFieldValue())
+        var uploads = 0
         compose.setContent {
             MotdTheme {
-                Box(Modifier.width(180.dp)) {
-                    Composer(
-                        value = draft.value,
-                        onValueChange = { draft.value = it },
-                        onSend = {},
-                        enabled = true,
-                        showEmojiButton = false,
-                        ircFormattingEnabled = true,
-                    )
-                }
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    showEmojiButton = false,
+                    ircFormattingEnabled = true,
+                    onAttachment = {},
+                    onUploadDraft = { uploads++ },
+                )
             }
         }
+        compose.onNodeWithTag("chat_composer_attachment").assertIsDisplayed()
         compose.onAllNodesWithTag("chat_composer_format_expand").assertCountEquals(0)
 
-        compose.runOnIdle { draft.value = TextFieldValue("text long enough to wrap onto another visual line") }
+        compose.runOnIdle { draft.value = TextFieldValue("x", TextRange(1)) }
         compose.waitForIdle()
-        compose.onNodeWithTag("chat_composer_format_expand").assertIsDisplayed()
+        compose.onAllNodesWithTag("chat_composer_attachment").assertCountEquals(0)
+        compose.onNodeWithTag("chat_composer_format_expand").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("chat_composer_overflow").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("chat_composer_upload_draft").performClick()
+        compose.runOnIdle { assertEquals(1, uploads) }
     }
 
     @Test
