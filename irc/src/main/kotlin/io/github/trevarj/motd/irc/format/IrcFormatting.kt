@@ -361,7 +361,7 @@ private fun rewriteSelection(
     val states = parsed.characterStates.toMutableList()
     val replacement = change(states.subList(visibleStart, visibleEnd))
     for (index in replacement.indices) states[visibleStart + index] = replacement[index]
-    val serialized = serializeVisible(parsed.visibleText, states)
+    val serialized = serializeVisibleIrc(parsed.visibleText, states)
     val reparsed = parseIrcFormatting(serialized)
     return IrcFormatEdit(
         text = serialized,
@@ -370,7 +370,7 @@ private fun rewriteSelection(
     )
 }
 
-private fun serializeVisible(
+internal fun serializeVisibleIrc(
     visible: String,
     states: List<IrcFormatState>,
 ): String =
@@ -491,7 +491,7 @@ private fun splitVisibleUtf8(
     maxBytes: Int,
 ): List<String> {
     if (visible.isEmpty()) return emptyList()
-    val serialized = serializeVisible(visible, states)
+    val serialized = serializeVisibleIrc(visible, states)
     if (serialized.toByteArray(Charsets.UTF_8).size <= maxBytes) return listOf(serialized)
     val result = ArrayList<String>()
     var start = 0
@@ -501,7 +501,7 @@ private fun splitVisibleUtf8(
         var candidate = ""
         while (end < visible.length) {
             val next = end + Character.charCount(visible.codePointAt(end))
-            val nextSerialized = serializeVisible(visible.substring(start, next), states.subList(start, next))
+            val nextSerialized = serializeVisibleIrc(visible.substring(start, next), states.subList(start, next))
             if (nextSerialized.toByteArray(Charsets.UTF_8).size > maxBytes) break
             candidate = nextSerialized
             end = next
@@ -510,7 +510,7 @@ private fun splitVisibleUtf8(
         require(end > start) { "maxBytes is smaller than one formatted UTF-8 code point" }
         if (end < visible.length && lastSpaceEnd > start) {
             end = lastSpaceEnd
-            candidate = serializeVisible(visible.substring(start, end), states.subList(start, end))
+            candidate = serializeVisibleIrc(visible.substring(start, end), states.subList(start, end))
         }
         result += candidate
         start = end
