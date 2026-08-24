@@ -83,6 +83,23 @@ class MessageVisibilityReaderTest {
         }
 
     @Test
+    fun chatListFoolResolutionUsesOneQueryPerIdentityRuleSet() =
+        runTest {
+            repeat(99) { index ->
+                db.bufferDao().insert(buffer(networkId, "#room-$index", readMarkerTime = 50))
+            }
+            val raw = db.bufferDao().observeChatList().first()
+            observedQueries.clear()
+
+            assertEquals(100, reader.resolveChatList(raw, spec(FoolsMode.COLLAPSE)).size)
+
+            assertEquals(
+                1,
+                observedQueries.count { it.contains("WITH selected AS", ignoreCase = true) },
+            )
+        }
+
+    @Test
     fun chatListReevaluatesCanonicalIdentityAfterMessageEnrichment() =
         runTest {
             val eventId =

@@ -265,8 +265,33 @@ class MessageVisibilityReader
             rows: List<ChatListRow>,
             spec: MessageVisibilitySpec,
         ): List<ChatListRow> {
-            if (spec.fools.isEmpty()) return rows
-            val resolved = rows.map { row -> resolveChatListRow(row, spec) }
+            if (spec.fools.isEmpty() || rows.isEmpty()) return rows
+            val replacements =
+                rows
+                    .groupBy { row -> IrcIdentityRules.from(row.caseMapping, row.chanTypes) }
+                    .values
+                    .flatMap { group ->
+                        val first = group.first()
+                        db.messageDao().rawChatListVisibility(
+                            chatListVisibilityQuery(
+                                group,
+                                spec,
+                                IrcIdentityRules.from(first.caseMapping, first.chanTypes),
+                            ),
+                        )
+                    }.associateBy { it.bufferId }
+            val resolved =
+                rows.map { row ->
+                    replacements[row.bufferId]?.let { replacement ->
+                        row.copy(
+                            lastMessageText = replacement.lastMessageText,
+                            lastMessageSender = replacement.lastMessageSender,
+                            lastMessageTime = replacement.lastMessageTime,
+                            unreadCount = replacement.unreadCount,
+                            mentionCount = replacement.mentionCount,
+                        )
+                    } ?: row
+                }
             // Same key the SQL projection orders on (stored rows only, never the advertised high-water
             // mark), so hiding a fool re-sorts the list without changing what "most recent" means.
             return resolved.sortedWith(
@@ -277,33 +302,41 @@ class MessageVisibilityReader
             )
         }
 
-        private suspend fun resolveChatListRow(
-            row: ChatListRow,
+        private fun chatListVisibilityQuery(
+            rows: List<ChatListRow>,
             spec: MessageVisibilitySpec,
-        ): ChatListRow {
-            val visibility =
-                MessageVisibilitySql(
-                    spec,
-                    IrcIdentityRules.from(row.caseMapping, row.chanTypes),
-                )
-            val preview =
-                queryMessage(
-                    where = "1",
-                    args = emptyList(),
-                    bufferId = row.bufferId,
-                    visibility = visibility.preview(),
-                    order = "m.serverTime DESC, m.timelineOrder DESC, m.id DESC",
-                )
-            val unreadCount = chatListCount(row.bufferId, visibility.visibleUnread(), mentionsOnly = false)
-            val mentionCount = chatListCount(row.bufferId, visibility.visibleUnread(), mentionsOnly = true)
-            return row.copy(
-                lastMessageText = preview?.text,
-                lastMessageSender = preview?.sender,
-                lastMessageTime = preview?.serverTime,
-                unreadCount = unreadCount,
-                mentionCount = mentionCount,
+            identityRules: IrcIdentityRules,
+        ): SimpleSQLiteQuery {
+            val selectedIds = rows.joinToString(",") { it.bufferId.toString() }
+            val visibility = MessageVisibilitySql(spec, identityRules)
+            return SimpleSQLiteQuery(
+                "WITH selected AS (" +
+                    "SELECT b.*, COALESCE(anchor.timelineOrder, COALESCE(b.localReadAnchorEventId, 0)) " +
+                    "AS localReadAnchorOrder FROM buffers b " +
+                    "LEFT JOIN messages anchor ON anchor.id = b.localReadAnchorEventId " +
+                    "WHERE b.id IN ($selectedIds)) " +
+                    "SELECT b.id AS bufferId, preview.text AS lastMessageText, " +
+                    "preview.sender AS lastMessageSender, preview.serverTime AS lastMessageTime, " +
+                    cappedChatListCountSql(visibility.visibleUnread(), mentionsOnly = false) + " AS unreadCount, " +
+                    cappedChatListCountSql(visibility.visibleUnread(), mentionsOnly = true) + " AS mentionCount " +
+                    "FROM selected b LEFT JOIN messages preview ON preview.id = (" +
+                    "SELECT m.id FROM messages m WHERE m.bufferId = b.id AND ${visibility.preview()} " +
+                    "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1)",
             )
         }
+
+        private fun cappedChatListCountSql(
+            visibility: String,
+            mentionsOnly: Boolean,
+        ): String =
+            "(SELECT COUNT(*) FROM (SELECT 1 FROM messages m WHERE m.bufferId = b.id AND (" +
+                "m.serverTime > MAX(COALESCE(b.localReadAnchorTime, 0), COALESCE(b.localUnreadFloorTime, 0)) " +
+                "OR (m.serverTime = b.localReadAnchorTime AND " +
+                "COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime AND (" +
+                "m.timelineOrder > b.localReadAnchorOrder OR " +
+                "(m.timelineOrder = b.localReadAnchorOrder AND m.id > COALESCE(b.localReadAnchorEventId, 0))))) " +
+                "AND $visibility" + (if (mentionsOnly) " AND m.hasMention = 1" else "") +
+                " LIMIT 1000))"
 
         private suspend fun queryMessage(
             where: String,
@@ -317,32 +350,6 @@ class MessageVisibilityReader
                     "SELECT m.* FROM messages m WHERE m.bufferId = ? AND ($where) " +
                         "AND $visibility ORDER BY $order LIMIT 1",
                     (listOf(bufferId) + args).toTypedArray(),
-                ),
-            )
-
-        // Capped like observeChatList's counts (badge renders 999+): a huge unread backlog must not
-        // turn every chat-list resolution into a full-buffer scan.
-        private suspend fun chatListCount(
-            bufferId: Long,
-            visibility: String,
-            mentionsOnly: Boolean,
-        ): Int =
-            db.messageDao().rawCount(
-                SimpleSQLiteQuery(
-                    "SELECT COUNT(*) FROM (SELECT 1 FROM buffers b JOIN messages m ON m.bufferId = b.id " +
-                        "WHERE b.id = ? AND (" +
-                        "m.serverTime > MAX(COALESCE(b.localReadAnchorTime, 0), " +
-                        "COALESCE(b.localUnreadFloorTime, 0)) OR (" +
-                        "m.serverTime = b.localReadAnchorTime AND " +
-                        "COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime " +
-                        "AND (m.timelineOrder > COALESCE((SELECT timelineOrder FROM messages " +
-                        "WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0)) " +
-                        "OR (m.timelineOrder = COALESCE((SELECT timelineOrder FROM messages " +
-                        "WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0)) " +
-                        "AND m.id > COALESCE(b.localReadAnchorEventId, 0))))) " +
-                        "AND $visibility" + (if (mentionsOnly) " AND m.hasMention = 1" else "") +
-                        " LIMIT 1000)",
-                    arrayOf(bufferId),
                 ),
             )
 

@@ -940,6 +940,16 @@ data class ChatListRow(
     val advertisedUnread: Boolean = false,
 )
 
+/** Batched fool-aware replacement for chat-list preview and badge fields. */
+data class ChatListVisibilityRow(
+    val bufferId: Long,
+    val lastMessageText: String?,
+    val lastMessageSender: String?,
+    val lastMessageTime: Long?,
+    val unreadCount: Int,
+    val mentionCount: Int,
+)
+
 /** Minimal query-buffer projection for MONITOR target selection. */
 data class MonitorQueryRow(
     val networkId: Long,
@@ -1022,6 +1032,9 @@ interface MessageDao {
 
     @RawQuery
     suspend fun rawCount(query: SupportSQLiteQuery): Int
+
+    @RawQuery
+    suspend fun rawChatListVisibility(query: SupportSQLiteQuery): List<ChatListVisibilityRow>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAllRaw(msgs: List<MessageEntity>): List<Long>
