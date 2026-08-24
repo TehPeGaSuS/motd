@@ -347,6 +347,8 @@ class AttachmentUploaderImpl
         ) {
             source.open(resolver).use { input ->
                 val buffer = ByteArray(STREAM_BUFFER_BYTES)
+                val throttle = UploadProgressThrottle(System.nanoTime())
+                val total = source.sizeOrNull()
                 var sent = 0L
                 while (true) {
                     currentCoroutineContext().ensureActive()
@@ -355,8 +357,9 @@ class AttachmentUploaderImpl
                     sent += count
                     if (sent > config.sizeLimitBytes) throw UploadException("Upload exceeds the configured limit")
                     output.write(buffer, 0, count)
-                    progress(sent, source.sizeOrNull())
+                    if (throttle.shouldEmit(sent, System.nanoTime())) progress(sent, total)
                 }
+                if (throttle.shouldEmit(sent, System.nanoTime(), final = true)) progress(sent, total)
             }
         }
 
@@ -571,6 +574,27 @@ private fun AttachmentSource.sizeOrNull() =
 class UploadException(
     message: String,
 ) : IOException(message)
+
+internal class UploadProgressThrottle(
+    startedAtNanos: Long,
+    private val byteStep: Long = 256L * 1024L,
+    private val intervalNanos: Long = 100_000_000L,
+) {
+    private var lastBytes = 0L
+    private var lastNanos = startedAtNanos
+
+    fun shouldEmit(
+        bytes: Long,
+        nowNanos: Long,
+        final: Boolean = false,
+    ): Boolean {
+        if (bytes == lastBytes) return false
+        if (!final && bytes - lastBytes < byteStep && nowNanos - lastNanos < intervalNanos) return false
+        lastBytes = bytes
+        lastNanos = nowNanos
+        return true
+    }
+}
 
 private const val CONNECT_TIMEOUT_MS = 15_000
 private const val READ_TIMEOUT_MS = 60_000
