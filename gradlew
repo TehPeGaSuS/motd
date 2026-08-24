@@ -88,10 +88,10 @@ APP_BASE_NAME=${0##*/}
 # Discard cd standard output in case $CDPATH is set (https://github.com/gradle/gradle/issues/25036)
 APP_HOME=$( cd -P "${APP_HOME:-./}" > /dev/null && printf '%s\n' "$PWD" ) || exit
 
-# Sandboxed builds may expose HOME read-only. Keep Gradle caches project-local only in that case.
+# Sandboxed builds may expose HOME read-only. Keep generated user state under the ignored Gradle directory.
 if ! mkdir -p "$HOME/.gradle" "$HOME/.android" 2>/dev/null; then
     : "${GRADLE_USER_HOME:=$APP_HOME/.gradle}"
-    : "${ANDROID_USER_HOME:=$APP_HOME/.android}"
+    : "${ANDROID_USER_HOME:=$APP_HOME/.gradle/android}"
     JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Duser.home=$APP_HOME/.gradle"
     export GRADLE_USER_HOME ANDROID_USER_HOME JAVA_TOOL_OPTIONS
 fi
