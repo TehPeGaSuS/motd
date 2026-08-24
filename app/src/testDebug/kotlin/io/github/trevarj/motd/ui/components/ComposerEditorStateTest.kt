@@ -1,6 +1,10 @@
 package io.github.trevarj.motd.ui.components
 
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.InterceptPlatformTextInput
+import androidx.compose.ui.platform.PlatformTextInputInterceptor
+import androidx.compose.ui.platform.PlatformTextInputMethodRequest
+import androidx.compose.ui.platform.PlatformTextInputSession
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -28,6 +32,45 @@ import org.robolectric.annotation.GraphicsMode
 class ComposerEditorStateTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun typingDoesNotRestartTheInputMethod() {
+        val draft = mutableStateOf(TextFieldValue())
+        var inputSessions = 0
+        compose.setContent {
+            InterceptPlatformTextInput(
+                interceptor =
+                    object : PlatformTextInputInterceptor {
+                        override suspend fun interceptStartInputMethod(
+                            request: PlatformTextInputMethodRequest,
+                            nextHandler: PlatformTextInputSession,
+                        ): Nothing {
+                            inputSessions++
+                            return nextHandler.startInputMethod(request)
+                        }
+                    },
+            ) {
+                MotdTheme(dynamicColor = false) {
+                    Composer(
+                        value = draft.value,
+                        onValueChange = { draft.value = it },
+                        onSend = {},
+                        enabled = true,
+                        ircFormattingEnabled = true,
+                    )
+                }
+            }
+        }
+
+        val field = compose.onNodeWithTag("chat_composer_field")
+        field.performClick()
+        compose.runOnIdle { assertEquals(1, inputSessions) }
+        "flicker".forEach { character ->
+            field.performTextInput(character.toString())
+            compose.runOnIdle { assertEquals(1, inputSessions) }
+        }
+        compose.runOnIdle { assertEquals("flicker", draft.value.text) }
+    }
 
     @Test
     fun applyingColorKeepsVisibleCursorInPlace() {

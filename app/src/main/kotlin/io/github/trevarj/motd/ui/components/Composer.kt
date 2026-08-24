@@ -1468,15 +1468,18 @@ private fun ComposerTextField(
     val hasSelection = selection?.collapsed == false
     val boldSelected = selection?.let { document.isStyleSelected(it.start, it.end, IrcTextStyle.BOLD) } == true
     val boldLabel = if (hasSelection && boldSelected) "Remove bold" else "Bold"
+    val latestDocument = rememberUpdatedState(document)
     val outputTransformation =
-        if (ircFormattingEnabled) {
-            OutputTransformation {
-                if (toString() == document.text) {
-                    document.runs.forEach { run -> addStyle(run.state.toSpanStyle(), run.start, run.end) }
+        remember(ircFormattingEnabled) {
+            if (ircFormattingEnabled) {
+                OutputTransformation {
+                    val visibleText = toString()
+                    val displayed = latestDocument.value.let { if (it.text == visibleText) it else it.replaceText(visibleText) }
+                    displayed.runs.forEach { run -> addStyle(run.state.toSpanStyle(), run.start, run.end) }
                 }
+            } else {
+                null
             }
-        } else {
-            null
         }
     val contextMenuModifier =
         if (!ircFormattingEnabled) {
