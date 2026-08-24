@@ -599,6 +599,10 @@ class CanonicalTimelineStore
                 dao.updateEvent(canonical)
             }
 
+            if (canonical.kind !in MONITOR_EXCLUDED_KINDS) {
+                db.bufferDao().refreshMonitorActivity(canonical.bufferId)
+            }
+
             return when {
                 inserted -> IngestResult.Inserted(canonical)
                 canonical != initial -> IngestResult.Enriched(canonical)
@@ -718,6 +722,9 @@ class CanonicalTimelineStore
             dao.repointEventRedirects(loser.id, winner.id)
             dao.upsertEventRedirect(EventRedirectEntity(loser.id, winner.id))
             dao.deleteEvent(loser.id)
+            if (loser.kind !in MONITOR_EXCLUDED_KINDS) {
+                db.bufferDao().refreshMonitorActivity(loser.bufferId)
+            }
             return merged
         }
 
@@ -939,6 +946,8 @@ class CanonicalTimelineStore
         private fun TimelineEventEntity.hasContentConflict(other: TimelineEventEntity): Boolean = kind != other.kind || normalizedActor != other.normalizedActor || text != other.text
 
         private companion object {
+            val MONITOR_EXCLUDED_KINDS =
+                setOf(MessageKind.JOIN, MessageKind.PART, MessageKind.QUIT, MessageKind.NETSPLIT, MessageKind.NETJOIN)
             const val DELIVERY_RECONCILIATION_WINDOW_MS = 2_000L
             const val PROVISIONAL_RECONCILIATION_WINDOW_MS = 30_000L
         }

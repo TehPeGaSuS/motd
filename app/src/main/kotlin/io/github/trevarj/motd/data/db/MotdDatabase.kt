@@ -34,7 +34,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 31,
+    version = 32,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -888,6 +888,27 @@ val MIGRATION_30_31 =
         }
     }
 
+/** v31 -> v32 materializes QUERY activity for MONITOR and indexes capped mention scans. */
+val MIGRATION_31_32 =
+    object : Migration(31, 32) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN monitorActivityTime INTEGER")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS " +
+                    "index_messages_bufferId_hasMention_isSelf_kind_serverTime_timelineOrder_id " +
+                    "ON messages(bufferId, hasMention, isSelf, kind, serverTime, timelineOrder, id)",
+            )
+            db.execSQL(
+                """UPDATE buffers SET monitorActivityTime = (
+                   SELECT m.serverTime FROM messages m
+                   WHERE m.bufferId = buffers.id
+                     AND m.kind NOT IN ('JOIN', 'PART', 'QUIT', 'NETSPLIT', 'NETJOIN')
+                   ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1
+               ) WHERE type = 'QUERY'""",
+            )
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -931,6 +952,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_28_29,
         MIGRATION_29_30,
         MIGRATION_30_31,
+        MIGRATION_31_32,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"

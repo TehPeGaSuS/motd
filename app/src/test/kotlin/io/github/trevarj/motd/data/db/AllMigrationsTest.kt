@@ -14,6 +14,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -169,7 +170,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31)
+                .addMigrations(MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32)
                 .build()
         try {
             migrated.openHelper.writableDatabase
@@ -239,7 +240,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_29_30, MIGRATION_30_31)
+                .addMigrations(MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -313,7 +314,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_30_31)
+                .addMigrations(MIGRATION_30_31, MIGRATION_31_32)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -326,6 +327,88 @@ class AllMigrationsTest {
             sqlite.query("SELECT length(ircFormattedText) FROM messages WHERE id = 1").use { cursor ->
                 check(cursor.moveToFirst())
                 assertEquals(7, cursor.getInt(0))
+            }
+        } finally {
+            migrated.close()
+        }
+    }
+
+    @Test
+    fun migrateVersion31To32_backfillsOnlyQueryMonitorActivityAndPreservesHistory() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.deleteDatabase(DB_NAME)
+        legacyHelper =
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration
+                    .builder(context)
+                    .name(DB_NAME)
+                    .callback(
+                        object : SupportSQLiteOpenHelper.Callback(31) {
+                            override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion(db, 31)
+
+                            override fun onUpgrade(
+                                db: SupportSQLiteDatabase,
+                                oldVersion: Int,
+                                newVersion: Int,
+                            ) = Unit
+                        },
+                    ).build(),
+            )
+        legacyHelper!!.writableDatabase.apply {
+            execSQL(
+                """INSERT INTO networks
+                    (id, name, role, host, port, tls, nick, username, realname, saslMechanism,
+                     autoConnect, ordering, restoreAutoConnect, nickServRecoveryEnabled)
+                    VALUES (1, 'libera', 'DIRECT', 'irc.libera.chat', 6697, 1, 'me', 'me', 'Me',
+                            'NONE', 1, 0, 0, 0)""",
+            )
+            execSQL(
+                """INSERT INTO buffers
+                    (id, networkId, name, displayName, type, joined, membershipCycle, pinned, muted,
+                     archived, ordering, historyComplete, dismissed)
+                    VALUES (1, 1, 'alice', 'Alice', 'QUERY', 0, 0, 0, 0, 0, 0, 0, 0),
+                           (2, 1, '#motd', '#motd', 'CHANNEL', 1, 0, 0, 0, 0, 0, 0, 0)""",
+            )
+            execSQL(
+                """INSERT INTO messages
+                    (id, bufferId, serverTime, sender, normalizedActor, kind, text, isSelf,
+                     hasMention, failed, dedupKey, serverTimeAuthoritative, timelineOrder,
+                     timelineOrderConfirmed, timeProvenance, notificationHandled,
+                     notificationClaimed, soundHandled, ircFormattedText)
+                    VALUES (1, 1, 1000, 'alice', 'alice', 'PRIVMSG', 'hello', 0, 0, 0, 'm1',
+                            1, 1, 0, 'SERVER_TAG', 0, 0, 0, NULL),
+                           (2, 1, 2000, 'alice', 'alice', 'JOIN', 'joined', 0, 0, 0, 'm2',
+                            1, 2, 0, 'SERVER_TAG', 0, 0, 0, NULL),
+                           (3, 2, 3000, 'bob', 'bob', 'PRIVMSG', 'channel', 0, 1, 0, 'm3',
+                            1, 3, 0, 'SERVER_TAG', 0, 0, 0, NULL)""",
+            )
+        }
+        legacyHelper!!.close()
+        legacyHelper = null
+
+        val migrated =
+            Room
+                .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
+                .addMigrations(MIGRATION_31_32)
+                .build()
+        try {
+            val sqlite = migrated.openHelper.writableDatabase
+            sqlite.query("SELECT monitorActivityTime FROM buffers WHERE id = 1").use { cursor ->
+                check(cursor.moveToFirst())
+                assertEquals(1_000L, cursor.getLong(0))
+            }
+            sqlite.query("SELECT monitorActivityTime FROM buffers WHERE id = 2").use { cursor ->
+                check(cursor.moveToFirst())
+                assertTrue(cursor.isNull(0))
+            }
+            sqlite.query("SELECT COUNT(*) FROM messages").use { cursor ->
+                check(cursor.moveToFirst())
+                assertEquals(3, cursor.getInt(0))
+            }
+            sqlite.query("PRAGMA index_list(messages)").use { cursor ->
+                val name = cursor.getColumnIndexOrThrow("name")
+                val names = buildSet { while (cursor.moveToNext()) add(cursor.getString(name)) }
+                assertTrue("mention index missing", "index_messages_bufferId_hasMention_isSelf_kind_serverTime_timelineOrder_id" in names)
             }
         } finally {
             migrated.close()
@@ -400,10 +483,10 @@ class AllMigrationsTest {
         const val DB_NAME = "all-migrations-test.db"
 
         /**
-         * Mirrors `version = 31` on `@Database`. Room's annotation is CLASS-retained, so the
+         * Mirrors `version = 32` on `@Database`. Room's annotation is CLASS-retained, so the
          * declared version cannot be read reflectively; the exported schema JSON is the runtime
          * witness for it instead.
          */
-        const val DECLARED_VERSION = 31
+        const val DECLARED_VERSION = 32
     }
 }

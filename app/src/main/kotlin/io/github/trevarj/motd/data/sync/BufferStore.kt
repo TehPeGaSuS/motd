@@ -331,6 +331,7 @@ class BufferStore
                     bufferDao.update(result)
                     aliasDao.repoint(loser.id, winner.id)
                     canonicalTimeline.moveEventsToRoom(winner.networkId, loser.id, winner.id)
+                    bufferDao.refreshMonitorActivity(winner.id)
                     val canonicalMergedHistoryGaps =
                         canonicalizeMergedHistoryGaps(
                             winner.id,

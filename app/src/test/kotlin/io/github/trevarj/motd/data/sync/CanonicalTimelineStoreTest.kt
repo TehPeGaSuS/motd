@@ -34,6 +34,33 @@ class CanonicalTimelineStoreTest {
     }
 
     @Test
+    fun canonicalIngestRefreshesQueryMonitorActivity() =
+        runTest {
+            val setup = openSetup("canonical-monitor-activity.db")
+            val queryRoom =
+                setup.db.bufferDao().insert(
+                    room(setup.networkId, "alice").copy(type = BufferType.QUERY),
+                )
+
+            setup.store.ingest(tagged(setup.networkId, queryRoom, "monitor-msg", 12_345, "hello"))
+
+            assertEquals(
+                12_345L,
+                setup.db
+                    .bufferDao()
+                    .rawById(queryRoom)
+                    ?.monitorActivityTime,
+            )
+            assertNull(
+                setup.db
+                    .bufferDao()
+                    .rawById(setup.roomId)
+                    ?.monitorActivityTime,
+            )
+            setup.db.close()
+        }
+
+    @Test
     fun livePushAndHistoryPermutations_convergeAcrossDatabaseReopen() =
         runTest {
             val permutations =

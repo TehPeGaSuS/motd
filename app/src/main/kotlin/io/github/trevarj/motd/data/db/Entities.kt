@@ -245,6 +245,8 @@ data class RoomEntity(
     val presenceModeOverride: PresenceMode? = null,
     /** User-selected HTTPS URL or app-owned file URI. SERVER rooms always leave this null. */
     val avatarOverrideModel: String? = null,
+    /** Latest locally retained non-presence event for QUERY-only MONITOR ranking. */
+    val monitorActivityTime: Long? = null,
     /**
      * Newest activity CHATHISTORY TARGETS advertised for this room, or null when discovery has
      * never mentioned it. Written forward-only, by [io.github.trevarj.motd.data.sync.EventProcessor]
@@ -330,6 +332,7 @@ data class RoomAliasEntity(
     indices = [
         Index(value = ["bufferId", "serverTime", "id"]),
         Index(value = ["bufferId", "serverTime", "timelineOrder"]),
+        Index(value = ["bufferId", "hasMention", "isSelf", "kind", "serverTime", "timelineOrder", "id"]),
         Index(value = ["replyToEventId"]),
         Index(value = ["bufferId", "msgid"]),
         Index(value = ["bufferId", "replyToMsgid", "replyToEventId"]),

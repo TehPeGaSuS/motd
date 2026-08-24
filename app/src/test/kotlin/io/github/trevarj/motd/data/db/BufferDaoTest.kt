@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.data.db
 
+import app.cash.turbine.test
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -73,6 +74,48 @@ class BufferDaoTest {
             db.bufferDao().setMuted(winner, false)
             assertEquals(1, db.bufferDao().unarchiveIfUnmuted(winner))
             assertFalse(db.bufferDao().observeById(winner)!!.archived)
+        }
+
+    @Test
+    fun `channel message writes do not invalidate monitor projection`() =
+        runTest {
+            val query = db.bufferDao().insert(buffer(networkId, "alice", type = BufferType.QUERY))
+            val channel = db.bufferDao().insert(buffer(networkId, "#room", type = BufferType.CHANNEL))
+
+            db.bufferDao().observeMonitorQueryRows().test {
+                assertEquals(1, awaitItem().size)
+                db.messageDao().insertAll(listOf(message(channel, "channel", serverTime = 100, dedupKey = "channel")))
+                db.bufferDao().refreshMonitorActivity(channel)
+                expectNoEvents()
+
+                db.messageDao().insertAll(listOf(message(query, "query", serverTime = 200, dedupKey = "query")))
+                db.bufferDao().refreshMonitorActivity(query)
+                assertEquals(200L, awaitItem().single().lastMessageTime)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `monitor activity is query-only and ignores presence rows`() =
+        runTest {
+            val query = db.bufferDao().insert(buffer(networkId, "alice", type = BufferType.QUERY))
+            val channel = db.bufferDao().insert(buffer(networkId, "#room", type = BufferType.CHANNEL))
+            db.messageDao().insertAll(
+                listOf(
+                    message(query, "chat", serverTime = 100, dedupKey = "query-chat"),
+                    message(query, "join", serverTime = 200, dedupKey = "query-join", kind = MessageKind.JOIN),
+                    message(channel, "channel", serverTime = 300, dedupKey = "channel-chat"),
+                ),
+            )
+
+            assertEquals(1, db.bufferDao().refreshMonitorActivity(query))
+            assertEquals(0, db.bufferDao().refreshMonitorActivity(channel))
+
+            assertEquals(
+                listOf(MonitorQueryRow(networkId, "alice", pinned = false, lastMessageTime = 100)),
+                db.bufferDao().observeMonitorQueryRows().first(),
+            )
+            assertNull(db.bufferDao().rawById(channel)?.monitorActivityTime)
         }
 
     @Test

@@ -197,6 +197,15 @@ interface BufferDao {
     @Transaction
     @Query(
         """
+        WITH visible_buffers AS (
+            SELECT base.*,
+                   COALESCE(anchor.timelineOrder, COALESCE(base.localReadAnchorEventId, 0))
+                       AS localReadAnchorOrder
+            FROM buffers base
+            LEFT JOIN messages anchor ON anchor.id = base.localReadAnchorEventId
+            WHERE base.type != 'SERVER' AND base.dismissed = 0
+              AND base.pendingCloseAt IS NULL AND base.redirectToRoomId IS NULL
+        )
         SELECT
             b.id AS bufferId,
             b.networkId AS networkId,
@@ -219,10 +228,8 @@ interface BufferDao {
                         m.serverTime = b.localReadAnchorTime
                         AND COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime
                         AND (
-                            m.timelineOrder > COALESCE((SELECT timelineOrder FROM messages
-                                WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0))
-                            OR (m.timelineOrder = COALESCE((SELECT timelineOrder FROM messages
-                                WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0))
+                            m.timelineOrder > b.localReadAnchorOrder
+                            OR (m.timelineOrder = b.localReadAnchorOrder
                                 AND m.id > COALESCE(b.localReadAnchorEventId, 0))
                         )
                     )
@@ -239,10 +246,8 @@ interface BufferDao {
                         m.serverTime = b.localReadAnchorTime
                         AND COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime
                         AND (
-                            m.timelineOrder > COALESCE((SELECT timelineOrder FROM messages
-                                WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0))
-                            OR (m.timelineOrder = COALESCE((SELECT timelineOrder FROM messages
-                                WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0))
+                            m.timelineOrder > b.localReadAnchorOrder
+                            OR (m.timelineOrder = b.localReadAnchorOrder
                                 AND m.id > COALESCE(b.localReadAnchorEventId, 0))
                         )
                     )
@@ -259,10 +264,8 @@ interface BufferDao {
                          COALESCE(b.localReadAnchorTime, 0) AND
                      (g.recoverable = 0 AND g.olderServerTime = g.newerServerTime OR
                       g.newerEventId IS NULL OR g.newerTimelineOrder IS NULL OR
-                      g.newerTimelineOrder > COALESCE((SELECT timelineOrder FROM messages
-                          WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0)) OR
-                      (g.newerTimelineOrder = COALESCE((SELECT timelineOrder FROM messages
-                          WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0)) AND
+                      g.newerTimelineOrder > b.localReadAnchorOrder OR
+                      (g.newerTimelineOrder = b.localReadAnchorOrder AND
                        g.newerEventId > COALESCE(b.localReadAnchorEventId, 0)))))) OR
             (b.historyComplete = 0 AND b.oldestFetchedTime >
                 MAX(COALESCE(b.localReadAnchorTime, 0),
@@ -276,10 +279,8 @@ interface BufferDao {
                          COALESCE(b.localReadAnchorTime, 0) AND
                      (g.recoverable = 0 AND g.olderServerTime = g.newerServerTime OR
                       g.newerEventId IS NULL OR g.newerTimelineOrder IS NULL OR
-                      g.newerTimelineOrder > COALESCE((SELECT timelineOrder FROM messages
-                          WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0)) OR
-                      (g.newerTimelineOrder = COALESCE((SELECT timelineOrder FROM messages
-                          WHERE id = b.localReadAnchorEventId), COALESCE(b.localReadAnchorEventId, 0)) AND
+                      g.newerTimelineOrder > b.localReadAnchorOrder OR
+                      (g.newerTimelineOrder = b.localReadAnchorOrder AND
                        g.newerEventId > COALESCE(b.localReadAnchorEventId, 0)))))) OR
             (b.historyComplete = 0 AND b.oldestFetchedTime >
                 MAX(COALESCE(b.localReadAnchorTime, 0),
@@ -289,7 +290,7 @@ interface BufferDao {
                     COALESCE(b.localUnreadFloorTime, 0)) / 1000
                 AND b.advertisedLatestTime / 1000 > COALESCE(lm.serverTime, 0) / 1000)
                 AS advertisedUnread
-        FROM buffers b
+        FROM visible_buffers b
         JOIN networks n ON n.id = b.networkId
         LEFT JOIN network_identity ni ON ni.networkId = b.networkId
         LEFT JOIN messages lm ON lm.id = (
@@ -298,8 +299,6 @@ interface BufferDao {
             ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC
             LIMIT 1
         )
-        WHERE b.type != 'SERVER' AND b.dismissed = 0
-          AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL
         ORDER BY b.pinned DESC,
                  (COALESCE(lm.serverTime, 0) = 0) ASC,
                  COALESCE(lm.serverTime, 0) DESC,
@@ -308,23 +307,28 @@ interface BufferDao {
     )
     fun observeChatList(): Flow<List<ChatListRow>>
 
-    // MONITOR reconciliation needs only query-buffer identity and recency. The always-on service
-    // collector re-runs its projection on every messages invalidation, so it must not pay the
-    // chat-list COUNT subqueries; keep the visibility WHERE clause aligned with observeChatList.
+    // QUERY-only materialization keeps channel traffic from invalidating this always-on projection.
     @Query(
         """SELECT b.networkId AS networkId,
                   b.displayName AS displayName,
                   b.pinned AS pinned,
-                  (SELECT m.serverTime FROM messages m
-                   WHERE m.bufferId = b.id
-                     AND m.kind NOT IN ('JOIN', 'PART', 'QUIT', 'NETSPLIT', 'NETJOIN')
-                   ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC
-                   LIMIT 1) AS lastMessageTime
+                  b.monitorActivityTime AS lastMessageTime
            FROM buffers b
            WHERE b.type = 'QUERY' AND b.dismissed = 0
              AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL""",
     )
     fun observeMonitorQueryRows(): Flow<List<MonitorQueryRow>>
+
+    /** Recompute one QUERY's MONITOR rank after canonical insert/update/delete or room merge. */
+    @Query(
+        """UPDATE buffers SET monitorActivityTime = (
+               SELECT m.serverTime FROM messages m
+               WHERE m.bufferId = buffers.id
+                 AND m.kind NOT IN ('JOIN', 'PART', 'QUIT', 'NETSPLIT', 'NETJOIN')
+               ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1
+           ) WHERE id = :bufferId AND type = 'QUERY'""",
+    )
+    suspend fun refreshMonitorActivity(bufferId: Long): Int
 
     @Query(
         """SELECT canonical.* FROM buffers requested
@@ -883,6 +887,7 @@ interface BufferDao {
                 dismissed = true,
                 historyDiscardedThroughMsgid = floorMsgid,
                 historyDiscardedThroughTime = floorTime,
+                monitorActivityTime = null,
             ),
         )
         deleteMembersForBuffer(room.id)

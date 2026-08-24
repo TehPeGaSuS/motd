@@ -135,7 +135,11 @@ class MessageRepositoryImpl
             )
         }
 
-        override suspend fun deleteMessage(id: Long) = messageDao.deleteWithAnchorFallback(id)
+        override suspend fun deleteMessage(id: Long) {
+            val bufferId = messageDao.byCanonicalId(id)?.bufferId
+            messageDao.deleteWithAnchorFallback(id)
+            bufferId?.let { bufferDao.refreshMonitorActivity(it) }
+        }
 
         // Observe the room's stored gaps and resolve both edges against the local store, then project
         // them through the seam role and clamp them into the coordinate space of the list [visibility]
