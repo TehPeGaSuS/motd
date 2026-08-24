@@ -234,7 +234,14 @@ class ComposerUiTest {
         compose.onNodeWithTag("chat_composer_format_expand").assertIsDisplayed().performClick()
         compose.onNodeWithTag("chat_composer_overflow").assertIsDisplayed().performClick()
         compose.onNodeWithTag("chat_composer_upload_draft").performClick()
-        compose.runOnIdle { assertEquals(1, uploads) }
+        compose.runOnIdle {
+            assertEquals(1, uploads)
+            draft.value = TextFieldValue()
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
+        compose.onNodeWithTag("chat_composer_format_expand").assertIsDisplayed()
+        compose.onAllNodesWithTag("chat_composer_attachment").assertCountEquals(0)
     }
 
     @Test

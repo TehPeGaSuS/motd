@@ -606,10 +606,6 @@ fun Composer(
         if (emojiPickerSession === collapsing) emojiPickerSession = null
     }
 
-    LaunchedEffect(hasDraftText) {
-        if (!hasDraftText) expanded = false
-    }
-
     // Dismiss transient surfaces before leaving chat.
     BackHandler(
         enabled = colorSheetVisible || expanded || emojiPickerSession?.phase == EmojiPickerPhase.OPEN,
@@ -779,7 +775,7 @@ fun Composer(
                             }
 
                             when {
-                                ircFormattingEnabled && hasDraftText -> {
+                                ircFormattingEnabled && (hasDraftText || expanded) -> {
                                     IconButton(
                                         onClick = { expanded = !expanded },
                                         modifier =
